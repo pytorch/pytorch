@@ -3764,6 +3764,19 @@ def meta_adaptive_avg_pool2d(self, output_size):
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
+    # Mirrors adaptive_avg_pool_check in aten/src/ATen/native/PoolingChecks.h.
+    # Inductor lowers _adaptive_avg_pool2d directly instead of using its
+    # decomposition, so without this a zero size spatial dim reaches the
+    # generated kernel, which averages over an empty window instead of raising.
+    for i in range(self.ndim - 2, self.ndim):
+        torch._check_value(
+            self.size(i) > 0,
+            lambda: (
+                "adaptive_avg_pool2d(): Expected input to have non-zero size for "
+                f"non-batch dimensions, but input has sizes {self.shape} with "
+                f"dimension {i} being empty"
+            ),
+        )
     output_shape = self.shape[:-2] + tuple(output_size)
     memory_format = utils.suggest_memory_format(self)
     # need to set memory_format to preserve the memory format of the input

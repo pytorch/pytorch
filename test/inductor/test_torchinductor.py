@@ -7503,6 +7503,35 @@ for dtype in (torch.int32, torch.int64):
         self.common(m2, (torch.randn(1, 2, 3),))
         self.common(m2, (torch.randint(0, 8, (1, 2, 3)),))
 
+    def test_adaptive_avg_pool_zero_size_input_errors(self):
+        # Eager raises for an empty spatial dim. The meta function has to raise
+        # as well, since Inductor lowers _adaptive_avg_pool2d without running
+        # the decomposition that carries the same check. Dynamo reports the
+        # ValueError from fake tensor propagation as a TorchRuntimeError.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        msg = "Expected input to have non-zero size for non-batch dimensions"
+        cases = [
+            (F.adaptive_avg_pool1d, (1, 1, 0), 2),
+            (F.adaptive_avg_pool2d, (1, 1, 0, 3), (2, 2)),
+            (F.adaptive_avg_pool2d, (2, 3, 4, 0), (2, 2)),
+            (F.adaptive_avg_pool2d, (1, 0, 3), (2, 2)),
+        ]
+        for op, shape, output_size in cases:
+            fn = functools.partial(op, output_size=output_size)
+            x = torch.randn(shape, device=self.device)
+            with self.assertRaisesRegex(ValueError, msg):
+                fn(x)
+
+            with FakeTensorMode() as mode:
+                fake_x = mode.from_tensor(x)
+                with self.assertRaisesRegex(ValueError, msg):
+                    fn(fake_x)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.compile(fn, fullgraph=True)(x)
+
     def test_max_pool2d1(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
