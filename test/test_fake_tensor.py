@@ -128,21 +128,8 @@ CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
 
 if CPP_FAKETENSOR:
 
-    def FakeTensorMode(
-        *,
-        shape_env=None,
-        allow_fallback_kernels=True,
-        allow_non_fake_inputs=False,
-        static_shapes=None,
-        **kwargs,
-    ):
-        if not allow_fallback_kernels or kwargs:
-            raise NotImplementedError("CppFakeTensorMode has no such options yet")
-        return CppFakeTensorMode(
-            shape_env=shape_env,
-            allow_non_fake_inputs=allow_non_fake_inputs,
-            static_shapes=static_shapes,
-        )
+    def FakeTensorMode(**kwargs):
+        return CppFakeTensorMode(**kwargs)
 
     FakeTensorModeCls = CppFakeTensorMode
 else:
@@ -720,6 +707,26 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(tied._is_param)
         self.assertIsNot(tied, lin.weight)
         self.assertIs(type(lin.weight), torch.nn.Parameter)
+
+    @unittest.skipIf(
+        not CPP_FAKETENSOR, "requires native fake tensor subclass construction"
+    )
+    def test_make_subclass_preserves_fake_alias_version(self):
+        class SubTensor(torch.Tensor):
+            pass
+
+        with FakeTensorMode():
+            x = torch.randn(3, requires_grad=True)
+            loss = x.square().sum()
+            y = torch.Tensor._make_subclass(SubTensor, x, True)
+            self.assertTrue(y.is_leaf)
+            self.assertTrue(y.requires_grad)
+            with torch.no_grad():
+                y.add_(1)
+            with self.assertRaisesRegex(
+                RuntimeError, "modified by an inplace operation"
+            ):
+                loss.backward()
 
     @skipIfTorchDynamo("uses torch.compile")
     def test_compile_module_with_fake_parameters(self):
@@ -1756,6 +1763,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             with self.assertRaisesRegex(RuntimeError, error):
                 torch.as_strided(x, (17, 18), (-80, 1), 1)
 
+    @skipIfCppFakeTensor("sets Python FakeTensorMode.in_kernel_invocation")
     def test_recursive_invocation(self):
         mode = FakeTensorMode()
         with mode:
@@ -1764,7 +1772,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             y = x + x
             self.assertTrue(mode.in_kernel_invocation)
 
-    @skipIfCppFakeTensor("no data-dependent output support")
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
@@ -2686,7 +2693,6 @@ def make_propagate_real_tensors_cls(cls):
         xfail_prop="_expected_failure_propagate_real_tensors",
         decorator=skipIfTorchDynamo("propagate_real_tensors affects Dynamo"),
     )
-    cls = skipIfCppFakeTensor("no propagate_real_tensors support")(cls)
     if not getattr(cls, "__unittest_skip__", False) and not TEST_WITH_TORCHDYNAMO:
         for name, fn in vars(cls).items():
             reason = getattr(fn, "_skip_propagate_real_tensors", None)
@@ -3541,6 +3547,7 @@ instantiate_parametrized_tests(TestFakeTensorCUDA)
 make_propagate_real_tensors_cls(TestFakeTensorCUDA)
 
 
+@instantiate_parametrized_tests
 class TestFakeTensorMoveModule(TestCase):
     # No hw_classification: it uses GPU_TYPE, so it runs on whichever accelerator
     # is present (CUDA, XPU or MPS), which neither GENERIC nor one device label fits.
@@ -3548,11 +3555,12 @@ class TestFakeTensorMoveModule(TestCase):
     # because the fake-only path has to stay reachable on a CUDA build with no GPU
     # present, where no cuda test variant would be generated.
 
+    @parametrize("use_cpp_fake_tensor", [False, True])
     @unittest.skipIf(
         not TEST_ACCELERATOR and not torch.backends.cuda.is_built(),
         "requires an accelerator, or a CUDA build for the fake-only path",
     )
-    def test_move_module_under_fake(self):
+    def test_move_module_under_fake(self, use_cpp_fake_tensor):
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3567,7 +3575,10 @@ class TestFakeTensorMoveModule(TestCase):
         input = torch.rand(2, 2)
         gpu_device = torch.device(GPU_TYPE, 0)
 
-        with FakeTensorMode(allow_non_fake_inputs=True):
+        with (
+            torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor),
+            fake_mode_cls()(allow_non_fake_inputs=True),
+        ):
             m.to(device=gpu_device)
             arg = input.to(device=gpu_device)
             out = m(arg)
@@ -7553,7 +7564,9 @@ class TestCppFakeTensorModeBindings(TestCase):
             if implementation == "python_meta":
                 op.py_impl(torch._C.DispatchKey.Meta)(python_meta_impl)
             elif implementation == "python_fake":
-                op.py_impl(FakeTensorMode)(python_fake_impl)
+                op.py_impl(torch._subclasses.fake_tensor.FakeTensorMode)(
+                    python_fake_impl
+                )
             # Export writes py_kernels directly, bypassing the PythonCIA table.
             overrides = (
                 {}
@@ -7637,18 +7650,17 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(require_python_fake_mode(py_mode), py_mode)
         self.assertIsNone(require_python_fake_mode(None))
 
-    def test_require_python_fake_mode_caller(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_shape_prop_fake_mode(self, use_cpp_fake_tensor):
         from torch.fx.passes.shape_prop import ShapeProp
 
-        # ShapeProp needs a Python FakeTensorMode, so it rejects a C++ one,
-        # given to it or found by detect_fake_mode
         gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        msg = "CppFakeTensorMode is not supported here yet"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            ShapeProp(gm, fake_mode=CppFakeTensorMode())
-        with tracing(TracingContext(CppFakeTensorMode())):
-            with self.assertRaisesRegex(RuntimeError, msg):
-                ShapeProp(gm)
+        x = torch.randn(2, 3)
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            mode = fake_mode_cls()()
+            self.assertEqual(ShapeProp(gm, fake_mode=mode).propagate(x).shape, x.shape)
+            with tracing(TracingContext(mode)):
+                self.assertEqual(ShapeProp(gm).propagate(x).shape, x.shape)
 
     @parametrize(
         "callback,propagate_real_tensors",
