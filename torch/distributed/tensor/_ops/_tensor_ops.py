@@ -260,10 +260,11 @@ def bucketize_single_dim_strategy(
     2. Shard boundaries on dim 0, replicate input, output is Partial("sum").
        Each rank counts how many of its local boundary values each input
        element exceeds; summing across ranks gives the correct global index.
-    3. Partial("max") or Partial("min") input with replicated boundaries.
-       Bucketize is monotonically non-decreasing in its input, so reducing
-       local bucket indices with max (or min) across ranks gives the same
-       result as bucketizing the reduced input values.
+    3. Partial("max") input with replicated boundaries. Bucketize is
+       monotonically non-decreasing in its input and maps nan to the last
+       bucket, so max-reducing local bucket indices gives the same result as
+       bucketizing the max-reduced input. Partial("min") is not supported:
+       amin propagates nan, but min-reducing the local indices drops it.
     """
     input_meta, _boundaries_meta = args_schema
     if not isinstance(input_meta, TensorMeta):
@@ -274,8 +275,7 @@ def bucketize_single_dim_strategy(
             [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim), Replicate()]
         )
     strategies.append([Partial("sum"), Replicate(), _ShardingPlaceholder(0)])
-    for reduce_op in ("max", "min"):
-        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
+    strategies.append([Partial("max"), Partial("max"), Replicate()])
     return strategies
 
 
