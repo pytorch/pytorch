@@ -509,6 +509,10 @@ class Transport(ABC):
         _validate_timeout(timeout)
         timeout = self._default_timeout if timeout is None else timeout
         deadline = None if timeout is None else time.monotonic() + timeout
+        # A batch is not atomic. If dispatch fails partway, the started transfers
+        # finish before the error is reported, so no buffer is still in use when
+        # the caller sees it, but some destinations may already be written.
+        # Backends must not promise more, so callers behave the same on all of them.
         works, dispatch_error = self._submit_batch(operation, list(transfers), deadline)
         remaining = _remaining(deadline)
         batch = _BatchWork(works, dispatch_error, timeout if async_op else remaining)
