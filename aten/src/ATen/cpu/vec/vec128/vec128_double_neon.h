@@ -171,13 +171,21 @@ class Vectorized<double> {
     result[1] = f(values[1], second.values[1]);
     return result;
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(const Vectorized<double>& mask) const {
+    return vreinterpretq_f64_u64(
+        vorrq_u64(vreinterpretq_u64_f64(values), vreinterpretq_u64_f64(mask)));
+  }
   Vectorized<double> abs() const {
     return vabsq_f64(values);
   }
   Vectorized<double> angle() const {
     auto zero = Vectorized<double>(0.0);
     auto pi = Vectorized<double>(c10::pi<double>);
-    auto tmp = blendv(zero, pi, vreinterpretq_f64_u64(vcltzq_f64(values)));
+    auto tmp = blendv(
+        zero,
+        pi,
+        vreinterpretq_f64_u64(vcltzq_s64(vreinterpretq_s64_f64(values))));
     return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {

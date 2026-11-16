@@ -1122,12 +1122,8 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
-            if sys.version_info < (3, 11):
-                call_op = "CALL_FUNCTION"
-            else:
-                call_op = "CALL"
+            call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
             # Find the CALL that invokes the compiled graph function
@@ -1265,7 +1261,6 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
             nonlocal match_done
 
@@ -1273,10 +1268,7 @@ main()
             # graph is tested, we skip the bytecode hook checks for future
             # frames.
             if not match_done:
-                if sys.version_info < (3, 11):
-                    call_op = "CALL_FUNCTION"
-                else:
-                    call_op = "CALL"
+                call_op = "CALL"
 
                 insts = list(dis.get_instructions(out_code))
                 # Find the CALL that invokes the compiled graph function
@@ -4594,6 +4586,16 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
+    def test_disallow_implicit_grad_accumulation_not_supported(self):
+        a = torch.randn(3, requires_grad=True)
+        loss = a.sin().sum()
+        with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "disallow_implicit_grad_accumulation=True is not supported with Compiled Autograd",
+            ):
+                loss.backward(disallow_implicit_grad_accumulation=True)
+
     def test_anomaly_mode_backward(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -5434,6 +5436,10 @@ def wrap_test_class(orig_cls):
             ]
             dct[name] = make_wrapped(fn, ctx_fns)
 
+    # Without a GPU the inductor-backend tests are left unwrapped (see above), so
+    # only GPU jobs run them under compiled autograd. Inheriting a GENERIC label
+    # would make those jobs skip them too.
+    dct["hw_classification"] = None
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
         (orig_cls,),
@@ -5574,6 +5580,12 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
+    # DTensor backward calls torch._C helpers that dynamo skips
+    # (_is_contiguous_or_false, _DTensor_compute_global_tensor_info), so these
+    # graph break once compiled autograd traces the backward.
+    "test_tp_linear_3d_input_dynamic_backward_style_colwise",
+    "test_tp_linear_3d_input_dynamic_backward_style_rowwise",
+    "test_dtensor_unbacked_rebuilt_sym_max_inductor",
     "test_retain_grad",  # retains_grad_hooks
     "test_retain_grad_cycle",  # retains_grad_hooks
     "test_retain_grad_inplace",  # retains_grad_hooks
@@ -5636,7 +5648,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_both_depths",  # queue_callback
         "test_reentrant_with_callbacks_depth_0",  # queue_callback
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
-        "test_checkpoint_graph_execution_group",  # Attempted to call function marked as skipped
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
@@ -5739,10 +5750,6 @@ xfail_divergence_from_eager = {
 
 skipped_tests = set()
 skipped_tests.add("test_graph_queue_callback")
-
-if not HAS_GPU_AND_TRITON:
-    # Found Tesla M60 which is too old to be supported by the triton GPU compiler
-    skipped_tests.add("test_type_conversions")
 
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")

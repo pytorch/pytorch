@@ -83,9 +83,8 @@ def dims(
 
         decoder = _PyInstDecoder(code, lasti)
 
-        if sys.version_info >= (3, 11):
-            if decoder.opcode() == "PRECALL":
-                decoder.next()
+        if decoder.opcode() == "PRECALL":
+            decoder.next()
 
         # Move to next instruction after the call
         decoder.next()
@@ -337,9 +336,8 @@ def dimlists(
 
         decoder = _PyInstDecoder(code, lasti)
 
-        if sys.version_info >= (3, 11):
-            if decoder.opcode() == "PRECALL":
-                decoder.next()
+        if decoder.opcode() == "PRECALL":
+            decoder.next()
 
         # Move to next instruction after the call
         decoder.next()
@@ -410,7 +408,6 @@ from . import op_properties
 
 def _safe_print(*args: Any, **kwargs: Any) -> None:
     """Safe print that avoids recursive torch function dispatches."""
-    import sys
 
     # Convert any torch objects to basic representations
     safe_args = []
