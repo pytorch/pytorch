@@ -1170,6 +1170,43 @@ class TestLinalg(TestCase):
             del chunks
             torch.cuda.empty_cache()
 
+    # Audit other batched cuSOLVER APIs for the batch-boundary failures seen
+    # with XsyevBatched (see #166004 and #203815). Keep these small enough
+    # for regular CUDA CI rather than relying on largeTensorTest.
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32)
+    @parametrize("batch_size", [65535, 65536, 100000])
+    def test_cusolver_gesvdj_batched_boundary(self, device, dtype, batch_size):
+        # The small-matrix SVD path dispatches to gesvdjBatched.
+        scales = torch.linspace(1.0, 2.0, batch_size, device=device, dtype=dtype)
+        a = torch.zeros((batch_size, 2, 2), device=device, dtype=dtype)
+        a[:, 0, 0] = 3 * scales
+        a[:, 1, 1] = scales
+        u, singular, vh = torch.linalg.svd(a)
+        self.assertEqual(singular[:, 0], 3 * scales)
+        self.assertEqual(singular[:, 1], scales)
+        self.assertEqual(u @ torch.diag_embed(singular) @ vh, a, atol=1e-5, rtol=1e-5)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32)
+    @parametrize("batch_size", [65535, 65536, 100000])
+    def test_cusolver_potrf_batched_boundary(self, device, dtype, batch_size):
+        # potrfBatched already chunks at 65535; verify the pointer and info
+        # offsets across the boundary and on the final partial chunk.
+        scales = torch.linspace(1.0, 2.0, batch_size, device=device, dtype=dtype)
+        a = torch.zeros((batch_size, 2, 2), device=device, dtype=dtype)
+        a[:, 0, 0] = 9 * scales.square()
+        a[:, 1, 1] = scales.square()
+        factor, info = torch.linalg.cholesky_ex(a)
+        self.assertEqual(info, torch.zeros_like(info))
+        self.assertEqual(factor[:, 0, 0], 3 * scales, atol=1e-5, rtol=1e-5)
+        self.assertEqual(factor[:, 1, 1], scales, atol=1e-5, rtol=1e-5)
+        self.assertEqual(factor @ factor.mH, a, atol=1e-5, rtol=1e-5)
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())

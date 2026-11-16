@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import abc
 import builtins
 import cmath
 import collections
@@ -954,6 +955,18 @@ class LockHolder:
         self.lock = threading.Lock()
 
 
+class _HolderBase(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def __init__(self, opts):
+        pass
+
+
+class _ABCHolder(_HolderBase):
+    def __init__(self, opts):
+        self.opts = opts
+        self.unused = threading.Lock()
+
+
 class DictionaryToken:
     pass
 
@@ -966,6 +979,48 @@ class TokenConsumer:
 
     def __reduce_ex__(self, protocol):
         return type(self), (self.token,)
+
+
+class _PayloadConsumer(TokenConsumer):
+    def __init__(self, token):
+        super().__init__(token)
+        self.scale = 2
+        if token.payload != ["required"]:
+            raise ValueError("Missing constructor payload")
+
+
+class _RegisteredPayloadConsumer(_PayloadConsumer):
+    __reduce_ex__ = object.__reduce_ex__
+
+
+class _DynamicStateConsumer(_RegisteredPayloadConsumer):
+    def __getattr__(self, name):
+        if name == "__setstate__":
+            return self.restore
+        raise AttributeError(name)
+
+    def restore(self, state):
+        self.__init__(state["token"])
+
+
+class _PayloadToken(DictionaryToken):
+    def __bool__(self):
+        if self.payload != ["required"]:
+            raise ValueError("Missing constructor payload")
+        return True
+
+
+_PayloadRecord = collections.namedtuple("_PayloadRecord", ["token"])
+_tuple_new = tuple.__new__
+
+
+class _PayloadNewConsumer(_PayloadRecord):
+    def __new__(cls, token):
+        return _tuple_new(cls, (token or None,))
+
+    @property
+    def scale(self):
+        return self.token.scale
 
 
 class SlottedTokenConsumer(TokenConsumer):
@@ -1895,6 +1950,34 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(list(loaded_keyed), [key])
         self.assertEqual(loaded_keyed[key], "saved")
         self.assertIsInstance(loaded_unused["bystander"], _Missing)
+
+    def test_dictionary_pruning_does_not_call_metaclass_equality(self):
+        class Meta(type):
+            def __eq__(cls, other):
+                raise AssertionError("Pickle protocol lookup must not compare classes")
+
+            __hash__ = type.__hash__
+
+        class Mapping(dict, metaclass=Meta):
+            pass
+
+        mapping = Mapping()
+        pickler = GuardsStatePickler({}, {}, {}, {}, io.BytesIO())
+        pickler._prune_dictionary_values([mapping])
+        self.assertNotIn(id(mapping), pickler._pruned_dictionary_ids)
+
+    def test_pruned_dictionary_preserves_recursive_and_repeated_references(self):
+        value = {"bystander": threading.Lock()}
+        value["self"] = value
+        buf = io.BytesIO()
+        pickler = GuardsStatePickler({id(value): value}, {}, {}, {}, buf)
+        pickler._prune_dictionary_values([value])
+        pickler.prune_local_scope({"arg": value})
+        pickler.dump((value, value))
+        left, right = load_guards_state(buf.getvalue())
+        self.assertIs(left, right)
+        self.assertIs(left["self"], left)
+        self.assertIsInstance(left["bystander"], _Missing)
 
     def test_required_state_traversal_does_not_read_class_property(self):
         calls = []
@@ -3532,6 +3615,94 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    def test_dictionary_values_shared_with_a_guarded_key(self):
+        def fn(x, keyed, unused):
+            return x + len(tuple(keyed)) + len(unused)
+
+        def inputs(key):
+            return {
+                "x": torch.ones(1),
+                "keyed": {key: 0},
+                "unused": {"alias": key, "lock": threading.Lock()},
+            }
+
+        ref, loaded = self._test_serialization(
+            ("DICT_KEYS_MATCH", "SEQUENCE_LENGTH"), fn, *inputs(_Mode.FAST).values()
+        )
+        self._test_check_fn(ref, loaded, inputs(_Mode.FAST), True)
+        self._test_check_fn(ref, loaded, inputs(_Mode.SLOW), False)
+        state = load_guards_state(self._cached_guards_state).output_graph.local_scope
+        self.assertIs(next(iter(state["keyed"])), state["unused"]["alias"])
+        self.assertIsInstance(state["unused"]["lock"], _Missing)
+
+    @parametrize("use_defaultdict", [False, True])
+    def test_dictionary_values_do_not_prune_constructor_aliases(self, use_defaultdict):
+        def fn(x, holder):
+            return x + len(tuple(holder.cfg)) + holder.items[1]
+
+        token = DictionaryToken()
+        holder = DictionaryToken()
+        holder.cfg = collections.defaultdict(list) if use_defaultdict else {}
+        holder.cfg["token"] = token
+        holder.items = [TokenConsumer(token), 5]
+        inputs = {"x": torch.ones(1), "holder": holder}
+        ref, loaded = self._test_serialization(
+            ("DICT_KEYS_MATCH", "SEQUENCE_LENGTH", "CONSTANT_MATCH"),
+            fn,
+            *inputs.values(),
+        )
+        self._test_check_fn(ref, loaded, inputs, True)
+        restored = load_guards_state(
+            self._cached_guards_state
+        ).output_graph.local_scope["holder"]
+        self.assertIsInstance(restored.items[0].token, DictionaryToken)
+        holder.items[1] += 1
+        self._test_check_fn(ref, loaded, inputs, False)
+
+    @parametrize(
+        "consumer_type",
+        [
+            _PayloadConsumer,
+            _PayloadNewConsumer,
+            _RegisteredPayloadConsumer,
+            _DynamicStateConsumer,
+        ],
+    )
+    def test_custom_constructor_keeps_independently_guarded_arguments(
+        self, consumer_type
+    ):
+        def fn(x, consumer, token):
+            return x + consumer.scale + token.scale
+
+        token = _PayloadToken()
+        token.payload = ["required"]
+        token.scale = 3
+        consumer = consumer_type(token)
+        inputs = {"x": torch.ones(1), "consumer": consumer, "token": token}
+        with mock.patch.dict(
+            copyreg.dispatch_table,
+            {_RegisteredPayloadConsumer: lambda obj: (type(obj), (obj.token,))},
+        ):
+            ref, loaded = self._test_serialization(
+                "CONSTANT_MATCH", fn, *inputs.values()
+            )
+        self._test_check_fn(ref, loaded, inputs, True)
+        token.scale += 1
+        self._test_check_fn(ref, loaded, inputs, False)
+
+    @parametrize("root_type", [_ABCHolder, _Cfg])
+    def test_nested_guarded_state_under_protocol_root(self, root_type):
+        def fn(x, holder):
+            return x + holder.opts.scale
+
+        opt = LockHolder(2)
+        holder = root_type(opt)
+        inputs = {"x": torch.ones(1), "holder": holder}
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, *inputs.values())
+        self._test_check_fn(ref, loaded, inputs, True)
+        opt.scale += 1
+        self._test_check_fn(ref, loaded, inputs, False)
+
     def test_slotted_dictionary_prunes_nested_unguarded_attributes(self):
         def fn(x, cfg):
             return x + cfg["opt"].scale
@@ -3541,12 +3712,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             cfg.tag = "saved"
             return {"x": torch.ones(1), "cfg": cfg}
 
-        with torch._dynamo.config.patch(strict_precompile=True):
-            ref, loaded = self._test_serialization(
-                ("TYPE_MATCH", "CONSTANT_MATCH", "TENSOR_MATCH"),
-                fn,
-                *inputs(2).values(),
-            )
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "CONSTANT_MATCH", "TENSOR_MATCH"), fn, *inputs(2).values()
+        )
         self._test_check_fn(ref, loaded, inputs(2), True)
         self._test_check_fn(ref, loaded, inputs(3), False)
         cfg = load_guards_state(self._cached_guards_state).output_graph.local_scope[
@@ -5756,13 +5924,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 module.register_forward_hook(hook, **{flag_name: flag})
             return module
 
+        flags_attr = (
+            "_forward_hooks_with_kwargs"
+            if flag_name == "with_kwargs"
+            else "_forward_hooks_always_called"
+        )
+
         def fn(x, module):
-            flags = getattr(
-                module,
-                "_forward_hooks_with_kwargs"
-                if flag_name == "with_kwargs"
-                else "_forward_hooks_always_called",
-            )
+            flags = getattr(module, flags_attr)
             return x + sum(
                 index + 1
                 for index, (key, _) in enumerate(module._forward_hooks.items())
@@ -5785,27 +5954,13 @@ class TestGuardSerialization(TestGuardSerializationBase):
             )
 
         first, second = module._forward_hooks
-        flags = getattr(
-            module,
-            "_forward_hooks_with_kwargs"
-            if flag_name == "with_kwargs"
-            else "_forward_hooks_always_called",
-        )
+        flags = getattr(module, flags_attr)
         flags[first] = flags.pop(second)
-        self._test_check_fn(
-            ref,
-            loaded,
-            {"x": x, "module": module},
-            False,
-        )
+        self._test_check_fn(ref, loaded, {"x": x, "module": module}, False)
         flags[second] = flags.pop(first)
+        # Key storage and the membership mask stay unchanged when linked order changes.
         module._forward_hooks.move_to_end(first)
-        self._test_check_fn(
-            ref,
-            loaded,
-            {"x": x, "module": module},
-            True,
-        )
+        self._test_check_fn(ref, loaded, {"x": x, "module": module}, True)
 
     def test_nested_region_hook_secondary_source(self):
         @torch.compiler.nested_compile_region
@@ -5848,11 +6003,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             module._forward_hooks.update({1: hook, 2: hook})
             if populated:
                 module._forward_hooks_with_kwargs[1] = True
-        flags = (
-            collections.OrderedDict({7: True})
-            if populated
-            else collections.OrderedDict()
-        )
+        flags = collections.OrderedDict.fromkeys((7,) if populated else (), True)
         if global_flags:
             second._forward_hooks = collections.OrderedDict({3: hook, 4: hook})
 
@@ -5894,12 +6045,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
             hook, **{flag_name: True}
         )
         self.addCleanup(handle.remove)
-        flags = getattr(
-            torch.nn.modules.module,
-            "_global_forward_hooks_with_kwargs"
-            if flag_name == "with_kwargs"
-            else "_global_forward_hooks_always_called",
-        )
+        suffix = "with_kwargs" if flag_name == "with_kwargs" else "always_called"
+        registry_name = f"_global_forward_hooks_{suffix}"
+        flags = getattr(torch.nn.modules.module, registry_name)
+        self.addCleanup(flags.pop, handle.id, None)
 
         def fn(x, module):
             return x + sum(key in flags for key in module._forward_hooks)
@@ -5912,11 +6061,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         inputs = {"x": x, "module": module, "flags": flags}
         self._test_check_fn(ref, loaded, inputs, True)
-        registry_name = (
-            "_global_forward_hooks_with_kwargs"
-            if flag_name == "with_kwargs"
-            else "_global_forward_hooks_always_called"
-        )
         with mock.patch.object(
             torch.nn.modules.module,
             registry_name,
