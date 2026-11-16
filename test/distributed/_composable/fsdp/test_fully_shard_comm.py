@@ -1370,6 +1370,23 @@ class TestFullyShardSingleRank(FSDPTestMultiThread):
         self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
 
     @skip_if_lt_x_gpu(1)
+    def test_single_rank_zero_numel_params(self):
+        # The weight of nn.Linear(0, 3) is (3, 0), with sharded size (0, 0) on
+        # Shard(0). There is no reference model: the buffered path fails on
+        # zero-numel gradients in chunk_cat.
+        model = nn.Sequential(
+            nn.Linear(0, 3, device=device), nn.Linear(3, 0, device=device)
+        )
+        fully_shard(model, mesh=self._shard_mesh())
+        # New sharded gradients, then adds into them
+        for _ in range(2):
+            model(torch.randn(4, 0, device=device)).sum().backward()
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            grad = fsdp_param.sharded_param.grad.to_local()
+            self.assertEqual(grad.shape, fsdp_param.sharded_size)
+            self.assertEqual(grad.stride(), fsdp_param.contiguous_sharded_stride)
+
+    @skip_if_lt_x_gpu(1)
     def test_single_rank_reduce_fallbacks(self):
         # Returns how many reduce-scatter copy-ins one backward runs
         def num_copy_ins(model: FSDPModule) -> int:

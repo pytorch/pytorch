@@ -722,6 +722,8 @@ def foreach_reduce(
         world_size == 1
         and all_reduce_group is None
         and all_reduce_hook is None
+        # TODO: Remove this special case for the default input fn. It leaks the
+        # input fn abstraction into foreach_reduce.
         and prepare_reduce_scatter_inputs is _default_reduce_scatter_input_fn
         and not any(fsdp_param.offload_to_cpu for fsdp_param in fsdp_params)
     ):
@@ -959,6 +961,10 @@ def _reduce_single_rank(
     reduce_scatter_stream.wait_stream(current_stream)
     with device_handle.stream(reduce_scatter_stream):
         for fsdp_param, reduce_grad in zip(fsdp_params, reduce_grads):
+            # With one rank, the sharded size is the gradient size except for
+            # zero-numel gradients: a (3, 0) gradient on Shard(0) has sharded
+            # size (0, 0)
+            reduce_grad = reduce_grad.view(fsdp_param.sharded_size)
             for factor in div_factors:
                 reduce_grad.div_(factor)
             new_sharded_grad = _to_dtype_if_needed(
