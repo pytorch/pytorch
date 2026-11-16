@@ -1,0 +1,53 @@
+# Owner(s): ["oncall: pt2"]
+# Workflow: Dynamo Unit Test
+# runs unit tests for dynamo.
+name: dynamo-unittest
+
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - .github/workflows/dynamo-unittest.yml
+      - .github/workflows/_dynamo-unittest-python.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-dynamo-unittest
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  dynamo:
+    name: py${{ matrix.python-version }}
+    uses: ./.github/workflows/_dynamo-unittest-python.yml
+    needs: get-label-type
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.14', '3.14t', '3.15']
+        include:
+          # Free-threaded Python has ~20-50% higher per-object memory overhead from biased reference counting and
+          # per-object locks, and test_nn (531 tests) under dynamo wrapping with compiled autograd consistently OOMs at 64GB.
+          - python-version: '3.14t'
+            runner: 'l-x86iavx512-16-128'
+    with:
+      python-version: ${{ matrix.python-version }}
+      runner: ${{ matrix.runner || 'l-x86iavx512-8-64' }}
+      label-type: ${{ needs.get-label-type.outputs.label-type }}
+      lf-runners: ${{ needs.get-label-type.outputs.lf-runners }}
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+    secrets: inherit
