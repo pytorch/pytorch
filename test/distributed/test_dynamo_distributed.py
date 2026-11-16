@@ -52,12 +52,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    skipIfTorchInductor,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import skipIfTorchInductor, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -1944,7 +1939,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipUnless(torch.accelerator.is_available(), "Requires accelerator")
-@instantiate_parametrized_tests
 class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
     Test harness initializes dist process group.
@@ -1993,8 +1987,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(correct_outputs, outputs))
 
     @patch.object(config, "optimize_ddp", True)
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_graph_split(self, use_cpp_fake_tensor):
+    def test_graph_split(self):
         if not config.optimize_ddp:
             raise AssertionError("Expected config.optimize_ddp to be True")
         """
@@ -2013,14 +2006,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         def opt_fn(inputs):
             return ddp_m(inputs)
 
-        with config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            opt_outputs = opt_fn(inputs)
-            self.assertTrue(same(correct_outputs, opt_outputs))
-            self.assertEqual(check_splits_compiler.compiler_called, 3)
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+        self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-            # ensure compatibility with dynamo explain
+        # ensure compatibility with dynamo explain
 
-            explain_out = torch._dynamo.explain(ddp_m)(inputs)
+        explain_out = torch._dynamo.explain(ddp_m)(inputs)
         break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
@@ -2269,8 +2261,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_graph_split_inductor(self, use_cpp_fake_tensor):
+    def test_graph_split_inductor(self):
         if not config.optimize_ddp:
             raise AssertionError("Expected config.optimize_ddp to be True")
         """
@@ -2284,8 +2275,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         def opt_fn(inputs):
             return ddp_m(inputs)
 
-        with config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
-            opt_outputs = opt_fn(inputs)
+        opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
 
     @torch._inductor.config.patch(

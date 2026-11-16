@@ -408,11 +408,11 @@ def _worker_nvgemm_autotuning_precompile(
     import torch
     from torch._inductor.runtime.cutedsl_cache import disk_cache_set
     from torch._inductor.utils import _ensure_fp4_dtype_registered
-    from torch._subclasses.fake_tensor import fake_mode_cls
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     _ensure_fp4_dtype_registered()
 
-    with fake_mode_cls()():
+    with FakeTensorMode():
         input_tensors = tuple(
             torch.empty_strided(m.sizes, m.strides, device=m.device, dtype=m.dtype)
             for m in input_tensor_meta
@@ -1233,7 +1233,7 @@ def _nvgemm_precompile(
     """
     import torch
     from torch._inductor.runtime.cutedsl_cache import disk_cache_set
-    from torch._subclasses.fake_tensor import fake_mode_cls
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     if max_active_clusters is None or device_capability is None:
         return
@@ -1244,7 +1244,7 @@ def _nvgemm_precompile(
         return
 
     device = f"cuda:{device_index}"
-    with fake_mode_cls()():
+    with FakeTensorMode():
         tensors = {}
         tensor_names = [*input_param_names]
         if output_scale_param_name is not None:

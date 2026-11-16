@@ -74,7 +74,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import (
     CppFakeTensorMode,
-    fake_mode_cls,
+    FakeTensorMode,
     maybe_get_fake_device,
     maybe_get_item_memo,
     maybe_set_fake_device,
@@ -846,7 +846,7 @@ class OutputGraph(OutputGraphCommon):
         import torch._functorch.config as _config
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = fake_mode_cls()(
+            fake_mode = FakeTensorMode(
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=bool(self.export),
