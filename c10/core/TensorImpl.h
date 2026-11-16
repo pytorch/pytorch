@@ -244,9 +244,9 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // reports its own layout.
 // Python keeps them on the output of a top-level alias or detach (dispatched,
 // through functionalization, or by calling fast_detach directly), but not of
-// other views. Here ExtraMeta's copy constructor copies them, so every shallow
-// copy, such as detach, keeps them, while views, including alias, drop them;
-// matching Python is left to the C++ fake dispatch path (later in this stack).
+// other views. The fake fallback (FakeFallbackKernel.cpp) does the same for a
+// dispatched op. A shallow copy made outside dispatch keeps them, as
+// ExtraMeta's copy constructor copies them.
 // Functionalization's alias/detach handling currently covers only a Python
 // FakeTensor. Unlike Python, fake.data = other gives the fake other's keys, as
 // set_data replaces the whole ExtraMeta.
