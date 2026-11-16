@@ -13,6 +13,7 @@ import torch
 from torch.export.exported_program import _get_shape_env
 from torch.export.graph_signature import InputKind
 from torch.onnx._internal.exporter import _decomp, _errors
+from torch.utils._sympy.value_ranges import bound_sympy
 
 
 if TYPE_CHECKING:
@@ -100,33 +101,30 @@ def warn_if_specialized(
     shape_env = _get_shape_env(exported_program.graph_module)
     if shape_env is None:
         return
-    constraints = {guard.expr for guard in shape_env.guards[before.n_guards :]}
-    constraints.update(
+    new_constraints = {guard.expr for guard in shape_env.guards[before.n_guards :]}
+    new_constraints.update(
         ra.expr
         for values in shape_env.deferred_runtime_asserts.values()
         for ra in values
         if ra.expr not in before.deferred_asserts
     )
-    constraints.update(
+    new_constraints.update(
         sympy.Eq(symbol, value)
         for symbol, value in shape_env.replacements.items()
         if symbol not in before.replacements
     )
     input_symbols = set(before.input_dims)
-    range_symbols = {symbol for symbol, _ in before.var_to_range}
-    constraints = {
-        expr
-        for expr in constraints
-        if expr.free_symbols <= input_symbols
-        # New asserts are now axioms; evaluate using only the original ranges.
-        and (
-            not expr.free_symbols <= range_symbols
-            or shape_env._maybe_evaluate_static(
-                expr, axioms=(), var_to_range=before.var_to_range
-            )
-            != sympy.true
-        )
-    }
+    ranges = dict(before.var_to_range)
+    constraints = set()
+    for expr in new_constraints:
+        if not expr.free_symbols <= input_symbols:
+            continue
+        if expr.free_symbols <= ranges.keys():
+            # ShapeEnv substitutions may already include the new specialization.
+            vr = bound_sympy(expr, ranges)
+            if vr.is_singleton() and vr.lower is sympy.true:
+                continue
+        constraints.add(expr)
     if not constraints:
         return
 

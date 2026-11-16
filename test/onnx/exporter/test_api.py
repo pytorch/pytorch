@@ -678,6 +678,37 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
             self.assertIn("specialization_test.specialize.default", message)
             self.assertIn("Constraints added while decomposing", message)
 
+    def test_custom_decomposition_pins_input_dimension(self):
+        with torch.library._scoped_library("specialization_test", "FRAGMENT") as lib:
+            lib.define("pin_dim(Tensor x) -> Tensor", tags=torch.Tag.pt2_compliant_tag)
+            lib.impl("pin_dim", lambda x: x.reshape(x.shape[0], -1), "CPU")
+            torch.library.register_fake(
+                "specialization_test::pin_dim", lambda x: torch.empty_like(x), lib=lib
+            )
+            target = torch.ops.specialization_test.pin_dim.default
+
+            def decompose(x):
+                return x.reshape(int(x.shape[0]), -1)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return target(x)
+
+            ep = torch.export.export(
+                Model(),
+                (torch.randn(6, 2),),
+                dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
+                strict=False,
+            )
+            with (
+                mock.patch.dict(torch._decomp.decomposition_table, {target: decompose}),
+                self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+            ):
+                torch.onnx.export(ep, verbose=False)
+            message = str(caught.warning)
+            self.assertIn("x.size()[0]", message)
+            self.assertRegex(message, r"Eq\([^)]*, 6\)")
+
     @common_utils.parametrize(
         "model_kind", ["resnet", "interpolate", "layer_norm", "static", "check"]
     )
@@ -777,22 +808,18 @@ class TestSpecializationHelpers(common_utils.TestCase):
             _specialization.warn_if_specialized(self.exported_program, self.before)
         _specialization.warn_if_specialized(self.exported_program, None)
 
-    def test_drops_implied_constraints_without_using_new_axioms(self):
+    def test_drops_implied_constraints_using_snapshot_ranges(self):
         expr = sympy.Eq(FloorDiv(self.symbol, 2), 3)
         self.shape_env.guard_or_defer_runtime_assert(expr, "specializing decomposition")
-        self.assertEqual(self.shape_env._maybe_evaluate_static(expr), sympy.true)
-        self.assertIsNone(
-            self.shape_env._maybe_evaluate_static(
-                expr, axioms=(), var_to_range=self.before.var_to_range
-            )
-        )
+        pinned = sympy.Eq(self.symbol, 6)
+        self.shape_env.replacements[self.symbol] = sympy.Integer(6)
+        ranges = dict(self.before.var_to_range)
+        self.assertFalse(_specialization.bound_sympy(expr, ranges).is_singleton())
+        self.assertFalse(_specialization.bound_sympy(pinned, ranges).is_singleton())
         implied = sympy.Ge(self.symbol, 1)
-        self.assertEqual(
-            self.shape_env._maybe_evaluate_static(
-                implied, axioms=(), var_to_range=self.before.var_to_range
-            ),
-            sympy.true,
-        )
+        vr = _specialization.bound_sympy(implied, ranges)
+        self.assertTrue(vr.is_singleton())
+        self.assertIs(vr.lower, sympy.true)
         # Keep the redundant bound in the diff to exercise the helper's filter.
         self.shape_env.deferred_runtime_asserts[None].append(mock.Mock(expr=implied))
         with (
@@ -803,6 +830,7 @@ class TestSpecializationHelpers(common_utils.TestCase):
         ):
             _specialization.warn_if_specialized(self.exported_program, self.before)
         self.assertIn(str(expr), str(caught.warning))
+        self.assertIn(str(pinned), str(caught.warning))
         self.assertNotIn(str(implied), str(caught.warning))
 
     def test_truncation_and_excluding_non_input_symbols(self):
@@ -844,7 +872,7 @@ class TestSpecializationHelpers(common_utils.TestCase):
             mock.patch.object(
                 _specialization, "_get_shape_env", return_value=self.shape_env
             ),
-            mock.patch.object(self.shape_env, "_maybe_evaluate_static") as evaluate,
+            mock.patch.object(_specialization, "bound_sympy") as evaluate,
             warnings.catch_warnings(record=True) as caught,
         ):
             warnings.simplefilter("always", DynamicShapeSpecializationWarning)
@@ -867,7 +895,7 @@ class TestSpecializationHelpers(common_utils.TestCase):
             mock.patch.object(
                 _specialization, "_get_shape_env", return_value=self.shape_env
             ),
-            mock.patch.object(self.shape_env, "_maybe_evaluate_static") as evaluate,
+            mock.patch.object(_specialization, "bound_sympy") as evaluate,
             self.assertWarns(DynamicShapeSpecializationWarning) as caught,
         ):
             _specialization.warn_if_specialized(self.exported_program, before)
