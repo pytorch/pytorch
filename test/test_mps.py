@@ -15763,6 +15763,15 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(ValueError, lambda: lib.full(mps_tensor, threads=(3, max_thread_group_size),
                                                        group_size=(3, max_thread_group_size)))
 
+    @parametrize("ndim", [1, 2, 3])
+    def test_metal_dispatch_over_uint32_threads(self, ndim):
+        # thread_position_in_grid is 32-bit per axis; oversize the last axis so every axis must be checked
+        lib = torch.mps.compile_shader("kernel void full(device float* x, uint3 idx [[thread_position_in_grid]]) { x[idx.x] = 1.0; }")
+        threads = [1] * (ndim - 1) + [2**32]
+        grid = "x".join(map(str, threads))
+        with self.assertRaisesRegex(ValueError, f"Dispatch grid {grid} exceeds 2\\^32 - 1 threads along one axis"):
+            lib.full(torch.zeros(4, device="mps"), threads=threads)
+
     def test_metal_randn(self):
         lib = torch.mps.compile_shader("""
             #include <c10/metal/random.h>
