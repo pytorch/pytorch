@@ -2,17 +2,13 @@ from __future__ import annotations
 
 from typing import Any, cast, TYPE_CHECKING
 
-import sympy
-
 import torch
 from torch.utils._helion import has_helion
 from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...ir import ComputedBuffer, Reduction
-from ...loop_body import MemoryUsageType
 from ...ops_handler import OpsHandler
-from ...scheduler import SchedulerNode
 from ...utils import get_fused_kernel_name
 from ...virtualized import V
 from ..triton import TritonScheduling
@@ -21,7 +17,7 @@ from .helion_op_overrides import HelionOverrides
 
 
 if TYPE_CHECKING:
-    from ...scheduler import BaseSchedulerNode
+    from ...scheduler import BaseSchedulerNode, SchedulerNode
 
 
 # Python operators HelionOverrides inherits from OpOverrides (a + b, a < b, ~a),
@@ -70,24 +66,6 @@ def python_wrapper() -> bool:
     return not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
 
 
-def reads_dot_operands_by_tile(node: SchedulerNode) -> bool:
-    """Whether each load of a native matmul reads a [M, K] or [K, N] tile,
-    i.e. is affine in (*B, M, K) or (*B, K, N) with non-negative strides."""
-    body = node._body
-    *_, m, n = body.iter_vars
-    variables = OrderedSet(body.var_ranges)
-    for entry in body.memory_usage[MemoryUsageType.LOAD]:
-        index = body.indexing_exprs[entry.index_name]
-        if not index.free_symbols <= variables or not index.is_polynomial(*variables):
-            return False
-        poly = sympy.Poly(index, *variables)
-        if poly.total_degree() > 1 or any(c < 0 for c in poly.coeffs()):
-            return False
-        if (m in index.free_symbols) == (n in index.free_symbols):
-            return False
-    return True
-
-
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
     """Whether `node` holds a native matmul (from triton.native_matmul) that a
     Helion kernel emits."""
@@ -96,11 +74,7 @@ def is_helion_matmul(node: BaseSchedulerNode) -> bool:
     for snode in node.get_nodes():
         if snode.is_native_matmul():
             dtype = cast(Reduction, cast(ComputedBuffer, snode.node).data).src_dtype
-            if dtype not in MATMUL_DTYPES:
-                return False
-            # Dot operands have no flat fallback: without this check,
-            # x @ v.expand(K, N) fails with "Cannot read a Helion dot operand at r0_index".
-            return reads_dot_operands_by_tile(cast(SchedulerNode, snode))
+            return dtype in MATMUL_DTYPES
     return False
 
 

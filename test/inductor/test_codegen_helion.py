@@ -223,16 +223,44 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         self.assertIn("hl.load(in2, [tile_x.index], extra_mask=", source)
         self.assertIn("hl.load(in3, [(-64) + tile_x.index], extra_mask=", source)
 
+    @parametrize("case", ["pad", "tril", "constant", "vector", "permuted"])
+    def test_operand(self, device, case):
+        b = randn(device, 72, 136)
+        fn, a, lines = {
+            # The mask needs tile_y and tile_r, and a [40, 72] view of the [36, 64]
+            # input would leave its storage, so the load is flat.
+            "pad": (
+                lambda a, b: torch.nn.functional.pad(a, (0, 8, 0, 4)) @ b,
+                randn(device, 36, 64),
+                [".reshape([tile_y, 1])", "extra_mask="],
+            ),
+            "tril": (
+                lambda a, b: a.tril() @ b,
+                randn(device, 40, 72),
+                ["torch.where("],
+            ),
+            "constant": (
+                lambda a, b: a @ torch.ones_like(b),
+                randn(device, 40, 72),
+                [".expand(tile_r, tile_x)"],
+            ),
+            "vector": (
+                lambda a, b: a @ b[:, :1].expand(72, 136),
+                randn(device, 40, 72),
+                [".reshape([tile_r, 1]).expand(tile_r, tile_x)"],
+            ),
+            "permuted": (
+                lambda a, b: a.permute(1, 0, 2).reshape(40, 72) @ b,
+                randn(device, 8, 40, 9),
+                ["//"],
+            ),
+        }[case]
+        (source,) = self.compile(fn, a, b)
+        for line in lines:
+            self.assertIn(line, source)
+
     @parametrize(
-        "case",
-        [
-            "dynamic",
-            "broadcast_rhs",
-            "permuted_operand",
-            "gathered_operand",
-            "cpu_scalar",
-            "native_matmul_off",
-        ],
+        "case", ["dynamic", "gathered_operand", "cpu_scalar", "native_matmul_off"]
     )
     def test_fallback(self, device, case):
         a, b = randn(device, 32, 64), randn(device, 64, 48)
@@ -240,11 +268,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         args = [a, b]
         if case == "dynamic":
             torch._dynamo.mark_dynamic(a, 0)
-        elif case == "broadcast_rhs":
-            fn, args = lambda a, v: a @ v.expand(64, 48), [a, randn(device, 64, 1)]
-        elif case == "permuted_operand":
-            fn = lambda a, b: a.permute(1, 0, 2).reshape(32, 64) @ b  # noqa: E731
-            args = [randn(device, 8, 32, 8), b]
         elif case == "gathered_operand":
             fn = lambda a, i, b: a[i] @ b  # noqa: E731
             i = torch.randint(0, 80, (32,), device=device)

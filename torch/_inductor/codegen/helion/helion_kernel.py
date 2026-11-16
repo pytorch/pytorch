@@ -29,7 +29,7 @@ from .helion_op_overrides import HelionOverrides, HelionPrinter
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
     from typing import Self
 
 
@@ -38,6 +38,16 @@ TileShape = tuple[str | int, ...]
 TILE_NAMES = {"z0_": "tile_z", "y": "tile_y", "x": "tile_x", "r0_": "tile_r"}
 TILE_AXES = {name: axis for axis, name in TILE_NAMES.items()}
 REDUCTIONS = OrderedSet(["sum", "prod", "max", "min"])
+
+
+def scope_shape(axes: Iterable[str], scope: Sequence[str]) -> TileShape:
+    """Shape of a value over `axes` that broadcasts against the tiles of `scope`,
+    e.g. (tile_y, 1) for {y} in (y, x)."""
+    present = [axis for axis in scope if axis in axes]
+    if not present:
+        return ()
+    start = scope.index(present[0])
+    return tuple(TILE_NAMES[axis] if axis in present else 1 for axis in scope[start:])
 
 
 def feeds_only_dots(node: torch.fx.Node | None) -> bool:
@@ -58,6 +68,12 @@ class HelionTensorArg:
 
 
 class HelionCSEProxy(CSEProxy):
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        kernel = cast(HelionKernel, self.kernel)
+        if kernel.in_dot_loop:
+            args = kernel.align_args(args)
+        return super()._default(name, args, kwargs)
+
     def dot(self, a: CSEVariable, b: CSEVariable) -> CSEVariable:
         return cast(HelionKernel, self.kernel).dot(a, b)
 
@@ -153,9 +169,22 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         return self.inside_reduction and self.features.is_reduction()
 
     @property
+    def in_dot_loop(self) -> bool:
+        return self.in_loop and self.is_matmul
+
+    @property
     def scope_axes(self) -> tuple[str, ...]:
-        # A matmul's K loop only holds dot operands, which do not broadcast.
-        return self.axes if self.in_loop and not self.is_matmul else self.outer_axes
+        return self.axes if self.in_loop else self.outer_axes
+
+    def value_scope(self, axes: Iterable[str]) -> tuple[str, ...]:
+        """The tiles that a value over `axes` broadcasts against."""
+        if self.in_dot_loop:
+            # A value in a matmul's K loop is part of a [z, y, r0_] or a [z, r0_, x]
+            # dot operand, so it spans only its own tiles: an r0_-only mask is
+            # [tile_r] next to [tile_y, tile_r] but [tile_r, 1] next to
+            # [tile_r, tile_x]. align_args() reshapes values as ops combine them.
+            return tuple(axis for axis in self.axes if axis in axes)
+        return self.scope_axes
 
     def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
         var = super().create_cse_var(*args, **kwargs)
@@ -172,19 +201,12 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def value_shape(self, axes: Sequence[str] | None = None) -> TileShape:
         """Shape of a value over `axes` that broadcasts against the tiles in scope,
         e.g. (tile_y, 1) for {y} in a loop over (y, x)."""
-        scope = self.scope_axes
-        axes = scope if axes is None else axes
-        present = [axis for axis in scope if axis in axes]
-        if not present:
-            return ()
-        start = scope.index(present[0])
-        return tuple(
-            TILE_NAMES[axis] if axis in present else 1 for axis in scope[start:]
-        )
+        if axes is None:
+            return scope_shape(self.scope_axes, self.scope_axes)
+        return scope_shape(axes, self.value_scope(axes))
 
-    def index_tensor(self, axis: str) -> str:
+    def index_tensor(self, axis: str, scope: Sequence[str]) -> str:
         name = f"{TILE_NAMES[axis]}.index"
-        scope = self.scope_axes
         axes = scope[scope.index(axis) :]
         if len(axes) == 1:
             return name
@@ -217,6 +239,27 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             return value
         line = self.align(value, self.value_shape())
         return self.cse.generate(self.compute, line, dtype=value.dtype, shape=target)
+
+    def align_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
+        """The values among an op's `args`, reshaped to broadcast against each
+        other. F.pad(a, (0, 8, 0, 4)) @ b masks a with (tile_y < 36) & (tile_r < 64):
+        [tile_y] & [tile_r] fails with "expected str(d1) == str(d2), got tile_y !=
+        tile_r", while [tile_y, 1] & [tile_r] gives the [tile_y, tile_r] mask."""
+        values = [arg for arg in args if isinstance(arg, CSEVariable)]
+        names = OrderedSet(str(dim) for value in values for dim in value.shape or ())
+        scope = [axis for axis in self.axes if TILE_NAMES[axis] in names]
+
+        def align(arg: Any) -> Any:
+            if not isinstance(arg, CSEVariable):
+                return arg
+            axes = [TILE_AXES[str(dim)] for dim in arg.shape or () if dim != 1]
+            shape = scope_shape(axes, scope)
+            if shape == tuple(arg.shape or ()):
+                return arg
+            line = f"{arg}.reshape([{', '.join(map(str, shape))}])"
+            return self.cse.generate(self.compute, line, dtype=arg.dtype, shape=shape)
+
+        return tuple(map(align, args))
 
     def tile_index(self, index: sympy.Expr) -> sympy.Expr:
         """`index` over the range tree roots, i.e. the tile indices."""
@@ -489,9 +532,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         buffer = V.graph.get_buffer(name)
         index = self.tile_index(index)
         axes = self.index_axes(index)
-        node = self.current_node
-        if self.in_loop and node is not None and node.is_native_matmul():
-            return self.load_dot_operand(buffer, index, axes)
         mask, mask_axes = self.load_mask(axes)
         if not mask_axes <= OrderedSet(axes):
             axes = [axis for axis in self.axes if axis in axes or axis in mask_axes]
@@ -500,7 +540,10 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             arg, coordinates, shape = found
         else:
             raise AssertionError("expected a flat subscript")
-        dtype = upcast_compute_type(buffer.get_dtype())
+        # A dot reads its operands in their own dtype, e.g. bf16 for a bf16 dot.
+        dtype = buffer.get_dtype()
+        if not self.in_dot_loop:
+            dtype = upcast_compute_type(dtype)
         cast_suffix = "" if dtype == buffer.get_dtype() else f".to({dtype})"
         subscript = ", ".join(coordinates)
         if mask is None:
@@ -520,25 +563,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             self.align(value, self.value_shape()),
             dtype=dtype,
             shape=aligned,
-        )
-
-    def load_dot_operand(
-        self, buffer: IRNode, index: sympy.Expr, axes: Sequence[str]
-    ) -> CSEVariable:
-        """A whole matrix tile in its storage dtype: [z, y, r0_] or [z, r0_, x]."""
-        if ("x" in axes) == ("y" in axes):
-            raise NotImplementedError(f"Cannot read a Helion dot operand at {index}")
-        batch = ["z0_"] if "z0_" in self.numels else []
-        operand = [*batch, "r0_", "x"] if "x" in axes else [*batch, "y", "r0_"]
-        found = OrderedSet(axes) <= OrderedSet(operand) and self.subscript(
-            buffer, index, operand, flat=False
-        )
-        if not found:
-            raise NotImplementedError(f"Cannot read a Helion dot operand at {index}")
-        arg, coordinates, shape = found
-        line = f"{arg.ref}[{', '.join(coordinates)}]"
-        return self.cse.generate(
-            self.loads, line, dtype=buffer.get_dtype(), shape=shape
         )
 
     def store(
@@ -590,7 +614,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         )
 
     def index_tensor_expr(self, index: sympy.Expr, axes: Sequence[str]) -> str:
-        if not OrderedSet(axes) <= OrderedSet(self.scope_axes) or (
+        scope = self.value_scope(axes)
+        if not OrderedSet(axes) <= OrderedSet(scope) or (
             index.free_symbols - OrderedSet(self.symbols[axis] for axis in axes)
         ):
             raise NotImplementedError(f"Unsupported Helion index: {index}")
@@ -602,7 +627,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         widen = any(not (-(2**31) <= b.lower and b.upper < 2**31) for b in bounds)
         suffix = ".to(torch.int64)" if widen else ""
         replacements = {
-            self.symbols[axis]: sympy.Symbol(self.index_tensor(axis) + suffix)
+            self.symbols[axis]: sympy.Symbol(self.index_tensor(axis, scope) + suffix)
             for axis in axes
         }
         return HelionPrinter().doprint(index.xreplace(replacements), simplify=False)
@@ -659,6 +684,9 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         return acc
 
     def dot(self, lhs: CSEVariable, rhs: CSEVariable) -> CSEVariable:
+        batch = ["z0_"] if "z0_" in self.numels else []
+        lhs = self.dot_operand(lhs, [*batch, "y", "r0_"])
+        rhs = self.dot_operand(rhs, [*batch, "r0_", "x"])
         # Each dot has its own accumulator, so horizontally fused dots stay apart.
         self.has_fp32_dot |= torch.float32 in (lhs.dtype, rhs.dtype)
         acc = self.accumulator(0, torch.float32)
@@ -666,6 +694,16 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         self.compute.writeline(f"{acc} = torch.{op}({acc}, {lhs}, {rhs})")
         self.dot_results.add(acc)
         return acc
+
+    def dot_operand(self, value: CSEVariable, axes: Sequence[str]) -> CSEVariable:
+        """`value` expanded to the matrix tile over `axes`. x @ torch.ones(72, 136)
+        multiplies by a constant, and with the 0-d tmp1 = hl.full([], 1.0, ...),
+        torch.addmm(acc, tmp0, tmp1) fails with "b must be 2D"."""
+        tiles = tuple(TILE_NAMES[axis] for axis in axes)
+        if tuple(value.shape or ()) == tiles:
+            return value
+        line = f"{self.align(value, tiles)}.expand({', '.join(tiles)})"
+        return self.cse.generate(self.compute, line, dtype=value.dtype, shape=tiles)
 
     def reduction(
         self,
