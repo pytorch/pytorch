@@ -1489,6 +1489,7 @@ class Child(torch.nn.Module):
 
 
 CHILD = Child()
+# Dispatch a hook so guard loading needs the recorded module-global alias.
 CHILD.register_forward_hook(identity_child_hook)
 
 
