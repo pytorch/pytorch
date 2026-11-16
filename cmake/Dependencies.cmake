@@ -336,7 +336,7 @@ endif()
 # mismatch between these shared dependencies, explicitly declare our intent to these
 # libraries that we are interested in using the exact same source dependencies for all.
 
-if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
+if(USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   set(DISABLE_NNPACK_AND_FAMILY OFF)
 
   # Sanity checks - Can we actually build NNPACK and family given the configuration provided?
@@ -376,13 +376,11 @@ if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   endif()
 
   if(DISABLE_NNPACK_AND_FAMILY)
-    caffe2_update_option(USE_NNPACK OFF)
     caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     caffe2_update_option(USE_XNNPACK OFF)
   else()
     # Disable unsupported NNPack combinations with MSVC
     if(MSVC)
-      caffe2_update_option(USE_NNPACK OFF)
       caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     endif()
 
@@ -513,23 +511,6 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
-endif()
-
-# ---[ NNPACK
-if(USE_NNPACK)
-  include(${CMAKE_CURRENT_LIST_DIR}/External/nnpack.cmake)
-  if(NNPACK_FOUND)
-    if(TARGET nnpack)
-      # ---[ NNPACK is being built together with Caffe2: explicitly specify dependency
-      list(APPEND Caffe2_DEPENDENCY_LIBS nnpack)
-    else()
-      include_directories(SYSTEM ${NNPACK_INCLUDE_DIRS})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${NNPACK_LIBRARIES})
-    endif()
-  else()
-    message(WARNING "Not compiling with NNPACK. Suppress this warning with -DUSE_NNPACK=OFF")
-    caffe2_update_option(USE_NNPACK OFF)
-  endif()
 endif()
 
 # ---[ XNNPACK
@@ -1234,8 +1215,33 @@ endif()
 # extension (torch._nccl_ep, see torch/CMakeLists.txt), which links it, so
 # libtorch_cuda does not depend on libnccl_ep and torch imports without nccl-extensions.
 if(USE_NCCL_EP)
-  message(STATUS "USE_NCCL_EP is ON")
-  include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
+  if(NOT (USE_NCCL AND USE_CUDA))
+    caffe2_update_option(USE_NCCL_EP OFF)
+  else()
+    if(USE_SYSTEM_NCCL)
+      file(READ "${NCCL_INCLUDE_DIRS}/nccl.h" __nccl_ep_version_file)
+    else()
+      file(READ "${PROJECT_SOURCE_DIR}/third_party/nccl/makefiles/version.mk" __nccl_ep_version_file)
+    endif()
+    set(__nccl_ep_version "")
+    foreach(__component MAJOR MINOR PATCH)
+      if(__nccl_ep_version_file MATCHES "NCCL_${__component}[ \t]+(:=[ \t]*)?([0-9]+)")
+        list(APPEND __nccl_ep_version "${CMAKE_MATCH_2}")
+      endif()
+    endforeach()
+    list(LENGTH __nccl_ep_version __nccl_ep_version_parts)
+    list(JOIN __nccl_ep_version "." __nccl_ep_version)
+    if(NOT __nccl_ep_version_parts EQUAL 3)
+      message(WARNING "Cannot determine NCCL version, so disabling USE_NCCL_EP.")
+      caffe2_update_option(USE_NCCL_EP OFF)
+    elseif(__nccl_ep_version VERSION_LESS "2.30.4")
+      message(STATUS "NCCL EP requires NCCL 2.30.4 or newer; found ${__nccl_ep_version}. Disabling USE_NCCL_EP.")
+      caffe2_update_option(USE_NCCL_EP OFF)
+    else()
+      message(STATUS "USE_NCCL_EP is ON")
+      include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
+    endif()
+  endif()
 endif()
 
 # ---[ XCCL
@@ -1279,8 +1285,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    add_compile_definitions(TORCH_USE_LIBUV)
-    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Tensorpipe uses cuda_add_library
@@ -1294,12 +1298,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     if(USE_CUDA)
       target_compile_options_if_supported(tensorpipe_cuda -Wno-missing-template-arg-list-after-template-kw)
     endif()
-    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
-    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
-    # But are used only once during shutdown
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-      target_compile_options_if_supported(tensorpipe_uv -mno-outline-atomics)
-    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
@@ -1312,6 +1310,51 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
     endif()
   endif()
+endif()
+
+# libuv for the TCPStore server. Windows uses libuv_ROOT, the same libuv Gloo
+# uses; elsewhere use the TensorPipe submodule copy.
+if(USE_DISTRIBUTED)
+  if(WIN32)
+    find_library(
+      libuv_LIBRARY
+      NAMES uv libuv
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES lib/release lib/debug lib
+      REQUIRED
+      NO_DEFAULT_PATH)
+    find_path(
+      libuv_INCLUDE_DIR
+      NAMES uv.h
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES include
+      REQUIRED
+      NO_DEFAULT_PATH)
+    include_directories(SYSTEM ${libuv_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${libuv_LIBRARY})
+  else()
+    set(_libuv_dir ${PROJECT_SOURCE_DIR}/third_party/tensorpipe/third_party/libuv)
+    # TensorPipe builds libuv as tensorpipe_uv and links it into tensorpipe.
+    if(TARGET tensorpipe_uv)
+      set(_libuv_target tensorpipe_uv)
+    else()
+      if(NOT EXISTS "${_libuv_dir}/CMakeLists.txt")
+        message(FATAL_ERROR "third_party/tensorpipe/third_party/libuv is missing. Please run: git submodule update --init --recursive")
+      endif()
+      add_subdirectory(${_libuv_dir} ${PROJECT_BINARY_DIR}/third_party/libuv EXCLUDE_FROM_ALL)
+      set_target_properties(uv_a PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      list(APPEND Caffe2_DEPENDENCY_LIBS uv_a)
+      set(_libuv_target uv_a)
+    endif()
+    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
+    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
+    # But are used only once during shutdown
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+      target_compile_options_if_supported(${_libuv_target} -mno-outline-atomics)
+    endif()
+    include_directories(BEFORE SYSTEM ${_libuv_dir}/include)
+  endif()
+  add_compile_definitions(TORCH_USE_LIBUV)
 endif()
 
 if(USE_GLOO)
