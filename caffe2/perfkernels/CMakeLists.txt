@@ -48,7 +48,7 @@ endif()
 
 # We will only build the SVE perfkernel files if the compiler supports SVE
 # extensions.
-if(CXX_SVE_FOUND)
+if(CXX_SVE_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
   add_library(Caffe2_perfkernels_sve STATIC ${sve_srcs})
   target_link_libraries(Caffe2_perfkernels_sve PRIVATE c10)
   install(TARGETS Caffe2_perfkernels_sve
