@@ -231,7 +231,11 @@ def precompile_flydsl_template(
         updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
     names = tuple(dict.fromkeys((*tensor_names, "output")))
-    with _compiled_cache_lock, temporary_env(updates), FakeTensorMode():
+    with (
+        _compiled_cache_lock,
+        temporary_env(updates),
+        FakeTensorMode(_force_python=True),
+    ):
         tensors = {
             name: torch.empty_strided(
                 tuple(shapes[name]),
@@ -270,7 +274,11 @@ def precompile_flydsl(
         updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
     # Cold launches must not observe FlyDSL's process-global compile-only mode.
     # Warm launches call the cached dispatcher directly and do not read it.
-    with _compiled_cache_lock, temporary_env(updates), FakeTensorMode():
+    with (
+        _compiled_cache_lock,
+        temporary_env(updates),
+        FakeTensorMode(_force_python=True),
+    ):
         tensors = {
             name: torch.empty_strided(
                 tuple(shape),
