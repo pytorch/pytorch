@@ -67,7 +67,6 @@ from torch._C._dynamo.guards import (
     GuardDebugInfo,
     GuardManager,
     install_no_tensor_aliasing_guard,
-    install_object_alias_pattern_guard,
     install_object_aliasing_guard,
     install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
@@ -122,7 +121,6 @@ from torch._guards import (
     Source,
     StorageOverlap,
     StorageOverlapPartition,
-    TracingContext,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -153,7 +151,6 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
-from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -193,7 +190,6 @@ from .source import (
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
-    SkipGuardSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
     TupleIteratorGetItemSource,
@@ -265,7 +261,6 @@ if TYPE_CHECKING:
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
@@ -332,87 +327,31 @@ def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> boo
 
 
 class NativeMethodMetadata(NamedTuple):
-    # Only class receivers are portable; instance tokens must not keep receivers alive.
-    receiver: type | tuple[type, int]
+    # Pickled by reference, so it is the loading process's class.
+    receiver: type
     name: str
 
 
-def _native_method_metadata(
-    value: object, *, portable: bool = True
-) -> NativeMethodMetadata | None:
+def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
+    # A builtin bound to a class, like an autograd Function's ``apply``: every
+    # attribute read makes a new bound object, so only equality is portable.
     if type(value) is not types.BuiltinMethodType:
         return None
     receiver = value.__self__
-    is_cls = issubclass(type(receiver), type)
-    if portable and not is_cls:
+    if not isinstance(receiver, type) or not _resolves_by_reference(receiver):
         return None
-    if not portable:
-        from .variables.object_protocol import type_is_immutable
-
-        owner = receiver if is_cls else type(receiver)
-        if type(owner) is not type or not type_is_immutable(owner):
-            return None
-        descr = inspect.getattr_static(owner, value.__name__, None)
-        kind = types.ClassMethodDescriptorType if is_cls else types.MethodDescriptorType
-        if type(descr) is not kind:
-            return None
-    if is_cls and not _resolves_by_reference(receiver):
+    if getattr(receiver, value.__name__, None) != value:
         return None
-    expected = NativeMethodMetadata(
-        cast(type, receiver) if is_cls else (type(receiver), id(receiver)),
-        value.__name__,
-    )
-    return expected if _native_method_matches(value, expected) else None
+    return NativeMethodMetadata(receiver, value.__name__)
 
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
-    if type(value) is not types.BuiltinMethodType or value.__name__ != expected.name:
-        return False
-    receiver = value.__self__
-    if type(expected.receiver) is tuple:
-        owner, receiver_id = expected.receiver
-        if type(receiver) is not owner or id(receiver) != receiver_id:
-            return False
-        # Instance metadata only resolves descriptors on immutable builtin classes.
-        descr = getattr(owner, expected.name, None)
-        return type(descr) is types.MethodDescriptorType and value == descr.__get__(
-            receiver
-        )
-    return receiver is expected.receiver and value == getattr(
-        expected.receiver, expected.name
-    )
-
-
-def _method_identity_guards_filtered(tx: InstructionTranslatorBase) -> bool:
-    context = CompileContext.try_get()
+    # The type check first: == would otherwise run the new value's __eq__.
     return (
-        context is not None
-        and context.is_aot_capture
-        or config.caching_precompile
-        or tx.export
-        or TracingContext.get().guards_context.skip_install
+        type(value) is types.BuiltinMethodType
+        and value.__self__ is expected.receiver
+        and value == getattr(expected.receiver, expected.name)
     )
-
-
-def install_builtin_method_guard(
-    tx: InstructionTranslatorBase, source: Source, value: object = None
-) -> None:
-    filtered = _method_identity_guards_filtered(tx)
-    if value is None:
-        value = tx.output.resolve_source_value(source)
-    expected = _native_method_metadata(value, portable=filtered)
-    if expected is not None:
-        create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
-        install_guard(source.make_guard(create))
-    elif filtered:
-        unimplemented(
-            gb_type="Prebound builtin method requires identity guards",
-            context=source.name,
-            explanation="Dynamo cannot track this prebound builtin method when its identity guard can be skipped or filtered.",
-            hints=["Bind the builtin method inside the compiled function."],
-        )
-    else:
-        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
 
 def _mapping_proxy_mapping(value: object) -> object:
@@ -546,49 +485,45 @@ class GuardManagerWrapper:
         # 0, so we collect them as well. Later on, we accumulate the diff guard
         # sources for all the guard managers.
 
-        # A relational check needs all participants, including their access paths.
-        # This closure applies only to unsafe diff selection, not explicit filters.
-        parents: dict[str, OrderedSet[str]] = {}
-        groups: dict[int, OrderedSet[str]] = {}
-        source_groups: dict[str, list[int]] = {}
+        def visit_dict_manager(node: DictGuardManager) -> bool:
+            is_diff_guard_node = (
+                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
+            )
+            for _idx, (key_mgr, val_mgr) in sorted(
+                node.get_key_value_managers().items()
+            ):
+                is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
 
-        def visit(node: GuardManager, parent: str | None = None) -> None:
-            source = node.get_source()
-            if parent is not None:
-                parents.setdefault(source, OrderedSet()).add(parent)
-            if node.fail_count() > 0:
-                self.diff_guard_sources.add(source)
-            for guard in node.get_leaf_guards():
-                if isinstance(guard, RelationalGuard):
-                    group = guard.get_group_id()
-                    groups.setdefault(group, OrderedSet()).add(source)
-                    source_groups.setdefault(source, []).append(group)
+            if is_diff_guard_node:
+                self.diff_guard_sources.add(node.get_source())
+
+            return is_diff_guard_node
+
+        def visit_manager(node: GuardManager) -> bool:
             if isinstance(node, DictGuardManager):
-                children = [
-                    manager
-                    for pair in node.get_key_value_managers().values()
-                    for manager in pair
-                    if manager is not None
-                ]
-            else:
-                children = node.get_child_managers()
-            for child in children:
-                visit(child, source)
+                raise AssertionError(
+                    f"Expected non-DictGuardManager node, got {type(node)}"
+                )
+
+            is_diff_guard_node = (
+                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
+            )
+            for child_mgr in node.get_child_managers():
+                is_diff_guard_node |= visit(child_mgr)
+
+            if is_diff_guard_node:
+                self.diff_guard_sources.add(node.get_source())
+
+            return is_diff_guard_node
+
+        def visit(node: GuardManager) -> bool:
+            if node is None:
+                return False
+            if isinstance(node, DictGuardManager):
+                return visit_dict_manager(node)
+            return visit_manager(node)
 
         visit(self.root)
-        pending = list(self.diff_guard_sources)
-        retained_groups: set[int] = set()
-        while pending:
-            source = pending.pop()
-            dependencies = OrderedSet(parents.get(source, ()))
-            for group in source_groups.get(source, ()):
-                if group not in retained_groups:
-                    retained_groups.add(group)
-                    dependencies.update(groups[group])
-            for dependency in dependencies:
-                if dependency not in self.diff_guard_sources:
-                    self.diff_guard_sources.add(dependency)
-                    pending.append(dependency)
 
         return self.diff_guard_sources
 
@@ -1062,14 +997,6 @@ def uninteresting_files() -> set[str]:
     return {inspect.getfile(m) for m in mods}
 
 
-def _receiver_alias_pattern(receivers: tuple[object, ...]) -> tuple[int, ...]:
-    positions: dict[int, int] = {}
-    return tuple(
-        positions.setdefault(id(receiver), index)
-        for index, receiver in enumerate(receivers)
-    )
-
-
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
@@ -1078,7 +1005,6 @@ def _get_closure_vars() -> dict[str, object]:
     if _CLOSURE_VARS is None:
         _CLOSURE_VARS = {
             "___check_type_id": check_type_id,
-            "___receiver_alias_pattern": _receiver_alias_pattern,
             "___check_obj_id": check_obj_id,
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
@@ -1461,14 +1387,10 @@ class GuardCheckSpec(NamedTuple):
         information from the guarded value at build time.
     eval_fn: (value, metadata) -> bool  — re-evaluates the guard at lookup
         time using a fresh value and the previously saved metadata.
-    get_extra_sources_fn: optional ordered dependencies. Both functions receive the
-        tuple (originating value, *dependency values) for a relational check.
     """
 
     get_metadata_fn: GuardCheckGetMetadataFn
     eval_fn: GuardCheckEvalFn
-    # Relational checks receive (originating value, *dependency values).
-    get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None
 
 
 SKIP_GUARD = object()
@@ -1605,15 +1527,9 @@ def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
 def register_guard_check_spec(
     get_metadata_fn: GuardCheckGetMetadataFn,
     eval_fn: GuardCheckEvalFn,
-    *,
-    get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
-    handler = GuardCheckSpec(
-        get_metadata_fn=get_metadata_fn,
-        eval_fn=eval_fn,
-        get_extra_sources_fn=get_extra_sources_fn,
-    )
+    handler = GuardCheckSpec(get_metadata_fn=get_metadata_fn, eval_fn=eval_fn)
 
     def decorator(fn):
         fn.guard_check_spec = handler
@@ -2046,9 +1962,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def get_guard_manager_from_source(self, source: Source) -> GuardManager:
-        if isinstance(source, SkipGuardSource):
-            # A relational check can depend on a skipped source without guarding it alone.
-            return self.get_guard_manager_from_source(source.base)
         root_guard_manager = self.guard_manager.root
 
         example_value = None
@@ -3654,29 +3567,22 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
-        if self.save_guards and type(expected.receiver) is tuple:
-            raise torch._dynamo.exc.PackageError(
-                "Instance methods need receiver identity; bind them in the saved function."
-            )
-        last_match: weakref.ReferenceType[object] | None = None
+        last_match: list[object] = []
 
         def guard_fn(value: object) -> bool:
-            nonlocal last_match
-            if last_match is not None and value is last_match():
-                return value is not None
+            # The object ID_MATCH would have pinned; holding it keeps its id
+            # from being reused.
+            if last_match and value is last_match[0]:
+                return True
             if not _native_method_matches(value, expected):
                 return False
-            last_match = weakref.ref(value)
+            last_match[:] = [value]
             return True
 
-        owner = cast(
-            type,
-            expected.receiver[0]
-            if type(expected.receiver) is tuple
-            else expected.receiver,
+        code = (
+            f"___check_native_method({self.arg_ref(guard)}, "
+            f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
         )
-        method = f"{owner.__module__}.{owner.__qualname__}.{expected.name}"
-        code = f"___check_native_method({self.arg_ref(guard)}, {method})"
         self._set_guard_export_info(guard, [code])
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
@@ -3705,10 +3611,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not issubclass(type(value), dict) and not istype(
-            guard.originating_source, TypeMROSource
-        ):
-            # DICT_LENGTH checks its type; TypeMROSource reads the always-tuple tp_mro.
+        if not issubclass(type(value), dict):
+            # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
@@ -3839,27 +3743,6 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
-        )
-
-    @skip_guard_check_spec
-    def BUILTIN_METHOD_RECEIVER_ALIAS(
-        self, guard: Guard, sources: tuple[Source, ...], aliases: tuple[int, ...]
-    ) -> None:
-        aliases = tuple(aliases)
-        if self.save_guards:
-            for source in sources:
-                if name := get_local_source_name(source):
-                    self.check_fn_manager.additional_used_local_vars.add(name)
-                if name := get_global_source_name(source):
-                    self.check_fn_manager.additional_used_global_vars.add(name)
-        refs = ", ".join(self.arg_ref(source.name) for source in sources)
-        code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
-        self._set_guard_export_info(guard, code)
-        install_object_alias_pattern_guard(
-            [self.get_guard_manager_from_source(source) for source in sources],
-            aliases,
-            get_verbose_code_parts(code, guard),
-            guard.user_stack,
         )
 
     # Multi-source guard (two inputs aliasing) — not expressible as a
@@ -5160,12 +5043,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         else:
             setstate(attrs)
 
-    @staticmethod
-    def _unpickle_method_wrapper(
-        owner: type, name: str, receiver: object
-    ) -> types.MethodWrapperType:
-        return inspect.getattr_static(owner, name).__get__(receiver, type(receiver))
-
     @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
         return itertools.count(item, step)
@@ -5472,14 +5349,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
 
-        if type(obj) is types.MethodWrapperType:
-            # Pickle's getattr(receiver, name) can select a different subclass slot.
-            return type(self)._unpickle_method_wrapper, (
-                obj.__objclass__,
-                obj.__name__,
-                obj.__self__,
-            )
-
         if obj is dict_keys:
             return type, (dict[Any, Any]().keys(),)
 
@@ -5695,10 +5564,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
-            from .variables.object_protocol import type_is_immutable
-
             owner = obj.__objclass__
-            if not type_is_immutable(owner):
+            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
@@ -6080,9 +5948,14 @@ def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
     if portable is None:
         return guard
     create_fn, expected = portable
-    return guard.with_source(
-        guard.originating_source,
+    return dataclasses.replace(
+        guard,
         create_fn=functools.partial(create_fn, expected=expected),
+        guard_types=None,
+        code_list=None,
+        obj_weakref=None,
+        guarded_class_weakref=None,
+        _hash=None,
     )
 
 
@@ -7491,17 +7364,8 @@ def update_diff_guard_managers_for_existing_cache_entries(
             cache_entry.guard_manager.collect_diff_guard_sources()
         )
 
-    # A source imported from another cache entry can add relational partners.
-    # Close the shared set before cloning any tree, including transitive groups.
-    while True:
-        previous_size = len(acc_diff_guard_sources)
-        for cache_entry in cache_entries:
-            cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
-            cache_entry.guard_manager.collect_diff_guard_sources()
-        if len(acc_diff_guard_sources) == previous_size:
-            break
-
-    # Rebuild each cache line using the complete shared source set.
+    # On the second pass, set the diff_guard_sources for each cache line to the
+    # accumulated value. And the re-populate the diff guard manager.
     for cache_entry in cache_entries:
         cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
         cache_entry.guard_manager.populate_diff_guard_manager()
@@ -7602,6 +7466,8 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
+    from torch._guards import TracingContext
+
     guards_context = TracingContext.get().guards_context
     if guards_context.skip_install:
         return

@@ -3236,42 +3236,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
-    @parametrize("skip_dependency", [False, True])
-    def test_native_receiver_alias_dependencies(self, skip_dependency):
-        def install_alias_guard(ctx):
-            from torch._dynamo.guards import GuardBuilder, install_guard
-            from torch._dynamo.source import SkipGuardSource
-
-            sources = tuple(
-                ctx.get_local(name)
-                ._i_will_not_complain_if_bc_breaks_VariableTracker()
-                .source
-                for name in ("left", "right")
-            )
-            if skip_dependency:
-                sources = (sources[0], SkipGuardSource(sources[1]))
-            install_guard(
-                sources[0].make_guard(
-                    functools.partial(
-                        GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
-                        sources=sources,
-                        aliases=(0, 1),
-                    )
-                )
-            )
-
-        def fn(x, left, right):
-            comptime(install_alias_guard)
-            return x + 1 if left is left and right is right else x
-
-        x, left, right = torch.ones(1), [], []
-        ref, loaded = self._test_serialization(
-            "BUILTIN_METHOD_RECEIVER_ALIAS", fn, x, left, right
-        )
-        self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": right}, True)
-        self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": left}, False)
-        self._test_check_fn(ref, loaded, {"x": x, "left": [], "right": []}, True)
-
     @parametrize("reordered", [False, True])
     def test_native_ordered_dict_order(self, reordered):
         def install_order_guard(ctx):
@@ -3845,15 +3809,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
 
         # Check verbose_code_parts from leaf guards (they include hints)
-        checked = 0
-
         def check_leaf_guards(mgr):
-            nonlocal checked
             for guard in mgr.get_leaf_guards():
                 verbose_parts = guard.verbose_code_parts()
                 verbose_str = " ".join(verbose_parts)
-                if "___check_type_id(L['m']," in verbose_str:
-                    checked += 1
+                if "___check_type_id" in verbose_str and "L['m']" in verbose_str:
                     self.assertIn(
                         "HINT: type",
                         verbose_str,
@@ -3880,7 +3840,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 check_leaf_guards(child_mgr)
 
         check_leaf_guards(ref.root)
-        self.assertGreater(checked, 0)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):

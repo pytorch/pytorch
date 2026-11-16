@@ -1005,15 +1005,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
             return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=descriptor_source,
+                source=source,
             )
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
@@ -1022,15 +1017,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            descriptor_source = (
-                self.get_source_by_walking_mro(tx, name)
-                if self.source is not None
-                else None
-            )
             return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=descriptor_source,
+                source=source,
             )
 
         # User-defined descriptor with Python __get__.
@@ -3721,19 +3711,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             hasattr(type(descriptor), "__set__")
             or hasattr(type(descriptor), "__delete__")
         ):
-            if self.cls_source is not None and is_constant_source(self.cls_source):
-                # Constant sources cannot guard a changed MRO or descriptor between calls.
-                unimplemented(
-                    gb_type="Descriptor mutation on a constant-source object",
-                    context=f"name={name_str}, class_source={self.cls_source.name}",
-                    explanation="Dynamo cannot guard the class metadata used to resolve "
-                    "a descriptor mutation on an object returned by a constant-result function.",
-                    hints=[
-                        "Pass the object as an input instead of returning it from a function "
-                        "marked with `torch._dynamo.assume_constant_result`.",
-                        "Move the descriptor mutation outside the compiled region.",
-                    ],
-                )
             desc_source = None
             if self.cls_source:
                 desc_source = self.get_source_by_walking_mro(tx, name_str)
@@ -4631,7 +4608,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 from .constant import FakeIdVariable
 
                 if isinstance(result, FakeIdVariable):
-                    return result.value, True
+                    return result.as_python_constant(), True
                 if isinstance(result, variables.SymNodeVariable):
                     return _normalize_custom_hash(int(result.evaluate_expr())), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):

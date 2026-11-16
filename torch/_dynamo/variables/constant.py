@@ -31,7 +31,6 @@ from .base import (
     GetSet,
     Member,
     Method,
-    NO_SUCH_SUBOBJ,
     readonly_setter,
     SourceLocation,
     ValueMutationNew,
@@ -1083,18 +1082,7 @@ class FakeIdVariable(VariableTracker):
         return SourcelessBuilder.create_internal_fake_id(value, kind)
 
     def as_python_constant(self) -> int:
-        if self.kind is FakeValueKind.HASH:
-            unimplemented(
-                gb_type="Conversion of compile-time-only hash value",
-                context="FakeIdVariable",
-                explanation="An identity-dependent hash cannot be converted to a constant result.",
-                hints=["Compute the hash outside the compiled function."],
-            )
         return self.value
-
-    def get_real_python_backed_value(self) -> object:
-        # Internal hash integers have no observable runtime identity.
-        return NO_SUCH_SUBOBJ if self.kind is FakeValueKind.HASH else self.value
 
     def is_python_constant(self) -> bool:
         return False
@@ -1110,12 +1098,12 @@ class FakeIdVariable(VariableTracker):
         # decimal string. The distinct-but-compile-time-only identity carried by
         # the fake id is preserved in the resulting string, matching how
         # FakeIdVariable already resolves same-kind id()/hash() comparisons.
-        return ConstantVariable.create(repr(self.as_python_constant()))
+        return ConstantVariable.create(repr(self.value))
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors long_bool. The fake value is only meaningful at compile time,
         # but its truthiness is, like tp_repr_impl, a plain function of it.
-        return ConstantVariable.create(bool(self.as_python_constant()))
+        return ConstantVariable.create(bool(self.value))
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
@@ -1171,10 +1159,7 @@ class FakeIdVariable(VariableTracker):
             result = op(lhs, rhs)
         except (TypeError, ValueError, OverflowError, ZeroDivisionError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        kind = self.kind
-        if isinstance(other, FakeIdVariable) and other.kind is FakeValueKind.HASH:
-            kind = FakeValueKind.HASH
-        return self._create(result, kind=kind)
+        return self._create(result)
 
     def nb_add_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
         return self._nb_binary_impl(tx, other, operator.add, reverse)
@@ -1207,16 +1192,16 @@ class FakeIdVariable(VariableTracker):
         return self._nb_binary_impl(tx, other, operator.rshift, reverse)
 
     def nb_negative_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(-self.value, kind=self.kind)
+        return self._create(-self.value)
 
     def nb_positive_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(+self.value, kind=self.kind)
+        return self._create(+self.value)
 
     def nb_absolute_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(abs(self.value), kind=self.kind)
+        return self._create(abs(self.value))
 
     def nb_invert_impl(self, tx):  # type: ignore[no-untyped-def]
-        return self._create(~self.value, kind=self.kind)
+        return self._create(~self.value)
 
     def nb_int_impl(self, tx):  # type: ignore[no-untyped-def]
         return self._create(int(self.value), kind=self.kind)
