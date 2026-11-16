@@ -1056,7 +1056,9 @@ def _prepare_exported_program_for_export(
         # Decompose the graph given the implemented torch ops in ONNX
         specialization_snapshot = _specialization.snapshot(exported_program, registry)
         exported_program = _fx_passes.decompose_with_registry(
-            exported_program, registry
+            exported_program,
+            registry,
+            decomp_table_hook=_specialization.attribution_hook(specialization_snapshot),
         )
         _specialization.warn_if_specialized(exported_program, specialization_snapshot)
 

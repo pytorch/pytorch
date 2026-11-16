@@ -13,10 +13,13 @@ import torch
 from torch.export.exported_program import _get_shape_env
 from torch.export.graph_signature import InputKind
 from torch.onnx._internal.exporter import _decomp, _errors
+from torch.utils._sympy.functions import Mod, PythonMod
 from torch.utils._sympy.value_ranges import bound_sympy
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.onnx._internal.exporter import _registration
     from torch.utils._sympy.value_ranges import ValueRanges
@@ -30,6 +33,9 @@ class _Snapshot:
     var_to_range: tuple[tuple[sympy.Symbol, ValueRanges], ...]
     input_dims: dict[sympy.Symbol, str]
     candidate_ops: tuple[str, ...]
+    candidate_targets: frozenset[torch._ops.OpOverload]
+    shape_env: ShapeEnv
+    by_op: dict[str, list[sympy.Expr]] = dataclasses.field(default_factory=dict)
 
 
 def _input_dim_names(
@@ -69,7 +75,7 @@ def snapshot(
         return None
     implemented = set(_decomp.get_onnx_implemented_overloads(registry))
     candidate_ops = {
-        str(node.target)
+        node.target
         for node in exported_program.graph.nodes
         if node.op == "call_function"
         and isinstance(node.target, torch._ops.OpOverload)
@@ -89,8 +95,82 @@ def snapshot(
         replacements=set(shape_env.replacements),
         var_to_range=tuple(shape_env.var_to_range.items()),
         input_dims=_input_dim_names(exported_program, shape_env),
-        candidate_ops=tuple(sorted(candidate_ops)),
+        candidate_ops=tuple(sorted(map(str, candidate_ops))),
+        candidate_targets=frozenset(candidate_ops),
+        shape_env=shape_env,
     )
+
+
+def attribution_hook(before: _Snapshot | None) -> Callable[[dict], dict] | None:
+    """Record constraints added by each outermost candidate decomposition."""
+    if before is None:
+        return None
+    shape_env = before.shape_env
+    candidate_targets = before.candidate_targets
+    by_op = before.by_op
+    depth = 0
+
+    def wrap(op, decompose):
+        def attributed(*args, **kwargs):
+            nonlocal depth
+            if depth:
+                return decompose(*args, **kwargs)
+            n_guards = len(shape_env.guards)
+            assert_ids = {
+                id(ra)
+                for values in shape_env.deferred_runtime_asserts.values()
+                for ra in values
+            }
+            replacements = set(shape_env.replacements)
+            depth += 1
+            try:
+                return decompose(*args, **kwargs)
+            finally:
+                depth -= 1
+                exprs = [guard.expr for guard in shape_env.guards[n_guards:]]
+                exprs.extend(
+                    ra.expr
+                    for values in shape_env.deferred_runtime_asserts.values()
+                    for ra in values
+                    if id(ra) not in assert_ids
+                )
+                exprs.extend(
+                    sympy.Eq(symbol, value)
+                    for symbol, value in shape_env.replacements.items()
+                    if symbol not in replacements
+                )
+                if exprs:
+                    by_op.setdefault(str(op), []).extend(exprs)
+
+        return attributed
+
+    def hook(table: dict) -> dict:
+        return {
+            op: wrap(op, decompose) if op in candidate_targets else decompose
+            for op, decompose in table.items()
+        }
+
+    return hook
+
+
+_CONSTRAINT_PRIORITY = {"bound": 0, "relation": 1, "divisibility": 2, "pin": 3}
+
+
+def _constraint_kind(expr: sympy.Expr) -> str:
+    if isinstance(expr, sympy.And):
+        return max(
+            map(_constraint_kind, expr.args), key=_CONSTRAINT_PRIORITY.__getitem__
+        )
+    if isinstance(expr, sympy.Eq):
+        lhs, rhs = expr.args
+        mod_types = (sympy.Mod, Mod, PythonMod)
+        if isinstance(lhs, mod_types) or isinstance(rhs, mod_types):
+            return "divisibility"
+        if (lhs.is_number and rhs.free_symbols) or (rhs.is_number and lhs.free_symbols):
+            return "pin"
+        if lhs.free_symbols and rhs.free_symbols:
+            return "relation"
+    return "bound"
 
 
 def warn_if_specialized(
@@ -127,7 +207,8 @@ def warn_if_specialized(
             vr = bound_sympy(expr, ranges)
             if vr.is_singleton() and vr.lower is sympy.true:
                 continue
-        constraints.add(expr)
+        if _constraint_kind(expr) != "bound":
+            constraints.add(expr)
     if not constraints:
         return
 
@@ -138,19 +219,37 @@ def warn_if_specialized(
         f"{before.input_dims[symbol]} ({symbol})"
         for symbol in sorted(affected, key=str)
     )
+    consequence = (
+        "will give wrong results (or fail) for other sizes"
+        if any(_constraint_kind(expr) == "pin" for expr in constraints)
+        else "may give wrong results for sizes that do not satisfy these constraints"
+    )
     lines = [
         "The exported ONNX model declares these input dimensions as dynamic, but the "
-        "graph was specialized to the example input's sizes and will give wrong results "
-        "(or fail) for other sizes:",
+        f"graph was specialized to the example input's sizes and {consequence}:",
         f"  {dims}",
         "Constraints added while decomposing ops that have no ONNX implementation "
         "(removed from the ONNX graph):",
     ]
-    rendered = [str(expr) for expr in sorted(constraints, key=str)]
-    if len(rendered) > 10:
-        rendered = [*rendered[:10], f"... and {len(rendered) - 10} more"]
-    lines.append("  " + "; ".join(rendered))
-    if before.candidate_ops:
+    ordered = sorted(
+        constraints,
+        key=lambda expr: (-_CONSTRAINT_PRIORITY[_constraint_kind(expr)], str(expr)),
+    )
+    by_op: dict[str, list[str]] = {}
+    unattributed = []
+    for expr in ordered[:10]:
+        ops = sorted(op for op, exprs in before.by_op.items() if expr in exprs)
+        if ops:
+            for op in ops:
+                by_op.setdefault(op, []).append(str(expr))
+        else:
+            unattributed.append(str(expr))
+    lines.extend(f"  {op}: {'; '.join(exprs)}" for op, exprs in sorted(by_op.items()))
+    if unattributed:
+        lines.append("  " + "; ".join(unattributed))
+    if len(ordered) > 10:
+        lines.append(f"  ... and {len(ordered) - 10} more")
+    if unattributed and before.candidate_ops:
         lines.append(
             "Ops decomposed for ONNX that may be responsible: "
             + ", ".join(before.candidate_ops)
