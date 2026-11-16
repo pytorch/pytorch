@@ -684,7 +684,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # The default filter keeps the local class's TYPE_MATCH and MRO guards,
         # so serialization refuses it. Dropping TYPE_MATCH alone still refuses
         # a plain instance in reducer_override. The module control also drops
-        # MRO guards: it loads as base Module and would otherwise fail that
+        # the MRO length guard: it loads as base Module and otherwise fails that
         # snapshot before exposing the deliberately missing type protection.
         def drop_type_match(entries):
             # The control: the pre-check's type tests minus every TYPE_MATCH.
@@ -2840,11 +2840,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         with self.assertRaisesRegex(PackageError, "can affect dispatch") as error:
             session.snapshot_artifact()
-        self.assertNotIn(
-            "Keep mutable MRO bases and their metaclasses importable through stable "
-            "module/name references",
-            str(error.exception),
-        )
+        self.assertNotIn("nested namedtuple", str(error.exception))
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
