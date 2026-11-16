@@ -1,19 +1,22 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
 from torch._C import FileCheck
 from torch._dynamo.utils import same
-from torch._inductor import config, memory
+from torch._inductor import config, ir, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     serialTest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -24,6 +27,225 @@ try:
 except ImportError:
     TRITON_AVAILABLE = False
 
+
+class TestMemoryPlanningAliases(TestCase):
+    def test_non_owning_layout_uses_owner_storage_and_lifetime(self):
+        class SizeVars:
+            @staticmethod
+            def optimization_hint(value, fallback=0):
+                return value
+
+        class Node:
+            def __init__(self, numel, layout):
+                self.numel = numel
+                self.layout = layout
+
+            def get_numel(self):
+                return self.numel
+
+            def get_dtype(self):
+                return torch.float32
+
+        class Buffer:
+            def __init__(self, name, numel, layout, aliases=()):
+                self.name = name
+                self.node = Node(numel, layout)
+                self.aliases = aliases
+
+            def get_name(self):
+                return self.name
+
+            def get_aliases(self):
+                return self.aliases
+
+        class Consumer:
+            unmet_dependencies = [
+                SimpleNamespace(name="slice2"),
+                SimpleNamespace(name="input_view"),
+                SimpleNamespace(name="static_view"),
+            ]
+
+            @staticmethod
+            def get_outputs():
+                return []
+
+        class Producer:
+            def __init__(self, output, dependencies=()):
+                self.output = output
+                self.unmet_dependencies = [
+                    SimpleNamespace(name=name) for name in dependencies
+                ]
+
+            def get_outputs(self):
+                return [self.output]
+
+        graph = SimpleNamespace(
+            sizevars=SizeVars(), scheduler=SimpleNamespace(mutation_real_name={})
+        )
+        consumer = Consumer()
+        owner = Buffer("owner", 1000, object())
+        alias1 = Buffer(
+            "slice1", 400, object.__new__(ir.NonOwningLayout), aliases=["owner"]
+        )
+        alias2 = Buffer(
+            "slice2", 100, object.__new__(ir.NonOwningLayout), aliases=["slice1"]
+        )
+        input_view = Buffer(
+            "input_view",
+            100,
+            object.__new__(ir.NonOwningLayout),
+            aliases=["graph_input"],
+        )
+        static_view = Buffer(
+            "static_view",
+            100,
+            object.__new__(ir.NonOwningLayout),
+            aliases=["static_input"],
+        )
+        buffers = {
+            "owner": owner,
+            "slice1": alias1,
+            "slice2": alias2,
+            "input_view": input_view,
+            "static_view": static_view,
+        }
+        graph_input = memory.FreeableInputBuffer(
+            "graph_input",
+            memory.MemoryPlanningInfoForBuffer(size_free=8000),
+        )
+        freeable_inputs = {"graph_input": graph_input}
+        with V.set_graph_handler(graph):
+            memory.assign_memory_planning_info_for_scheduler_buffers(
+                [consumer], buffers, freeable_inputs
+            )
+
+        self.assertEqual(
+            (owner.mpi_buffer.size_alloc, owner.mpi_buffer.size_free), (4000, 4000)
+        )
+        self.assertEqual(
+            (alias1.mpi_buffer.size_alloc, alias1.mpi_buffer.size_free), (0, 0)
+        )
+        self.assertEqual(
+            (alias2.mpi_buffer.size_alloc, alias2.mpi_buffer.size_free), (0, 0)
+        )
+        self.assertEqual(
+            (input_view.mpi_buffer.size_alloc, input_view.mpi_buffer.size_free),
+            (0, 0),
+        )
+        self.assertEqual(
+            (static_view.mpi_buffer.size_alloc, static_view.mpi_buffer.size_free),
+            (0, 0),
+        )
+        self.assertEqual(owner.mpi_buffer.succ_nodes, {consumer})
+        self.assertEqual(owner.mpi_buffer.succ_nodes_for_ordering, set())
+        self.assertEqual(alias2.mpi_buffer.succ_nodes_for_ordering, {consumer})
+        self.assertEqual(graph_input.mpi_buffer.succ_nodes, {consumer})
+        self.assertEqual(graph_input.mpi_buffer.succ_nodes_for_ordering, set())
+        self.assertEqual(input_view.mpi_buffer.succ_nodes, {consumer})
+        self.assertEqual(
+            memory._normalize_graph_outputs(OrderedSet(["slice2"]), buffers),
+            OrderedSet(["slice2", "owner"]),
+        )
+        self.assertEqual(
+            memory._normalize_graph_outputs(
+                OrderedSet(["input_view"]), buffers, freeable_inputs
+            ),
+            OrderedSet(["input_view", "graph_input"]),
+        )
+        self.assertEqual(
+            memory._normalize_graph_outputs(OrderedSet(["static_view"]), buffers),
+            OrderedSet(["static_view"]),
+        )
+
+        # Direct timeline callers keep the owner when only an alias is an output.
+        graph_outputs = OrderedSet(["slice2"])
+        timeline_nodes = [
+            Producer(owner),
+            Producer(alias1),
+            Producer(alias2),
+            consumer,
+        ]
+        timeline, _, _ = memory.compute_memory_timeline(
+            timeline_nodes, {}, graph_outputs
+        )
+        self.assertEqual(graph_outputs, OrderedSet(["slice2", "owner"]))
+        owner_info = next(info for info in timeline if info.buffer is owner)
+        self.assertEqual(owner_info.end_step, -1)
+        peak, _ = memory.estimate_peak_memory(timeline_nodes, {}, graph_outputs)
+        self.assertEqual(peak, 4000)
+
+    def test_non_owning_lifetime_does_not_add_ordering_backedge(self):
+        """A liveness-only alias must not turn an otherwise valid DAG cyclic."""
+
+        class SizeVars:
+            @staticmethod
+            def optimization_hint(value, fallback=0):
+                return value
+
+        class BufferNode:
+            def __init__(self, layout):
+                self.layout = layout
+
+            def get_numel(self):
+                return 1
+
+            def get_dtype(self):
+                return torch.float32
+
+        class Buffer:
+            def __init__(self, name, layout, aliases=()):
+                self.name = name
+                self.node = BufferNode(layout)
+                self.aliases = aliases
+
+            def get_name(self):
+                return self.name
+
+            def get_aliases(self):
+                return self.aliases
+
+        class SchedulerNode:
+            def __init__(self, name, output, dependencies=()):
+                self.name = name
+                self.output = output
+                self.unmet_dependencies = [
+                    SimpleNamespace(name=dep) for dep in dependencies
+                ]
+
+            def get_outputs(self):
+                return [self.output]
+
+        # The alias consumer already reaches the owner's producer, so an ordering
+        # edge owner -> alias consumer would form a cycle.
+        owner = Buffer("owner", object())
+        alias = Buffer(
+            "alias", object.__new__(ir.NonOwningLayout), aliases=["owner"]
+        )
+        intermediate = Buffer("intermediate", object())
+        alias_producer = SchedulerNode("alias_producer", alias)
+        alias_consumer = SchedulerNode(
+            "alias_consumer", intermediate, dependencies=["alias"]
+        )
+        owner_producer = SchedulerNode(
+            "owner_producer", owner, dependencies=["intermediate"]
+        )
+        nodes = [alias_producer, alias_consumer, owner_producer]
+        buffers = {buf.get_name(): buf for buf in [owner, alias, intermediate]}
+        graph = SimpleNamespace(
+            sizevars=SizeVars(), scheduler=SimpleNamespace(mutation_real_name={})
+        )
+
+        with V.set_graph_handler(graph):
+            memory.assign_memory_planning_info_for_scheduler_buffers(nodes, buffers)
+        memory.assign_memory_planning_info_for_scheduler_nodes(
+            nodes, {}, buffers, {}
+        )
+
+        self.assertEqual(owner.mpi_buffer.succ_nodes, {alias_consumer})
+        self.assertEqual(owner.mpi_buffer.succ_nodes_for_ordering, set())
+        self.assertEqual(alias_producer.mpi_node.succ_nodes, {alias_consumer})
+        self.assertEqual(alias_consumer.mpi_node.succ_nodes, {owner_producer})
+        self.assertEqual(owner_producer.mpi_node.succ_nodes, set())
 
 class Foo(torch.nn.Module):
     """
@@ -289,9 +511,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
         og_method = memory.assign_memory_planning_info_for_scheduler_buffers
 
         def assign_memory_planning_info_for_scheduler_buffers_with_records(
-            nodes, name_to_buf
+            nodes, name_to_buf, name_to_freeable_input_buf=None
         ):
-            og_method(nodes, name_to_buf)
+            og_method(nodes, name_to_buf, name_to_freeable_input_buf)
             for buf_name, buf in name_to_buf.items():
                 buffer_info[buf_name] = (
                     buf.mpi_buffer.size_alloc,
