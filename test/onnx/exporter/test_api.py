@@ -624,6 +624,8 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_adaptive_max_pool2d(self):
+        # This relies on torchlib not implementing adaptive_max_pool2d; the
+        # custom-op tests provide coverage that does not depend on torchlib.
         class Model(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.functional.adaptive_max_pool2d(x, (2, 2))
@@ -678,7 +680,8 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
             self.assertIn("specialization_test.specialize.default", message)
             self.assertIn("Constraints added while decomposing", message)
 
-    def test_custom_decomposition_pins_input_dimension(self):
+    @common_utils.parametrize("warnings_as_errors", [False, True])
+    def test_custom_decomposition_pins_input_dimension(self, warnings_as_errors):
         with torch.library._scoped_library("specialization_test", "FRAGMENT") as lib:
             lib.define("pin_dim(Tensor x) -> Tensor", tags=torch.Tag.pt2_compliant_tag)
             lib.impl("pin_dim", lambda x: x.reshape(x.shape[0], -1), "CPU")
@@ -700,12 +703,25 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
                 dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
                 strict=False,
             )
-            with (
-                mock.patch.dict(torch._decomp.decomposition_table, {target: decompose}),
-                self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+            with mock.patch.dict(
+                torch._decomp.decomposition_table, {target: decompose}
             ):
-                torch.onnx.export(ep, verbose=False)
-            message = str(caught.warning)
+                if warnings_as_errors:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter(
+                            "error", torch.onnx.errors.OnnxExporterWarning
+                        )
+                        with self.assertRaises(
+                            torch.onnx.errors.OnnxExporterError
+                        ) as error:
+                            torch.onnx.export(ep, verbose=False)
+                    cause = error.exception.__cause__
+                    self.assertIsInstance(cause, DynamicShapeSpecializationWarning)
+                    message = str(cause)
+                else:
+                    with self.assertWarns(DynamicShapeSpecializationWarning) as caught:
+                        torch.onnx.export(ep, verbose=False)
+                    message = str(caught.warning)
             self.assertIn("x.size()[0]", message)
             self.assertRegex(message, r"Eq\([^)]*, 6\)")
 

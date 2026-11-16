@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch.onnx.errors
 
 
-class DynamicShapeSpecializationWarning(UserWarning):
+class DynamicShapeSpecializationWarning(torch.onnx.errors.OnnxExporterWarning):
     """Dynamic input dimensions were specialized before ONNX translation."""
 
 

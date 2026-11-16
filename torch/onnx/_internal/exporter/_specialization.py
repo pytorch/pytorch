@@ -121,7 +121,9 @@ def warn_if_specialized(
         if not expr.free_symbols <= input_symbols:
             continue
         if expr.free_symbols <= ranges.keys():
-            # ShapeEnv substitutions may already include the new specialization.
+            # Evaluate against the pre-decomposition ranges only: the ShapeEnv now
+            # treats the new asserts and replacements as facts, so its own evaluation
+            # would report every new constraint as implied.
             vr = bound_sympy(expr, ranges)
             if vr.is_singleton() and vr.lower is sympy.true:
                 continue
