@@ -261,7 +261,8 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       scale_b.strides());
 }
 
-// out = alpha * (A @ B) + beta * out, applied as oneDNN post-ops.
+// out = alpha * (A @ B) + beta * input; input is pre-copied into out for
+// oneDNN's sum post-op.
 struct ScaledGemmEpilogue {
   float alpha = 1.0f;
   float beta = 0.0f;
@@ -1393,10 +1394,6 @@ static void _scaled_mm_xpu_v2_impl(
         "input data pointer must be 16-byte aligned");
     TORCH_CHECK_VALUE(
         !accumulator->is_neg(), "input must not be a negative view");
-    TORCH_CHECK(
-        accumulator->scalar_type() == out.scalar_type() &&
-            accumulator->stride(0) == out.stride(0),
-        "scaled_addmm: input and output must have the same dtype and leading dimension");
     epilogue.alpha = alpha.to<float>();
     epilogue.beta = beta.to<float>();
     if (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0 ||

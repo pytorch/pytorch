@@ -1393,7 +1393,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         with self.assertRaisesRegex(ValueError, "real alpha and beta"):
             scaled_addmm(input, *args, alpha=1j)
 
-        if torch.device(device).type in ("cuda", "xpu"):
+        if torch.device(device).type == "cuda":
             padded_out = input.new_empty_strided(input.shape, (48, 1))
             with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
                 torch.ops.aten._scaled_addmm.out(
