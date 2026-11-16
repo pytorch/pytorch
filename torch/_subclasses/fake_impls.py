@@ -1897,9 +1897,14 @@ def to_dense_functorch_frontmode_impl(
         ctx = FunctorchFunctionalizeAPI(interpreter)
         (unwrapped,) = ctx.unwrap_tensors((self,))
         with ctx.redispatch_to_next():
-            out = to_dense_composite_impl(
-                unwrapped, dtype=dtype, masked_grad=masked_grad
-            )
+            if is_fake_tensor(unwrapped):
+                out = to_dense_composite_impl(
+                    unwrapped, dtype=dtype, masked_grad=masked_grad
+                )
+            else:
+                out = aten.to_dense.default(
+                    unwrapped, dtype=dtype, masked_grad=masked_grad
+                )
         (wrapped,) = ctx.wrap_tensors((out,))
         return wrapped
 
