@@ -1378,8 +1378,9 @@ class TestCfgPasses(TestCase):
             run.replay.name,
             "TestCfgPasses.test_pass_replaces_a_run_by_a_call.<locals>.f (block 0)",
         )
-        # Four operators and the constant one of them takes.
-        self.assertEqual(len(run.replay.text(run.replay.start, run.replay.end)), 5)
+        # Four operators, the constant one of them takes, and the two
+        # variables they bind.
+        self.assertEqual(len(run.replay.text(run.replay.start, run.replay.end)), 7)
 
     def test_replayed_error_names_its_instruction(self):
         handles = []
@@ -2852,29 +2853,211 @@ def frame_case_name(f, args):
     return f"{f.__name__}_{args[-1] if type(args[-1]) in (bool, int) else ''}"
 
 
+def frame_variables():
+    """The variables of the function that called this one, as its frame has them."""
+    return dict(sys._getframe(1).f_locals)
+
+
+def frame_binds(a, b=2, *rest, flag=False, **more):
+    first = frame_variables()
+    c = a + b
+    second = frame_variables()
+    c = None  # noqa: F841
+    del a
+    return first, second, frame_variables()
+
+
+def frame_binds_in_a_loop(n):
+    seen = []
+    for i in range(n):
+        square = i * i  # noqa: F841
+        seen.append({k: v for k, v in frame_variables().items() if k != "seen"})
+    return seen
+
+
+def frame_binds_cells(a):
+    b = a * 2
+
+    def inner():
+        return a + b
+
+    return {k: v for k, v in frame_variables().items() if k != "inner"}, inner()
+
+
+def frame_binds_in_a_handler(a):
+    try:
+        b = a + 1  # noqa: F841
+        raise ValueError("x")
+    except ValueError:
+        c = 2  # noqa: F841
+        caught = sorted(frame_variables())
+    return caught, sorted(frame_variables())
+
+
+def frame_binds_in_a_comprehension(n):
+    return [sorted(frame_variables()) for i in range(n)], sorted(frame_variables())
+
+
+def frame_evals(a):
+    b = a + 1  # noqa: F841
+    return eval("a + b"), eval("a + b", {"a": 10, "b": 20})
+
+
+def frame_execs(a):
+    scope = {}
+    exec("c = a * 3", {"a": a}, scope)
+    exec("d = a + 1")
+    return scope, locals()["d"]
+
+
+def frame_reads_through_another_name(a, b):
+    read = locals
+    return sorted(read())
+
+
+def frame_super(obj, x):
+    return obj.scale(x)
+
+
+def frame_fails(a):
+    b = a + 1
+    c = [b]
+    del a
+    return c[5]
+
+
+def frame_calls_fails(a):
+    d = a * 2  # noqa: F841
+    return frame_fails(a)
+
+
+def frame_tensors(x):
+    y = x * 2
+    z = y + 1
+    return frame_variables(), z
+
+
+def frame_tensor_loop(x, n):
+    for _ in range(n):
+        x = x * 2 + 1
+    return x
+
+
+def frame_reads_amid_tensor_work(x):
+    y = x * 2 + 1
+    y = y * 2 + 1
+    y = y * 2 + 1
+    frame = sys._getframe()
+    here = (globals() is frame.f_globals, frame.f_code.co_name, frame.f_lineno)
+    z = y * 2 + 1
+    z = z * 2 + 1
+    return z * 3, here
+
+
+def frame_region(x):
+    y = x * 2 + 1
+    y = y * 2 + 1
+    hidden = y * 3
+    z = hidden * 2 + 1
+    seen = dict(sys._getframe().f_locals)
+    w = z * 2 + 1
+    w = w * 2 + 1
+    return z, seen, w * 3
+
+
+def frame_path(x, flag):
+    y = x * 2 + 1
+    y = y * 2 + 1
+    if flag:
+        y = y * 3 + 1
+    hidden = y * 3
+    z = hidden * 2 + 1
+    return z, frame_variables()
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgFrames(TestCase):
-    """A compiled function runs under a frame of the interpreter, with its locals in registers."""
+    """A compiled function runs under a frame of the interpreter, which has its variables."""
 
     hw_classification = HardwareClassification.GENERIC
 
-    def test_function_that_reads_its_frame_is_not_compiled(self):
-        def uses_eval(a):
-            return eval("a + 1")
+    @parametrize(
+        "f,args",
+        (
+            (frame_binds, (1,)),
+            (frame_binds, (1, 5, 6, 7)),
+            (frame_binds_in_a_loop, (3,)),
+            (frame_binds_cells, (3,)),
+            (frame_binds_in_a_handler, (1,)),
+            (frame_binds_in_a_comprehension, (2,)),
+        ),
+        name_fn=lambda f, args: f"{f.__name__}_{len(args)}",
+    )
+    def test_frame_has_the_variables(self, f, args):
+        # What a callee finds in the frame of its caller.
+        compiled = torch.cfg_compile(f, fallback=False)
+        more = {"flag": True, "k": 1} if f is frame_binds else {}
+        for _ in range(4):
+            self.assertEqual(compiled(*args, **more), f(*args, **more))
+        self.assertIn("store_local", compiled.dump())
 
-        def passes_locals_on(a, b):
-            read = locals
-            return sorted(read())
+    @parametrize(
+        "f,args",
+        (
+            (frame_evals, (1,)),
+            (frame_execs, (2,)),
+            (frame_reads_through_another_name, (1, 2)),
+            (frame_super, (FrameChild(), 3)),
+        ),
+        name_fn=lambda f, args: f.__name__,
+    )
+    def test_function_that_reads_its_frame_is_compiled(self, f, args):
+        compiled = torch.cfg_compile(f, fallback=False)
+        for _ in range(4):
+            self.assertEqual(compiled(*args), f(*args))
+        if f is frame_super:
+            # `parent = super()` finds the class and the instance in the frame.
+            self.assertIn("FrameChild.scale", compiled.stats()["compiled_callees"])
 
-        for f, args, why in (
-            (uses_eval, (1,), r"eval\(\) reads the local variables of the frame"),
-            (passes_locals_on, (1, 2), "locals, vars or dir is not called where"),
-        ):
-            with self.assertRaisesRegex(torch.cfg_compile.Unsupported, why):
-                torch.cfg_compile(f, fallback=False)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.assertEqual(torch.cfg_compile(f)(*args), f(*args))
+    @parametrize("inline", (False, True))
+    def test_traceback_has_the_variables(self, inline):
+        def variables(fn):
+            try:
+                fn(1)
+            except IndexError as e:
+                tb = e.__traceback__.tb_next
+                return dict(tb.tb_frame.f_locals), dict(tb.tb_next.tb_frame.f_locals)
+
+        compiled = torch.cfg_compile(frame_calls_fails, fallback=False, inline=inline)
+        for _ in range(3):
+            self.assertEqual(variables(compiled), variables(frame_calls_fails))
+        self.assertEqual(variables(compiled), ({"a": 1, "d": 2}, {"b": 2, "c": [2]}))
+        self.assertEqual(compiled.stats()["inlined"], ["frame_fails"] if inline else [])
+
+    def test_tensor_variable_is_bound_when_something_is_called(self):
+        compiled = torch.cfg_compile(frame_tensors, fallback=False)
+        x = torch.ones(3)
+        for _ in range(8):
+            seen, z = compiled(x)
+            self.assertEqual(list(seen), ["x", "y", "z"])
+            self.assertIs(seen["x"], x)
+            self.assertIs(seen["z"], z)
+            self.assertEqual(seen["y"], x * 2)
+        # The kernels gave tensors without a Python object.
+        self.assertGreater(compiled.stats()["unboxed_results"], 0)
+
+    def test_binding_a_variable_does_not_give_a_tensor_its_object(self):
+        compiled = torch.cfg_compile(frame_tensor_loop, fallback=False, demote=False)
+        x = torch.ones(3)
+        for _ in range(6):
+            compiled(x, 40)
+        before = compiled.stats()
+        self.assertEqual(compiled(x, 40), frame_tensor_loop(x, 40))
+        after = compiled.stats()
+        self.assertGreaterEqual(
+            after["unboxed_results"] - before["unboxed_results"], 80
+        )
+        self.assertLessEqual(after["boxed_later"] - before["boxed_later"], 2)
 
     @parametrize(
         "f,args",
@@ -2910,7 +3093,6 @@ class TestCfgFrames(TestCase):
             got = compiled(x, y)
         self.assertEqual(list(got), ["x", "y", "z", "w"])
         self.assertEqual(got, f(x, y))
-        self.assertIn("locals %", compiled.dump())
 
     def test_global_called_locals_that_is_something_else_is_called(self):
         def f(a):
@@ -3040,7 +3222,46 @@ class TestCfgFrames(TestCase):
                 traceback.clear_frames(e.__traceback__)
                 self.assertIsNone(probes[-1]())
 
-    def test_callee_that_reads_its_frame_runs_in_the_interpreter(self):
+    @parametrize("inline", (False, True))
+    def test_calls_made_under_a_trace_function_run_in_the_interpreter(self, inline):
+        compiled = torch.cfg_compile(frame_sets_a_trace, fallback=False, inline=inline)
+        for _ in range(4):
+            self.assertEqual(compiled(3), frame_sets_a_trace(3))
+        events = [event for event, _ in compiled(3)[3]]
+        self.assertEqual(events, ["call", "line", "line", "return"])
+        inlined = compiled.stats()["inlined"]
+        self.assertEqual("frame_traced_callee" in inlined, inline)
+
+    def test_callee_whose_globals_are_not_a_plain_dict_runs_in_the_interpreter(self):
+        class Defaults(dict):
+            def __missing__(self, key):
+                return 7
+
+        # The interpreter asks the mapping, which makes up what it lacks.
+        adds = eval("lambda: made_up + 1", Defaults())
+
+        def f(g):
+            return g()
+
+        with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "not a plain dict"):
+            torch.cfg_compile(adds, fallback=False)
+        compiled = torch.cfg_compile(f, fallback=False)
+        self.assertEqual(compiled(adds), 8)
+        self.assertEqual(len(compiled.stats()["interpreted_callees"]), 1)
+
+    def test_call_of_a_c_function_does_not_keep_its_tensors_alive(self):
+        # The first calls of a C function are recorded, to see whether it is
+        # one kernel: when it is a whole computation, its tensors come and go.
+        def f(x, log):
+            return FrameWork.apply(x, log)
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        x, log = torch.ones(3), []
+        for _ in range(4):
+            self.assertEqual(compiled(x, log), x + 1)
+        self.assertEqual(log, [[True] * 4] * 4)
+
+    def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
             return eval("'{}={}'.format(name, value)")
 
@@ -3049,12 +3270,52 @@ class TestCfgFrames(TestCase):
 
         compiled = torch.cfg_compile(f, fallback=False)
         self.assertEqual(compiled(FrameChild(), 3), ("x=3", 7))
-        # What an interpreted function calls is not compiled either.
-        self.assertEqual(compiled.stats()["compiled_callees"], [])
-        interpreted = compiled.stats()["interpreted_callees"]
-        self.assertEqual(
-            [name.rsplit(".", 1)[-1] for name in interpreted], ["scale", "fmt"]
-        )
+        self.assertEqual(compiled.stats()["interpreted_callees"], [])
+        names = [
+            name.rsplit(".", 1)[-1] for name in compiled.stats()["compiled_callees"]
+        ]
+        self.assertEqual(sorted(names), ["fmt", "scale", "scale"])
+
+
+def frame_traced_callee(a):
+    b = a + 1
+    return b * 2
+
+
+def frame_sets_a_trace(n):
+    events = []
+
+    def tracer(frame, event, arg):
+        if frame.f_code is frame_traced_callee.__code__:
+            events.append((event, frame.f_lineno - frame.f_code.co_firstlineno))
+        return tracer
+
+    before = frame_traced_callee(n)
+    previous = sys.gettrace()
+    sys.settrace(tracer)
+    try:
+        traced = frame_traced_callee(n)
+    finally:
+        sys.settrace(previous)
+    return before, traced, frame_traced_callee(n), events
+
+
+class FrameWork(torch.autograd.Function):
+    """Computes with temporaries, in a function that is entered from C."""
+
+    @staticmethod
+    def forward(ctx, x, log):
+        gone = []
+        for _ in range(4):
+            temporary = x * 2
+            gone.append(weakref.ref(temporary))
+            del temporary
+        log.append([ref() is None for ref in gone])
+        return x + 1
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad, None
 
 
 def breaker_signals_itself(log):
@@ -3792,6 +4053,12 @@ def region_loop(model, batches):
     return total
 
 
+def region_accumulates(x, total):
+    total.add_(x * 2)
+    y = total * 3 + 1
+    return y * 2 + x
+
+
 class RegionOutput:
     # A plain object, as model code uses for results.
     def __init__(self, logits, hidden, name):
@@ -4159,7 +4426,10 @@ class TestCfgWorkspace(TestCase):
         x = torch.randn(64, 1024)
         expected = temporaries(x, 3)
         kept = [compiled(x, 3) for _ in range(3)]
-        self.assertEqual(torch.cfg_compile.memory(compiled)["live"], 3 * x.numel() * 4)
+        # What they asked for, rounded up to pages.
+        live = torch.cfg_compile.memory(compiled)["live"]
+        self.assertGreaterEqual(live, 3 * x.numel() * 4)
+        self.assertLess(live, 3 * (x.numel() * 4 + 8192))
         # The function goes first: its results still own their memory.
         del compiled
         gc.collect()
@@ -4196,6 +4466,35 @@ class TestCfgWorkspace(TestCase):
         for _ in range(6):
             compiled(small, 6)
         self.assertEqual(torch.cfg_compile.memory(compiled)["kept"], 0)
+
+    def test_memory_is_cut_to_the_size_that_is_asked_for(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        large, small = torch.ones(8 << 20), torch.ones(1 << 20)
+        for _ in range(2):
+            compiled(large, 3)
+        before = torch.cfg_compile.memory(compiled)
+        # An eighth of what a large tensor left behind serves a small one.
+        compiled(small, 3)
+        after = torch.cfg_compile.memory(compiled)
+        self.assertEqual(after["misses"], before["misses"])
+        self.assertGreater(after["hits"], before["hits"])
+        # What comes back is one piece again with the memory around it.
+        compiled(large, 3)
+        self.assertEqual(torch.cfg_compile.memory(compiled)["misses"], before["misses"])
+
+    def test_holds_little_more_than_its_tensors_did_at_their_most(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        # Every call needs pieces larger than any the calls before it left.
+        for n in (1, 2, 6, 15, 37):
+            compiled(torch.ones(n << 20), 3)
+            memory = torch.cfg_compile.memory(compiled)
+            # Half as much again, 256 MB at most; and 64 MB whatever its
+            # tensors held.
+            spare = min(memory["peak"] // 2, 1 << 28)
+            limit = max(memory["peak"] + spare, 1 << 26)
+            self.assertLessEqual(memory["live"] + memory["kept"], limit)
+        # The memory of the last call is all there for the next.
+        self.assertGreaterEqual(memory["kept"], 2 * (37 << 22))
 
     def test_without_a_workspace(self):
         compiled = torch.cfg_compile(temporaries, fallback=False, keep_memory=False)
@@ -4240,6 +4539,78 @@ class TestCfgRegions(TestCase):
             for r in torch.cfg_compile.regions(fn)
             if r["state"] == "vm" and r["where"].startswith(where)
         ]
+
+    def test_frame_readers_amid_tensor_work_find_their_function(self):
+        # The instructions of a region run from frames of the region's own
+        # until its graph is made: what they call is called by the function.
+        graphs = lambda graph, example: graph  # noqa: E731
+        fn = frame_reads_amid_tensor_work
+        compiled = torch.cfg_compile(fn, backend=graphs, fallback=False)
+        x = torch.ones(3)
+        for _ in range(8):
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x)[1][:2], (True, fn.__name__))
+        self.assertEqual(len(self.compiled_regions(compiled)), 2)
+
+    @parametrize(
+        "f,args",
+        ((frame_region, ()), (frame_path, (True,)), (frame_path, (False,))),
+        name_fn=lambda f, args: f.__name__ + "".join(map(str, args)),
+    )
+    def test_region_binds_the_variables_it_gives(self, f, args):
+        graphs = lambda graph, example: graph  # noqa: E731
+        compiled = torch.cfg_compile(f, backend=graphs, fallback=False)
+        refs = []
+        for i in range(8):
+            x = torch.full((3,), float(i))
+            z, seen, *more = compiled(x, *args)
+            want, there, *rest = f(x, *args)
+            self.assertEqual([z, *more], [want, *rest])
+            self.assertIs(seen["x"], x)
+            self.assertIs(seen["z"], z)
+            self.assertLessEqual(set(seen), set(there))
+            for name in seen:
+                self.assertEqual(seen[name], there[name])
+            tensors = [t for t in seen.values() if isinstance(t, torch.Tensor)]
+            refs.extend(weakref.ref(t) for t in tensors)
+            del z, seen, more, want, there, rest, x, tensors
+        # One whose instructions are replaced where they are, and one that
+        # goes on into the blocks after it.
+        ends = [bool(region["ends"]) for region in self.compiled_regions(compiled)]
+        self.assertEqual(ends, [True] if f is frame_path else [False, True])
+        # The first gives what the function keeps to its end, as the
+        # frame does. The second gives what is read after it: a variable it
+        # does not give has no value to be bound to.
+        seen = compiled(torch.ones(3), *args)[1]
+        bound = {"x", "z", "flag"} if f is frame_path else {"x", "y", "hidden", "z"}
+        self.assertEqual(set(seen), bound)
+        del seen
+        # And no frame kept a tensor of an earlier call.
+        gc.collect()
+        self.assertEqual([ref() for ref in refs], [None] * len(refs))
+
+    def test_graph_that_fails_on_its_first_run_does_not_write_twice(self):
+        runs = []
+
+        def backend(graph, example):
+            def run(*args):
+                runs.append(1)
+                # Writes to `total`, as the instructions will when they run
+                # in its place.
+                graph(*args)
+                raise RuntimeError("after the write")
+
+            return run
+
+        fn = region_accumulates
+        compiled = torch.cfg_compile(fn, backend=backend, fallback=False)
+        x, mine, theirs = torch.ones(3), torch.zeros(3), torch.zeros(3)
+        for _ in range(8):
+            self.assertEqual(compiled(x, mine), fn(x, theirs))
+            self.assertEqual(mine, theirs)
+        self.assertEqual(len(runs), 1)
+        (reason,) = self.left_to_vm(compiled, "region_accumulates")
+        self.assertIn("the compiled graph failed", reason)
 
     def test_module_call_is_one_graph(self):
         torch.manual_seed(0)
