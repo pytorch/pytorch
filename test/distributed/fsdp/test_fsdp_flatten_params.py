@@ -129,9 +129,10 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.run_subtests(
             {"half": [False, True]},
             self._test_partial_flattening,
+            device=device,
         )
 
-    def _test_partial_flattening(self, half: bool):
+    def _test_partial_flattening(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
@@ -212,7 +213,7 @@ class TestFlattenParams(FlattenParamsTestBase):
         Tests flattening an empty module (i.e. one without any parameters).
         """
         module = self._get_empty_module()
-        in_data = torch.rand(1)
+        in_data = torch.rand(1, device=torch.device(device).type)
         ref_out = module(in_data)
         fsdp_module = FSDP(module)
         self.assertEqual(len(list(fsdp_module.parameters())), 0)
@@ -289,13 +290,14 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.run_subtests(
             {"half": [False, True]},
             self._test_output_without_shared_params,
+            device=device,
         )
 
-    def _test_output_without_shared_params(self, half: bool):
+    def _test_output_without_shared_params(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
-        self._test_output(module)
+        self._test_output(module, device)
 
     @requires_world_size(1)
     def test_output_with_shared_params(self, device):
@@ -306,16 +308,17 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.run_subtests(
             {"half": [False, True]},
             self._test_output_with_shared_params,
+            device=device,
         )
 
-    def _test_output_with_shared_params(self, half: bool):
+    def _test_output_with_shared_params(self, half: bool, device):
         module = self._get_shared_params_transformer()
         if half:
             module = module.half()
-        self._test_output(module)
+        self._test_output(module, device)
 
-    def _test_output(self, module: nn.Module):
-        module = module.to(self.rank)
+    def _test_output(self, module: nn.Module, device):
+        module = module.to(torch.device(device).type)
         ref_output = self._get_output(module)
         fsdp_module = FSDP(module)
         fsdp_output = self._get_output(fsdp_module)
@@ -337,14 +340,17 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.run_subtests(
             {"half": [False, True]},
             self._test_pnorm_after_step_with_shared_params,
+            device=device,
         )
 
-    def _test_pnorm_after_step_with_shared_params(self, half: bool):
-        module = self._get_shared_params_transformer().to(self.rank)
+    def _test_pnorm_after_step_with_shared_params(self, half: bool, device):
+        module = self._get_shared_params_transformer().to(torch.device(device).type)
         if half:
             module = module.half()
         ref_pnorm_after_step = self._get_pnorm_after_step(module)
-        module = self._get_shared_params_transformer().to(self.rank)  # recreate
+        module = self._get_shared_params_transformer().to(
+            torch.device(device).type
+        )  # recreate
         if half:
             module = module.half()
         fsdp_module = FSDP(module)
@@ -706,7 +712,7 @@ class TestFlattenParams(FlattenParamsTestBase):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.emb(x).sum()
 
-        model = EmbeddingModel().half().to(self.rank)
+        model = EmbeddingModel().half().to(torch.device(device).type)
         fsdp_model = FSDP(
             model,
             sharding_strategy=HandleShardingStrategy.NO_SHARD,
@@ -721,7 +727,7 @@ class TestFlattenParams(FlattenParamsTestBase):
             param.data = param.data.float()
             fsdp_module._handle._orig_param_dtype = torch.float32
 
-        x = torch.randint(0, 5, (20,), device=self.rank)
+        x = torch.randint(0, 5, (20,), device=torch.device(device).type)
         with torch.no_grad():
             out = fsdp_model(x)
         self.assertEqual(out.shape, torch.Size([]))
