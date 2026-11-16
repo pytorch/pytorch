@@ -2965,5 +2965,5 @@ instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda
 
 
 if __name__ == "__main__":
-    if HAS_GPU_AND_TRITON or HAS_CPU:
+    if HAS_CUDA_AND_TRITON or HAS_CPU:
         run_tests()
