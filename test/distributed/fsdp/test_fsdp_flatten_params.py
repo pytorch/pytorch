@@ -51,8 +51,6 @@ class FlattenParamsTestBase(FSDPTestContinuous):
     requiring multiple ranks.
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @classmethod
     def _resolved_device_type(cls) -> str:
         dt = cls.device_type
@@ -82,9 +80,11 @@ class FlattenParamsTestBase(FSDPTestContinuous):
 class TestFlattenParams(FlattenParamsTestBase):
     """Tests parameter flattening and shard metadata logic."""
 
-    def _get_default_config(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _get_default_config(self, device):
         return {
-            "device": torch.device(self._resolved_device_type()),
+            "device": torch.device(device).type,
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,
@@ -189,9 +189,10 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.run_subtests(
             {"half": [False, True]},
             self._test_flatten_nothing,
+            device=device,
         )
 
-    def _test_flatten_nothing(self, half: bool):
+    def _test_flatten_nothing(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
@@ -202,7 +203,7 @@ class TestFlattenParams(FlattenParamsTestBase):
             FlatParamHandle(
                 [],
                 module,
-                **self._get_default_config(),
+                **self._get_default_config(device),
             )
 
     @requires_world_size(1)
@@ -242,13 +243,14 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.run_subtests(
             {"half": [False, True]},
             self._test_numel_without_shared_params,
+            device=device,
         )
 
-    def _test_numel_without_shared_params(self, half: bool):
+    def _test_numel_without_shared_params(self, half: bool, device):
         module = self._get_transformer()
         if half:
             module = module.half()
-        self._test_numel(module)
+        self._test_numel(module, device)
 
     @requires_world_size(1)
     def test_numel_with_shared_params(self, device):
@@ -259,21 +261,22 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.run_subtests(
             {"half": [False, True]},
             self._test_numel_with_shared_params,
+            device=device,
         )
 
-    def _test_numel_with_shared_params(self, half: bool):
+    def _test_numel_with_shared_params(self, half: bool, device):
         module = self._get_shared_params_transformer()
         if half:
             module = module.half()
-        self._test_numel(module)
+        self._test_numel(module, device)
 
-    def _test_numel(self, module):
+    def _test_numel(self, module, device):
         ref_numel = sum(p.numel() for p in module.parameters())
         params_to_flatten = list(module.parameters())
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
             module,
-            **self._get_default_config(),
+            **self._get_default_config(device),
         )
         self.assertEqual(ref_numel, flat_param_handle.flat_param.numel())
 
@@ -373,7 +376,7 @@ class TestFlattenParams(FlattenParamsTestBase):
         handle = FlatParamHandle(
             params_to_flatten,
             module,
-            **self._get_default_config(),
+            **self._get_default_config(device),
         )
 
         self._test_flat_param_shard_metadata(
@@ -519,7 +522,7 @@ class TestFlattenParams(FlattenParamsTestBase):
             torch.nn.Linear(5, 5, bias=False),  # 2.weight
         )
         params_to_flatten = list(module.parameters())
-        handle_kwargs = self._get_default_config()
+        handle_kwargs = self._get_default_config(device)
         handle_kwargs["use_orig_params"] = True
         handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
         # For 32-bit full precision, FSDP pads up to 3 numel after each
@@ -573,7 +576,7 @@ class TestFlattenParams(FlattenParamsTestBase):
             torch.nn.Linear(5, 3, bias=False),  # 2.weight
         )
         params_to_flatten = list(module.parameters())
-        handle_kwargs = self._get_default_config()
+        handle_kwargs = self._get_default_config(device)
         handle_kwargs["use_orig_params"] = True
         handle_kwargs["mp_param_dtype"] = torch.float16
         handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
@@ -656,7 +659,7 @@ class TestFlattenParams(FlattenParamsTestBase):
             torch.nn.Conv2d(10, 10, 1, bias=False),  # 2.weight, 100 params
         ).to(memory_format=memory_format)
         params_to_flatten = list(module.parameters())
-        handle_kwargs = self._get_default_config()
+        handle_kwargs = self._get_default_config(device)
         handle_kwargs["use_orig_params"] = True
         handle = FlatParamHandle(params_to_flatten, module, **handle_kwargs)
         contiguous_tensors = memory_format == torch.contiguous_format
