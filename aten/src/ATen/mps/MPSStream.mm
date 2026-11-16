@@ -44,6 +44,7 @@ bool commandBufferFailed(id<MTLCommandBuffer> cb, bool& is_oom, int32_t& code, s
 //-----------------------------------------------------------------
 
 MPSStream::MPSStream(Stream stream) : _stream(stream) {
+  _queryEvent = [MPSDevice::getInstance()->device() newSharedEvent];
   _commandQueue = [MPSDevice::getInstance()->device() newCommandQueue];
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
@@ -66,6 +67,8 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 }
 
 MPSStream::~MPSStream() {
+  [_queryEvent release];
+  _queryEvent = nil;
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
@@ -84,6 +87,8 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
     cb.willCommitAndContinue = [this] { addErrorHandler(); };
     _commandBuffer = cb;
   }
+  // Assume that work will be enqueued by the caller
+  _hasWorkSinceQuerySignal = true;
 
   return _commandBuffer;
 }
@@ -176,6 +181,7 @@ void MPSStream::commitAndWait() {
     _commandBuffer = nil;
     checkLastError();
   }
+  _hasWorkSinceQuerySignal = false;
 }
 
 void MPSStream::commitAndContinue() {
@@ -237,6 +243,39 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
       [commandBuffer() addCompletedHandler:block];
     }
   });
+}
+
+bool MPSStream::query() {
+  // Metal has no built-in way to check if there is any unfinished enqueued
+  // work. The strategy here is to enqueue an event, called a "query event". If
+  // the query event ever finishes before any other work has been enqueued, then
+  // we know that all enqueued work has finished.
+
+  __block bool done;
+  dispatch_sync(_serialQueue, ^() {
+    @autoreleasepool {
+      //  Any time `MPSStream::commandBuffer()` is called,
+      //  `_hasWorkSinceQuerySignal = true` is set, conservatively assuming that
+      //  the caller will enqueue work. So if `_hasWorkSinceQuerySignal ==
+      //  false`, then we know that no new work has been enqueued.
+      if (_hasWorkSinceQuerySignal) {
+        endKernelCoalescing();
+        // New work has been enqueued, so enqueue the query event.
+        [commandBuffer() encodeSignalEvent:_queryEvent value:++_querySignalCounter];
+        // Commit now because `query` must be able to be called in a loop that
+        // eventually finishes.
+        synchronize(SyncType::COMMIT);
+        // Reset this flag since the newly encoded event marks the end of all
+        // previously encoded work. Flag should only be reset after the event is
+        // committed, because the commit itself sets the flag to true.
+        _hasWorkSinceQuerySignal = false;
+      }
+      // If all the enqueued query events have signaled then all the work
+      // enqueued before the event is finished.
+      done = _queryEvent.signaledValue >= _querySignalCounter;
+    }
+  });
+  return done;
 }
 
 void MPSStream::copy(id<MTLBuffer> srcBuffer,
