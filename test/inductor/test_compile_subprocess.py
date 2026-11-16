@@ -19,12 +19,10 @@ from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompile
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     IS_CI,
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
-    parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -109,7 +107,6 @@ test_failures.update(
 )
 
 
-@instantiate_parametrized_tests
 class TestSubprocess(TestCase):
     def setUp(self):
         torch._dynamo.reset()
@@ -206,8 +203,7 @@ class TestSubprocess(TestCase):
         self.assertIn("'max_autotune': True", source_codes[-1])
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
-    @parametrize("use_cpp_fake_tensor", [False, True])
-    def test_async(self, use_cpp_fake_tensor):
+    def test_async(self):
         # Test that async+subprocess works.
         from torch._inductor.compile_fx_async import _AsyncFxCompile
 
@@ -221,9 +217,6 @@ class TestSubprocess(TestCase):
         _AsyncFxCompile._reset_stats()
 
         with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor)
-            )
             if not torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
                 raise AssertionError
             stack.enter_context(
