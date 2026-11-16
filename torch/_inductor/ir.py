@@ -1702,6 +1702,16 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
+            # A read that doesn't move over the first reduction steps (e.g. a
+            # per-group mask broadcast within each group) abstains instead of
+            # voting OUTER. Step 1 alone is not enough: x.t() repeat-interleaved
+            # by 2 doesn't move at step 1 but jumps a full row at step 2.
+            zero = dict.fromkeys(ranges1, sympy.S.Zero)
+            if all(s == 0 for s in strides) and all(
+                sympy_subs(j, {**zero, v: 2}) == sympy_subs(j, zero)
+                for v in reduction_vars
+            ):
+                continue
             # A 0 stride does not make a reduction contiguous.
             # This can happen when the reduction ranges contains a 1.
             outer = all(s == 0 or s > 1 for s in strides)
