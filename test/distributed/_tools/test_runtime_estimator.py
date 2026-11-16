@@ -136,7 +136,9 @@ class TestRuntimeEstimator(TestCase):
         return (model, optimizer, inp)
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    def test_transformer_runtime(self):
+    def test_transformer_runtime(
+        self,
+    ):
         """Runs a basic GPT-2 model"""
         vocab_size = 8192
         bsz, seq_len = 8, 1024
@@ -170,7 +172,9 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
-    def test_conv_model_runtime(self):
+    def test_conv_model_runtime(
+        self,
+    ):
         """Runs a simple CNN model"""
         num_classes = 100
         bsz, img_sz = 256, 128

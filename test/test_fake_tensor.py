@@ -219,7 +219,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     def test_like_out_overload_meta_out(self):
         # An out overload returns its out argument, a fake already
-        with FakeTensorMode():
+        with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.empty(2, device="meta")
             out = torch.empty(2, device="meta")
             self.assertIs(torch.ops.aten.ones_like.out(x, out=out), out)
@@ -1608,7 +1608,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     def check_function_with_fake(self, fn):
         out = fn()
-        with FakeTensorMode():
+        with torch._subclasses.FakeTensorMode():
             out_fake = fn()
 
         for a, b in zip(pytree.tree_leaves(out), pytree.tree_leaves(out_fake)):
@@ -2312,7 +2312,7 @@ def forward(self, x_1):
         def f(x):
             return 4312491 * x
 
-        with FakeTensorMode():
+        with torch._subclasses.fake_tensor.FakeTensorMode():
             with fwAD.dual_level():
                 x = torch.randn(3, device="cpu")
                 y = torch.ones_like(x)
@@ -2327,7 +2327,7 @@ def forward(self, x_1):
         def add(x, y):
             return x + y, x + y
 
-        with FakeTensorMode():
+        with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.randn((3, 5, 7), device="cpu")
             init = torch.randn((3, 7), device="cpu")
             r = scan(add, init, x, dim=1, reverse=reverse)
@@ -2360,12 +2360,17 @@ def forward(self, x_1):
             elif shape_case == "channels_last":
                 x = x.contiguous(memory_format=torch.channels_last)
                 y = y.contiguous(memory_format=torch.channels_last)
-        from torch._subclasses.fake_impls import get_fast_op_impls
+        from torch._subclasses.fake_impls import get_fast_op_impls, infer_size
 
         z = get_fast_op_impls()[op](mode, x, y)
         self.assertEqual(z.dtype, torch.float32 if op == aten.div.Tensor else x.dtype)
         self.assertIs(maybe_get_fake_mode(z), mode)
-        dispatched = op(x, y)
+        with patch(
+            "torch._subclasses.fake_impls.infer_size", wraps=infer_size
+        ) as python_shape_probe:
+            dispatched = op(x, y)
+        if isinstance(mode, CppFakeTensorMode):
+            python_shape_probe.assert_not_called()
         prims.utils.compare_tensor_meta(z, dispatched, check_strides=True)
         self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
@@ -2390,7 +2395,7 @@ def forward(self, x_1):
 
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
-        with FakeTensorMode() as mode:
+        with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
             x = torch.randn(10)
             out = torch.empty(())
             torch.nanmean(x, out=out)
@@ -2399,7 +2404,7 @@ def forward(self, x_1):
 
     def test_unbind_copy_out(self):
         # Regression test to ensure we don't error out.
-        with FakeTensorMode() as mode:
+        with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
             eye = torch.eye(3)
             out = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
             torch.unbind_copy(eye, out=out)
@@ -3550,7 +3555,6 @@ instantiate_parametrized_tests(TestFakeTensorCUDA)
 make_propagate_real_tensors_cls(TestFakeTensorCUDA)
 
 
-@instantiate_parametrized_tests
 class TestFakeTensorMoveModule(TestCase):
     # No hw_classification: it uses GPU_TYPE, so it runs on whichever accelerator
     # is present (CUDA, XPU or MPS), which neither GENERIC nor one device label fits.
@@ -3674,7 +3678,7 @@ class TestFakeTensorConstHandling(TestCase):
         with self.assertRaises(
             torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            with FakeTensorMode():
+            with torch._subclasses.fake_tensor.FakeTensorMode():
                 a = torch.randn(3, 800, 1199)
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]
