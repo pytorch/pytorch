@@ -15,10 +15,10 @@ from ..scheduler import (
     Scheduler,
     SchedulerNode,
 )
-from ..virtualized import V
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
 from .flydsl.flydsl_scheduling import FlyDSLScheduling
+from .helion import HelionScheduling
 from .nv_universal_gemm.nv_universal_gemm_scheduling import (
     NVGemmVerticalFusionDecision,
     NVUniversalGemmScheduling,
@@ -57,25 +57,10 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
-        self._triton_scheduling: TritonScheduling
-        # HelionScheduling emits the schedules it supports as Helion kernels and
-        # the others as Triton. Like use_helion_native_matmul, it
-        # needs the Python wrapper: with cpp_wrapper and triton.native_matmul,
-        # the C++ wrapper would get helion_fused_add_mm_relu_0(arg0_1, arg1_1,
-        # arg2_1, buf1); and fail to load with SyntaxError. There is no graph
-        # without a scheduler: get_backend_features() builds this with None,
-        # e.g. for has_backend_feature() while tracing, when V.graph.cpp_wrapper
-        # raises AttributeError: 'NullHandler' object has no attribute 'cpp_wrapper'.
-        if (
-            config.helion.enabled
-            and scheduler is not None
-            and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
-        ):
-            from .helion import HelionScheduling
-
-            self._triton_scheduling = HelionScheduling(scheduler)
-        else:
-            self._triton_scheduling = TritonScheduling(scheduler)
+        triton_scheduling = (
+            HelionScheduling if config.helion.enabled else TritonScheduling
+        )
+        self._triton_scheduling = triton_scheduling(scheduler)
         self._cutlass_scheduling = CUTLASSScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
         self._cutedsl_scheduling = CuteDSLScheduling(scheduler)

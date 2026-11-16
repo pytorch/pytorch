@@ -6436,7 +6436,10 @@ class SIMDScheduling(BaseScheduling):
         # when natively generating matmul without template calls.
         for node in EnableReduction.filter(node_schedule):
             if isinstance(node.node, ir.ComputedBuffer):
-                if node.node.get_reduction_type() == "dot":
+                if (
+                    node.node.get_reduction_type() == "dot"
+                    and config.triton.native_matmul
+                ):
                     # A[M,K] @ B[K,N]
                     # force tiling to be {'y':M, 'x':N, 'r0_':K}
                     node_ranges = node.get_ranges()

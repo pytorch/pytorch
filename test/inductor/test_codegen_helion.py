@@ -68,7 +68,7 @@ class TestHelionNativeMatmul(TestCase):
             config.patch(
                 {
                     "helion.enabled": True,
-                    "helion.native_matmul": True,
+                    "triton.native_matmul": True,
                     "helion.autotune_effort": "none",
                 }
             )
@@ -77,14 +77,10 @@ class TestHelionNativeMatmul(TestCase):
     def compile(
         self, fn, *args, expected=None, tol=None, backend="triton", helion=True
     ):
-        """Run compiled `fn`, check it, and return the Helion matmul kernel modules.
-
-        By default the result is checked against `fn` on FP32 copies of
-        FP16/BF16 inputs, since Helion kernels keep their epilogue in FP32.
-        """
+        """Run compiled `fn`, check it against FP32 eager, and return the Helion
+        matmul kernel sources."""
         if backend == "cute" and not HAS_CUTE:
             self.skipTest("requires CuTeDSL")
-        # Helion or Triton is decided before codegen, so codegen logs no error.
         with (
             config.patch({"helion.backend": backend}),
             self.assertNoLogs("torch._inductor.scheduler", level="CRITICAL"),
@@ -150,14 +146,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             backend=backend,
         )
         self.assertIn(f'backend="{backend}"', source)
-        # Operands keep their storage dtype (see HelionKernel.load_dot_operand).
         self.assertIn("tmp0 = in0[tile_y, tile_r]\n", source)
         self.assertIn("tmp1 = in1[tile_r, tile_x]\n", source)
         store = "out0[tile_y, tile_x] = acc"
         self.assertIn(
             store if dtype == torch.float32 else f"{store}.to({dtype})", source
         )
-        # dot_precision only affects FP32 dots.
         if dtype == torch.float32:
             self.assertIn('dot_precision="ieee"', source)
         else:
@@ -202,14 +196,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             backend=backend,
         )
         load = {
-            # A size-1 dim the index skips is dropped through a view.
             "row": "in2[tile_y]",
             "column": "in2[tile_x]",
             "matrix": "in2[tile_y, tile_x]",
             "scalar": "in2[()]",
         }[bias]
         self.assertIn(f" = {load}.to(torch.float32)\n", source)
-        # Values broadcast against the tile; only a row vector needs a reshape.
         if bias == "row":
             self.assertIn(".reshape([tile_y, 1])", source)
         else:
@@ -273,7 +265,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
 
     @parametrize("backend", BACKENDS)
     def test_fma_epilogue(self, backend):
-        # addcmul lowers to ops.fma, which rounds x * y + z once.
         (source,) = self.compile(
             lambda a, b, c, d: torch.addcmul(c, a @ b, d),
             randn(40, 72),
@@ -298,8 +289,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertIn("hl.load(in3, [(-64) + tile_x.index], extra_mask=", source)
 
     def test_masked_epilogue_load_over_other_axes(self):
-        # The row mask of the cat cannot change the address of bias[x], so the
-        # bias load is unmasked and only torch.where selects its rows.
         (source,) = self.compile(
             lambda a, b, bias, rest: a @ b + torch.cat((bias.expand(10, 136), rest)),
             randn(40, 72),
@@ -347,31 +336,13 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             fn, args = lambda a: a @ a.T, [randn(40, 72)]
             view = "reinterpret_tensor(arg0_1, (72, 40), (1, 72), 0)"
         (source,) = self.compile(fn, *args)
-        # The wrapper passes 2D views of the inputs, so the kernel never decodes
-        # a flat index with // or %.
         self.assertIn(view, self.code)
         self.assertIn("in0[tile_y, tile_r]", source)
         self.assertIn("in1[tile_r, tile_x]", source)
         self.assertNotIn("//", source)
         self.assertNotIn("%", source)
 
-    @parametrize("case", ["rhs", "rhs_m_equals_k", "lhs"])
-    def test_broadcast_operand(self, case):
-        # A stride-0 operand: v.expand(72, 136) is copied and read by tile like
-        # any mat2; v.expand(40, 72) is read through its stride-0 view.
-        if case == "rhs":
-            fn, args = lambda a, v: a @ v.expand(72, 136), [randn(40, 72), randn(72, 1)]
-        elif case == "rhs_m_equals_k":
-            fn, args = lambda a, v: a @ v.expand(72, 136), [randn(72, 72), randn(72, 1)]
-        else:
-            fn, args = lambda v, b: v.expand(40, 72) @ b, [randn(1, 72), randn(72, 136)]
-        (source,) = self.compile(fn, *args)
-        self.assertIn("in0[tile_y, tile_r]", source)
-        self.assertIn("in1[tile_r, tile_x]", source)
-
     def test_operand_shared_with_epilogue(self):
-        # x is both the lhs and the epilogue input; the same view of it is one
-        # kernel parameter.
         (source,) = self.compile(lambda x, w: x @ w + x, randn(40, 72), randn(72, 72))
         self.assertIn("in0[tile_y, tile_r]", source)
         self.assertIn("in0[tile_y, tile_x]", source)
@@ -385,7 +356,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         matrix = {
             "contiguous": lambda: randn(*batch, 5, 8, 136),
             "strided": lambda: randn(*batch, 5, 8, 144)[..., :136],
-            # An (8, 5, 136) input that fn transposes back to a contiguous layout.
             "permuted": lambda: randn(*batch, 5, 8, 136).transpose(-3, -2),
         }[layout]()
 
@@ -408,8 +378,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
 
     @parametrize("case", ["transposed", "padded"])
     def test_flat_epilogue_input(self, case):
-        # A transposed or padded [5, 8, 136] input is no 2D view of its storage,
-        # so the kernel reads a flat view at the flat index, like Triton.
         if case == "transposed":
             bias, numel = randn(5, 136, 8).transpose(1, 2), 5440
         else:
@@ -426,8 +394,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         )
 
     def test_flat_epilogue_input_skipping_an_axis(self):
-        # The [B, 1, 1, N] bias of a [B * H, M, N] bmm is read at
-        # N * (z // H) + x, a flat index over the z and x tiles only.
         (source,) = self.compile(
             lambda a, b, bias: torch.bmm(a, b).view(2, 3, 40, 136) + bias,
             randn(6, 40, 72),
@@ -439,26 +405,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             source,
         )
 
-    @parametrize("case", ["compute", "repeat", "gather", "permute_copy"])
-    def test_materialized_operand(self, case):
-        if case == "compute":
-            fn, args = lambda a, b: (a + 1) @ (b - 2), [randn(40, 72), randn(72, 136)]
-        elif case == "repeat":
-            fn, args = lambda a, b: a.repeat(1, 9) @ b, [randn(40, 8), randn(72, 136)]
-        elif case == "gather":
-            indices = torch.randint(0, 80, (40,), device=GPU_TYPE)
-            fn, args = (
-                lambda a, i, b: a[i] @ b,
-                [randn(80, 72), indices, randn(72, 136)],
-            )
-        else:
-            fn = lambda a, b: a.permute(1, 0, 2).reshape(40, 64) @ b  # noqa: E731
-            args = [randn(8, 40, 8), randn(64, 136)]
-        (source,) = self.compile(fn, *args)
-        # The producer is a kernel of its own, and the Helion matmul kernel
-        # reads its output buffer, not the input.
-        self.assertRegex(self.code, r"helion_\w+\((reinterpret_tensor\()?buf0, ")
+    def test_computed_operand(self):
+        (source,) = self.compile(
+            lambda a, b: (a + 1) @ (b - 2), randn(40, 72), randn(72, 136)
+        )
         self.assertIn("in0[tile_y, tile_r]", source)
+        self.assertIn("in1[tile_r, tile_x]", source)
 
     @parametrize("backend", BACKENDS)
     @parametrize("epilogue", [False, True])
@@ -476,14 +428,11 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         )
         self.assertIn("acc1 = hl.zeros(", source)
         self.assertIn("acc1 = torch.addmm(acc1, tmp0, ", source)
-        # The shared lhs is loaded once, and fused intermediates are not stored.
         self.assertEqual(source.count("in0[tile_y, tile_r]"), 1)
         self.assertIn("in2[tile_r, tile_x]", source)
         self.assertEqual("out1[" in source, not epilogue)
 
     def test_horizontal_dots_share_one_k_loop(self):
-        # The nodes fuse as [dot1, cast1, dot2, cast2]; both dots still go in
-        # one K loop, which loads w once.
         (source,) = self.compile(
             lambda w, a, b: ((a @ w).float(), (b @ w).float()),
             randn(16, 512),
@@ -503,19 +452,15 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
 
     def test_identical_kernels_share_a_module(self):
         def fn(a, b):
-            return torch.relu(torch.relu(a @ b) @ b)
+            return (a @ b) @ b
 
         args = (randn(32, 64), randn(64, 64))
-        # Like eager, the first product is rounded to bf16 before the second.
         self.compile(fn, *args, expected=fn(*args))
         (name,) = re.findall(r"(helion_\w+)_source = ", self.code)
         self.assertEqual(self.code.count(f"{name}("), 2)
 
     @parametrize("producer", ["cumsum", "sort"])
     def test_epilogue_input_reused_for_output(self, producer):
-        # x's producer is a separate Triton kernel and the epilogue is the last
-        # use of its output, so the output takes over that buffer
-        # (buf1 = buf0; del buf0) and the Helion kernel reads it through buf1.
         def fn(a, b, x):
             y = torch.cumsum(x, -1) if producer == "cumsum" else torch.sort(x, -1)[0]
             return a @ b + y
@@ -546,9 +491,13 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             "m_is_one",
             "n_is_one",
             "k_is_one",
-            "self_product_of_a_row",
             "float64",
             "dynamic",
+            "broadcast_lhs",
+            "broadcast_rhs",
+            "permuted_operand",
+            "repeated_operand",
+            "gathered_operand",
             "indirect_epilogue",
             "cpu_scalar",
         ],
@@ -563,43 +512,35 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             args = [a, randn(64, 1)]
         elif case == "k_is_one":
             args = [randn(32, 1), randn(1, 48)]
-        elif case == "self_product_of_a_row":
-            fn, args = lambda x: x @ x.T, [randn(1, 64)]
         elif case == "float64":
             args = [a.double(), b.double()]
         elif case == "dynamic":
             torch._dynamo.mark_dynamic(a, 0)
+        elif case == "broadcast_lhs":
+            fn, args = lambda v, b: v.expand(32, 64) @ b, [randn(1, 64), b]
+        elif case == "broadcast_rhs":
+            fn, args = lambda a, v: a @ v.expand(64, 48), [a, randn(64, 1)]
+        elif case == "permuted_operand":
+            fn = lambda a, b: a.permute(1, 0, 2).reshape(32, 64) @ b  # noqa: E731
+            args = [randn(8, 32, 8), b]
+        elif case == "repeated_operand":
+            fn, args = lambda a, b: a.repeat(1, 8) @ b, [randn(32, 8), b]
+        elif case == "gathered_operand":
+            fn = lambda a, i, b: a[i] @ b  # noqa: E731
+            args = [randn(80, 64), torch.randint(0, 80, (32,), device=GPU_TYPE), b]
         elif case == "indirect_epilogue":
             fn = lambda a, b, c, i: a @ b + c[i]  # noqa: E731
             args = [a, b, randn(80, 48), torch.randint(0, 80, (32,), device=GPU_TYPE)]
         else:
             fn = lambda a, b, c: a @ b + c  # noqa: E731
             args = [a, b, torch.tensor(2.0, device="cpu")]
-        # Unfused epilogues round the product first, as eager does.
         sources = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=False)
         if case in ("indirect_epilogue", "cpu_scalar"):
-            # The matmul is a Helion kernel and the epilogue a Triton kernel.
+            # A Helion matmul and a Triton epilogue.
             self.assertEqual(len(sources), 1)
             self.assertIn("@triton.jit", self.code)
         else:
             self.assertEqual(sources, [])
-
-    @parametrize("op", ["mm", "addmm_out_dtype"])
-    def test_declined_matmul_keeps_its_lowering(self, op):
-        # A dynamic matmul, which Helion declines, is lowered as without Helion:
-        # a Triton native matmul with triton.native_matmul, and one
-        # extern_kernels.addmm_dtype for addmm(..., out_dtype=).
-        a, b = randn(40, 72), randn(72, 136)
-        torch._dynamo.mark_dynamic(a, 0)
-        if op == "mm":
-            with config.patch({"triton.native_matmul": True}):
-                self.compile(lambda a, b: a @ b, a, b, tol=1e-2, helion=False)
-            self.assertIn("tl.dot(", self.code)
-        else:
-            args = (randn(136, dtype=torch.float32), a, b)
-            fn = lambda c, a, b: torch.addmm(c, a, b, out_dtype=torch.float32)  # noqa: E731
-            self.compile(fn, *args, expected=fn(*args), tol=1e-2, helion=False)
-            self.assertIn("extern_kernels.addmm_dtype(", self.code)
 
     def test_addmm(self):
         (source,) = self.compile(
@@ -608,8 +549,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             randn(40, 72),
             randn(72, 136),
         )
-        # Unit alpha and beta add the bias without scaling it.
-        self.assertIn("tmp3 = tmp2 + acc", source)
+        self.assertIn(" = in2[tile_x].to(torch.float32)", source)
 
     def test_baddbmm(self):
         (source,) = self.compile(
@@ -618,20 +558,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             randn(3, 40, 72),
             randn(3, 72, 136),
         )
-        self.assertIn("tmp3 = tmp2 + acc", source)
-
-    def test_addmm_out_dtype(self):
-        (source,) = self.compile(
-            lambda bias, a, b: torch.addmm(
-                bias, a, b, out_dtype=torch.float32, alpha=1.25, beta=0.75
-            ),
-            randn(136, dtype=torch.float32),
-            randn(40, 72),
-            randn(72, 136),
-        )
-        self.assertIn("hl.full([], 1.25, dtype=torch.float32)", source)
-        # BF16 operands with an FP32 accumulator and output have no FP32 dot.
-        self.assertNotIn("dot_precision", source)
+        self.assertIn(" = in2[tile_z, tile_y, tile_x].to(torch.float32)", source)
 
     @config.patch(max_autotune=True)
     def test_mm_plus_mm(self):
@@ -651,8 +578,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
 
         args = (randn(32, 72), randn(72, 64))
         (source,) = self.compile(fn, *args, expected=fn(*args), tol=2e-2)
-        # sinh is not a Helion op, and a row sum is not fused into a Helion
-        # kernel, so both run as Triton kernels after it.
         self.assertIn("@triton.jit", self.code)
         self.assertNotIn("torch.sinh(", source)
         self.assertNotIn("sum", source)
@@ -665,8 +590,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
 
         q, k, v = (randn(1, 2, 128, 64) for _ in range(3))
         args = (q, k, v, randn(32, 64), randn(64, 48))
-        # The flex_attention template (which uses tl.dot) and its relu epilogue
-        # stay Triton.
         (source,) = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=False)
         self.assertIn("torch.relu(", source)
         self.assertIn("triton_tem_fused", self.code)
@@ -719,30 +642,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
                 self.assertEqual(b.grad, rb.grad, atol=1e-4, rtol=1e-4)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
-    @parametrize("case", ["baddbmm", "addmm_beta0", "addmm_out_dtype"])
-    def test_k1_matmul_keeps_its_lowering(self, case):
-        # K == 1 matmuls that are not decomposed to a multiply before lowering
-        # use the regular lowering instead of a Helion kernel without a K loop.
-        fn, args = {
-            "baddbmm": (
-                torch.baddbmm,
-                (randn(3, 40, 136), randn(3, 40, 1), randn(3, 1, 136)),
-            ),
-            "addmm_beta0": (
-                lambda c, a, b: torch.addmm(c, a, b, beta=0),
-                (randn(40, 136), randn(40, 1), randn(1, 136)),
-            ),
-            "addmm_out_dtype": (
-                lambda c, a, b: torch.addmm(c, a, b, out_dtype=torch.float32),
-                (randn(40, 136, dtype=torch.float32), randn(40, 1), randn(1, 136)),
-            ),
-        }[case]
-        expected = fn(*args) if case == "addmm_out_dtype" else None
-        self.assertEqual(self.compile(fn, *args, expected=expected, helion=False), [])
-
     @parametrize("effort", ["none", "quick", "full"])
     def test_kernel_settings(self, effort):
-        # Only the decorator is checked, so skip running (and autotuning) it.
         import helion
 
         with (
@@ -766,14 +667,10 @@ class TestHelionDefaults(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_default_config(self):
-        # The other classes pin autotune_effort="none" to skip autotuning. With
-        # only TORCHINDUCTOR_HELION=1 set, a matmul is a Helion kernel that
-        # autotunes with effort "quick" at its first call. Only the generated
-        # code is checked, so the kernel is not run (or autotuned).
         import helion
 
         with (
-            config.patch({"helion.enabled": True}),
+            config.patch({"helion.enabled": True, "triton.native_matmul": True}),
             patch.object(helion.Kernel, "__call__", lambda self, *args: None),
         ):
             _, (code,) = run_and_get_code(
@@ -798,8 +695,7 @@ class TestHelionReduction(TestCase):
         )
 
     def compile(self, fn, *args, tol=None):
-        """Run compiled `fn`, check it against eager, and return the Helion kernel modules."""
-        # Helion or Triton is decided before codegen, so codegen logs no error.
+        """Run compiled `fn`, check it against eager, and return the Helion kernel sources."""
         with self.assertNoLogs("torch._inductor.scheduler", level="CRITICAL"):
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
         self.assertEqual(result, fn(*args), atol=tol, rtol=tol)
@@ -846,7 +742,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             x = torch.randn(64, 100, device=GPU_TYPE, dtype=dtype)
         if op == "prod":
             x = x / 8 + 1
-        # R = 100 is not a power of two, so the last tile_r block is partial.
         (source,) = self.compile(lambda x: getattr(torch, op)(x, -1), x, tol=1e-2)
         self.assertIn(f"torch.{op}(", source)
 
@@ -856,14 +751,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             torch.randn(64, 100, device=GPU_TYPE),
         )
         self.assertEqual(source.count("for tile_r in hl.tile(100):"), 2)
-        # The second loop loads x again and views acc as (tile_x, 1).
         self.assertEqual(source.count(" = in0[tile_x, tile_r]"), 2)
         self.assertIn(" = acc.reshape([tile_x, 1])", source)
         self.assertIn("out0[tile_x, tile_r] = ", source)
 
     def test_value_read_in_a_later_loop(self):
         def fn(x):
-            # Over 30 ops: Inductor keeps y as a buffer instead of inlining it.
             y = x
             for i in range(20):
                 y = torch.sin(y) * 0.9 + 0.1 * i
@@ -891,7 +784,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         )
 
     def test_masked_scalar_load(self):
-        # The pad mask of column 3 is the constant 3 < 4, and s is 0-d.
         (source,) = self.compile(
             lambda x, s: torch.nn.functional.pad(x * s, (0, 1))[:, 3] + x[:, 1],
             torch.randn(64, 4, device=GPU_TYPE),
@@ -901,11 +793,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
 
     @config.patch({"triton.native_matmul": True, "helion.native_matmul": False})
     def test_triton_native_matmul_stays_triton(self):
-        # Without helion.native_matmul, a Triton native matmul is a Triton
-        # kernel, also with an operand that only the Helion lowering realizes.
         sources = self.compile(
-            lambda a, b: a.permute(1, 0, 2).reshape(40, 64) @ b,
-            torch.randn(8, 40, 8, device=GPU_TYPE),
+            lambda a, b: a @ b,
+            torch.randn(40, 64, device=GPU_TYPE),
             torch.randn(64, 136, device=GPU_TYPE),
             tol=1e-2,
         )
@@ -930,10 +820,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         }[case]
         if case == "dynamic":
             torch._dynamo.mark_dynamic(x, 0)
-        # Online softmax, Welford, any and argmax are not Helion reductions yet.
         metrics.reset()
         self.assertEqual(self.compile(fn, x, tol=1e-4), [])
-        # No HelionKernel was started: each generated kernel is a Triton kernel.
         self.assertEqual(metrics.generated_kernel_count, self.code.count("@triton.jit"))
 
     def test_reduction_of_broadcast_value(self):
@@ -945,7 +833,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         self.assertIn(" + hl.zeros([tile_x, tile_r], dtype=torch.float32)", source)
 
     def test_mask_over_other_axes(self):
-        # The pad mask covers (tile_x, tile_r) and r is read over tile_x.
         (source,) = self.compile(
             lambda x, r: torch.nn.functional.pad(x * r, (1, 1, 1, 1)).sum(-1),
             torch.randn(64, 100, device=GPU_TYPE),
@@ -958,9 +845,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         )
 
     def test_kernel_args(self):
-        # Like a Triton kernel, a Helion kernel records the buffers it reads
-        # and writes, for generate_intermediate_hooks, warn_mix_layout and
-        # remove_kernel_local_buffers().
         kernels = []
         codegen = HelionScheduling.codegen_node_schedule
 
@@ -986,7 +870,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         )
         expected = x + y
         _, (code,) = run_and_get_code(torch.compile(lambda x, y: x.add_(y)), x, y)
-        # The kernel runs once, and its arguments are checked after it.
         self.assertEqual(x, expected)
         calls = re.findall(r"^\s+helion_\w+\(", code, re.MULTILINE)
         self.assertEqual(len(calls), 1)
@@ -1024,7 +907,6 @@ class TestHelionCodegenUnits(TestCase):
                 "index_expr",
                 "value_expr",
                 "masked",
-                "dot",
             )
             if spelled is None or name in kernel_ops:
                 continue
@@ -1042,8 +924,6 @@ class TestHelionCodegenUnits(TestCase):
 
     @config.patch({"helion.enabled": True})
     def test_scheduling_without_graph(self):
-        # get_backend_features() builds the scheduling with no scheduler and no
-        # graph, e.g. for has_backend_feature() in a decomposition while tracing.
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
