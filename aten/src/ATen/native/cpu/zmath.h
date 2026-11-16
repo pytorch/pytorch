@@ -3,7 +3,8 @@
 // Complex number math operations that act as no-ops for other dtypes.
 #include <c10/util/complex.h>
 #include <c10/util/MathConstants.h>
-#include<ATen/NumericUtils.h>
+#include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
@@ -44,7 +45,7 @@ inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
   if (at::_isnan(z)) {
     return z;
   }
-  return z < 0 ? c10::pi<double> : 0;
+  return std::signbit(static_cast<at::opmath_type<SCALAR_TYPE>>(z)) ? c10::pi<double> : 0;
 }
 
 template<>

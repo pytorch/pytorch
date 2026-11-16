@@ -8,6 +8,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -225,7 +226,7 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       batchsize, ")");
 
   // A tensor constitutes of full blocks, 3.1
-  for (int i=0; i<block_ndim; i++) {
+  for (const auto i : c10::irange(block_ndim)) {
       TORCH_CHECK(size[batch_ndim + i] % blocksize[i] == 0,
                   "tensor shape[", batch_ndim + i, "] (=", size[batch_ndim + i],
                   ") must be divisible with blocksize[", i, "] (=", blocksize[i],
