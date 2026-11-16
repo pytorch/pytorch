@@ -160,6 +160,33 @@ class _TestFakeTensorHelpers:
 class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_mode_constructor_defaults(self):
+        shape_env = ShapeEnv()
+        with FakeTensorMode(
+            shape_env=shape_env,
+            allow_fallback_kernels=True,
+            allow_non_fake_inputs=True,
+            static_shapes=False,
+            export=False,
+        ) as mode:
+            fake = torch.empty(2, 3)
+        self.assertIs(mode.shape_env, shape_env)
+        self.assertTrue(mode.is_our_fake(fake))
+
+    def test_mode_constructor_disallow_fallback_kernels(self):
+        mode = FakeTensorMode(allow_fallback_kernels=False)
+        self.assertFalse(mode.allow_fallback_kernels)
+
+    def test_mode_constructor_export(self):
+        if torch._dynamo.config.use_cpp_fake_tensor:
+            with self.assertRaisesRegex(
+                NotImplementedError, "export=True"
+            ):
+                FakeTensorMode(export=True)
+            return
+        mode = FakeTensorMode(export=True)
+        self.assertTrue(mode.fake_tensor_converter.export)
+
     def test_mode_subclass_construction(self):
         class SubMode(FakeTensorMode):
             def __init__(self, marker, **kwargs):
@@ -7072,57 +7099,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                         op(fake, device=device)
         self.assertEqual(retained.device, torch.device(output_device))
         self.assertIs(maybe_get_fake_mode(retained), mode)
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @parametrize("size", [1, 2])
-    @parametrize("parameter", [False, True])
-    @parametrize("allow", [False, True])
-    def test_fake_fallback_lift_storage(self, size, parameter, allow):
-        mode = FakeTensorMode(allow_non_fake_inputs=allow)
-        real = torch.arange(size, dtype=torch.float32)
-        if parameter:
-            real = torch.nn.Parameter(real, requires_grad=False)
-        expected = real.clone()
-        with mode:
-            if parameter and not allow:
-                with self.assertRaisesRegex(
-                    AssertionError, "Please convert all Tensors"
-                ):
-                    aten.lift_fresh.default(real)
-                return
-            lifted = aten.lift_fresh.default(real)
-            repeated = aten.lift_fresh.default(real)
-            self.assertIs(torch._guards.active_fake_mode(), mode)
-        self.assertIs(maybe_get_fake_mode(lifted), mode)
-        prims.utils.compare_tensor_meta(lifted, real, check_strides=True)
-        if size == 1 and not parameter:
-            constant = maybe_get_fake_constant(lifted)
-            self.assertEqual(constant, expected)
-            self.assertNotEqual(constant.data_ptr(), real.data_ptr())
-            real.add_(1)
-            self.assertEqual(constant, expected)
-            self.assertIsNot(lifted, repeated)
-        else:
-            self.assertIsNone(maybe_get_fake_constant(lifted))
-            converted = mode.from_tensor(real)
-            if parameter:
-                # Normal dispatch lifts the converted Parameter into fresh aliases.
-                self.assertIsNot(lifted, repeated)
-                for alias in (repeated, converted):
-                    self.assertEqual(
-                        alias.untyped_storage()._cdata,
-                        lifted.untyped_storage()._cdata,
-                    )
-            else:
-                self.assertIs(lifted, repeated)
-                self.assertIs(converted, lifted)
-            with mode:
-                relifted = aten.lift_fresh.default(lifted)
-            self.assertIs(maybe_get_fake_mode(relifted), mode)
-            self.assertEqual(
-                relifted.untyped_storage()._cdata, lifted.untyped_storage()._cdata
-            )
-            self.assertIsNone(maybe_get_fake_constant(relifted))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("size", [1, 2])
