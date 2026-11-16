@@ -218,10 +218,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             return compiled
 
         with (
-            torch._dynamo.config.patch(
-                repro_after="aot",
-                repro_level=1,
-            ),
+            torch._dynamo.config.patch(repro_after="aot", repro_level=1),
             patch.object(after_aot, "dump_compiler_graph_state") as dump,
             self.assertRaisesRegex(RuntimeError, "failure"),
         ):

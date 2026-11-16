@@ -23,7 +23,6 @@ class TestReinplacePass(TestCase):
     def test_reinplace_basic(self):
         # Basic test: the out-of-place add() call should be converted
         # into add_()
-
         def f(x):
             a = x.clone()
             b = a.add(1)

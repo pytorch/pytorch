@@ -3249,8 +3249,9 @@ graph():
             def forward(self, x, y):
                 return x[0] + y - self.param
 
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
         f = Basic()
-        with FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[])):
+        with fake_mode:
             args = ([torch.empty(3, 2)], torch.empty(3, 2))
         ep = export(f, args, strict=False)
         inputs = ([torch.randn(3, 2)], torch.randn(3, 2))
@@ -11922,6 +11923,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = (torch.randn(5, 10),)
         m = M()
         ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
+
         core_aten_ep = ep.run_decompositions()
 
         input_node = [
@@ -12394,6 +12396,8 @@ graph():
         ep = export(M(), inp)  # This errors because dynamo adds an extra input
 
     def test_export_with_fake_tensor_inputs(self):
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -12404,10 +12408,7 @@ graph():
                 return out
 
         # Put the inputs on a device
-        with (
-            FakeTensorMode(),
-            torch.device("meta"),
-        ):
+        with fake_mode, torch.device("meta"):
             x = torch.rand(5, 2, 2)
             model = Model()
 
@@ -15795,7 +15796,10 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x + self.bar + self.baz
 
-        with FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[])):
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[])
+        )
+        with fake_mode:
             m = MyModule()
         inp = torch.randn(4, 4)
         ep = export(m, (inp,))
@@ -15810,9 +15814,13 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x
 
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[])
+        )
         m = MyModule()
-        with FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[])):
+        with fake_mode:
             inp = torch.randn(4, 4)
+
         ep = export(m, (inp,))
         self.assertEqual(ep.module()(torch.ones(4, 4)), m(torch.ones(4, 4)))
 
@@ -15838,9 +15846,10 @@ def forward(self, x, b_t, y):
             def forward(self, x):
                 return self.foo + x
 
-        with (
-            FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[])),
-        ):
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[])
+        )
+        with fake_mode:
             m = MyModule()
             inp = torch.randn(4, 4)
             # Can't use unqualified export() as it will attempt to deserialize
