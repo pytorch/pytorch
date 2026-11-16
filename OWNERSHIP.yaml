@@ -554,10 +554,17 @@ ownership:
       - /torch/csrc/jit/backends/
   - name: ci
     labels: ["module: ci"]
-    owners: [pytorch/pytorch-dev-infra]
+    owners: [atalman, georgehong, huydhn, jathu]
     section: infra_ci
     paths:
-      - /.ci/: [pytorch/pytorch-dev-infra]
+      - /.ci/: [huydhn, atalman]
+      - /.ci/pytorch/: [huydhn, georgehong, atalman, jathu]
+  - name: docker_ci
+    labels: ["module: ci", "module: docker"]
+    owners: [atalman, huydhn]
+    section: infra_ci
+    paths:
+      - /.ci/docker/: [atalman, huydhn]
   - name: rocm_ci
     labels: ["module: ci", "module: rocm"]
     owners: [jeffdaily]
@@ -567,6 +574,8 @@ ownership:
       - /.ci/docker/common/install_roc*.sh: [jeffdaily]
       - /.ci/docker/common/install_amdsmi.sh: [jeffdaily]
       - /.ci/docker/ci_commit_pins/rocm-*.txt: [jeffdaily]
+      - /.ci/pytorch/rocm_preflight.py: [jeffdaily]
+      - /.ci/pytorch/rocm_utils.sh: [jeffdaily]
   - name: inductor_ci
     labels: ["module: ci", "module: inductor"]
     owners: [Chillee, desertfire, eellison, jataylo, jeffdaily, jithunnair-amd, pruthvistony]
