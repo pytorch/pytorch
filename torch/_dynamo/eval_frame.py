@@ -2780,7 +2780,9 @@ def export(
             example_inputs = []
             graph_captured_input = ()
             graph_captured_result = ()
-            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+            fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=ShapeEnv(), export=True
+            )
             if out_guards is None:
                 out_guards = _guards.GuardsSet()
             if out_guards is None:  # suppress mypy error
