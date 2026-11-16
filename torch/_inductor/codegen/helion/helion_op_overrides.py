@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import cast, TYPE_CHECKING
 
 import torch
@@ -8,6 +7,7 @@ import torch
 from ...utils import upcast_compute_type
 from ...virtualized import V
 from ..common import CSEVariable, OpOverrides, PythonPrinter
+from ..simd import constant_repr
 
 
 if TYPE_CHECKING:
@@ -16,12 +16,6 @@ if TYPE_CHECKING:
     import sympy
 
     from .helion_kernel import HelionKernel
-
-
-def literal(value: bool | float | int) -> str:
-    if isinstance(value, float) and not math.isfinite(value):
-        return f"float({repr(value)!r})"
-    return repr(value)
 
 
 class HelionPrinter(PythonPrinter):
@@ -54,7 +48,8 @@ class HelionOverrides(OpOverrides):
     @staticmethod
     def constant(value: bool | float | int, dtype: torch.dtype) -> str:
         # A 0-d tensor, since torch.minimum/maximum take no Python scalar.
-        return f"hl.full([], {literal(value)}, dtype={upcast_compute_type(dtype)})"
+        dtype = upcast_compute_type(dtype)
+        return f"hl.full([], {constant_repr(value)}, dtype={dtype})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]

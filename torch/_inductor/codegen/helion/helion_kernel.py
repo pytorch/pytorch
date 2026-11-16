@@ -24,8 +24,8 @@ from ...ir import (
 from ...utils import IndentedBuffer, sympy_subs, upcast_compute_type
 from ...virtualized import V
 from ..common import CSEProxy, CSEVariable, DeferredLine, TensorArg
-from ..simd import SIMDKernel
-from .helion_op_overrides import HelionOverrides, HelionPrinter, literal
+from ..simd import constant_repr, SIMDKernel
+from .helion_op_overrides import HelionOverrides, HelionPrinter
 
 
 if TYPE_CHECKING:
@@ -605,7 +605,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         if init == 0 and dtype != torch.bool:
             self.body.writeline(f"{acc} = hl.zeros([{shape}], dtype={dtype})")
         else:
-            value = literal(init)
+            value = constant_repr(init)
             self.body.writeline(f"{acc} = hl.full([{shape}], {value}, dtype={dtype})")
         return acc
 
