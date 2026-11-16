@@ -4023,6 +4023,12 @@ def region_loop(model, batches):
     return total
 
 
+def region_accumulates(x, total):
+    total.add_(x * 2)
+    y = total * 3 + 1
+    return y * 2 + x
+
+
 class RegionOutput:
     # A plain object, as model code uses for results.
     def __init__(self, logits, hidden, name):
@@ -4520,6 +4526,29 @@ class TestCfgRegions(TestCase):
         # And no frame kept a tensor of an earlier call.
         gc.collect()
         self.assertEqual([ref() for ref in refs], [None] * len(refs))
+
+    def test_graph_that_fails_on_its_first_run_does_not_write_twice(self):
+        runs = []
+
+        def backend(graph, example):
+            def run(*args):
+                runs.append(1)
+                # Writes to `total`, as the instructions will when they run
+                # in its place.
+                graph(*args)
+                raise RuntimeError("after the write")
+
+            return run
+
+        fn = region_accumulates
+        compiled = torch.cfg_compile(fn, backend=backend, fallback=False)
+        x, mine, theirs = torch.ones(3), torch.zeros(3), torch.zeros(3)
+        for _ in range(8):
+            self.assertEqual(compiled(x, mine), fn(x, theirs))
+            self.assertEqual(mine, theirs)
+        self.assertEqual(len(runs), 1)
+        (reason,) = self.left_to_vm(compiled, "region_accumulates")
+        self.assertIn("the compiled graph failed", reason)
 
     def test_module_call_is_one_graph(self):
         torch.manual_seed(0)
