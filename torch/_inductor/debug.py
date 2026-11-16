@@ -1523,7 +1523,7 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
             return x
 
     fake_mode = torch._subclasses.FakeTensorMode(
-        allow_non_fake_inputs=True, shape_env=shape_env
+        _force_python=True, allow_non_fake_inputs=True, shape_env=shape_env
     )
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
