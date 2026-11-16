@@ -3661,6 +3661,9 @@ def _matches_test(target: str, classname: str, test_name: str, sanitized_name: s
         return False
     target_testname = target_test_parts[0]
     target_classname = target_test_parts[1][1:-1].split(".")[-1]
+    cpp_fake = os.environ.get("CPP_FAKETENSOR")
+    if cpp_fake is not None:
+        classname += f"[cpp_faketensor={cpp_fake}]"
     # if test method name or its sanitized version exactly matches the disabled
     # test method name AND allow non-parametrized suite names to disable
     # parametrized ones (TestSuite disables TestSuiteCPU)

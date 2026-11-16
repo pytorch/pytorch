@@ -505,6 +505,161 @@ FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
+# An empty tuple runs the whole suite; mixed suites select only fake-related tests.
+FAKETENSOR_TESTS: dict[str, tuple[str, ...]] = dict.fromkeys(
+    {
+        *DYNAMO_CORE_TESTS,
+        *INDUCTOR_TESTS,
+        *TORCH_EXPORT_TESTS,
+        *FUNCTORCH_TESTS,
+        "test_fake_tensor",
+        "test_python_dispatch",
+        "test_custom_ops",
+        "test_proxy_tensor",
+        "test_fx",
+        "test_fx_experimental",
+        "test_fx_const_fold",
+        "test_fx_reinplace_pass",
+        "test_functionalization",
+        "test_decomp",
+        "test_dynamic_shapes",
+        "test_symbolic_shapes",
+        "test_precompile",
+        "test_serialization",
+        "test_opaque_obj_v2",
+        "distributed/test_decomp_comms",
+        "distributed/test_overlap_bucketing_unit",
+        "distributed/tensor/test_dtensor_ops",
+        "onnx/test_fx_type_promotion",
+        "distributed/test_c10d_functional_native",
+        "distributed/test_aten_comm_compute_reordering",
+        "distributed/test_compute_comm_reordering",
+        "distributed/tensor/parallel/test_micro_pipeline_tp",
+        "distributed/_composable/fsdp/test_fully_shard_comm",
+        "distributed/_composable/fsdp/test_fully_shard_training",
+        "distributed/_composable/fsdp/test_fully_shard_state_dict",
+        "distributed/_composable/fsdp/test_fully_shard_frozen",
+        "distributed/_composable/fsdp/test_fully_shard_mixed_precision",
+        "distributed/_composable/fsdp/test_fully_shard_clip_grad_norm_",
+        "distributed/fsdp/test_fsdp_tp_integration",
+    }
+    | {
+        test
+        for test in TESTS
+        if test.startswith(
+            ("higher_order_ops/", "onnx/exporter/", "distributed/_tools/")
+        )
+        or (
+            test.startswith("distributed/")
+            and any(part in test for part in ("compile", "dynamo", "inductor"))
+        )
+    },
+    (),
+) | {
+    "custom_operator/test_inplace_tag": ("test_auto_fake_kernel_inplace",),
+    "custom_operator/test_out_variant": (
+        "test_auto_fake_kernel_multi_out",
+        "test_auto_fake_kernel_single_out",
+    ),
+    "distributed/tensor/debug/test_debug_mode": ("test_fake_tensor",),
+    "distributed/tensor/test_op_strategy": (
+        "test_t_prunes_unproven_unbacked_strided_shard_candidates",
+    ),
+    "distributed/tensor/test_placement_types": (
+        "test_hinted_unbacked_even_chunk_preserves_symbolic_shard_size",
+        "test_hinted_unbacked_even_shard_skips_padding",
+        "test_hinted_unbacked_shardability_adds_runtime_check",
+        "test_select_split_tensor_unbacked_symint_uneven_does_not_raise",
+        "test_strided_shard_preserves_symbolic_split_factor",
+        "test_strided_shard_split_tensor_uses_unbacked_safe_chunking",
+        "test_strided_shard_unbacked_local_size_avoids_chunk_guard",
+        "test_unbacked_even_fallback_hint_requires_override",
+    ),
+    "distributed/tensor/test_utils": (
+        "test_strided_shard_to_replicate_preserves_even_unbacked_shape",
+    ),
+    "distributed/test_device_mesh": ("test_mesh_slice_fake_tensor_mode",),
+    "python_native/test_linear_cross_entropy_override": (
+        "test_kernel_declines_a_class_count_it_cannot_index",
+    ),
+    "python_native/test_native_utils": (
+        "test_conds_never_raise_without_a_usable_device",
+        "test_device_ok_declines_hip",
+        "test_device_ok_honours_the_callers_set",
+        "test_is_traced_exact_type_cpp_wrappers",
+        "test_is_traced_fake_tensor_branch",
+    ),
+    "python_native/test_registry": (
+        "test_cow_guard_misses_on_fake_tensor",
+        "test_fake_tensor_shape_inference",
+    ),
+    "python_native/test_rmsnorm_cutedsl": ("test_traced_inputs_decline",),
+    "test_content_store": ("test_load_tensor",),
+    "test_cow": ("test_fake_tensor_unsupported",),
+    "test_flop_counter": (
+        "test_nested_attention_fake_tensors",
+        "test_sparsity_hint_affects_flex_attention_flops",
+        "test_sparsity_hint_annotate_propagates",
+    ),
+    "test_hop_infra": (
+        "test_triton_kernel_wrapper_functional_fake_tensor_nested_kwargs",
+        "test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs",
+    ),
+    "test_linalg": (
+        "test_svd_driver_meta",
+        "test_svd_driver_validation",
+    ),
+    "test_meta": (
+        "test_arange_symbolic_fake_tensor",
+        "test_arange_symbolic_float_arguments",
+        "test_fused_adamw",
+        "test_grid_sampler_2d_cpu_fallback_meta",
+        "test_linalg_eig_strides_cpu",
+        "test_padded_dense_to_jagged_total_L_none",
+        "test_padded_dense_to_jagged_total_L_zero",
+        "test_reflection_pad2d_channels_last",
+        "test_replication_pad2d_channels_last",
+        "test_scatter_add_out_shape_mismatch_symbolic_index",
+        "test_shift_out_symbolic_fake_tensor",
+        "test_stride_for_index_Tensor",
+        "test_zero_preserves_input_strides",
+    ),
+    "test_nn": (
+        "test_grid_sample_error_checking",
+        "test_pixel_shuffle_unshuffle_non_positive_factor",
+    ),
+    "test_ops": (
+        "TestFakeTensor",
+        "test_python_ref_meta",
+        "test_python_ref_errors",
+    ),
+    "test_prims": ("test_fft_meta_layout",),
+    "test_scaled_matmul_cuda": (
+        "test_mnk4_output_dtype_fake",
+        "test_scaled_addmm_contraction_dim",
+        "test_scaled_addmm_fake_tensor",
+        "test_scaled_grouped_gemm_cublaslt_v2_out_dtype",
+        "test_scaled_grouped_mm_invalid_recipe_fake",
+        "test_scaled_grouped_mm_offsets_fake",
+        "test_scaled_grouped_mm_v2_rejects_blockwise_out_dtype",
+        "test_scaled_grouped_mm_validation",
+        "test_scaled_mm_v2_contraction_dim",
+    ),
+    "test_scatter_gather_ops": ("test_symbolic_sizes_are_not_cached",),
+    "test_sparse": (
+        "test_fake",
+        "test_zeros_like_fake",
+    ),
+    "test_sparse_semi_structured": ("test_cutlass_mm_functionalization_decomp",),
+    "test_stateless_rng": ("test_uniform_tensor_bounds_errors",),
+    "test_torch": (
+        "test_has_storage_data",
+        "test_has_storage_data_ignores_data_access_checks",
+        "test_storage_throws_on_data_ptr_access",
+    ),
+    "test_transformers": ("test_sdpa_math_broadcast_batch_dims",),
+    "test_utils_config_module": ("test_live_justknob_updates_cache",),
+}
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
 
@@ -614,13 +769,52 @@ def run_test(
     env=None,
     print_log=True,
 ) -> int:
+    env = os.environ.copy() if env is None else env.copy()
+    if (
+        IS_CI
+        and "CPP_FAKETENSOR" not in env
+        and (test_module.name in FAKETENSOR_TESTS or options.dynamo)
+    ):
+        results = []
+        report_source = env.get("TEST_REPORT_SOURCE_OVERRIDE", "python-unittest")
+        for flag in ("0", "1"):
+            mode_options = options
+            mode_args = extra_unittest_args
+            cases = FAKETENSOR_TESTS.get(test_module.name, ())
+            if flag == "1" and cases and not options.dynamo:
+                if options.pytest:
+                    mode_options = copy.deepcopy(options)
+                    selection = " or ".join(cases)
+                    if options.pytest_k_expr:
+                        selection = f"({options.pytest_k_expr}) and ({selection})"
+                    mode_options.pytest_k_expr = selection
+                else:
+                    mode_args = list(extra_unittest_args or [])
+                    for case in cases:
+                        mode_args.extend(["-k", case])
+            results.append(
+                run_test(
+                    test_module,
+                    test_directory,
+                    mode_options,
+                    launcher_cmd,
+                    mode_args,
+                    {
+                        **env,
+                        "CPP_FAKETENSOR": flag,
+                        "TEST_REPORT_SOURCE_OVERRIDE": f"{report_source}-cpp-faketensor-{flag}",
+                    },
+                    print_log,
+                )
+            )
+        return next((result for result in results if result), 0)
+
     scribe_token = os.getenv("SCRIBE_GRAPHQL_ACCESS_TOKEN", "")
     if scribe_token:
         print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is set")
     else:
         print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
 
-    env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
     test_file = test_module.name
@@ -629,6 +823,9 @@ def run_test(
     # filter for partial runs ("test_ops, not (TestA or TestB) 3/8") and would
     # fragment the log classifier's grouping key.
     test_label = f"{test_file} {test_module.shard}/{test_module.num_shards}"
+    cpp_fake = env.get("CPP_FAKETENSOR")
+    if cpp_fake is not None:
+        test_label += f" CPP_FAKETENSOR={cpp_fake}"
     stepcurrent_key = test_file
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
@@ -678,7 +875,13 @@ def run_test(
                 is_distributed_test=is_distributed_test,
             )
         )
-        unittest_args.extend(test_module.get_pytest_args())
+        shard_filter = test_module.test.get_pytest_filter()
+        if shard_filter:
+            if "-k" in unittest_args:
+                index = unittest_args.index("-k") + 1
+                unittest_args[index] = f"({unittest_args[index]}) and ({shard_filter})"
+            else:
+                unittest_args.extend(["-k", shard_filter])
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
@@ -780,7 +983,7 @@ def run_test(
         if options.pytest_xdist_workers is not None and test_file in XDIST_SERIAL_FILES
         else None
     )
-    print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
+    print_to_stderr(f"Executing {command} ({test_label}) ... [{datetime.now()}]")
 
     with ExitStack() as stack:
         output = None
