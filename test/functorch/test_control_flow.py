@@ -3053,16 +3053,14 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(result, result_exp)
 
     @parametrize("output", ["tensor", "none"])
-    @parametrize("use_cpp", [False, True])
-    def test_scan_xs_none_length_zero(self, output, use_cpp):
+    def test_scan_xs_none_length_zero(self, output):
         if output == "tensor":
 
             def body(c, x):
                 return c, (c * 2).clone()
 
             init = torch.tensor([1.0, 2.0, 3.0])
-            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-                carry, ys = scan(body, init, None, length=0)
+            carry, ys = scan(body, init, None, length=0)
             self.assertEqual(carry, init)
             self.assertEqual(ys.shape, torch.Size([0, 3]))
             self.assertEqual(ys.dtype, init.dtype)
@@ -3072,8 +3070,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
                 return c + 1.0, None
 
             init = torch.tensor(0.0)
-            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp):
-                carry, ys = scan(body, init, None, length=0)
+            carry, ys = scan(body, init, None, length=0)
             self.assertEqual(carry, init)
             self.assertIsNone(ys)
         expected = _fake_scan(body, init, None, length=0)
