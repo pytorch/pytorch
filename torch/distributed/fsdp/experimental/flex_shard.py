@@ -33,6 +33,7 @@ from torch.distributed.fsdp._flex_shard import (
     get_global_shape,
     get_mesh,
     get_outer_layout,
+    get_outer_shard_groups,
     get_partial_grad_group,
     get_placements,
     GlobalLayout,
@@ -44,6 +45,7 @@ from torch.distributed.fsdp._flex_shard import (
     register_optimizer_checkpoint_hook,
     relayout_bucket,
     set_global_layout,
+    set_outer_shard_groups,
     set_partial_grad_group,
     set_state_dict_global_layouts,
 )
@@ -75,6 +77,7 @@ __all__ = [
     "get_global_shape",
     "get_mesh",
     "get_outer_layout",
+    "get_outer_shard_groups",
     "get_partial_grad_group",
     "get_placements",
     "GlobalLayout",
@@ -91,6 +94,7 @@ __all__ = [
     "register_optimizer_checkpoint_hook",
     "relayout_bucket",
     "set_global_layout",
+    "set_outer_shard_groups",
     "set_partial_grad_group",
     "set_state_dict_global_layouts",
 ]

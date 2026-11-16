@@ -19,6 +19,7 @@ from torch._prims_common import make_contiguous_strides_for
 
 from .placement_contract import (
     get_global_layout,
+    get_outer_shard_groups,
     get_partial_grad_group,
     GradientReduceOp,
     GradientReduction,
@@ -246,6 +247,9 @@ class ParamInfo:
     # Outer (TP/EP) layout declared by the input param; ``global_shape`` is then
     # the outer local shape.
     outer_layout: GlobalLayout | None = None
+    # Groups over which the outer sharding splits the parameter
+    # (set_outer_shard_groups), kept on its sharded parameter.
+    outer_shard_groups: tuple[dist.ProcessGroup, ...] = ()
     # Group over which each rank computes only part of the grad; FlexShard sums
     # the unsharded grad over it before the reduce-scatter.
     partial_grad_group: dist.ProcessGroup | None = None
@@ -671,6 +675,7 @@ class ShardedBucketStorage:
             global_numel=param.numel(),
             bucket_layout=bucket_layout,
             outer_layout=get_global_layout(param),
+            outer_shard_groups=get_outer_shard_groups(param),
             partial_grad_group=get_partial_grad_group(param),
             param_attrs=dict(vars(param)),
             has_explicit_grad_dtype=has_explicit_grad_dtype,
@@ -885,7 +890,7 @@ class ShardedBucketStorage:
         return cast("BucketRuntime", self.runtime)
 
     def set_buckets_to_forward_prefetch(
-        self, buckets: list[ShardedBucketStorage]
+        self, buckets: list[ShardedBucketStorage] | None
     ) -> None:
         """Set the buckets this bucket prefetches in forward, like FSDP2's
         ``set_modules_to_forward_prefetch``.
@@ -897,13 +902,15 @@ class ShardedBucketStorage:
         buckets overlaps more communication and holds more unsharded buckets
         at once. Without a list, a bucket prefetches the next bucket in the
         learned forward order, one prefetch at a time; a list, even an empty
-        one, replaces that. The buckets must come from the same ``flex_shard``
-        call. Eager only.
+        one, replaces that, and ``None`` restores it. The buckets must come
+        from the same ``flex_shard`` call. Eager only.
         """
-        self._forward_prefetch = _check_prefetch_buckets(buckets)
+        self._forward_prefetch = (
+            None if buckets is None else _check_prefetch_buckets(buckets)
+        )
 
     def set_buckets_to_backward_prefetch(
-        self, buckets: list[ShardedBucketStorage]
+        self, buckets: list[ShardedBucketStorage] | None
     ) -> None:
         """Set the buckets this bucket prefetches in backward, like FSDP2's
         ``set_modules_to_backward_prefetch``.
@@ -911,9 +918,12 @@ class ShardedBucketStorage:
         Right after this bucket re-gathers in its pre-backward hook, the listed
         buckets start their all-gathers, as ``set_buckets_to_forward_prefetch``
         describes. Without a list, a bucket prefetches the next bucket in the
-        reverse post-forward order; a list, even an empty one, replaces that.
+        reverse post-forward order; a list, even an empty one, replaces that,
+        and ``None`` restores it.
         """
-        self._backward_prefetch = _check_prefetch_buckets(buckets)
+        self._backward_prefetch = (
+            None if buckets is None else _check_prefetch_buckets(buckets)
+        )
 
     @property
     def world_size(self) -> int:

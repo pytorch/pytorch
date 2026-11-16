@@ -5,7 +5,13 @@ import copy
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp._flex_shard import BucketSpec, clip_grad_norm_, flex_shard
+from torch.distributed.fsdp._flex_shard import (
+    BucketSpec,
+    clip_grad_norm_,
+    flex_shard,
+    get_flex_shard_global_layouts,
+)
+from torch.distributed.fsdp._flex_shard.layout_adapters import dtensor_to_global_layout
 from torch.distributed.fsdp._flex_shard.placement_contract import (
     GlobalLayout,
     set_global_layout,
@@ -17,6 +23,7 @@ from torch.distributed.fsdp._flex_shard.placements.owned import (
     make_bucketed_owned_full_param_placement_fn,
 )
 from torch.distributed.fsdp._flex_shard.placements.shard import per_param_placements
+from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
@@ -33,6 +40,22 @@ def _net(hidden: int) -> nn.Sequential:
         nn.ReLU(),
         nn.Linear(16, 16),
     )
+
+
+class _OuterParallel(nn.Module):
+    """Parameters as tensor and expert parallelism split them: column- and
+    row-wise linear weights, stacked expert weights and a replicated bias."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.colwise = nn.Parameter(torch.randn(8, 6))
+        self.rowwise = nn.Parameter(torch.randn(6, 8))
+        self.experts = nn.Parameter(torch.randn(4, 3, 5))
+        self.bias = nn.Parameter(torch.randn(6))
+
+
+def _slices(offsets: tuple[int, ...], sizes: tuple[int, ...]) -> tuple[slice, ...]:
+    return tuple(slice(o, o + s) for o, s in zip(offsets, sizes, strict=True))
 
 
 class TestFlexShardClipGradNorm(FSDPTest):
@@ -95,10 +118,69 @@ class TestFlexShardClipGradNorm(FSDPTest):
                     for grad, param in zip(grads, params, strict=True):
                         self.assertEqual(param.grad, grad * coef)
 
+    @skip_if_lt_x_gpu(4)
+    def test_matches_unsharded_reference_with_outer_layouts(self):
+        # Tensor and expert parallelism over "outer", flex_shard over "dp":
+        # each rank holds the dp shard of its outer part, so the norm combines
+        # over both, but not over the replicas of the bias
+        mesh = init_device_mesh(
+            device_type.type, (2, 2), mesh_dim_names=("outer", "dp")
+        )
+        outer_placements = {
+            "colwise": Shard(0),
+            "rowwise": Shard(1),
+            "experts": Shard(0),
+            "bias": Replicate(),
+        }
+        for norm_type in (2.0, 1.0, float("inf")):
+            with self.subTest(norm_type=norm_type):
+                torch.manual_seed(0)
+                model = _OuterParallel().to(device_type)
+                full_grads = {
+                    name: torch.randn_like(param)
+                    for name, param in model.named_parameters()
+                }
+                for name, placement in outer_placements.items():
+                    full = getattr(model, name).detach()
+                    dtensor = distribute_tensor(full, mesh["outer"], [placement])
+                    setattr(model, name, nn.Parameter(dtensor))
+                dtensor_to_global_layout(model)
+                flex_shard(
+                    model,
+                    buckets=[BucketSpec(["*"], per_param_placements, mesh=mesh["dp"])],
+                )
+                # Each local grad is the part of the full grad that the
+                # parameter's local shard holds
+                layouts = get_flex_shard_global_layouts(model)
+                grads = {}
+                for name, param in model.named_parameters():
+                    grad = torch.zeros_like(param)
+                    layout = layouts[name]
+                    for global_offsets, local_offsets, sizes in zip(
+                        layout.global_offsets,
+                        layout.local_offsets,
+                        layout.local_sizes,
+                        strict=True,
+                    ):
+                        grad[_slices(local_offsets, sizes)] = full_grads[name][
+                            _slices(global_offsets, sizes)
+                        ]
+                    param.grad = grad
+                    grads[name] = grad.clone()
+                max_norm = 0.1
+                ref_norm = torch.nn.utils.get_total_norm(
+                    list(full_grads.values()), norm_type
+                )
+                norm = clip_grad_norm_(model.parameters(), max_norm, norm_type)
+                self.assertEqual(norm, ref_norm)
+                coef = max_norm / (ref_norm + 1e-6)
+                for name, param in model.named_parameters():
+                    self.assertEqual(param.grad, grads[name] * coef)
+
     @skip_if_lt_x_gpu(2)
-    def test_rejects_outer_layouts(self):
-        # A parameter that is itself a part of a bigger one (tensor parallelism)
-        # needs its norm combined over ranks outside the bucket's mesh
+    def test_outer_layout_needs_its_shard_groups(self):
+        # A part of a bigger parameter whose outer groups are not declared
+        # cannot be combined with the parts of the other outer ranks
         mesh = init_device_mesh(device_type.type, (self.world_size,))
         model = nn.Linear(8, 8, bias=False, device=device_type)
         set_global_layout(
@@ -112,7 +194,7 @@ class TestFlexShardClipGradNorm(FSDPTest):
         )
         flex_shard(model, buckets=[BucketSpec(["*"], per_param_placements, mesh=mesh)])
         model(torch.randn(2, 8, device=device_type)).sum().backward()
-        with self.assertRaisesRegex(NotImplementedError, "outer"):
+        with self.assertRaisesRegex(ValueError, "set_outer_shard_groups"):
             clip_grad_norm_(model.parameters(), 1.0)
 
 

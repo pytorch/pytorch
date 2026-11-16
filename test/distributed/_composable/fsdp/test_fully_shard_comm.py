@@ -1743,6 +1743,29 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     @skip_if_lt_x_gpu(2)
+    def test_set_modules_to_prefetch_empty_list_keeps_default(self):
+        # An empty list sets no explicit prefetch, so each module keeps its
+        # default prefetching, as in FSDP2's internals
+        model, _, inp = self._init_transformer(
+            n_layers=4, reshard_after_forward=True, checkpoint_impl="utils"
+        )
+        model(inp).sum().backward()
+        events: list[EventType] = []
+        with (
+            patch_unshard(self._get_unshard_with_record(events)),
+            patch_reshard(self._get_reshard_with_record(events)),
+            patch_post_backward(self._get_post_backward_with_record(events)),
+        ):
+            model(inp).sum().backward()
+            default_events = list(events)
+            events.clear()
+            for layer in model.layers:
+                layer.set_modules_to_forward_prefetch([])
+                layer.set_modules_to_backward_prefetch([])
+            model(inp).sum().backward()
+        self.assertEqual(events, default_events)
+
+    @skip_if_lt_x_gpu(2)
     def test_set_modules_to_backward_prefetch_inside_ac(self):
         n_layers = 3
         reshard_after_forward = True
