@@ -8,11 +8,9 @@
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.distributed.fsdp._flex_shard import flex_shard, relayout_bucket
-from torch.distributed.fsdp._flex_shard.bucket_storage import (
-    BucketSpec,
-    MixedPrecisionPolicy,
-)
+from torch.distributed.fsdp._flex_shard.bucket_storage import BucketSpec
 from torch.distributed.fsdp._flex_shard.placements.owned import (
     BucketedOwned,
     make_bucketed_owned_full_param_placement_fn,

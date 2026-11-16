@@ -13,13 +13,13 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.distributed.fsdp._flex_shard import (
     BucketSpec,
     flex_shard,
     get_global_layout,
     get_outer_layout,
     GlobalLayout,
-    MixedPrecisionPolicy,
     set_global_layout,
     set_partial_grad_group,
 )

@@ -20,18 +20,9 @@ import torch.distributed.distributed_c10d as c10d
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import (
-    FSDPModule,
-    fully_shard,
-    MixedPrecisionPolicy as FSDPMixedPrecisionPolicy,
-)
-from torch.distributed.fsdp._flex_shard import (
-    BucketSpec,
-    flex_shard,
-    MixedPrecisionPolicy,
-)
-from torch.distributed.fsdp._flex_shard.placements.shard import Shard
-from torch.distributed.tensor import Shard as DTensorShard
+from torch.distributed.fsdp import FSDPModule, fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._flex_shard import BucketSpec, flex_shard
+from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
@@ -147,7 +138,7 @@ def _apply_fsdp2(
     dims = {param: _shard_dim(fqn) for fqn, param in model.named_parameters()}
     fsdp_config = {
         "mesh": mesh,
-        "mp_policy": FSDPMixedPrecisionPolicy(
+        "mp_policy": MixedPrecisionPolicy(
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
             cast_forward_inputs=False,
@@ -164,7 +155,7 @@ def _apply_fsdp2(
             layer,
             **fsdp_config,
             reshard_after_forward=True,
-            shard_placement_fn=lambda param: DTensorShard(dims[param]),
+            shard_placement_fn=lambda param: Shard(dims[param]),
         )
     fully_shard(model, **fsdp_config)
     if divide_factor is not None:
