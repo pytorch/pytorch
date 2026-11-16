@@ -328,7 +328,7 @@ class TestNativeMatmulRowReduction(TestCase):
             "local_xindex_mask)"
         ).run(code)
 
-    # https://github.com/pytorch/pytorch/issues/203499
+    # https://github.com/intel/torch-xpu-ops/issues/6234
     @xfailIf(GPU_TYPE == "xpu" and not Xe2_Or_Later)
     def test_matmul_output_precision(self):
         def f(x, weight):
