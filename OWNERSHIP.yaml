@@ -925,13 +925,50 @@ ownership:
       - /torchgen/
   - name: testing
     labels: ["module: testing"]
-    owners: [pytorch/pytorch-dev-infra]
+    owners: [georgehong, huydhn, jathu]
     section: infra_test
     paths:
-      - /torch/testing/_internal/common_utils.py: [pytorch/pytorch-dev-infra]
+      - /torch/testing/_internal/common_utils.py: [huydhn, georgehong, jathu]
       - /torch/testing/_internal/common_methods_invocations.py
       - /torch/testing/_internal/common_device_type.py
-      - /test/run_test.py: [pytorch/pytorch-dev-infra]
+      - /test/run_test.py: [huydhn, georgehong, jathu]
+      - /tools/testing/: [huydhn, georgehong, jathu]
+  - name: testing_ci
+    labels: ["module: ci", "module: testing"]
+    owners: [georgehong, huydhn, jathu, jeanschmidt]
+    section: infra_test
+    paths:
+      - /.github/actions/download-td-artifacts/: [jeanschmidt, georgehong]
+      - /.github/actions/filter-test-configs/: [georgehong]
+      - /.github/actions/pytest-cache-download/: [georgehong]
+      - /.github/actions/pytest-cache-upload/: [georgehong]
+      - /.github/actions/upload-sccache-stats/: [georgehong, jathu]
+      - /.github/actions/upload-utilization-stats/: [georgehong, jathu]
+      - /.github/scripts/filter_test_configs.py: [georgehong]
+      - /.github/scripts/pytest_cache.py: [georgehong]
+      - /.github/scripts/pytest_caching_utils.py: [georgehong]
+      - /.github/scripts/test_filter_test_configs.py: [georgehong]
+      - /.github/scripts/test_pytest_caching_utils.py: [georgehong]
+      - /.github/workflows/llm_td_retrieval.yml: [jeanschmidt, georgehong]
+      - /.github/workflows/populate-clickhouse-owners.yml: [georgehong, jathu]
+      - /.github/workflows/target-determination-indexer.yml: [jeanschmidt, georgehong]
+      - /.github/workflows/target_determination.yml: [jeanschmidt, georgehong]
+      - /.github/workflows/td-holdout-unstable.yml: [jeanschmidt, georgehong]
+      - /.github/workflows/upload-test-stats-while-running.yml: [georgehong, jathu]
+      - /.github/workflows/upload-test-stats.yml: [georgehong, jathu]
+      - /.github/workflows/upload-torch-dynamo-perf-stats.yml: [georgehong, jathu]
+      - /.github/workflows/upload_test_stats_intermediate.yml: [georgehong, jathu]
+      - /tools/stats/: [georgehong, jathu]
+      - /tools/test/test_upload_stats_lib.py: [georgehong, jathu]
+      - /tools/test/test_upload_test_stats.py: [georgehong, jathu]
+      - /tools/test/heuristics/: [jeanschmidt, georgehong]
+      - /tools/testing/clickhouse.py: [georgehong, jathu]
+      - /tools/testing/do_target_determination_for_s3.py: [jeanschmidt, georgehong]
+      - /tools/testing/target_determination/: [jeanschmidt, georgehong]
+      - /test/torchci/: [huydhn]
+      - /test/torchci/test_populate_clickhouse_owners.py: [georgehong, jathu]
+      - /torch/testing/_internal/torchci/: [georgehong, jathu]
+      - /tools/alerts/: [huydhn]
   - name: higher_order_operators_testing
     labels: ["module: testing", "module: higher order operators"]
     owners: [aorenste, bohnstingl, tugsbayasgalan, ydwu4]
@@ -1709,9 +1746,7 @@ ownership:
       - /test/test_utils.py
       - /test/test_utils_config_module.py
       - /test/test_utils_filelock.py
-      - /test/torchci/
       - /tools/test/
-      - /tools/testing/
       - /torch/_logging/
       - /torch/testing/
       - /torch/utils/benchmark/
