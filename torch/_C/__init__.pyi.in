@@ -2853,6 +2853,7 @@ def _xpu_isCurrentStreamCapturing() -> _bool: ...
 def _set_worker_signal_handlers(
     *arg: Any,
 ) -> None: ...  # THPModule_setWorkerSignalHandlers
+def _set_worker_signal_message_affixes(prefix: str | bytes, suffix: str | bytes) -> None: ...
 def _set_worker_pids(
     key: _int,
     child_pids: tuple[_int, ...],

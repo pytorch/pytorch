@@ -2583,6 +2583,7 @@ PyObject* initModule() {
   PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
 #endif
 
+  ASSERT_TRUE(THPDataLoader_initModule(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
