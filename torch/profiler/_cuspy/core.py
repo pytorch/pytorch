@@ -37,7 +37,7 @@ _PY_PROFILER = torch._C._profiler
 _cuspy_native = _PY_PROFILER._cuspy
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
+    from typing import Self
 
 logger = logging.getLogger(__name__)
 
@@ -433,6 +433,13 @@ class Cuspy:
         """
         if self._subscriber is not None:
             return self._subscriber
+        cuda = torch.version.cuda
+        min_cuda = cupti_python.CUDA_MIN_VERSION
+        if cuda is None or tuple(int(x) for x in cuda.split(".")[:2]) < min_cuda:
+            raise RuntimeError(
+                "Cuspy requires a PyTorch build with CUDA >= "
+                f"{min_cuda[0]}.{min_cuda[1]}; this build reports CUDA {cuda}"
+            )
         version = self._cupti.get_version()
         if version < cupti_python.LIBCUPTI_MIN_VERSION:
             raise RuntimeError(
@@ -1470,11 +1477,11 @@ def enable_hes_early() -> None:
     if rc != cuda_driver.CUresult.CUDA_SUCCESS:
         raise RuntimeError(f"cuInit failed with rc={rc}")
 
-    # Use the direct libcupti call (self._cupti.activity_enable_hw_trace), not
+    # Use the direct libcupti call (pylibcupti().activity_enable_hes), not
     # cupti-python's activity_enable_hw_trace(): after torch is imported, the
     # latter makes subsequent cuptiActivityRegisterCallbacks() fail with
     # CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED, while the direct call works.
-    cupti_python.pylibcupti().activity_enable_hw_trace(True)
+    cupti_python.pylibcupti().activity_enable_hes()
     _hes_enabled = True
 
 

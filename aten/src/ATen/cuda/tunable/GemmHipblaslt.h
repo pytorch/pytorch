@@ -5,14 +5,20 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
+#include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <fmt/printf.h>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+
+#include <mutex>
+#include <set>
 
 #define TORCH_HIPBLASLT_CHECK(EXPR)               \
   do {                                            \
@@ -88,6 +94,12 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
   return static_cast<hipDataType>(500);
+}
+
+// Same as above: a scale factor type, dummy value to satisfy linker.
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e5m3fnu>() {
+  return static_cast<hipDataType>(501);
 }
 
 template <>
@@ -609,7 +621,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         return FAIL;
       }
 
-      void* workspace_buffer = at::cuda::getCUDABlasLtWorkspace();
+      at::cuda::blas::detail::CublasLtWorkspace ltworkspace;
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
             matmul.descriptor(),
@@ -624,8 +636,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
             params->c,
             mat_c,
             &algo_,
-            workspace_buffer,
-            workspace_size,
+            ltworkspace.ptr,
+            ltworkspace.size,
             at::cuda::getCurrentCUDAStream()));
 
       //TORCH_HIPBLASLT_CHECK(hipblasLtMatmulDescDestroy(matmul));
@@ -639,6 +651,48 @@ class HipblasltGemmOp : public Callable<ParamsT> {
     hipblasLtMatmulAlgo_t algo_;
 };
 
+// If hipBLASLt has no kernel library for a device's architecture (e.g.
+// gfx103X), getAllAlgos returns INVALID_VALUE. These track the devices where
+// that happened, so the call is not repeated for each TunableOp instantiation.
+// Not templates, so the state is shared by all of them.
+struct HipBlasLtUnavailableDevices {
+  std::mutex mutex;
+  std::set<c10::DeviceIndex> devices;
+};
+
+inline HipBlasLtUnavailableDevices& GetHipBlasLtUnavailableDevices() {
+  static HipBlasLtUnavailableDevices unavailable;
+  return unavailable;
+}
+
+inline bool IsHipBlasLtUnavailable(c10::DeviceIndex device) {
+  auto& unavailable = GetHipBlasLtUnavailableDevices();
+  std::lock_guard<std::mutex> lock(unavailable.mutex);
+  return unavailable.devices.count(device) != 0;
+}
+
+// Like Context::blasPreferredBackend(), only warn when hipBLASLt was requested
+// explicitly.
+inline void MarkHipBlasLtUnavailable(c10::DeviceIndex device) {
+  {
+    auto& unavailable = GetHipBlasLtUnavailableDevices();
+    std::lock_guard<std::mutex> lock(unavailable.mutex);
+    if (!unavailable.devices.insert(device).second) {
+      return;
+    }
+  }
+  const auto& arch = at::cuda::getDeviceProperties(device)->gcnArchName;
+  TUNABLE_LOG1("hipBLASLt has no kernel library on ", arch,
+      ", skipping hipBLASLt candidates on this device");
+  static const bool requested = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED") == true;
+  if (requested) {
+    TORCH_WARN(
+        "PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED=1, but hipBLASLt has no kernel "
+        "library on ", arch, ". TunableOp only tunes the other backends on "
+        "this device.");
+  }
+}
+
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
 auto GetHipBlasLtTypeStringAndOps() {
   hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
@@ -647,12 +701,12 @@ auto GetHipBlasLtTypeStringAndOps() {
   auto b_datatype = HipDataTypeFor<BT>();
   auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;
 #if ROCM_VERSION == 60400
   // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
   if ((a_datatype == HIP_R_32F || b_datatype == HIP_R_32F || in_out_datatype == HIP_R_32F)
           && (transa_outer == HIPBLAS_OP_T && transb_outer == HIPBLAS_OP_T)) {
-    std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ignore;
-    return ignore;
+    return ret;
   }
 #endif
 
@@ -663,9 +717,29 @@ auto GetHipBlasLtTypeStringAndOps() {
     }
   }
 
-  hipblasLtHandle_t handle;
-  TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
-  TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
+  const auto device = c10::cuda::current_device();
+  if (IsHipBlasLtUnavailable(device)) {
+    return ret;
+  }
+  // getAllAlgos needs a hipBLASLt handle for the current stream. Reuse the
+  // pooled one that HipblasltGemmOp::Call runs on instead of creating and
+  // destroying a private one. A handle cannot be created during stream capture,
+  // so when a GEMM type is first used inside capture and no handle was created
+  // in advance (CUDAGraph::capture_begin does that only where hipBLASLt is
+  // usable), offer no hipBLASLt candidates.
+  cublasLtHandle_t handle = nullptr;
+  if (c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+      c10::cuda::CaptureStatus::None) {
+    handle = at::cuda::getCurrentCUDABlasLtHandle();
+  } else {
+    handle = at::cuda::getCurrentCUDABlasLtHandleIfAvailable();
+    if (handle == nullptr) {
+      TUNABLE_LOG2("stream is being captured and no hipBLASLt handle exists "
+          "for it, skipping hipBLASLt candidates");
+      return ret;
+    }
+  }
+  auto status = hipblaslt_ext::getAllAlgos(handle,
         hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
         transa_outer,
         transb_outer,
@@ -674,11 +748,22 @@ auto GetHipBlasLtTypeStringAndOps() {
         in_out_datatype,
         in_out_datatype,
         computeType,
-        heuristic_result));
-  TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
+        heuristic_result);
+  // INVALID_VALUE means hipBLASLt has no kernel library (see
+  // HipBlasLtUnavailableDevices); a type combination the library does not
+  // cover returns success with no algorithms instead. Offer no hipBLASLt
+  // candidates so the other backends are still tuned. TunableOps are
+  // process-wide statics, so this list is built on whichever device first
+  // uses the op.
+  if (status == HIPBLAS_STATUS_INVALID_VALUE) {
+    MarkHipBlasLtUnavailable(device);
+    return ret;
+  }
+  TORCH_CHECK(status == HIPBLAS_STATUS_SUCCESS,
+              "hipblaslt error: ", hipblasStatusToString(status),
+              " when calling `hipblaslt_ext::getAllAlgos`");
 
   int returned_algo_count = heuristic_result.size();
-  std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;
   for (int i = 0; i < returned_algo_count; i++) {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
