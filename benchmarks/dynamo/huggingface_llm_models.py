@@ -43,8 +43,9 @@ class WhisperBenchmark(Benchmark):
     # Roughly the token count of a transcript of DURATION seconds of speech.
     LABEL_LENGTH = 128
     DECODE_LENGTH = 128
-    # Both registered checkpoints have 448 decoder positions. Reserve the final
-    # generation slot and the decoder start token when selecting sweep models.
+    # Both registered checkpoints have 448 decoder positions: the static cache
+    # holds one fewer, and the decoder start token takes one. Validation uses
+    # this before loading; get_model_and_inputs checks the loaded config.
     MAX_DECODE_LENGTH = 446
 
     @staticmethod
@@ -109,7 +110,7 @@ class WhisperBenchmark(Benchmark):
             inputs["decode_ids"] = torch.randint(
                 model.config.vocab_size, (batch_size, decode_length), device=device
             )
-            return WhisperDecodeModel(model, cache_capacity), inputs
+            return WhisperDecodeModel(model, batch_size, cache_capacity), inputs
 
         return model, inputs
 
@@ -124,38 +125,31 @@ class WhisperEncodeModel(torch.nn.Module):
 
 
 class WhisperDecodeModel(torch.nn.Module):
-    def __init__(self, model, cache_capacity):
+    def __init__(self, model, batch_size, cache_capacity):
         super().__init__()
         self.model = model
+        self.batch_size = batch_size
         self.cache_capacity = cache_capacity
         self.cache = None
         self.encoder_hidden_states = None
 
     def prepare_for_decode(self, input_features, decoder_input_ids):
-        from transformers import EncoderDecoderCache, StaticCache
+        from transformers import EncoderDecoderCache
 
+        if input_features.shape[0] != self.batch_size:
+            raise ValueError(
+                f"input_features must have batch size {self.batch_size}, got "
+                f"{input_features.shape[0]}"
+            )
         config = self.model.config
         if self.cache is None:
-            cache_shape = self.model._get_static_cache_init_shape()
-            if cache_shape is None:
-                raise RuntimeError(
-                    f"{type(self.model).__name__} cannot preallocate a static cache"
-                )
-            num_heads, head_dim = cache_shape
             # The cross-attention cache holds the encoder output.
-            caches = [
-                StaticCache(config=config, max_cache_len=max_cache_len)
-                for max_cache_len in (self.cache_capacity, config.max_source_positions)
-            ]
-            for cache in caches:
-                cache.early_initialization(
-                    batch_size=input_features.shape[0],
-                    num_heads=num_heads,
-                    head_dim=head_dim,
-                    dtype=self.model.dtype,
-                    device=self.model.device,
+            self.cache = EncoderDecoderCache(
+                *(
+                    allocate_static_cache(self.model, config, length, self.batch_size)
+                    for length in (self.cache_capacity, config.max_source_positions)
                 )
-            self.cache = EncoderDecoderCache(*caches)
+            )
         else:
             self.cache.reset()
         # Encode and prefill the start token outside the compiled forward. The
@@ -297,6 +291,24 @@ def load_tensor_parallel_model(model_name, dtype, tp_size):
 CACHE_TRANSFORMERS_VERSION = "5.14.1"
 
 
+def allocate_static_cache(model, config, max_cache_len, batch_size):
+    from transformers import StaticCache
+
+    cache_shape = model._get_static_cache_init_shape()
+    if cache_shape is None:
+        raise RuntimeError(f"{type(model).__name__} cannot preallocate a static cache")
+    num_heads, head_dim = cache_shape
+    cache = StaticCache(config=config, max_cache_len=max_cache_len)
+    cache.early_initialization(
+        batch_size=batch_size,
+        num_heads=num_heads,
+        head_dim=head_dim,
+        dtype=model.dtype,
+        device=model.device,
+    )
+    return cache
+
+
 class TextGenerationCacheModel(torch.nn.Module):
     def __init__(self, model, batch_size, prompt_length, cache_capacity):
         super().__init__()
@@ -315,8 +327,6 @@ class TextGenerationCacheModel(torch.nn.Module):
         return copy.train(self.training)
 
     def prepare_for_prefill(self, input_ids):
-        from transformers import StaticCache
-
         expected_shape = (self.batch_size, self.prompt_length)
         if tuple(input_ids.shape) != expected_shape:
             raise ValueError(
@@ -325,23 +335,9 @@ class TextGenerationCacheModel(torch.nn.Module):
             )
 
         if self.cache is None:
-            cache_shape = self.model._get_static_cache_init_shape()
-            if cache_shape is None:
-                raise RuntimeError(
-                    f"{type(self.model).__name__} cannot preallocate a static cache"
-                )
-            num_heads, head_dim = cache_shape
             config = self.model.config.get_text_config(decoder=True)
-            self.cache = StaticCache(
-                config=config,
-                max_cache_len=self.cache_capacity,
-            )
-            self.cache.early_initialization(
-                batch_size=self.batch_size,
-                num_heads=num_heads,
-                head_dim=head_dim,
-                dtype=self.model.dtype,
-                device=self.model.device,
+            self.cache = allocate_static_cache(
+                self.model, config, self.cache_capacity, self.batch_size
             )
             if any(self.cache.is_linear):
                 # KV early initialization skips the hybrid cache's linear layers.
@@ -414,11 +410,11 @@ HF_LLM_MODELS: dict[str, Benchmark] = {
     "google/gemma-2-2b": TextGenerationBenchmark,
     "google/gemma-3-4b-it": TextGenerationBenchmark,
     "openai/whisper-tiny": WhisperBenchmark,
-    "openai/whisper-large-v3-turbo": WhisperBenchmark,
     "Qwen/Qwen3-0.6B": TextGenerationBenchmark,
     "Qwen/Qwen3.5-0.8B": TextGenerationBenchmark,
     "Qwen/Qwen2.5-0.5B-Instruct": TextGenerationBenchmark,
     "google/gemma-3-1b-it": TextGenerationBenchmark,
+    "openai/whisper-large-v3-turbo": WhisperBenchmark,
     "mistralai/Mistral-7B-Instruct-v0.3": TextGenerationBenchmark,
     "openai/gpt-oss-20b": TextGenerationBenchmark,
 }
@@ -436,8 +432,13 @@ def prefill_forward(model, example_inputs, collect_outputs=True):
 
 def setup_decode(model, example_inputs):
     torch.compiler.cudagraph_mark_step_begin()
-    prompt = {k: v for k, v in example_inputs.items() if k != "decode_ids"}
-    model.prepare_for_decode(**prompt)
+    if "input_features" in example_inputs:
+        # Whisper's prompt is audio and the decoder start token.
+        model.prepare_for_decode(
+            example_inputs["input_features"], example_inputs["decoder_input_ids"]
+        )
+    else:
+        model.prepare_for_decode(example_inputs["input_ids"])
 
 
 def decode_forward(model, example_inputs, collect_outputs=True):
@@ -508,7 +509,8 @@ INFERENCE_PHASES = {
 }
 
 
-# gemma-3-1b-it is excluded: its single KV head cannot be sharded.
+# Models benchmarked with tensor parallelism in both phases. The Gemma models
+# have no decode benchmark; gemma-3-1b-it's single KV head cannot be sharded either.
 TP_MODELS = {
     "meta-llama/Llama-3.2-1B",
     "Qwen/Qwen2.5-0.5B-Instruct",

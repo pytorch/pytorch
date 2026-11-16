@@ -18,8 +18,10 @@ try:
         download_retry_decorator,
         load_yaml_file,
         main,
+        parse_inductor_config,
         reset_rng_state,
         should_diff_branch,
+        tensor_parallel_backend,
     )
 except ImportError:
     from common import (
@@ -28,8 +30,10 @@ except ImportError:
         download_retry_decorator,
         load_yaml_file,
         main,
+        parse_inductor_config,
         reset_rng_state,
         should_diff_branch,
+        tensor_parallel_backend,
     )
 
 from packaging.version import Version
@@ -389,6 +393,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
 
+    @property
+    def skip_not_suitable_for_training_models(self):
+        return self._skip["test"]["training"]
+
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in [
             "GPT2ForSequenceClassification",
@@ -449,8 +457,9 @@ class HuggingfaceRunner(BenchmarkRunner):
             )
         if mode == "generate":
             return
-        installed = importlib.metadata.version("transformers")
-        if Version(installed) != Version(CACHE_TRANSFORMERS_VERSION):
+        installed = Version(importlib.metadata.version("transformers"))
+        # Encode uses no cache.
+        if mode != "encode" and installed != Version(CACHE_TRANSFORMERS_VERSION):
             raise ValueError(
                 f"--hf-inference-mode={mode} requires "
                 f"transformers=={CACHE_TRANSFORMERS_VERSION}, found {installed}; "
@@ -485,6 +494,12 @@ class HuggingfaceRunner(BenchmarkRunner):
         if whisper and args.prompt_length is not None:
             raise ValueError(
                 f"--prompt-length does not apply to {args.only}, whose prompt is audio"
+            )
+        max_decode_length = WhisperBenchmark.MAX_DECODE_LENGTH
+        if whisper and (args.decode_length or 0) > max_decode_length:
+            raise ValueError(
+                f"--decode-length must be between 1 and {max_decode_length} for "
+                f"{args.only}, got {args.decode_length}"
             )
 
         unsupported = []
@@ -537,6 +552,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 "save_model_outputs_to",
                 "compare_model_outputs_with",
                 "minify",
+                "log_operator_inputs",
             )
             if getattr(args, flag)
         ]
@@ -548,10 +564,8 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError("--tp-size does not support " + ", ".join(unsupported))
         cudagraphs = False
         if args.backend == "inductor":
-            for option in args.inductor_config or ():
-                key, _, value = option.partition("=")
-                if key == "triton.cudagraphs":
-                    cudagraphs = value in ("1", "True")
+            config = parse_inductor_config(args.inductor_config)
+            cudagraphs = config.get("triton.cudagraphs", False)
             if args.inductor:
                 options = torch._inductor.list_mode_options(
                     args.inductor_compile_mode or "default"
@@ -564,23 +578,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             )
         if not (args.bfloat16 or args.float16 or args.float32):
             raise ValueError("--tp-size requires --bfloat16, --float16, or --float32")
-        devices = args.devices or (["cuda"] if torch.cuda.is_available() else ["cpu"])
-        if devices == ["cpu"] and torch.accelerator.current_accelerator() is not None:
-            raise ValueError(
-                "CPU tensor parallelism requires a PyTorch build without accelerator "
-                "support, since Hugging Face places TP shards on the accelerator"
-            )
-        if devices == ["cpu"] and args.backend not in ("eager", "aot_eager"):
+        cpu = tensor_parallel_backend(args) == "gloo"
+        if cpu and args.backend not in ("eager", "aot_eager"):
             raise ValueError(
                 "CPU tensor parallelism supports only --backend=eager or "
-                "--backend=aot_eager. Inductor TP requires CUDA/NCCL because "
-                "concurrent Gloo all-gathers can corrupt memory."
+                "--backend=aot_eager; Inductor TP requires CUDA/NCCL"
             )
-        # Resolve defaults so that every output row records its workload.
-        if args.prompt_length is None:
-            args.prompt_length = TextGenerationBenchmark.INPUT_LENGTH
-        if args.hf_inference_mode == "decode" and args.decode_length is None:
-            args.decode_length = TextGenerationBenchmark.DECODE_LENGTH
 
     def get_workload(self, example_inputs, *, is_performance=False):
         if self.args.hf_inference_mode != "generate":
@@ -598,7 +601,9 @@ class HuggingfaceRunner(BenchmarkRunner):
                 measure_iters=1,
                 stabilization_iters=4,
             )
-        if self.hf_llm and is_performance:
+        # Training times forward and backward, as for other models. Only Whisper
+        # supplies labels; text-generation models have no loss to backpropagate.
+        if self.hf_llm and is_performance and not self.args.training:
             return BenchmarkWorkload(
                 self.generate,
                 compile_forward=True,
@@ -618,6 +623,22 @@ class HuggingfaceRunner(BenchmarkRunner):
             "phase": self.args.hf_inference_mode,
             "prompt_length": prompt.shape[1] if prompt is not None else None,
             "decode_length": decode.shape[1] if decode is not None else 0,
+        }
+
+    def get_requested_metadata(self):
+        mode = self.args.hf_inference_mode
+        if mode == "generate":
+            return {}
+        decode_length = 0
+        if mode == "decode":
+            decode_length = (
+                self.args.decode_length or TextGenerationBenchmark.DECODE_LENGTH
+            )
+        return {
+            "phase": mode,
+            "prompt_length": self.args.prompt_length
+            or TextGenerationBenchmark.INPUT_LENGTH,
+            "decode_length": decode_length,
         }
 
     def deepcopy_model(self, model):
@@ -672,14 +693,6 @@ class HuggingfaceRunner(BenchmarkRunner):
             mode = self.args.hf_inference_mode
             decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
             if benchmark_cls is WhisperBenchmark:
-                if mode == "decode":
-                    config = self._download_config(model_name)
-                    max_decode_length = config.max_target_positions - 2
-                    if not 1 <= decode_length <= max_decode_length:
-                        raise ValueError(
-                            f"--decode-length must be between 1 and {max_decode_length}, "
-                            f"got {decode_length}"
-                        )
                 model, example_inputs = WhisperBenchmark.get_model_and_inputs(
                     model_name,
                     device,
@@ -727,8 +740,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 )
             if mode == "generate":
                 model.generation_config.disable_compile = True
-            # Training times forward and backward as for other models, not generate().
-            self.hf_llm = not is_training
+            self.hf_llm = True
 
         else:
             self.hf_llm = False
@@ -776,18 +788,20 @@ class HuggingfaceRunner(BenchmarkRunner):
             model_names &= INFERENCE_PHASES[args.hf_inference_mode].models
         if args.tp_size > 1:
             model_names &= TP_MODELS
-        if args.hf_inference_mode == "decode" and (
-            args.prompt_length is not None
-            or (
-                args.decode_length is not None
-                and args.decode_length > WhisperBenchmark.MAX_DECODE_LENGTH
-            )
-        ):
-            model_names -= {
+        if args.hf_inference_mode == "decode":
+            whisper = {
                 name
                 for name, benchmark in HF_LLM_MODELS.items()
                 if benchmark is WhisperBenchmark
             }
+            reason = None
+            if args.prompt_length is not None:
+                reason = "--prompt-length"
+            elif (args.decode_length or 0) > WhisperBenchmark.MAX_DECODE_LENGTH:
+                reason = f"--decode-length above {WhisperBenchmark.MAX_DECODE_LENGTH}"
+            if reason and (excluded := model_names & whisper):
+                log.warning("Skipping %s: %s", ", ".join(sorted(excluded)), reason)
+                model_names -= whisper
         model_names = sorted(model_names)
 
         start, end = self.get_benchmark_indices(len(model_names))
