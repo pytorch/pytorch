@@ -47,8 +47,8 @@ else
     # VS15INSTALLDIR via vswhere.
     cmd /c "windows\\internal\\vc_install_helper.bat"
 
-    # shellcheck source=./windows/set_desired_python.sh
-    source ./windows/set_desired_python.sh
+    # shellcheck source=../wheel/windows/set_desired_python.sh
+    source ../wheel/windows/set_desired_python.sh
 
     ENV_FILE="$(mktemp)"
     trap 'rm -f "$ENV_FILE"' EXIT
@@ -56,16 +56,16 @@ else
     # Use the interpreter set_desired_python.sh selected, not a bare `python`
     # (which resolves to the regular exe even for a free-threaded build), so
     # the pip deps land in it and the wheel's ABI tag matches DESIRED_PYTHON.
-    "$DESIRED_PYTHON_EXE" ./windows/build_env_setup.py --env-out "$ENV_FILE"
+    "$DESIRED_PYTHON_EXE" ../wheel/windows/build_env_setup.py --env-out "$ENV_FILE"
     # shellcheck source=/dev/null
     source "$ENV_FILE"
 
-    "$DESIRED_PYTHON_EXE" ./windows/build_install_deps.py --env-out "$ENV_FILE"
+    "$DESIRED_PYTHON_EXE" ../wheel/windows/build_install_deps.py --env-out "$ENV_FILE"
     # shellcheck source=/dev/null
     source "$ENV_FILE"
 
     cd "$PYTORCH_ROOT"
-    "$DESIRED_PYTHON_EXE" "$PYTORCH_ROOT/.ci/pytorch/windows/build_wheel.py" "$PYTORCH_FINAL_PACKAGE_DIR"
+    "$DESIRED_PYTHON_EXE" "$PYTORCH_ROOT/.ci/wheel/windows/build_wheel.py" "$PYTORCH_FINAL_PACKAGE_DIR"
 fi
 
 echo "Free space on filesystem after build:"

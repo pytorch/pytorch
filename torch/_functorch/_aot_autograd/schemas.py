@@ -532,7 +532,12 @@ class ViewAndMutationMeta:
     # raised
     deterministic: bool | None = None
 
-    # Keeps track of which input indices store parameters (which we will treat as static)
+    # Positions of the flat inputs that store parameters (which we will treat as
+    # static). On the metadata of the traced graph (whose inputs are unwrapped
+    # when there are tensor-subclass inputs), the positions also count the
+    # effect tokens while they are inputs: from graph capture until
+    # unlift_tokens, or for good if the tokens are kept. See
+    # Note [Side-Effectful Tokens in AOTAutograd].
     static_input_indices: list[int] = field(default_factory=list)
 
     # Input paths that held AsyncCollectiveTensors at compile time. A path is
@@ -586,6 +591,13 @@ class ViewAndMutationMeta:
 
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
+
+    # Whether the compiled region runs with the eager saved tensors hooks
+    # disabled because inlineable hooks were inlined into the graphs. Recorded
+    # when the joint graph is partitioned, since a wrapper rebuilt from a cache
+    # entry may run outside the hooks context the graph was compiled under.
+    # None for entries that predate the field.
+    disable_saved_tensors_hooks: bool | None = None
 
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
@@ -998,6 +1010,9 @@ class GraphSignature:
     input_tokens: list[GraphInputName]
     output_tokens: list[GraphOutputName]
 
+    # Input mutations that occur exclusively in backward stay in the graph.
+    inputs_mutated_in_backward: list[GraphInputName] = field(default_factory=list)
+
     @classmethod
     def from_tracing_metadata(
         cls,
@@ -1058,14 +1073,24 @@ class GraphSignature:
 
         names = [*input_tokens, *parameters, *buffers, *user_inputs]
         mutations: list[str] = []
+        backward_mutation_indices = view_mutation_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+        inputs_mutated_in_backward = [
+            graph_inputs[num_tokens + idx] for idx in backward_mutation_indices
+        ]
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
+            if (
+                trace_joint
+                and idx < len(parameters)
+                and (input_info.mutates_data or idx in backward_mutation_indices)
+            ):
+                raise RuntimeError(
+                    "Mutating module parameters while exporting a joint "
+                    "forward/backward graph is not supported. Only buffers "
+                    "can be mutated as module state. If this state does "
+                    "not need gradients, register it as a buffer instead. "
+                    f"Found mutation on parameter {parameters[idx]!r}."
+                )
             if input_info.mutates_data:
-                if trace_joint:
-                    # Only buffers can be mutated, not parameters
-                    if idx < len(parameters):
-                        raise AssertionError(
-                            f"expected idx ({idx}) >= len(parameters) ({len(parameters)}) when tracing joint"
-                        )
                 mutations.append(names[idx + num_tokens])
 
         if len(mutations) != view_mutation_metadata.num_mutated_inp_runtime_indices:
@@ -1118,6 +1143,7 @@ class GraphSignature:
             inputs_to_buffers=inputs_to_buffers,  # type: ignore[arg-type]
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
             user_inputs_to_mutate=user_inputs_to_mutate,
+            inputs_mutated_in_backward=inputs_mutated_in_backward,  # type: ignore[arg-type]
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
             parameters_to_mutate=parameters_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
