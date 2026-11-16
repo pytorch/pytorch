@@ -5,7 +5,9 @@ import pkgutil
 
 import torch
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     HardwareClassification,
+    instantiate_parametrized_tests,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -28,6 +30,7 @@ do_imports()
 
 
 @skipIfTorchDynamo("not applicable")
+@instantiate_parametrized_tests
 class TestHOPInfra(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -125,17 +128,14 @@ class TestHOPInfra(TestCase):
             )
             self.assertEqual(id(hop), id(copied_hop))
 
-    def test_triton_kernel_wrapper_functional_fake_tensor_nested_kwargs(self):
+    @fake_tensor_modes
+    def test_triton_kernel_wrapper_functional_fake_tensor_nested_kwargs(self, mode_cls):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional,
         )
-        from torch._subclasses.fake_tensor import (
-            FakeTensorMode,
-            is_fake_tensor,
-            maybe_get_fake_mode,
-        )
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 
-        mode = FakeTensorMode()
+        mode = mode_cls()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
@@ -156,13 +156,14 @@ class TestHOPInfra(TestCase):
         self.assertEqual(out["out_ptr"].size(), fake_output.size())
         self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
 
-    def test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs(self):
+    @fake_tensor_modes
+    def test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs(self, mode_cls):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
         )
-        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        mode = FakeTensorMode()
+        mode = mode_cls()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
