@@ -6,6 +6,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TemporaryDirectoryName,
     TestCase,
@@ -18,6 +19,8 @@ from torch.utils._content_store import (
 
 
 class TestContentStore(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic(self, device):
         # setup test data
         x = torch.randn(4, device=device)
