@@ -4072,6 +4072,15 @@ class CUDAScaledMainLoopSoftwareScalingTemplateConfigHeuristic(
         configs = [c for c in configs if 128 % c.block_k == 0]
         return super()._filter_configs(configs)
 
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        # Like ScaledMMConfigMixin._valid: Triton's fp8 dot needs K > 16, and
+        # tcgen05 fp8 MMA (this template only runs on datacenter Blackwell)
+        # needs K >= 32.
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for scaled MM")
+        _, _, k = kernel_inputs.mnk_symbolic()
+        return not V.graph.sizevars.guard_or_false(sympy.Lt(k, 32))
+
 
 @register_template_heuristic(
     mm_plus_mm_template.uid,

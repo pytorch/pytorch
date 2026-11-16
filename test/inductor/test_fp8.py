@@ -1768,7 +1768,7 @@ class TestFP8Lowering(TestCase):
             ((1536, 1280, 4096), "native"),
             ((1282, 1153, 4208), "native"),
             ((2048, 1024, 4096), "native"),
-            # partial 128-row tiles and a single K block
+            # partial 128-row tiles
             ((16, 256, 256), "native"),
             ((65, 321, 4208), "native"),
             # BLOCK_K=256 over 33 K blocks: the last scale tile is half out of bounds
@@ -1781,6 +1781,8 @@ class TestFP8Lowering(TestCase):
             ((65, 321, 128), "software"),
             ((65, 321, 4208), "software"),
             ((1536, 1280, 384), "software"),
+            # a single K block; 128x256 tiles exceed tensor memory at this K
+            ((16, 256, 128), "native_bn128"),
         ),
     )
     @parametrize("host_side_tma", (False, True))
@@ -1809,6 +1811,8 @@ class TestFP8Lowering(TestCase):
             # eager rejects N % 16 != 0 with a ValueError, so no ATen choice
             ((258, 321, 400), "software"),
             ((258, 321, 400), "autotune"),
+            # K < 32: tcgen05 fp8 MMA needs K >= 32, so no software template
+            ((64, 256, 16), "autotune"),
         ),
     )
     def test_k128_ue8m0_blockwise_scaling_sm100_default_backends(
@@ -1824,7 +1828,25 @@ class TestFP8Lowering(TestCase):
         )
         _, N, K = shape
         self.assertEqual("_scaled_mm_v2" in names, N % 16 == 0 and K % 16 == 0, names)
-        self.assertTrue(any("main_loop_sw_scaled_mm_" in name for name in names), names)
+        self.assertEqual(
+            any("main_loop_sw_scaled_mm_" in name for name in names), K >= 32, names
+        )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("shape", ((1536, 1280, 4096), (16, 256, 256)))
+    def test_k128_ue8m0_blockwise_scaling_sm100_dynamic_shapes(self, shape, device):
+        # With dynamic N and K the ATen choice must still be offered: the
+        # multiple-of-16 gate guards on the sizes instead of needing them static.
+        self._skip_without_eager_mnk4(device)
+        names = self._check_k128_ue8m0_blockwise_scaling(
+            device, shape, "aten", backends="ATEN,TRITON", dynamic=True
+        )
+        self.assertIn("_scaled_mm_v2", names)
 
     def _skip_without_eager_mnk4(self, device):
         # Eager packed MN x K4 scaling needs SM10.x/11.x and cuBLASLt >= 13.8.1.
@@ -1896,12 +1918,15 @@ class TestFP8Lowering(TestCase):
         output_dtype=torch.bfloat16,
         nt_mats=False,
         persistent_tma=True,
+        dynamic=False,
     ):
         """Compile the K128 UE8M0 scaled_mm, keep only the candidates for
         ``path`` (``"autotune"`` keeps all of them), check the result against an
         fp32 reference, and return the names of all candidates offered."""
         from torch._inductor.select_algorithm import (
+            add_feedback_saver,
             add_preprocessing_fn,
+            clear_feedback_savers,
             clear_preprocessing_fns,
         )
 
@@ -1929,8 +1954,18 @@ class TestFP8Lowering(TestCase):
             ).to(torch.uint8)
             if include_nan:
                 codes[0, 0] = 255
+            # Pack like to_mnk4, but with NaN (0xFF) in the padding, which no
+            # kernel may apply: rows past `outer` and K blocks past K.
+            padded = torch.full(
+                (4 * ceil_div(outer, 4), 4 * ceil_div(k_blocks, 4)),
+                255,
+                dtype=torch.uint8,
+                device=device,
+            )
+            padded[:outer, :k_blocks] = codes
+            packed = padded.reshape(padded.shape[0], -1, 4).permute(1, 0, 2)
             values = codes.view(torch.float8_e8m0fnu)
-            return to_mnk4(values.float()), values
+            return packed.contiguous().flatten().view(torch.float8_e8m0fnu), values
 
         scale_a, scale_a_values = make_scale(M, 7, 124, include_nan=True)
         scale_b, scale_b_values = make_scale(N, 5, 125)
@@ -1981,6 +2016,11 @@ class TestFP8Lowering(TestCase):
                     "BLOCK_K=256",
                     "num_stages=3, num_warps=4",
                 ),
+                "native_bn128": (
+                    "BLOCK_M=128, BLOCK_N=128",
+                    "BLOCK_K=128",
+                    "num_stages=4, num_warps=4",
+                ),
             }[path]
         elif path == "software":
             template_name = "main_loop_sw_scaled_mm_"
@@ -2014,8 +2054,16 @@ class TestFP8Lowering(TestCase):
             self.assertEqual(len(forced), 1, choice_records)
             return forced
 
+        aten_timings = []
+
+        def record_aten_timing(timings, *args):
+            aten_timings.extend(
+                t for choice, t in timings.items() if choice.name == "_scaled_mm_v2"
+            )
+
         torch._dynamo.reset()
         add_preprocessing_fn(record_and_keep_k128_ue8m0)
+        add_feedback_saver(record_aten_timing)
         try:
             with config.patch(
                 {
@@ -2029,7 +2077,9 @@ class TestFP8Lowering(TestCase):
                 }
             ):
                 actual, (code,) = run_and_get_code(
-                    torch.compile(fn, backend="inductor", fullgraph=True),
+                    torch.compile(
+                        fn, backend="inductor", fullgraph=True, dynamic=dynamic
+                    ),
                     a,
                     b,
                     scale_a,
@@ -2037,8 +2087,18 @@ class TestFP8Lowering(TestCase):
                 )
         finally:
             clear_preprocessing_fns(clear_defaults=False)
+            clear_feedback_savers()
 
         self.assertEqual(actual, expected)
+        if (
+            path == "autotune"
+            and len(choice_records) > 1
+            and any(name == "_scaled_mm_v2" for name, _ in choice_records)
+        ):
+            # autotuning turns a failing benchmark into an inf timing; make sure
+            # cuBLASLt was really timed (a single choice is not benchmarked)
+            self.assertTrue(aten_timings, choice_records)
+            self.assertTrue(all(t < float("inf") for t in aten_timings), aten_timings)
         if native:
             # the native block-scaled MMA reads the packed scales itself, so no
             # scale re-layout kernel runs first

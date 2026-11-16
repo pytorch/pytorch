@@ -1587,10 +1587,12 @@ def scaled_mm_v2_constraint(
 L.add_layout_constraint(aten._scaled_mm_v2, scaled_mm_v2_constraint)
 
 
-# Inductor has no template or extern choice that understands swizzled scale
-# layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
-# is False because this handler is invoked manually from the lowering below, not
-# registered as the op's global fallback.
+# Apart from BlockWise1x128 with packed MN x K4 UE8M0 scales on datacenter
+# Blackwell (_tuned_blackwell_main_loop_scaled_mm), Inductor has no template or
+# extern choice that understands swizzled scale layouts for _scaled_mm_v2; defer
+# those to the eager op. add_to_fallback_set is False because this handler is
+# invoked manually from the lowering below, not registered as the op's global
+# fallback.
 scaled_mm_v2_fallback = fallback_handler(
     aten._scaled_mm_v2.default, add_to_fallback_set=False
 )
@@ -1601,6 +1603,10 @@ def _is_blackwell_main_loop_scaled_mm(
 ) -> bool:
     # BlockWise1x128 with UE8M0 scales in cuBLASLt's packed MN x K4 layout, the
     # eager contract on Blackwell, maps onto tcgen05 block-scaled MMA.
+    # Eager also requires N and K to be multiples of 16 and raises ValueError
+    # otherwise. The Triton templates do not need that, so under max-autotune
+    # with the Triton backend such shapes compile and run instead of raising;
+    # only the ATen choice is gated on it.
     return (
         len(recipe_a) == len(recipe_b) == 1
         and recipe_a[0] == recipe_b[0] == ScalingType.BlockWise1x128.value
@@ -1627,11 +1633,14 @@ def _tuned_blackwell_main_loop_scaled_mm(
     swizzle_a: int,
     swizzle_b: int,
 ):
-    """SM100 lowering for BlockWise1x128 UE8M0 scales in the packed MN x K4
-    layout. Autotunes the configured backends (the eager cuBLASLt op and the
-    Triton templates) over the same inputs. Returns None when no Triton
-    template applies, e.g. without max-autotune, so the caller runs the eager
-    op as it would without this lowering."""
+    """Datacenter Blackwell (SM10.x/SM11.x) lowering for BlockWise1x128 UE8M0
+    scales in the packed MN x K4 layout. Autotunes the configured backends (the
+    eager cuBLASLt op and the Triton templates) over the same inputs. Returns
+    None, so the caller runs the eager op as it would without this lowering,
+    when the Triton templates cannot apply (e.g. without max-autotune), when
+    whether the ATen choice applies cannot be decided, or when no choice is
+    left. If the Triton heuristics produce no configs, the ATen choice alone
+    is selected."""
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
@@ -1659,16 +1668,20 @@ def _tuned_blackwell_main_loop_scaled_mm(
         or not use_triton_template(layout)
     ):
         return None
-    counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
-    log.info(
-        "Tuned aten._scaled_mm_v2.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
-        m,
-        n,
-        k,
-        mat_a.get_dtype(),
-        mat_b.get_dtype(),
-        layout,
-    )
+    # Eager rejects N or K that is not a multiple of 16 with a ValueError, which
+    # autotuning would not skip, so the ATen choice needs both to be. Guard on it
+    # for dynamic sizes. If it cannot be decided (unbacked sizes), run the eager
+    # op rather than autotune without cuBLASLt. An unsupported device or
+    # cuBLASLt (< 13.8.1) raises NotImplementedError, which autotuning skips like
+    # a failed choice.
+    offer_aten = False
+    if use_aten_gemm_kernels():
+        multiple_of_16 = [sympy.Eq(sympy.Mod(dim, 16), 0) for dim in (n, k)]
+        offer_aten = all(V.graph.sizevars.guard_or_false(e) for e in multiple_of_16)
+        if not offer_aten and all(
+            V.graph.sizevars.guard_or_true(e) for e in multiple_of_16
+        ):
+            return None
     name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
     # Every choice reads the packed scales as eager does, so autotuning times
@@ -1679,12 +1692,7 @@ def _tuned_blackwell_main_loop_scaled_mm(
     )
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides: dict[str, dict[str, Any]] = {}
-    # Eager rejects N or K that is not a multiple of 16 with a ValueError, which
-    # autotuning would not skip. An unsupported device or cuBLASLt (< 13.8.1)
-    # raises NotImplementedError, which autotuning skips like a failed choice.
-    if use_aten_gemm_kernels() and all(
-        V.graph.sizevars.statically_known_multiple_of(dim, 16) for dim in (n, k)
-    ):
+    if offer_aten:
         templates_to_use.append(aten__fp8_mm_v2)
         kwarg_overrides[aten__fp8_mm_v2.uid] = dict(
             recipe_a=recipe_a,
@@ -1707,12 +1715,26 @@ def _tuned_blackwell_main_loop_scaled_mm(
     )
     if not choices:
         return None
+    counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm_v2.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
     select_kwargs = {}
-    if aten__fp8_mm_v2 in templates_to_use:
+    if offer_aten:
         # The ATen choice builds a FallbackKernel, which needs the lowering
         # context and adds two operations (the kernel and its MultiOutput), so
         # the scheduler cannot finalize it as a deferred multi-template choice.
         # Select during lowering instead.
+        # TODO: let the scheduler finalize FallbackKernel-based extern choices
+        # (the general _scaled_mm_v2 path offers the same aten__fp8_mm_v2), then
+        # drop this so the pick between cuBLASLt and Triton accounts for
+        # epilogue fusion as it does for mm.
         select_kwargs["return_multi_template"] = False
     node, _ = autotune_select_algorithm(
         name, choices, kernel_inputs.nodes(), layout, **select_kwargs
