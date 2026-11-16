@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/RangeUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/arange_native.h>
@@ -10,9 +11,11 @@
 #include <ATen/ops/logspace_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/range_native.h>
+#include <c10/util/safe_conv.h>
 #include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace at::native {
@@ -25,16 +28,29 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace {
 
+// thread_position_in_grid is 32-bit, so dispatch at most 2^31 threads at a time;
+// bind_base passes each chunk's first element index to the kernel.
+template <typename F>
+void dispatch_1d_chunks(id<MTLComputeCommandEncoder> encoder,
+                        id<MTLComputePipelineState> pso,
+                        int64_t numel,
+                        F bind_base) {
+  constexpr int64_t max_chunk = int64_t(1) << 31;
+  for (int64_t base = 0; base < numel; base += max_chunk) {
+    bind_base(base);
+    mps::mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(std::min(max_chunk, numel - base)));
+  }
+}
+
 void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& result) {
   using namespace mps;
   const auto steps = result.numel();
   const auto tname = scalarToMetalTypeString(result);
   const bool is_int = isIntegralType(result.scalar_type(), /*includeBool=*/false);
   auto stream = getCurrentMPSStream();
-  auto encoder = stream->commandEncoder();
 
   // Binds result and {start, step}: int64 for integer dtypes, float otherwise.
-  const auto bind_start_step = [&] {
+  const auto bind_start_step = [&](id<MTLComputeCommandEncoder> encoder) {
     if (is_int) {
       mtl_setArgs(encoder, result, std::array<int64_t, 2>{start.to<int64_t>(), step.to<int64_t>()});
     } else {
@@ -45,18 +61,21 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
-    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    const auto use32 = std::in_range<int32_t>(std::max<int64_t>(steps, (steps - 1) * abs_stride));
     auto pso = lib.getPipelineStateForFunc("arange_" + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        bind_start_step();
+        bind_start_step(encoder);
         if (use32) {
-          mtl_setArgs<2>(encoder, static_cast<int32_t>(stride));
+          mtl_setArgs<2>(encoder, std::array<int32_t, 2>{c10::safe_conv<int32_t>(stride, "int32_t"), 0});
+          mtl_dispatch1DJob(encoder, pso, steps);
         } else {
-          mtl_setArgs<2>(encoder, static_cast<int64_t>(stride));
+          dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
+            mtl_setArgs<2>(encoder, std::array<int64_t, 2>{stride, base});
+          });
         }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
       }
     });
   } else {
@@ -67,10 +86,11 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
     const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        bind_start_step();
+        bind_start_step(encoder);
         mtl_setArgs<2>(encoder, ndim, sizes, strides);
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) { mtl_setArgs<5>(encoder, base); });
       }
     });
   }
@@ -200,34 +220,33 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   }
 
   auto stream = getCurrentMPSStream();
-  auto encoder = stream->commandEncoder();
   const auto tname = scalarToMetalTypeString(result);
   const auto kernel_prefix = use_integral_kernel ? "linspace_integral_" : "linspace_";
 
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
-    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    const auto use32 = std::in_range<int32_t>(std::max<int64_t>(steps, (steps - 1) * abs_stride));
     auto pso = lib.getPipelineStateForFunc(kernel_prefix + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        if (use32) {
-          std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
-          if (use_integral_kernel) {
-            mtl_setArgs(encoder, result, integral_params, p);
-          } else {
-            mtl_setArgs(encoder, result, vals, p);
-          }
+        if (use_integral_kernel) {
+          mtl_setArgs(encoder, result, integral_params);
         } else {
-          std::array<int64_t, 2> p{steps, stride};
-          if (use_integral_kernel) {
-            mtl_setArgs(encoder, result, integral_params, p);
-          } else {
-            mtl_setArgs(encoder, result, vals, p);
-          }
+          mtl_setArgs(encoder, result, vals);
         }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        if (use32) {
+          const c10::metal::vec3<int32_t> p{
+              c10::safe_conv<int32_t>(steps, "int32_t"), c10::safe_conv<int32_t>(stride, "int32_t"), 0};
+          mtl_setArgs<2>(encoder, p);
+          mtl_dispatch1DJob(encoder, pso, steps);
+        } else {
+          dispatch_1d_chunks(encoder, pso, steps, [&](int64_t base) {
+            mtl_setArgs<2>(encoder, c10::metal::vec3<int64_t>{steps, stride, base});
+          });
+        }
       }
     });
   } else {
@@ -237,16 +256,18 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     // offset_from_thread_index treats dim 0 as innermost; pass reversed.
     const std::vector<int64_t> sizes(result.sizes().rbegin(), result.sizes().rend());
     const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
-    const auto steps32 = static_cast<uint32_t>(steps);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
         if (use_integral_kernel) {
-          mtl_setArgs(encoder, result, integral_params, steps32, ndim, sizes, strides);
+          mtl_setArgs(encoder, result, integral_params);
         } else {
-          mtl_setArgs(encoder, result, vals, steps32, ndim, sizes, strides);
+          mtl_setArgs(encoder, result, vals);
         }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        mtl_setArgs<3>(encoder, ndim, sizes, strides);
+        dispatch_1d_chunks(
+            encoder, pso, steps, [&](int64_t base) { mtl_setArgs<2>(encoder, std::array<int64_t, 2>{steps, base}); });
       }
     });
   }
@@ -287,24 +308,27 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   const std::array<float, 4> vals{s, (e - s) / static_cast<float>(steps - 1), e, static_cast<float>(base)};
 
   auto stream = getCurrentMPSStream();
-  auto encoder = stream->commandEncoder();
   const auto tname = scalarToMetalTypeString(result);
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
-    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    const auto use32 = std::in_range<int32_t>(std::max<int64_t>(steps, (steps - 1) * abs_stride));
     auto pso = lib.getPipelineStateForFunc("logspace_" + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, result, vals);
         if (use32) {
-          std::array<int32_t, 2> p{int32_t(steps), int32_t(stride)};
-          mtl_setArgs(encoder, result, vals, p);
+          const c10::metal::vec3<int32_t> p{
+              c10::safe_conv<int32_t>(steps, "int32_t"), c10::safe_conv<int32_t>(stride, "int32_t"), 0};
+          mtl_setArgs<2>(encoder, p);
+          mtl_dispatch1DJob(encoder, pso, steps);
         } else {
-          std::array<int64_t, 2> p{steps, stride};
-          mtl_setArgs(encoder, result, vals, p);
+          dispatch_1d_chunks(encoder, pso, steps, [&](int64_t first) {
+            mtl_setArgs<2>(encoder, c10::metal::vec3<int64_t>{steps, stride, first});
+          });
         }
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
       }
     });
   } else {
@@ -312,12 +336,14 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     const auto ndim = static_cast<int>(result.dim());
     const std::vector<int64_t> sizes(result.sizes().rbegin(), result.sizes().rend());
     const std::vector<int64_t> strides(result.strides().rbegin(), result.strides().rend());
-    const auto steps32 = static_cast<uint32_t>(steps);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
+        auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        mtl_setArgs(encoder, result, vals, steps32, ndim, sizes, strides);
-        mtl_dispatch1DJob(encoder, pso, static_cast<NSUInteger>(steps));
+        mtl_setArgs(encoder, result, vals);
+        mtl_setArgs<3>(encoder, ndim, sizes, strides);
+        dispatch_1d_chunks(
+            encoder, pso, steps, [&](int64_t first) { mtl_setArgs<2>(encoder, std::array<int64_t, 2>{steps, first}); });
       }
     });
   }
