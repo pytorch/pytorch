@@ -278,6 +278,25 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, module), module(x))
         self.assertEqual(module(x), x + 2)
 
+    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False, compiled_autograd=True)
+    def test_empty_backward_hook_subclass_guard(self):
+        class Hooks(dict):
+            def __bool__(self):
+                return True
+
+            def values(self):
+                return [lambda module, grads: (3 * grads[0],)]
+
+        module = torch.nn.Identity()
+        x = torch.ones(1, requires_grad=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        fn = torch.compile(lambda x, m: 2 * m(x), backend=counter, fullgraph=True)
+        for hooks, multiplier in (({}, 2), (Hooks(), 6)):
+            module._backward_pre_hooks = hooks
+            (grad,) = torch.autograd.grad(fn(x, module).sum(), x)
+            self.assertEqual(grad, x * multiplier)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_non_dict_hook_mapping_fallback(self):
         def fn(x, module):
             return module(x) + 1
