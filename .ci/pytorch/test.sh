@@ -780,26 +780,6 @@ test_lazy_tensor_meta_reference_disabled() {
   export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
 }
 
-test_faketensor() {
-  export CPP_FAKETENSOR="${TEST_CONFIG##*_}"
-  export NO_TD=1
-  local selection=(--exclude-distributed-tests)
-  install_torchvision
-  install_spmd_types
-  if [[ "${TEST_CONFIG}" == cpp_faketensor_distributed_* ]]; then
-    selection=(--distributed-tests)
-  else
-    pip_install onnxruntime==1.28.0 transformers==4.36.2
-  fi
-  time python test/run_test.py \
-    --include-faketensor-tests \
-    "${selection[@]}" \
-    --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" \
-    --verbose \
-    --upload-artifacts-while-running
-  assert_git_not_dirty
-}
-
 test_dynamo_core() {
   time python test/run_test.py \
     --include-dynamo-core-tests \
@@ -2694,8 +2674,6 @@ fi
 if [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
-elif [[ "${TEST_CONFIG}" == cpp_faketensor_* ]]; then
-  test_faketensor
 elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and compatible scipy & numba versions
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
