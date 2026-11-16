@@ -51,7 +51,9 @@ def scope_shape(axes: Iterable[str], scope: Sequence[str]) -> TileShape:
 
 
 def feeds_only_dots(node: torch.fx.Node | None) -> bool:
-    """Whether the value of loop-body `node` only reaches dots, through casts."""
+    """Whether the value of loop-body `node` only reaches dots, through casts.
+    Such a value keeps its dtype, since a dot reads bf16 operands as bf16; any
+    other value is computed in the compute type, as in Triton kernels."""
     return node is not None and all(
         user.target == "dot" or (user.target == "to_dtype" and feeds_only_dots(user))
         for user in node.users
@@ -247,8 +249,10 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         [tile_y] & [tile_r] fails with "expected str(d1) == str(d2), got tile_y !=
         tile_r", while [tile_y, 1] & [tile_r] gives the [tile_y, tile_r] mask."""
         values = [arg for arg in args if isinstance(arg, CSEVariable)]
-        names = OrderedSet(str(dim) for value in values for dim in value.shape or ())
-        scope = [axis for axis in self.axes if TILE_NAMES[axis] in names]
+        axes = OrderedSet(
+            TILE_AXES[str(dim)] for value in values for dim in value.shape or ()
+        )
+        scope = [axis for axis in self.axes if axis in axes]
 
         def align(arg: Any) -> Any:
             if not isinstance(arg, CSEVariable):
@@ -541,9 +545,11 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             arg, coordinates, shape = found
         else:
             raise AssertionError("expected a flat subscript")
-        # A dot reads its operands in their own dtype, e.g. bf16 for a bf16 dot.
+        # A bf16 a in (a + 1).float() @ b is read as fp32, so that a + 1 is fp32 as
+        # its CSE dtype says. Read as bf16, bf16 + hl.full([], 1.0, dtype=float32)
+        # stays bf16 and the dot fails: "lhs and rhs bitwidth must be the same".
         dtype = buffer.get_dtype()
-        if not self.in_dot_loop:
+        if not feeds_only_dots(getattr(V.interpreter, "current_node", None)):
             dtype = upcast_compute_type(dtype)
         cast_suffix = "" if dtype == buffer.get_dtype() else f".to({dtype})"
         subscript = ", ".join(coordinates)
