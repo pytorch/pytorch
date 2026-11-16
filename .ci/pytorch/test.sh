@@ -2681,6 +2681,8 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
   test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
+elif [[ "${TEST_CONFIG}" == "inductor_benchmark_runner" ]]; then
+  python test/run_test.py --include dynamo/test_benchmark_runner --verbose
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   setup_torch_trace
   test_inductor_distributed
@@ -2709,12 +2711,6 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
     test_dynamo_benchmark huggingface "$id"
   fi
   collect_tlparse_output
-  if [[ "${TEST_CONFIG}" == "inductor_huggingface" &&
-        "${BUILD_ENVIRONMENT}" == *cuda13.2* &&
-        "${SHARD_NUMBER}" -eq 1 ]]; then
-    # Run harness, CPU, and CUDA tests with HF dependencies, after benchmark output.
-    env -u TORCH_TRACE python test/run_test.py --include dynamo/test_benchmark_runner --verbose
-  fi
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))

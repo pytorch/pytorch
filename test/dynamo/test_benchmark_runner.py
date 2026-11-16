@@ -213,11 +213,11 @@ class TestHuggingFaceLLMPerformance(TestCase):
 class HuggingFacePrefillTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        # The inductor_huggingface CI job installs the pinned transformers to run these
+        # The inductor_benchmark_runner CI jobs supply the pinned transformers for these
         # tests, so a skip there would hide a pin bump.
         unavailable = (
             AssertionError
-            if TEST_CONFIG == "inductor_huggingface"
+            if TEST_CONFIG == "inductor_benchmark_runner"
             else unittest.SkipTest
         )
         try:

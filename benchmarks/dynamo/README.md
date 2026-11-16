@@ -78,6 +78,18 @@ For debugging you can run just a single benchmark by adding the `--only=<NAME>` 
 
 A complete list of options can be seen by running each of the runners with the `--help` flag.
 
+As an example, the commands to run first line of the dashboard (performance only) would be:
+```
+./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv
+./benchmarks/dynamo/torchbench.py --performance --inference --bfloat16 --backend=inductor --output=torchbench_inference.csv
+
+./benchmarks/dynamo/huggingface.py --performance --training --amp --backend=inductor --output=huggingface_training.csv
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 --backend=inductor --output=huggingface_inference.csv
+
+./benchmarks/dynamo/timm_models.py --performance --training --amp --backend=inductor --output=timm_models_training.csv
+./benchmarks/dynamo/timm_models.py --performance --inference --bfloat16 --backend=inductor --output=timm_models_inference.csv
+```
+
 ### Decoder-only generation and prefill
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
@@ -118,14 +130,5 @@ elements. Rows do not record the inference mode or prompt length, so write each
 mode and input size to its own file. Default output and profiler trace names get
 a `_prefill` suffix.
 
-As an example, the commands to run first line of the dashboard (performance only) would be:
-```
-./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv
-./benchmarks/dynamo/torchbench.py --performance --inference --bfloat16 --backend=inductor --output=torchbench_inference.csv
-
-./benchmarks/dynamo/huggingface.py --performance --training --amp --backend=inductor --output=huggingface_training.csv
-./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 --backend=inductor --output=huggingface_inference.csv
-
-./benchmarks/dynamo/timm_models.py --performance --training --amp --backend=inductor --output=timm_models_training.csv
-./benchmarks/dynamo/timm_models.py --performance --inference --bfloat16 --backend=inductor --output=timm_models_inference.csv
-```
+With `--log-operator-inputs`, use a separate output directory for each mode and
+input size. Operator logs are named by model, and existing logs are skipped.
