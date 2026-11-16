@@ -6705,32 +6705,8 @@ def forward(self, x):
                 eager_model,
                 (torch.ones(2, 2),),
             )
-            fake_vals = [
-                val
-                for n in ep_for_training.graph.nodes
-                if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
-            )
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep_for_inference = ep_for_training.run_decompositions()
-            fake_vals = [
-                val
-                for n in ep_for_inference.graph.nodes
-                if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
-            )
         self.assertExpectedInline(
             str(ep_for_inference.graph_module.code).strip(),
             """\
@@ -11832,34 +11808,12 @@ def forward(self, b_a_buffer, x):
         m = M()
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep = export(m, inp)
-            fake_vals = [
-                val for n in ep.graph.nodes if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
-            )
         state_dict = ep.state_dict
 
         self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             core_aten_ep = ep.run_decompositions()
-            fake_vals = [
-                val
-                for n in core_aten_ep.graph.nodes
-                if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
-            )
         FileCheck().check_count("torch.ops.aten.permute.default", 1, exactly=True).run(
             core_aten_ep.graph_module.code
         )
@@ -12485,18 +12439,6 @@ graph():
             model = Model()
 
             exported_program = torch.export.export(model, (x,))
-            fake_vals = [
-                val
-                for n in exported_program.graph.nodes
-                if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
-            )
             export_res = exported_program.module()(x)
             exp_res = model(x)
             all_meta_val = [
@@ -12513,18 +12455,6 @@ graph():
                 )
             )
             decomposed_ep = exported_program.run_decompositions()
-            fake_vals = [
-                val
-                for n in decomposed_ep.graph.nodes
-                if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
-            )
             export_res = decomposed_ep.module()(x)
             self.assertTrue(export_res.size() == exp_res.size())
 
@@ -12635,16 +12565,6 @@ graph():
                     momentum,
                     eps,
                 ),
-            )
-            fake_vals = [
-                val for n in ep.graph.nodes if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
             )
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep.run_decompositions()

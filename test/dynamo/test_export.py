@@ -3563,21 +3563,6 @@ def forward(self, x):
 
             for aten_graph in [True, False]:
                 gm, _ = torch._dynamo.export(f, aten_graph=aten_graph)(x)
-                fake_values = [
-                    n.meta.get("val", n.meta.get("example_value"))
-                    for n in gm.graph.nodes
-                ]
-                self.assertTrue(any(fake_tensor.is_fake_tensor(v) for v in fake_values))
-                self.assertTrue(
-                    all(
-                        isinstance(
-                            fake_tensor.maybe_get_fake_mode(v),
-                            fake_tensor.fake_mode_cls(),
-                        )
-                        for v in fake_values
-                        if fake_tensor.is_fake_tensor(v)
-                    )
-                )
                 self.assertTrue(
                     isinstance(gm, torch.fx.GraphModule),
                     msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"

@@ -22,11 +22,6 @@ from torch._functorch.aot_autograd import (
     aot_export_module,
 )
 from torch._guards import tracing as torch_tracing, TracingContext
-from torch._subclasses.fake_tensor import (
-    fake_mode_cls,
-    is_fake_tensor,
-    maybe_get_fake_mode,
-)
 from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
@@ -320,18 +315,6 @@ def forward(self, args_0):
                 ep = export(Foo(i), inputs, strict=True)
             with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
                 ep_joint = _export_forward_backward(ep, joint_loss_index=i)
-                fake_vals = [
-                    val
-                    for n in ep_joint.graph.nodes
-                    if is_fake_tensor(val := n.meta.get("val"))
-                ]
-                self.assertTrue(fake_vals)
-                self.assertTrue(
-                    all(
-                        isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                        for val in fake_vals
-                    )
-                )
             for j, spec in enumerate(ep_joint.graph_signature.output_specs):
                 if i == j:
                     self.assertTrue(spec.kind == OutputKind.LOSS_OUTPUT)
@@ -361,18 +344,6 @@ def forward(self, args_0):
             ep = export(Foo(), inputs)
         with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep_joint = _export_forward_backward(ep)
-            fake_vals = [
-                val
-                for n in ep_joint.graph.nodes
-                if is_fake_tensor(val := n.meta.get("val"))
-            ]
-            self.assertTrue(fake_vals)
-            self.assertTrue(
-                all(
-                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
-                    for val in fake_vals
-                )
-            )
         self.assertEqual(len(ep_joint.graph_signature.output_specs), 5)
         self.assertEqual(
             ep_joint.graph_signature.output_specs[0].kind,

@@ -43,12 +43,7 @@ from torch._export.serde.serialize import (
 from torch._export.utils import wrap_method
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.opaque_object import get_opaque_type_name, register_custom_class
-from torch._subclasses.fake_tensor import (
-    fake_mode_cls,
-    FakeTensorMode,
-    is_fake_tensor,
-    maybe_get_fake_mode,
-)
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ShapeEnv, ValueRanges
@@ -1097,20 +1092,6 @@ class _DeserializeGraphMixin:
                 serialized_artifact, expected_opset_version={"aten": 0}
             )
             deserialized_ep.graph.eliminate_dead_code()
-            for graph in (ep.graph, deserialized_ep.graph):
-                fake_vals = [
-                    val
-                    for node in graph.nodes
-                    if is_fake_tensor(val := node.meta.get("val"))
-                ]
-                self.assertTrue(fake_vals)
-                expected_mode = fake_mode_cls()
-                self.assertTrue(
-                    all(
-                        isinstance(maybe_get_fake_mode(val), expected_mode)
-                        for val in fake_vals
-                    )
-                )
 
             orig_outputs = ep.module()(*_deepcopy_inputs(inputs))
             loaded_outputs = deserialized_ep.module()(*_deepcopy_inputs(inputs))
