@@ -1048,10 +1048,10 @@ void CudaCodeGen::Initialize() {
 }
 
 void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
-  if (C10_UNLIKELY(numel == 0)) {
+  if (numel == 0) [[unlikely]] {
     return;
   }
-  if (C10_UNLIKELY(thread_block_size_ <= 0)) {
+  if (thread_block_size_ <= 0) [[unlikely]] {
     TORCH_INTERNAL_ASSERT(
         thread_block_size_ >= 0,
         "call_with_numel() requires a precomputed thread block size");

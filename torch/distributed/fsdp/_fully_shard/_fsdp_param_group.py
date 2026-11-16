@@ -28,7 +28,9 @@ from ._fsdp_collectives import (
     _wait_all_gather,
     AllGather,
     AllGatherResult,
+    AllReduce,
     DefaultAllGather,
+    DefaultAllReduce,
     DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -178,7 +180,7 @@ class AllGatherState(NamedTuple):
 
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
-    event: torch.Event | None  # reduce-scatter event
+    event: torch.Event | None  # last use of the input (see foreach_reduce)
     allocation_stream: torch.Stream  # Owns the input allocation
     param_group: FSDPParamGroup  # Identifies the owning FSDP root
 
@@ -248,6 +250,7 @@ class FSDPParamGroup:
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Callable[[torch.Tensor], None] | None = None
+        self._all_reduce_comm: AllReduce = DefaultAllReduce()
         self._all_gather_comm: AllGather = DefaultAllGather()
         self._all_gather_output = torch.empty(0, device=self.device)
         self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
@@ -719,8 +722,8 @@ class FSDPParamGroup:
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
-            # `max_input_buffers` in flight: reclaim the oldest (wait on its
-            # reduce-scatter, then drop the keepalive ref that was deferring the
+            # `max_input_buffers` in flight: reclaim the oldest (wait on its last
+            # use, then drop the keepalive ref that was deferring the
             # allocator's reuse of its memory) until fewer than that remain, before
             # this module's reduce appends one more. See
             # set_reduce_scatter_max_input_buffers for the memory/overlap tradeoff.
@@ -823,6 +826,7 @@ class FSDPParamGroup:
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
                     prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
+                    all_reduce_comm=self._all_reduce_comm,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
