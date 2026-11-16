@@ -5,7 +5,10 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
+
 import torch
+import torch.nn as nn
 from torch.distributed.fsdp._flex_shard import is_flex_shard_param
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -70,6 +73,71 @@ class TestFlexShardStateDict(TestCase):
 
             for key, value in source.state_dict().items():
                 self.assertEqual(value, target.state_dict()[key])
+
+    def test_load_state_dict_assign_after_forward(self):
+        # load_state_dict(assign=True) replaces the sharded parameters, also
+        # once the buckets have unsharded; the next unshard gathers the
+        # loaded values
+        with single_rank_cuda_mesh() as mesh:
+            torch.manual_seed(0)
+            args, source = _make_flex_sharded_transformer(mesh)
+            torch.manual_seed(1)
+            _, target = _make_flex_sharded_transformer(mesh)
+            x = transformer_inputs(args, batch_size=3, device="cuda")
+            target(x).sum().backward()
+
+            state_dict = {k: v.detach().clone() for k, v in source.state_dict().items()}
+            target.load_state_dict(state_dict, assign=True)
+            self.assertTrue(all(is_flex_shard_param(p) for p in target.parameters()))
+            self.assertEqual(source(x), target(x))
+            target.zero_grad(set_to_none=True)
+            target(x).sum().backward()
+            target.reshard()
+            self.assertTrue(all(p.grad is not None for p in target.parameters()))
+
+    def test_module_to_dtype_and_device_after_forward(self):
+        with single_rank_cuda_mesh() as mesh:
+            torch.manual_seed(0)
+            reference = nn.Sequential(nn.Linear(8, 12), nn.ReLU(), nn.Linear(12, 4))
+            reference.cuda()
+            model = copy.deepcopy(reference)
+            flex_shard_cuda(model, mesh)
+            x = torch.randn(2, 8, device="cuda")
+            model(x).sum().backward()
+            model.zero_grad(set_to_none=True)
+
+            model.to(torch.float64)
+            reference.to(torch.float64)
+            self.assertEqual(model(x.double()), reference(x.double()))
+            model.cpu()
+            model.cuda()
+            self.assertEqual(model(x.double()), reference(x.double()))
+            model.reshard()
+            for param in model.parameters():
+                self.assertTrue(is_flex_shard_param(param))
+                self.assertEqual(param.dtype, torch.float64)
+
+    def test_params_left_on_meta_must_be_replaced_before_forward(self):
+        def make() -> nn.Module:
+            return nn.Sequential(
+                nn.Linear(8, 8, device="cuda"), nn.Linear(8, 8, device="meta")
+            )
+
+        with single_rank_cuda_mesh() as mesh:
+            x = torch.randn(2, 8, device="cuda")
+            model = flex_shard_cuda(make(), mesh)
+            with self.assertRaisesRegex(
+                RuntimeError, r"still on meta device: \['1.weight', '1.bias'\]"
+            ):
+                model(x)
+
+            torch.manual_seed(0)
+            reference = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8)).cuda()
+            module = make()
+            module[0].load_state_dict(reference[0].state_dict())
+            model = flex_shard_cuda(module, mesh)
+            model[1].load_state_dict(reference[1].state_dict(), assign=True)
+            self.assertEqual(model(x), reference(x))
 
     def test_load_state_dict_rejects_incompatible_shapes(self):
         with single_rank_cuda_mesh() as mesh:

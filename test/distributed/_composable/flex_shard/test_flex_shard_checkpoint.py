@@ -31,7 +31,9 @@ from torch.distributed.fsdp._flex_shard import (
 )
 from torch.distributed.fsdp._flex_shard.bucket_storage import ShardedBucketStorage
 from torch.distributed.fsdp._flex_shard.flex_shard import (
-    _attach_flex_shard_module_state,
+    _install_state,
+    build_flex_bucket,
+    FlexShardState,
 )
 from torch.distributed.fsdp._flex_shard.placement_contract import (
     compose_global_layouts,
@@ -111,13 +113,13 @@ def _shard_model(
     mesh: Any,
     shared_names: dict[str, list[str]] | None = None,
 ) -> None:
+    # flex_shard() needs a CUDA mesh to run; building the bucket directly
+    # checks its checkpoint layouts on a CPU mesh
     named_params = list(model.named_parameters())
-    storage = ShardedBucketStorage.from_bucket(
+    storage = build_flex_bucket(
         model,
         named_params,
         {fqn: (placement,) for fqn, _ in named_params},
-        mesh,
-        torch.device("cpu"),
         BucketSpec(
             ["*"],
             placement_fn=lambda named_params, mesh: {
@@ -128,7 +130,7 @@ def _shard_model(
         ),
         shared_names,
     )
-    _attach_flex_shard_module_state(model, [storage])
+    _install_state(model, FlexShardState(), [storage])
 
 
 def _checkpoint_state_dict(model: nn.Module) -> dict[str, Any]:

@@ -4,7 +4,6 @@ import math
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import auto, Enum
 from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
@@ -15,6 +14,7 @@ from torch.distributed._composable.contract import _get_registry
 from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
+from .._flex_shard.utils import _cast_fp_tensor, TrainingState  # noqa: F401
 from ._fsdp_api import DataParallelMeshDims
 
 
@@ -30,17 +30,6 @@ def _dynamo_disable(func: Callable[_P, _R]) -> Callable[_P, _R]:
         return torch._dynamo.disable(
             func, recursive=True, reason="skipping FSDP hooks"
         )(*args, **kwargs)
-
-    return wrapper
-
-
-def _disable_functorch_if_active(func: Callable[_P, _R]) -> Callable[_P, _R]:
-    @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        if torch._C._are_functorch_transforms_active():
-            with torch._C._DisableFuncTorch():
-                return func(*args, **kwargs)
-        return func(*args, **kwargs)
 
     return wrapper
 
@@ -112,19 +101,6 @@ class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
         super().__post_init__()
 
 
-class TrainingState(Enum):
-    """Describes the training state of one FSDP state / parameter group."""
-
-    # Transition to forward starting pre-forward until post-forward
-    FORWARD = auto()
-    # Transition to pre-backward when unsharding in backward
-    PRE_BACKWARD = auto()
-    # Transition to post-backward when resharding and reducing gradients
-    POST_BACKWARD = auto()
-    # Idle before/after forward or before pre-backward/after post-backward
-    IDLE = auto()
-
-
 def _raise_assert_with_print(*args: Any, **kwargs: Any):
     print(f"[Rank {dist.get_rank()}] ", end="")
     print(*args, **kwargs)
@@ -147,25 +123,6 @@ def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Si
     return torch.Size([padded_dim0]) + tensor_size[1:]
 
 
-def _chunk_with_empty(
-    tensor: torch.Tensor, num_chunks: int, dim: int
-) -> list[torch.Tensor]:
-    chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
-    while len(chunks) < num_chunks:
-        chunks.append(chunks[0].new_empty(0))
-    return chunks
-
-
-def _get_dim_chunked_size(
-    chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
-) -> torch.Size:
-    if chunk.numel() > 0:
-        return chunk.size()
-    # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
-    # pyrefly: ignore [bad-return]
-    return unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
-
-
 def _from_local_no_grad(
     local_tensor: torch.Tensor,
     sharding_spec: DTensorSpec,
@@ -184,24 +141,6 @@ def _from_local_no_grad(
         # pyrefly: ignore [unexpected-keyword]
         requires_grad=local_tensor.requires_grad,
     )
-
-
-def _to_dtype_if_needed(
-    tensor: torch.Tensor, dtype: torch.dtype | None
-) -> torch.Tensor:
-    if dtype is not None and tensor.dtype != dtype:
-        return tensor.to(dtype)
-    return tensor
-
-
-def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
-    if (
-        not isinstance(x, torch.Tensor)
-        or not torch.is_floating_point(x)
-        or x.dtype == dtype
-    ):
-        return x
-    return x.to(dtype)
 
 
 def is_bw() -> bool:

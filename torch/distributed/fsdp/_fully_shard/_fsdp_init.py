@@ -458,13 +458,11 @@ def _init_param_group(
     if not params:
         return
 
-    groups = state._fsdp_param_groups
-
     if shard_placement_fn is None:
         # No shard_placement_fn means all params use the same mesh_info,
         # so no grouping is needed. This also handles DDPMeshInfo from
         # replicate_with_fsdp, which doesn't have shard_process_group.
-        groups.append(
+        state.add_group(
             FullyShardBucket(
                 params,
                 modules,
@@ -522,7 +520,7 @@ def _init_param_group(
             )
         else:
             group_post_forward = post_forward_mesh_info
-        groups.append(
+        state.add_group(
             FullyShardBucket(
                 group_params,
                 modules,

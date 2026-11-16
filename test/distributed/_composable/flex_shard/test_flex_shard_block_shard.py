@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import torch
@@ -14,10 +15,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._flex_shard import BucketSpec, flex_shard, GradientReduction
-from torch.distributed.fsdp._flex_shard.bucket_storage import (
-    ParamInfo,
-    ShardedBucketStorage,
-)
+from torch.distributed.fsdp._flex_shard.flex_shard import build_flex_bucket
 from torch.distributed.fsdp._flex_shard.placements import (
     BlockShard,
     BucketedBlockShard,
@@ -35,6 +33,10 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.common_flex_shard import single_rank_cpu_mesh
+
+
+if TYPE_CHECKING:
+    from torch.distributed.fsdp._flex_shard.bucket_storage import ParamInfo
 
 
 device_type = torch.device(get_devtype())
@@ -193,12 +195,10 @@ class TestBucketedBlockShardDistributed(FSDPTestMultiThread):
             reshard_after_forward=False,
         )
 
-        bucket_storage = ShardedBucketStorage.from_bucket(
+        bucket_storage = build_flex_bucket(
             model,
             named_params,
             placements,
-            mesh,
-            torch.device("cpu"),
             bucket_spec,
         )
 
@@ -239,23 +239,19 @@ class TestBucketedBlockShardDistributed(FSDPTestMultiThread):
         )
 
         if self.rank == 0:
-            bucket_storage = ShardedBucketStorage.from_bucket(
+            bucket_storage = build_flex_bucket(
                 model,
                 named_params,
                 placements,
-                mesh,
-                torch.device("cpu"),
                 bucket_spec,
             )
             self.assertEqual(bucket_storage.total_bytes, 4 * torch.float32.itemsize)
         else:
             with self.assertRaisesRegex(ValueError, "contains only padding"):
-                ShardedBucketStorage.from_bucket(
+                build_flex_bucket(
                     model,
                     named_params,
                     placements,
-                    mesh,
-                    torch.device("cpu"),
                     bucket_spec,
                 )
 
@@ -284,12 +280,10 @@ class TestBucketedBlockShardDistributed(FSDPTestMultiThread):
             mesh=mesh,
             reshard_after_forward=False,
         )
-        bucket_storage = ShardedBucketStorage.from_bucket(
+        bucket_storage = build_flex_bucket(
             model,
             named_params,
             placements,
-            mesh,
-            torch.device("cpu"),
             bucket_spec,
         )
         infos = [bucket_storage.param_infos[fqn] for fqn, _ in named_params]
@@ -346,12 +340,10 @@ class TestBucketedBlockShardDistributed(FSDPTestMultiThread):
             mesh=mesh,
             reshard_after_forward=False,
         )
-        bucket_storage = ShardedBucketStorage.from_bucket(
+        bucket_storage = build_flex_bucket(
             model,
             named_params,
             placements,
-            mesh,
-            torch.device("cpu"),
             bucket_spec,
         )
         weight_grad = torch.arange(8, dtype=torch.float32).view(4, 2)
