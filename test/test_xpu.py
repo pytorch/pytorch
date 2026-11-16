@@ -131,6 +131,28 @@ class TestXpu(TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_triangular_solve_out_xpu_kernel(self):
+        dispatch_table = torch._C._dispatch_dump("aten::triangular_solve.X")
+        xpu_registration = next(
+            (
+                line
+                for line in dispatch_table.splitlines()
+                if line.startswith("XPU: registered at ")
+            ),
+            "",
+        )
+        self.assertIn("RegisterXPU_", xpu_registration)
+
+        b = torch.tensor([[2.0], [5.0]], device="xpu")
+        a = torch.tensor([[2.0, 0.0], [1.0, 2.0]], device="xpu")
+        out = torch.empty_like(b)
+        cloned_a = torch.empty_like(a)
+        solution, cloned = torch.ops.aten.triangular_solve.X(
+            b, a, upper=False, X=out, M=cloned_a
+        )
+        self.assertEqual(solution, torch.tensor([[1.0], [2.0]], device="xpu"))
+        self.assertEqual(cloned, a)
+
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
         device_properties = torch.xpu.get_device_properties(current_device)
@@ -205,16 +227,17 @@ class TestXpu(TestCase):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             """\
 import torch
-from torch.multiprocessing import Process
+from torch.multiprocessing import get_context
 def run(rank):
     torch.xpu.set_device(rank)
 if __name__ == "__main__":
     size = 2
     processes = []
+    ctx = get_context("fork")
     for rank in range(size):
         # it would work fine without the line below
         torch.xpu.set_device(0)
-        p = Process(target=run, args=(rank,))
+        p = ctx.Process(target=run, args=(rank,))
         p.start()
         processes.append(p)
     for p in processes:
@@ -615,23 +638,25 @@ print(torch.xpu.is_initialized())
 
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
-        s0 = torch.xpu.Stream(device=0, priority=low)
+        for priority in range(high, low + 1):
+            s = torch.xpu.Stream(device=0, priority=priority)
+            self.assertEqual(priority, s.priority)
+            self.assertEqual(torch.device("xpu:0"), s.device)
 
-        self.assertEqual(low, s0.priority)
-        self.assertEqual(torch.device("xpu:0"), s0.device)
+            e = torch.xpu.Event()
+            e.record()
+            s.wait_event(e)
+            s.synchronize()
+            self.assertTrue(s.query())
 
-        s1 = torch.xpu.Stream(device=0, priority=high)
-
-        self.assertEqual(high, s1.priority)
-        self.assertEqual(torch.device("xpu:0"), s1.device)
-
-        # Streams of every priority must be usable, including the lowest one.
-        event = torch.xpu.Event()
-        for stream in (s0, s1):
-            event.record()
-            stream.wait_event(event)
-            stream.synchronize()
-            self.assertTrue(stream.query())
+            x = torch.randn(2, 3, 8, 8)
+            w = torch.randn(4, 3, 3, 3)
+            expected = torch.nn.functional.conv2d(x, w)
+            with s:
+                # Run a oneDNN op on a stream of each priority.
+                out = torch.nn.functional.conv2d(x.to("xpu"), w.to("xpu"))
+            s.synchronize()
+            self.assertEqual(out.cpu(), expected)
 
     def test_event_repr(self):
         e = torch.xpu.Event()
