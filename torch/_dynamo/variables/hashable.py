@@ -528,18 +528,24 @@ class HashableTracker:
             self._hash, self._hash_is_identity = hash(vt.value), False
             return
 
-        from .descriptors import BoundBuiltinMethodVariable
+        from ..symbolic_convert import InstructionTranslator
 
-        input_methods = ()
-        lazy_key_types: Iterable[tuple[type | None, Source | None]] | None = None
-        if isinstance(vt, variables.LazyVariableTracker):
+        # Fast path for unrealized LazyVariableTrackers: check and hash without
+        # realizing, to avoid inserting guards.  If the fast-path check fails,
+        # fall through to realize the VT and try the full is_hashable check.
+        if (
+            isinstance(vt, variables.LazyVariableTracker)
+            and not vt.is_realized()
+            and vt.is_hashable_lazy()
+        ):
             from .builder import bound_builtin_method_descriptor
 
             value = vt.original_value()
             source = cast(Source, vt.source)
             self.method_keys_guarded = not isinstance(vt.source, ConstDictKeySource)
             if self.method_keys_guarded:
-                input_methods, lazy_key_types = (source,), ()
+                input_methods = (source,)
+                self._key_types = ()
             else:
                 # Lazy hashability accepts only functions/classes and flat exact tuples.
                 entries = (
@@ -553,64 +559,53 @@ class HashableTracker:
                     if type(item) is types.BuiltinMethodType
                     and bound_builtin_method_descriptor(item) is not None
                 )
-                lazy_key_types = [
+                self._key_types = [
                     (type(item), TypeSource(source))
                     for item, source in entries
                     if type(item) is not types.BuiltinMethodType
                 ]
-        from ..symbolic_convert import InstructionTranslator
+            if input_methods:
+                try:
+                    tx = InstructionTranslator.current_tx()
+                except AttributeError:
+                    tx = None
+                if tx is not None:
+                    tracker = tx.output.builtin_method_keys
+                    if self.method_keys_guarded:
+                        tracker.track(tx, unguarded=False)
+                    else:
+                        tracker.has_method_keys = True
+                self.input_methods = () if self.method_keys_guarded else input_methods
+                self.has_builtin_method = True
+                self.method_receivers = tuple(
+                    AttrSource(source, "__self__") for source in input_methods
+                )
+            self._hash = hash(value)
+            self._hash_is_identity = False
+            return
 
+        # Compute hash via the tp_hash slot (generic_hash_impl).
+        # For unhashable types, tp_hash_impl raises ObservedTypeError.
+        from .object_protocol import generic_hash_impl
+
+        tx = InstructionTranslator.current_tx()
         if type(vt) is variables.CallMethodVariable:
-            vt = vt.as_bound_builtin_method(InstructionTranslator.current_tx()) or vt
-        if not isinstance(vt, variables.LazyVariableTracker) and isinstance(
-            vt, BoundBuiltinMethodVariable
-        ):
-            tx = InstructionTranslator.current_tx()
+            vt = vt.as_bound_builtin_method(tx) or vt
+        # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
+        # have no python-constant value, so their key equality is identity.
+        if isinstance(vt, variables.BoundBuiltinMethodVariable):
             self._hash, self._hash_is_identity = vt.key_hash_impl(tx)
             self._key_types = ()
             self.has_builtin_method = True
-            self.method_keys_guarded = vt.value is not None
-            self.method_keys_guarded &= not self._hash_is_identity
+            self.method_keys_guarded = (
+                vt.value is not None and not self._hash_is_identity
+            )
             self.method_receivers = (vt.obj.source,)
             if vt.obj.source is None and not vt.has_fresh_container_receiver():
                 self.method_receivers = ()
                 self.fixed_receiver_types = (vt.obj.python_type(),)
             self.vt = vt
             return
-        if input_methods:
-            try:
-                current_tx = InstructionTranslator.current_tx()
-            except AttributeError:
-                current_tx = None
-            if current_tx is not None:
-                if self.method_keys_guarded:
-                    current_tx.output.builtin_method_keys.track(
-                        current_tx, unguarded=False
-                    )
-                else:
-                    current_tx.output.builtin_method_keys.has_method_keys = True
-        self.input_methods = () if self.method_keys_guarded else input_methods
-        self.has_builtin_method = bool(input_methods)
-        self.method_receivers = tuple(
-            AttrSource(source, "__self__") for source in input_methods
-        )
-        if lazy_key_types is not None:
-            self._key_types = lazy_key_types
-
-        # Fast path for unrealized LazyVariableTrackers: check and hash without
-        # realizing, to avoid inserting guards.  If the fast-path check fails,
-        # fall through to realize the VT and try the full is_hashable check.
-        if (
-            isinstance(vt, variables.LazyVariableTracker)
-            and not vt.is_realized()
-            and vt.is_hashable_lazy()
-        ):
-            # Keep input-key laziness until a constructed method can compare with it.
-            self._hash = hash(vt.original_value())
-            self._hash_is_identity = False
-            return
-
-        tx = InstructionTranslator.current_tx()
         try:
             kind = vt.python_type()
         except NotImplementedError:
@@ -666,12 +661,6 @@ class HashableTracker:
             and not any(kind is builtin for builtin in (tuple, frozenset, torch.Size))
         ):
             self.has_custom_equality = True
-        # Compute hash via the tp_hash slot (generic_hash_impl).
-        # For unhashable types, tp_hash_impl raises ObservedTypeError.
-        from .object_protocol import generic_hash_impl
-
-        # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
-        # have no python-constant value, so their key equality is identity.
         self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
 
     @functools.cached_property
