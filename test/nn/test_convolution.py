@@ -46,6 +46,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     download_file,
     dtype2prec_DONTUSE,
     gradcheck,
@@ -3722,6 +3723,10 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(grad_weight.shape, weight.shape)
 
     @skipCUDAIfRocmHipBlasltVersionLessThan((1, 2, 0))
+    @decorateIf(
+        unittest.skip("ROCm not available"),
+        lambda p: torch.device(p["device"]).type == "cuda" and not TEST_WITH_ROCM,
+    )
     @onlyAccelerator
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
