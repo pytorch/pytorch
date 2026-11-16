@@ -4748,6 +4748,7 @@ _FAKE_TENSOR_OWNED_ATTRIBUTES = (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
     | {
         "_fake_device",
+        "_fake_pytype",
         "fake_mode",
         "constant",
         "pytype",
@@ -4848,8 +4849,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.fake_mode = torch._subclasses.FakeTensorMode()
-        self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
         # above _keep. Required, because omitting it would carry no plain
@@ -4940,8 +4939,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         grad: torch.Tensor,
     ) -> torch.Tensor:
         fake_mode = torch._subclasses.FakeTensorMode()
-        tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
-        ret = tensor_converter.from_meta_and_device(
+        ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
             device,
@@ -5450,12 +5448,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                default = torch.nn.Parameter if is_param else torch.Tensor
-                pytype = obj.pytype or default
+                pytype = torch.nn.Parameter if is_param else torch.Tensor
             elif is_fake and is_param and pytype is torch.Tensor:
                 # A C++ fake's own type is the real type, but a C++ fake
                 # Parameter can be a plain Tensor carrying the marker.
                 pytype = torch.nn.Parameter
+            pytype = maybe_get_fake_pytype(obj) or pytype
             # A fake answers empty_like with another fake (a Python fake through
             # its own __torch_dispatch__, whether or not its FakeTensorMode is
             # active), and that fake would drag the mode and its converters into

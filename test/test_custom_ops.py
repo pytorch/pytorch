@@ -14,6 +14,7 @@ import typing
 import unittest
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import *  # noqa: F403
 from unittest.mock import patch
 
@@ -38,6 +39,7 @@ from torch._library.fake_profile import (
     TensorMetadata,
 )
 from torch._library.infer_schema import tuple_to_list
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -51,7 +53,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
-    fake_tensor_modes,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -2343,14 +2344,13 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "already has an implementation"):
             custom_ops.impl(qualname, func=foo_impl)
 
-    @fake_tensor_modes
     @parametrize("active", [False, True])
     @parametrize("not_implemented", [False, True])
-    def test_abstract_impl_on_existing_op(self, mode_cls, active, not_implemented):
+    def test_abstract_impl_on_existing_op(self, active, not_implemented):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
         qualname = f"{self.test_ns}::foo"
-        mode = mode_cls()
+        mode = FakeTensorMode()
         calls = 0
 
         @torch.library.register_fake(qualname, lib=self.lib())
@@ -2794,8 +2794,7 @@ Dynamic shape operator
         lib.impl(op_name, foo_impl2, "CPU")
         self.assertEqual(op(torch.ones(3)), torch.ones(6))
 
-    @fake_tensor_modes
-    def test_override_fake(self, mode_cls):
+    def test_override_fake(self):
         lib = self.lib()
         op_name = f"{self.test_ns}::foo"
         torch.library.define(op_name, "(Tensor x) -> Tensor", lib=lib)
@@ -2807,7 +2806,7 @@ Dynamic shape operator
         # Register fake kernel to foo_impl1
         torch.library.register_fake(op_name, foo_impl1, lib=lib)
 
-        with mode_cls():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [3])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
@@ -2821,19 +2820,19 @@ Dynamic shape operator
 
         # Override fake kernel to foo_impl2
         torch.library.register_fake(op_name, foo_impl2, lib=lib)
-        with mode_cls():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Fake kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
             torch.library.register_fake(op_name, foo_impl1, lib=lib2)
-            with mode_cls():
+            with FakeTensorMode():
                 self.assertEqual(op(torch.ones(3)).shape, [3])
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
         # Fake kernel should go back to foo_impl2
-        with mode_cls():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
@@ -4876,11 +4875,14 @@ with warnings.catch_warnings(record=True) as w:
         self.assertTrue("custom_op_db.py" in source)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @fake_tensor_modes
-    def test_library_register_fake(self, mode_cls):
+    @torch._dynamo.config.patch(fake_tensor_cache_enabled=False)
+    @parametrize("profile_op", ["custom", "aten"])
+    def test_library_register_fake(self, profile_op):
         for mode in ["function", "qualname", "opoverload"]:
+            opname = f"register_fake_{mode}_{profile_op}"
+            qualname = f"_torch_testing::{opname}"
 
-            @torch.library.custom_op("_torch_testing::add", mutates_args=())
+            @torch.library.custom_op(qualname, mutates_args=())
             def add(x: Tensor, y: float) -> Tensor:
                 x_np = x.cpu().numpy()
                 out_np = x_np + y
@@ -4892,10 +4894,12 @@ with warnings.catch_warnings(record=True) as w:
                 dec = torch.library.register_fake(add)
                 self.assertIsNotNone(dec)
             elif mode == "qualname":
-                dec = torch.library.register_fake("_torch_testing::add")
+                dec = torch.library.register_fake(qualname)
                 self.assertIsNotNone(dec)
             elif mode == "opoverload":
-                dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+                dec = torch.library.register_fake(
+                    getattr(torch.ops._torch_testing, opname).default
+                )
                 self.assertIsNotNone(dec)
             else:
                 raise AssertionError("should not get here")
@@ -4906,12 +4910,42 @@ with warnings.catch_warnings(record=True) as w:
                 called = True
                 return torch.empty_like(x)
 
-            with mode_cls():
+            with FakeTensorMode() as fake_mode:
                 x = torch.randn(3)
                 y = 3.14
                 z = add(x, y)
                 self.assertEqual(z.shape, x.shape)
                 self.assertTrue(called)
+
+                op = (
+                    add._opoverload
+                    if profile_op == "custom"
+                    else torch.ops.aten.add.Tensor
+                )
+                args = (x, y) if profile_op == "custom" else (x, x)
+
+                def profiled_kernel(func, mode, x, y):
+                    self.assertIs(func, op)
+                    self.assertIs(mode, fake_mode)
+                    with mode:
+                        return x.new_empty(x.numel() + 1)
+
+                profiles = SimpleNamespace(
+                    data={op}, generic_fake_kernel=profiled_kernel
+                )
+                with torch._dynamo.config.patch(_custom_ops_profile=profiles):
+                    called = False
+                    self.assertEqual(op(*args).shape, (4,))
+                    self.assertFalse(called)
+                    profiles.data.clear()
+                    self.assertEqual(op(*args).shape, (3,))
+                    self.assertEqual(called, profile_op == "custom")
+                    profiles.data.add(op)
+                    self.assertEqual(op(*args).shape, (4,))
+                    with torch._dynamo.config.patch(_custom_ops_profile=None):
+                        self.assertEqual(op(*args).shape, (3,))
+                    self.assertEqual(op(*args).shape, (4,))
+                self.assertEqual(op(*args).shape, (3,))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_torch_dispatch(self):
