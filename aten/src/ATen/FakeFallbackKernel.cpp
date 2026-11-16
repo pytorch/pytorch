@@ -82,10 +82,6 @@
 // this divergence rather than pay for live lookups or propagate the snapshot
 // through Python handlers.
 //
-// TODO: _custom_ops_profile is checked only for custom namespaces here. Python
-// also permits built-in operators in profiles.data; probing those would add a
-// GIL/config lookup to the ordinary native path.
-//
 // TODO: in-place output conversion changes raw Meta tensors retained by a
 // kernel and bypasses the converter's memo. On later calls they are existing
 // fakes, so a changed common device or a prior device override can cause a
@@ -751,14 +747,13 @@ void fakeFallback(
       return;
     }
   }
-  // Match library_utils.is_builtin before probing custom kernel registrations.
+  if ((*interpreter)->fake_try_custom_op_profile(op, stack, mode)) {
+    return;
+  }
+  // Match library_utils.is_builtin before inferring custom fake kernels.
   const auto op_namespace = op.operator_name().getNamespace();
   const bool is_builtin = op_namespace &&
       (*op_namespace == "aten" || *op_namespace == "prim" || *op_namespace == "prims");
-  if (!is_builtin &&
-      (*interpreter)->fake_try_custom_op_profile(op, stack, mode)) {
-    return;
-  }
   if (real.ptr(interpreter) && mode->shape_env_ && !is_builtin &&
       (*interpreter)->fake_infer_from_real_out(op, stack, mode, real.ptr(interpreter))) {
     maybe_propagate_real_tensors();
