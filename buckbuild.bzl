@@ -1187,7 +1187,7 @@ def define_buck_targets(
     fb_xplat_cxx_library(
         name = "common_core",
         srcs = [
-            "caffe2/core/common.cc",
+            source_file("caffe2/core/common.cc"),
         ],
         apple_sdks = (IOS, MACOSX),
         compiler_flags = get_pt_compiler_flags(),
@@ -2313,6 +2313,12 @@ def define_buck_targets(
         exported_deps = [
             ":lean_runtime_with_tensor",
         ],
+        # Internally caffe2/caffe2 is a separate package, and a header from
+        # another package makes fb_xplat_cxx_library skip its header map default.
+        **({} if IS_OSS else {"header_mode": select({
+            "DEFAULT": "header_map_only",
+            "ovr_config//cuda:has_cuda": None,
+        })})
     )
 
     pt_xplat_cxx_library(

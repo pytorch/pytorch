@@ -57,6 +57,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     onlyCPU,
+    preserves_device_selection,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
@@ -157,6 +158,9 @@ def _random_bytes(shape, dtype, device):
 
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+    if TEST_WITH_TORCHINDUCTOR:
+        setUp = preserves_device_selection(TestCase.setUp)
+        setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
