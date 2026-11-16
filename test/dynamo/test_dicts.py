@@ -220,6 +220,92 @@ class DictTests(torch._dynamo.test_case.TestCase):
             mapping.move_to_end(next(iter(mapping)))
         self.assertEqual(counter.frame_count, 1)
 
+    def test_reordered_input_does_not_call_key_equality(self):
+        class Key:
+            calls = 0
+
+            def __hash__(self):
+                return 42
+
+            def __eq__(self, other):
+                self.calls += 1
+                return self is other
+
+        def fn(x, mapping, first, second):
+            return x + len(mapping) + (first.calls > second.calls)
+
+        first, second = Key(), Key()
+        mapping = OrderedDict([(first, 1), (second, 2)])
+        mapping.move_to_end(first)
+        first.calls = second.calls = 0
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(x, mapping, first, second), x + 2
+        )
+        self.assertEqual((first.calls, second.calls), (0, 0))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "Reordered OrderedDict input"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                x, mapping, first, second
+            )
+        self.assertEqual((first.calls, second.calls), (0, 0))
+
+    @parametrize("nested", [False, True])
+    def test_reordered_input_skips_key_metaclass_callbacks(self, nested):
+        events = []
+
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "__dict__":
+                    events.append(name)
+                return super().__getattribute__(name)
+
+            def __hash__(cls):
+                events.append("hash")
+                return type.__hash__(cls)
+
+            def __eq__(cls, other):
+                events.append("eq")
+                return cls is other
+
+        class Key(metaclass=Meta):
+            pass
+
+        def fn(x, mapping):
+            return x + len(mapping)
+
+        key = (Key(),) if nested else Key()
+        mapping = OrderedDict([(key, 1), ("other", 2)])
+        mapping.move_to_end(key)
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager")
+        events.clear()
+        self.assertEqual(compiled(x, mapping), x + 2)
+        self.assertEqual(events, [])
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        events.clear()
+        with self.assertRaisesRegex(Unsupported, "Reordered OrderedDict input"):
+            compiled(x, mapping)
+        self.assertEqual(events, [])
+
+    def test_ordered_input_rechecks_linked_order_before_reuse(self):
+        class Key:
+            def __hash__(self):
+                return 42
+
+        def fn(x, mapping):
+            return x + len(mapping)
+
+        first, second = Key(), Key()
+        mapping = OrderedDict([(first, 1), (second, 2)])
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, mapping), x + 2)
+        mapping.move_to_end(first)
+        with self.assertRaisesRegex(Unsupported, "Reordered OrderedDict input"):
+            compiled(x, mapping)
+
     def test_ordered_dict_repr_guards_linked_order(self):
         def fn(x, mapping):
             return x + 1, repr(mapping)
