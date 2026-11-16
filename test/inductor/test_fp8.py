@@ -2861,7 +2861,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
 
     def test_pattern_fires_and_is_correct(self):
         """The log2+ceil pattern should be matched and produce correct uint8."""
-        _misc_patterns_init("cuda")
+        _misc_patterns_init(GPU_TYPE)
         E8M0_BIAS = 127
 
         def fn(inp):
