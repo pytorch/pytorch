@@ -1349,6 +1349,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (layout_policy_) [[unlikely]] {
       return layout_custom();
     }
+
     // NB: This method is not virtual and avoid dispatches for perf.
     // strided is also the most common layout type, so we check for
     // strided case first.
