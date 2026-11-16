@@ -5,19 +5,31 @@ import builtins
 import contextlib
 import numbers
 import operator
+import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from functools import partial
-from typing import Any, cast, Literal, Protocol, runtime_checkable, Self, TYPE_CHECKING
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Protocol,
+    runtime_checkable,
+    Self,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.distributed as dist
 from torch.distributed import Work
 
-from ._work import _validate_timeout, wait_all
+from ._work import _BatchWork, _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -37,6 +49,20 @@ def _subrange(
     if length < 0 or length > size - offset:
         raise ValueError(f"range exceeds the {name}")
     return offset, length
+
+
+def _remaining(deadline: float | None) -> float | None:
+    return None if deadline is None else max(0.0, deadline - time.monotonic())
+
+
+PeerId = str
+
+
+class Notification(NamedTuple):
+    """A message from ``peer``, as returned by ``Transport.poll_notifications``."""
+
+    peer: PeerId
+    payload: bytes
 
 
 def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
@@ -91,6 +117,11 @@ class RemoteBuffer(Protocol):
     Descriptors grant memory access: exchange them only with authorized peers.
     """
 
+    @property
+    def peer_id(self) -> PeerId:
+        """The peer that registered this memory, as addressed by notifications."""
+        ...
+
     def serialize(self) -> bytes: ...
 
     @classmethod
@@ -144,6 +175,17 @@ class Transport(ABC):
     timeout may leave transfers pending. ``wait_all`` awaits their completion
     futures without blocking the event loop.
 
+    ``write_batch`` and ``read_batch`` transfer a sequence of ``(local view,
+    remote buffer)`` pairs as one operation, returning zero or one Work like
+    ``write``/``read``. Backends validate every pair before dispatching any, so
+    an invalid pair raises with nothing in flight. Pairs may name different
+    peers and complete in any order; zero-length pairs are skipped. The Work
+    completes only once every transfer is terminal and fails if any transfer
+    failed, in which case the contents of every destination range are
+    unspecified. If a transfer fails to start after others have, the Work waits
+    for those, then fails with that error. ``timeout`` bounds the wait for the
+    whole batch.
+
     Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
     connect to multiple peers, and remote descriptors identify their peer. No
     process group, ranks, or matching receives are needed.
@@ -170,6 +212,16 @@ class Transport(ABC):
     while the transfer is in flight, and can be captured in CUDA graphs.
     Transfer failures terminate the process, since consumers may already be
     enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
+
+    Backends with a nonzero ``max_notification_size`` exchange small byte
+    messages with peers. ``send_notification`` sends one to a connected peer;
+    ``notification=`` on ``write``/``read`` sends one to the remote buffer's
+    peer once the transfer succeeds, so a written range is visible in the
+    destination's host memory when its notification arrives. Receivers see
+    messages from all senders, including peers they never connected to.
+    Messages are not lost or duplicated while both endpoints are open, but are
+    not ordered with each other or with unrelated transfers. Peer ids are
+    asserted by the sender, not authenticated.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
@@ -326,6 +378,47 @@ class Transport(ABC):
     def connected(self) -> bool:
         """Return whether the endpoint is connected to any peer."""
 
+    @property
+    def peer_id(self) -> PeerId:
+        """This endpoint's id, as peers see it in notifications and descriptors."""
+        raise NotImplementedError("transport does not support notifications")
+
+    def max_notification_size(self) -> int:
+        """Return the largest notification payload in bytes; 0 if unsupported."""
+        return 0
+
+    def send_notification(
+        self, peer: PeerId, payload: bytes, *, timeout: float | None = None
+    ) -> Work:
+        """Send a nonempty ``payload`` to the connected ``peer``.
+
+        The Work completes once the backend accepted the message, not when the
+        peer receives it. Raises ``ValueError`` for an unconnected peer.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    def poll_notifications(self) -> list[Notification]:
+        """Return received notifications without waiting; each is returned once."""
+        raise NotImplementedError("transport does not support notifications")
+
+    def wait_notifications(self, *, timeout: float | None = None) -> Work:
+        """Return a Work that completes once a notification can be polled.
+
+        The following ``poll_notifications`` may return nothing if another
+        caller drained it first. The Work fails if the transport closes first;
+        ``timeout`` is its default wait timeout.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    def _check_notification(self, payload: bytes) -> None:
+        limit = self.max_notification_size()
+        if not limit:
+            raise NotImplementedError("transport does not support notifications")
+        if not isinstance(payload, bytes):
+            raise TypeError("notification payload must be bytes")
+        if not 0 < len(payload) <= limit:
+            raise ValueError(f"notification payload must be 1 to {limit} bytes")
+
     @abstractmethod
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -357,8 +450,13 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
-        """Write a local view; return Work for async_op=True, otherwise zero."""
+        """Write a local view; return Work for async_op=True, otherwise zero.
+
+        A ``notification`` is sent to the destination after the write succeeds;
+        the transfer completes once it has been sent.
+        """
 
     @abstractmethod
     def read(
@@ -368,8 +466,89 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
-        """Read into a local view; return Work for async_op=True, otherwise zero."""
+        """Read into a local view; return Work for async_op=True, otherwise zero.
+
+        A ``notification`` is sent to the source after the read succeeds; the
+        transfer completes once it has been sent.
+        """
+
+    def write_batch(
+        self,
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Write each local view to its remote buffer as one batch."""
+        return self._transfer_batch(
+            "WRITE", transfers, async_op=async_op, timeout=timeout
+        )
+
+    def read_batch(
+        self,
+        transfers: Sequence[tuple[MutableMemoryView, RemoteBuffer]],
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Read each remote buffer into its local view as one batch."""
+        return self._transfer_batch(
+            "READ", transfers, async_op=async_op, timeout=timeout
+        )
+
+    def _transfer_batch(
+        self,
+        operation: Literal["WRITE", "READ"],
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        async_op: bool,
+        timeout: float | None,
+    ) -> int | Work:
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
+        # A batch is not atomic. If dispatch fails partway, the started transfers
+        # finish before the error is reported, so no buffer is still in use when
+        # the caller sees it, but some destinations may already be written.
+        # Backends must not promise more, so callers behave the same on all of them.
+        works, dispatch_error = self._submit_batch(operation, list(transfers), deadline)
+        remaining = _remaining(deadline)
+        batch = _BatchWork(works, dispatch_error, timeout if async_op else remaining)
+        if async_op:
+            return batch
+        batch.wait()
+        return 0
+
+    def _submit_batch(
+        self,
+        operation: Literal["WRITE", "READ"],
+        transfers: list[tuple[MemoryView, RemoteBuffer]],
+        deadline: float | None,
+    ) -> tuple[list[Work], Exception | None]:
+        """Validate every pair, then start each non-empty one.
+
+        Backends with native batches override this. Returns the started Works
+        and the error that stopped dispatch; raises if nothing started.
+        """
+        mutable = operation == "READ"
+        transfer: Callable[..., int | Work] = self.read if mutable else self.write
+        for local, remote in transfers:
+            self._check_transfer(local, remote, mutable=mutable)
+        works: list[Work] = []
+        for local, remote in transfers:
+            if local.size() == 0:
+                continue
+            timeout = _remaining(deadline)
+            try:
+                work = transfer(local, remote, async_op=True, timeout=timeout)
+            except Exception as error:
+                if not works:
+                    raise
+                return works, error
+            works.append(cast(Work, work))
+        return works, None
 
     def write_stream(
         self,
@@ -413,7 +592,7 @@ class Transport(ABC):
     def _check_transfer(  # noqa: B027
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
     ) -> None:
-        """Validate a transfer before it is enqueued on a CUDA stream."""
+        """Validate a transfer before it is enqueued on a CUDA stream or batched."""
 
     def _cuda_stream(self, stream: torch.cuda.Stream) -> _CudaStreamOrdering:
         from ._cuda_stream import _CudaStreamOrdering
@@ -442,6 +621,7 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Write a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
@@ -449,7 +629,14 @@ class Transport(ABC):
         started = asyncio.get_running_loop().time()
         work = cast(
             Work,
-            self.write(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.write(
+                local_buffer,
+                remote_buffer,
+                async_op=True,
+                timeout=timeout,
+                # Omitted when unset so backends without notifications still work.
+                **({} if notification is None else {"notification": notification}),
+            ),
         )
         remaining = (
             None
@@ -464,6 +651,7 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Read into a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
@@ -471,12 +659,55 @@ class Transport(ABC):
         started = asyncio.get_running_loop().time()
         work = cast(
             Work,
-            self.read(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.read(
+                local_buffer,
+                remote_buffer,
+                async_op=True,
+                timeout=timeout,
+                # Omitted when unset so backends without notifications still work.
+                **({} if notification is None else {"notification": notification}),
+            ),
         )
         remaining = (
             None
             if timeout is None
             else max(0.0, timeout - (asyncio.get_running_loop().time() - started))
+        )
+        await wait_all((work,), timeout=remaining)
+
+    async def write_batch_async(
+        self,
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Write a batch, yielding to asyncio until every transfer finishes."""
+        await self._transfer_batch_async(self.write_batch, transfers, timeout)
+
+    async def read_batch_async(
+        self,
+        transfers: Sequence[tuple[MutableMemoryView, RemoteBuffer]],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Read a batch, yielding to asyncio until every transfer finishes."""
+        await self._transfer_batch_async(self.read_batch, transfers, timeout)
+
+    async def _transfer_batch_async(
+        self,
+        transfer_batch: Callable[..., int | Work],
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        timeout: float | None,
+    ) -> None:
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        # Dispatch may wait on backend locks, so keep it off the event loop.
+        dispatch = partial(transfer_batch, transfers, async_op=True, timeout=timeout)
+        work = cast(Work, await asyncio.to_thread(dispatch))
+        remaining = (
+            None if timeout is None else max(0.0, timeout - (loop.time() - started))
         )
         await wait_all((work,), timeout=remaining)
 
