@@ -359,13 +359,14 @@ ownership:
       - /aten/src/ATen/native/vulkan/
   - name: dsl_native_ops
     labels: ["module: dsl-native-ops"]
-    owners: [drisspg, pearu, slayton58]
+    owners: [drisspg, pearu, slayton58, vkuzo]
     section: python_core_api
     paths:
       - /torch/_native/: [slayton58, drisspg]
       - /torch/_native/ops/linear_cross_entropy/: [slayton58, pearu]
       - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
       - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
+      - /torch/utils/_quantize_tensor_validation.py: [vkuzo, slayton58]
   - name: complex
     labels: ["module: complex"]
     owners: [amjames, hameerabbasi]
@@ -408,7 +409,7 @@ ownership:
       - /torch/nn/: [albanD, jbschlosser]
   - name: nn_dsl_native_ops
     labels: ["module: dsl-native-ops", "module: nn"]
-    owners: [drisspg, pearu, slayton58]
+    owners: [drisspg, pearu, slayton58, vkuzo]
     section: python_nn_api
     paths:
       - /torch/nn/modules/linear_cross_entropy*.py: [slayton58, pearu]
@@ -634,7 +635,6 @@ ownership:
     owners: []
     section: third_party_backend_deps
     paths:
-      - /third_party/NNPACK
       - /third_party/VulkanMemoryAllocator
       - /third_party/XNNPACK
       - /third_party/aiter
@@ -716,6 +716,16 @@ ownership:
       - /torch/csrc/distributed/c10d/Backend.*: [kwen2501]
       - /torch/csrc/distributed/c10d/Ops.*: [kwen2501]
       - /torch/distributed/distributed_c10d.py: [d4l3k, fduwjj, kapilsh]
+  - name: distributed_infra
+    labels: ["oncall: distributed infra"]
+    owners: [d4l3k]
+    section: distributed
+    paths:
+      - /test/distributed/checkpoint/test_pg_transport.py: [d4l3k]
+      - /test/distributed/test_transport_*: [d4l3k]
+      - /test/distributed/transport_test_utils.py: [d4l3k]
+      - /torch/distributed/_transport/: [d4l3k]
+      - /torch/distributed/checkpoint/_pg_transport.py: [d4l3k]
   - name: fsdp
     labels: ["module: fsdp"]
     owners: [weifengpy]
@@ -1309,6 +1319,7 @@ ownership:
       - /test/simulate_nccl_errors.py
       - /test/slow_tests.json
       - /test/test_accelerator.py
+      - /test/test_stream.py
       - /test/test_ao_sparsity.py
       - /test/test_appending_byte_serializer.py
       - /test/test_as_strided.py
@@ -1560,6 +1571,7 @@ ownership:
       - /test/benchmark_utils/
       - /test/hw_classification_testdata/
       - /test/junit_xml_testdata/
+      - /test/prune_skips_testdata/
       - /test/scripts/
       - /test/spincli/
       - /test/strobelight/

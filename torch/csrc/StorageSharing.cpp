@@ -1,4 +1,3 @@
-#include <c10/util/safe_conv.h>
 #include <torch/csrc/python_headers.h>
 #ifdef _MSC_VER
 #include <c10/util/win32-headers.h>
@@ -12,6 +11,7 @@
 #include <torch/csrc/copy_utils.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #include <torch/csrc/Storage.h>
