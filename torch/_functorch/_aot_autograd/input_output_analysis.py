@@ -203,7 +203,9 @@ def create_synthetic_base_metadata(
                 if m.input_info[x].mutates_data
             )
             if len(outer_indices) > 1
-            else m.input_info[outer_indices[0]].mutations_under_no_grad_or_inference_mode
+            else m.input_info[
+                outer_indices[0]
+            ].mutations_under_no_grad_or_inference_mode
         )
 
         mutation_inductor_storage_resize = all(
@@ -335,11 +337,11 @@ def create_synthetic_base_metadata(
 
     # Regenerate traced tangents to include mutated inputs including synthetic bases
     traced_tangents = (
-        inner_mutated_tangents + m.traced_tangents[num_outer_mutated_tangents :]
+        inner_mutated_tangents + m.traced_tangents[num_outer_mutated_tangents:]
     )
     traced_tangents_descs = (
         inner_mutated_tangents_descs
-        + m.traced_tangents_descs[num_outer_mutated_tangents :]
+        + m.traced_tangents_descs[num_outer_mutated_tangents:]
     )
     if m.subclass_tangent_meta is None:
         raise AssertionError("m.subclass_tangent_meta must not be None")
@@ -347,7 +349,7 @@ def create_synthetic_base_metadata(
         # pyrefly: ignore[bad-argument-type]
         PlainTensorMeta(0, memory_format=x)
         for x in inner_mutated_tangents_memory_formats
-    ] + m.subclass_tangent_meta[num_outer_mutated_tangents :]
+    ] + m.subclass_tangent_meta[num_outer_mutated_tangents:]
 
     return (
         ViewAndMutationMeta(
