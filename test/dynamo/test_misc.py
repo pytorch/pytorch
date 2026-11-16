@@ -9102,6 +9102,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with torch.device("cpu"):
             self.assertEqual(opt_fn(x), fn(x))
 
+    def test_nn_parameter_ctor_subclass_method(self):
+        class MySubclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            p = torch.nn.Parameter(x)
+            return p.add(1)
+
+        x = torch.zeros(3).as_subclass(MySubclass)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def _optimize_then_check_exp(
         self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
     ):
