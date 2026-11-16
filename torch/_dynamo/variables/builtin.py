@@ -3643,8 +3643,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if name == "__new__":
             return self.tp_new_impl(tx, args, kwargs)
 
-        if args and isinstance(args[0], ConstDictVariable):
-            args[0].check_base_dict_mutation(tx, name)
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
