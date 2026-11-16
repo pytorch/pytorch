@@ -679,9 +679,7 @@ class ViewAndMutationMeta:
         if self.outer_mutated_non_leaf_arg_positions is None:
             self.outer_mutated_non_leaf_arg_positions = inner_mutated_non_leaf_indices
         self.mutated_inp_retain_grad_indices = [
-            i
-            for i in inner_mutated_non_leaf_indices
-            if self.input_info[i].retains_grad
+            i for i in inner_mutated_non_leaf_indices if self.input_info[i].retains_grad
         ]
 
         # This is pre-computed for perf.

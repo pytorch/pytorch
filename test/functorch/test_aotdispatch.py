@@ -2257,9 +2257,23 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
                 x1.grad = None
                 loss1.backward(inputs=[w1])
                 if w_non_leaf:
-                    res_non_leaf = (g_oth, xg_after_oth, g_w, xg_after_ag_w, x1.grad, w1.grad)
+                    res_non_leaf = (
+                        g_oth,
+                        xg_after_oth,
+                        g_w,
+                        xg_after_ag_w,
+                        x1.grad,
+                        w1.grad,
+                    )
                 else:
-                    res_leaf = (g_oth, xg_after_oth, g_w, xg_after_ag_w, x1.grad, w1.grad)
+                    res_leaf = (
+                        g_oth,
+                        xg_after_oth,
+                        g_w,
+                        xg_after_ag_w,
+                        x1.grad,
+                        w1.grad,
+                    )
             return res_leaf, res_non_leaf
 
         for dyn in (False, True):

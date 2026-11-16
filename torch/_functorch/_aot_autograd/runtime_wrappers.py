@@ -3202,12 +3202,12 @@ def _codegen_backward_prologue(
 
 
 def _has_saved_ctx_edge(target: Tensor, saved_ctx: Any) -> bool:
-    cur: Tensor | None = target
+    cur = target
     cur_gf = cur.grad_fn
     if cur_gf is None:
         return False
     seen: set[int] = set()
-    while cur is not None and id(cur) not in seen:
+    while id(cur) not in seen:
         seen.add(id(cur))
         if any(nf is saved_ctx for nf, _ in cur_gf.next_functions):
             return True
@@ -3374,9 +3374,7 @@ def _codegen_backward_epilogue(
     # Note: backward output layout is [input grads | mutated-input grads | rng | tokens].
     # Tokens/RNG are stripped first, subclasses are wrapped, then trailing
     # mutated-input grads are stripped and scheduled for deferred accumulation.
-    num_mut_grads = len(
-        getattr(fw_metadata, "captured_mutated_inp_retain_grads", ())
-    )
+    num_mut_grads = len(getattr(fw_metadata, "captured_mutated_inp_retain_grads", ()))
 
     if has_subclass:
         args = (
@@ -3465,9 +3463,7 @@ def _codegen_compiled_forward(
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
-    captured_mut_grads = getattr(
-        fw_metadata, "captured_mutated_inp_retain_grads", ()
-    )
+    captured_mut_grads = getattr(fw_metadata, "captured_mutated_inp_retain_grads", ())
 
     buf = PySourceBuilder(
         "_compiled_forward",

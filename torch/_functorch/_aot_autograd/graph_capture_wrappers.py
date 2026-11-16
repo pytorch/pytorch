@@ -312,7 +312,7 @@ def _find_dep_primal_indices(
                             node_to_idx[acc] = idx
         found: set[int] = set()
         seen: set[Any] = set()
-        stack = [out_t.grad_fn] if out_t.grad_fn is not None else []
+        stack: list[Any] = [out_t.grad_fn] if out_t.grad_fn is not None else []
         while stack:
             fn = stack.pop()
             if fn in seen:
@@ -404,7 +404,7 @@ def create_joint(
             and not aot_config.is_export
             and not aot_config.no_tangents
         )
-        mut_retain_grad_desc_to_idx = (
+        mut_retain_grad_desc_to_idx: dict[AOTInput, int] = (
             {primals_descs[i]: i for i in mutated_inp_retain_grad_indices}
             if capture_mut_grads and primals_descs is not None
             else {}
