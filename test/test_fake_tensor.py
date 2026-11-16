@@ -666,7 +666,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertFalse(torch.nn.Parameter(x, requires_grad=False).requires_grad)
 
     @unittest.skipIf(
-        not torch._dynamo.config.use_cpp_fake_tensor, "lazy modules cannot be built under this fake mode"
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "lazy modules cannot be built under this fake mode",
     )
     def test_parameter_from_lazy_module_parameter(self):
         # A lazy module's UninitializedParameter needs _make_subclass on a fake,
@@ -706,7 +707,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     @skipIfTorchDynamo("uses torch.compile")
     @unittest.skipIf(
-        not torch._dynamo.config.use_cpp_fake_tensor, "TENSOR_MATCH already tells a Python FakeTensor apart"
+        not torch._dynamo.config.use_cpp_fake_tensor,
+        "TENSOR_MATCH already tells a Python FakeTensor apart",
     )
     def test_compile_parameter_subclass_with_fake_input(self):
         # Parameter.__new__ treats a C++ fake differently, so a graph traced for
@@ -3832,7 +3834,9 @@ class TestFakeTensorConverter(TestCase):
         x = torch.rand(2, 2, 2)
         y = x[0]
         mode = FakeTensorMode()
-        converter = FakeTensorConverter(cpp_fakes=torch._dynamo.config.use_cpp_fake_tensor)
+        converter = FakeTensorConverter(
+            cpp_fakes=torch._dynamo.config.use_cpp_fake_tensor
+        )
         x_conv = converter.from_real_tensor(mode, x)
         x_conv_storage = x_conv.untyped_storage()
         del x_conv
