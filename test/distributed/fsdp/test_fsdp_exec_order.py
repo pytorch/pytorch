@@ -45,8 +45,6 @@ class ExecOrderTestBase(FSDPTestContinuous):
     (a ported classmethod cannot see the variant's device_type).
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @classmethod
     def _resolved_device_type(cls) -> str:
         dt = cls.device_type
@@ -139,6 +137,8 @@ class Model(torch.nn.Module):
 
 
 class TestFSDPExecOrder(ExecOrderTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_world_size(2)
     @parametrize(
         "sharding_strategy",
@@ -151,7 +151,7 @@ class TestFSDPExecOrder(ExecOrderTestBase):
     ):
         """Tests that FSDP errors if the all-gather order differs across ranks
         in the first iteration."""
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
         dist.set_debug_level(dist.DebugLevel.DETAIL)
@@ -178,7 +178,7 @@ class TestFSDPExecOrder(ExecOrderTestBase):
     ):
         """Tests that FSDP warns the user if the all-gather order changes after
         the first iteration."""
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # On the first iteration, all ranks run the same order, and on the next
         # iteration, all but rank 0 run in a different order
@@ -222,7 +222,7 @@ class TestFSDPExecOrder(ExecOrderTestBase):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     def test_train_eval(self, device, sharding_strategy: ShardingStrategy):
-        device_type = torch.device(self._resolved_device_type())
+        device_type = torch.device(device).type
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         fsdp_model = Model.wrap(sharding_strategy, device_type)
         NUM_ITERS = 3
