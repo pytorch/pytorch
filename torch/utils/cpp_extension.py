@@ -2845,6 +2845,10 @@ def _get_cuda_arch_flags(cflags: list[str] | None = None) -> list[str]:
     # If not given or set as native, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list or _arch_list == "native":
         arch_list = []
+        # architecture-accelerated ("a") variants detected below, kept separate from
+        # arch_list until after the plain arches are sorted and the highest one is
+        # marked "+PTX" (see comment below)
+        accelerated_arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
         for i in range(torch.cuda.device_count()):
@@ -2860,8 +2864,25 @@ def _get_cuda_arch_flags(cflags: list[str] | None = None) -> list[str]:
             arch = f'{capability[0]}.{capability[1]}'
             if arch not in arch_list:
                 arch_list.append(arch)
+            # Also target the architecture-accelerated variant (e.g. "9.0a", "12.0a")
+            # when the GPU actually present has one, in addition to (not instead of)
+            # the plain arch. Features like CUTLASS's block-scaled/narrow-precision
+            # MMA on Hopper/Blackwell are only exposed through the "a" variant. Native
+            # mode compiles specifically for the GPU(s) actually present, so unlike the
+            # distributed wheel builds, there's no forward-compatibility reason to omit
+            # it. See https://github.com/pytorch/pytorch/issues/172807.
+            accelerated_arch = arch + 'a'
+            if accelerated_arch in supported_arches and accelerated_arch not in accelerated_arch_list:
+                accelerated_arch_list.append(accelerated_arch)
         arch_list = sorted(arch_list)
         arch_list[-1] += '+PTX'
+        # Append accelerated variants after assigning "+PTX" to the highest plain arch
+        # above: the "a" suffix means "this exact architecture only", so pairing it
+        # with PTX would defeat the purpose of (and may not even be accepted as) PTX,
+        # which exists for forward compatibility with future architectures. This
+        # mirrors how cmake/Codegen.cmake compiles specific files for both the base
+        # and the "a" variant of a given arch, rather than one instead of the other.
+        arch_list.extend(sorted(accelerated_arch_list))
 
         if not _arch_list:
             # Only log on rank 0 in distributed settings to avoid spam

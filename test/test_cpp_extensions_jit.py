@@ -1565,6 +1565,29 @@ class TestCppExtensionJITMPS(_TestCppExtensionJITBase):
         self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
 
 
+def _native_detect_expected_sm_codes():
+    # Computes the expected set of embedded `sm_*` codes for the native/auto-detect
+    # case (TORCH_CUDA_ARCH_LIST unset) by asking `_get_cuda_arch_flags()` directly,
+    # rather than recomputing the arch-detection logic independently here. This
+    # keeps the expectation in sync with whatever native-detect decides (including
+    # architecture-accelerated variants, see issue #172807) while `test_jit_cuda_archflags`
+    # still verifies that decision is faithfully compiled through to the real binary.
+    # The dedicated accelerated-suffix regression lives in
+    # `test_cuda_arch_flags_native_includes_accelerated_variant` below instead.
+    old_envvar = os.environ.pop("TORCH_CUDA_ARCH_LIST", None)
+    try:
+        flags = _get_cuda_arch_flags()
+    finally:
+        if old_envvar is not None:
+            os.environ["TORCH_CUDA_ARCH_LIST"] = old_envvar
+    codes = {
+        match.group(1)
+        for flag in flags
+        if (match := re.search(r"code=sm_(\w+)$", flag))
+    }
+    return sorted(codes)
+
+
 @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
@@ -1614,7 +1637,10 @@ class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
                     f"Output: {output} "
                 )
 
-            actual_arches = sorted(re.findall(r"sm_\d+", output))
+            # `[a-z]?` picks up architecture-accelerated suffixes (e.g. "sm_120a"):
+            # without it, `\d+` stops before the letter and "sm_120a" would be
+            # misread as a second, indistinguishable "sm_120" match.
+            actual_arches = sorted(re.findall(r"sm_\d+[a-z]?", output))
             expected_arches = sorted(
                 ["sm_" + xx.replace("121", "120") for xx in expected_values]
             )
@@ -1684,15 +1710,10 @@ class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
         #   - Architecture names
         #   - With/without '+PTX'
 
-        n = torch.cuda.device_count()
-        capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            "": (
-                [f"{capability[0]}{capability[1]}" for capability in capabilities],
-                None,
-            ),
+            "": (_native_detect_expected_sm_codes(), None),
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
         major, minor = map(int, torch.version.cuda.split(".")[:2])
@@ -1747,6 +1768,55 @@ class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
         self.assertGreater(
             len(empty_flags), 0, "Empty list should generate default flags"
         )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_native_includes_accelerated_variant(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/172807:
+        # when TORCH_CUDA_ARCH_LIST is unset (native/auto-detect), the detected
+        # arch flags should include the architecture-accelerated ("a") variant in
+        # addition to the plain one, for GPUs that have one (e.g. Hopper,
+        # Blackwell). CUTLASS's block-scaled/narrow-precision MMA kernels are only
+        # exposed through the "a" variant, and native mode targets the exact GPU(s)
+        # present, so there's no portability reason to omit it the way the
+        # distributed wheel builds do.
+        #
+        # Capabilities with a known accelerated counterpart, i.e. "{major}.{minor}a"
+        # is in `supported_arches` inside `_get_cuda_arch_flags`. Keep in sync with
+        # that list.
+        accelerated_capabilities = {
+            (9, 0),
+            (10, 0),
+            (10, 3),
+            (10, 7),
+            (11, 0),
+            (12, 0),
+            (12, 1),
+        }
+
+        old_envvar = os.environ.pop("TORCH_CUDA_ARCH_LIST", None)
+        try:
+            flags = _get_cuda_arch_flags()
+        finally:
+            if old_envvar is not None:
+                os.environ["TORCH_CUDA_ARCH_LIST"] = old_envvar
+
+        sm_codes = {
+            match.group(1)
+            for flag in flags
+            if (match := re.search(r"code=sm_(\w+)$", flag))
+        }
+        capability = torch.cuda.get_device_capability()
+        base_code = f"{capability[0]}{capability[1]}"
+
+        if capability in accelerated_capabilities:
+            self.assertIn(
+                base_code + "a",
+                sm_codes,
+                f"Native-detected flags for capability {capability} should include "
+                f"the accelerated sm_{base_code}a variant. Got flags: {flags}",
+            )
+        else:
+            self.assertIn(base_code, sm_codes)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
