@@ -807,9 +807,7 @@ void CUDAGraph::end_capture_to_conditional_node() {
   conditional_graph_capture_ids_.pop();
   conditional_node_handles_.pop();
 
-  // Destroys the body's stream. The pool's blocks and expandable segments do
-  // not refer to it: the allocator files allocations made on a conditional
-  // body's stream under its parent's stream (CaptureTracker::reuseStream).
+  // Returns the body's stream to the free list (see ConditionalBodyStream).
   TORCH_INTERNAL_ASSERT(!conditional_node_raw_streams_.empty());
   conditional_node_raw_streams_.pop();
 
