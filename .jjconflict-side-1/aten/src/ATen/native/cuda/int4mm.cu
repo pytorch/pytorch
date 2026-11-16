@@ -1,0 +1,2248 @@
+#if defined(USE_ROCM) || (defined(CUDA_VERSION) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
+#include <cuda_runtime.h>
+#if !defined(USE_ROCM)
+#include <mma.h>
+#endif
+#endif
+#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/DeviceGuard.h>
+#include <c10/cuda/CUDAGuard.h>
+
+#if defined(USE_ROCM)
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
+
+namespace at::native {
+
+template <typename U, typename V>
+constexpr __host__ __device__ auto divDown(U a, V b) -> decltype(a + b) {
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
+  return (a / b);
+}
+
+template <typename U, typename V>
+constexpr __host__ __device__ auto divUp(U a, V b) -> decltype(a + b) {
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
+  // Overflow safe variant of (a + b - 1) / b
+  const uint64_t blocks = a / b + (a % b != 0);
+  return blocks;
+}
+
+template <typename U, typename V>
+constexpr __host__ __device__ auto roundDown(U a, V b) -> decltype(a + b) {
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
+  return divDown(a, b) * b;
+}
+
+template <typename U, typename V>
+constexpr __host__ __device__ auto roundUp(U a, V b) -> decltype(a + b) {
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
+  return divUp(a, b) * b;
+}
+
+template <typename U, typename V>
+constexpr __host__ __device__ bool isEvenDivisor(U a, V b) {
+  static_assert(std::is_integral_v<U> && std::is_integral_v<V>);
+  return (a % V(b) == 0) && ((a / V(b)) >= 1);
+}
+
+template <class T>
+constexpr __host__ __device__ T pow(T n, int power) {
+  return (power > 0 ? n * pow(n, power - 1) : 1);
+}
+
+template <class T>
+constexpr __host__ __device__ T pow2(int power) {
+  return pow(2, power);
+}
+
+static_assert(pow2<int>(8) == 256, "pow2");
+
+template <typename T>
+constexpr __host__ __device__ int log2(T n, int p = 0) {
+  return (n <= 1) ? p : log2(n / 2, p + 1);
+}
+
+static_assert(log2(2) == 1, "log2");
+static_assert(log2(3) == 1, "log2");
+static_assert(log2(4) == 2, "log2");
+
+template <typename T>
+constexpr __host__ __device__ bool isPowerOf2(T v) {
+  static_assert(std::is_integral_v<T>);
+  return (v && !(v & (v - 1)));
+}
+
+static_assert(isPowerOf2(2048), "isPowerOf2");
+static_assert(!isPowerOf2(3333), "isPowerOf2");
+
+template <typename T>
+constexpr __host__ __device__ T nextHighestPowerOf2(T v) {
+  static_assert(std::is_integral_v<T>);
+  return (isPowerOf2(v) ? (T)2 * v : ((T)1 << (log2(v) + 1)));
+}
+
+static_assert(nextHighestPowerOf2(1) == 2, "nextHighestPowerOf2");
+static_assert(nextHighestPowerOf2(2) == 4, "nextHighestPowerOf2");
+static_assert(nextHighestPowerOf2(3) == 4, "nextHighestPowerOf2");
+static_assert(nextHighestPowerOf2(4) == 8, "nextHighestPowerOf2");
+
+static_assert(nextHighestPowerOf2(15) == 16, "nextHighestPowerOf2");
+static_assert(nextHighestPowerOf2(16) == 32, "nextHighestPowerOf2");
+static_assert(nextHighestPowerOf2(17) == 32, "nextHighestPowerOf2");
+
+static_assert(
+    nextHighestPowerOf2(1536000000u) == 2147483648u,
+    "nextHighestPowerOf2");
+static_assert(
+    nextHighestPowerOf2((size_t)2147483648ULL) == (size_t)4294967296ULL,
+    "nextHighestPowerOf2");
+
+template <typename T>
+constexpr __host__ __device__ T nextLowestPowerOf2(T v) {
+  static_assert(std::is_integral_v<T>);
+  return (isPowerOf2(v) ? v / (T)2 : ((T)1 << (log2(v))));
+}
+
+static_assert(nextLowestPowerOf2(1) == 0, "nextLowestPowerOf2");
+static_assert(nextLowestPowerOf2(2) == 1, "nextLowestPowerOf2");
+static_assert(nextLowestPowerOf2(3) == 2, "nextLowestPowerOf2");
+static_assert(nextLowestPowerOf2(4) == 2, "nextLowestPowerOf2");
+
+static_assert(nextLowestPowerOf2(15) == 8, "nextLowestPowerOf2");
+static_assert(nextLowestPowerOf2(16) == 8, "nextLowestPowerOf2");
+static_assert(nextLowestPowerOf2(17) == 16, "nextLowestPowerOf2");
+
+inline __host__ __device__ bool isPointerAligned(const void* p, int align) {
+  return reinterpret_cast<uintptr_t>(p) % align == 0;
+}
+
+// Returns the increment needed to aligned the pointer to the next highest
+// aligned address
+template <int Align>
+inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
+  static_assert(isPowerOf2(Align));
+  const uint32_t diff = uint32_t(uintptr_t(p) & uintptr_t(Align - 1));
+  return diff == 0 ? 0 : uint32_t(Align) - diff;
+}
+
+#if !defined(USE_ROCM)
+#if (defined(CUDA_VERSION) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+
+constexpr int32_t kWarpSize = 32;
+
+// f16 vector types
+struct __align__(2) f16x1 {
+  __half vals[1];
+};
+
+struct __align__(4) f16x2 {
+  __half vals[2];
+};
+
+struct __align__(8) f16x4 {
+  __half vals[4];
+};
+
+struct __align__(16) f16x8 {
+  __half vals[8];
+};
+
+// bf16 vector types
+struct __align__(2) bf16x1 {
+  __nv_bfloat16 vals[1];
+};
+
+struct __align__(4) bf16x2 {
+  __nv_bfloat16 vals[2];
+};
+
+struct __align__(8) bf16x4 {
+  __nv_bfloat16 vals[4];
+};
+
+struct __align__(16) bf16x8 {
+  __nv_bfloat16 vals[8];
+};
+
+// bf162 vector types
+struct __align__(4) bf16x2x1 {
+  __nv_bfloat162 vals[1];
+};
+
+struct __align__(8) bf16x2x2 {
+  __nv_bfloat162 vals[2];
+};
+
+struct __align__(16) bf16x2x4 {
+  __nv_bfloat162 vals[4];
+};
+
+struct __align__(16) bf16x2x4_u32 {
+  uint32_t vals[4];
+};
+
+struct __align__(8) bf16x2x2_u32 {
+  uint32_t vals[2];
+};
+
+struct __align__(4) bf16x2x1_u32 {
+  uint32_t vals[1];
+};
+
+template <typename T, int N>
+struct __align__(sizeof(T) * N) VectorType {
+  T vals[N];
+};
+
+// from
+// https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h
+inline __device__ bf16x2x4 convert_i4x8_to_bf16x2x4(uint32_t source) {
+  bf16x2x4 result;
+  constexpr int kElements = 8;
+
+  uint32_t* h = reinterpret_cast<uint32_t*>(&result);
+  uint32_t const source_i4s = source;
+
+  // First, we extract the i4s and construct an intermediate fp16 number.
+  static constexpr uint32_t immLut = (0xf0 & 0xcc) | 0xaa;
+  static constexpr uint32_t MASK = 0x000f000f;
+  static constexpr uint32_t I4s_TO_BF16s_MAGIC_NUM = 0x43004300;
+
+  // We don't have enough mantissa to remove as much shift overhead as FP16, so
+  // we must loop. No shift needed for first item.
+  uint32_t i4s = source_i4s;
+
+  asm volatile("lop3.b32 %0, %1, %2, %3, %4;\n"
+               : "=r"(h[0])
+               : "r"(i4s), "n"(MASK), "n"(I4s_TO_BF16s_MAGIC_NUM), "n"(immLut));
+
+#pragma unroll
+  for (int ii = 1; ii < kElements / 2; ++ii) {
+    i4s >>= 4; // or is it 8?
+    // (i4s & 0x000f000f) | 0x43004300
+    asm volatile(
+        "lop3.b32 %0, %1, %2, %3, %4;\n"
+        : "=r"(h[ii])
+        : "r"(i4s), "n"(MASK), "n"(I4s_TO_BF16s_MAGIC_NUM), "n"(immLut));
+  }
+
+  // This is the BF16 {-136, -136} represented as an integer.
+  static constexpr uint32_t BF16_BIAS = 0xC308C308;
+  static constexpr uint32_t BF16_ONE = 0x3F803F80;
+
+// Finally, we construct the output numbers.
+#pragma unroll
+  for (int ii = 0; ii < kElements / 2; ++ii) {
+    // Since this section is for Ampere+, we use bf16 fma to do the bias
+    // subtraction
+    asm("fma.rn.bf16x2 %0, %1, %2, %3;\n"
+        : "=r"(h[ii])
+        : "r"(h[ii]), "r"(BF16_ONE), "r"(BF16_BIAS));
+  }
+
+  return result;
+}
+
+
+
+enum class KReductionType {
+  // No k-reduction is needed between blocks as the number of k-tiles processed
+  // per block are exact and we can directly write the output
+  None,
+};
+
+// Loads the A matrix in 16-bit standard m x k row major layout, and writes
+// the C matrix in 16-bit standard m x n row major layout:
+//
+// size [m][k]
+template <KReductionType ReduceType>
+struct ALayout_RM {
+  static constexpr int32_t kMTileSize = 16;
+  static constexpr int32_t kNTileSize = 8;
+  static constexpr int32_t kKTileSize = 16;
+
+  template <int KTilesToLoad>
+  static __device__ void load(
+      const void* A,
+      int32_t m,
+      int32_t k,
+      int32_t mTiles,
+      int32_t mTile,
+      int32_t kTiles,
+      int32_t kTileStart,
+      int32_t laneId,
+      bf16x2x4_u32 out[KTilesToLoad]
+  ) {
+    const auto mLane = mTile * kMTileSize + (laneId / 4);
+    const auto kLane = kTileStart * kKTileSize + (laneId % 4) * 2;
+
+    // access
+    // [mTile * kMTileSize + (laneId / 4)]
+    // [kTileStart * kKTileSize + (laneId % 4) * 2]
+    auto aPtr = reinterpret_cast<const __nv_bfloat16*>(A) + mLane * k + kLane;
+    bool m0InBounds = mLane < m;
+
+    auto aPtrPlus8Rows = aPtr + 8 * k;
+
+    bool m1InBounds = (mLane + 8) < m;
+
+#pragma unroll
+    for (int i = 0; i < KTilesToLoad; ++i) {
+      out[i].vals[0] = m0InBounds
+          ? *reinterpret_cast<const uint32_t*>(aPtr + i * kKTileSize)
+          : uint32_t(0);
+      out[i].vals[1] = m1InBounds
+          ? *reinterpret_cast<const uint32_t*>(aPtrPlus8Rows + i * kKTileSize)
+          : uint32_t(0);
+
+      out[i].vals[2] = m0InBounds
+          ? *reinterpret_cast<const uint32_t*>(aPtr + i * kKTileSize + 8)
+          : uint32_t(0);
+      out[i].vals[3] = m1InBounds ? *reinterpret_cast<const uint32_t*>(
+                                        aPtrPlus8Rows + i * kKTileSize + 8)
+                                  : uint32_t(0);
+    }
+  }
+
+  static __device__ void store(
+      void* C,
+      int32_t m,
+      int32_t n,
+      int32_t mOutTiles,
+      int32_t mTile,
+      int32_t nOutTiles,
+      int32_t nTile,
+      int32_t laneId,
+      const float4& out) {
+    static_assert(ReduceType == KReductionType::None);
+
+    if constexpr (ReduceType == KReductionType::None) {
+      // sum.x / sum.y are written at
+      // [laneId / 4], [(laneId % 4) * 2, (laneId % 4) * 2 + 1]
+      // sum.z / sum.w are written at
+      // [8 + (laneId / 4)], [(laneId % 4) * 2, (laneId % 4) * 2 + 1]
+      // i.e., same columns, different row.
+      const int outRow = mTile * kMTileSize + (laneId / 4);
+      const int outCol = nTile * kNTileSize + (laneId % 4) * 2;
+
+      // Pointer where sum.x / sum.y is written
+      auto cPtr = reinterpret_cast<__nv_bfloat16*>(C) + outRow * n + outCol;
+
+      auto v01 = __float22bfloat162_rn(float2{out.x, out.y});
+      auto v23 = __float22bfloat162_rn(float2{out.z, out.w});
+
+      if (outRow < m) {
+        *reinterpret_cast<__nv_bfloat162*>(cPtr) = v01;
+      }
+
+      // sum.z, sum.w at +8 rows from cPtr
+      if (outRow + 8 < m) {
+        *reinterpret_cast<__nv_bfloat162*>(cPtr + 8 * n) = v23;
+      }
+    }
+  }
+};
+
+template <int InnerKTiles, int QGroupSize>
+struct BLayout_TC_int4 {
+  static constexpr int32_t kInnerKTiles = InnerKTiles;
+  static constexpr int32_t kMTileSize = 16;
+  static constexpr int32_t kNTileSize = 8;
+  static constexpr int32_t kKTileSize = 16;
+
+  template <int KTilesToLoad>
+  static __device__ void load(
+      // type uint32, size [n / 8][k / (InnerKTiles * 16)][32][InnerKTiles / 2]
+      // n-tiles: n / 8 for NV, n /16 for AMD
+      // k / (InnerKTiles * 16): TC size per k-tile is 16 (m16n8k16 for NV, m16n16k16 for AMD)
+      // value per warp lane: 32 for NV, 64 for AMD
+      // (InnerKTiles / 2): B layout has 4 values per lane (16 bits) per k-tile.
+      // 2 k-tiles packed is a uint32 (hence InnerKTiles == 2 is our smallest
+      // value) 4 k-tiles packed is a uint32x2 (64 bits) 8 k-tiles packed is a
+      // uint32x4 (128 bits)
+      const void* __restrict__ B,
+      // size [k / qGroupSize][n][2]
+      // Contains the scale and zero point of each of the quantized int4 values
+      // within B
+      // v_reconstructed = (bf16(B_int4_val) * scale) - zero
+      const void* __restrict__ quantizationInfo,
+      int32_t n,
+      int32_t k,
+      int32_t nTiles,
+      int32_t nTile,
+      int32_t kTiles,
+      int32_t kTileStart,
+      int32_t laneId,
+      bf16x2x4_u32 out[KTilesToLoad / InnerKTiles][InnerKTiles / 2]) {
+    // offset [nTile][kTileStart / InnerKTiles][laneId][0]
+    auto bPtr = reinterpret_cast<const int32_t*>(B) +
+        (((nTile * (kTiles / InnerKTiles) + (kTileStart / InnerKTiles)) *
+          kWarpSize) +
+         laneId) *
+            (InnerKTiles / 2);
+
+    int32_t b_int4[KTilesToLoad / InnerKTiles][InnerKTiles / 2];
+
+#pragma unroll
+    for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
+      auto bPtrCur = bPtr + i * kWarpSize * (InnerKTiles / 2);
+
+      if constexpr (InnerKTiles == 2) {
+        b_int4[i][0] = bPtrCur[0];
+      }
+
+      if constexpr (InnerKTiles == 4) {
+        // asm volatile("ld.global.cs.v2.u32 {%0, %1}, [%2];\n"
+        //              : "=r"(b_int4[i][0]), "=r"(b_int4[i][1])
+        //              : "l"(bPtrCur));
+
+        int2 load8 = reinterpret_cast<const int2*>(bPtrCur)[0];
+        b_int4[i][0] = load8.x;
+        b_int4[i][1] = load8.y;
+      }
+
+      if constexpr (InnerKTiles == 8) {
+        // asm volatile("ld.global.cs.v4.u32 {%0, %1, %2, %3}, [%4];\n"
+        //              : "=r"(b_int4[i][0]), "=r"(b_int4[i][1]),
+        //              "=r"(b_int4[i][2]), "=r"(b_int4[i][3]) : "l"(bPtrCur));
+
+        int4 load16 = reinterpret_cast<const int4*>(bPtrCur)[0];
+        b_int4[i][0] = load16.x;
+        b_int4[i][1] = load16.y;
+        b_int4[i][2] = load16.z;
+        b_int4[i][3] = load16.w;
+      }
+    }
+
+    // Load needed info for dequantization
+
+    static_assert(isPowerOf2(QGroupSize));
+    static_assert(isEvenDivisor(QGroupSize, kKTileSize));
+    // smallest quantization group size is 32 (2 k-tiles are packed in an int32)
+    static_assert(QGroupSize >= kKTileSize * 2);
+    constexpr int kKTilesPerQGroup = (QGroupSize / kKTileSize);
+    // a q-group could be larger than what we are handling in a single warp
+    constexpr int kNumQGroups = (KTilesToLoad / kKTilesPerQGroup) < 1
+        ? 1
+        : (KTilesToLoad / kKTilesPerQGroup);
+
+    __nv_bfloat162 qScaleAndZero[kNumQGroups];
+    {
+      int32_t laneN = nTile * kNTileSize + (laneId / 4);
+      int32_t groupStart = (kTileStart * kKTileSize) / QGroupSize;
+
+      int32_t n = nTiles * kNTileSize;
+
+      // offset [qScale_kGroup][qScale_n][0]
+      auto qInfoPtr = reinterpret_cast<const __nv_bfloat16*>(quantizationInfo) +
+          (groupStart * n + laneN) * 2;
+
+#pragma unroll
+      for (int i = 0; i < kNumQGroups; ++i) {
+        qScaleAndZero[i] =
+            *reinterpret_cast<const __nv_bfloat162*>(qInfoPtr + i * n * 2);
+      }
+    }
+
+    //
+    // De-quantize int4 values to bf16. Values are dequantized as truly int4
+    // [-8, 7] range; dequant = (bf16(int4_value) * bf16_scale) + bf16_zero
+    //
+    {
+      // FIXME: does this negatively affect register counts, or will nvcc
+      // move this expansion (and data loads above) closer to the point of use?
+      __nv_bfloat162 qScale[kNumQGroups];
+      __nv_bfloat162 qZero[kNumQGroups];
+
+#pragma unroll
+      for (int i = 0; i < kNumQGroups; ++i) {
+        qScale[i] = __bfloat162bfloat162(qScaleAndZero[i].x);
+        qZero[i] = __bfloat162bfloat162(qScaleAndZero[i].y);
+      }
+
+#pragma unroll
+      for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
+#pragma unroll
+        for (int j = 0; j < InnerKTiles / 2; ++j) {
+          bf16x2x4 v = convert_i4x8_to_bf16x2x4(b_int4[i][j]);
+
+          int curKTile = i * InnerKTiles + j * 2;
+          int curQGroup = (curKTile * kKTileSize) / QGroupSize;
+
+          // The dequantized values in `v` for a given lane have the same n
+          // dimension (the B tensor core layout has all values in the same
+          // thread along the same n) but different k dimension, but all are
+          // guaranteed to occur within the same quantization group, so we need
+          // only load a single scale + zero to cover what this lane has
+#pragma unroll
+          for (int k = 0; k < 4; ++k) {
+            v.vals[k] = __hfma2(v.vals[k], qScale[curQGroup], qZero[curQGroup]);
+          }
+
+          // type pun, the __nv_bfloat162 value in bf16x2x4 is a struct and
+          // can't be used as a 32-bit asm register argument for `mma`
+          static_assert(sizeof(bf16x2x4) == sizeof(out[0][0]));
+          // On Windows with ROCm, std::memcpy resolves to a __host__-only
+          // function and cannot be called from __device__ code. Use the raw
+          // memcpy which the HIP compiler provides as a __device__ builtin.
+          std::memcpy(&out[i][j], &v, sizeof(bf16x2x4_u32));
+        }
+      }
+    }
+  }
+};
+
+template <
+    typename ALayout,
+    typename BLayout,
+    typename CLayout,
+    int Warps,
+    int KTilesPerIteration>
+__global__
+__launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
+    // Data for the A matrix, loaded as per ALayout
+    const void* const __restrict__ A,
+
+    // Data for the B matrix, loaded as per BLayout
+    const void* const __restrict__ B,
+
+    // Optional quantization data for dequantizing B, loaded as per BLayout
+    const void* const __restrict__ B_quantizationInfo,
+
+    // Output data for the C matrix, stored as per CLayout
+    void* __restrict__ C,
+
+    // The size of the matrix multiplication
+    int32_t m,
+    int32_t n,
+    int32_t k,
+
+    // The size of the matrix multiplication, in multiples of our TC tile size
+    int32_t mTiles,
+    int32_t nTiles,
+    int32_t kTiles) {
+  constexpr int32_t kMTileSize = 16;
+  constexpr int32_t kNTileSize = 8;
+  constexpr int32_t kKTileSize = 16;
+
+  static_assert(
+      ALayout::kMTileSize == kMTileSize && ALayout::kNTileSize == kNTileSize &&
+      ALayout::kKTileSize == kKTileSize);
+
+  static_assert(
+      BLayout::kMTileSize == kMTileSize && BLayout::kNTileSize == kNTileSize &&
+      BLayout::kKTileSize == kKTileSize);
+
+  static_assert(
+      CLayout::kMTileSize == kMTileSize && CLayout::kNTileSize == kNTileSize &&
+      CLayout::kKTileSize == kKTileSize);
+
+  constexpr int kInnerKTiles = BLayout::kInnerKTiles;
+
+  // 2/4/8 inner k-tiles correspond to 4, 8 and 16 byte innermost loads
+  static_assert(
+      kInnerKTiles == 2 || kInnerKTiles == 4 || kInnerKTiles == 8);
+
+  // We always process at least kInnerKTiles k-tiles back to back in a warp
+  static_assert(
+      KTilesPerIteration >= kInnerKTiles &&
+      isEvenDivisor(KTilesPerIteration, kInnerKTiles));
+
+  auto warpId = threadIdx.y;
+  auto laneId = threadIdx.x;
+
+  int32_t mTile = blockIdx.z;
+  int32_t nTile = blockIdx.y;
+
+  float4 c{0.0f, 0.0f, 0.0f, 0.0f};
+
+  // First, handle whole multiples of KTilesPerIteration
+  auto kTilesLimit = roundDown(kTiles, KTilesPerIteration);
+
+  // Each warp handles a set of KTilesPerIteration under the above limit
+  for (int32_t kTileBase = (blockIdx.x * Warps + warpId) * KTilesPerIteration;
+       kTileBase < kTilesLimit;
+       kTileBase += Warps * KTilesPerIteration) {
+    //
+    // Load data from A
+    //
+    bf16x2x4_u32 a[KTilesPerIteration];
+    ALayout::template load<KTilesPerIteration>(
+        A, m, k, mTiles, mTile, kTiles, kTileBase, laneId, a);
+
+    //
+    // Load data from B and de-quantize as needed
+    // Each k-tile is bf16x2x2
+    //
+    bf16x2x4_u32 b[KTilesPerIteration / kInnerKTiles][kInnerKTiles / 2];
+    BLayout::template load<KTilesPerIteration>(
+        B,
+        B_quantizationInfo,
+        n,
+        k,
+        nTiles,
+        nTile,
+        kTiles,
+        kTileBase,
+        laneId,
+        b);
+
+    //
+    // Now, perform the matrix multiplication
+    //
+
+    // We accumulate across k-tiles here
+#pragma unroll
+    for (int i = 0; i < KTilesPerIteration / kInnerKTiles; ++i) {
+      static_assert(isEvenDivisor(kInnerKTiles, 2) && kInnerKTiles >= 2);
+#pragma unroll
+      for (int j = 0; j < kInnerKTiles / 2; ++j) {
+        // We don't simply accumulate into `c` as this creates a too-strong
+        // execution dependency. Instead, we only periodically accumulate into
+        // `c`
+        float4 cTmp[2];
+
+#pragma unroll
+        for (int k = 0; k < 2; ++k) {
+          cTmp[k] = float4{0.0f, 0.0f, 0.0f, 0.0f};
+        }
+
+#pragma unroll
+        for (int k = 0; k < 2; ++k) {
+          asm volatile(
+              "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+              "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
+              : "=f"(cTmp[k].x),
+                "=f"(cTmp[k].y),
+                "=f"(cTmp[k].z),
+                "=f"(cTmp[k].w)
+              : "r"(a[i * kInnerKTiles + j * 2 + k].vals[0]),
+                "r"(a[i * kInnerKTiles + j * 2 + k].vals[1]),
+                "r"(a[i * kInnerKTiles + j * 2 + k].vals[2]),
+                "r"(a[i * kInnerKTiles + j * 2 + k].vals[3]),
+                "r"(b[i][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 0]),
+                "r"(b[i][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 1]),
+                "f"(cTmp[k].x),
+                "f"(cTmp[k].y),
+                "f"(cTmp[k].z),
+                "f"(cTmp[k].w));
+        }
+
+#pragma unroll
+        for (int k = 0; k < 2; ++k) {
+          c.x += cTmp[k].x;
+          c.y += cTmp[k].y;
+          c.z += cTmp[k].z;
+          c.w += cTmp[k].w;
+        }
+      }
+    }
+  } // for all tiles under kTilesLimit
+
+  // Now, there could be a remainder of 1 to KTilesPerIteration - 1 k-tiles
+  // remaining. We guarantee that the number of warps is >= KTilesPerIteration /
+  // kInnerKTiles, so that each warp can simply load kInnerKTiles and do its
+  // thing without needing more warps
+  static_assert(Warps >= KTilesPerIteration / kInnerKTiles);
+
+  auto kTileBaseRemaining = kTilesLimit + warpId * kInnerKTiles;
+
+  // If we have any remainder k-tiles, some warps will handle them, processing
+  // kInnerKTiles k-tiles at a time
+  if (kTileBaseRemaining < kTiles) {
+    bf16x2x4_u32 a[kInnerKTiles];
+    ALayout::template load<kInnerKTiles>(
+        A, m, k, mTiles, mTile, kTiles, kTileBaseRemaining, laneId, a);
+
+    bf16x2x4_u32 b[1][kInnerKTiles / 2];
+    BLayout::template load<kInnerKTiles>(
+        B,
+        B_quantizationInfo,
+        n,
+        k,
+        nTiles,
+        nTile,
+        kTiles,
+        kTileBaseRemaining,
+        laneId,
+        b);
+
+#pragma unroll
+    for (int j = 0; j < kInnerKTiles / 2; ++j) {
+      // We don't simply accumulate into `c` as this creates a too-strong
+      // execution dependency. Instead, we only periodically accumulate into
+      // `c`
+      float4 cTmp[2];
+
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        cTmp[k] = float4{0.0f, 0.0f, 0.0f, 0.0f};
+      }
+
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        asm volatile(
+            "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
+            "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
+            : "=f"(cTmp[k].x), "=f"(cTmp[k].y), "=f"(cTmp[k].z), "=f"(cTmp[k].w)
+            : "r"(a[j * 2 + k].vals[0]),
+              "r"(a[j * 2 + k].vals[1]),
+              "r"(a[j * 2 + k].vals[2]),
+              "r"(a[j * 2 + k].vals[3]),
+              "r"(b[0][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 0]),
+              "r"(b[0][(j * 2 + k) / 2].vals[((j * 2 + k) % 2) * 2 + 1]),
+              "f"(cTmp[k].x),
+              "f"(cTmp[k].y),
+              "f"(cTmp[k].z),
+              "f"(cTmp[k].w));
+      }
+
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        c.x += cTmp[k].x;
+        c.y += cTmp[k].y;
+        c.z += cTmp[k].z;
+        c.w += cTmp[k].w;
+      }
+    }
+  }
+
+  //
+  // Reduce independent k-tiles (same m/n) across warps
+  //
+  __shared__ float4 smem_sum[Warps][kWarpSize];
+
+  // FIXME: this likely doesn't need to be a true reduction tree, can just be a
+  // serial sum, maybe (unless nvcc/ptxas goes back to its old ways)
+  // smem_sum[warpId][laneId] = TreeReduce4<KTilesPerIteration>::reduce(c);
+  smem_sum[warpId][laneId] = c;
+
+  __syncthreads();
+
+  if (warpId == 0) {
+    float4 sum_f32{0.0f, 0.0f, 0.0f, 0.0f};
+
+    // Reduce across the block in the first warp
+    for (int i = 0; i < Warps; ++i) {
+      float4 v = smem_sum[i][laneId];
+      sum_f32.x += v.x;
+      sum_f32.y += v.y;
+      sum_f32.z += v.z;
+      sum_f32.w += v.w;
+    }
+
+    // Write the reduced result (in the first warp) into the output
+    CLayout::store(
+        C,
+        m,
+        n,
+        mTiles,
+        mTile,
+        // n for C output becomes k for A input, so for m16n8k16,
+        // we need to halve the tiles
+        nTiles / 2,
+        nTile,
+        laneId,
+        sum_f32);
+  }
+}
+
+
+template <
+    typename ALayout,
+    typename BLayout,
+    typename CLayout,
+    int Warps,
+    int KTilesPerWarp>
+void launch_tinygemm_kernel(
+    const at::Tensor& A,
+    const at::Tensor& B,
+    const at::Tensor* qScaleAndZeros, /* optional */
+    at::Tensor& C_final,
+    int32_t mTiles,
+    int32_t nTiles,
+    int32_t kTiles,
+    int32_t m,
+    int32_t n,
+    int32_t k,
+    cudaStream_t stream) {
+  // The chunking kernel requires that kTiles is a multiple of kInnerKTiles
+  TORCH_CHECK(
+      kTiles >= BLayout::kInnerKTiles &&
+      isEvenDivisor(kTiles, BLayout::kInnerKTiles));
+
+  TORCH_CHECK(
+      KTilesPerWarp >= BLayout::kInnerKTiles &&
+      isEvenDivisor(KTilesPerWarp, BLayout::kInnerKTiles));
+
+  // After intra-block reduction across the k dimension, we are left with this
+  // many tiles
+  //  int32_t postKernelKTiles = kTiles / (Warps * KTilesPerWarp);
+  int32_t postKernelKTiles = 1; // we loop
+
+  auto grid = dim3(postKernelKTiles, nTiles, mTiles);
+  auto block = dim3(kWarpSize, Warps);
+
+  auto func =
+      tinygemm_m16n8k16_chunk_kernel<ALayout, BLayout, CLayout, Warps, KTilesPerWarp>;
+
+  func<<<grid, block, 0, stream>>>(
+      A.data_ptr(),
+      B.data_ptr(),
+      qScaleAndZeros ? qScaleAndZeros->data_ptr() : nullptr,
+      C_final.data_ptr(),
+      m,
+      n,
+      k,
+      mTiles,
+      nTiles,
+      kTiles);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  cudaFuncAttributes funcAttr;
+  C10_CUDA_CHECK(cudaFuncGetAttributes(
+      &funcAttr,
+      func
+  ));
+}
+
+// FIXME: parallelize better, smem staging etc?
+template <int InnerKTiles>
+__global__ void matrix_to_m16n8k16_Bint4_layout(
+    // size [n][k / 2]
+    const at::PackedTensorAccessor32<uint8_t, 2, at::RestrictPtrTraits> in,
+    // size [ceil(n / 8)][ceil(k / (InnerKTiles * 16))][32][InnerKTiles / 2]
+    at::PackedTensorAccessor32<int32_t, 4, at::RestrictPtrTraits> out) {
+  // int4 values are packed into int32 values, which require at least 8. Given
+  // m16n8k16 B layout requires 4 scalar values/lane, the minimum number of
+  // innermost k-tiles that we can use is 2.
+  static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles));
+
+  constexpr int32_t kNTileSize = 8;
+  constexpr int32_t kKTileSize = 16;
+
+  // gridDim.x corresponds to the number of k-tiles divided by InnerKTiles
+  auto kOuterTile = blockIdx.x;
+  auto nTile = blockIdx.y;
+  auto t = threadIdx.x;
+
+  // Two k-tiles are packed into an int32 at a time
+#pragma unroll
+  for (int innerKTile = 0; innerKTile < InnerKTiles; innerKTile += 2) {
+    // n dimension that this lane loads from
+    auto n0 = nTile * kNTileSize + (t / 4);
+
+    bool n0Valid = n0 < in.size(0);
+
+    // Four uint8 are packed into an int32
+    int32_t ks[4];
+
+    auto kBase0 = (kOuterTile * InnerKTiles + innerKTile) * kKTileSize / 2;
+
+    ks[0] = kBase0 + t % 4;
+    ks[1] = ks[0] + 4;
+
+    auto kBase1 = kBase0 + kKTileSize / 2;
+    ks[2] = kBase1 + t % 4;
+    ks[3] = ks[2] + 4;
+
+    auto pIn = &in[n0][0];
+
+    uint8_t v[4];
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+      v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint8_t(0);
+    }
+
+    // To clearly explain the packed result with 8 int4 values (4 uint8)
+    // into one int32, we use the follow figure:
+    // [n][k]     int32: v[0] v[1] v[2] v[3] v[4] v[5] v[6] v[7]
+    // [n][k / 2] uint8:    v[0]     v[1]      v[2]      v[3]
+    // When using int32 weight as input, the packed result is consisted of
+    // v[7] | v[5] | v[3] | v[1] | v[6] | v[4] | v[2] | v[0],
+    // which epuals to
+    // v[3]L | v[2]L | v[1]L | v[0]L | v[3]H | v[2]H | v[1]H | v[0]H
+    // when using uint8 weight as input.
+    int32_t pack = ((uint32_t)(v[3] & 0xF) << 28) |
+        ((uint32_t)(v[2] & 0xF) << 24) | ((uint32_t)(v[1] & 0xF) << 20) |
+        ((uint32_t)(v[0] & 0xF) << 16) | ((uint32_t)(v[3] & 0xF0) << 8) |
+        ((uint32_t)(v[2] & 0xF0) << 4) | ((uint32_t)(v[1] & 0xF0)) |
+        ((uint32_t)(v[0] & 0xF0) >> 4);
+
+    // inner k-tiles pack two at a time
+    out[nTile][kOuterTile][t][innerKTile / 2] = pack;
+  }
+}
+
+#endif
+
+
+at::Tensor _weight_int4pack_mm_cuda(
+    const at::Tensor& A,
+    const at::Tensor& B,
+    int64_t qGroupSize,
+    const at::Tensor& qScaleAndZeros) {
+  c10::cuda::CUDAGuard g(A.device());
+
+  TORCH_CHECK(
+      A.device() == B.device() && A.device() == qScaleAndZeros.device());
+
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_weight_int4pack_mm_cuda requires a GPU with compute capability 8.0 or newer");
+
+  constexpr int32_t kMTileSize = 16;
+  constexpr int32_t kNTileSize = 8;
+  constexpr int32_t kKTileSize = 16;
+
+  // row major layout
+  auto m = A.size(0);
+  auto mTiles = divUp(m, kMTileSize);
+
+  // To convert the nTiles from tensor storage layout to the actual matrix core layout
+  constexpr int32_t kNTileSizeTensor = 8;
+  auto nTileScaleFactor = (kNTileSize / kNTileSizeTensor);
+
+  // tensor core layout
+  auto nTiles = (B.size(0) / nTileScaleFactor);
+  auto n = nTiles * kNTileSize;
+
+  // row major layout
+  auto k = A.size(1);
+  auto kTiles = divUp(k, kKTileSize);
+
+  // The number of inner k tiles is the innermost dimension of  times 2
+  // 2 k-tiles (4 values per lane per tile, 8 values total) quantized to int4
+  // packed into 1 int32 for int4 B
+  auto B_innerKTiles = B.size(3) * 2;
+  TORCH_CHECK(B_innerKTiles == 2 || B_innerKTiles == 4 || B_innerKTiles == 8);
+
+  // A is standard row major
+  TORCH_CHECK(A.dtype() == at::kBFloat16);
+  TORCH_CHECK(A.is_contiguous());
+  TORCH_CHECK(A.dim() == 2);
+
+  // B has B_innerKTiles k-tiles in the innermost dimension
+  TORCH_CHECK(B.dtype() == at::kInt);
+  TORCH_CHECK(B.is_contiguous());
+  TORCH_CHECK(B.dim() == 4);
+  TORCH_CHECK(B.size(1) == k / (B_innerKTiles * kKTileSize));
+  TORCH_CHECK(B.size(2) == 32);
+
+  // Validate the scale and zero point tensor for dequantization
+  // These are the only versions handled at the moment
+  TORCH_CHECK(
+      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
+      qGroupSize == 256);
+
+  TORCH_CHECK(qScaleAndZeros.dim() == 3);
+  TORCH_CHECK(
+      kTiles * kKTileSize >= qGroupSize &&
+      isEvenDivisor(kTiles * kKTileSize, qGroupSize));
+  TORCH_CHECK(qScaleAndZeros.size(1) == n);
+  TORCH_CHECK(qScaleAndZeros.size(2) == 2);
+
+  // Output is a standard row-major matrix
+  auto C_final = at::empty(
+      {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
+
+#if (defined(CUDA_VERSION) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+  auto stream = at::cuda::getCurrentCUDAStream();
+#define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
+  do {                                                               \
+    using ACLayout = ALayout_RM<REDUCE_TYPE>;                        \
+                                                                     \
+    TORCH_CHECK(                                                     \
+        K_TILES_PER_WARP >= B_innerKTiles &&                         \
+        isEvenDivisor(K_TILES_PER_WARP, B_innerKTiles));             \
+                                                                     \
+    switch (B_innerKTiles) {                                         \
+      case 2:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 2) {                       \
+          using BLayout = BLayout_TC_int4<2, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      case 4:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 4) {                       \
+          using BLayout = BLayout_TC_int4<4, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      case 8:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 8) {                       \
+          using BLayout = BLayout_TC_int4<8, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      default:                                                       \
+        break;                                                       \
+    }                                                                \
+  } while (false)
+
+#define HANDLE_Q_GROUP(WARPS, K_TILES_PER_WARP, REDUCE_TYPE) \
+  do {                                                       \
+    switch (qGroupSize) {                                    \
+      case 32:                                               \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 32, REDUCE_TYPE);  \
+        break;                                               \
+      case 64:                                               \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 64, REDUCE_TYPE);  \
+        break;                                               \
+      case 128:                                              \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 128, REDUCE_TYPE); \
+        break;                                               \
+      case 256:                                              \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 256, REDUCE_TYPE); \
+        break;                                               \
+    }                                                        \
+  } while (false)
+
+  HANDLE_Q_GROUP(8, 8, KReductionType::None);
+
+#undef HANDLE_Q_GROUP
+#undef RUN_GEMM
+
+  return C_final;
+#endif
+  TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
+  return C_final;
+}
+
+// input is [n][k / 2] (uint8 dtype)
+// output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2] (int32 dtype)
+at::Tensor _convert_weight_to_int4pack_cuda(
+    const at::Tensor& in,
+    int64_t innerKTiles) {
+  c10::cuda::CUDAGuard g(in.device());
+
+  TORCH_CHECK(in.dim() == 2);
+  TORCH_CHECK(in.dtype() == at::kByte);
+  TORCH_CHECK(in.is_contiguous());
+
+  // At least 2 k-tiles need to be packed back to back in the innermost
+  // dimension, as the m16n8k16 tensor core tile presents 4 scalar values for
+  // the B matrix, but the minimum word size for the packed format is 4 bytes
+  // (int32). 4 inner K-tiles = 8 byte load, 8 inner k-tiles = 16 byte load
+  // which is the maximum vectorized load/store size
+  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
+
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_convert_weight_to_int4pack_cuda requires a GPU with compute capability 8.0 or newer");
+  constexpr int32_t kNTileSize = 8;
+  constexpr int32_t kKTileSize = 16;
+
+  // GPT-FAST assumes nTileSize of 8 for quantized weight tensor.
+  // See https://github.com/meta-pytorch/gpt-fast/blob/091515ab5b06f91c0d6a3b92f9c27463f738cc9b/quantize.py#L510
+  // Torch dynamo also requires the torch ops has the same output shape for each device.
+  // See https://github.com/pytorch/pytorch/blob/ec284d3a74ec1863685febd53687d491fd99a161/torch/_meta_registrations.py#L3263
+  constexpr int32_t kNTileSizeTensor = 8;
+
+  auto nTiles = divUp(in.size(0), kNTileSize);
+  auto nTilesTensor = divUp(in.size(0), kNTileSizeTensor);
+
+  // k-tiles are packed back to back in the innermost dimension in order to
+  // allow for 4/8/16 byte loads
+  TORCH_CHECK(isEvenDivisor(in.size(1) * 2, innerKTiles * kKTileSize));
+  // kSuperTiles is the number of k-tiles assuming k is innerKTiles * kKTileSize
+  auto kSuperTiles = divUp(in.size(1) * 2, innerKTiles * kKTileSize);
+
+  // each block handles `innerKTiles` k-tiles.
+  // 2 k-tiles are a single int32
+  //
+  // We use the same shape for AMD gpus also to match the GPT-FAST spec.
+  // Will index it correctly when dereferencing the quantized weight tensor pointer.
+  auto out = at::empty(
+      {nTilesTensor, kSuperTiles, 32, innerKTiles / 2},
+      at::TensorOptions().dtype(at::kInt).device(in.device()));
+
+#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
+  auto stream = at::cuda::getCurrentCUDAStream();
+  dim3 grid(kSuperTiles, nTiles);
+
+  if (innerKTiles == 2) {
+    matrix_to_m16n8k16_Bint4_layout<2><<<grid, kWarpSize, 0, stream>>>(
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
+        out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
+  } else if (innerKTiles == 4) {
+    matrix_to_m16n8k16_Bint4_layout<4><<<grid, kWarpSize, 0, stream>>>(
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
+        out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
+  } else if (innerKTiles == 8) {
+    matrix_to_m16n8k16_Bint4_layout<8><<<grid, kWarpSize, 0, stream>>>(
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
+        out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
+  }
+
+  return out;
+#endif
+  TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is not available for build.")
+  return out;
+}
+#else // USE_ROCM
+
+template<typename T, uint32_t Rank>
+using VecT = T __attribute__((ext_vector_type(Rank)));
+
+static bool isCDNA2orLater(int index) {
+    return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942", "gfx950", "gfx1250"}, index);
+}
+
+static bool isRDNA3(int index) {
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"}, index);
+}
+
+static bool isRDNA4(int index) {
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1200", "gfx1201"}, index);
+}
+
+
+struct __align__(16) bf16x2x4_u32 {
+  VecT<short, 4> val[2];
+};
+
+// Matrix-core traits, one struct per ROCm architecture family. Each describes
+// how a 16x16 tile of A, B and C is spread over the lanes of a wave and which
+// instruction multiplies it; the loaders and the kernel are written once
+// against this interface. kTileLanes is the number of lanes holding distinct
+// A/B data of a tile; a lane holds 16 * 16 / kTileLanes values of each k-tile.
+// BWord is one int32 of packed int4 spread to 8 bf16; the B operand of a k-tile
+// is built from the lane's BWords by bTile(). kFactoredDequant selects how B is
+// scaled (see mmaDequant).
+
+// CDNA (gfx9) wave64: mfma_f32_16x16x16bf16_1k. 4 A/B values and 4 C values per
+// lane; one int32 of packed int4 covers two k-tiles.
+struct RocmMmaCdna {
+  static constexpr int32_t kWarpSize = 64;
+  static constexpr int32_t kTileLanes = 64;
+  struct __align__(8) ATile {
+    VecT<short, 4> val;
+  };
+  using BWord = bf16x2x4_u32;
+  using CAccum = VecT<float, 4>;
+  // C value j of a lane is row cRowBase(lane) + j * kCRowStride of column
+  // lane % 16
+  static constexpr int32_t kCValues = 4;
+  static constexpr int32_t kCRowStride = 1;
+  static __device__ int32_t cRowBase(int32_t laneId) {
+    return (laneId / 16) * 4;
+  }
+
+  // Offsets into the [n][k / 2] uint8 input of the 4 bytes lane t packs into
+  // its int32 word w: 2 bytes from each of the word's two k-tiles (8 bytes apart)
+  static __device__ void packKs(uint32_t t, int32_t w, int32_t kBase0, int32_t ks[4]) {
+    ks[0] = kBase0 + (t / 16) * 2;
+    ks[1] = ks[0] + 1;
+    ks[2] = kBase0 + 8 + (t / 16) * 2;
+    ks[3] = ks[2] + 1;
+  }
+
+  static __device__ VecT<short, 4> bTile(const BWord* words, int kTile) {
+    return words[kTile / 2].val[kTile % 2];
+  }
+
+  // Workaround for ROCm compiler bug where __builtin_amdgcn_is_invocable
+  // incorrectly reports mfma_f32_16x16x16bf16_1k as available on gfx908.
+  // Targets without MFMA (gfx10, and amdgcnspirv run on such a GPU) end here.
+  static constexpr bool kFactoredDequant = true;
+
+  static __device__ bool supported() {
+#if defined(__gfx908__)
+    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is not supported on gfx908\n");
+    return false;
+#else
+    if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+      printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
+      return false;
+    }
+    return true;
+#endif
+  }
+
+  // Partial sums are added per element, and the cross-warp reduction goes
+  // through float4 in shared memory; the vector forms schedule worse here
+  using ReduceAccum = float4;
+  static __device__ void accumulate(CAccum& c, const CAccum& v) {
+    c[0] += v[0];
+    c[1] += v[1];
+    c[2] += v[2];
+    c[3] += v[3];
+  }
+  static __device__ void storeReduce(ReduceAccum& r, const CAccum& c) {
+    r.x = c[0];
+    r.y = c[1];
+    r.z = c[2];
+    r.w = c[3];
+  }
+  static __device__ void addReduce(CAccum& c, const ReduceAccum& r) {
+    c[0] += r.x;
+    c[1] += r.y;
+    c[2] += r.z;
+    c[3] += r.w;
+  }
+
+  // Multiplies k-tiles kTile and kTile + 1 into cTmp[0] and cTmp[1]
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+#if !defined(__gfx908__)
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+        cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a[kTile + k].val, bTile(words, kTile + k), cTmp[k], 0, 0, 0);
+      }
+    }
+#endif
+  }
+};
+
+// RDNA4 (gfx12) wave32: wmma_f32_16x16x16_bf16. 8 A/B values and 8 C values per
+// lane; one int32 of packed int4 per k-tile.
+struct RocmMmaGfx12 {
+  static constexpr int32_t kWarpSize = 32;
+  static constexpr int32_t kTileLanes = 32;
+  struct __align__(16) ATile {
+    VecT<short, 8> val;
+  };
+  struct __align__(16) BWord {
+    VecT<short, 8> val;
+  };
+  using CAccum = VecT<float, 8>;
+  static constexpr int32_t kCValues = 8;
+  static constexpr int32_t kCRowStride = 1;
+  static __device__ int32_t cRowBase(int32_t laneId) {
+    return (laneId / 16) * 8;
+  }
+
+  static __device__ void packKs(uint32_t t, int32_t w, int32_t kBase0, int32_t ks[4]) {
+    ks[0] = kBase0 + (t / 16) * 4;
+    ks[1] = ks[0] + 1;
+    ks[2] = ks[0] + 2;
+    ks[3] = ks[0] + 3;
+  }
+
+  static __device__ VecT<short, 8> bTile(const BWord* words, int kTile) {
+    return words[kTile].val;
+  }
+
+  using ReduceAccum = CAccum;
+  static __device__ void accumulate(CAccum& c, const CAccum& v) {
+    c += v;
+  }
+  static __device__ void storeReduce(ReduceAccum& r, const CAccum& c) {
+    r = c;
+  }
+  static __device__ void addReduce(CAccum& c, const ReduceAccum& r) {
+    c += r;
+  }
+
+  static constexpr bool kFactoredDequant = true;
+
+  static __device__ bool supported() {
+    return true;
+  }
+
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a[kTile + k].val, bTile(words, kTile + k), cTmp[k]);
+    }
+  }
+};
+
+// CDNA5 (gfx1250) wave32: the gfx12 layout. There is no 16x16x16 bf16 WMMA; the
+// 16x16x32 WMMA takes a lane's operands of two consecutive k-tiles as values
+// 0-7 and 8-15, so one instruction covers the pair and cTmp[1] stays zero.
+// Defined only for gfx1250: older compilers (ROCm 7.0) do not declare its WMMA
+// builtin, and a non-template body is parsed for every offload arch.
+#if defined(__gfx1250__)
+struct RocmMmaGfx1250 : RocmMmaGfx12 {
+  // gfx1250 has a packed bf16 FMA and no v_dot2_f32_bf16, so dequantizing each
+  // B value before the multiply is cheaper than the factored form's row sums
+  static constexpr bool kFactoredDequant = false;
+
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+    using BF16x16 = VecT<__bf16, 16>;
+    const auto aPair = __builtin_shufflevector(a[kTile].val, a[kTile + 1].val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    const auto bPair = __builtin_shufflevector(
+        bTile(words, kTile), bTile(words, kTile + 1), 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    cTmp[0] = __builtin_amdgcn_wmma_f32_16x16x32_bf16(
+        false, __builtin_bit_cast(BF16x16, aPair), false, __builtin_bit_cast(BF16x16, bPair), 0, cTmp[0], false, false);
+  }
+};
+#endif
+
+// RDNA3 (gfx11) wave32: wmma_f32_16x16x16_bf16. Each lane holds the full
+// 16-value A row (B column); the two half-waves carry identical A/B data and
+// each computes its own 8 C rows. Two int32 of packed int4 per k-tile.
+struct RocmMmaGfx11 {
+  static constexpr int32_t kWarpSize = 32;
+  static constexpr int32_t kTileLanes = 16;
+  struct __align__(32) ATile {
+    VecT<short, 16> val;
+  };
+  struct __align__(16) BWord {
+    VecT<short, 8> val;
+  };
+  using CAccum = VecT<float, 8>;
+  static constexpr int32_t kCValues = 8;
+  // Every other row of one column, from row laneId / 16
+  static constexpr int32_t kCRowStride = 2;
+  static __device__ int32_t cRowBase(int32_t laneId) {
+    return laneId / 16;
+  }
+
+  // Word w % 2 of a k-tile holds k values 8 * (w % 2) .. + 7 of the column
+  static __device__ void packKs(uint32_t t, int32_t w, int32_t kBase0, int32_t ks[4]) {
+    ks[0] = kBase0 + (w % 2) * 4;
+    ks[1] = ks[0] + 1;
+    ks[2] = ks[0] + 2;
+    ks[3] = ks[0] + 3;
+  }
+
+  // The column's two dequantized words, k ascending
+  static __device__ VecT<short, 16> bTile(const BWord* words, int kTile) {
+    return __builtin_shufflevector(
+        words[kTile * 2].val, words[kTile * 2 + 1].val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+  }
+
+  using ReduceAccum = CAccum;
+  static __device__ void accumulate(CAccum& c, const CAccum& v) {
+    c += v;
+  }
+  static __device__ void storeReduce(ReduceAccum& r, const CAccum& c) {
+    r = c;
+  }
+  static __device__ void addReduce(CAccum& c, const ReduceAccum& r) {
+    c += r;
+  }
+
+  static constexpr bool kFactoredDequant = true;
+
+  static __device__ bool supported() {
+    return true;
+  }
+
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[kTile + k].val, bTile(words, kTile + k), cTmp[k]);
+    }
+  }
+};
+
+#if defined(__GFX9__)
+using RocmMma = RocmMmaCdna;
+#elif defined(__GFX11__)
+using RocmMma = RocmMmaGfx11;
+#elif defined(__gfx1250__)
+using RocmMma = RocmMmaGfx1250;
+#elif defined(__GFX12__)
+using RocmMma = RocmMmaGfx12;
+#else
+// The host pass (it uses the runtime warp size), gfx10 (no matrix cores;
+// rejected by the host gate) and amdgcnspirv (no gfx family macro) keep the
+// wave64 MFMA kernel, which is guarded at run time by supported().
+using RocmMma = RocmMmaCdna;
+#endif
+
+constexpr int32_t kWarpSize = RocmMma::kWarpSize;
+constexpr int32_t kTileLanes = RocmMma::kTileLanes;
+
+// Spreads the 8 int4 values q of a packed word into 8 bf16 of value 128 + q:
+// q becomes the low mantissa bits of bf16 128 (from
+// https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h).
+// Plain C, not inline asm: the compiler's hazard recognizer cannot see into
+// inline asm, and on gfx1250 an asm write to a register that a preceding WMMA
+// is still reading corrupts that WMMA's operand.
+inline __device__ VecT<uint32_t, 4> int4x8_to_bf16x8_biased(uint32_t packed) {
+  VecT<uint32_t, 4> h;
+#pragma unroll
+  for (int ii = 0; ii < 4; ++ii) {
+    h[ii] = ((packed >> (4 * ii)) & 0x000f000f) | 0x43004300;
+  }
+  return h;
+}
+
+enum class KReductionType {
+  // No k-reduction is needed between blocks as the number of k-tiles processed
+  // per block are exact and we can directly write the output
+  None,
+};
+
+// Loads the A matrix in 16-bit standard m x k row major layout, and writes
+// the C matrix in 16-bit standard m x n row major layout:
+//
+// size [m][k]
+template <KReductionType ReduceType>
+struct ALayout_RM {
+  static constexpr int32_t kMTileSize = 16;
+  static constexpr int32_t kNTileSize = 16;
+  static constexpr int32_t kKTileSize = 16;
+
+  template <int KTilesToLoad>
+  static __device__ void load(
+      const void* A,
+      int32_t m,
+      int32_t k,
+      int32_t mTiles,
+      int32_t mTile,
+      int32_t kTiles,
+      int32_t kTileStart,
+      int32_t laneId,
+      RocmMma::ATile out[KTilesToLoad]) {
+    if constexpr (kTileLanes < kWarpSize) {
+      // Lanes beyond kTileLanes hold copies of the same A data
+      laneId %= kTileLanes;
+    }
+    // Each lane holds kAValuesPerLane consecutive k values of one row
+    constexpr int32_t kAValuesPerLane = kMTileSize * kKTileSize / kTileLanes;
+    const auto mLane = mTile * kMTileSize + (laneId % kMTileSize);
+    const auto kLane = kTileStart * kKTileSize + (laneId / kMTileSize) * kAValuesPerLane;
+
+    auto aPtr = reinterpret_cast<const __hip_bfloat16*>(A) + mLane * k + kLane;
+    bool m0InBounds = mLane < m;
+
+
+#pragma unroll
+    for (int i = 0; i < KTilesToLoad; ++i) {
+      // Per tile, into the struct member: this keeps each zero fill next to
+      // its load in the k loop; hoisting either delays the next loads on CDNA
+      using ALaneVec = decltype(RocmMma::ATile::val);
+      out[i].val = m0InBounds ? *((const ALaneVec*)(aPtr + i * kKTileSize)) : ALaneVec{};
+    }
+  }
+
+  static __device__ void store(
+      void* C,
+      int32_t m,
+      int32_t n,
+      int32_t mOutTiles,
+      int32_t mTile,
+      int32_t nOutTiles,
+      int32_t nTile,
+      int32_t laneId,
+      const RocmMma::CAccum& out) {
+    static_assert(ReduceType == KReductionType::None);
+
+    if constexpr (ReduceType == KReductionType::None) {
+      constexpr int kCRowStride = RocmMma::kCRowStride;
+      const int outRow = mTile * kMTileSize + RocmMma::cRowBase(laneId);
+      const int outCol = nTile * kNTileSize + (laneId % kNTileSize);
+      auto cPtr = reinterpret_cast<__hip_bfloat16*>(C) + outRow * n + outCol;
+#pragma unroll
+      for (int j = 0; j < RocmMma::kCValues; ++j) {
+        if ((outRow + j * kCRowStride) < m)
+          cPtr[j * kCRowStride * n] = __float2bfloat16(out[j]);
+      }
+    }
+  }
+};
+
+template <int InnerKTiles, int QGroupSize>
+struct BLayout_TC_int4 {
+  static constexpr int32_t kInnerKTiles = InnerKTiles;
+  static constexpr int32_t kMTileSize = 16;
+  static constexpr int32_t kNTileSize = 16;
+  static constexpr int32_t kKTileSize = 16;
+  // int4 values of one k-tile held by one lane, and int32 words of packed int4
+  // per lane for InnerKTiles k-tiles
+  static constexpr int32_t kInt4PerLane = kKTileSize * kNTileSize / kTileLanes;
+  static constexpr int32_t kInt32PerLane = InnerKTiles * kInt4PerLane / 8;
+  static constexpr int32_t kQGroupSize = QGroupSize;
+  // k-tiles of one q-group within KTiles consecutive k-tiles: a q-group larger
+  // than KTiles is handled in parts, which the factored dequant allows
+  template <int KTiles>
+  static constexpr int32_t kGroupKTiles = KTiles < QGroupSize / kKTileSize ? KTiles : QGroupSize / kKTileSize;
+
+  template <int KTilesToLoad>
+  static __device__ void load(
+      // type uint32, size [n / 8][k / (InnerKTiles * 16)][32][InnerKTiles / 2],
+      // the same element count as the [n / 16][k / (InnerKTiles * 16)]
+      // [kTileLanes][kInt32PerLane] layout read here: per 16x16 tile of n and k
+      // each of kTileLanes lanes holds kInt32PerLane words of 8 int4 values
+      const void* __restrict__ B,
+      // size [k / qGroupSize][n][2]
+      // Contains the scale and zero point of each of the quantized int4 values
+      // within B
+      // v_reconstructed = (bf16(B_int4_val) * scale) - zero
+      const void* __restrict__ quantizationInfo,
+      int32_t n,
+      int32_t k,
+      int32_t nTiles,
+      int32_t nTile,
+      int32_t kTiles,
+      int32_t kTileStart,
+      int32_t laneId,
+      RocmMma::BWord out[KTilesToLoad / InnerKTiles][kInt32PerLane],
+      __hip_bfloat162 qScaleAndZero[KTilesToLoad / kGroupKTiles<KTilesToLoad>]) {
+    if constexpr (kTileLanes < kWarpSize) {
+      // Lanes beyond kTileLanes hold copies of the same B data
+      laneId %= kTileLanes;
+    }
+
+    // offset [nTile][kTileStart / InnerKTiles][laneId][0]
+    auto bPtr = reinterpret_cast<const int32_t*>(B) +
+        (((nTile * (kTiles / InnerKTiles) + (kTileStart / InnerKTiles)) *
+          kTileLanes) +
+         laneId) *
+            kInt32PerLane;
+
+    int32_t b_int4[KTilesToLoad / InnerKTiles][kInt32PerLane];
+
+#pragma unroll
+    for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
+      auto bPtrCur = bPtr + i * kTileLanes * kInt32PerLane;
+
+      if constexpr (kInt32PerLane == 1) {
+        b_int4[i][0] = bPtrCur[0];
+      }
+
+      if constexpr (kInt32PerLane == 2) {
+        int2 load8 = reinterpret_cast<const int2*>(bPtrCur)[0];
+        b_int4[i][0] = load8.x;
+        b_int4[i][1] = load8.y;
+      }
+
+      if constexpr (kInt32PerLane >= 4) {
+#pragma unroll
+        for (int l = 0; l < kInt32PerLane / 4; ++l) {
+          int4 load16 = reinterpret_cast<const int4*>(bPtrCur)[l];
+          b_int4[i][l * 4 + 0] = load16.x;
+          b_int4[i][l * 4 + 1] = load16.y;
+          b_int4[i][l * 4 + 2] = load16.z;
+          b_int4[i][l * 4 + 3] = load16.w;
+        }
+      }
+    }
+
+    // Load the scale and zero point of each q-group, for the lane's column
+    static_assert(isPowerOf2(QGroupSize));
+    // smallest quantization group size is 32 (2 k-tiles are packed in an int32)
+    static_assert(QGroupSize >= kKTileSize * 2);
+    {
+      int32_t laneN = nTile * kNTileSize + (laneId % kNTileSize);
+      int32_t groupStart = (kTileStart * kKTileSize) / QGroupSize;
+
+      int32_t n = nTiles * kNTileSize;
+
+      // offset [qScale_kGroup][qScale_n][0]
+      auto qInfoPtr = reinterpret_cast<const __hip_bfloat16*>(quantizationInfo) +
+          (groupStart * n + laneN) * 2;
+
+#pragma unroll
+      for (int i = 0; i < KTilesToLoad / kGroupKTiles<KTilesToLoad>; ++i) {
+        qScaleAndZero[i] =
+            *reinterpret_cast<const __hip_bfloat162*>(qInfoPtr + i * n * 2);
+      }
+    }
+
+#pragma unroll
+    for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
+#pragma unroll
+      for (int j = 0; j < kInt32PerLane; ++j) {
+        auto h = int4x8_to_bf16x8_biased(b_int4[i][j]);
+        if constexpr (!RocmMma::kFactoredDequant) {
+          // Each value of the word is in the same q-group:
+          // ((128 + q) - 136) * scale + zero
+          const int curQGroup = ((i * InnerKTiles + j * 8 / kInt4PerLane) * kKTileSize) / QGroupSize;
+          const auto bias = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0xC308}));
+          const auto one = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0x3F80}));
+          const auto scale = __bfloat162bfloat162(qScaleAndZero[curQGroup].x);
+          const auto zero = __bfloat162bfloat162(qScaleAndZero[curQGroup].y);
+          __hip_bfloat162 v[4];
+          auto vWords = reinterpret_cast<uint32_t*>(v);
+#pragma unroll
+          for (int k = 0; k < 4; ++k) {
+            vWords[k] = h[k];
+            v[k] = __hfma2(__hfma2(v[k], one, bias), scale, zero);
+            h[k] = vWords[k];
+          }
+        }
+        out[i][j] = __builtin_bit_cast(RocmMma::BWord, h);
+      }
+    }
+  }
+};
+
+// Multiplies KTiles k-tiles of A by B as loaded by BLayout::load and adds the
+// result to c. Without kFactoredDequant, B is already dequantized. Otherwise B
+// is bf16 128 + q, and for one q-group of the lane's column, with scale s and
+// zero point z,
+//   sum_k A (s (q - 8) + z) = s * sum_k A (128 + q) + (z - 136 s) * sum_k A
+// so the matrix-core products accumulate per q-group and s and z are applied
+// once per group in fp32. sum_k A is per row of A: the lanes holding a row
+// (lane % 16) add their k values, and each C value takes the sum of its row.
+template <typename BLayout, int KTiles>
+__device__ void mmaDequant(
+    const RocmMma::ATile* a,
+    const RocmMma::BWord b[][BLayout::kInt32PerLane],
+    const __hip_bfloat162* qScaleAndZero,
+    int32_t laneId,
+    RocmMma::CAccum& c) {
+  constexpr int kInnerKTiles = BLayout::kInnerKTiles;
+  constexpr int kGroupKTiles = BLayout::template kGroupKTiles<KTiles>;
+  static_assert(isEvenDivisor(kGroupKTiles, 2));
+  if constexpr (!RocmMma::kFactoredDequant) {
+#pragma unroll
+    for (int kt = 0; kt < KTiles; kt += 2) {
+      // We don't simply accumulate into `c` as this creates a too-strong
+      // execution dependency. Instead, we only periodically accumulate into `c`
+      RocmMma::CAccum cTmp[2] = {};
+      const int i = kt / kInnerKTiles;
+      RocmMma::mmaKTilePair(a + i * kInnerKTiles, b[i], kt % kInnerKTiles, cTmp);
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        RocmMma::accumulate(c, cTmp[k]);
+      }
+    }
+    return;
+  }
+#pragma unroll
+  for (int g = 0; g < KTiles / kGroupKTiles; ++g) {
+    // Two accumulators: a single one creates a too-strong execution dependency
+    RocmMma::CAccum cGroup[2] = {};
+    float rowSum = 0.0f;
+#pragma unroll
+    for (int kt = g * kGroupKTiles; kt < (g + 1) * kGroupKTiles; kt += 2) {
+      const int i = kt / kInnerKTiles;
+      RocmMma::mmaKTilePair(a + i * kInnerKTiles, b[i], kt % kInnerKTiles, cGroup);
+#pragma unroll
+      for (int t = 0; t < 2; ++t) {
+        const auto aBf16 = __builtin_bit_cast(VecT<__bf16, sizeof(a[0].val) / 2>, a[kt + t].val);
+#pragma unroll
+        for (int e = 0; e < sizeof(a[0].val) / 2; e += 2) {
+          if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fdot2_f32_bf16)) {
+            const VecT<__bf16, 2> pair = {aBf16[e], aBf16[e + 1]};
+            const VecT<__bf16, 2> ones = {__bf16(1.0f), __bf16(1.0f)};
+            rowSum = __builtin_amdgcn_fdot2_f32_bf16(pair, ones, rowSum, false);
+          } else {
+            rowSum += float(aBf16[e]) + float(aBf16[e + 1]);
+          }
+        }
+      }
+    }
+    RocmMma::accumulate(cGroup[0], cGroup[1]);
+#pragma unroll
+    for (int lanes = BLayout::kMTileSize; lanes < kTileLanes; lanes *= 2) {
+      rowSum += __shfl_xor(rowSum, lanes);
+    }
+    const float s = __bfloat162float(qScaleAndZero[g].x);
+    const float zBiased = fmaf(-136.0f, s, __bfloat162float(qScaleAndZero[g].y));
+#pragma unroll
+    for (int j = 0; j < RocmMma::kCValues; ++j) {
+      const float r = __shfl(rowSum, RocmMma::cRowBase(laneId) + j * RocmMma::kCRowStride);
+      c[j] += fmaf(s, cGroup[0][j], zBiased * r);
+    }
+  }
+}
+
+template <
+    typename ALayout,
+    typename BLayout,
+    typename CLayout,
+    int Warps,
+    int KTilesPerIteration>
+__global__
+__launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
+    // Data for the A matrix, loaded as per ALayout
+    const void* const __restrict__ A,
+
+    // Data for the B matrix, loaded as per BLayout
+    const void* const __restrict__ B,
+
+    // Optional quantization data for dequantizing B, loaded as per BLayout
+    const void* const __restrict__ B_quantizationInfo,
+
+    // Output data for the C matrix, stored as per CLayout
+    void* __restrict__ C,
+
+    // The size of the matrix multiplication
+    int32_t m,
+    int32_t n,
+    int32_t k,
+
+    // The size of the matrix multiplication, in multiples of our TC tile size
+    int32_t mTiles,
+    int32_t nTiles,
+    int32_t kTiles) {
+  constexpr int32_t kMTileSize = 16;
+  if (!RocmMma::supported()) {
+    return;
+  }
+  constexpr int32_t kNTileSize = 16;
+  constexpr int32_t kKTileSize = 16;
+
+  static_assert(
+      ALayout::kMTileSize == kMTileSize && ALayout::kNTileSize == kNTileSize &&
+      ALayout::kKTileSize == kKTileSize);
+
+  static_assert(
+      BLayout::kMTileSize == kMTileSize && BLayout::kNTileSize == kNTileSize &&
+      BLayout::kKTileSize == kKTileSize);
+
+  static_assert(
+      CLayout::kMTileSize == kMTileSize && CLayout::kNTileSize == kNTileSize &&
+      CLayout::kKTileSize == kKTileSize);
+
+  constexpr int kInnerKTiles = BLayout::kInnerKTiles;
+
+  // 2/4/8 inner k-tiles correspond to 4, 8 and 16 byte innermost loads
+  static_assert(
+      kInnerKTiles == 2 || kInnerKTiles == 4 || kInnerKTiles == 8);
+
+  // We always process at least kInnerKTiles k-tiles back to back in a warp
+  static_assert(
+      KTilesPerIteration >= kInnerKTiles &&
+      isEvenDivisor(KTilesPerIteration, kInnerKTiles));
+
+  auto warpId = threadIdx.y;
+  auto laneId = threadIdx.x;
+
+  int32_t mTile = blockIdx.z;
+  int32_t nTile = blockIdx.y;
+
+  RocmMma::CAccum c{};
+
+  // First, handle whole multiples of KTilesPerIteration
+  auto kTilesLimit = roundDown(kTiles, KTilesPerIteration);
+
+  // Each warp handles a set of KTilesPerIteration under the above limit
+  for (int32_t kTileBase = (blockIdx.x * Warps + warpId) * KTilesPerIteration;
+       kTileBase < kTilesLimit;
+       kTileBase += Warps * KTilesPerIteration) {
+    //
+    // Load data from A
+    //
+    RocmMma::ATile a[KTilesPerIteration];
+    ALayout::template load<KTilesPerIteration>(
+        A, m, k, mTiles, mTile, kTiles, kTileBase, laneId, a);
+
+    //
+    // Load data from B, as bf16 128 + q, and its scale and zero point
+    //
+    RocmMma::BWord b[KTilesPerIteration / kInnerKTiles][BLayout::kInt32PerLane];
+    __hip_bfloat162 qsz[KTilesPerIteration / BLayout::template kGroupKTiles<KTilesPerIteration>];
+    BLayout::template load<KTilesPerIteration>(
+        B,
+        B_quantizationInfo,
+        n,
+        k,
+        nTiles,
+        nTile,
+        kTiles,
+        kTileBase,
+        laneId,
+        b,
+        qsz);
+
+    mmaDequant<BLayout, KTilesPerIteration>(a, b, qsz, laneId, c);
+  } // for all tiles under kTilesLimit
+
+  // Now, there could be a remainder of 1 to KTilesPerIteration - 1 k-tiles
+  // remaining. We guarantee that the number of warps is >= KTilesPerIteration /
+  // kInnerKTiles, so that each warp can simply load kInnerKTiles and do its
+  // thing without needing more warps
+  static_assert(Warps >= KTilesPerIteration / kInnerKTiles);
+
+  auto kTileBaseRemaining = kTilesLimit + warpId * kInnerKTiles;
+
+  // If we have any remainder k-tiles, some warps will handle them, processing
+  // kInnerKTiles k-tiles at a time
+  if (kTileBaseRemaining < kTiles) {
+    RocmMma::ATile a[kInnerKTiles];
+    ALayout::template load<kInnerKTiles>(
+        A, m, k, mTiles, mTile, kTiles, kTileBaseRemaining, laneId, a);
+
+    RocmMma::BWord b[1][BLayout::kInt32PerLane];
+    __hip_bfloat162 qsz[kInnerKTiles / BLayout::template kGroupKTiles<kInnerKTiles>];
+    BLayout::template load<kInnerKTiles>(
+        B,
+        B_quantizationInfo,
+        n,
+        k,
+        nTiles,
+        nTile,
+        kTiles,
+        kTileBaseRemaining,
+        laneId,
+        b,
+        qsz);
+
+    mmaDequant<BLayout, kInnerKTiles>(a, b, qsz, laneId, c);
+  }
+
+  //
+  // Reduce independent k-tiles (same m/n) across warps
+  //
+  __shared__ RocmMma::ReduceAccum smem_sum[Warps][kWarpSize];
+
+  RocmMma::storeReduce(smem_sum[warpId][laneId], c);
+
+  __syncthreads();
+
+  if (warpId == 0) {
+    RocmMma::CAccum sum_f32{};
+
+    // Reduce across the block in the first warp
+    for (int i = 0; i < Warps; ++i) {
+      RocmMma::addReduce(sum_f32, smem_sum[i][laneId]);
+    }
+
+    // Write the reduced result (in the first warp) into the output
+    CLayout::store(
+        C,
+        m,
+        n,
+        mTiles,
+        mTile,
+        // n for C output becomes k for A input, so for m16n8k16,
+        // we need to halve the tiles
+        nTiles / 2,
+        nTile,
+        laneId,
+        sum_f32);
+  }
+}
+
+
+template <
+    typename ALayout,
+    typename BLayout,
+    typename CLayout,
+    int Warps,
+    int KTilesPerWarp>
+void launch_tinygemm_kernel(
+    const at::Tensor& A,
+    const at::Tensor& B,
+    const at::Tensor* qScaleAndZeros, /* optional */
+    at::Tensor& C_final,
+    int32_t mTiles,
+    int32_t nTiles,
+    int32_t kTiles,
+    int32_t m,
+    int32_t n,
+    int32_t k,
+    hipStream_t stream) {
+  // The chunking kernel requires that kTiles is a multiple of kInnerKTiles
+  TORCH_CHECK(
+      kTiles >= BLayout::kInnerKTiles &&
+      isEvenDivisor(kTiles, BLayout::kInnerKTiles));
+
+  TORCH_CHECK(
+      KTilesPerWarp >= BLayout::kInnerKTiles &&
+      isEvenDivisor(KTilesPerWarp, BLayout::kInnerKTiles));
+
+  // After intra-block reduction across the k dimension, we are left with this
+  // many tiles
+  //  int32_t postKernelKTiles = kTiles / (Warps * KTilesPerWarp);
+  int32_t postKernelKTiles = 1; // we loop
+
+  auto grid = dim3(postKernelKTiles, nTiles, mTiles);
+  auto block = dim3(at::cuda::warp_size(), Warps);
+
+  auto func =
+      tinygemm_m16n8k16_chunk_kernel<ALayout, BLayout, CLayout, Warps, KTilesPerWarp>;
+
+  func<<<grid, block, 0, stream>>>(
+      A.data_ptr(),
+      B.data_ptr(),
+      qScaleAndZeros ? qScaleAndZeros->data_ptr() : nullptr,
+      C_final.data_ptr(),
+      m,
+      n,
+      k,
+      mTiles,
+      nTiles,
+      kTiles);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  hipFuncAttributes funcAttr;
+  C10_CUDA_CHECK(hipFuncGetAttributes(
+      &funcAttr,
+      (void *)func
+  ));
+}
+
+// FIXME: parallelize better, smem staging etc?
+template <int InnerKTiles>
+__global__ void matrix_to_m16n8k16_Bint4_layout(
+    // size [n][k / 2]
+    const at::PackedTensorAccessor32<uint8_t, 2, at::RestrictPtrTraits> in,
+    // size [ceil(n / 8)][ceil(k / (InnerKTiles * 16))][32][InnerKTiles / 2]
+    at::PackedTensorAccessor32<int32_t, 4, at::RestrictPtrTraits> out) {
+  // int4 values are packed into int32 values, which require at least 8. Given
+  // m16n8k16 B layout requires 4 scalar values/lane, the minimum number of
+  // innermost k-tiles that we can use is 2.
+  static_assert(InnerKTiles >= 2 && isPowerOf2(InnerKTiles));
+
+  constexpr int32_t kNTileSize = 16;
+  constexpr int32_t kKTileSize = 16;
+
+  // gridDim.x corresponds to the number of k-tiles divided by InnerKTiles
+  auto kOuterTile = blockIdx.x;
+  auto nTile = blockIdx.y;
+  auto t = threadIdx.x;
+  if constexpr (kTileLanes < kWarpSize) {
+    // Lanes beyond kTileLanes would pack copies of the same words
+    if (t >= kTileLanes) {
+      return;
+    }
+  }
+
+  // Each lane packs kInt32PerLane int32 words of 8 int4 values; a word covers
+  // two k-tiles on CDNA, one on gfx12 and gfx1250, half of one on gfx11
+  constexpr int32_t kInt4PerLane = kKTileSize * kNTileSize / kTileLanes;
+  constexpr int32_t kInt32PerLane = InnerKTiles * kInt4PerLane / 8;
+#pragma unroll
+  for (int w = 0; w < kInt32PerLane; ++w) {
+    const int innerKTile = w * 8 / kInt4PerLane;
+    // n dimension that this lane loads from
+    auto n0 = nTile * kNTileSize + (t % kNTileSize);
+
+    bool n0Valid = n0 < in.size(0);
+
+    // Four uint8 are packed into an int32
+    int32_t ks[4];
+
+    auto kBase0 = (kOuterTile * InnerKTiles + innerKTile) * kKTileSize / 2;
+
+    RocmMma::packKs(t, w, kBase0, ks);
+
+    auto pIn = &in[n0][0];
+
+    uint8_t v[4];
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+      v[i] = (n0Valid && ks[i] < in.size(1)) ? pIn[ks[i]] : uint8_t(0);
+    }
+
+    // To clearly explain the packed result with 8 int4 values (4 uint8)
+    // into one int32, we use the follow figure:
+    // [n][k]     int32: v[0] v[1] v[2] v[3] v[4] v[5] v[6] v[7]
+    // [n][k / 2] uint8:    v[0]     v[1]      v[2]      v[3]
+    // When using int32 weight as input, the packed result is consisted of
+    // v[7] | v[5] | v[3] | v[1] | v[6] | v[4] | v[2] | v[0],
+    // which epuals to
+    // v[3]L | v[2]L | v[1]L | v[0]L | v[3]H | v[2]H | v[1]H | v[0]H
+    // when using uint8 weight as input.
+    int32_t pack = ((uint32_t)(v[3] & 0xF) << 28) |
+        ((uint32_t)(v[2] & 0xF) << 24) | ((uint32_t)(v[1] & 0xF) << 20) |
+        ((uint32_t)(v[0] & 0xF) << 16) | ((uint32_t)(v[3] & 0xF0) << 8) |
+        ((uint32_t)(v[2] & 0xF0) << 4) | ((uint32_t)(v[1] & 0xF0)) |
+        ((uint32_t)(v[0] & 0xF0) >> 4);
+
+    // The output tensor shape is [ceil(n / 8)][ceil(k / (InnerKTiles * 16))][32][InnerKTiles / 2]
+    // for compatibility with CUDA; the ROCm layout is [ceil(n / 16)]
+    // [ceil(k / (InnerKTiles * 16))][kTileLanes][kInt32PerLane] (same element
+    // count), so construct the pointer accordingly
+    auto bPtr = out.data() +
+      ((nTile * out.size(1) * kTileLanes * kInt32PerLane) +
+        (kOuterTile * kTileLanes * kInt32PerLane) +
+          (t * kInt32PerLane) +
+            w);
+    *bPtr = pack;
+  }
+}
+
+
+
+at::Tensor _weight_int4pack_mm_cuda(
+    const at::Tensor& A,
+    const at::Tensor& B,
+    int64_t qGroupSize,
+    const at::Tensor& qScaleAndZeros) {
+  c10::cuda::CUDAGuard g(A.device());
+
+  TORCH_CHECK(
+      A.device() == B.device() && A.device() == qScaleAndZeros.device());
+
+  if (!isCDNA2orLater(A.device().index()) && !isRDNA3(A.device().index()) && !isRDNA4(A.device().index())) {
+    TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
+  }
+
+  constexpr int32_t kMTileSize = 16;
+  constexpr int32_t kNTileSize = 16;
+  constexpr int32_t kKTileSize = 16;
+
+  // row major layout
+  auto m = A.size(0);
+  auto mTiles = divUp(m, kMTileSize);
+
+  // To convert the nTiles from tensor storage layout to the actual matrix core layout
+  constexpr int32_t kNTileSizeTensor = 8;
+  auto nTileScaleFactor = (kNTileSize / kNTileSizeTensor);
+
+  // tensor core layout
+  auto nTiles = (B.size(0) / nTileScaleFactor);
+  auto n = nTiles * kNTileSize;
+
+  // row major layout
+  auto k = A.size(1);
+  auto kTiles = divUp(k, kKTileSize);
+
+  // The number of inner k tiles is the innermost dimension of  times 2
+  // 2 k-tiles (4 values per lane per tile, 8 values total) quantized to int4
+  // packed into 1 int32 for int4 B
+  auto B_innerKTiles = B.size(3) * 2;
+  TORCH_CHECK(B_innerKTiles == 2 || B_innerKTiles == 4 || B_innerKTiles == 8);
+
+  // A is standard row major
+  TORCH_CHECK(A.dtype() == at::kBFloat16);
+  TORCH_CHECK(A.is_contiguous());
+  TORCH_CHECK(A.dim() == 2);
+
+  // B has B_innerKTiles k-tiles in the innermost dimension
+  TORCH_CHECK(B.dtype() == at::kInt);
+  TORCH_CHECK(B.is_contiguous());
+  TORCH_CHECK(B.dim() == 4);
+  TORCH_CHECK(B.size(1) == k / (B_innerKTiles * kKTileSize));
+  TORCH_CHECK(B.size(2) == 32);
+
+  // Validate the scale and zero point tensor for dequantization
+  // These are the only versions handled at the moment
+  TORCH_CHECK(
+      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
+      qGroupSize == 256);
+
+  TORCH_CHECK(qScaleAndZeros.dim() == 3);
+  TORCH_CHECK(
+      kTiles * kKTileSize >= qGroupSize &&
+      isEvenDivisor(kTiles * kKTileSize, qGroupSize));
+  TORCH_CHECK(qScaleAndZeros.size(1) == n);
+  TORCH_CHECK(qScaleAndZeros.size(2) == 2);
+
+  // Output is a standard row-major matrix
+  auto C_final = at::empty(
+      {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+#define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
+  do {                                                               \
+    using ACLayout = ALayout_RM<REDUCE_TYPE>;                        \
+                                                                     \
+    TORCH_CHECK(                                                     \
+        K_TILES_PER_WARP >= B_innerKTiles &&                         \
+        isEvenDivisor(K_TILES_PER_WARP, B_innerKTiles));             \
+                                                                     \
+    switch (B_innerKTiles) {                                         \
+      case 2:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 2) {                       \
+          using BLayout = BLayout_TC_int4<2, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      case 4:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 4) {                       \
+          using BLayout = BLayout_TC_int4<4, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      case 8:                                                        \
+        if constexpr (K_TILES_PER_WARP >= 8) {                       \
+          using BLayout = BLayout_TC_int4<8, Q_GROUP_SIZE>;          \
+          launch_tinygemm_kernel<                                    \
+              ACLayout,                                              \
+              BLayout,                                               \
+              ACLayout,                                              \
+              WARPS,                                                 \
+              K_TILES_PER_WARP>(                                     \
+              A,                                                     \
+              B,                                                     \
+              &qScaleAndZeros,                                       \
+              C_final,                                               \
+              mTiles,                                                \
+              nTiles,                                                \
+              kTiles,                                                \
+              m,                                                     \
+              n,                                                     \
+              k,                                                     \
+              stream);                                               \
+        }                                                            \
+        break;                                                       \
+      default:                                                       \
+        break;                                                       \
+    }                                                                \
+  } while (false)
+
+#define HANDLE_Q_GROUP(WARPS, K_TILES_PER_WARP, REDUCE_TYPE) \
+  do {                                                       \
+    switch (qGroupSize) {                                    \
+      case 32:                                               \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 32, REDUCE_TYPE);  \
+        break;                                               \
+      case 64:                                               \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 64, REDUCE_TYPE);  \
+        break;                                               \
+      case 128:                                              \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 128, REDUCE_TYPE); \
+        break;                                               \
+      case 256:                                              \
+        RUN_GEMM(WARPS, K_TILES_PER_WARP, 256, REDUCE_TYPE); \
+        break;                                               \
+    }                                                        \
+  } while (false)
+
+  HANDLE_Q_GROUP(8, 8, KReductionType::None);
+
+#undef HANDLE_Q_GROUP
+#undef RUN_GEMM
+
+  return C_final;
+}
+
+// input is [n][k / 2] (uint8 dtype)
+// output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2] (int32 dtype)
+at::Tensor _convert_weight_to_int4pack_cuda(
+    const at::Tensor& in,
+    int64_t innerKTiles) {
+  c10::cuda::CUDAGuard g(in.device());
+
+  TORCH_CHECK(in.dim() == 2);
+  TORCH_CHECK(in.dtype() == at::kByte);
+  TORCH_CHECK(in.is_contiguous());
+
+  // At least 2 k-tiles need to be packed back to back in the innermost
+  // dimension, as the m16n8k16 tensor core tile presents 4 scalar values for
+  // the B matrix, but the minimum word size for the packed format is 4 bytes
+  // (int32). 4 inner K-tiles = 8 byte load, 8 inner k-tiles = 16 byte load
+  // which is the maximum vectorized load/store size
+  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
+
+  if (!isCDNA2orLater(in.device().index()) && !isRDNA3(in.device().index()) && !isRDNA4(in.device().index())) {
+    TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
+  }
+  constexpr int32_t kNTileSize = 16;
+  constexpr int32_t kKTileSize = 16;
+
+  // GPT-FAST assumes nTileSize of 8 for quantized weight tensor.
+  // See https://github.com/meta-pytorch/gpt-fast/blob/091515ab5b06f91c0d6a3b92f9c27463f738cc9b/quantize.py#L510
+  // Torch dynamo also requires the torch ops has the same output shape for each device.
+  // See https://github.com/pytorch/pytorch/blob/ec284d3a74ec1863685febd53687d491fd99a161/torch/_meta_registrations.py#L3263
+  constexpr int32_t kNTileSizeTensor = 8;
+
+  auto nTiles = divUp(in.size(0), kNTileSize);
+  auto nTilesTensor = divUp(in.size(0), kNTileSizeTensor);
+
+  // k-tiles are packed back to back in the innermost dimension in order to
+  // allow for 4/8/16 byte loads
+  TORCH_CHECK(isEvenDivisor(in.size(1) * 2, innerKTiles * kKTileSize));
+  // kSuperTiles is the number of k-tiles assuming k is innerKTiles * kKTileSize
+  auto kSuperTiles = divUp(in.size(1) * 2, innerKTiles * kKTileSize);
+
+  // each block handles `innerKTiles` k-tiles.
+  // 2 k-tiles are a single int32
+  //
+  // We use the same shape for AMD gpus also to match the GPT-FAST spec.
+  // Will index it correctly when dereferencing the quantized weight tensor pointer.
+  auto out = at::empty(
+      {nTilesTensor, kSuperTiles, 32, innerKTiles / 2},
+      at::TensorOptions().dtype(at::kInt).device(in.device()));
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+  dim3 grid(kSuperTiles, nTiles);
+  const int32_t block = at::cuda::warp_size();
+
+  if (innerKTiles == 2) {
+    matrix_to_m16n8k16_Bint4_layout<2><<<grid, block, 0, stream>>>(
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
+        out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
+  } else if (innerKTiles == 4) {
+    matrix_to_m16n8k16_Bint4_layout<4><<<grid, block, 0, stream>>>(
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
+        out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
+  } else if (innerKTiles == 8) {
+    matrix_to_m16n8k16_Bint4_layout<8><<<grid, block, 0, stream>>>(
+        in.packed_accessor32<uint8_t, 2, at::RestrictPtrTraits>(),
+        out.packed_accessor32<int32_t, 4, at::RestrictPtrTraits>());
+  }
+
+  return out;
+}
+#endif // USE_ROCM
+
+
+} // namespace at::native

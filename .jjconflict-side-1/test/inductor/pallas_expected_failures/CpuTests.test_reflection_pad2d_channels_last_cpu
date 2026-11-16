@@ -1,0 +1,3 @@
+FAIL
+AssertionError: Tensor-likes are not close!
+Numerical accuracy issue in reflection_pad2d with channels_last input

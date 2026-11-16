@@ -1,0 +1,390 @@
+.. _hip-semantics:
+
+HIP (ROCm) semantics
+====================
+
+ROCm\ |trade| is AMD’s open source software platform for GPU-accelerated high
+performance computing and machine learning. HIP is ROCm's C++ dialect designed
+to ease conversion of CUDA applications to portable C++ code. HIP is used when
+converting existing CUDA applications like PyTorch to portable C++ and for new
+projects that require portability between AMD and NVIDIA.
+
+.. _hip_as_cuda:
+
+HIP Interfaces Reuse the CUDA Interfaces
+----------------------------------------
+
+PyTorch for HIP intentionally reuses the existing :mod:`torch.cuda` interfaces.
+This helps to accelerate the porting of existing PyTorch code and models because
+very few code changes are necessary, if any.
+
+The example from :ref:`cuda-semantics` will work exactly the same for HIP::
+
+    cuda = torch.device('cuda')     # Default HIP device
+    cuda0 = torch.device('cuda:0')  # 'rocm' or 'hip' are not valid, use 'cuda'
+    cuda2 = torch.device('cuda:2')  # GPU 2 (these are 0-indexed)
+
+    x = torch.tensor([1., 2.], device=cuda0)
+    # x.device is device(type='cuda', index=0)
+    y = torch.tensor([1., 2.]).cuda()
+    # y.device is device(type='cuda', index=0)
+
+    with torch.cuda.device(1):
+        # allocates a tensor on GPU 1
+        a = torch.tensor([1., 2.], device=cuda)
+
+        # transfers a tensor from CPU to GPU 1
+        b = torch.tensor([1., 2.]).cuda()
+        # a.device and b.device are device(type='cuda', index=1)
+
+        # You can also use ``Tensor.to`` to transfer a tensor:
+        b2 = torch.tensor([1., 2.]).to(device=cuda)
+        # b.device and b2.device are device(type='cuda', index=1)
+
+        c = a + b
+        # c.device is device(type='cuda', index=1)
+
+        z = x + y
+        # z.device is device(type='cuda', index=0)
+
+        # even within a context, you can specify the device
+        # (or give a GPU index to the .cuda call)
+        d = torch.randn(2, device=cuda2)
+        e = torch.randn(2).to(cuda2)
+        f = torch.randn(2).cuda(cuda2)
+        # d.device, e.device, and f.device are all device(type='cuda', index=2)
+
+.. _checking_for_hip:
+
+Checking for HIP
+----------------
+
+Whether you are using PyTorch for CUDA or HIP, the result of calling
+:meth:`~torch.cuda.is_available` will be the same. If you are using a PyTorch
+that has been built with GPU support, it will return `True`. If you must check
+which version of PyTorch you are using, refer to this example below::
+
+    if torch.cuda.is_available() and torch.version.hip:
+        # do something specific for HIP
+    elif torch.cuda.is_available() and torch.version.cuda:
+        # do something specific for CUDA
+
+.. |trade|  unicode:: U+02122 .. TRADEMARK SIGN
+   :ltrim:
+
+.. _tf32_on_rocm:
+
+TensorFloat-32(TF32) on ROCm
+----------------------------
+
+TF32 is supported on AMD Instinct MI300 (gfx942, CDNA3) via hipBLASLt. The
+same ``torch.backends.cuda.matmul.fp32_precision`` and
+``torch.backends.cuda.matmul.allow_tf32`` controls used on NVIDIA hardware
+also apply on ROCm, except that the ``"bfx9"`` precision mode is NVIDIA-only
+and raises an error on ROCm because rocBLAS and hipBLASLt have no corresponding
+nine-product compute mode. The TF32 path on MI300 has hardware-level numerical
+differences from the NVIDIA implementation; see :ref:`tf32_on_mi300` for
+details.
+
+.. _rocm-memory-management:
+
+Memory management
+-----------------
+
+PyTorch uses a caching memory allocator to speed up memory allocations. This
+allows fast memory deallocation without device synchronizations. However, the
+unused memory managed by the allocator will still show as if used in
+``amd-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
+:meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
+tensors, and use :meth:`~torch.cuda.memory_reserved` and
+:meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory
+managed by the caching allocator. Calling :meth:`~torch.cuda.empty_cache`
+releases all **unused** cached memory from PyTorch so that those can be used
+by other GPU applications. However, the occupied GPU memory by tensors will not
+be freed so it can not increase the amount of GPU memory available for PyTorch.
+
+For more advanced users, we offer more comprehensive memory benchmarking via
+:meth:`~torch.cuda.memory_stats`. We also offer the capability to capture a
+complete snapshot of the memory allocator state via
+:meth:`~torch.cuda.memory_snapshot`, which can help you understand the
+underlying allocation patterns produced by your code.
+
+To debug memory errors, set
+``PYTORCH_NO_HIP_MEMORY_CACHING=1`` in your environment to disable caching.
+``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` is also accepted for ease of porting.
+
+.. _hipblas-workspaces:
+
+hipBLAS workspaces
+------------------
+
+As on CUDA, ATen allocates a hipBLAS workspace for each operation from the HIP caching allocator and
+releases it when the operation returns. Set ``TORCH_CUBLAS_WORKSPACE_CACHE=1`` to instead retain one
+workspace for each hipBLAS handle and HIP stream, which was the default before PyTorch 2.15.
+Persistent workspaces must not be used when capturing multiple HIP graphs on the same stream.
+
+When ATen workspace caching is disabled, ATen operations bind their workspaces to handles that
+``torch.cuda.current_blas_handle()`` never returns. That function returns a separate handle for each
+thread and stream, because a rocBLAS handle's workspace must not be used by two streams at once. When
+the handle is created, ATen replaces the workspace rocBLAS allocated for it with a buffer from the HIP
+caching allocator, so ``torch.cuda.memory_allocated()`` counts it. The buffer comes from a memory pool
+reserved for these buffers, never from a pool selected with ``torch.cuda.use_mem_pool`` or by
+CUDA graphs, and so never shares a segment with other allocations. The buffer is as
+large as the workspace rocBLAS allocated (128 MiB on MI355X; the size depends on the GPU, the rocBLAS
+version and ``ROCBLAS_DEVICE_MEMORY_SIZE``), and at least the hipBLAS workspace size described below,
+so a ``ROCBLAS_DEVICE_MEMORY_SIZE`` below that size has no effect.
+rocBLAS never grows a bound workspace: GEMMs that need more fall back to kernels that use less, and
+other calls that need more fail with ``rocblas_status_memory_error``. Handles are never destroyed.
+When a thread exits, each of its handles passes only to a later thread using the same stream, and a
+handle for ``hipStreamPerThread`` passes to none, so the buffer stays allocated for the life of the
+process, and ``torch.cuda.empty_cache()`` does not release it. Where rocBLAS runs GEMMs through
+hipBLASLt, as on MI355X, each rocBLAS handle also holds about 25 MiB that hipBLASLt allocates when the
+handle is created, outside the caching allocator, and no API replaces it.
+
+ATen operations use rocBLAS handles of their own, which are also never destroyed: one for each
+thread and stream for eager operations, and one for each thread for captures, which a thread's first
+rocBLAS operation or ``torch.cuda.current_blas_handle()`` call creates even if the thread never
+captures. Without workspaces bound, each holds about 1
+MiB, or about 27 MiB where rocBLAS runs GEMMs through hipBLASLt (measured on MI300X with ROCm 7.0
+and ``ROCBLAS_USE_HIPBLASLT=1``).
+
+Each stream keeps the handles used on it, as many of each kind as threads used it at once. The
+default stream and the pool streams that ``torch.cuda.Stream()`` returns are a fixed set for each
+device, but each new address of a stream created outside PyTorch, such as one wrapped in
+``torch.cuda.ExternalStream``, adds handles that stay allocated after the stream is destroyed, until a
+stream created at the same address uses them. Besides the rocBLAS handles above, each hipBLASLt handle
+holds about 25 MiB of device memory, which hipBLASLt allocates outside the caching allocator.
+
+A workspace bound with ``rocblas_set_workspace`` stays bound, even after the buffer is freed, and
+after the thread exits and the handle passes to another thread using the same stream. Unbind it with
+``rocblas_set_workspace(handle, nullptr, 0)`` before freeing the buffer. The handle then has no
+workspace, and ATen does not bind its own buffer again, so GEMMs on it use kernels that need none and
+other calls make rocBLAS allocate a workspace outside the caching allocator, which is not allowed
+during capture. A caller that needs its own workspace can create its own rocBLAS handle instead.
+
+Outside capture, run work on a handle only on the stream it was returned for: calling
+``torch.cuda.current_blas_handle()`` on that stream again points the handle back at it without waiting
+for other streams, and when its thread exits, the handle passes to the next thread on that stream,
+whose work is ordered only after work queued there. To move a handle to another stream with
+``rocblas_set_stream``, synchronize its stream first, as rocBLAS requires, and synchronize the other
+stream before calling the function on the original stream again or letting the thread exit. With
+caching enabled, the function returns the handle that ATen's own rocBLAS operations use on that
+stream, and each of them points it back the same way, so also synchronize the other stream before
+running them on the original stream.
+
+Call ``torch.cuda.current_blas_handle()`` on each thread, on each stream it will use, before capture
+begins. It also creates ATen's own rocBLAS handles for that thread and stream; with caching disabled,
+an ATen warmup operation alone does not create the handle the function returns. ``hipblasCreate``
+initializes hipBLASLt, which allocates device memory that HIP rejects on a capturing stream.
+
+With caching disabled, while the current stream is capturing, ``torch.cuda.current_blas_handle()``
+returns a capture handle instead. There is one per thread, and it serves every stream in the capture:
+each request points it at the current stream and binds a workspace for that stream allocated from the
+capture's memory pool, so a graph shares its rocBLAS scratch memory neither with eager work nor with
+other graphs. Request the handle inside the capture instead of using one obtained before it, whose
+workspace eager work on that stream keeps using. When the capture
+ends, its workspaces return to the pool and the handle is unbound, so do not use it afterwards. Once a
+device's handle has been requested, graph capture creates the capturing thread's capture handle and
+one spare for another thread, such as an autograd worker, so side streams that first appear inside a
+capture can use the function too.
+
+hipBLASLt handles are created for each thread and stream on first use, and creating one on a
+capturing stream raises an error. Graph capture creates the capture stream's hipBLASLt handle and one
+spare whenever the device supports hipBLASLt, in both workspace modes, so in a capture that forks two
+new side streams running hipBLASLt operations such as ``torch._scaled_mm``, the second raises. Run a
+hipBLASLt operation on each such stream before capture begins. TunableOp's tuning benchmarks must also
+run outside capture. ATen's own rocBLAS handles for eager operations are likewise created for each
+thread and stream on first use, which allocates device memory and frees some, synchronizing the
+device. A capture in global mode, the default ``capture_error_mode``, forbids creating either kind of
+handle from every thread, because both allocate device memory. So before one begins, on each thread
+that will run eager operations while it is underway and each stream that thread will use, run a
+hipBLASLt operation, and call ``torch.cuda.current_blas_handle()`` or run a rocBLAS operation. See
+`ROCm/rocm-libraries#11838 <https://github.com/ROCm/rocm-libraries/issues/11838>`_.
+
+Graph replay is not covered: a captured GEMM keeps using the handle it was captured with each time the
+graph is replayed, so a replay can overlap other work on that handle, and hang or produce wrong
+results. That work can be eager operations on the capture stream, from the capturing thread or a later
+thread on that stream, another graph the same thread captured, or, where rocBLAS runs GEMMs through
+hipBLASLt, a parallel branch of the same capture, since a capture's branches share the thread's rocBLAS
+handles. See `#203474 <https://github.com/pytorch/pytorch/issues/203474>`_.
+
+Extensions that call hipBLASLt themselves can use the workspace ``at::cuda::getCUDABlasLtWorkspace()``
+returns: a buffer cached for each stream, or, with caching disabled while the stream is capturing, a
+buffer from the capture's memory pool, one per stream and capture, which returns to the pool when the
+capture ends. Fetch it inside the capture: a buffer fetched before the capture must not be used in it.
+
+When caching is enabled, a hipBLAS workspace is allocated for each combination of hipBLAS handle and
+HIP stream that executes a hipBLAS kernel requiring a workspace.  In order to
+avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
+``torch._C._cuda_clearCublasWorkspaces()`` is called; note that it's the same function for CUDA or
+HIP. Resetting a graph also frees every workspace cached for the stream it was captured on.
+The workspace size per allocation can be specified via the environment variable
+``HIPBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.  As an example, the environment
+variable ``HIPBLAS_WORKSPACE_CONFIG=:4096:2:16:8`` specifies a total size of ``2 * 4096 + 8 * 16
+KiB`` or 8 MIB. The default workspace size is 32 MiB; MI300 and newer defaults to 128 MiB.
+``HIPBLAS_WORKSPACE_CONFIG=:0:0`` makes rocBLAS GEMMs use kernels that need no workspace. Unlike on
+CUDA, other rocBLAS calls such as ``torch.dot`` then have rocBLAS allocate a workspace itself, outside
+the caching allocator, so they cannot be captured. For convenience, ``CUBLAS_WORKSPACE_CONFIG`` is also
+accepted.
+
+With caching enabled, ``torch.cuda.current_blas_handle()`` returns ATen's own handles: outside
+capture, the thread's handle for the current stream; while the current stream is capturing, the
+thread's own handle for the device, which serves every stream in the capture. That handle is not the
+capture handle described above: the thread's first rocBLAS operation creates it, graph capture
+creates neither it nor a spare, and it is not unbound when the capture ends. So a pointer mode set on
+the handle returned outside capture does not apply inside it. Its workspace for each stream is first
+allocated during capture, from the graph's memory pool; one for a stream other than the capture
+stream stays allocated, and keeps part of that pool in use, until the workspace cache is cleared.
+
+.. _hipfft-plan-cache:
+
+hipFFT/rocFFT plan cache
+------------------------
+
+Setting the size of the cache for hipFFT/rocFFT plans is not supported.
+
+.. _rocm-gds:
+
+hipFile (GPUDirect Storage)
+---------------------------
+
+The ``torch.cuda.gds`` APIs are implemented with `hipFile
+<https://rocm.docs.amd.com/projects/hipFile/en/latest/>`_ on ROCm, taking the
+place of cuFile on CUDA. hipFile ships with ROCm 7.14 and later; on older ROCm
+the build disables GDS support and :func:`torch.cuda.gds.is_available` returns
+``False``. As elsewhere in the HIP port, the build option keeps its CUDA name,
+so ``USE_CUFILE=0`` is what disables the support in a ROCm build. hipFile is
+Linux-only, so a Windows ROCm build never has GDS support.
+
+Each wrapper in ``torch.cuda.gds`` calls the hipFile counterpart of the
+cuFile function named in its docstring: ``hipFileRead``, ``hipFileWrite``,
+``hipFileReadAsync``, ``hipFileWriteAsync``, ``hipFileBufRegister``,
+``hipFileBufDeregister``, ``hipFileHandleRegister`` and
+``hipFileHandleDeregister``. Errors quote the hipFile name, so a failed read
+raises ``hipFileRead failed: ...``. hipFile is close to cuFile but not
+identical; the known divergences, including that numeric error codes are not
+guaranteed to match, are listed in `cuFile compatibility
+<https://rocm.docs.amd.com/projects/hipFile/en/latest/reference/hipFile-cuFile-compatibility.html>`_.
+
+hipFile transfers at most ``2**31`` bytes minus the page size per call and
+silently truncates larger transfers, so the :class:`~torch.cuda.gds.GdsFile`
+load and save methods raise a ``RuntimeError`` for a larger storage instead.
+
+Configuring a system for GDS on ROCm differs from CUDA, and the NVIDIA
+GPUDirect Storage installation and troubleshooting guide does not apply. Refer
+instead to the hipFile documentation:
+
+* `Install hipFile <https://rocm.docs.amd.com/projects/hipFile/en/latest/install/install.html>`_
+* `Check for fastpath compatibility <https://rocm.docs.amd.com/projects/hipFile/en/latest/how-to/checking-system-compatibility.html>`_
+* `Set up a local NVMe drive <https://rocm.docs.amd.com/projects/hipFile/en/latest/how-to/setup-local-nvme.html>`_
+* `Troubleshooting <https://rocm.docs.amd.com/projects/hipFile/en/latest/troubleshooting/troubleshooting.html>`_
+
+.. _torch-distributed-backends:
+
+torch.distributed backends
+--------------------------
+
+Currently, only the "nccl" and "gloo" backends for torch.distributed are supported on ROCm.
+
+.. _cuda-api-to_hip-api-mappings:
+
+CUDA API to HIP API mappings in C++
+-----------------------------------
+
+Please refer: https://rocm.docs.amd.com/projects/HIP/en/latest/reference/api_syntax.html
+
+NOTE: The CUDA_VERSION macro, cudaRuntimeGetVersion and cudaDriverGetVersion APIs do not
+semantically map to the same values as HIP_VERSION macro, hipRuntimeGetVersion and
+hipDriverGetVersion APIs. Please do not use them interchangeably when doing version checks.
+
+For example: Instead of using
+
+``#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000`` to implicitly exclude ROCm/HIP,
+
+use the following to not take the code path for ROCm/HIP:
+
+``#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(USE_ROCM)``
+
+Alternatively, if it is desired to take the code path for ROCm/HIP:
+
+``#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || defined(USE_ROCM)``
+
+Or if it is desired to take the code path for ROCm/HIP only for specific HIP versions:
+
+``#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || (defined(USE_ROCM) && ROCM_VERSION >= 40300)``
+
+
+Refer to CUDA Semantics doc
+---------------------------
+
+For any sections not listed here, please refer to the CUDA semantics doc: :ref:`cuda-semantics`
+
+
+Enabling kernel asserts
+-----------------------
+
+Kernel asserts are supported on ROCm, but they are disabled due to performance overhead. It can be enabled
+by recompiling the PyTorch from source.
+
+Please add below line as an argument to cmake command parameters::
+
+    -DROCM_FORCE_ENABLE_GPU_ASSERTS:BOOL=ON
+
+Enabling/Disabling ROCm Composable Kernel
+-----------------------------------------
+
+Enabling composable_kernel (CK) for both SDPA and GEMMs is a two-part process. First the user must have built
+pytorch while setting the corresponding environment variable to '1'
+
+SDPA:
+``USE_ROCM_CK_SDPA=1``
+
+GEMMs:
+``USE_ROCM_CK_GEMM=1``
+
+Second, the user must explicitly request that CK be used as the backend library via the corresponding python
+call
+
+SDPA:
+``setROCmFAPreferredBackend('<choice>')``
+
+GEMMs:
+``setBlasPreferredBackend('<choice>')``
+
+To enable CK in either scenario, simply pass 'ck' to those functions.
+
+In order to set the backend to CK, the user MUST have built with the correct environment variable. If not,
+PyTorch will print a warning and use the "default" backend. For GEMMs, this will route to hipblas and
+for SDPA it routes to aotriton.
+
+.. _sdpa-input-layout-on-rocm:
+
+SDPA input layout on ROCm
+-------------------------
+
+The AOTriton backend for
+:func:`~torch.nn.functional.scaled_dot_product_attention` selects kernel
+configurations from a tuning database that assumes contiguous BHSD
+(batch, heads, seqlen, head_dim) inputs. Inputs that are BHSD-shaped but
+not contiguous, such as the view produced by ``permute(0, 2, 1, 3)`` on a
+BSHD tensor, fall outside the tuned configuration space and may select a
+suboptimal kernel.
+
+Materializing contiguous inputs first trades a copy for a better kernel
+choice, so whether it wins depends on device, shape and dtype. It is
+generally not profitable on discrete GPUs, where the copy overhead tends to
+outweigh the kernel benefit. It has been observed to be a large win on the
+AMD gfx1151 iGPU at long sequence lengths (see
+`#190154 <https://github.com/pytorch/pytorch/issues/190154>`_ for measurements).
+Time both forms end to end, including the copies, on the shapes and dtype
+your model actually uses::
+
+    def sdpa_permute(q, k, v):
+        q2, k2, v2 = (x.permute(0, 2, 1, 3) for x in (q, k, v))
+        out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
+        return out.permute(0, 2, 1, 3)
+
+    def sdpa_contiguous(q, k, v):
+        q2, k2, v2 = (x.transpose(1, 2).contiguous() for x in (q, k, v))
+        out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
+        return out.transpose(1, 2)
