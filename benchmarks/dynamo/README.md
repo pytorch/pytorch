@@ -78,6 +78,18 @@ For debugging you can run just a single benchmark by adding the `--only=<NAME>` 
 
 A complete list of options can be seen by running each of the runners with the `--help` flag.
 
+As an example, the commands to run first line of the dashboard (performance only) would be:
+```
+./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv
+./benchmarks/dynamo/torchbench.py --performance --inference --bfloat16 --backend=inductor --output=torchbench_inference.csv
+
+./benchmarks/dynamo/huggingface.py --performance --training --amp --backend=inductor --output=huggingface_training.csv
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 --backend=inductor --output=huggingface_inference.csv
+
+./benchmarks/dynamo/timm_models.py --performance --training --amp --backend=inductor --output=timm_models_training.csv
+./benchmarks/dynamo/timm_models.py --performance --inference --bfloat16 --backend=inductor --output=timm_models_inference.csv
+```
+
 ### Decoder-only generation, prefill, and decode
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
@@ -91,7 +103,9 @@ unpadded prompts:
   --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
 ```
 
-Prefill and decode require Transformers 5.14.1 or newer.
+Prefill and decode require exactly Transformers 5.14.1 because cache
+preallocation uses private APIs from that release. Other versions are rejected
+before loading models.
 
 Prefill measures one forward over the prompt, returning last-position logits and
 populating a reusable static cache. The cache holds `prompt_length + 1999`
@@ -99,19 +113,13 @@ positions, the capacity `generate` allocates for its first forward, so attention
 spans the same KV length as in generation; `prompt_length + 2000` must fit the
 model's context length. Cache allocation and reset occur outside the compiled
 and timed forward. Use `--accuracy` to check correctness or
-`--disable-cudagraphs` to measure without CUDA graphs. Prefill requires inference
-and a backend; autocast, dynamic shapes, DDP/FSDP, and export modes are
-unsupported. `--prompt-length` (default 1000) and `--batch-size` configure
-the prefill workload; generation retains its existing `1 x 1000` inputs and
-rejects `--prompt-length`.
-
-CSV `abs_latency` and `eager_latency` are milliseconds for all
-`--iterations-per-run` requests; `input_tokens_per_second` includes all batch
-elements. Default output and profiler trace names get a `_prefill` suffix; use
-separate files for different input dimensions.
+`--disable-cudagraphs` to measure without CUDA graphs. `--prompt-length`
+(default 1000) and `--batch-size` configure the prefill and decode workloads;
+generation retains its existing `1 x 1000` inputs and rejects `--prompt-length`.
 
 Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
-`Qwen/Qwen3.5-0.8B`:
+`Qwen/Qwen3.5-0.8B`. `gemma-2-2b` is excluded because its sliding-window cache
+recompiles on every step.
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -123,14 +131,25 @@ Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
 Each decode request prefills the prompt eagerly into the static cache outside
 the timed region, then times `--decode-length` (default 128, at most 1999)
 single-token compiled forwards. Decode feeds fixed random tokens rather than
-sampled ones and returns the last step's logits. It shares prefill's cache
-capacity and flag restrictions. `gemma-2-2b` is excluded because its
-sliding-window cache recompiles on every step.
+sampled ones and returns the last step's logits.
+
+Prefill and decode require `--inference` and a backend. They reject `--amp`,
+`--aot-precompile`, `--batch-invariant`, `--compare-backed-unbacked`, `--ddp`,
+`--dynamic-batch-only`, `--dynamic-shapes`, `--enable-activation-checkpointing`,
+`--export`, `--export-aot-inductor`, `--export-nativert`, `--find-batch-sizes`,
+`--fsdp`, `--multiprocess`, `--optimus`, `--quantization`,
+`--recompile-profiler`, `--tolerance`, `--torchscript-jit-trace`,
+`--trace-on-xla`, `--unbacked-batch-only`, and `--xla`.
 
 CSV `abs_latency` and `eager_latency` are milliseconds for all
-`--iterations-per-run` requests; `output_tokens_per_second` counts every decode
-step across batch elements. Default output and profiler trace names get a
-`_decode` suffix.
+`--iterations-per-run` requests. Prefill reports `input_tokens_per_second` and
+decode reports `output_tokens_per_second`, both counting all batch elements.
+Rows do not record the inference mode, prompt length, or decode length, so write
+each mode and input size to its own file. Default output and profiler trace
+names get a `_prefill` or `_decode` suffix.
+
+With `--log-operator-inputs`, use a separate output directory for each mode and
+input size. Operator logs are named by model, and existing logs are skipped.
 
 #### Tensor-parallel prefill and decode
 
@@ -207,15 +226,3 @@ unsupported. Inductor TP requires CUDA/NCCL. With a CPU-only PyTorch build,
 `--backend=aot_eager`. CPU Inductor TP is rejected because concurrent Gloo
 all-gathers can corrupt memory; this was reproduced without a model or
 compilation and is not specific to Qwen3.5.
-
-As an example, the commands to run first line of the dashboard (performance only) would be:
-```
-./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv
-./benchmarks/dynamo/torchbench.py --performance --inference --bfloat16 --backend=inductor --output=torchbench_inference.csv
-
-./benchmarks/dynamo/huggingface.py --performance --training --amp --backend=inductor --output=huggingface_training.csv
-./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 --backend=inductor --output=huggingface_inference.csv
-
-./benchmarks/dynamo/timm_models.py --performance --training --amp --backend=inductor --output=timm_models_training.csv
-./benchmarks/dynamo/timm_models.py --performance --inference --bfloat16 --backend=inductor --output=timm_models_inference.csv
-```
