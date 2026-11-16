@@ -415,17 +415,22 @@ class _PyLibCupti:
             == CUPTI_SUCCESS
         )
 
-    def disarm_approx_timestamp_callback(self, sub_handle: int) -> None:
-        """Restore CUPTI's default CPU timer for this subscriber (callback_addr=0), the
-        inverse of arm_approx_timestamp_callback -- called before unsubscribe so a following
-        consumer isn't left with our callback."""
+    def disarm_approx_timestamp_callback(self, sub_handle: int) -> bool:
+        """Restore CUPTI's default CPU timer; return whether removal succeeded.
+
+        Teardown may ignore failure before unsubscribing. A live configuration
+        change must check this result before interpreting records on another clock.
+        """
         val = ctypes.c_void_p(None)
         size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
-        self._lib.cuptiActivitySetAttribute_v2(
-            ctypes.c_void_p(sub_handle),
-            ActivityAttr.TIMESTAMP_CALLBACK,
-            ctypes.byref(size),
-            ctypes.byref(val),
+        return (
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                ActivityAttr.TIMESTAMP_CALLBACK,
+                ctypes.byref(size),
+                ctypes.byref(val),
+            )
+            == CUPTI_SUCCESS
         )
 
     def activity_flush_all(self, *, forced: bool = False) -> None:

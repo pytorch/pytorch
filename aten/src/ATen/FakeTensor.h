@@ -12,6 +12,8 @@ struct TensorImpl;
 
 namespace at {
 
+class Tensor;
+
 TORCH_API void set_and_normalize_fake_device(
     c10::TensorImpl* impl,
     c10::Device device);
@@ -20,19 +22,12 @@ TORCH_API void set_and_normalize_fake_device(
 // fake of mode on device and marks its storage so that reading its
 // mutable data pointer warns, or throws if the mode disallows unsafe data
 // pointer access, as Python's FakeTensor.__new__ does for every fake it makes,
-// a view op's output included. Views made within a kernel's implementation
-// (maybe_copy_fake_tensor_metadata), which Python never wraps, share their
-// base's marked storage and do not mark it again.
+// a view op's output included. Temporary views inside a Meta kernel share
+// their base's marked storage; only returned outputs are initialized as fakes.
 //
-// impl must read as meta: a meta tensor, or, inside a kernel, a fake. The
-// latter is how the fake fallback (later in this stack) makes a new fake of a
-// kernel output that inherited fake state from an input. A view whose kernel
-// calls maybe_copy_fake_tensor_metadata (e.g. as_strided, alias, view,
-// _reshape_alias) has the input's fake device and mode, while one whose kernel
-// does not (view_as_real, view_as_complex, view.dtype) inherits only the Fake
-// key. A shallow copy, such as detach's output, has a copy of the input's
-// ExtraMeta (see ExtraMeta's copy constructor for what is kept), including the
-// real tensor and recorded dispatch keys (see Note [C++ fake dispatch keys]).
+// impl must read as meta. New views and shallow copies made inside a Meta
+// kernel do not inherit fake state (see Note [C++ fake outputs inside Meta
+// kernels]); the fallback initializes them when the kernel returns.
 // init_cpp_fake itself replaces only the fake device and mode and keeps the
 // rest of the ExtraMeta; the fallback then sets the real tensor and dispatch
 // keys as Python does for an op's output. A rejected impl is left unchanged.
@@ -40,5 +35,14 @@ TORCH_API void init_cpp_fake(
     c10::TensorImpl* impl,
     c10::Device device,
     const std::shared_ptr<c10::FakeTensorMode>& mode);
+
+namespace impl {
+
+// Metadata-only fake kernels. The caller validates the inputs and disables
+// dispatch, but must not enter InKernelInvocationGuard: the copies stay fake.
+TORCH_API Tensor fake_detach(const Tensor& self);
+TORCH_API Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source);
+
+} // namespace impl
 
 } // namespace at
