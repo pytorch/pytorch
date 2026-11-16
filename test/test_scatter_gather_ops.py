@@ -1,8 +1,10 @@
 # Owner(s): ["module: scatter & gather ops"]
 
+import itertools
 import random
 import unittest
 from typing import NamedTuple
+from unittest.mock import patch
 
 import torch
 
@@ -155,6 +157,58 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    def test_scatter_out_variant_dynamic_shapes(self):
+        device = "cpu"
+        dtype = torch.float32
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103
+
+        def scatter_src(x, index, src, out):
+            return torch.scatter(x, 1, index, src, out=out)
+
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        def scatter_value(x, index, out):
+            return torch.scatter(x, 1, index, 1.0, out=out)
+
+        for fn, needs_src in (
+            (scatter_src, True),
+            (scatter_add, True),
+            (scatter_value, False),
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+            for width in (2, 3, 5):
+                x = torch.zeros(1, width, device=device, dtype=dtype)
+                index = torch.arange(width, device=device).unsqueeze(0)
+                src = torch.ones(1, width, device=device, dtype=dtype)
+                eager_out = torch.empty_like(x)
+                compiled_out = torch.empty_like(x)
+                args = (x, index, src, eager_out) if needs_src else (x, index, eager_out)
+                compiled_args = (
+                    (x, index, src, compiled_out) if needs_src else (x, index, compiled_out)
+                )
+                fn(*args)
+                compiled(*compiled_args)
+                self.assertEqual(eager_out, compiled_out)
+
+    def test_scatter_add_out_dynamic_shapes_empty_index(self):
+        device = "cpu"
+        dtype = torch.float32
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103.
+
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        compiled = torch.compile(scatter_add, backend="eager", fullgraph=True, dynamic=True)
+        for width in (2, 3, 0, 5):
+            x = torch.zeros(1, width, device=device, dtype=dtype)
+            index = torch.arange(width, device=device).unsqueeze(0)
+            src = torch.ones(1, width, device=device, dtype=dtype)
+            eager_out = torch.empty_like(x)
+            compiled_out = torch.empty_like(x)
+            scatter_add(x, index, src, eager_out)
+            compiled(x, index, src, compiled_out)
+            self.assertEqual(eager_out, compiled_out)
 
 class TestScatterGatherDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -210,11 +264,18 @@ class TestScatterGatherDevice(TestCase):
     @serialTest()
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
-        # test larger shapes to check vectorized implementation
-        # (4096, 3072, 16), (4096, 3072, 32) and (4096, 1024, 8) cover
-        # 16/32-byte rows that must skip the vectorized kernel
+        many_rows = 1031
+        if device.startswith("cuda"):
+            properties = torch.cuda.get_device_properties(device)
+            # Match max_num_threads=256 and max_block_waves=32 in IndexKernelUtils.cu.
+            # Use multiple passes plus a partial tail, rather than one row past the cap.
+            many_rows = 2 * properties.multi_processor_count * (properties.max_threads_per_multi_processor // 256) * 32 + 1031
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192),
-                          (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8)):
+                          (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8),
+                          # Non-power-of-two packing, partial row blocks, and the 32/33-vector boundary.
+                          (4096, 1031, 48), (4096, 1031, 160), (4096, 1031, 512), (4096, 1031, 528),
+                          # Force row-loop iterations on this GPU without multi-GB outputs.
+                          (64, many_rows, 4096), (64, many_rows * 64, 64)):
             if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
@@ -225,10 +286,12 @@ class TestScatterGatherDevice(TestCase):
             alloc2 = torch.empty(m, k + 4, device=device, dtype=dtype)
             misaligned1 = alloc2[:, :-4].copy_(src)
             num_ind = n
-            for dim in (0, 1):
+            index_dtypes = (torch.int64, torch.int32) if device.startswith("cuda") and k == 48 else (torch.int64,)
+            dims = (0,) if m == 64 and n in (many_rows, many_rows * 64) else (0, 1)
+            for dim, index_dtype in itertools.product(dims, index_dtypes):
                 max_ind = src.shape[dim]
-                ind0 = torch.randint(max_ind, (num_ind,), device=device)
-                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=torch.int64)[::2].copy_(ind0)
+                ind0 = torch.randint(max_ind, (num_ind,), device=device, dtype=index_dtype)
+                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=index_dtype)[::2].copy_(ind0)
                 shape_ind = [1] * src.ndim
                 shape_ind[dim] = ind0.shape[0]
                 shape_out = list(src.shape)
@@ -746,6 +809,84 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "op",
+        [
+            "scatter_add",
+            "scatter_reduce_sum",
+            "scatter_reduce_mean",
+            "scatter_scalar_add",
+            "index_add",
+            "index_add_many",
+            "index_reduce_mean",
+            "put_accumulate",
+        ],
+    )
+    def test_atomic_add_preserves_neighbours(self, device, dtype, op):
+        # Half-precision atomic adds may be packed with the other half of the
+        # 4-byte word holding the target, inside or outside self. The packed
+        # lane must leave that slot unchanged; -0.0 would flip under +0.0.
+        # See https://github.com/pytorch/pytorch/issues/202905
+        def view_5x5(b):
+            return b[:25].view(5, 5)
+
+        cases = [
+            (view_5x5, 1, 4),
+            (view_5x5, 0, 4),
+            (lambda b: view_5x5(b).t(), 1, 4),
+            (lambda b: b[1:26].view(5, 5), 1, 0),
+            (lambda b: b[:30].view(5, 6)[:, :5], 1, 4),
+            (lambda b: b[:10:2], 0, 1),
+            (lambda b: b[1:11:2], 0, 1),
+        ]
+
+        # Each case leaves the targeted slice at 1 and all other bits unchanged.
+        def apply(x, dim, i, idx, src):
+            if op == "scatter_add":
+                x.scatter_add_(dim, idx, src)
+            elif op == "scatter_reduce_sum":
+                x.scatter_reduce_(dim, idx, src, "sum")
+            elif op == "scatter_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.scatter_reduce_(dim, idx, src * 2, "mean")
+            elif op == "scatter_scalar_add":
+                x.scatter_(dim, idx, 1.0, reduce="add")
+            elif op == "index_add":
+                x.index_add_(dim, idx.flatten()[:1], src)
+            elif op == "index_add_many":
+                # More than 16 indices selects the large-index kernel, and
+                # alpha != 1 avoids delegating to scatter_add_.
+                n = 32
+                many = idx.flatten()[:1].repeat(n)
+                x.index_add_(dim, many, torch.cat([src] * n, dim) / 16, alpha=0.5)
+            elif op == "index_reduce_mean":
+                # With include_self, the mean of -0.0 and 2 is 1.
+                x.index_reduce_(dim, idx.flatten()[:1], src * 2, "mean")
+            elif op == "put_accumulate":
+                flat_idx = torch.arange(x.numel(), device=device).view(x.shape)
+                x.put_(flat_idx.select(dim, i), src, accumulate=True)
+            else:
+                raise AssertionError(f"unknown op {op}")
+
+        for make_self, dim, i in cases:
+            base = torch.full((32,), -0.0, device=device, dtype=dtype)
+            x = make_self(base)
+            shape = list(x.shape)
+            shape[dim] = 1
+            idx = torch.full(shape, i, device=device)
+            src = torch.ones(shape, device=device, dtype=dtype)
+            apply(x, dim, i, idx, src)
+
+            expected = torch.full((32,), -0.0, device=device, dtype=dtype)
+            make_self(expected).select(dim, i).fill_(1)
+            self.assertEqual(
+                base.view(torch.int16),
+                expected.view(torch.int16),
+                msg=f"dim={dim}, index={i}, self strides {x.stride()}, offset {x.storage_offset()}",
+            )
+
     @dtypes(torch.float32)
     def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
         for d in (0, 1):
@@ -761,6 +902,7 @@ class TestScatterGatherDevice(TestCase):
             with DeterministicGuard(True):
                 res = inp.clone().scatter_add_(d, idx, src)
             self.assertEqual(res, ref)
+
 
 
 # ---------------------------------------------------------------------------
@@ -937,9 +1079,8 @@ class TestScatterAddOverrideConds(TestCase):
         cutedsl_impl.register_to_dispatch()
 
     def _conds(self, self_t, idx, src, dim=0):
-        # _is_*_supported take (self, dim, index, src); they build the
-        # analysis iter internally and pattern-match its strides against
-        # the kernel's expected layout.
+        # _is_*_supported take (self, dim, index, src); they look up the
+        # (cached) layout eligibility and check pointer alignment per call.
         return (
             self.impl._is_tma_supported(self_t, dim, idx, src),
             self.impl._is_vec_scatter_supported(self_t, dim, idx, src),
@@ -959,6 +1100,18 @@ class TestScatterAddOverrideConds(TestCase):
         # 129 % 4 != 0 -> vec also rejects.
         self_t, idx, src, _ = _make_override_triple(100, 50, (129,))
         self.assertEqual(self._conds(self_t, idx, src), (False, False))
+
+    def test_alignment_is_checked_on_a_cached_layout(self):
+        self_t = torch.zeros(_M_OUT, _D, device="cuda")
+        aligned = torch.randn(_M_SRC, _D, device="cuda")
+        misaligned = _misaligned_view(_M_SRC, _D, torch.float32).normal_()
+        idx = _expanded_idx(torch.zeros(_M_SRC, dtype=torch.int64, device="cuda"), (_D,))
+        self.impl._ELIGIBILITY_CACHE.clear()
+        compute = self.impl._compute_eligibility
+        with patch.object(self.impl, "_compute_eligibility", wraps=compute) as spy:
+            self.assertEqual(self._conds(self_t, idx, aligned), (True, True))
+            self.assertEqual(self._conds(self_t, idx, misaligned), (False, False))
+        spy.assert_called_once()
 
     @parametrize("case", _ALIGNMENT_CASES, name_fn=lambda c: c.name)
     def test_alignment_cond_matrix(self, case):
@@ -1091,17 +1244,6 @@ class TestScatterAddOverrideConds(TestCase):
         with DeterministicGuard(True):
             self.assertFalse(self.impl._tma_cond(self_t, 0, idx, src))
             self.assertFalse(self.impl._vs_cond(self_t, 0, idx, src))
-
-    def test_rejects_empty_self(self):
-        # self.shape[0] == 0 with a non-empty src would have every index
-        # out of range. Cond must reject so aten raises the index error
-        # instead of our kernel silently writing OOB.
-        self_t = torch.zeros(0, 128, device="cuda", dtype=torch.float32)
-        src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
-        idx = _expanded_idx(
-            torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
-        )
-        self.assertEqual(self._conds(self_t, idx, src), (False, False))
 
 
 @unittest.skipUnless(TEST_CUDA, "needs CUDA")
@@ -1378,6 +1520,66 @@ class TestScatterAddOverrideCorrectness(TestCase):
         torch.cuda.synchronize()
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
+
+    @parametrize("narrow", ["self", "src"])
+    def test_declines_index_wider_than_a_view(self, narrow):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        # aten raises for this. The narrowed operand's storage is wide enough
+        # that as_strided can't catch it; only the explicit shape check does.
+        self_t = torch.zeros(64, 512, device="cuda")
+        src = torch.randn(32, 512, device="cuda")
+        if narrow == "self":
+            self_t = self_t[:, :256]
+        else:
+            src = src[:, :256]
+        idx = _expanded_idx(torch.zeros(32, dtype=torch.int64, device="cuda"), (512,))
+        self.assertFalse(cutedsl_impl._is_tma_supported(self_t, 0, idx, src))
+        self.assertFalse(cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src))
+        with self.assertRaisesRegex(RuntimeError, "Expected index"):
+            self_t.scatter_add_(0, idx, src)
+
+    @parametrize("base_rows", [0, 100])
+    def test_rejects_empty_self(self, base_rows):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        # self.shape[0] == 0 with a non-empty src would have every index
+        # out of range. Cond must reject so aten raises the index error
+        # instead of our kernel silently writing OOB. A zero-row view of a
+        # larger buffer shares the bare tensor's cache key, so clear it.
+        cutedsl_impl._ELIGIBILITY_CACHE.clear()
+        self_t = torch.zeros(base_rows, 128, device="cuda", dtype=torch.float32)[:0]
+        src = torch.randn(5, 128, device="cuda", dtype=torch.float32)
+        idx = _expanded_idx(
+            torch.zeros(5, device="cuda", dtype=torch.int64), (128,)
+        )
+        self.assertFalse(cutedsl_impl._is_tma_supported(self_t, 0, idx, src))
+        self.assertFalse(cutedsl_impl._is_vec_scatter_supported(self_t, 0, idx, src))
+
+    def test_cache_eviction_keeps_results_correct(self):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        cutedsl_impl._ELIGIBILITY_CACHE.clear()
+        with patch.object(cutedsl_impl, "_ELIGIBILITY_CACHE_MAX", 2):
+            for N in (128, 256, 512, 128):
+                self_t, idx, src, _ = _make_override_triple(100, 50, (N,))
+                self.assertEqual(cutedsl_impl._scatter_add_eligibility(self_t, 0, idx, src), (N, 50))
+                self.assertLessEqual(len(cutedsl_impl._ELIGIBILITY_CACHE), 2)
+
+    def test_symbolic_sizes_are_not_cached(self):
+        from torch._native.ops.scatter_add import cutedsl_impl
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv, StatelessSymbolicContext
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        def fake(t):
+            ctx = StatelessSymbolicContext(dynamic_sizes=[DimDynamic.DYNAMIC] * t.ndim)
+            return mode.from_tensor(t, symbolic_context=ctx)
+
+        self_t, idx, src, _ = _make_override_triple(100, 50, (128,))
+        fake_self, fake_idx, fake_src = fake(self_t), fake(idx), fake(src)
+        self.assertIsInstance(fake_self.shape[0], torch.SymInt)
+        cutedsl_impl._ELIGIBILITY_CACHE.clear()
+        with mode:
+            cutedsl_impl._scatter_add_eligibility(fake_self, 0, fake_idx, fake_src)
+        self.assertEqual(len(cutedsl_impl._ELIGIBILITY_CACHE), 0)
 
 
 

@@ -38,13 +38,7 @@ from torch._C._dynamo import (
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import (
-    ObservedAttributeError,
-    raise_attribute_error,
-    raise_type_error,
-    unimplemented,
-    Unsupported,
-)
+from ..exc import raise_attribute_error, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
@@ -561,16 +555,21 @@ def load_pending_mutation(
 def getset_load_or_build(
     accessor: Callable[[Any], Any],
     name: str,
-    source: Callable[[Any], Source | None] = lambda self: None,
+    source: Callable[[Any], Source | None] | None = None,
 ) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`,
-    attaching the Source returned by `source` (defaults to sourceless)."""
+    attaching the Source returned by `source` (defaults to `self.source.name`)."""
+
+    def default_source(self: Any) -> Source | None:
+        return self.source and AttrSource(self.source, name)
+
+    get_source = default_source if source is None else source
 
     def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
         pending = load_pending_mutation(tx, self, name)
         if pending is not None:
             return pending
-        return VariableTracker.build(tx, accessor(self), source(self))
+        return VariableTracker.build(tx, accessor(self), get_source(self))
 
     return getter
 
@@ -578,7 +577,25 @@ def getset_load_or_build(
 def getset_set(name: str) -> Callable[..., None]:
     """Setter for a GetSet/Member whose value is an already-built VT."""
 
-    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
+    def setter(
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        value: VariableTracker | None,
+    ) -> None:
+        if value is None:
+            from .constant import ConstantVariable
+
+            value = ConstantVariable.create(None)
+        store_attr_mutation(tx, vt, name, value)
+
+    return setter
+
+
+def attr_getset(name: str, obj: Callable[[Any], Any]) -> GetSet:
+    """GetSet for a plain writable attribute: read via getattr(obj(self), name),
+    written through store_attr_mutation."""
+    getter = getset_load_or_build(lambda vt: getattr(obj(vt), name), name)
+    return GetSet(getter, getset_set(name))
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -1133,7 +1150,6 @@ _SLOT_FN: dict[SlotGroup, dict[str, str]] = {
     SlotGroup.TYPE: {
         **{f: f"{f}_impl" for f in _TYPE_FIELDS},
         "tp_call": "call_function",
-        "tp_hash": "hash_impl",
     },
 }
 
@@ -1239,10 +1255,10 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    # hash_impl returns (int, bool), not a VariableTracker like other impls.
+    # tp_hash_impl returns (int, bool), not a VariableTracker like other impls.
     TPSLOT(
         "__hash__",
-        "hash_impl",
+        "tp_hash_impl",
         PyTypeSlots.TP_HASH,
         _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
     ),
@@ -1785,9 +1801,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     """
 
     # The CPython type(s) this VT is designed to represent.
-    # Single type or tuple of types. None means no static CPython type mapping
-    # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
-    _cpython_type: type | tuple[type, ...] | None = None
+    # Single type or tuple of types. None means no static CPython type mapping.
+    # Read per class (own __dict__), not inherited. The base class itself
+    # represents plain `object()` instances, like PyBaseObject_Type:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
+    _cpython_type: type | tuple[type, ...] | None = object
 
     # Declarative named-method table (analogous to CPython's tp_methods): maps a
     # method name to a Method describing its handler and calling convention.
@@ -1971,6 +1989,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Raises:
             NotImplementedError: If the method is not implemented in a subclass.
         """
+        if type(self) is VariableTracker:
+            return object
         try:
             return type(self.as_python_constant())
         except NotImplementedError:
@@ -2051,7 +2071,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return True
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Default tp_hash: object.__hash__ = PyObject_GenericHash (identity hash).
 
         PyObject_GenericHash: https://github.com/python/cpython/blob/e76aa128fe/Python/pyhash.c#L143-L147
@@ -2061,7 +2081,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         a sourceless object's identity and must not escape into output bytecode.
 
         VT subclasses override this for types with their own C tp_hash.
-        UserDefinedObjectVariable.hash_impl handles the MRO walk for custom
+        UserDefinedObjectVariable.tp_hash_impl handles the MRO walk for custom
         Python __hash__, builtin-inherited C hash, and unknown C tp_hash.
         """
         # object.__hash__ = Py_HashPointer(obj) — identity hash.
@@ -2069,11 +2089,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             real_val = tx.output.resolve_source_value(self.source)
             if type(real_val).__hash__ is not object.__hash__:
                 unimplemented(
-                    gb_type="Missing hash_impl override",
-                    context=f"hash_impl {self}",
+                    gb_type="Missing tp_hash_impl override",
+                    context=f"tp_hash_impl {self}",
                     explanation=f"{type(self).__name__} wraps "
                     f"{type(real_val).__name__} which has a non-default "
-                    f"tp_hash. Add a hash_impl override to "
+                    f"tp_hash. Add a tp_hash_impl override to "
                     f"{type(self).__name__}.",
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
@@ -2376,35 +2396,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
-
-        Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
-        call tp_getattro, suppress AttributeError via PyErr_Clear, return
-        True/False.
-        https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
-        """
-        result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            return result
-
-        try:
-            self.tp_getattro_impl(tx, name)
-            return variables.ConstantVariable.create(True)
-        except ObservedAttributeError:
-            tx.exn_vt_stack.clear_current_exception()
-            return variables.ConstantVariable.create(False)
-        except (NotImplementedError, Unsupported):
-            pass
-
-        unimplemented(
-            gb_type="Unsupported hasattr call",
-            context=f"call_obj_hasattr {self} {name}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[
-                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        """VT-specific hasattr shortcut. generic_hasattr_str only calls an
+        override; the default raises so an override can defer via super()."""
+        # Do not overload this unless you really need it: e.g. non-trivial
+        # hasattr behavior which cannot be captured by the generic_hasattr function.
+        raise NotImplementedError
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
@@ -2959,7 +2955,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-
+        if type(self) is VariableTracker:
+            return self.value
         try:
             return self.as_python_constant()
         except NotImplementedError:
@@ -3466,8 +3463,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
         dict_vt: variables.DunderDictVariable | None = None,
+        value: object = NO_SUCH_SUBOBJ,
     ) -> None:
         super().__init__()
+        # Only bare VariableTrackers (plain object() instances) pass a value;
+        # subclasses manage their own self.value.
+        if value is not NO_SUCH_SUBOBJ:
+            self.value: Any = value
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
@@ -3581,8 +3583,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> None:
         original_method = getattr(cls, method)
 
-        if original_method is getattr(VariableTracker, method) or hasattr(
-            original_method, "_call_once_guarded"
+        # A constant holds no other VTs, so it cannot be self-referential and
+        # skips the guard, which costs a contextvar lookup and a set update per
+        # call. ConstantVariable is not defined yet when its own class body is
+        # processed, hence the name check.
+        is_constant = (
+            cls.__name__ == "ConstantVariable"
+            and cls.__module__ == "torch._dynamo.variables.constant"
+        )
+        if (
+            is_constant
+            or original_method is getattr(VariableTracker, method)
+            or hasattr(original_method, "_call_once_guarded")
         ):
             return
 

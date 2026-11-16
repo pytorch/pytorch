@@ -9,7 +9,10 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    preserves_device_selection,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     MI350_ARCH,
@@ -19,8 +22,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
-    HAS_CPU,
     HAS_GPU,
+    RUN_CPU,
 )
 
 
@@ -559,7 +562,7 @@ class DynamicShapesCodegenTestCase(TestCase):
         return self.device_type
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
         hw_classification = HardwareClassification.CPU
@@ -687,6 +690,10 @@ if not TEST_WITH_ASAN:
     ):
         hw_classification = HardwareClassification.ACCELERATOR
         maxDiff = None
+        setUp = preserves_device_selection(TestCase.setUp)
+        setUpClass = classmethod(
+            preserves_device_selection(DynamicShapesCodegenTestCase.setUpClass.__func__)
+        )
 
         def common(
             self,
@@ -756,6 +763,9 @@ if not TEST_WITH_ASAN:
         if not _name.startswith("DynamicShapesCodegenGPUTests"):
             continue
         _cls = globals()[_name]
+        _device = vars(_cls).get("_device_type_at_collection")
+        if _device is not None:
+            _cls._device_at_collection = _device
         if hasattr(_cls, "test_randint_distribution_dynamic_shapes"):
             # gfx950 shows a deterministic randint64 distribution mismatch
             # for high bounds.
@@ -771,5 +781,5 @@ if not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or HAS_GPU:
         run_tests(needs="filelock")
