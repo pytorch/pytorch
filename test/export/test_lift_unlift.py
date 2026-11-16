@@ -9,6 +9,7 @@ from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
     lift_constants_pass,
 )
+from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch.export._unlift import _unlift_exported_program_lifted_states
 from torch.export.exported_program import (
     ExportGraphSignature,
@@ -20,7 +21,9 @@ from torch.export.exported_program import (
 )
 from torch.export.graph_signature import CustomObjArgument
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_MACOS,
     run_tests,
     TestCase,
@@ -29,8 +32,9 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
 class GraphBuilder:
-    def __init__(self) -> None:
+    def __init__(self, fake_mode=None) -> None:
         self.graph = torch.fx.Graph()
+        self.fake_mode = fake_mode
         self.nodes = {}
         self.values = {}
         self.nn_module_stack_key: dict[str, int] = {}
@@ -39,7 +43,9 @@ class GraphBuilder:
 
     def input(self, name: str, value: torch.Tensor, kind: InputKind):
         node = self.graph.placeholder(name)
-        node.meta["val"] = value
+        node.meta["val"] = (
+            self.fake_mode.from_tensor(value) if self.fake_mode is not None else value
+        )
         self.nodes[name] = node
         self.values[name] = value
         self.input_to_kind[node] = kind
@@ -146,6 +152,7 @@ class GraphBuilder:
 
 
 @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
+@instantiate_parametrized_tests
 class TestLift(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -153,8 +160,9 @@ class TestLift(TestCase):
         super().setUp()
         load_torchbind_test_lib()
 
-    def test_lift_basic(self):
-        builder = GraphBuilder()
+    @fake_tensor_modes
+    def test_lift_basic(self, mode_cls):
+        builder = GraphBuilder(mode_cls())
 
         builder.input("param", torch.rand(2, 3), InputKind.PARAMETER)
         builder.input("buffer", torch.rand(2, 3), InputKind.BUFFER)
@@ -210,7 +218,9 @@ class TestLift(TestCase):
         lifted_tensor_placeholder = placeholder_nodes[2]
         self.assertEqual(lifted_tensor_placeholder.target, "lifted_tensor_0")
         # It should have a val equivalent to the constant
-        self.assertEqual(lifted_tensor_placeholder.meta["val"], const_tensor)
+        self.assertEqual(
+            maybe_get_fake_constant(lifted_tensor_placeholder.meta["val"]), const_tensor
+        )
 
         lifted_obj_placeholder = placeholder_nodes[3]
         self.assertEqual(lifted_obj_placeholder.target, "lifted_custom_0")
@@ -236,8 +246,9 @@ class TestLift(TestCase):
         self.assertIsInstance(obj_constant_input_spec.arg, CustomObjArgument)
         self.assertEqual(obj_constant_input_spec.arg.name, lifted_obj_placeholder.name)
 
-    def test_lift_nested(self):
-        builder = GraphBuilder()
+    @fake_tensor_modes
+    def test_lift_nested(self, mode_cls):
+        builder = GraphBuilder(mode_cls())
         builder.input("x", torch.rand(2, 3), InputKind.USER_INPUT)
         builder.input("y", torch.rand(2, 3), InputKind.USER_INPUT)
         builder.input("z", torch.rand(2, 3), InputKind.USER_INPUT)
@@ -284,11 +295,12 @@ class TestLift(TestCase):
         self.assertIsInstance(constant_input_spec.arg, TensorArgument)
         self.assertEqual(constant_input_spec.arg.name, lifted_constant_placeholder.name)
 
-    def test_duplicate_constant_access(self):
+    @fake_tensor_modes
+    def test_duplicate_constant_access(self, mode_cls):
         const = torch.rand(2, 3)
         const_obj = torch.classes._TorchScriptTesting._Foo(10, 20)
 
-        builder = GraphBuilder()
+        builder = GraphBuilder(mode_cls())
         builder.input("x", torch.rand(2, 3), InputKind.USER_INPUT)
         builder.constant("const_tensor", const, target="const_tensor")
         # loading the same target twice

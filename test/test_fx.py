@@ -76,8 +76,10 @@ from torch.fx._symbolic_trace import PHBase, PHWithMeta
 from torch.fx.proxy import TraceError
 from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     find_library_location,
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_ARM64,
@@ -267,6 +269,7 @@ def _parse_profiler_trace_lines(traces: str) -> list[tuple[str, str, str]]:
     return lines
 
 
+@instantiate_parametrized_tests
 class TestFX(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2537,7 +2540,8 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
                 kwargs={},
             )
 
-    def test_example_shape_prop(self):
+    @fake_tensor_modes
+    def test_example_shape_prop(self, mode_cls):
         class TestCase(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -2550,7 +2554,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         tc = TestCase()
         tc_traced = symbolic_trace(tc)
         ref_out = tc_traced(torch.rand(3, 4))
-        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
+        shape_prop.ShapeProp(tc_traced, fake_mode=mode_cls()).propagate(torch.rand(3, 4))
 
         # Make sure we're testing all opcodes
         opcodes = set()
@@ -2684,7 +2688,8 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
                     node.meta["tensor_meta"].memory_format, torch.channels_last_3d
                 )
 
-    def test_shape_prop_unbacked_sym(self):
+    @fake_tensor_modes
+    def test_shape_prop_unbacked_sym(self, mode_cls):
         from torch._dynamo.utils import detect_fake_mode
 
         class M(torch.nn.Module):
@@ -2696,8 +2701,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         fake_inputs = [
             node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
         ]
-        inp = fake_inputs
-        fake_mode = detect_fake_mode(inp)
+        fake_mode = mode_cls(shape_env=detect_fake_mode(fake_inputs).shape_env)
         shape_prop.ShapeProp(gm=gm, fake_mode=fake_mode).propagate(*inp)
         self.assertEqual(len(fake_mode.shape_env.pending_fresh_unbacked_symbols), 0)
 
