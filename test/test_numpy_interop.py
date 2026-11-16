@@ -14,7 +14,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
-    onlyCPU,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import (
@@ -33,137 +32,6 @@ from torch.testing._internal.common_utils import (
 #   arrays from NumPy.
 class TestNumPyInterop(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    # Note: the warning this tests for only appears once per program, so
-    # other instances of this warning should be addressed to avoid
-    # the tests depending on the order in which they're run.
-    @onlyCPU
-    def test_numpy_non_writeable(self, device):
-        arr = np.zeros(5)
-        arr.flags["WRITEABLE"] = False
-        self.assertWarns(UserWarning, lambda: torch.from_numpy(arr))
-
-    @onlyCPU
-    @skipIf(
-        sys.version_info[:2] == (3, 14)
-        and np.lib.NumpyVersion(np.__version__) < "2.4.0",
-        "Broken in older numpy versions, see https://github.com/numpy/numpy/issues/30265",
-    )
-    def test_numpy_unresizable(self, device) -> None:
-        x = np.zeros((2, 2))
-        y = torch.from_numpy(x)  # noqa: F841
-        with self.assertRaises(ValueError):
-            x.resize((5, 5))
-
-        z = torch.randn(5, 5)
-        w = z.numpy()
-        with self.assertRaises(RuntimeError):
-            z.resize_(10, 10)
-        with self.assertRaises(ValueError):
-            w.resize((10, 10))
-
-    @onlyCPU
-    def test_to_numpy(self, device) -> None:
-        def get_castable_tensor(shape, dtype):
-            if dtype.is_floating_point:
-                dtype_info = torch.finfo(dtype)
-                # can't directly use min and max, because for double, max - min
-                # is greater than double range and sampling always gives inf.
-                low = max(dtype_info.min, -1e10)
-                high = min(dtype_info.max, 1e10)
-                t = torch.empty(shape, dtype=torch.float64).uniform_(low, high)
-            else:
-                # can't directly use min and max, because for int64_t, max - min
-                # is greater than int64_t range and triggers UB.
-                low = max(torch.iinfo(dtype).min, int(-1e10))
-                high = min(torch.iinfo(dtype).max, int(1e10))
-                t = torch.empty(shape, dtype=torch.int64).random_(low, high)
-            return t.to(dtype)
-
-        dtypes = [
-            torch.uint8,
-            torch.int8,
-            torch.short,
-            torch.int,
-            torch.half,
-            torch.float,
-            torch.double,
-            torch.long,
-        ]
-
-        for dtp in dtypes:
-            # 1D
-            sz = 10
-            x = get_castable_tensor(sz, dtp)
-            y = x.numpy()
-            for i in range(sz):
-                self.assertEqual(x[i], y[i])
-
-            # 1D > 0 storage offset
-            xm = get_castable_tensor(sz * 2, dtp)
-            x = xm.narrow(0, sz - 1, sz)
-            self.assertTrue(x.storage_offset() > 0)
-            y = x.numpy()
-            for i in range(sz):
-                self.assertEqual(x[i], y[i])
-
-            def check2d(x, y):
-                for i in range(sz1):
-                    for j in range(sz2):
-                        self.assertEqual(x[i][j], y[i][j])
-
-            # empty
-            x = torch.tensor([]).to(dtp)
-            y = x.numpy()
-            self.assertEqual(y.size, 0)
-
-            # contiguous 2D
-            sz1 = 3
-            sz2 = 5
-            x = get_castable_tensor((sz1, sz2), dtp)
-            y = x.numpy()
-            check2d(x, y)
-            self.assertTrue(y.flags["C_CONTIGUOUS"])
-
-            # with storage offset
-            xm = get_castable_tensor((sz1 * 2, sz2), dtp)
-            x = xm.narrow(0, sz1 - 1, sz1)
-            y = x.numpy()
-            self.assertTrue(x.storage_offset() > 0)
-            check2d(x, y)
-            self.assertTrue(y.flags["C_CONTIGUOUS"])
-
-            # non-contiguous 2D
-            x = get_castable_tensor((sz2, sz1), dtp).t()
-            y = x.numpy()
-            check2d(x, y)
-            self.assertFalse(y.flags["C_CONTIGUOUS"])
-
-            # with storage offset
-            xm = get_castable_tensor((sz2 * 2, sz1), dtp)
-            x = xm.narrow(0, sz2 - 1, sz2).t()
-            y = x.numpy()
-            self.assertTrue(x.storage_offset() > 0)
-            check2d(x, y)
-
-            # non-contiguous 2D with holes
-            xm = get_castable_tensor((sz2 * 2, sz1 * 2), dtp)
-            x = xm.narrow(0, sz2 - 1, sz2).narrow(1, sz1 - 1, sz1).t()
-            y = x.numpy()
-            self.assertTrue(x.storage_offset() > 0)
-            check2d(x, y)
-
-            if dtp != torch.half:
-                # check writeable
-                x = get_castable_tensor((3, 4), dtp)
-                y = x.numpy()
-                self.assertTrue(y.flags.writeable)
-                y[0][1] = 3
-                self.assertTrue(x[0][1] == 3)
-                y = x.t().numpy()
-                self.assertTrue(y.flags.writeable)
-                y[0][1] = 3
-                self.assertTrue(x[0][1] == 3)
 
     def test_to_numpy_bool(self, device) -> None:
         x = torch.tensor([True, False], dtype=torch.bool)
@@ -331,14 +199,6 @@ class TestNumPyInterop(TestCase):
             lambda msg: f"{msg}\nMemory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
         )
 
-    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
-    @onlyCPU
-    def test_from_numpy_zero_element_type(self):
-        # This tests that dtype check happens before strides check
-        # which results in div-by-zero on-x86
-        x = np.ndarray((3, 3), dtype=str)
-        self.assertRaises(TypeError, lambda: torch.from_numpy(x))
-
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
         warning_msg = (
@@ -382,7 +242,238 @@ class TestNumPyInterop(TestCase):
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
             torch.tensor([[1, 2, 3], np.random.random(size=(2,))], device=device)
 
-    @onlyCPU
+    def test_has_storage_numpy(self, device):
+        for dtype in [np.float32, np.float64, np.int64, np.int32, np.int16, np.uint8]:
+            arr = np.array([1], dtype=dtype)
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.float32).storage()
+            )
+            if torch.device(device).type != "mps":
+                self.assertIsNotNone(
+                    torch.tensor(arr, device=device, dtype=torch.double).storage()
+                )
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.int).storage()
+            )
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.long).storage()
+            )
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.uint8).storage()
+            )
+
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_numpy_scalar_cmp(self, device, dtype):
+        if dtype.is_complex:
+            tensors = (
+                torch.tensor(complex(1, 3), dtype=dtype, device=device),
+                torch.tensor([complex(1, 3), 0, 2j], dtype=dtype, device=device),
+                torch.tensor(
+                    [[complex(3, 1), 0], [-1j, 5]], dtype=dtype, device=device
+                ),
+            )
+        else:
+            tensors = (
+                torch.tensor(3, dtype=dtype, device=device),
+                torch.tensor([1, 0, -3], dtype=dtype, device=device),
+                torch.tensor([[3, 0, -1], [3, 5, 4]], dtype=dtype, device=device),
+            )
+
+        for tensor in tensors:
+            if dtype == torch.bfloat16:
+                with self.assertRaises(TypeError):
+                    np_array = tensor.cpu().numpy()
+                continue
+
+            np_array = tensor.cpu().numpy()
+            for t, a in product(
+                (tensor.flatten()[0], tensor.flatten()[0].item()),
+                (np_array.flatten()[0], np_array.flatten()[0].item()),
+            ):
+                self.assertEqual(t, a)
+                if (
+                    dtype == torch.complex64
+                    and torch.is_tensor(t)
+                    and type(a) is np.complex64
+                ):
+                    # TODO: Imaginary part is dropped in this case. Need fix.
+                    # https://github.com/pytorch/pytorch/issues/43579
+                    self.assertFalse(t == a)
+                else:
+                    self.assertTrue(t == a)
+
+    def test_ndarray_astype_object_graph_break(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(xs):
+            xs.astype("O")
+
+        xs = np.array([1, 2])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
+        ):
+            f(xs)
+
+    def test_ndarray_astype_object_graph_break_2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(xs):
+            xs.astype(object)
+
+        xs = np.array([1, 2])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
+        ):
+            f(xs)
+
+    def test_copy_mode(self):
+        def f(x):
+            return np.array(x, copy=np._CopyMode.IF_NEEDED)
+
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+        x = np.array([1, 2, 3])
+        # Should run without throwing an exception
+        y = opt_f(x)
+        self.assertEqual(y, f(x))
+
+
+class TestNumPyInteropCPUOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    # Note: the warning this tests for only appears once per program, so
+    # other instances of this warning should be addressed to avoid
+    # the tests depending on the order in which they're run.
+    def test_numpy_non_writeable(self, device):
+        arr = np.zeros(5)
+        arr.flags["WRITEABLE"] = False
+        self.assertWarns(UserWarning, lambda: torch.from_numpy(arr))
+
+    @skipIf(
+        sys.version_info[:2] == (3, 14)
+        and np.lib.NumpyVersion(np.__version__) < "2.4.0",
+        "Broken in older numpy versions, see https://github.com/numpy/numpy/issues/30265",
+    )
+    def test_numpy_unresizable(self, device) -> None:
+        x = np.zeros((2, 2))
+        y = torch.from_numpy(x)  # noqa: F841
+        with self.assertRaises(ValueError):
+            x.resize((5, 5))
+
+        z = torch.randn(5, 5)
+        w = z.numpy()
+        with self.assertRaises(RuntimeError):
+            z.resize_(10, 10)
+        with self.assertRaises(ValueError):
+            w.resize((10, 10))
+
+    def test_to_numpy(self, device) -> None:
+        def get_castable_tensor(shape, dtype):
+            if dtype.is_floating_point:
+                dtype_info = torch.finfo(dtype)
+                # can't directly use min and max, because for double, max - min
+                # is greater than double range and sampling always gives inf.
+                low = max(dtype_info.min, -1e10)
+                high = min(dtype_info.max, 1e10)
+                t = torch.empty(shape, dtype=torch.float64).uniform_(low, high)
+            else:
+                # can't directly use min and max, because for int64_t, max - min
+                # is greater than int64_t range and triggers UB.
+                low = max(torch.iinfo(dtype).min, int(-1e10))
+                high = min(torch.iinfo(dtype).max, int(1e10))
+                t = torch.empty(shape, dtype=torch.int64).random_(low, high)
+            return t.to(dtype)
+
+        dtypes = [
+            torch.uint8,
+            torch.int8,
+            torch.short,
+            torch.int,
+            torch.half,
+            torch.float,
+            torch.double,
+            torch.long,
+        ]
+
+        for dtp in dtypes:
+            # 1D
+            sz = 10
+            x = get_castable_tensor(sz, dtp)
+            y = x.numpy()
+            for i in range(sz):
+                self.assertEqual(x[i], y[i])
+
+            # 1D > 0 storage offset
+            xm = get_castable_tensor(sz * 2, dtp)
+            x = xm.narrow(0, sz - 1, sz)
+            self.assertTrue(x.storage_offset() > 0)
+            y = x.numpy()
+            for i in range(sz):
+                self.assertEqual(x[i], y[i])
+
+            def check2d(x, y):
+                for i in range(sz1):
+                    for j in range(sz2):
+                        self.assertEqual(x[i][j], y[i][j])
+
+            # empty
+            x = torch.tensor([]).to(dtp)
+            y = x.numpy()
+            self.assertEqual(y.size, 0)
+
+            # contiguous 2D
+            sz1 = 3
+            sz2 = 5
+            x = get_castable_tensor((sz1, sz2), dtp)
+            y = x.numpy()
+            check2d(x, y)
+            self.assertTrue(y.flags["C_CONTIGUOUS"])
+
+            # with storage offset
+            xm = get_castable_tensor((sz1 * 2, sz2), dtp)
+            x = xm.narrow(0, sz1 - 1, sz1)
+            y = x.numpy()
+            self.assertTrue(x.storage_offset() > 0)
+            check2d(x, y)
+            self.assertTrue(y.flags["C_CONTIGUOUS"])
+
+            # non-contiguous 2D
+            x = get_castable_tensor((sz2, sz1), dtp).t()
+            y = x.numpy()
+            check2d(x, y)
+            self.assertFalse(y.flags["C_CONTIGUOUS"])
+
+            # with storage offset
+            xm = get_castable_tensor((sz2 * 2, sz1), dtp)
+            x = xm.narrow(0, sz2 - 1, sz2).t()
+            y = x.numpy()
+            self.assertTrue(x.storage_offset() > 0)
+            check2d(x, y)
+
+            # non-contiguous 2D with holes
+            xm = get_castable_tensor((sz2 * 2, sz1 * 2), dtp)
+            x = xm.narrow(0, sz2 - 1, sz2).narrow(1, sz1 - 1, sz1).t()
+            y = x.numpy()
+            self.assertTrue(x.storage_offset() > 0)
+            check2d(x, y)
+
+            if dtp != torch.half:
+                # check writeable
+                x = get_castable_tensor((3, 4), dtp)
+                y = x.numpy()
+                self.assertTrue(y.flags.writeable)
+                y[0][1] = 3
+                self.assertTrue(x[0][1] == 3)
+                y = x.t().numpy()
+                self.assertTrue(y.flags.writeable)
+                y[0][1] = 3
+                self.assertTrue(x[0][1] == 3)
+
+    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
+    def test_from_numpy_zero_element_type(self):
+        # This tests that dtype check happens before strides check
+        # which results in div-by-zero on-x86
+        x = np.ndarray((3, 3), dtype=str)
+        self.assertRaises(TypeError, lambda: torch.from_numpy(x))
+
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
         dtypes = [
             np.double,
@@ -397,7 +488,6 @@ class TestNumPyInterop(TestCase):
         for dtype in dtypes:
             self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
 
-    @onlyCPU
     def test_numpy_index(self, device):
         i = np.array([0, 1, 2], dtype=np.int32)
         x = torch.randn(5, 5)
@@ -405,7 +495,6 @@ class TestNumPyInterop(TestCase):
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
 
-    @onlyCPU
     def test_numpy_index_multi(self, device):
         for dim_sz in [2, 8, 16, 32]:
             i = np.zeros((dim_sz, dim_sz, dim_sz), dtype=np.int32)
@@ -413,7 +502,6 @@ class TestNumPyInterop(TestCase):
             x = torch.randn(dim_sz, dim_sz, dim_sz)
             self.assertTrue(x[i == 1].numel() == np.sum(i))
 
-    @onlyCPU
     def test_numpy_array_interface(self, device):
         types = [
             torch.DoubleTensor,
@@ -496,7 +584,6 @@ class TestNumPyInterop(TestCase):
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
 
-    @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
         for np_dtype in [
             np.float32,
@@ -520,7 +607,6 @@ class TestNumPyInterop(TestCase):
                 self.assertTrue(r2.dtype == t_dtype)
                 self.assertTrue(r2.requires_grad)
 
-    @onlyCPU
     @skipIfTorchDynamo()
     def test_parse_numpy_int_overflow(self, device):
         # assertRaises uses a try-except which dynamo has issues with
@@ -538,7 +624,6 @@ class TestNumPyInterop(TestCase):
                 lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
             )  # type: ignore[call-overload]
 
-    @onlyCPU
     def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
@@ -568,68 +653,6 @@ class TestNumPyInterop(TestCase):
             self.assertEqual((t + np_val).dtype, t.dtype)
             self.assertEqual((np_val + t).dtype, t.dtype)
 
-    def test_has_storage_numpy(self, device):
-        for dtype in [np.float32, np.float64, np.int64, np.int32, np.int16, np.uint8]:
-            arr = np.array([1], dtype=dtype)
-            self.assertIsNotNone(
-                torch.tensor(arr, device=device, dtype=torch.float32).storage()
-            )
-            if torch.device(device).type != "mps":
-                self.assertIsNotNone(
-                    torch.tensor(arr, device=device, dtype=torch.double).storage()
-                )
-            self.assertIsNotNone(
-                torch.tensor(arr, device=device, dtype=torch.int).storage()
-            )
-            self.assertIsNotNone(
-                torch.tensor(arr, device=device, dtype=torch.long).storage()
-            )
-            self.assertIsNotNone(
-                torch.tensor(arr, device=device, dtype=torch.uint8).storage()
-            )
-
-    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    def test_numpy_scalar_cmp(self, device, dtype):
-        if dtype.is_complex:
-            tensors = (
-                torch.tensor(complex(1, 3), dtype=dtype, device=device),
-                torch.tensor([complex(1, 3), 0, 2j], dtype=dtype, device=device),
-                torch.tensor(
-                    [[complex(3, 1), 0], [-1j, 5]], dtype=dtype, device=device
-                ),
-            )
-        else:
-            tensors = (
-                torch.tensor(3, dtype=dtype, device=device),
-                torch.tensor([1, 0, -3], dtype=dtype, device=device),
-                torch.tensor([[3, 0, -1], [3, 5, 4]], dtype=dtype, device=device),
-            )
-
-        for tensor in tensors:
-            if dtype == torch.bfloat16:
-                with self.assertRaises(TypeError):
-                    np_array = tensor.cpu().numpy()
-                continue
-
-            np_array = tensor.cpu().numpy()
-            for t, a in product(
-                (tensor.flatten()[0], tensor.flatten()[0].item()),
-                (np_array.flatten()[0], np_array.flatten()[0].item()),
-            ):
-                self.assertEqual(t, a)
-                if (
-                    dtype == torch.complex64
-                    and torch.is_tensor(t)
-                    and type(a) is np.complex64
-                ):
-                    # TODO: Imaginary part is dropped in this case. Need fix.
-                    # https://github.com/pytorch/pytorch/issues/43579
-                    self.assertFalse(t == a)
-                else:
-                    self.assertTrue(t == a)
-
-    @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test___eq__(self, device, dtype):
         a = make_tensor((5, 7), dtype=dtype, device=device, low=-9, high=9)
@@ -672,7 +695,6 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(a == b_np, res_check)
         self.assertEqual(b_np == a, res_check)
 
-    @onlyCPU
     def test_empty_tensors_interop(self, device):
         x = torch.rand((), dtype=torch.float16)
         y = torch.tensor(np.random.rand(0), dtype=torch.float16)
@@ -686,42 +708,11 @@ class TestNumPyInterop(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/113037
         self.assertEqual(torch.div(x, y, rounding_mode="floor").shape, y.shape)
 
-    def test_ndarray_astype_object_graph_break(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(xs):
-            xs.astype("O")
-
-        xs = np.array([1, 2])
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
-        ):
-            f(xs)
-
-    def test_ndarray_astype_object_graph_break_2(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(xs):
-            xs.astype(object)
-
-        xs = np.array([1, 2])
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
-        ):
-            f(xs)
-
-    def test_copy_mode(self):
-        def f(x):
-            return np.array(x, copy=np._CopyMode.IF_NEEDED)
-
-        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
-        x = np.array([1, 2, 3])
-        # Should run without throwing an exception
-        y = opt_f(x)
-        self.assertEqual(y, f(x))
-
 
 instantiate_device_type_tests(
     TestNumPyInterop, globals(), allow_mps=True, allow_xpu=True
 )
+instantiate_device_type_tests(TestNumPyInteropCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
