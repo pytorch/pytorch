@@ -315,7 +315,6 @@ class TestSubprocess(TestCase):
         unwrapped = CompiledFxGraphConstantsWithGm(gm).unwrap(_G())
         self.assertIs(unwrapped["c0"], pinned)
 
-    @requires_gpu()
     def test_pinned_constants_pruned(self):
         # Names pruned from graph.constants (e.g. by the CPP GEMM template)
         # must not stay in pinned_constant_names, else unwrap fails on the
@@ -331,8 +330,12 @@ class TestSubprocess(TestCase):
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         gm._x = x = torch.tensor([1.0])
-        # No _pruned attribute on gm: pruned constants are deleted from the
-        # module, like the CPP GEMM template does for weights.
+        # Stand-in for GraphLowering; a real one needs a full compile. If
+        # CompiledFxGraph.__init__ grows a new graph read, this fails loudly
+        # with an AttributeError. Simulate a worker's unpickled pageable copy
+        # for c1, and a pruned constant (c0) whose module attribute was
+        # deleted.
+        pageable = torch.tensor([1.0])
         graph = SimpleNamespace(
             cache_key="",
             cache_path=None,
@@ -341,13 +344,15 @@ class TestSubprocess(TestCase):
             device_idxs=[],
             mutated_inputs=[],
             mutated_input_idxs=[],
-            constants={"c1": x},
+            constants={"c1": pageable},
             allocated_constant_name={"c1": "_x"},
             pinned_constant_names={"c0": "_pruned", "c1": "_x"},
             torchbind_constants={},
             opaque_value_type_classes={},
             kernel_free_cudagraph=False,
             partition_maps=None,
+            wrapper_code=SimpleNamespace(kernel_sources=[]),
+            has_uncaptured_partition=False,
         )
         cfg = CompiledFxGraph(
             None,
@@ -368,7 +373,9 @@ class TestSubprocess(TestCase):
         )
         self.assertEqual(cfg.pinned_constant_names, {"c1": "_x"})
         unwrapped = CompiledFxGraphConstantsWithGm(gm).unwrap(cfg)
-        self.assertNotIn("c0", unwrapped)
+        # The rebind must override the worker's pageable copy with the
+        # parent's own tensor.
+        self.assertIs(unwrapped["c1"], x)
 
 
 if RUN_CPU:
