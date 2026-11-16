@@ -1101,15 +1101,8 @@ void initPythonIRBindings(PyObject* module_) {
           "getMethod",
           [](InterfaceType& self, const std::string& name) {
             return self.getMethod(name);
-          },
-          py::return_value_policy::reference)
-      .def("getMethodNames", [](InterfaceType& self) {
-        std::vector<std::string> names;
-        for (const FunctionSchema& fn : self.methods()) {
-          names.emplace_back(fn.name());
-        }
-        return names;
-      });
+          })
+      .def("getMethodNames", &InterfaceType::getMethodNames);
   using ::c10::InferredType;
   py::class_<InferredType, std::shared_ptr<InferredType>>(m, "InferredType")
       .def(py::init([](std::shared_ptr<Type> type) {
