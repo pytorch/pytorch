@@ -26,7 +26,10 @@ void THCPGraph_init(PyObject* module) {
   torch_C_m.def("_graph_pool_handle", &::at::cuda::graph_pool_handle);
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
-      .def(py::init<bool>(), py::arg("keep_graph") = false)
+      .def(
+          py::init<bool, int64_t>(),
+          py::arg("keep_graph") = false,
+          py::arg("num_rng_states") = 8)
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
@@ -79,6 +82,10 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
+      .def(
+          "_get_rng_state_buffers",
+          torch::wrap_pybind_function(
+              &at::cuda::CUDAGraph::get_rng_state_buffers))
       .def(
           "reset",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::reset))

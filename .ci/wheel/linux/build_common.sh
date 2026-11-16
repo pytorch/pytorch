@@ -130,7 +130,7 @@ case ${DESIRED_PYTHON} in
   cp313*)
     retry pip install -q --pre numpy==2.1.2
     ;;
-  # Should catch 3.10-3.12
+  # Should catch 3.11-3.12
   *)
     retry pip install -q --pre numpy==2.0.2
     ;;
