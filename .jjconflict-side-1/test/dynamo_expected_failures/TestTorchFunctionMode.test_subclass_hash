@@ -1,0 +1,10 @@
+Need to handle `class` block inside `torch.compile` region (`LOAD_BUILD_CLASS`)
+or properly graph break on it rather than skipping the frame altogether.
+https://github.com/pytorch/pytorch/issues/128942
+
+Fundamental issue is Dynamo tries to probe tensor object properties, but that
+could trigger user-defined `__torch_function__` for tensor subclass objects.
+
+In this case the `LOAD_BUILD_CLASS` error caused Dynamo to start tracing in the
+`__init__` of the following class, but `self._diag = _diag` hasn't fired yet, and
+its `__torch_function__` errors when Dynamo is probing tensor property
