@@ -91,7 +91,7 @@ if TYPE_CHECKING:
 
 # Shape of a kernel value: a tile name per dim, or 1 for a broadcast dim.
 TileShape = tuple[str | int, ...]
-TILE_NAMES = {"z": "tile_z", "y": "tile_y", "x": "tile_x", "r0_": "tile_r"}
+TILE_NAMES = {"z0_": "tile_z", "y": "tile_y", "x": "tile_x", "r0_": "tile_r"}
 TILE_AXES = {name: axis for axis, name in TILE_NAMES.items()}
 
 
@@ -476,7 +476,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             raise AssertionError(f"Helion kernels do not tile {tiling}")
         nodes = tuple(self.features.scheduler_nodes())
         self.is_matmul = any(node.is_native_matmul() for node in nodes)
-        order = ("z", "y", "r0_", "x") if self.is_matmul else ("z", "y", "x", "r0_")
+        order = ("z0_", "y", "r0_", "x") if self.is_matmul else ("z0_", "y", "x", "r0_")
         self.axes = tuple(axis for axis in order if axis in self.numels)
         self.outer_axes = tuple(axis for axis in self.axes if axis != "r0_")
         roots = {tree.prefix: tree for tree in self.range_trees}
@@ -974,7 +974,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             # body casts it to that anyway, so an upcast would emit a round trip
             #   tmp0 = in0[tile_y, tile_r].to(torch.float32)
             #   tmp1 = tmp0.to(torch.bfloat16)
-            batch = ["z"] if "z" in self.numels else []
+            batch = ["z0_"] if "z0_" in self.numels else []
             operand = [*batch, "r0_", "x"] if "x" in axes else [*batch, "y", "r0_"]
             found = OrderedSet(axes) <= OrderedSet(operand) and self.subscript(
                 buffer, index, operand, flat=False
@@ -1222,7 +1222,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         """
         self.has_fp32_dot |= torch.float32 in (lhs.dtype, rhs.dtype)
         acc = self.accumulator(0, torch.float32)
-        op = "baddbmm" if "z" in self.numels else "addmm"
+        op = "baddbmm" if "z0_" in self.numels else "addmm"
         self.compute.writeline(f"{acc} = torch.{op}({acc}, {lhs}, {rhs})")
         return acc
 
