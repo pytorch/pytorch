@@ -19,13 +19,14 @@ import torch
 from torch._inductor import config
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import try_import_ck_lib
+from torch._inductor.utils import run_and_get_code, try_import_ck_lib
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocmVersionAtLeast,
+    skipIfRocmVersionLessThan,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -202,6 +203,7 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("num_gemms", (1, 2))
+    @skipIfRocmVersionLessThan((10, 3))
     def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
         """
         Verify that CK GEMM templates work under JIT cpp_wrapper mode.
@@ -333,7 +335,6 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
-    @skipIfRocmVersionAtLeast((10, 1))
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
@@ -522,6 +523,44 @@ class TestCKBackend(TestCase):
             Y_compiled = conv2d(x_cl, w_cl)
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ,
+        {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
+    def test_max_autotune_conv_transpose2d_skips_forward_ck(self):
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+        x = torch.randn(1, 64, 32, 32, **tensor_options).to(
+            memory_format=torch.channels_last
+        )
+        w = torch.randn(64, 64, 3, 3, **tensor_options).to(
+            memory_format=torch.channels_last
+        )
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": "CK",
+                    "compile_threads": 4,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv_transpose2d(x, w):
+                return torch.conv_transpose2d(x, w, stride=1, padding=1)
+
+            y_eager = torch.conv_transpose2d(x, w, stride=1, padding=1)
+            y_compiled, codes = run_and_get_code(conv_transpose2d, x, w)
+
+            self.assertFalse(any("async_compile.rocm" in c for c in codes))
+            torch.testing.assert_close(y_compiled, y_eager, atol=2e-4, rtol=2e-4)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
@@ -904,6 +943,79 @@ struct FlatmmPipelineProblem
                 ]
             )
         )
+
+
+@unittest.skipIf(not torch.version.hip, "ROCM only")
+class TestCKRowwiseScale(TestCase):
+    @parametrize("use_aoti", (False, True))
+    @parametrize("has_bias", (False, True))
+    def test_singleton_column_scale(self, device, use_aoti, has_bias):
+        arch = torch.cuda.get_device_properties(device).gcnArchName
+        if "gfx94" not in arch and "gfx95" not in arch:
+            self.skipTest(f"Unsupported FP8 arch {arch}")
+        ck_dir, _, _, _ = try_import_ck_lib()
+        if not ck_dir:
+            self.skipTest("Composable Kernel library is not installed")
+        fp8_dtype = torch.float8_e4m3fnuz if "gfx94" in arch else torch.float8_e4m3fn
+
+        class RowwiseMM(torch.nn.Module):
+            def forward(self, x, w, scale_x, scale_w, bias):
+                return torch._scaled_mm(
+                    x,
+                    w,
+                    scale_x.view(-1, 1),
+                    scale_w.view(1, -1),
+                    bias,
+                    out_dtype=torch.bfloat16,
+                )
+
+        model = RowwiseMM().eval()
+        w = torch.randn(4096, 5888, device=device).to(fp8_dtype).t()
+        scale_w = torch.linspace(0.5, 2.0, 4096, device=device)
+        bias = (
+            torch.randn(4096, device=device, dtype=torch.bfloat16) if has_bias else None
+        )
+        inputs = [
+            (
+                torch.randn(rows, 5888, device=device).to(fp8_dtype),
+                w,
+                torch.linspace(0.01, 1.0, rows, device=device),
+                scale_w,
+                bias,
+            )
+            for rows in (384, 32, 1920)
+        ]
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CK",
+                    "epilogue_fusion": False,
+                    "rocm.ck_max_profiling_configs": 8,
+                    "rocm.ck_dir": ck_dir,
+                }
+            ),
+        ):
+            if use_aoti:
+                rows = torch.export.Dim("rows", min=1, max=4096)
+                ep = torch.export.export(
+                    model,
+                    inputs[0],
+                    dynamic_shapes=({0: rows}, None, {0: rows}, None, None),
+                )
+                package = torch._inductor.aoti_compile_and_package(ep)
+                optimized = AOTIRunnerUtil.load_package(package)
+            else:
+                optimized = torch.compile(model, fullgraph=True, dynamic=True)
+                _, codes = run_and_get_code(optimized, *inputs[0])
+                # A CK kernel ran, reading scale_x by row and scale_w by column.
+                FileCheck().check("/* ds_layouts */ Tuple<Col, Row").run(codes[0])
+            for args in inputs:
+                self.assertEqual(optimized(*args), model(*args), rtol=1e-2, atol=0.05)
+
+
+instantiate_device_type_tests(TestCKRowwiseScale, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ import sys
 import types
 import typing
 import unittest
+import weakref
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -200,6 +201,7 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch._C._is_cow_tensor": TorchInGraphFunctionVariable,
+    "torch._C._is_fake_tensor": TorchInGraphFunctionVariable,
     "torch._dynamo.eval_frame._is_in_optimized_module": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
@@ -500,6 +502,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.atan",
         "math.atan2",
         "math.atanh",
+        "math.cbrt",
         "math.ceil",
         "math.comb",
         "math.copysign",
@@ -510,6 +513,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.erf",
         "math.erfc",
         "math.exp",
+        "math.exp2",
         "math.expm1",
         "math.fabs",
         "math.factorial",
@@ -933,7 +937,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects",
         "torch._C._jit_pass_dce",
         "torch._C._jit_pass_decompose_ops",
-        "torch._C._jit_pass_dedup_module_uses",
         "torch._C._jit_pass_erase_number_types",
         "torch._C._jit_pass_erase_shape_information",
         "torch._C._jit_pass_filter_non_tensor_arguments",
@@ -950,19 +953,13 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv",
         "torch._C._jit_pass_fuse_frozen_conv_add_relu",
         "torch._C._jit_pass_fuse_linear",
-        "torch._C._jit_pass_fuse_quantized_add_relu",
         "torch._C._jit_pass_fuse_tensorexprs",
         "torch._C._jit_pass_fuse",
         "torch._C._jit_pass_inline_fork_wait",
         "torch._C._jit_pass_inline_functional_graphs",
         "torch._C._jit_pass_inline",
         "torch._C._jit_pass_inplace_to_functional_activation",
-        "torch._C._jit_pass_insert_observer_method_for_ondevice_ptq",
-        "torch._C._jit_pass_insert_observers",
-        "torch._C._jit_pass_insert_prepack_unpack",
         "torch._C._jit_pass_insert_prepacked_ops",
-        "torch._C._jit_pass_insert_quant_dequant_for_ondevice_ptq",
-        "torch._C._jit_pass_insert_quant_dequant",
         "torch._C._jit_pass_integer_value_refinement",
         "torch._C._jit_pass_lint",
         "torch._C._jit_pass_loop_unrolling",
@@ -1009,9 +1006,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_propagate_dtype",
         "torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute",
         "torch._C._jit_pass_propagate_shapes_on_graph",
-        "torch._C._jit_pass_quant_finalize_for_ondevice_ptq",
-        "torch._C._jit_pass_quant_finalize",
-        "torch._C._jit_pass_quant_fusion",
         "torch._C._jit_pass_refine_integer_values",
         "torch._C._jit_pass_refine_tuple_types",
         "torch._C._jit_pass_remove_dropout",
@@ -1019,7 +1013,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_remove_inplace_ops",
         "torch._C._jit_pass_remove_mutation",
         "torch._C._jit_pass_replace_old_ops_with_upgraders",
-        "torch._C._jit_pass_replicate_dequantize",
         "torch._C._jit_pass_run_decompositions",
         "torch._C._jit_pass_specialize_autogradzero",
         "torch._C._jit_pass_swap_functional_linear",
@@ -2439,10 +2432,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
 )
 
 
-if sys.version_info >= (3, 11):
-    torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
-    torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
-
 if sys.version_info >= (3, 12):
     torch_c_binding_in_graph_functions["math.sumprod"] = TorchInGraphFunctionVariable
 
@@ -3593,6 +3582,8 @@ MOD_INLINELIST = [
     "torch.return_types",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._creation",
+    "torch.testing._internal.common_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._cxx_pytree",
@@ -3614,7 +3605,10 @@ if torch.distributed.is_available():
 # Modules in MOD_INLINELIST where nested graph breaks should be suppressed.
 # These are large internal modules that are inlined for correctness but whose
 # internal operations are not worth compiling as separate NGB subgraphs.
-NGB_SUPPRESS_INLINELIST: set[str] = set()
+NGB_SUPPRESS_INLINELIST: set[str] = {
+    "torch.testing._creation",
+    "torch.testing._internal.common_utils",
+}
 
 if torch.distributed.is_available():
     NGB_SUPPRESS_INLINELIST.add("torch.distributed")
@@ -3978,6 +3972,31 @@ def _force_inline() -> Iterator[None]:
         _force_inline_flag = old_val
 
 
+def _collect_weakref_finalize_registry_codes() -> tuple[types.CodeType, ...]:
+    functions = []
+    for member in vars(weakref.finalize).values():
+        if isinstance(member, property):
+            functions.extend((member.fget, member.fset, member.fdel))
+        elif isinstance(member, (classmethod, staticmethod)):
+            functions.append(member.__func__)
+        else:
+            functions.append(member)
+    return tuple(fn.__code__ for fn in functions if isinstance(fn, types.FunctionType))
+
+
+# Guard construction mutates the registry. Tracing it can fail same-frame
+# guards or replay stale contents over newly registered finalizers.
+_WEAKREF_FINALIZE_REGISTRY_CODES = _collect_weakref_finalize_registry_codes()
+
+
+def is_weakref_finalize_registry_code(code: types.CodeType | None) -> bool:
+    return (
+        code is not None
+        and code.co_filename == _WEAKREF_FINALIZE_REGISTRY_CODES[0].co_filename
+        and any(code is entry for entry in _WEAKREF_FINALIZE_REGISTRY_CODES)
+    )
+
+
 def check_verbose(
     obj: object, is_inlined_call: bool = False, frame: Any | None = None
 ) -> SkipResult:
@@ -4050,6 +4069,9 @@ def check_verbose(
     # break. Skip it at the top level to avoid installing unnecessary guards.
     if fi.code is not None and fi.code is typing.cast.__code__:
         return SkipResult(True, "typing.cast is a no-op, skip at top level")
+
+    if is_weakref_finalize_registry_code(fi.code):
+        return SkipResult(True, "weakref.finalize uses the finalizer registry")
 
     # Consult the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()

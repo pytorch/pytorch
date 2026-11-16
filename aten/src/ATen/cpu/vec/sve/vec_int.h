@@ -35,6 +35,11 @@ inline namespace CPU_CAPABILITY {
   struct is_vec_specialized_for<int##bit##_t> : std::bool_constant<true> {};  \
                                                                               \
   template <>                                                                 \
+  struct VecBoolType<int##bit##_t> {                                          \
+    using type = SveVecBool<int##bit##_t>;                                    \
+  };                                                                          \
+                                                                              \
+  template <>                                                                 \
   class Vectorized<int##bit##_t> {                                            \
    private:                                                                   \
     vls_int##bit##_t values;                                                  \
@@ -52,6 +57,12 @@ inline namespace CPU_CAPABILITY {
     Vectorized(int##bit##_t val) {                                            \
       values = svdup_n_s##bit(val);                                           \
     }                                                                         \
+    /* A comparison result as a mask: all bits set in a true lane. */         \
+    Vectorized(VecBool<int##bit##_t> p)                                       \
+        : values(svsel_s##bit(                                                \
+              p,                                                              \
+              ALL_S##bit##_TRUE_MASK,                                         \
+              ALL_S##bit##_FALSE_MASK)) {}                                    \
     template <                                                                \
         typename... Args,                                                     \
         typename = std::enable_if_t<(sizeof...(Args) == size())>>             \
@@ -80,6 +91,12 @@ inline namespace CPU_CAPABILITY {
         const Vectorized<int##bit##_t>& b,                                    \
         const Vectorized<int##bit##_t>& mask_) {                              \
       svbool_t mask = svcmpeq_s##bit(ptrue, mask_, ALL_S##bit##_TRUE_MASK);   \
+      return svsel_s##bit(mask, b, a);                                        \
+    }                                                                         \
+    static Vectorized<int##bit##_t> blendv(                                   \
+        const Vectorized<int##bit##_t>& a,                                    \
+        const Vectorized<int##bit##_t>& b,                                    \
+        VecBool<int##bit##_t> mask) {                                         \
       return svsel_s##bit(mask, b, a);                                        \
     }                                                                         \
     /* step sometimes requires a higher precision type (e.g., T=int,          \
@@ -140,41 +157,29 @@ inline namespace CPU_CAPABILITY {
     Vectorized<int##bit##_t> neg() const {                                    \
       return svneg_s##bit##_x(ptrue, values);                                 \
     }                                                                         \
-    Vectorized<int##bit##_t> operator==(                                      \
+    VecBool<int##bit##_t> operator==(                                         \
         const Vectorized<int##bit##_t>& other) const {                        \
-      svbool_t mask = svcmpeq_s##bit(ptrue, values, other);                   \
-      return svsel_s##bit(                                                    \
-          mask, ALL_S##bit##_TRUE_MASK, ALL_S##bit##_FALSE_MASK);             \
+      return svcmpeq_s##bit(ptrue, values, other);                            \
     }                                                                         \
-    Vectorized<int##bit##_t> operator!=(                                      \
+    VecBool<int##bit##_t> operator!=(                                         \
         const Vectorized<int##bit##_t>& other) const {                        \
-      svbool_t mask = svcmpne_s##bit(ptrue, values, other);                   \
-      return svsel_s##bit(                                                    \
-          mask, ALL_S##bit##_TRUE_MASK, ALL_S##bit##_FALSE_MASK);             \
+      return svcmpne_s##bit(ptrue, values, other);                            \
     }                                                                         \
-    Vectorized<int##bit##_t> operator<(                                       \
+    VecBool<int##bit##_t> operator<(                                          \
         const Vectorized<int##bit##_t>& other) const {                        \
-      svbool_t mask = svcmplt_s##bit(ptrue, values, other);                   \
-      return svsel_s##bit(                                                    \
-          mask, ALL_S##bit##_TRUE_MASK, ALL_S##bit##_FALSE_MASK);             \
+      return svcmplt_s##bit(ptrue, values, other);                            \
     }                                                                         \
-    Vectorized<int##bit##_t> operator<=(                                      \
+    VecBool<int##bit##_t> operator<=(                                         \
         const Vectorized<int##bit##_t>& other) const {                        \
-      svbool_t mask = svcmple_s##bit(ptrue, values, other);                   \
-      return svsel_s##bit(                                                    \
-          mask, ALL_S##bit##_TRUE_MASK, ALL_S##bit##_FALSE_MASK);             \
+      return svcmple_s##bit(ptrue, values, other);                            \
     }                                                                         \
-    Vectorized<int##bit##_t> operator>(                                       \
+    VecBool<int##bit##_t> operator>(                                          \
         const Vectorized<int##bit##_t>& other) const {                        \
-      svbool_t mask = svcmpgt_s##bit(ptrue, values, other);                   \
-      return svsel_s##bit(                                                    \
-          mask, ALL_S##bit##_TRUE_MASK, ALL_S##bit##_FALSE_MASK);             \
+      return svcmpgt_s##bit(ptrue, values, other);                            \
     }                                                                         \
-    Vectorized<int##bit##_t> operator>=(                                      \
+    VecBool<int##bit##_t> operator>=(                                         \
         const Vectorized<int##bit##_t>& other) const {                        \
-      svbool_t mask = svcmpge_s##bit(ptrue, values, other);                   \
-      return svsel_s##bit(                                                    \
-          mask, ALL_S##bit##_TRUE_MASK, ALL_S##bit##_FALSE_MASK);             \
+      return svcmpge_s##bit(ptrue, values, other);                            \
     }                                                                         \
     Vectorized<int##bit##_t> eq(const Vectorized<int##bit##_t>& other) const; \
     Vectorized<int##bit##_t> ne(const Vectorized<int##bit##_t>& other) const; \
@@ -250,27 +255,27 @@ inline namespace CPU_CAPABILITY {
   }                                                                           \
   Vectorized<int##bit##_t> inline Vectorized<int##bit##_t>::eq(               \
       const Vectorized<int##bit##_t>& other) const {                          \
-    return (*this == other) & Vectorized<int##bit##_t>(1);                    \
+    return svsel_s##bit(*this == other, ONE_S##bit, ZERO_S##bit);             \
   }                                                                           \
   Vectorized<int##bit##_t> inline Vectorized<int##bit##_t>::ne(               \
       const Vectorized<int##bit##_t>& other) const {                          \
-    return (*this != other) & Vectorized<int##bit##_t>(1);                    \
+    return svsel_s##bit(*this != other, ONE_S##bit, ZERO_S##bit);             \
   }                                                                           \
   Vectorized<int##bit##_t> inline Vectorized<int##bit##_t>::gt(               \
       const Vectorized<int##bit##_t>& other) const {                          \
-    return (*this > other) & Vectorized<int##bit##_t>(1);                     \
+    return svsel_s##bit(*this > other, ONE_S##bit, ZERO_S##bit);              \
   }                                                                           \
   Vectorized<int##bit##_t> inline Vectorized<int##bit##_t>::ge(               \
       const Vectorized<int##bit##_t>& other) const {                          \
-    return (*this >= other) & Vectorized<int##bit##_t>(1);                    \
+    return svsel_s##bit(*this >= other, ONE_S##bit, ZERO_S##bit);             \
   }                                                                           \
   Vectorized<int##bit##_t> inline Vectorized<int##bit##_t>::lt(               \
       const Vectorized<int##bit##_t>& other) const {                          \
-    return (*this < other) & Vectorized<int##bit##_t>(1);                     \
+    return svsel_s##bit(*this < other, ONE_S##bit, ZERO_S##bit);              \
   }                                                                           \
   Vectorized<int##bit##_t> inline Vectorized<int##bit##_t>::le(               \
       const Vectorized<int##bit##_t>& other) const {                          \
-    return (*this <= other) & Vectorized<int##bit##_t>(1);                    \
+    return svsel_s##bit(*this <= other, ONE_S##bit, ZERO_S##bit);             \
   }
 
 VEC_INT_SVE_TEMPLATE(VECTOR_WIDTH / sizeof(int64_t), 64)
