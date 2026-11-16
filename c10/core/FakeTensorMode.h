@@ -94,7 +94,7 @@ struct C10_API FakeTensorMode {
   void clear_constant(c10::TensorImpl* fake_impl) noexcept;
 
   // return the real constant a fake tensor was created from, or nullptr
-  const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
+  c10::intrusive_ptr<c10::TensorImpl> get_constant(
       c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
@@ -102,6 +102,8 @@ struct C10_API FakeTensorMode {
   void clear_non_cpu_constants();
 
  private:
+  // Constants can be invalidated by native dispatch without the GIL.
+  mutable std::mutex constant_mutex_;
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
   struct ConstantAliases {

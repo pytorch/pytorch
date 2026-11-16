@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/schema_info.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -44,7 +45,8 @@
 // Non-fake inputs are converted through the mode's converter when allowed;
 // metadata-mutating operations always require inputs owned by the mode.
 // Lifts and numbers-as-tensors calls first try Python's constant-creation path.
-// Constant propagation remains unsupported once an input is a constant fake.
+// Deterministic ops on constant inputs run on their real constants, and writes
+// that cannot be evaluated invalidate constants sharing the written storage.
 // Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
@@ -322,6 +324,9 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_decomposition_table,
     py::module::import("torch._decomp").attr("decomposition_table"))
 DEFINE_CACHED_PYTHON_IMPORT(
+    get_schema_info,
+    py::module::import("torch._subclasses.fake_tensor").attr("get_schema_info"))
+DEFINE_CACHED_PYTHON_IMPORT(
     get_check_for_subclass_arg,
     py::module::import("torch._subclasses.fake_tensor")
         .attr("_check_for_subclass_arg"))
@@ -524,6 +529,32 @@ void fake_raise_device_mismatch(
   py::gil_scoped_acquire gil;
   PyErr_SetString(PyExc_AssertionError, msg.c_str());
   throw py::error_already_set();
+}
+
+void invalidate_written_to_constants(
+    const c10::OperatorHandle& op,
+    const torch::jit::Stack& stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  py::gil_scoped_acquire gil;
+  py::object schema_info_obj = get_schema_info()(getTorchApiFunction(op));
+  auto& schema_info = schema_info_obj.cast<torch::utils::SchemaInfo&>();
+  const auto arguments =
+      torch::jit::last(stack, op.schema().arguments().size());
+  for (const auto i : c10::irange(arguments.size())) {
+    if (!arguments[i].isTensor()) {
+      continue;
+    }
+    const auto& t = arguments[i].toTensor();
+    if (!t.defined() || !t.is_fake() ||
+        t.unsafeGetTensorImpl()->fake_tensor_mode() != mode) {
+      continue;
+    }
+    auto constant = mode->get_constant(t.unsafeGetTensorImpl());
+    if (constant && schema_info.is_mutable({c10::SchemaArgType::input, i})) {
+      mode->invalidate_constant_aliases(
+          constant->storage().unsafeGetStorageImpl());
+    }
+  }
 }
 
 // Try a registered Python decomposition for op.
@@ -997,8 +1028,13 @@ void fakeFallback(
           return std::nullopt;
         }
         const auto input_mode = impl->fake_tensor_mode();
-        if (t.is_fake() && (input_mode == mode || input_mode == nullptr)) {
-          return std::nullopt;
+        if (t.is_fake()) {
+          if (input_mode == nullptr) {
+            unsupported(op, "fake tensors without a mode");
+          }
+          if (input_mode == mode) {
+            return std::nullopt;
+          }
         }
         const auto raise = [&](std::string_view what) {
           raise_assertion_error(
@@ -1017,6 +1053,93 @@ void fakeFallback(
         }
         return at::Tensor(from_real_tensor(mode, t.getIntrusivePtr()));
       });
+
+  bool all_constant = true;
+  bool any_constant = false;
+  c10::SmallVector<std::pair<const c10::TensorImpl*, at::Tensor>, 4> constants;
+  bool has_symbolic_sizes = has_symbolic_number;
+  for_each_tensor(
+      stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
+        if (!t.defined() || !t.is_fake() ||
+            t.unsafeGetTensorImpl()->fake_tensor_mode() != mode) {
+          return;
+        }
+        const auto* impl = t.unsafeGetTensorImpl();
+        auto constant = mode->get_constant(t.unsafeGetTensorImpl());
+        all_constant = all_constant && constant != nullptr;
+        any_constant = any_constant || constant != nullptr;
+        if (constant) {
+          constants.emplace_back(
+              t.unsafeGetTensorImpl(), at::Tensor(std::move(constant)));
+        }
+        has_symbolic_sizes =
+            has_symbolic_sizes || impl->has_symbolic_sizes_strides();
+      });
+  if (any_constant && all_constant && !has_symbolic_sizes &&
+      !op.hasTag(at::Tag::nondeterministic_seeded) &&
+      (!op.hasTag(at::Tag::inplace_view) ||
+       (schema.name() == "aten::detach_" && schema.overload_name().empty())) &&
+      !avoiding_device_init() &&
+      schema.name() != "aten::_nested_tensor_from_tensor_list") {
+    torch::jit::Stack outputs(stack->end() - num_arguments, stack->end());
+    replace_each_tensor(
+        &outputs,
+        0,
+        num_arguments,
+        [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+          if (t.defined() && t.is_fake() &&
+              t.unsafeGetTensorImpl()->fake_tensor_mode() == mode) {
+            const auto it = std::find_if(
+                constants.begin(), constants.end(), [&](const auto& entry) {
+                  return entry.first == t.unsafeGetTensorImpl();
+                });
+            TORCH_INTERNAL_ASSERT(it != constants.end());
+            return it->second;
+          }
+          return std::nullopt;
+        });
+    {
+      c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+          {c10::DispatchKey::Python,
+           c10::DispatchKey::PreDispatch,
+           c10::DispatchKey::Fake,
+           c10::DispatchKey::PythonTLSSnapshot}));
+      op.callBoxed(outputs);
+    }
+    bool all_outputs_constant = true;
+    for_each_tensor(&outputs, 0, outputs.size(), [&](const at::Tensor& t) {
+      if (t.defined() && !may_turn_const(t)) {
+        all_outputs_constant = false;
+      }
+    });
+    if (all_outputs_constant) {
+      replace_each_tensor(
+          &outputs,
+          0,
+          outputs.size(),
+          [&](const at::Tensor& t) -> std::optional<at::Tensor> {
+            if (!t.defined()) {
+              return std::nullopt;
+            }
+            return at::Tensor(from_real_tensor(
+                mode, t.getIntrusivePtr(), FakeTensorConversion::Constant));
+          });
+      torch::jit::drop(*stack, num_arguments);
+      stack->insert(
+          stack->end(),
+          std::make_move_iterator(outputs.begin()),
+          std::make_move_iterator(outputs.end()));
+      return;
+    }
+    for_each_tensor(&outputs, 0, outputs.size(), [&](const at::Tensor& t) {
+      if (t.defined()) {
+        mode->invalidate_constant_aliases(t.storage().unsafeGetStorageImpl());
+      }
+    });
+  }
+  if (any_constant) {
+    invalidate_written_to_constants(op, *stack, mode);
+  }
 
   // Input devices in argument order, paired with whether each is a CPU scalar.
   c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
@@ -1049,9 +1172,6 @@ void fakeFallback(
         }
         if (impl->real_tensor() != nullptr) {
           unsupported(op, "propagate_real_tensors");
-        }
-        if (mode->get_constant(impl) != nullptr) {
-          unsupported(op, "constant inputs");
         }
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
