@@ -64,9 +64,11 @@ C10_METAL_CONSTEXPR uint32_t kFFTMaskP2357 = kFFTMaskP235 | (1u << 7);
 // (zero-padded beyond), n_out: outputs. Four-step: input e * ld_mul + i0,
 // output k * out_k_mul + i0, i0_dim1 reads i0 from batch dim 1. Smem slot i
 // of a row of `row` slots is at i + (i >> padshift); tiles interleave by es.
+// index_t: the offset type, 64-bit where one transform spans 2^31 elements.
+template <typename index_t>
 struct FFTParams {
   uint32_t n, n_sig, n_out, tgb, jt, ndim, nstages;
-  int32_t in_stride, out_stride; // along the axis
+  index_t in_stride, out_stride; // along the axis
   float scale;
   uint32_t ld_mul, out_k_mul, row, padshift, es;
   bool i0_dim1, via_smem;
@@ -74,7 +76,7 @@ struct FFTParams {
       twstep; // ns: product so far
   ::c10::metal::array<float, kFFTMaxStages> inv_ns;
   ::c10::metal::array<uint32_t, ::c10::metal::max_ndim> sizes;
-  ::c10::metal::array<int32_t, ::c10::metal::max_ndim> in_strides, out_strides;
+  ::c10::metal::array<index_t, ::c10::metal::max_ndim> in_strides, out_strides;
 };
 
 #ifndef __METAL__

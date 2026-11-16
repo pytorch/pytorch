@@ -133,6 +133,7 @@ class XpuProfilerTest(TestCase):
                 args = e.get("args", {})
                 self.assertIn("overhead cost", args)
                 self.assertIn("overhead count", args)
+                self.assertIn("overhead api id", args)
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_profiler_xpu_driver(self):
