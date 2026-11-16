@@ -416,7 +416,7 @@ void CuptiActivityApi::enableCuptiActivities(
 #if (CUDART_VERSION >= 12050)
       // Disabling an API's records also drops its external correlation, which
       // links GPU work to CPU ops. Only disable frequent runtime and driver
-      // APIs that launch no GPU work.
+      // APIs that don't launch GPU work.
       CUPTI_CALL(cuptiActivityEnableRuntimeApi(
           CUPTI_RUNTIME_TRACE_CBID_cudaGetDevice_v3020, 0));
       CUPTI_CALL(cuptiActivityEnableRuntimeApi(
