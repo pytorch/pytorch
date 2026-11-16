@@ -244,6 +244,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         return 2
 
     def test_dtensor_basic(self):
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         @torch.compile(backend="aot_eager", fullgraph=True)
