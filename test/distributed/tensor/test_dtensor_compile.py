@@ -243,7 +243,11 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def world_size(self) -> int:
         return 2
 
-    def test_dtensor_basic(self):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_dtensor_basic(self, use_cpp_fake_tensor):
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         @torch.compile(backend="aot_eager", fullgraph=True)
@@ -253,8 +257,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         param = torch.randn(4, 4, requires_grad=True)
         x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
 
-        res = fn(x)
-        res.to_local().sum().backward()
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
+            res = fn(x)
+            res.to_local().sum().backward()
 
     def test_to_local_backward_unbacked_symbolic_stride(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))

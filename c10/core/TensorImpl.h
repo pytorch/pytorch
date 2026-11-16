@@ -239,9 +239,8 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // A fake can record the dispatch keys of the real tensor it stands for
 // (ExtraMeta::fake_dispatch_keys_, Python's FakeTensor.dispatch_keys), so that
 // guards built from the fake check the real tensor's keys rather than the
-// fake's own. Python also derives is_mkldnn and layout from them; here only
-// guards read them, so a fake recorded with an mkldnn tensor's keys still
-// reports its own layout.
+// fake's own. Python's is_mkldnn and layout properties also read them, while
+// native queries continue to see the fake's strided Meta backing.
 // Python keeps them on the output of a top-level alias or detach (dispatched,
 // through functionalization, or by calling fast_detach directly), but not of
 // other views. The fake fallback (FakeFallbackKernel.cpp) does the same for a
@@ -1350,7 +1349,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (layout_policy_) [[unlikely]] {
       return layout_custom();
     }
-
     // NB: This method is not virtual and avoid dispatches for perf.
     // strided is also the most common layout type, so we check for
     // strided case first.

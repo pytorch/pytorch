@@ -20,7 +20,7 @@ from torch._subclasses.fake_impls import (
     _is_op_registered_to_fake_rule,
     register_op_impl,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import fake_mode_cls
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -403,7 +403,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
-            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+            fake_mode = fake_mode_cls()(shape_env=ShapeEnv(), export=True)
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
