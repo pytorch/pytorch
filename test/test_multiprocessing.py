@@ -1065,13 +1065,13 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
                     self.assertEqual(handle_type, 2)  # FABRIC_HANDLE
                 struct.pack_into("=i", wrong_handle, 26, 0)  # UNSPECIFIED
                 with self.assertRaisesRegex(RuntimeError, "Unsupported.*IPC"):
-                    mp.reductions.rebuild_cuda_tensor(
+                    mp.reductions._rebuild_device_tensor(
                         **dict(specs[0], storage_handle=bytes(wrong_handle))
                     )
             for dev in range(2 if peer else 1):
                 start = 3 * dev
                 tensors.extend(
-                    mp.reductions.rebuild_cuda_tensor(**dict(s, storage_device=dev))
+                    mp.reductions._rebuild_device_tensor(**dict(s, storage_device=dev))
                     for s in specs[start : start + 3]
                 )
                 self.assertEqual([t.device.index for t in tensors[start:]], [dev] * 3)
@@ -1148,7 +1148,7 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         self.assertFalse(event.query())
         c2p.get()  # wait for synchronization in child
         self.assertTrue(event.query())
-        p.join()
+        p.join(30)
 
     @unittest.skipIf(not TEST_MULTIGPU, "found only 1 GPU")
     def test_event_handle_multi_gpu(self):
@@ -1227,7 +1227,7 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         e0.synchronize()
         self.assertTrue(e0.query())
         p2c.put(0)
-        p.join()
+        p.join(30)
 
     # Check sharing a cudaMalloc allocation with different types of storage.
     # (Issue #11422)
