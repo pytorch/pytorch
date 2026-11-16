@@ -355,12 +355,9 @@ class TestPrepareTensor(TestCase):
 
 
 class TestPrepareStateDict(TestCase):
-    # Every case builds its target device as torch.device("cpu") rather than
-    # deriving it from whatever accelerator is present, so this is tied to CPU
-    # by construction. GENERIC is for logic that references no device at all.
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
-    def test_prepare_state_dict_basic(self, device):
+    def test_prepare_state_dict_basic(self):
         """Test basic state dict preparation."""
         state_dict = {"weight": torch.randn(3, 4), "bias": torch.randn(4)}
         device = torch.device("cpu")
@@ -376,7 +373,7 @@ class TestPrepareStateDict(TestCase):
         for leaf in meta.non_tensor_leaves:
             self.assertIsInstance(leaf, _TensorMeta)
 
-    def test_prepare_state_dict_nested(self, device):
+    def test_prepare_state_dict_nested(self):
         """Test preparing nested state dict."""
         state_dict = {
             "layer1": {"weight": torch.randn(3, 4), "bias": torch.randn(4)},
@@ -391,7 +388,7 @@ class TestPrepareStateDict(TestCase):
         self.assertEqual(len(meta.non_tensor_leaves), 4)
         self.assertEqual(len(tensors), 4)
 
-    def test_prepare_state_dict_with_non_tensor_values(self, device):
+    def test_prepare_state_dict_with_non_tensor_values(self):
         """Test preparing state dict with non-tensor values."""
         state_dict = {
             "weight": torch.randn(3, 4),
@@ -416,10 +413,7 @@ class TestPrepareStateDict(TestCase):
 
 
 class TestPGTransportMocked(TestCase):
-    # `setUp` pins the transport to torch.device("cpu"); the process group is
-    # mocked, so nothing here adapts to the accelerator that happens to be
-    # present. That is CPU, not GENERIC.
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -435,7 +429,7 @@ class TestPGTransportMocked(TestCase):
         self.pg.send = MagicMock(return_value=self.mock_work)
         self.pg.recv = MagicMock(return_value=self.mock_work)
 
-    def test_send_checkpoint_basic(self, device):
+    def test_send_checkpoint_basic(self):
         """Test basic send_checkpoint functionality with mocked process group."""
         transport = PGTransport(self.pg, self.timeout, self.device)
         state_dict = {"weight": torch.randn(3, 4), "bias": torch.randn(4)}
@@ -451,7 +445,7 @@ class TestPGTransportMocked(TestCase):
         # Check that wait was called on all work objects
         self.assertEqual(self.mock_work.wait.call_count, expected_calls)
 
-    def test_recv_checkpoint_basic(self, device):
+    def test_recv_checkpoint_basic(self):
         """Test basic recv_checkpoint functionality with mocked process group."""
         # Setup mock for pickle.loads to return a valid _StateDictMeta
         with patch("pickle.loads") as mock_loads:
@@ -500,7 +494,7 @@ class TestPGTransportMocked(TestCase):
             # Check that wait was called
             self.assertGreaterEqual(self.mock_work.wait.call_count, 2)
 
-    def test_send_checkpoint_empty_state_dict(self, device):
+    def test_send_checkpoint_empty_state_dict(self):
         """Test send_checkpoint with empty state dict."""
         transport = PGTransport(self.pg, self.timeout, self.device)
         state_dict = {}
@@ -514,7 +508,7 @@ class TestPGTransportMocked(TestCase):
         # Check that wait was called
         self.assertEqual(self.mock_work.wait.call_count, 2)
 
-    def test_send_checkpoint_with_non_tensor_values(self, device):
+    def test_send_checkpoint_with_non_tensor_values(self):
         """Test send_checkpoint with non-tensor values in state dict."""
         transport = PGTransport(self.pg, self.timeout, self.device)
         state_dict = {"weight": torch.randn(3, 4), "config": {"lr": 0.01}}
@@ -528,7 +522,7 @@ class TestPGTransportMocked(TestCase):
         # Check that wait was called
         self.assertEqual(self.mock_work.wait.call_count, 3)
 
-    def test_recv_checkpoint_with_state_dict_callback(self, device):
+    def test_recv_checkpoint_with_state_dict_callback(self):
         """Test recv_checkpoint with state_dict callback."""
         # Setup mock for pickle.loads to return a valid _StateDictMeta
         with patch("pickle.loads") as mock_loads:
@@ -626,8 +620,6 @@ instantiate_device_type_tests(PgTransportCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(
     PgTransportGPU, globals(), except_for="cpu", allow_xpu=True
 )
-instantiate_device_type_tests(TestPrepareStateDict, globals(), only_for="cpu")
-instantiate_device_type_tests(TestPGTransportMocked, globals(), only_for="cpu")
 instantiate_device_type_tests(
     TestPGTransportEdgeCases, globals(), except_for="cpu", allow_xpu=True
 )
