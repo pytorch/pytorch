@@ -44,7 +44,13 @@ class TestHelion(TestCase):
     def setUp(self):
         super().setUp()
         self.enterContext(
-            config.patch({"helion.enabled": True, "helion.autotune_effort": "none"})
+            config.patch(
+                {
+                    "helion.enabled": True,
+                    "helion.native_matmul": True,
+                    "helion.autotune_effort": "none",
+                }
+            )
         )
 
     def compile(
@@ -284,30 +290,45 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
 
     @parametrize(
         "case",
-        ["none", "dynamic", "gathered_operand", "cpu_scalar", "native_matmul_off"],
+        [
+            "none",
+            "dynamic",
+            "deterministic",
+            "native_matmul_off",
+            "gathered_operand",
+            "cpu_scalar",
+        ],
     )
     def test_matmul_fallback(self, device, case):
         a, b = randn(device, 32, 64), randn(device, 64, 48)
         fn = lambda a, b: torch.relu(a @ b)  # noqa: E731
         args = [a, b]
+        # Declined when lowering: the matmul keeps its extern kernel, as without
+        # Helion, rather than a Triton native matmul kernel.
+        lowering = "extern_kernels.mm("
         if case == "dynamic":
             torch._dynamo.mark_dynamic(a, 0)
+        elif case == "deterministic":
+            self.enterContext(config.patch({"deterministic": True}))
+        elif case == "native_matmul_off":
+            self.enterContext(config.patch({"helion.native_matmul": False}))
+        # Declined when scheduling, once lowered to a dot: Triton's native matmul
+        # codegen emits it.
         elif case == "gathered_operand":
             fn = lambda a, i, b: a[i] @ b  # noqa: E731
             i = torch.randint(0, 80, (32,), device=device)
             args = [randn(device, 80, 64), i, b]
+            lowering = "tl.dot("
         elif case == "cpu_scalar":
             # The CPU scalar epilogue fuses into the matmul, so the kernel is Triton.
             fn = lambda a, b, c: a @ b + c  # noqa: E731
             args = [a, b, torch.tensor(2.0, device="cpu")]
-        elif case == "native_matmul_off":
-            self.enterContext(config.patch({"helion.native_matmul": False}))
-        # "none" checks that the matmul is Helion's without the case's change.
+            lowering = "tl.dot("
         helion = case == "none"
         sources = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=helion)
         self.assertEqual(len([s for s in sources if DOT_RE.search(s)]), int(helion))
-        if case == "native_matmul_off":
-            self.assertIn("extern_kernels.mm(", self.code)
+        if not helion:
+            self.assertIn(lowering, self.code)
 
     def test_cudagraph_tree(self, device):
         def fn(a, b):

@@ -12,6 +12,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
+from ..codegen.helion.helion_scheduling import lowers_helion_matmul
 from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
@@ -190,16 +191,10 @@ def use_native_matmul(mat1, mat2):
         # TODO: support block ptr
         if use_block_ptr_enabled():
             raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-    elif not (
-        # Helion matmuls (codegen/helion) use this lowering too. Their kernels
-        # need CUDA and the Python wrapper, and Triton's native matmul codegen,
-        # which emits the matmuls Helion declines, supports no block_ptr.
-        config.helion.enabled
-        and config.helion.native_matmul
-        and mat1.get_device().type == "cuda"
-        and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
-        and not use_block_ptr_enabled()
-    ):
+    elif use_block_ptr_enabled() or not lowers_helion_matmul(mat1, mat2):
+        # Helion matmuls (codegen/helion) use this lowering too. Triton's native
+        # matmul codegen, which emits the dots Helion declines when scheduling,
+        # supports no block_ptr.
         return False
 
     # Currently only enable native matmul for triton on GPU.

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, cast, TYPE_CHECKING
 
+import sympy
+
 import torch
 from torch.utils._helion import has_helion
 from torch.utils._ordered_set import OrderedSet
@@ -17,6 +19,7 @@ from .helion_op_overrides import HelionOverrides
 
 
 if TYPE_CHECKING:
+    from ...ir import IRNode
     from ...scheduler import BaseSchedulerNode, SchedulerNode
 
 
@@ -66,9 +69,44 @@ def python_wrapper() -> bool:
     return not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
 
 
+def numerics_supported() -> bool:
+    # Helion kernels do not implement these numerics modes yet, so they stay Triton.
+    return not (
+        config.strict_reduction
+        or config.batch_invariant
+        or config.deterministic
+        or config.eager_numerics.division_rounding
+        or config.eager_numerics.disable_ftz
+        or config.emulate_precision_casts
+    )
+
+
+def lowers_helion_matmul(mat1: IRNode, mat2: IRNode) -> bool:
+    """Whether use_native_matmul() lowers mat1 @ mat2 to a dot for a Helion kernel.
+
+    A dot that helion_supports() declines becomes a Triton native matmul kernel,
+    so this declines what is known at lowering time not to become a Helion
+    kernel, which keeps its extern kernel or template, as without Helion: e.g.
+    relu(a @ b) with a dynamic dim of a keeps extern_kernels.mm. What only
+    scheduling shows still becomes a Triton native matmul kernel: an operand with
+    an indirect load, as in a[i] @ b, or a fused epilogue that Helion does not
+    emit, as in a @ b + torch.tensor(2.0) with the scalar on the CPU. These go
+    away as HelionKernel supports more."""
+    sizes = (*mat1.get_size(), *mat2.get_size())
+    return (
+        config.helion.enabled
+        and config.helion.native_matmul
+        and mat1.get_device_or_error().type == "cuda"
+        and python_wrapper()
+        and numerics_supported()
+        and mat1.get_dtype() in MATMUL_DTYPES
+        # HelionKernel.supports_tiling() needs static tiles.
+        and all(isinstance(size, (int, sympy.Integer)) for size in sizes)
+    )
+
+
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
-    """Whether `node` holds a native matmul (from triton.native_matmul) that a
-    Helion kernel emits."""
+    """Whether `node` holds a native matmul that a Helion kernel emits."""
     if not config.helion.native_matmul or node.is_template() or not python_wrapper():
         return False
     for snode in node.get_nodes():
@@ -79,15 +117,7 @@ def is_helion_matmul(node: BaseSchedulerNode) -> bool:
 
 
 def helion_supports(node: SchedulerNode) -> bool:
-    # Helion kernels do not implement these numerics modes yet, so they stay Triton.
-    if (
-        config.strict_reduction
-        or config.batch_invariant
-        or config.deterministic
-        or config.eager_numerics.division_rounding
-        or config.eager_numerics.disable_ftz
-        or config.emulate_precision_casts
-    ):
+    if not numerics_supported():
         return False
     reduction_type = cast(ComputedBuffer, node.node).get_reduction_type()
     body = node._body
