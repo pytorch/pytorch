@@ -10,10 +10,9 @@ from torch.utils._ordered_set import OrderedSet
 from ... import config
 from ...ir import ComputedBuffer, Reduction
 from ...loop_body import MemoryUsageType
-from ...scheduler import SchedulerNode, WhyNoFuse
-from ...utils import get_fused_kernel_name, is_bf16x9_matmul, sympy_product
+from ...scheduler import SchedulerNode
+from ...utils import get_fused_kernel_name, is_bf16x9_matmul
 from ...virtualized import V
-from ..simd import SIMDKernel
 from ..triton import TritonScheduling
 from .helion_kernel import HelionKernel, REDUCTIONS
 from .helion_op_overrides import HelionOverrides
@@ -139,24 +138,6 @@ class HelionScheduling(TritonScheduling):
         )
 
     def can_fuse(self, node1, node2):
-        if not (is_helion_matmul(node1) or is_helion_matmul(node2)):
-            return super().can_fuse(node1, node2)
-        why = WhyNoFuse(node1, node2)
-        nodes = [*node1.get_nodes(), *node2.get_nodes()]
-        if not all(map(helion_supports, nodes)):
-            why("Helion kernels do not support all nodes")
-            return False
-        # Epilogues must iterate over the matmul output tiles, not over K.
-        dots = [node for node in nodes if node.is_native_matmul()]
-        tiles = list(dots[0].get_ranges()[0])
-        numel, groups = sympy_product(tiles), [*tiles, sympy.S.One]
-        for node in nodes:
-            if node in dots:
-                continue
-            pointwise = node.group[1] == (numel, 1)
-            if not pointwise or not SIMDKernel.is_compatible(groups, node.get_ranges()):
-                why("Helion epilogue must iterate over the matmul output tiles")
-                return False
         return super().can_fuse(node1, node2)
 
     can_fuse_vertical = can_fuse
