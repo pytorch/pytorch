@@ -13,12 +13,14 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 try:
@@ -59,6 +61,8 @@ def mock_compare_config_prefer_larger_XBLOCK(
 
 @instantiate_parametrized_tests
 class TestCoordinateDescentTuner(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_abs_function(self):
         """
         The benchmark result is simply abs(XBLOCK - 15)
@@ -107,23 +111,6 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertEqual(set(neighbours), {1, 3, 4})
         neighbours = tuner.get_neighbour_values("num_warps", 2, radius=2)
         self.assertEqual(set(neighbours), {1, 4, 8})
-
-    def test_persistent_reduction(self):
-        def f(x):
-            return x / x.sum(dim=-1, keepdim=True)
-
-        with mock.patch.object(
-            CoordescTuner, "compare_config", mock_compare_config_prefer_larger_XBLOCK
-        ):
-            x = torch.ones(2, 256).to(GPU_TYPE)
-            expected = f(x)
-            # the first call get correct result when cache miss. Don't know why yet
-            _ = torch.compile(f)(x)
-            actual = torch.compile(f)(x)
-            self.assertTrue(
-                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
-                lambda msg: f"{msg}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
 
     def test_value_too_large(self):
         # Simulate a reduction
@@ -553,6 +540,31 @@ class TestCoordinateDescentTuner(TestCase):
         )
 
 
+class TestCoordinateDescentTunerDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_persistent_reduction(self, device):
+        def f(x):
+            return x / x.sum(dim=-1, keepdim=True)
+
+        with mock.patch.object(
+            CoordescTuner, "compare_config", mock_compare_config_prefer_larger_XBLOCK
+        ):
+            x = torch.ones(2, 256).to(device)
+            expected = f(x)
+            # the first call get correct result when cache miss. Don't know why yet
+            _ = torch.compile(f)(x)
+            actual = torch.compile(f)(x)
+            self.assertTrue(
+                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
+                lambda msg: f"{msg}\nExpected:\n{expected}\nActual:\n{actual}",
+            )
+
+
+instantiate_device_type_tests(
+    TestCoordinateDescentTunerDevice, globals(), allow_xpu=True, except_for="cpu"
+)
+
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX and HAS_TRITON:
         run_tests()
