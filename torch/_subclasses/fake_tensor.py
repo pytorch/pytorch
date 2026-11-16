@@ -3950,7 +3950,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(cast(FakeTensor, op_impl_out))
 
         # If there's a Python meta, prefer that over the decomposition.
-        # fake_try_decomp in torch/csrc/PyInterpreter.cpp mirrors this block for
+        # try_decomp in torch/csrc/FakeFallbackKernel.cpp mirrors this block for
         # C++ FakeTensor, and _register_static_shape_decomps in
         # torch/_meta_registrations.py its static shape case; keep them in sync.
         from torch._decomp import meta_table
