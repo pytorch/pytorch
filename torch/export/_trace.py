@@ -360,9 +360,13 @@ def _extract_fake_inputs(gm, args, kwargs):
                 )
         fake_mode = detected_fake_mode
     elif detected_shape_env:
-        fake_mode = FakeTensorMode(shape_env=detected_shape_env, export=True)
+        fake_mode = FakeTensorMode(
+            _force_python=True, shape_env=detected_shape_env, export=True
+        )
     else:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+        fake_mode = FakeTensorMode(
+            _force_python=True, shape_env=ShapeEnv(), export=True
+        )
 
     count = 0
 
