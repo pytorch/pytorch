@@ -1228,7 +1228,9 @@ class TensorVariable(VariableTracker):
         method = self.tp_methods.get(name)
         if method is not None:
             flags = _derive_method_flags(self, name)
-            _check_method_arity(self, tx, name, flags, args, kwargs)
+            _check_method_arity(
+                tx, f"{self.python_type_name()}.{name}", flags, args, kwargs
+            )
             # Realize any LazyVariableTracker in kwargs before calling handler.
             realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
             try:
