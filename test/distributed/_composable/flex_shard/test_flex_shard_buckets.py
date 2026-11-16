@@ -44,6 +44,7 @@ from torch.distributed.fsdp._flex_shard.bucket_storage import (
     ShardedBucketStorage,
 )
 from torch.distributed.fsdp._flex_shard.flex_shard import (
+    _BucketGroups,
     _materialize_bucket_storages,
     build_flex_bucket,
     FlexShardModule,
@@ -113,10 +114,10 @@ class TestFlexShardMesh(TestCase):
         with single_rank_cuda_mesh():
             mesh = init_device_mesh(
                 "cuda",
-                (1, 1),
-                mesh_dim_names=("fsdp", "tp"),
+                (1, 1, 1),
+                mesh_dim_names=("replicate", "fsdp", "tp"),
             )
-            with self.assertRaisesRegex(ValueError, "1D DeviceMesh"):
+            with self.assertRaisesRegex(ValueError, "1D DeviceMesh, or a 2D one"):
                 _validate_flex_shard_mesh(mesh)
 
 
@@ -753,12 +754,10 @@ class TestBucketStorageLayout(FSDPTestMultiThread):
             device=torch.device("cpu"),
             param_placements=placements,
             bucket_assignments=assignments,
+            buckets=buckets,
+            bucket_groups=[_BucketGroups()] * len(buckets),
         )
-        bucket_storages = _materialize_bucket_storages(
-            model,
-            inputs,
-            buckets,
-        )
+        bucket_storages = _materialize_bucket_storages(model, inputs)
 
         self.assertEqual(len(bucket_storages), len(buckets))
         self.assertIn("tok_embeddings.weight", bucket_storages[0].param_infos)
