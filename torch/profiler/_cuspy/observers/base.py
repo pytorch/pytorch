@@ -70,6 +70,20 @@ def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     return annotation_for(graph_node_id)
 
 
+class _CachedResolver:
+    def __init__(self, fn: Callable[[int], Any]) -> None:
+        self._fn = fn
+        self._cached = functools.cache(fn)
+
+    def __call__(self, graph_node_id: int) -> Any:
+        return self._cached(graph_node_id)
+
+    def cache_clear(self) -> None:
+        # An in-flight miss can repopulate a cleared functools cache. Replace the
+        # wrapper so that result can only reach the retired cache.
+        self._cached = functools.cache(self._fn)
+
+
 @dataclass(frozen=True)
 class ObserverAnnotationSettings:
     """How an observer attributes activity to named regions. Each source enforces its own
@@ -133,7 +147,7 @@ class CuspyObserver:
     @_annotation_resolver.setter
     def _annotation_resolver(self, fn: GraphAnnotationResolver | None) -> None:
         self._annotation_resolver_cached = (
-            functools.cache(fn) if fn is not None else None
+            _CachedResolver(fn) if fn is not None else None
         )
 
     @property
@@ -142,7 +156,7 @@ class CuspyObserver:
 
     @_lane_resolver.setter
     def _lane_resolver(self, fn: LaneResolver | None) -> None:
-        self._lane_resolver_cached = functools.cache(fn) if fn is not None else None
+        self._lane_resolver_cached = _CachedResolver(fn) if fn is not None else None
 
     @property
     def _dependency_resolver(self) -> GraphDependencyResolver | None:
@@ -151,7 +165,7 @@ class CuspyObserver:
     @_dependency_resolver.setter
     def _dependency_resolver(self, fn: GraphDependencyResolver | None) -> None:
         self._dependency_resolver_cached = (
-            functools.cache(fn) if fn is not None else None
+            _CachedResolver(fn) if fn is not None else None
         )
 
     def __init__(
@@ -220,9 +234,7 @@ class CuspyObserver:
             self._obs = None
         # Register a graph-destroy hook per installed graph-node resolver so a
         # destroyed CUDA graph purges that resolver's registry and invalidates
-        # its cache. Registering any hook is also the "Cuspy active" gate
-        # torch.cuda.graphs checks before arming its destroy callback. Handles are
-        # removed in close() so nothing leaks this observer.
+        # its cache. Handles are removed in close() so nothing leaks this observer.
         self._destroy_hook_handles: list[RemovableHandle] = []
         if self.available:
             self._register_graph_destroy_hooks()
@@ -246,18 +258,11 @@ class CuspyObserver:
         return self._obs is not None
 
     def _register_graph_destroy_hooks(self) -> None:
-        """Register a graph-destroy hook per installed graph-node resolver. Each hook
-        purges its backing store (the annotation module registry, or this observer's own
-        dependency map) and clears its resolver cache (cache_clear is global per resolver
-        -- it drops every graph's cached lookups, not just the destroyed graph's --
-        acceptable on the infrequent destroy path and what bounds cache growth over a
-        long run). Hooks capture only the cache wrapper + purge fn (never self, so they
-        cannot pin this observer -- the dependency purge closes over the map dict, not the
-        observer); the destroy fan-out also swallows any error they raise
-        (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The lane
-        resolver is externally backed (nothing to purge), so its hook only clears the
-        cache."""
-        from torch.cuda._graph_annotations import remove_kernel_annotations
+        """Invalidate resolver caches after graph-owned annotations are purged.
+
+        Dependency state is owned by the profiler and purged here. Hooks retain
+        the cache wrappers and backing maps, never the observer.
+        """
         from torch.cuda.graphs import register_graph_destroy_hook
 
         handles = self._destroy_hook_handles
@@ -282,7 +287,7 @@ class CuspyObserver:
             handles.append(register_graph_destroy_hook(hook))
 
         if self._annotation_resolver_cached is not None:
-            add(self._annotation_resolver_cached, remove_kernel_annotations)
+            add(self._annotation_resolver_cached, None)
         if self._dependency_resolver_cached is not None:
             add(self._dependency_resolver_cached, purge_deps)
         if self._lane_resolver_cached is not None:

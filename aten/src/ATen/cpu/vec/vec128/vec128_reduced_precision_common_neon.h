@@ -126,8 +126,8 @@ struct Vectorized16 {
   Derived angle() const {
     auto zero = Derived(0);
     auto pi = Derived(c10::pi<value_type>);
-    auto tmp =
-        Derived::blendv(zero, pi, *static_cast<const Derived*>(this) < zero);
+    auto tmp = Derived::blendv(
+        zero, pi, pi.copysign(*static_cast<const Derived*>(this)) < zero);
     return Derived::blendv(
         tmp,
         *static_cast<const Derived*>(this),
@@ -299,7 +299,8 @@ struct Vectorized16 {
         &Vectorized<float>::lgamma);
   }
   Derived rsqrt() const {
-    return static_cast<const Derived*>(this)->sqrt().reciprocal();
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::rsqrt);
   }
   Derived pow(const Derived& exp) const {
     return static_cast<const Derived*>(this)->map2_with_vec_float_method(
