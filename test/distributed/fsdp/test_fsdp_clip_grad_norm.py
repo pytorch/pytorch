@@ -14,7 +14,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -46,6 +49,7 @@ class TestClipGradNorm(FSDPTestContinuous):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_non_root(self, device):
         """
@@ -71,6 +75,7 @@ class TestClipGradNorm(FSDPTestContinuous):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             fsdp_model.lin2.clip_grad_norm_(max_norm=2)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_ddp_parity(self, device):
         """
@@ -244,6 +249,7 @@ class TestClipGradNorm(FSDPTestContinuous):
             ddp_optim.step()
             fsdp_optim.step()
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_low_precision_grads(self, device):
         """Tests ``clip_grad_norm_()`` when using low precision gradients."""
@@ -307,6 +313,7 @@ class TestClipGradNorm(FSDPTestContinuous):
                     torch.linalg.vector_norm(param.grad, norm_type).item() <= max_norm,
                 )
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_no_gradients(self, device):
         """
@@ -346,6 +353,7 @@ class TestClipGradNorm(FSDPTestContinuous):
             total_norm, torch.tensor(0.0, device=torch.device(device).type)
         )
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_non_uniform_grad_dtype(self, device):
         """Tests clip_grad_norm_ with non-uniform gradient dtypes via MixedPrecision."""
@@ -384,8 +392,6 @@ class TestClipGradNorm(FSDPTestContinuous):
         self.assertEqual(total_norm.dtype, torch.float32)
 
 
-instantiate_device_type_tests(
-    TestClipGradNorm, globals(), except_for=("cpu",), allow_xpu=True
-)
+instantiate_device_type_tests(TestClipGradNorm, globals(), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
