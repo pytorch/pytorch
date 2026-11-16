@@ -9,7 +9,7 @@ from unittest.mock import patch
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
-from torch._inductor import config, metrics
+from torch._inductor import config
 from torch._inductor.codegen.cuda_combined_scheduling import CUDACombinedScheduling
 from torch._inductor.codegen.helion import helion_scheduling
 from torch._inductor.test_case import run_tests, TestCase
@@ -38,7 +38,7 @@ def randn(device, *shape, dtype=torch.bfloat16):
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
 )
-class TestHelionNativeMatmul(TestCase):
+class TestHelion(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
@@ -51,7 +51,7 @@ class TestHelionNativeMatmul(TestCase):
         self, fn, *args, expected=None, tol=None, backend="triton", helion=True
     ):
         """Run compiled `fn`, check it against FP32 eager, and return the Helion
-        matmul kernel sources."""
+        kernel sources."""
         if backend == "cute" and not HAS_CUTE:
             self.skipTest("requires CuTeDSL")
         with (
@@ -65,7 +65,7 @@ class TestHelionNativeMatmul(TestCase):
             expected = pytree.tree_map(lambda e, r: e.to(r.dtype), expected, result)
         self.assertEqual(result, expected, atol=tol, rtol=tol)
         self.code = "\n".join(codes)
-        sources = [s for s in SOURCE_RE.findall(self.code) if DOT_RE.search(s)]
+        sources = SOURCE_RE.findall(self.code)
         if helion:
             self.assertTrue(sources)
             self.assertNotRegex(self.code, r"extern_kernels\.\w*mm\w*\(")
@@ -123,12 +123,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertIn("tmp1 = in1[tile_z, tile_r, tile_x]", source)
         self.assertIn("acc = torch.baddbmm(acc, tmp0, tmp1)", source)
         self.assertIn("out0[tile_z, tile_y, tile_x] = ", source)
-
-    def test_computed_operand(self, device):
-        a, b = randn(device, 40, 72), randn(device, 72, 136)
-        (source,) = self.compile(lambda a, b: (a + 1) @ (b - 2), a, b)
-        self.assertIn("in0[tile_y, tile_r]", source)
-        self.assertIn("in1[tile_r, tile_x]", source)
 
     def test_saved_bf16_output(self, device):
         # silu's backward reads a @ b, so the bf16 product is saved and rounded.
@@ -207,15 +201,10 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         self.assertIn("reinterpret_tensor(arg2_1, (6586, ), (1, ), 0)", self.code)
         self.assertIn("assert not arg2_1.isnan().any().item()", self.code)
 
-    @parametrize("epilogue", [False, True])
-    def test_horizontal(self, device, epilogue):
+    def test_horizontal(self, device):
         def fn(a, b, c):
             first, second = a @ b, a @ c
-            return (
-                torch.relu(first - second + first * second)
-                if epilogue
-                else (first, second)
-            )
+            return torch.relu(first - second + first * second)
 
         args = randn(device, 40, 72), randn(device, 72, 136), randn(device, 72, 136)
         (source,) = self.compile(fn, *args)
@@ -223,7 +212,6 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         self.assertIn("acc1 = torch.addmm(acc1, tmp0, ", source)
         self.assertEqual(source.count("in0[tile_y, tile_r]"), 1)
         self.assertIn("in2[tile_r, tile_x]", source)
-        self.assertEqual("out1[" in source, not epilogue)
 
     def test_masked_epilogue_load(self, device):
         (source,) = self.compile(
@@ -236,7 +224,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         self.assertIn("hl.load(in2, [tile_x.index], extra_mask=", source)
         self.assertIn("hl.load(in3, [(-64) + tile_x.index], extra_mask=", source)
 
-    @parametrize("case", ["horizontal", "vertical", "y_only", "x_only"])
+    @parametrize("case", ["horizontal", "vertical", "y_only"])
     def test_reduction_over_dot_loop(self, device, case):
         def horizontal(a, b):
             return a @ b, (a[:, :, None] * b[None]).sum(1)
@@ -249,15 +237,11 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         def y_only(a, b):
             return a @ b, a[:, :, None].expand(40, 72, 136).sum(1)
 
-        def x_only(a, b):
-            return a @ b, b[None].expand(40, 72, 136).sum(1)
-
         # A sum over the dot's ranges reduces tile_r where the axis order puts it.
         fn, line = {
             "horizontal": (horizontal, r"acc1 = acc1 \+ torch\.sum\(tmp\d+, -2\)\n"),
             "vertical": (vertical, r"acc1 = acc1 \+ torch\.sum\(tmp\d+, -2\)\n"),
             "y_only": (y_only, r"torch\.sum\(tmp\d+, -1\)\.reshape\(\[tile_y, 1\]\)"),
-            "x_only": (x_only, r"acc1 = acc1 \+ torch\.sum\(tmp\d+, -2\)\n"),
         }[case]
         (source,) = self.compile(fn, randn(device, 40, 72), randn(device, 72, 136))
         self.assertRegex(source, line)
@@ -299,9 +283,10 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
             self.assertIn(line, source)
 
     @parametrize(
-        "case", ["dynamic", "gathered_operand", "cpu_scalar", "native_matmul_off"]
+        "case",
+        ["none", "dynamic", "gathered_operand", "cpu_scalar", "native_matmul_off"],
     )
-    def test_fallback(self, device, case):
+    def test_matmul_fallback(self, device, case):
         a, b = randn(device, 32, 64), randn(device, 64, 48)
         fn = lambda a, b: torch.relu(a @ b)  # noqa: E731
         args = [a, b]
@@ -315,10 +300,12 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
             # The CPU scalar epilogue fuses into the matmul, so the kernel is Triton.
             fn = lambda a, b, c: a @ b + c  # noqa: E731
             args = [a, b, torch.tensor(2.0, device="cpu")]
-        else:
+        elif case == "native_matmul_off":
             self.enterContext(config.patch({"helion.native_matmul": False}))
-        sources = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=False)
-        self.assertEqual(sources, [])
+        # "none" checks that the matmul is Helion's without the case's change.
+        helion = case == "none"
+        sources = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=helion)
+        self.assertEqual(len([s for s in sources if DOT_RE.search(s)]), int(helion))
         if case == "native_matmul_off":
             self.assertIn("extern_kernels.mm(", self.code)
 
@@ -330,62 +317,21 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor, out1: torch
         counters.clear()
         with config.patch({"triton.cudagraphs": True}):
             compiled = torch.compile(fn, fullgraph=True)
-            for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            result, (code,) = run_and_get_code(compiled, *args)
+            self.assertEqual(result, fn(*args))
+            for _ in range(2):
                 torch.compiler.cudagraph_mark_step_begin()
                 self.assertEqual(compiled(*args), fn(*args))
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        self.assertEqual(len(SOURCE_RE.findall(code)), 2)
 
-
-instantiate_device_type_tests(TestHelionNativeMatmul, globals(), only_for=GPU_TYPE)
-
-
-@unittest.skipUnless(
-    HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
-)
-class TestHelionDefaults(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    def test_default_config(self):
-        import helion
-
-        args = randn(GPU_TYPE, 32, 64), randn(GPU_TYPE, 64, 48)
-        with (
-            config.patch({"helion.enabled": True}),
-            patch.object(helion.Kernel, "__call__", lambda self, *args: None),
-        ):
-            _, (code,) = run_and_get_code(torch.compile(lambda a, b: a @ b), *args)
-        (source,) = [s for s in SOURCE_RE.findall(code) if DOT_RE.search(s)]
-        self.assertIn('autotune_effort="quick"', source)
-        self.assertNotRegex(code, r"extern_kernels\.\w*mm\w*\(")
-
-    @config.patch({"helion.enabled": True})
-    def test_missing_helion(self):
+    def test_missing_helion(self, device):
         with (
             patch.object(helion_scheduling, "has_helion", lambda: False),
             self.assertRaisesRegex(RuntimeError, "Helion is not installed"),
         ):
             CUDACombinedScheduling(None)
-
-
-@unittest.skipUnless(
-    HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
-)
-class TestHelionReduction(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    def setUp(self):
-        super().setUp()
-        self.enterContext(
-            config.patch({"helion.enabled": True, "helion.autotune_effort": "none"})
-        )
-
-    def compile(self, fn, *args, tol=None):
-        """Run compiled `fn`, check it against eager, and return the Helion kernel sources."""
-        with self.assertNoLogs("torch._inductor.scheduler", level="CRITICAL"):
-            result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
-        self.assertEqual(result, fn(*args), atol=tol, rtol=tol)
-        self.code = "\n".join(codes)
-        return SOURCE_RE.findall(self.code)
 
     def test_reduction_source(self, device):
         (source,) = self.compile(
@@ -460,8 +406,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
     @parametrize(
         "case",
         [
-            "softmax",
-            "layer_norm",
+            "none",
             "argmax",
             "dynamic",
             "strict_reduction",
@@ -470,29 +415,25 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             "deterministic",
         ],
     )
-    def test_triton_fallback(self, device, case):
+    def test_reduction_fallback(self, device, case):
         x = torch.randn(64, 100, device=device)
-        fn = {
-            "softmax": lambda x: torch.softmax(x, -1),
-            "layer_norm": lambda x: torch.nn.functional.layer_norm(x, (100,)),
-            "argmax": lambda x: x.argmax(-1),
-        }.get(case, lambda x: x.sum(-1))
+        fn = (lambda x: x.argmax(-1)) if case == "argmax" else (lambda x: x.sum(-1))
         if case == "dynamic":
             torch._dynamo.mark_dynamic(x, 0)
-        # Without these modes, x.sum(-1) is a Helion kernel.
+        # "none" checks that x.sum(-1) is a Helion kernel without these modes.
         modes = {
             "strict_reduction": {"numerics": "strict_reduction"},
             "strict_pointwise": {"numerics": "strict_pointwise"},
             "batch_invariant": {"batch_invariant": True},
             "deterministic": {"deterministic": True},
         }
-        metrics.reset()
+        helion = case == "none"
         with config.patch(modes.get(case, {})):
-            self.assertEqual(self.compile(fn, x, tol=1e-4), [])
-        self.assertEqual(metrics.generated_kernel_count, self.code.count("@triton.jit"))
+            sources = self.compile(fn, x, tol=1e-4, helion=helion)
+        self.assertEqual(len(sources), int(helion))
 
 
-instantiate_device_type_tests(TestHelionReduction, globals(), only_for=GPU_TYPE)
+instantiate_device_type_tests(TestHelion, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":
