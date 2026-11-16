@@ -6,8 +6,7 @@ import numpy as np
 import torch
 import torch._C
 import torch._dynamo
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.overrides import TorchFunctionMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -178,30 +177,6 @@ class PrivateUse1BackendTest(TestCase):
         self.assertEqual(flat.dtype, x.dtype)
         self.assertEqual(flat.requires_grad, requires_grad)
         self.assertIs(flat._base, fake)
-
-    def test_fake_tensor_requires_grad_hook_can_reenter(self):
-        mode = FakeTensorMode()
-        meta = torch.empty(3, device="meta")
-        probe = mode.from_tensor(torch.zeros(2))
-        hook_results = []
-
-        class GradReadMode(TorchFunctionMode):
-            def __torch_function__(self, func, types, args=(), kwargs=None):
-                if (
-                    args
-                    and args[0] is meta
-                    and getattr(func, "__self__", None) is torch.Tensor.requires_grad
-                ):
-                    hook_results.append(probe.add(1))
-                return func(*args, **(kwargs or {}))
-
-        device = torch.device("npy:0")
-        with GradReadMode():
-            result = FakeTensor(mode, meta, device)
-
-        self.assertTrue(hook_results)
-        self.assertTrue(mode.is_our_fake(hook_results[0]))
-        self.assertEqual(result.device, device)
 
     def test_ldexp(self):
         a_cpu = torch.tensor([1.0, 2.0], dtype=torch.float32)

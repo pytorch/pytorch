@@ -1942,36 +1942,13 @@ class FakeTensor(Tensor):
                 "'device' (or 'fake_device')"
             )
 
-        device_type = device.type
-        if (
-            device_type not in ("cpu", "cuda")
-            and type(elem) is Tensor
-            and device_type == torch._C._get_privateuse1_backend_name()
-            and elem.device.type == "meta"
-        ):
-            # Plain Meta results for PrivateUse1 can retain that backend's key.
-            # Run the constructor's detach on Meta.
-            # Resolve requires_grad first so TorchFunctionMode hooks run with
-            # the caller's dispatch keys.
-            requires_grad = (
-                elem.requires_grad if requires_grad is None else requires_grad
-            )
-            with torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Meta):
-                self = Tensor._make_subclass(
-                    cls,
-                    elem,
-                    requires_grad,
-                    dispatch_device=True,
-                    device_for_backend_keys=device,
-                )
-        else:
-            self = Tensor._make_subclass(
-                cls,
-                elem,
-                elem.requires_grad if requires_grad is None else requires_grad,
-                dispatch_device=True,
-                device_for_backend_keys=device,
-            )
+        self = Tensor._make_subclass(
+            cls,
+            elem,
+            elem.requires_grad if requires_grad is None else requires_grad,
+            dispatch_device=True,
+            device_for_backend_keys=device,
+        )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
         else:
@@ -1988,15 +1965,12 @@ class FakeTensor(Tensor):
         # So by default we disallow meta, and if you are working in a situation
         # where it is helpful (e.g., crossref testing) you can turn it back
         # on
-        if device_type == "meta" and not fake_mode.allow_meta:
-            raise AssertionError(
-                "device.type must not be 'meta' when allow_meta is False"
-            )
-        if device_type == "cpu" and cls is FakeTensor:
-            # The constructor already normalized the CPU device above.
-            self._fake_device = device
-        else:
-            self.fake_device = device
+        if not fake_mode.allow_meta:
+            if device.type == "meta":
+                raise AssertionError(
+                    "device.type must not be 'meta' when allow_meta is False"
+                )
+        self.fake_device = device
         self.fake_mode = fake_mode
         self.constant = constant
         self.pytype = pytype
