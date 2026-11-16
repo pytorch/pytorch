@@ -35,16 +35,17 @@ enum class ScalingType : std::uint8_t {
   RowWise, // fp32 scales
   BlockWise1x16, // fp8_e4m3fn scales
   BlockWise1x32, // fp8_e8m0fnu scales
-  BlockWise1x128, // fp32 scales
+  BlockWise1x128, // fp32 or fp8_e8m0fnu scales
   BlockWise128x128, // fp32 scales
 };
 
-// Memory layout of a blockwise scale tensor. NO_SWIZZLE is the backend's
-// default layout for the recipe.
+// Memory layout of a blockwise scale tensor. Supported layouts depend on
+// the backend and recipe; CUDA MXFP8 requires explicit SWIZZLE_32_4_4.
 enum class SwizzleType : std::uint8_t {
   NO_SWIZZLE = 0,
   SWIZZLE_32_4_4 = 1, // cuBLAS 128x4-tiled block scales
   SWIZZLE_32_8 = 2, // hipBLASLt BLK32_UE8M0_32_8
+  SWIZZLE_MN_K4 = 3, // cuBLAS MN-major scales with four values packed along K
 };
 
 inline const char* ScalingTypeToString(ScalingType value) {
@@ -74,6 +75,8 @@ inline const char* SwizzleTypeToString(SwizzleType value) {
       return "SWIZZLE_32_4_4";
     case SwizzleType::SWIZZLE_32_8:
       return "SWIZZLE_32_8";
+    case SwizzleType::SWIZZLE_MN_K4:
+      return "SWIZZLE_MN_K4";
     default:
       return "UnknownSwizzleType";
   }

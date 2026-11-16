@@ -47,6 +47,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  pip_install nccl-extensions==0.1.0
+fi
+
 # Remove onnxruntime if present to avoid interference with non-ONNX tests
 if [[ "$TEST_CONFIG" != "onnx" ]]; then
   pip uninstall -y onnxruntime 2>/dev/null || true
@@ -604,6 +608,7 @@ test_python_smoke_b200() {
     --include \
       test_matmul_cuda \
       test_scaled_matmul_cuda \
+      test_quantize_tensor \
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       inductor/test_torchinductor \
@@ -634,13 +639,13 @@ test_python_smoke_b200() {
     --upload-artifacts-while-running \
     --pytest-xdist-workers 32
 
-  # The CuTeDSL linear_cross_entropy OpInfo variants exist only where the
-  # CuTeDSL runtime does, so they are collected nowhere else.
-  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  # The variants' expectations live outside test_ops too: two xfails in
-  # test_ops_gradients.py and nine TestOperatorsDevice entries in the shared skip
-  # tuple. An expectation that never runs rots into an unexpected success
-  # without anyone noticing, so collect those suites here as well -- a handful
+  # The CuTeDSL linear_cross_entropy and quantize_tensor OpInfo variants exist
+  # only where the CuTeDSL runtime does, so they are collected nowhere else.
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k "linear_cross_entropy or quantize_tensor" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The linear_cross_entropy variants' expectations live outside test_ops too:
+  # two xfails in test_ops_gradients.py and nine TestOperatorsDevice entries in the
+  # shared skip tuple. An expectation that never runs rots into an unexpected
+  # success without anyone noticing, so collect those suites here as well -- a handful
   # of tests each once restricted to this op.
   time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops_gradients -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # functorch selects its variants with -k instead: restricting op_db trips
@@ -838,6 +843,13 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_load_package_multiple_gpus --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_uncapturable_models --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_multi_device_model --verbose
+  # CUDA graph capture on a second GPU: the test_shim tests whose names end in
+  # MultiGpu, which skip or check only device 0 on single-GPU runners.
+  /usr/bin/env LD_LIBRARY_PATH="${TORCH_LIB_DIR}" "${BUILD_BIN_DIR}/test_shim" \
+    --gtest_filter='*MultiGpu' \
+    --gtest_output=xml:test/test-reports/cpp/test_shim_multi_gpu.xml
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
@@ -1530,7 +1542,9 @@ test_dynamo_benchmark() {
 
   if [[ "$suite" == "torchbench" &&
         ( "${TEST_CONFIG}" == *perf_compare* ||
-          ( "${TEST_CONFIG}" != *perf* && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ) ) ]]; then
+          ( "${TEST_CONFIG}" != *perf* &&
+            ( " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ||
+              " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --export-aot-inductor "* ) ) ) ]]; then
     local model
     for model in "${INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
       extra_args+=(--exclude-exact "$model")

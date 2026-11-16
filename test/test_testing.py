@@ -4273,6 +4273,7 @@ class TestImports(TestCase):
                            "torch._native.ops.reductions.ordered",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
+                           "torch._native.ops.quantize_tensor.blockscaled_tma",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
@@ -4325,6 +4326,16 @@ class TestImports(TestCase):
                 except Exception as e:
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
+
+    def test_import_aot_runtime_wrappers_before_dynamo(self):
+        self._check_python_output(textwrap.dedent("""
+            import sys
+            import torch
+
+            if "torch._dynamo" in sys.modules:
+                raise AssertionError("Dynamo was loaded before runtime_wrappers")
+            import torch._functorch._aot_autograd.runtime_wrappers
+        """))
 
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")

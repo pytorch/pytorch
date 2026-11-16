@@ -1574,7 +1574,7 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         return 0
 
 
-def run_tests(argv=None):
+def _run_tests(argv=None):
     parse_cmd_line_args()
     if argv is None:
         argv = UNITTEST_ARGS
@@ -1761,6 +1761,12 @@ def run_tests(argv=None):
                 sys.exit(-1)
     else:
         unittest_main(argv=argv)
+
+
+
+def run_tests(argv=None):
+    with torch._dynamo.config.patch(nested_graph_breaks=True):
+        return _run_tests(argv)
 
 
 IS_LINUX = sys.platform == "linux"
@@ -2335,6 +2341,14 @@ def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     if not isinstance(msg, str):
         raise AssertionError("Are you using skipIfFreeThreaded correctly?")
     return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
+
+
+def fake_tensor_modes(fn):
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+
+    return parametrize(
+        "mode_cls", [FakeTensorMode, CppFakeTensorMode], name_fn=lambda cls: cls.__name__
+    )(fn)
 
 
 def skipIfCppFakeTensor(reason):
@@ -4548,6 +4562,9 @@ class TestCase(expecttest.TestCase):
 
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                torch._dynamo.config.patch(nested_graph_breaks=True)
+            )
             if TEST_WITH_CROSSREF:
                 stack.enter_context(CrossRefMode())
             self._run_custom(
