@@ -43,8 +43,7 @@ from torch._dynamo.utils import (
 from torch._guards import compile_context, CompileContext, CompileId, Source
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
@@ -344,7 +343,6 @@ class AutogradCompilerInstance:
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
         self.fake_tensor_mode = FakeTensorMode(
-            _force_python=True,
             allow_fallback_kernels=True,
             allow_non_fake_inputs=True,
             shape_env=self.shape_env,
@@ -353,7 +351,7 @@ class AutogradCompilerInstance:
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Proxy | None = None
 
-    def wrap_fake(self, x: torch.Tensor, source: Source | None) -> FakeTensor:
+    def wrap_fake(self, x: torch.Tensor, source: Source | None) -> torch.Tensor:
         if not isinstance(x, torch.Tensor):
             raise AssertionError(f"Expected torch.Tensor, got {type(x)}")
         return self.fake_tensor_mode.from_tensor(x, source=source)

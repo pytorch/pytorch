@@ -419,9 +419,7 @@ class Match:
                     if "val" in arg.meta
                     else arg.meta["example_value"],
                 )
-                fake_mode = torch._guards.require_python_fake_mode(
-                    torch._dynamo.utils.detect_fake_mode(example_vals)
-                )
+                fake_mode = torch._dynamo.utils.detect_fake_mode(example_vals)
                 if fake_mode is not None:
 
                     def _convert_to_fake_mode(it):
@@ -3337,11 +3335,7 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
         if "get_decomp_fn" in _fn_params:
             kwargs["get_decomp_fn"] = get_decomp_fn
 
-        with (
-            torch._guards.tracing(None),
-            unset_fake_temporarily(),
-            FakeTensorMode(_force_python=True),
-        ):
+        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn(**kwargs)
 
         # clear view matches encountered during tracing

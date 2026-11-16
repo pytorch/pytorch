@@ -303,7 +303,7 @@ def wrap_compiler_debug(
         compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
-        from torch._subclasses import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         is_inference = kwargs.get("is_inference", False)
         compiler_fn = functools.partial(
@@ -376,7 +376,7 @@ def wrap_compiler_debug(
             # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
             # because inductor clears the tensor list in its codegen. And example_inputs
             # are available only for the first invocation.
-            fake_mode = FakeTensorMode(_force_python=True)
+            fake_mode = FakeTensorMode()
             copy_tensor_attrs = [
                 fake_mode.from_tensor(x) if isinstance(x, torch.Tensor) else x
                 for x in real_inputs

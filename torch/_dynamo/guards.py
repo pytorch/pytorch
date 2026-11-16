@@ -4848,8 +4848,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.fake_mode = torch._subclasses.FakeTensorMode(_force_python=True)
-        self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
         # above _keep. Required, because omitting it would carry no plain
@@ -4939,9 +4937,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         dispatch_keys_raw: int,
         grad: torch.Tensor,
     ) -> torch.Tensor:
+        # Guard snapshots use pytype to represent arbitrary real tensor classes.
+        # The Python fake is a metadata carrier here, independent of the mode
+        # used to trace the graph; C++ from_meta_and_device cannot carry pytype.
         fake_mode = torch._subclasses.FakeTensorMode(_force_python=True)
-        tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
-        ret = tensor_converter.from_meta_and_device(
+        ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
             device,
