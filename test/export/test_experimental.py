@@ -23,7 +23,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import tracing as torch_tracing, TracingContext
 from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
+    fake_mode_cls,
     is_fake_tensor,
     maybe_get_fake_mode,
 )
@@ -39,9 +39,9 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
-    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
+    parametrize,
 )
 from torch.utils import _pytree as pytree
 
@@ -298,8 +298,8 @@ def forward(self, args_0):
         ep = export(net, inputs, strict=True)
         ep = _export_forward_backward(ep)
 
-    @fake_tensor_modes
-    def test_joint_loss_index(self, mode_cls):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_joint_loss_index(self, use_cpp_fake_tensor):
         class Foo(torch.nn.Module):
             def __init__(self, index):
                 super().__init__()
@@ -316,13 +316,9 @@ def forward(self, args_0):
 
         inputs = (torch.randn(4, 4),)
         for i in [0, 1]:
-            with torch._dynamo.config.patch(
-                use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-            ):
+            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
                 ep = export(Foo(i), inputs, strict=True)
-            with torch._dynamo.config.patch(
-                use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-            ):
+            with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
                 ep_joint = _export_forward_backward(ep, joint_loss_index=i)
                 fake_vals = [
                     val
@@ -332,7 +328,7 @@ def forward(self, args_0):
                 self.assertTrue(fake_vals)
                 self.assertTrue(
                     all(
-                        isinstance(maybe_get_fake_mode(val), mode_cls)
+                        isinstance(maybe_get_fake_mode(val), fake_mode_cls())
                         for val in fake_vals
                     )
                 )
@@ -342,8 +338,8 @@ def forward(self, args_0):
                 else:
                     self.assertTrue(spec.kind != OutputKind.LOSS_OUTPUT)
 
-    @fake_tensor_modes
-    def test_joint_buffer_input_mutations(self, mode_cls):
+    @parametrize("use_cpp_fake_tensor", [False, True])
+    def test_joint_buffer_input_mutations(self, use_cpp_fake_tensor):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -361,13 +357,9 @@ def forward(self, args_0):
             torch.randn(4, 4),
             torch.randint(0, 4, (4,)),
         )
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep = export(Foo(), inputs)
-        with torch._dynamo.config.patch(
-            use_cpp_fake_tensor=mode_cls is CppFakeTensorMode
-        ):
+        with torch._dynamo.config.patch(use_cpp_fake_tensor=use_cpp_fake_tensor):
             ep_joint = _export_forward_backward(ep)
             fake_vals = [
                 val
@@ -376,7 +368,10 @@ def forward(self, args_0):
             ]
             self.assertTrue(fake_vals)
             self.assertTrue(
-                all(isinstance(maybe_get_fake_mode(val), mode_cls) for val in fake_vals)
+                all(
+                    isinstance(maybe_get_fake_mode(val), fake_mode_cls())
+                    for val in fake_vals
+                )
             )
         self.assertEqual(len(ep_joint.graph_signature.output_specs), 5)
         self.assertEqual(
