@@ -2797,10 +2797,15 @@ class TestCuspyHes(TestCase):
         core.enable_hes_early()
         if consumer == "observer":
             observer = self.cuspy.register([], lambda _columns: None)
-            close = lambda: self.cuspy.unregister(observer)
+
+            def close() -> None:
+                self.cuspy.unregister(observer)
         else:
             handler = self.cuspy.register_callback_handler(0, 0, lambda *args: None)
-            close = lambda: self.cuspy.unregister_callback_handler(handler)
+
+            def close() -> None:
+                self.cuspy.unregister_callback_handler(handler)
+
         with self.assertRaisesRegex(
             RuntimeError, "closing all Cuspy activity observers"
         ):
