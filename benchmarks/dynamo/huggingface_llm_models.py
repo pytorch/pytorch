@@ -75,6 +75,8 @@ class TextGenerationBenchmark(Benchmark):
         prompt_length=INPUT_LENGTH,
         inference_mode="generate",
     ):
+        if inference_mode not in ("generate", "prefill"):
+            raise ValueError(f"unsupported inference mode: {inference_mode}")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device)
         model.eval()
@@ -109,8 +111,8 @@ class TextGenerationBenchmark(Benchmark):
         return model, example_inputs
 
 
-# TextGenerationPrefillModel relies on StaticCache internals from this release.
-MIN_TRANSFORMERS_VERSION = "5.14.1"
+# TextGenerationPrefillModel relies on StaticCache internals from this exact release.
+PREFILL_TRANSFORMERS_VERSION = "5.14.1"
 
 
 class TextGenerationPrefillModel(torch.nn.Module):
@@ -151,7 +153,7 @@ class TextGenerationPrefillModel(torch.nn.Module):
                 dtype=self.model.dtype,
                 device=self.model.device,
             )
-            if config.model_type == "qwen3_5_text":
+            if any(self.cache.is_linear):
                 # KV early initialization skips the hybrid cache's linear layers.
                 # These tensors are shape templates: lazy_initialization allocates
                 # zeroed states for each layer.

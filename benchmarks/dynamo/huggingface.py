@@ -14,6 +14,7 @@ import warnings
 try:
     from .common import (
         BenchmarkRunner,
+        BenchmarkWorkload,
         download_retry_decorator,
         load_yaml_file,
         main,
@@ -22,6 +23,7 @@ try:
 except ImportError:
     from common import (
         BenchmarkRunner,
+        BenchmarkWorkload,
         download_retry_decorator,
         load_yaml_file,
         main,
@@ -135,16 +137,14 @@ if not BATCH_SIZE_KNOWN_MODELS:
 try:
     from .huggingface_llm_models import (
         HF_LLM_MODELS,
-        MIN_TRANSFORMERS_VERSION,
         PREFILL_MODELS,
-        TextGenerationPrefillModel,
+        PREFILL_TRANSFORMERS_VERSION,
     )
 except ImportError:
     from huggingface_llm_models import (
         HF_LLM_MODELS,
-        MIN_TRANSFORMERS_VERSION,
         PREFILL_MODELS,
-        TextGenerationPrefillModel,
+        PREFILL_TRANSFORMERS_VERSION,
     )
 
 
@@ -433,10 +433,11 @@ class HuggingfaceRunner(BenchmarkRunner):
                 raise ValueError("--prompt-length requires --hf-inference-mode=prefill")
             return
         installed = importlib.metadata.version("transformers")
-        if Version(installed) < Version(MIN_TRANSFORMERS_VERSION):
+        if Version(installed) != Version(PREFILL_TRANSFORMERS_VERSION):
             raise ValueError(
                 f"--hf-inference-mode=prefill requires "
-                f"transformers>={MIN_TRANSFORMERS_VERSION}, found {installed}"
+                f"transformers=={PREFILL_TRANSFORMERS_VERSION}, found {installed}; "
+                "prefill cache initialization depends on this version's internals"
             )
         if args.prompt_length is not None and args.prompt_length <= 0:
             raise ValueError(
@@ -457,6 +458,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             "amp",
             "aot_precompile",
             "batch_invariant",
+            "compare_backed_unbacked",
             "ddp",
             "dynamic_shapes",
             "enable_activation_checkpointing",
@@ -466,6 +468,8 @@ class HuggingfaceRunner(BenchmarkRunner):
             "find_batch_sizes",
             "fsdp",
             "multiprocess",
+            "optimus",
+            "quantization",
             "recompile_profiler",
             "torchscript_jit_trace",
             "tolerance",
@@ -476,36 +480,38 @@ class HuggingfaceRunner(BenchmarkRunner):
         ):
             if getattr(args, flag, False):
                 unsupported.append("--" + flag.replace("_", "-"))
-        if args.backend in ("optimus", "torchao"):
-            unsupported.append(f"--backend={args.backend}")
         if unsupported:
             raise ValueError(
                 "--hf-inference-mode=prefill does not support " + ", ".join(unsupported)
             )
         if args.iterations_per_run <= 0:
             raise ValueError("--iterations-per-run must be positive for prefill")
-        if args.backend is None and not args.inductor:
+        if args.backend is None:
             raise ValueError(
                 "--hf-inference-mode=prefill requires --backend or --inductor"
             )
 
-    def get_performance_workload(self):
+    def get_workload(self, example_inputs, *, is_performance=False):
         if self.args.hf_inference_mode == "prefill":
-            return self.prefill_forward, self.setup_prefill
-        if self.hf_llm:
-            return self.generate, None
-        return super().get_performance_workload()
-
-    def use_model_forward_for_accuracy(self):
-        return self.args.hf_inference_mode == "prefill"
-
-    def report_eager_latency(self):
-        return self.args.hf_inference_mode == "prefill"
-
-    def get_request_tokens(self, example_inputs):
-        if self.args.hf_inference_mode == "prefill":
-            return {"input_tokens_per_second": example_inputs["input_ids"].numel()}
-        return None
+            return BenchmarkWorkload(
+                self.prefill_forward,
+                setup_fn=self.setup_prefill,
+                compile_forward=True,
+                report_eager_latency=True,
+                request_tokens={
+                    "input_tokens_per_second": example_inputs["input_ids"].numel()
+                },
+                measure_iters=1,
+                stabilization_iters=4,
+            )
+        if self.hf_llm and is_performance:
+            return BenchmarkWorkload(
+                self.generate,
+                compile_forward=True,
+                measure_iters=1,
+                stabilization_iters=4,
+            )
+        return super().get_workload(example_inputs, is_performance=is_performance)
 
     def setup_prefill(self, model, example_inputs):
         torch.compiler.cudagraph_mark_step_begin()
@@ -513,10 +519,6 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def generate(self, model, example_inputs, collect_outputs=True):
         return model.generate(**example_inputs)
-
-    def prefill(self, model, example_inputs, collect_outputs=True):
-        self.setup_prefill(model, example_inputs)
-        return self.prefill_forward(model, example_inputs, collect_outputs)
 
     def prefill_forward(self, model, example_inputs, collect_outputs=True):
         with torch.no_grad():
@@ -583,15 +585,11 @@ class HuggingfaceRunner(BenchmarkRunner):
                     prompt_length=prompt_length,
                     inference_mode="prefill",
                 )
-                self.model_iter_fn = self.prefill
             else:
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
                     model_name, device
                 )
-            generation_model = (
-                model.model if isinstance(model, TextGenerationPrefillModel) else model
-            )
-            generation_model.generation_config.disable_compile = True
+                model.generation_config.disable_compile = True
             self.hf_llm = True
 
         else:
