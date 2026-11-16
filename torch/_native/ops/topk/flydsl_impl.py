@@ -8,10 +8,14 @@ Two kernels, picked by (K, N) - see ``flydsl_kernels.py``:
     regardless of ``torch.use_deterministic_algorithms``; only the gather
     invariant is checked against aten, not the tie order.
   * radix: (K, N) in a row of ``_RADIX_GATE_RANGES``, K padded up to a
-    power of 2 for the bitonic network. For finite inputs, deterministic
-    mode gathers in input order and matches aten on values and indices;
-    otherwise indices on threshold ties vary across runs. All NaNs share
-    one ordinal, so distinct NaN payload/index choices can differ from aten.
+    power of 2 for the bitonic network. Deterministic mode gathers threshold
+    ties in input order; default mode uses atomics, so selected tied indices
+    can vary across runs. ATen index parity is not guaranteed for two current
+    implementation-specific cases: for ``64 <= K <= 128``, ATen treats
+    ``-0 == +0`` and preserves their index order, while FlyDSL ranks ``+0``
+    above ``-0``; for ``129 <= K <= 1024``, ATen can place negative-sign NaNs
+    differently, while FlyDSL collapses every NaN to one ordinal. NaN payload
+    and index choices can therefore differ as well.
 
 ``_cond`` also requires a supported dtype on ``_SUPPORTED_ARCHES``, sorted
 output, a contiguous last-axis reduction, enough rows for the kernel/dtype
