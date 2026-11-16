@@ -132,9 +132,7 @@ def _min_rows_for_full_wave(device_idx: int) -> int:
     return torch.cuda.get_device_properties(device_idx).multi_processor_count
 
 
-def _eligible(
-    self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
-) -> bool:
+def _eligible(self: torch.Tensor, k: int, dim: int, sorted_: bool) -> bool:
     if not self.is_cuda or self.dtype not in _SUPPORTED_DTYPES:
         return False
     device_index = self.device.index
@@ -174,7 +172,10 @@ def _cond(
     *args,
     **kwargs,
 ) -> bool:
-    return _eligible(self, int(k), int(dim), bool(largest), bool(sorted))
+    # `largest` is part of aten::topk's dispatcher-facing signature. Both
+    # directions are supported, so it does not affect eligibility.
+    del largest
+    return _eligible(self, int(k), int(dim), bool(sorted))
 
 
 def _out_cond(
