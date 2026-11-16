@@ -54,7 +54,7 @@ struct C10_API PyObjectSlot {
 
   bool try_incref() const noexcept {
     PyInterpreter* interp = c10::impl::getGlobalPyInterpreter();
-    if (C10_UNLIKELY(!interp)) {
+    if (!interp) [[unlikely]] {
       return false;
     }
     return (*interp)->try_incref(*this);
