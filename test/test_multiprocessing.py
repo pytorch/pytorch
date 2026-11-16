@@ -1174,7 +1174,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         self.assertFalse(event.query())
         c2p.get()  # wait for synchronization in child
         self.assertTrue(event.query())
-        p.join()
+        p.join(30)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "found only 1 GPU")
     @parametrize(
@@ -1258,7 +1258,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
         e0.synchronize()
         self.assertTrue(e0.query())
         p2c.put(0)
-        p.join()
+        p.join(30)
 
     # Check sharing a cudaMalloc allocation with different types of storage.
     # (Issue #11422)
