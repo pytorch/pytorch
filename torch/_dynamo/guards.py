@@ -4748,6 +4748,7 @@ _FAKE_TENSOR_OWNED_ATTRIBUTES = (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
     | {
         "_fake_device",
+        "_fake_pytype",
         "fake_mode",
         "constant",
         "pytype",
@@ -4937,10 +4938,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         dispatch_keys_raw: int,
         grad: torch.Tensor,
     ) -> torch.Tensor:
-        # Guard snapshots use pytype to represent arbitrary real tensor classes.
-        # The Python fake is a metadata carrier here, independent of the mode
-        # used to trace the graph; C++ from_meta_and_device cannot carry pytype.
-        fake_mode = torch._subclasses.FakeTensorMode(_force_python=True)
+        fake_mode = torch._subclasses.FakeTensorMode()
         ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
@@ -5450,12 +5448,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                default = torch.nn.Parameter if is_param else torch.Tensor
-                pytype = obj.pytype or default
+                pytype = torch.nn.Parameter if is_param else torch.Tensor
             elif is_fake and is_param and pytype is torch.Tensor:
                 # A C++ fake's own type is the real type, but a C++ fake
                 # Parameter can be a plain Tensor carrying the marker.
                 pytype = torch.nn.Parameter
+            pytype = maybe_get_fake_pytype(obj) or pytype
             # A fake answers empty_like with another fake (a Python fake through
             # its own __torch_dispatch__, whether or not its FakeTensorMode is
             # active), and that fake would drag the mode and its converters into
