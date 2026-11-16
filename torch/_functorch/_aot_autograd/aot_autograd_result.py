@@ -723,7 +723,9 @@ def deserialize_bundled_cache_entry(
     if context is None:
         # Create a clean environment when running fx graph post compile
         # if one is not available
-        context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+        context = torch._guards.TracingContext(
+            FakeTensorMode(_force_python=True, shape_env=ShapeEnv())
+        )
     with torch._guards.tracing(context):
         compiled_fn = entry.wrap_post_compile(
             [],
