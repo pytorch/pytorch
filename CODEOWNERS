@@ -1519,5 +1519,5 @@
 # Keep these rules last so they override broader patterns.
 /CODEOWNERS @albanD @malfet
 /OWNERSHIP.yaml @albanD @malfet
-/.github/merge_rules.yaml @pytorch/pytorch-dev-infra @albanD @malfet
+/.github/merge_rules.yaml @izaitsevfb @jeanschmidt @huydhn @albanD @malfet
 #
