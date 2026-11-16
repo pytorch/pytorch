@@ -898,7 +898,7 @@ class TensorVariable(VariableTracker):
         except (AttributeError, ObservedAttributeError):
             ret_val = False
 
-        if self.source:
+        if self.source and self.source.subguards_allowed():
             install_guard(
                 self.source.make_guard(
                     functools.partial(GuardBuilder.HASATTR, attr=name)
@@ -1208,7 +1208,7 @@ class TensorVariable(VariableTracker):
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
             and is_base_tensor_method
         ):
-            if self.source:
+            if self.source and self.source.subguards_allowed():
                 func_var = VariableBuilder(
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
                 )(static_attr)

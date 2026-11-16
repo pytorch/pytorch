@@ -9066,6 +9066,42 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @parametrize("from_input", [True, False])
+    @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
+    def test_nn_parameter_ctor_type(self, from_input):
+        # nn.Parameter() is built before the graph runs, into a synthetic local
+        # that guards can't read, so type() and __class__ must not guard on it.
+        # (The config patch only matters for nn.Parameter(x + 1).)
+        def fn(x):
+            p = torch.nn.Parameter(x if from_input else x + 1)
+            if type(p) is torch.nn.Parameter and p.__class__ is torch.nn.Parameter:
+                return x + 1
+            return x - 1
+
+        x = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_nn_parameter_ctor_hasattr(self):
+        def fn(x):
+            p = torch.nn.Parameter(x)
+            return x + 1 if hasattr(p, "foo") else x - 1
+
+        x = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_nn_parameter_ctor_method_in_torch_function_mode(self):
+        def fn(x):
+            p = torch.nn.Parameter(x)
+            return p.add(1)
+
+        x = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # torch.device is a TorchFunctionMode, so p.add() dispatches through it.
+        with torch.device("cpu"):
+            self.assertEqual(opt_fn(x), fn(x))
+
     def _optimize_then_check_exp(
         self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
     ):
