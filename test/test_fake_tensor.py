@@ -160,6 +160,39 @@ class _TestFakeTensorHelpers:
 class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_mode_constructor_defaults(self):
+        shape_env = ShapeEnv()
+        with FakeTensorMode(
+            shape_env=shape_env,
+            allow_fallback_kernels=True,
+            allow_non_fake_inputs=True,
+            static_shapes=False,
+            export=False,
+        ) as mode:
+            fake = torch.empty(2, 3)
+        self.assertIs(mode.shape_env, shape_env)
+        self.assertTrue(mode.is_our_fake(fake))
+
+    def test_mode_constructor_disallow_fallback_kernels(self):
+        if torch._dynamo.config.use_cpp_fake_tensor:
+            with self.assertRaisesRegex(
+                NotImplementedError, "allow_fallback_kernels=False"
+            ):
+                FakeTensorMode(allow_fallback_kernels=False)
+            return
+        mode = FakeTensorMode(allow_fallback_kernels=False)
+        self.assertFalse(mode.allow_fallback_kernels)
+
+    def test_mode_constructor_export(self):
+        if torch._dynamo.config.use_cpp_fake_tensor:
+            with self.assertRaisesRegex(
+                NotImplementedError, "export=True"
+            ):
+                FakeTensorMode(export=True)
+            return
+        mode = FakeTensorMode(export=True)
+        self.assertTrue(mode.fake_tensor_converter.export)
+
     def test_mode_subclass_construction(self):
         class SubMode(FakeTensorMode):
             def __init__(self, marker, **kwargs):

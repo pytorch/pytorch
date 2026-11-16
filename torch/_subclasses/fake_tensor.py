@@ -1039,9 +1039,20 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         self,
         *,
         shape_env: ShapeEnv | None = None,
+        allow_fallback_kernels: bool = True,
         allow_non_fake_inputs: bool = False,
         static_shapes: bool | None = None,
+        export: bool = False,
     ) -> None:
+        if not allow_fallback_kernels:
+            raise NotImplementedError(
+                "CppFakeTensorMode does not support allow_fallback_kernels=False yet"
+            )
+        if export:
+            raise NotImplementedError(
+                "CppFakeTensorMode does not support export=True yet"
+            )
+
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
