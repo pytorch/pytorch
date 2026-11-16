@@ -57,6 +57,62 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager")(x), x + 3)
         self.assertEqual(box.value, 3)
 
+    def test_constant_class_property_read_guards_replacement(self):
+        class Parent:
+            @property
+            def value(self):
+                return 2
+
+        class Child(Parent):
+            pass
+
+        @torch._dynamo.assume_constant_result
+        def get_class():
+            return Child
+
+        def fn(x):
+            getter = get_class().value.fget
+            return x + getter(None), getter
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        result, getter = compiled(x)
+        self.assertEqual(result, x + 2)
+        self.assertIs(getter, Parent.value.fget)
+        Child.value = property(lambda self: 5)
+        result, getter = compiled(x)
+        self.assertEqual(result, x + 5)
+        self.assertIs(getter, Child.value.fget)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_constant_class_mro_guards_reassigned_bases(self):
+        class Parent:
+            pass
+
+        class Intermediate(Parent):
+            pass
+
+        class Child(Parent):
+            pass
+
+        @torch._dynamo.assume_constant_result
+        def get_class():
+            return Child
+
+        def fn(x, read_mro):
+            return x + len(read_mro(get_class()))
+
+        x = torch.ones(1)
+        for read_mro in (lambda cls: cls.mro(), lambda cls: cls.__mro__):
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            Child.__bases__ = (Parent,)
+            self.assertEqual(compiled(x, read_mro), x + 3)
+            Child.__bases__ = (Intermediate,)
+            self.assertEqual(compiled(x, read_mro), x + 4)
+            self.assertEqual(counter.frame_count, 2)
+
     def test_property_setter_guards_replacement(self):
         class Box:
             @property
