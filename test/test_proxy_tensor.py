@@ -3,6 +3,8 @@
 
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -873,6 +875,7 @@ class TestRealProxyTensor(TestCase):
         )
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
+@instantiate_parametrized_tests
 class TestFakeProxyTensor(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -889,39 +892,38 @@ class TestFakeProxyTensor(TestCase):
         x = A(torch.randn(3, 3))
         self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
 
-    def test_snapshot_fake_of_batched_tensor(self):
+    @parametrize("propagate", [False, True])
+    def test_snapshot_fake_of_batched_tensor(self, propagate):
         # A vmap wrapper is recorded as a view of the fake tensor it wraps, with
         # no real tensor. A value whose real tensor is kept keeps its wrapper,
         # which carries it.
         from torch._functorch.vmap import vmap_increment_nesting
+        from torch._subclasses.fake_tensor import maybe_get_real_tensor
 
         functorch = torch._C._functorch
         real = torch.randn(4, 3, 5)[1:]
-        for propagate in (False, True):
-            with self.subTest(propagate=propagate), torch._functorch.config.patch(
-                fake_tensor_propagate_real_tensors=propagate
-            ):
-                mode = FakeTensorMode()
-                fake = mode.from_tensor(real)
-                with vmap_increment_nesting(3, "error") as level:
-                    with mode:
-                        batched = functorch._add_batch_dim(fake, 1, level)
-                    val = snapshot_fake(batched)
-                    kept = snapshot_fake(batched, include_real=True)
-                self.assertTrue(is_fake_tensor(val))
-                self.assertIsNone(val.real_tensor)
-                self.assertEqual(
-                    StorageWeakRef(val.untyped_storage()),
-                    StorageWeakRef(fake.untyped_storage()),
-                )
-                self.assertEqual(
-                    (val.shape, val.stride(), val.storage_offset()),
-                    ((3, 5), (15, 1), 15),
-                )
-                # With no real tensor to keep, include_real records the view too.
-                self.assertEqual(is_fake_tensor(kept), not propagate)
-                if propagate:
-                    self.assertIsNotNone(functorch.get_unwrapped(kept).real_tensor)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=propagate):
+            mode = FakeTensorMode()
+            fake = mode.from_tensor(real)
+            with vmap_increment_nesting(3, "error") as level:
+                with mode:
+                    batched = functorch._add_batch_dim(fake, 1, level)
+                val = snapshot_fake(batched)
+                kept = snapshot_fake(batched, include_real=True)
+            self.assertTrue(is_fake_tensor(val))
+            self.assertIsNone(maybe_get_real_tensor(val))
+            self.assertEqual(
+                StorageWeakRef(val.untyped_storage()),
+                StorageWeakRef(fake.untyped_storage()),
+            )
+            self.assertEqual(
+                (val.shape, val.stride(), val.storage_offset()),
+                ((3, 5), (15, 1), 15),
+            )
+            # With no real tensor to keep, include_real records the view too.
+            self.assertEqual(is_fake_tensor(kept), not propagate)
+            if propagate:
+                self.assertIsNotNone(maybe_get_real_tensor(functorch.get_unwrapped(kept)))
 
     def test_snapshot_fake_of_grad_tracking_tensor(self):
         # A grad tracking wrapper, as inside jvp, is recorded as a view of the
@@ -947,7 +949,6 @@ class TestFakeProxyTensor(TestCase):
 
     def test_snapshot_fake_of_sparse_batched_tensor(self):
         from torch._functorch.vmap import vmap_increment_nesting
-        from torch._subclasses.fake_tensor import FakeTensorMode
 
         functorch = torch._C._functorch
         mode = FakeTensorMode()
@@ -1046,19 +1047,28 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
-    def test_fake_tensor_mode(self):
-        def f(a):
-            d = a.cos()
-            return d
-
+    @parametrize("tracing_mode", ["real", "fake", "symbolic"])
+    @parametrize("ambient", [False, True])
+    def test_fake_tensor_mode(self, tracing_mode, ambient):
+        from contextlib import nullcontext
         from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        existing_fake_mode = FakeTensorMode()
-        with existing_fake_mode:
-            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        x = torch.randn(3, 4)
+        if not ambient or tracing_mode == "real":
+            x = mode.from_tensor(x)
+        # Reuse the mode from the ambient context or fake inputs.
+        with mode if ambient else nullcontext():
+            gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode)(x)
+            self.assertIs(detect_fake_mode(), mode if ambient else None)
+        vals = [n.meta["val"] for n in gm.graph.nodes if "val" in n.meta]
+        self.assertIs(detect_fake_mode(vals), mode)
+        if tracing_mode == "symbolic":
+            self.assertIs(gm.shape_env, mode.shape_env)
+        self.assertIsNone(detect_fake_mode())
 
-        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
-        self.assertEqual(fake_mode, existing_fake_mode)
+
 
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:

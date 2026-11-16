@@ -2324,6 +2324,7 @@ class _CppFakeTensorMode:
     allow_scalar_outputs: _bool
     propagate_real_tensors: _bool
     epoch: _int
+    def clear_non_cpu_constants(self) -> None: ...
     @property
     def avoid_device_init(self) -> _bool: ...
     @property

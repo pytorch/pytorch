@@ -26,6 +26,7 @@ import unittest.mock
 import weakref
 import warnings
 from math import sqrt
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -2550,7 +2551,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         tc = TestCase()
         tc_traced = symbolic_trace(tc)
         ref_out = tc_traced(torch.rand(3, 4))
-        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
+        shape_prop.ShapeProp(tc_traced, fake_mode=FakeTensorMode()).propagate(torch.rand(3, 4))
 
         # Make sure we're testing all opcodes
         opcodes = set()
@@ -2696,8 +2697,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         fake_inputs = [
             node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
         ]
-        inp = fake_inputs
-        fake_mode = detect_fake_mode(inp)
+        fake_mode = FakeTensorMode(shape_env=detect_fake_mode(fake_inputs).shape_env)
         shape_prop.ShapeProp(gm=gm, fake_mode=fake_mode).propagate(*inp)
         self.assertEqual(len(fake_mode.shape_env.pending_fresh_unbacked_symbols), 0)
 
