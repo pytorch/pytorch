@@ -1942,7 +1942,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            # THPSize_pynew converts items that are not ints or SymInts with
+            # __index__, e.g. the 0-d tensors produced by torch.Size(tensor).
+            items = [
+                item.nb_index_impl(tx)
+                if isinstance(item, variables.TensorVariable)
+                else item
+                for item in tup.items  # type: ignore[missing-attribute]
+            ]
+            return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.

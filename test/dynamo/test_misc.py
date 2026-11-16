@@ -7071,6 +7071,42 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_size_from_tensor(self):
+        def fn(x, shape):
+            return x.reshape(torch.Size(shape))
+
+        x = torch.randn(256)
+        shape = torch.tensor([4, 64])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        self.assertEqual(opt_fn(x, shape), fn(x, shape))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_torch_size_from_tensor_graph_break(self):
+        def fn(x, shape):
+            return x.reshape(torch.Size(shape)) + 1
+
+        x = torch.randn(256)
+        shape = torch.tensor([4, 64])
+        opt_fn = torch.compile(fn, backend="eager")
+
+        self.assertEqual(opt_fn(x, shape), fn(x, shape))
+
+    def test_torch_size_from_float_tensor(self):
+        def fn(shape):
+            try:
+                return torch.Size(shape)
+            except TypeError:
+                return None
+
+        shape = torch.tensor([4.0, 64.0])
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertIsNone(fn(shape))
+        self.assertIsNone(opt_fn(shape))
+
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
