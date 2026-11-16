@@ -1947,7 +1947,6 @@ class MetaConverter(Generic[_TensorT]):
                             torch._dynamo.source.AttrSource(source, "_base"),
                             base_symbolic_context,
                         )
-                    require_python_fake_mode(maybe_get_fake_mode(base))
 
                     def is_c_of_r(
                         complex_dtype: torch.dtype, real_dtype: torch.dtype
