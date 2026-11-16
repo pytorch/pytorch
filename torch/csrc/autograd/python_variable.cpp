@@ -652,15 +652,8 @@ static PyObject* THPVariable_make_subclass(
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
-  auto input = r.tensor(1);
-  // Native fake detach can enter Python for real-tensor propagation, attaching
-  // a Tensor PyObject before WrapWithType gets to install the requested class.
-  // The data path makes a fresh TensorImpl and preserves the shadow real tensor
-  // without boxing the result in Python.
-  auto data = input.is_fake() ? input.tensor_data() : input.detach();
-  if (input.is_fake()) {
-    data.unsafeGetTensorImpl()->set_autograd_meta(nullptr);
-  }
+  auto data =
+      r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we
   // want to allow the following use case for backward compatibility:
   //

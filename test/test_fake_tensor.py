@@ -711,12 +711,17 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     @unittest.skipIf(
         not CPP_FAKETENSOR, "requires native fake tensor subclass construction"
     )
-    def test_make_subclass_preserves_fake_alias_version(self):
+    @parametrize("constant", [False, True])
+    def test_make_subclass_preserves_fake_alias_version(self, constant):
         class SubTensor(torch.Tensor):
             pass
 
         with FakeTensorMode():
-            x = torch.randn(3, requires_grad=True)
+            x = (
+                torch.tensor([1.0], requires_grad=True)
+                if constant
+                else torch.randn(3, requires_grad=True)
+            )
             loss = x.square().sum()
             y = torch.Tensor._make_subclass(SubTensor, x, True)
             self.assertTrue(y.is_leaf)
@@ -3630,10 +3635,15 @@ class TestFakeTensorConstHandling(TestCase):
             self.assertNotConst(x)
 
     @fake_tensor_modes
-    def test_inplace_add(self, mode_cls):
-        with mode_cls():
+    @parametrize("detach", [False, True])
+    @parametrize("inference_mode", [False, True])
+    def test_inplace_add(self, mode_cls, detach, inference_mode):
+        with torch.inference_mode(inference_mode), mode_cls():
             x = torch.tensor(4.0)
-            y = x.add_(1)
+            if detach:
+                x = x.detach()
+            y = aten.add_.Tensor(x, 1)
+            self.assertIs(y, x)
             self.assertEqual(x.item(), 5.0)
             self.assertEqual(y.item(), 5.0)
             self.assertConst(x, y)
