@@ -6,7 +6,10 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -78,6 +81,7 @@ class TestApply(FSDPTestContinuous):
             fsdp, lambda param: torch.empty_like(param).fill_(1.0), self.assertEqual
         )
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_nested_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on a
@@ -91,6 +95,7 @@ class TestApply(FSDPTestContinuous):
         )
         self._check_apply(nested_wrapped_module)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_transformer_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on an
@@ -104,6 +109,7 @@ class TestApply(FSDPTestContinuous):
         )
         self._check_apply(transformer)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_apply_in_summon_raises_error(self, device):
         """Tests that calling ``apply()`` on an FSDP instance inside the
@@ -120,6 +126,6 @@ class TestApply(FSDPTestContinuous):
                 transformer.apply(self._init_linear_weights)
 
 
-instantiate_device_type_tests(TestApply, globals(), except_for=("cpu",), allow_xpu=True)
+instantiate_device_type_tests(TestApply, globals(), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
