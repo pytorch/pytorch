@@ -453,11 +453,9 @@ use_lamba_guard_for_object_aliasing = False
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
-# Skip empty nn.Module hook-registry guards. Forward-hook dispatch also avoids
-# specializing builtin registry types and local hook IDs. Populated registries
-# still guard their length, order and callbacks; observing IDs or types, or
-# mutating a registry, adds the corresponding guards.
-# Unsafe: adding hooks to a registry compiled as empty can go unnoticed.
+# Skip checks on empty nn.Module hook registries during dispatch. Adding a hook
+# after compilation can therefore go unnoticed. Populated registries still
+# guard the callback values and kwargs/always-call flag membership they use.
 skip_nnmodule_hook_guards = True
 
 # Make dynamo skip no tensor aliasing guard on parameters

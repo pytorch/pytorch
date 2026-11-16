@@ -678,9 +678,8 @@ def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
     # runtime guard reads the root directly. It also carries a DUPLICATE_INPUT's
     # source_b and a cpp-form SHAPE_ENV guard's shape_env_sources. A SHAPE_ENV
     # guard installed as a Python lambda reads its G['NAME'] operands from the
-    # same scope, and none of them reaches
-    # global_scope -- shape_env_sources is filled from the cpp code parts alone
-    # -- so they are recovered from the lambda's own text.
+    # same scope. Only the C++ code parts populate shape_env_sources, so we
+    # recover the Python operands from the lambda's own text.
     # A filter that drops SHAPE_ENV drops them too: the builder records
     # shape_code_parts on the save pass only, which runs over the kept guards.
     names = set(guards_state.output_graph.global_scope)
@@ -779,8 +778,7 @@ class AOTCompiledFunction:
             recorded_globals = _recorded_guard_globals(guards_state) - {builtins_key}
             # Dynamo's own __import_* aliases are not user globals: a rebuilt
             # scope carries every recorded one freshly imported, so a guard
-            # rooted at one resolves there and neither half of the warning the
-            # fallback path logs applies to it.
+            # rooted at one resolves there without a captured-global warning.
             aliases = set(self._artifacts.runtime_env.import_sources)
             self._has_global_guards = bool(recorded_globals - aliases)
             if guard_scope is not None:
