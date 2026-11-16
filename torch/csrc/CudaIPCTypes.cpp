@@ -151,6 +151,7 @@ CudaIPCSentData::CudaIPCSentData(
       counter_ptr_(counter_ptr),
       device_(device) {
   auto stream = c10::impl::VirtualGuardImpl(device_.type()).getStream(device_);
+#if !defined(USE_ROCM)
   // Backends may limit the number of live interprocess events, so fall back to
   // stream sync once TORCH_IPC_MAXIMUM_EVENTS_TO_USE is reached.
   if (cuda_ipc_global_entities.sync_events_used_.load() <
@@ -170,6 +171,13 @@ CudaIPCSentData::CudaIPCSentData(
     event_ = std::nullopt;
     event_sync_required_ = false;
   }
+#else
+  // ROCm uses stream sync instead of IPC events: re-opening the same IPC event
+  // handle in one process fails with hipErrorInvalidValue, and
+  // hipIpcOpenEventHandle fails after a few thousand shared tensors.
+  stream.synchronize();
+  event_sync_required_ = false;
+#endif
 }
 
 CudaIPCSentData::~CudaIPCSentData() {
@@ -177,6 +185,7 @@ CudaIPCSentData::~CudaIPCSentData() {
     original_ptr_.release_context();
   }
   ReturnRefCounter(handle_, offset_);
+#if !defined(USE_ROCM)
   try {
     if (event_sync_required_) {
       event_.reset();
@@ -188,6 +197,7 @@ CudaIPCSentData::~CudaIPCSentData() {
     // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) { /* No throw */
   }
+#endif
 }
 
 uint64_t CudaIPCSentData::counter_value() {
