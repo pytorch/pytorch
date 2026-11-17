@@ -13,15 +13,18 @@ namespace c10::xpu {
  * can execute. Currently, there are several pools per device to manage SYCL
  * queue, and a device's pool is lazily created.
  *
- * There are two pools per device. The first pool contains "normal priority"
- * queues. The second pool is the "high priority" queues. There are 32 queues in
- * per pool per device, and when a queue is requested one of these queues is
- * returned round-robin. That is, the first queue requested is at index 0, the
- * second at index 1... to index 31, then index 0 again.
+ * There are three pools per device, one for each priority: "low", "normal" and
+ * "high", see Note [XPU Stream priorities]. Each pool holds 32 in-order queues.
+ * When a queue is requested from a pool, one of its queues is returned
+ * round-robin. That is, the first queue requested is at index 0, the second at
+ * index 1... to index 31, then index 0 again.
  *
- * This means that if 33 queues are requested, the first and last queues
- * requested are actually the same queue (under the covers) and kernels enqueued
- * on them cannot run concurrently.
+ * This means that if 33 queues of the same priority are requested, the first
+ * and last queues requested are actually the same queue (under the covers) and
+ * kernels enqueued on them cannot run concurrently.
+ *
+ * The default current queue of each device is the last queue (index 31) of the
+ * "normal priority" pool.
  *
  * It is safe to enqueue a kernel on the same queue from two different
  * threads as the SYCL specification described.
@@ -103,7 +106,7 @@ class C10_XPU_API XPUStream {
   void synchronize() const {
     queue().wait_and_throw();
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_stream_synchronization(
           c10::kXPU, reinterpret_cast<uintptr_t>(&queue()));
     }
