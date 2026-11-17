@@ -917,7 +917,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             fake_tensor.fake_device = torch.device("cuda")
             self.assertEqual(fake_tensor.fake_device, torch.device("cuda:0"))
 
-    @fake_tensor_test()
     def test_convert_fake_to_real(self):
         x = torch.ones([20])
         with FakeTensorMode(allow_non_fake_inputs=True) as m:
@@ -927,7 +926,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         self.assertEqual(torch.ones([10]), out[0])
 
-    @fake_tensor_test()
     def test_conv_nhwc(self):
         x = torch.randn([1, 1024, 16, 16]).to(memory_format=torch.channels_last)
         w = torch.randn([256, 1024, 4, 4]).to(memory_format=torch.channels_last)
