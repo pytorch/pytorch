@@ -66,7 +66,6 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
 
 RawTensorMetadata::RawTensorMetadata(const at::Tensor& t, bool with_weak_ref)
     : RawTensorMetadataBase(t),
-      impl_{t.unsafeGetTensorImpl()},
       weak_self_{with_weak_ref ? WeakTensor(t) : WeakTensor()},
       device_type_{t.device().type()},
       device_index_{t.device().index()} {}
@@ -77,7 +76,6 @@ TensorMetadata::TensorMetadata(
     std::vector<int64_t> strides)
     // NOLINTNEXTLINE(cppcoreguidelines-slicing)
     : RawTensorMetadataBase(r),
-      impl_{r.impl_},
       weak_self_{r.weak_self_},
       device_{r.device_type_, r.device_index_},
       sizes_{std::move(sizes)},
