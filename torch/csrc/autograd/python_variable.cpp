@@ -428,7 +428,7 @@ static PyObject* THPVariable_WrapWithType(
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPVariableClass);
     if (desired_type) {
       type = *desired_type;
-    } else if (C10_UNLIKELY(var.device().type() == c10::kXLA)) {
+    } else if (var.device().type() == c10::kXLA) [[unlikely]] {
       if (auto clazz = getPythonTensorClass(var.device())) {
         type = reinterpret_cast<PyTypeObject*>(clazz);
       }

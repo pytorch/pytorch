@@ -383,11 +383,14 @@ class UserKernelHOPInfo:
     mutation: UserKernelWrapperHOP
     functional: UserKernelWrapperHOP
     # (hop_kwargs, kernel_kwargs) -> names of the kernel kwargs the kernel writes.
-    # Inductor's propagate_mutation passes the mutation HOP's kwargs as lowered
-    # (each FX node replaced by its lowered value, e.g. an IR node for a tensor, in
-    # "kwargs" too) and that node's "kwargs" with each FX node replaced by its meta
-    # value. Read only the DSL's own arguments (e.g. kernel_idx) from hop_kwargs,
-    # and the kernel's arguments from kernel_kwargs.
+    # It may name a kwarg that the kernel only reads, but must not omit one that it
+    # writes: Inductor's layout constraints would let that kwarg share a buffer with
+    # another argument. Inductor (propagate_mutation and the layout constraints)
+    # passes the mutation HOP's kwargs as lowered (each FX node replaced by its
+    # lowered value, e.g. an IR node for a tensor, in "kwargs" too) and that node's
+    # "kwargs" with each FX node replaced by its fake value (from its meta value, or
+    # its eager_input_vals). Read only the DSL's own arguments (e.g. kernel_idx) from
+    # hop_kwargs, and the kernel's arguments from kernel_kwargs.
     get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
     # HOP kwargs -> kernel name, for the reinplacing pass's log.
     get_kernel_name: Callable[[Mapping[str, Any]], str]
