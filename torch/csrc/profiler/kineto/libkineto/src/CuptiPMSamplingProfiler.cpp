@@ -185,6 +185,9 @@ std::unique_ptr<libkineto::IActivityProfilerSession> CuptiPMSamplingProfiler::
     configure(
         const std::set<libkineto::ActivityType>& /*activityTypes*/,
         const libkineto::Config& config) {
+  if (!config.deviceTracingEnabled()) {
+    return nullptr;
+  }
   const auto& metricNames = config.performanceMetricNames();
   if (metricNames.empty()) {
     return nullptr;
