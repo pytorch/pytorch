@@ -2517,7 +2517,7 @@ def infer_size(
             guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
-            f"at non-singleton dimension {i})",
+            f"at non-singleton dimension {i}",
         )
         expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
     return tuple(expandedSizes)
@@ -2530,10 +2530,15 @@ def make_fast_binary_impl(
     def fast_binary_impl(
         mode: FakeTensorMode | CppFakeTensorMode, *args: Any, **kwargs: Any
     ) -> FakeTensorLike:
-        def slow(msg: str) -> FakeTensor:
+        def slow(msg: str) -> FakeTensorLike:
             count_label(f"slow {msg}")
             with mode:
                 return slow_ref(*args, **kwargs)
+
+        # Native dispatch already tries the binary fast path. Its Python
+        # fallback should not repeat the same shape and layout checks.
+        if isinstance(mode, CppFakeTensorMode):
+            return slow("native fast path fallback")
 
         count_label("attempt fast")
 
