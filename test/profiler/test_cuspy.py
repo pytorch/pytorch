@@ -4437,17 +4437,19 @@ cuspy_core.enable_hes_early()
             print("OK")
             """
         )
-        # Run parity once with HES off and, on SM100+, once with it on. The HES child
-        # self-skips via SKIP_HES when hardware events are unavailable. Each child
+        # Run parity once with HES off and once with it on, except for the CUDA 13.5
+        # workaround below. The HES child self-skips via SKIP_HES when hardware
+        # events are unavailable. Each child
         # prints its Cuspy metadata after RESULT; the HES-on Cuspy must match the
         # HES-off Cuspy (which already matched stock above).
         import json
 
         captured = {}
-        # Run HES only on SM100+; on L4, the unsupported-HES fallback
-        # raises CUPTI_ERROR_NOT_COMPATIBLE.
+        # On CUDA 13.5 builds, skip HES on pre-SM100 GPUs (e.g. L4):
+        # the unsupported-HES fallback raises CUPTI_ERROR_NOT_COMPATIBLE.
         # Tracking: https://github.com/pytorch/pytorch/issues/204831
-        for hes in (False, True) if SM100OrLater else (False,):
+        skip_hes = torch.version.cuda == "13.5" and not SM100OrLater
+        for hes in (False,) if skip_hes else (False, True):
             env = dict(os.environ)
             if hes:
                 env["PARITY_HES"] = "1"
