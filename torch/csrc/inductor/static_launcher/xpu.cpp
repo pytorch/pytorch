@@ -20,8 +20,10 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/Context.h>
+#include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
@@ -382,6 +384,25 @@ std::unique_ptr<LoadedKernel> loadKernel(
     uint32_t sharedMemBytes,
     uint32_t& nSpills,
     int device_idx) {
+  const auto deviceCount = static_cast<int>(c10::xpu::device_count());
+  // Check the full int; narrowing DeviceIndex (int8_t) would wrap 256 to 0.
+  TORCH_CHECK(
+      device_idx >= 0 && device_idx < deviceCount,
+      "The device index is out of range. It must be in [0, ",
+      deviceCount,
+      "), but got ",
+      device_idx,
+      ".");
+  const auto slmLimit =
+      at::xpu::getDeviceLocalMemSize(static_cast<c10::DeviceIndex>(device_idx));
+  // Launching with more SLM than the device has hangs the GPU. Raise OOM so
+  // autotune drops the config. Follow ROCm's inclusive bound, since
+  // local_mem_size is the inclusive maximum.
+  if (sharedMemBytes > slmLimit) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName, sharedMemBytes, slmLimit);
+  }
+
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
