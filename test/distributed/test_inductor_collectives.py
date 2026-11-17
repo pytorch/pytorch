@@ -1831,7 +1831,9 @@ class TestCollectivesInductorGeneric(torch._dynamo.test_case.TestCase):
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
         with mock.patch.object(
-            c10d, "_resolve_group_name_by_ranks_and_tag", return_value="meta_test_group"
+            c10d.distributed_c10d,
+            "_resolve_group_name_by_ranks_and_tag",
+            return_value="meta_test_group",
         ):
             out = torch.ops.c10d_functional.all_reduce(
                 x, "sum", tag="", ranks=[0], group_size=1
