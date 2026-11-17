@@ -392,6 +392,7 @@ class InductorMeta(typing.TypedDict, total=False):
     kernel_name: str
     mutated_arg_names: typing.Any
     optimize_mem: bool
+    tuning_list: dict[str, typing.Any]
 
     # Injected at runtime (CachingAutotuner, reduction heuristics, combo kernels)
     warp_size: int | None

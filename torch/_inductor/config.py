@@ -3508,6 +3508,13 @@ class lookup_table:
     check_src_hash: bool = True
 
 
+class tuning_list:
+    # Extra Triton configs for pointwise and (persistent) reduction kernels, keyed
+    # "[<device>+]<category>/<len(size_hints)>", e.g. "gfx950+pointwise/1"; values are
+    # {"configs": [...], "mode": "append" | "replace"}. See tuning_list/README.md.
+    table: dict[str, dict[str, Any]] | None = None
+
+
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
