@@ -8,8 +8,8 @@
 // or returns false to fall through to the stock impl. The stub signature is the
 // op's structured impl signature, and the path is gated on
 // at::globalContext().allowNativeAot().
-// Unstructured functional hooks run before the backend implementation and assign
-// their allocated outputs to a trailing aot_result reference.
+// Unstructured hooks run before the backend, filling aot_result or mutating self.
+// Inplace hooks return the self alias; functional hooks allocate fresh outputs.
 //
 // No kernel is registered here. The AOT kernels are built separately from the same
 // declarations by tools/native_aot, linked into libtorch_cuda, and registered with
@@ -19,6 +19,7 @@
 // drags in the generated TensorBody.h, rebuilding every includer on any
 // native_functions.yaml change.
 #include <ATen/core/TensorBase.h>
+#include <ATen/core/Generator.h>
 #include <ATen/native/DispatchStub.h>
 
 namespace at::native {

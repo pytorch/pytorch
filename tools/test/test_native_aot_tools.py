@@ -1704,7 +1704,7 @@ class TestFunctionalIntrospection(unittest.TestCase):
                 manifest = NativeAotManifest(
                     op=op, dispatch_key=DispatchKey.CUDA, structured=False
                 )
-                with self.assertRaisesRegex(RuntimeError, "returning fresh tensors"):
+                with self.assertRaisesRegex(RuntimeError, "fresh Tensor returns"):
                     validate_native_aot_manifests(
                         {(DispatchKey.CUDA, op): manifest}, grouped
                     )

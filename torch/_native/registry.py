@@ -2,7 +2,8 @@ import logging
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import ParamSpec, TypeVar
+from functools import cache
+from typing import Any, ParamSpec, TypeVar
 
 import torch.library
 
@@ -214,8 +215,8 @@ _native_decomp_overrides: dict[object, Callable] = {}
 _router_active = threading.local()
 
 
-def _has_cow_tensor(*args, **kwargs) -> bool:
-    def is_cow_tensor(arg) -> bool:
+def _has_cow_tensor(*args: Any, **kwargs: Any) -> bool:
+    def is_cow_tensor(arg: Any) -> bool:
         if isinstance(arg, torch.Tensor):
             return torch._C._is_cow_tensor(arg)  # pyrefly: ignore[missing-attribute]
         if isinstance(arg, (list, tuple)):
@@ -427,6 +428,175 @@ def _schema_tail(lib_symbol: str, op_symbol: str) -> str:
     _, rest = s.split("::", 1)
     _, args = rest.split("(", 1)
     return f"({args}"
+
+
+def _same_dtype_kind(a: torch.dtype, b: torch.dtype) -> bool:
+    def kind(d: torch.dtype) -> int:
+        if d == torch.bool:
+            return 0
+        if d.is_complex:
+            return 3
+        return 2 if d.is_floating_point else 1
+
+    return kind(a) == kind(b)
+
+
+_ScalarResult = TypeVar("_ScalarResult")
+
+
+def _cast_to_weak_dtype(
+    out: _ScalarResult, cast_dtype: torch.dtype | None
+) -> _ScalarResult | torch.Tensor:
+    r"""Restore weak promotion without changing the output's numeric kind."""
+    if (
+        cast_dtype is not None
+        and isinstance(out, torch.Tensor)
+        and out.dtype != cast_dtype
+        and _same_dtype_kind(out.dtype, cast_dtype)
+    ):
+        return out.to(cast_dtype)
+    return out
+
+
+# Cache dtype compatibility to avoid repeated tensor allocations.
+@cache
+def _promotes_with(a: torch.dtype, b: torch.dtype) -> bool:
+    try:
+        torch.result_type(torch.empty((), dtype=a), torch.empty((), dtype=b))
+    except RuntimeError:
+        return False
+    return True
+
+
+_NATURAL_SCALAR_DTYPE: dict[type, torch.dtype] = {
+    bool: torch.bool,
+    int: torch.int64,
+    float: torch.float64,
+    complex: torch.complex128,
+}
+
+
+def _weak_wrap(
+    num: bool | int | float | complex,
+    tensor_dtypes: list[torch.dtype],
+    cast_dtype: torch.dtype,
+    compute_dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    r"""Preserve scalar values, using an explicit floating computation dtype when needed."""
+    dtype = _NATURAL_SCALAR_DTYPE[type(num)]
+    if isinstance(num, int) and num > 2**63 - 1:
+        dtype = torch.uint64
+    if compute_dtype is not None and isinstance(num, (float, complex)):
+        if _same_dtype_kind(dtype, compute_dtype):
+            dtype = compute_dtype
+    nat = torch.as_tensor(num, dtype=dtype, device="cpu")
+    if all(_promotes_with(nat.dtype, dt) for dt in tensor_dtypes):
+        return nat
+    narrowed = nat.to(cast_dtype)
+    return narrowed if narrowed.to(nat.dtype).equal(nat) else nat
+
+
+_WEAK_SCALAR_OPS: frozenset[str] = frozenset(
+    f"aten::{name}"
+    for name in [
+        "add",
+        "sub",
+        "rsub",
+        "mul",
+        "div",
+        "remainder",
+        "fmod",
+        "pow",
+        "maximum",
+        "minimum",
+        "fmax",
+        "fmin",
+        "clamp_min",
+        "clamp_max",
+        "atan2",
+        "copysign",
+        "hypot",
+        "logaddexp",
+        "xlogy",
+        "eq",
+        "ne",
+        "gt",
+        "ge",
+        "lt",
+        "le",
+        "bitwise_and",
+        "bitwise_or",
+        "bitwise_xor",
+        "bitwise_left_shift",
+        "bitwise_right_shift",
+        "logical_and",
+        "logical_or",
+        "logical_xor",
+    ]
+)
+_CoercedScalars = tuple[tuple[Any, ...], torch.dtype | None] | None
+
+
+def _scalar_arg_coercer(
+    overload: "torch._ops.OpOverload | None",
+) -> Callable[[tuple[Any, ...]], _CoercedScalars] | None:
+    r"""Wrap known pointwise scalars; unknown promotion policies require native dispatch."""
+    if overload is None:
+        return None
+    tensor_slots = [
+        i
+        for i, a in enumerate(overload._schema.arguments)
+        if str(a.type) in ("Tensor", "Tensor?")
+    ]
+    if not tensor_slots:
+        return None
+
+    def coerce(args: tuple[Any, ...]) -> _CoercedScalars:
+        scalar_slots = [
+            i
+            for i in tensor_slots
+            if i < len(args) and isinstance(args[i], (bool, int, float, complex))
+        ]
+        if not scalar_slots:
+            return args, None
+        if overload._schema.name.removesuffix("_") not in _WEAK_SCALAR_OPS:
+            return None
+        operands = [
+            a for a in args if isinstance(a, (torch.Tensor, bool, int, float, complex))
+        ]
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND,
+            get_computation_dtype,
+        )
+
+        _, cast_dtype = elementwise_dtypes(
+            *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        )
+        tensor_dtypes = [a.dtype for a in operands if isinstance(a, torch.Tensor)]
+        compute_dtype = None
+        if overload._schema.name not in (
+            "aten::div",
+            "aten::div_",
+        ):
+            compute_dtype = get_computation_dtype(cast_dtype)
+        out = list(args)
+        for i in scalar_slots:
+            out[i] = _weak_wrap(args[i], tensor_dtypes, cast_dtype, compute_dtype)
+        if compute_dtype is None:
+            _, wrapped_dtype = elementwise_dtypes(
+                *(
+                    a
+                    for a in out
+                    if isinstance(a, (torch.Tensor, bool, int, float, complex))
+                ),
+                type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+            )
+            if wrapped_dtype != cast_dtype:
+                return None
+        return tuple(out), cast_dtype
+
+    return coerce
 
 
 def _define_native_op_once(name: str, lib_symbol: str, op_symbol: str) -> None:
@@ -979,16 +1149,7 @@ def _register_overrides_from_graph(
     *,
     filter_state: _FilterState | None = None,
 ) -> None:
-    """
-    Register all overrides in a single graph.
-
-    Args:
-        lib_symbol: The namespace of the overridden op
-        op_symbol: The operation symbol
-        dispatch_key: The dispatch key
-        graph: List of override nodes to register
-        filter_state: Optional filter state for conditional registration
-    """
+    r"""Install enabled override nodes for one namespace, operator and backend graph."""
     lib = _get_or_create_library(dispatch_key)
 
     cond_impl: list[tuple[_OpCondFn, str, _OpRuntimeInitFn | None]] = []
@@ -1010,10 +1171,7 @@ def _register_overrides_from_graph(
 
     overload = _resolve_overload(lib_symbol, op_symbol)
 
-    # Tear down any existing override so either (a) the op cleanly reverts to
-    # its original kernel (empty cond_impl), or (b) the subsequent `get_kernel`
-    # call returns that kernel rather than a stale previously-installed
-    # router.
+    # Remove stale routers before capturing the original backend kernel.
     _destroy_override(lib_symbol, op_symbol, dispatch_key)
 
     # If no active conds remain for this (op, key), leave the native op
@@ -1023,54 +1181,31 @@ def _register_overrides_from_graph(
             _native_decomp_overrides.pop(overload, None)
         return
 
-    # Capture the prior kernel at this (op, dispatch_key) *before* we install
-    # our override. The fallback path calls it via `call_boxed`, which
-    # re-enters the dispatcher with the original kernel handle -- bypassing
-    # our just-registered router and avoiding the recursion that would
-    # otherwise appear in aten's backward formulas (e.g. bmm's backward
-    # calls bmm, which would route back to us).
-    #
-    # An op missing from the dispatcher has already failed by this point:
-    # `_register_node_impl` above needs its schema. That is what a namespace
-    # whose defining module was never imported trips on.
+    # Capture the backend handle so fallback calls bypass this router.
     fallback_kernel = torch.library.get_kernel(
         f"{lib_symbol}::{op_symbol}", dispatch_key
     )
+    # Candidate overrides receive ordinary CPU tensors for Python scalar inputs.
+    _coerce_scalars = _scalar_arg_coercer(overload)
 
-    # Build the router closures. Both share a first-match-wins loop over
-    # `cond_impl`; they differ in
-    #   (a) whether cond exceptions fail loudly or silently,
-    #   (b) whether a matching candidate initializes its runtime, and
-    #   (c) what to do when no candidate matches.
-    #
-    # Eager routers run on real tensors where cond exceptions indicate a
-    # genuine bug. A failed runtime initialization declines that candidate so
-    # routing can continue; no match falls back to the captured original kernel.
-    #
-    # Compile/export routers run under FakeTensor where some predicates are
-    # undefined (e.g. _is_cow_tensor), so we swallow cond exceptions and treat
-    # them as non-matches. They skip eager runtime initialization, and on no
-    # match return NotImplemented so Inductor can use its default lowering
-    # rather than recursing.
-    _NO_MATCH = object()  # sentinel; impl return values of None would be valid outputs
+    # Eager routing propagates predicate errors and initializes matching runtimes.
+    # Compile routing skips predicate errors and eager runtime initialization.
+    _NO_MATCH = object()  # None can be a valid kernel result.
 
-    # Calls served by an AOT kernel embedded in the aten implementation must decline
-    # the JIT route, because the router's no-match fallback lands in that kernel.
-    # Checked here, once per call, rather than per cond; applies to unconditional
-    # overrides too. None when the op has no AOT declaration, so those pay nothing.
+    # Decline JIT when the captured backend kernel can serve native AOT.
     from . import aot_manifest
 
     coverage = aot_manifest.get_coverage(op_symbol, dispatch_key)
 
     def _dispatch(
-        args,
-        kwargs,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
         *,
         swallow_cond_exceptions: bool,
         initialize_runtime: bool,
-    ):
+    ) -> Any:
         # covers() degrades exceptions to "uncovered", so this is safe on FakeTensors.
-        if coverage is not None and coverage.covers(args, kwargs):
+        if coverage is not None and coverage.covers(args, kwargs, op_symbol=op_symbol):
             return _NO_MATCH
         for cond, impl_name, try_initialize_runtime in cond_impl:
             try:
@@ -1091,38 +1226,14 @@ def _register_overrides_from_graph(
         return _NO_MATCH
 
     def eager_router(
-        keyset, *args, _fallback=fallback_kernel, _orig_overload=overload, **kwargs
-    ):
-        """Boxed eager kernel: divert to the original op while Dynamo traces,
-        else dispatch.
-
-        The shortcut is only safe while Dynamo is actively tracing this
-        Python router. The broader compile-session flag can be true when this
-        router executes eagerly; redispatching to the original op there would
-        re-enter us.
-
-        `is_dynamo_compiling()` cannot tell those apart on its own: it is not a
-        runtime flag but `return False`, which Dynamo folds to a True constant
-        at trace time (tracing_state_functions in _dynamo/variables/torch.py).
-        A frame carrying that folded constant can still execute eagerly -- then
-        `_orig_overload(...)` re-enters the dispatcher from the top, lands back
-        in this router, and recurses until RecursionError. Reproduced by OpInfo
-        test_out_warning_scatter_add under PYTORCH_TEST_WITH_INDUCTOR once a
-        native override is installed for the op.
-
-        `_router_active` breaks that cycle: the outer call takes the shortcut
-        (so real tracing still records the plain original op and avoids the
-        graph breaks of #186354), and a re-entrant call falls through to normal
-        eager dispatch below. Deliberately narrow -- the trace-time behavior the
-        flag exists for is unchanged, since under tracing the overload call does
-        not come back here.
-
-        COW state is guarded by Dynamo's _is_cow_tensor handler but is not
-        modeled in the compiled graph. If a COW input reaches this router, keep
-        the existing eager path so COW-preserving fallback semantics are
-        maintained instead of compiling through the original op and
-        materializing it.
-        """
+        keyset: "torch._C.DispatchKeySet",
+        *args: Any,
+        _fallback: "torch._C._SafeKernelFunction" = fallback_kernel,
+        _orig_overload: "torch._ops.OpOverload | None" = overload,
+        **kwargs: Any,
+    ) -> Any:
+        r"""Redispatch to ATen while Dynamo traces; otherwise select an eager override.
+        Preserve COW inputs and bypass the shortcut on re-entrant calls."""
         if (
             torch.compiler.is_dynamo_compiling()
             and _orig_overload is not None
@@ -1135,6 +1246,20 @@ def _register_overrides_from_graph(
             finally:
                 _router_active.on = False
 
+        # Box Tensor-slot numbers while retaining weak result promotion.
+        original_args = args
+        cast_dtype = None
+        if _coerce_scalars is not None:
+            coerced = _coerce_scalars(args)
+            if coerced is None:
+                return _fallback.call_boxed(keyset, *original_args, **kwargs)
+            args, cast_dtype = coerced
+        if cast_dtype is not None and all(
+            not isinstance(arg, torch.Tensor) or arg.dim() == 0 for arg in original_args
+        ):
+            # Native scalar kernels retain the wrapped-number promotion tier.
+            return _fallback.call_boxed(keyset, *original_args, **kwargs)
+
         result = _dispatch(
             args,
             kwargs,
@@ -1142,10 +1267,12 @@ def _register_overrides_from_graph(
             initialize_runtime=True,
         )
         if result is _NO_MATCH:
-            return _fallback.call_boxed(keyset, *args, **kwargs)
-        return result
+            return _fallback.call_boxed(keyset, *original_args, **kwargs)
+        if _orig_overload is not None and _orig_overload._schema.is_mutable:
+            return result
+        return _cast_to_weak_dtype(result, cast_dtype)
 
-    def compile_router(*args, **kwargs):
+    def compile_router(*args: Any, **kwargs: Any) -> Any:
         result = _dispatch(
             args,
             kwargs,
@@ -1159,10 +1286,7 @@ def _register_overrides_from_graph(
     # Eager path: install a fresh override for this (lib, op, key).
     _install_override(lib_symbol, op_symbol, dispatch_key, eager_router)
 
-    # Compile / export path: record the router in our own decomp table.
-    # Callers opt in via `native_decomp_table()` -- we deliberately do NOT
-    # write into torch._inductor.decomposition.decompositions (see the
-    # comment on `_native_decomp_overrides` for why).
+    # Only callers using native_decomp_table() opt into this compile router.
     if overload is not None:
         _native_decomp_overrides[overload] = compile_router
 

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import types
 import unittest.mock as mock
+from typing import Any
 
 import torch
 from torch._native import aot_manifest
@@ -190,52 +191,46 @@ class TestGetCoverage(TestCase):
             self.assertIs(aot_manifest.get_coverage("fakeop.values", "CUDA"), base)
             self.assertIs(aot_manifest.get_coverage("fakeop_", "CUDA"), base)
 
-    def test_router_declines_covered_calls_once(self):
-        # With two registered override paths, a covered call must run covered_axes
-        # once and no cond at all, while an uncovered call runs the conds.
-        from torch._native import registry
+    def test_router_declines_covered_calls_once(self) -> None:
+        from test.python_native.test_registry import TestRegistryRuntime
 
+        runtime = TestRegistryRuntime("runTest")
+        runtime.setUp()
+        self.addCleanup(runtime.tearDown)
         with ManifestFixture():
-            cond_calls, axes_calls = [], []
+            cond_calls: list[int] = []
+            axes_calls: list[int] = []
             coverage = aot_manifest.get_coverage("fakeop", "CUDA")
             inner_axes = coverage._covered_axes
 
-            def counting_axes(*args, **kwargs):
+            def counting_axes(*args: Any, **kwargs: Any) -> dict[str, Any]:
                 axes_calls.append(1)
                 return inner_axes(*args, **kwargs)
 
             coverage._covered_axes = counting_axes
+            aot_manifest._load_coverage()[("topk", "CPU")] = coverage
 
-            def probe_cond(*args, **kwargs):
+            def probe_cond(*args: Any, **kwargs: Any) -> bool:
                 cond_calls.append(1)
                 return False
 
-            cond_impl = [(probe_cond, "a"), (probe_cond, "b")]
-            _NO_MATCH = object()
-
-            # Mirror of _register_overrides_from_graph._dispatch, which is a closure
-            # and so cannot be imported; keep the two in sync.
-            def dispatch(args, kwargs):
-                if coverage is not None and coverage.covers(args, kwargs):
-                    return _NO_MATCH
-                for cond, _impl in cond_impl:
-                    if cond(*args, **kwargs):
-                        return None
-                return _NO_MATCH
-
-            self.assertIs(dispatch((torch.empty(4, 1024), 8), {}), _NO_MATCH)
-            self.assertEqual(len(axes_calls), 1)
+            for index in range(2):
+                runtime.registry.register_op_override(
+                    f"coverage_count_{index}",
+                    "aten",
+                    "topk",
+                    "CPU",
+                    probe_cond,
+                    torch.topk,
+                    allow_multiple_override=True,
+                )
+            runtime._install("topk", "CPU")
+            torch.topk(torch.empty(4, 1024), 8)
+            self.assertEqual(axes_calls, [1])
             self.assertEqual(cond_calls, [])
-            dispatch((torch.empty(4, 512), 8), {})
-            self.assertEqual(len(cond_calls), 2)
-
-        # And the real router must reference get_coverage, in case the check above
-        # keeps passing after registry._dispatch drops it.
-        import inspect
-
-        src = inspect.getsource(registry._register_overrides_from_graph)
-        self.assertIn("get_coverage", src)
-        self.assertIn("coverage.covers(args, kwargs)", src)
+            torch.topk(torch.empty(4, 512), 8)
+            self.assertEqual(axes_calls, [1, 1])
+            self.assertEqual(cond_calls, [1, 1])
 
 
 class TestEmbeddedCoverage(TestCase):
