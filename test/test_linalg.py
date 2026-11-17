@@ -5411,10 +5411,11 @@ class TestLinalg(TestCase):
         # y is not expanded to the batch shape of x
         for size_x, size_y in (((2, 3, 4, 5, 6), (2, 3, 1, 6, 7)), ((6, 3, 1, 5), (3, 5, 4))):
             self.assertNotIn("aten::expand", matmul_ops(torch.randn(size_x, device=device), torch.randn(size_y, device=device)))
-        # Not folded, as that would copy the output or x while expanding y is a view
+        # Not folded, as expanding y is a view
         y = torch.randn(1, 5, 3, device=device)
-        self.assertNotIn("aten::clone", matmul_ops(torch.randn(6, 4, 1, 5, device=device), y.expand(4, 5, 3)))
-        self.assertNotIn("aten::clone", matmul_ops(torch.randn(1, 1, 5, device=device).expand(6, 1, 5), y))
+        self.assertIn("aten::expand", matmul_ops(torch.randn(6, 4, 1, 5, device=device), y.expand(4, 5, 3)))
+        self.assertIn("aten::expand", matmul_ops(torch.randn(1, 1, 5, device=device).expand(6, 1, 5), y))
+        self.assertIn("aten::expand", matmul_ops(torch.randn(1, 4, 8, 16, device=device), torch.randn(1, 1, 16, 8, device=device)))
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):

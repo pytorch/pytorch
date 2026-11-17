@@ -2007,9 +2007,10 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
       .has_value();
 }
 
-// tensor1: (*b1, n, m) and tensor2: (*b2, m, p) where b2 broadcasts to b1. Rather than
-// expanding tensor2 to b1, which copies it, fold the batch dims where tensor2 has size 1
-// into the rows of tensor1. For example, q (b, h, g, s, d) @ kT (b, h, 1, d, t) becomes
+// tensor1: (*b1, n, m) and tensor2: (*b2, m, p) where b2 broadcasts to b1. Expanding
+// tensor2 to b1 copies it when its expanded batch dims cannot be merged into one. In that
+// case, fold the batch dims where tensor2 has size 1 into the rows of tensor1 instead.
+// For example, q (b, h, g, s, d) @ kT (b, h, 1, d, t) becomes
 // q.view(b * h, g * s, d).bmm(kT.view(b * h, d, t)) without copying either input.
 // Returns nullopt when this does not apply or is not clearly cheaper.
 static std::optional<Tensor> matmul_fold_broadcast_batch(
@@ -2041,7 +2042,31 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     return std::nullopt;
   }
 
+  c10::SymInt keep_numel = 1;
+  for (const auto i : keep) {
+    keep_numel *= sizes1[i];
+  }
+  c10::SymInt fold_numel = 1;
+  for (const auto i : fold) {
+    fold_numel *= sizes1[i];
+  }
   const auto& n = sizes1[nb];
+  const auto& m = sizes2[tensor2.dim() - 2];
+  const auto& p = sizes2.back();
+  // If expanding tensor2 does not copy it, keep the existing path
+  c10::SymDimVector expanded_sizes2(sizes1.begin(), sizes1.end() - 2);
+  expanded_sizes2.append({m, p});
+  c10::SymDimVector expanded_strides2(nb, c10::SymInt(0));
+  for (const auto i : keep) {
+    expanded_strides2[i] = tensor2.sym_stride(i - offset);
+  }
+  expanded_strides2.append({tensor2.sym_stride(-2), tensor2.sym_stride(-1)});
+  const c10::SymDimVector bmm_shape2{keep_numel * fold_numel, m, p};
+  if (at::detail::computeStride(expanded_sizes2, expanded_strides2, bmm_shape2)
+          .has_value()) {
+    return std::nullopt;
+  }
+
   std::vector<int64_t> perm(keep);
   perm.insert(perm.end(), fold.begin(), fold.end());
   perm.push_back(nb);
@@ -2070,14 +2095,6 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     }
   }
 
-  c10::SymInt keep_numel = 1;
-  for (const auto i : keep) {
-    keep_numel *= sizes1[i];
-  }
-  c10::SymInt fold_numel = 1;
-  for (const auto i : fold) {
-    fold_numel *= sizes1[i];
-  }
   const auto t1 = tensor1.permute(perm);
   const c10::SymDimVector t1_shape{keep_numel, fold_numel * n, sizes1.back()};
   const auto t1_strides =
@@ -2089,9 +2106,8 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     return std::nullopt;
   }
 
-  const auto& p = sizes2.back();
   const auto out = t1.view_symint(t1_shape).bmm(
-      tensor2.reshape_symint({keep_numel, sizes2[tensor2.dim() - 2], p}));
+      tensor2.reshape_symint({keep_numel, m, p}));
   if (in_order) {
     c10::SymDimVector output_shape(sizes1.begin(), sizes1.end() - 1);
     output_shape.push_back(p);

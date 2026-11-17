@@ -232,6 +232,29 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     check_train=False,
                 )
 
+    def _test_sdpa_rewriter_1_broadcast_kv(self):
+        # key and value broadcast over the batch dims of query, so the matmul
+        # decomposition expands them without a copy and the pattern still matches
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .div(math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        for q_shape in ((1, 4, 16, 32), (2, 4, 16, 32)):
+            args = (
+                torch.randn(q_shape, device=self.device),
+                torch.randn((1, 1, 16, 32), device=self.device),
+                torch.randn((1, 1, 16, 32), device=self.device),
+            )
+            self._check_common(
+                dot_prod_attention, args1=args, contains=False, check_train=False
+            )
+
     def _test_insignificant_strides(self):
         f32 = torch.float32
 
@@ -2566,6 +2589,9 @@ if RUN_CPU:
         hw_classification = HardwareClassification.CPU
         device = "cpu"
         test_sdpa_rewriter_1_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
+        test_sdpa_rewriter_1_broadcast_kv_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1_broadcast_kv
+        )
         test_pattern_fails_with_reuse_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_reuse
         )

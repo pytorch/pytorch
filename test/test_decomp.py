@@ -1275,21 +1275,34 @@ class DecompOneOffTests(TestCase):
         # https://github.com/pytorch/pytorch/issues/154128
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        for size_x, size_y, num_clones in (
-            ((2, 3, 4, 5, 6), (2, 3, 1, 6, 7), 0),
-            ((1, 3, 4, 1, 6), (1, 3, 1, 6, 7), 0),
-            ((6, 3, 1, 5), (3, 5, 4), 1),
+        # y is folded into the rows of x only when expanding y would copy it
+        for size_x, size_y, folded, num_clones in (
+            ((2, 3, 4, 5, 6), (2, 3, 1, 6, 7), True, 0),
+            ((1, 3, 4, 1, 6), (1, 3, 1, 6, 7), True, 0),
+            ((6, 3, 1, 5), (3, 5, 4), True, 1),
+            ((1, 4, 8, 16), (1, 1, 16, 8), False, 0),
+            ((2, 4, 8, 16), (1, 1, 16, 8), False, 0),
         ):
             x = torch.randn(size_x, device=device)
             y = torch.randn(size_y, device=device)
+            expected = x @ y.expand(*size_x[:-2], *size_y[-2:]).contiguous()
             for tracing_mode in ("real", "symbolic"):
                 with enable_python_dispatcher():
                     gm = make_fx(torch.matmul, tracing_mode=tracing_mode)(x, y)
                 targets = [node.target for node in gm.graph.nodes]
-                self.assertNotIn(torch.ops.aten.expand.default, targets)
+                self.assertEqual(torch.ops.aten.expand.default not in targets, folded)
                 clones = targets.count(torch.ops.aten.clone.default)
                 self.assertEqual(clones, num_clones)
-                self.assertEqual(gm(x, y), torch.matmul(x, y))
+                self.assertEqual(gm(x, y), expected)
+
+        # Same for a matrix y and an x that should_fold does not fold into a matrix
+        x = torch.randn(4, 8, 12, device=device)[..., :6]
+        y = torch.randn(6, 5, device=device)
+        with enable_python_dispatcher():
+            gm = make_fx(torch.matmul)(x, y)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(torch.ops.aten.expand.default, targets)
+        self.assertEqual(gm(x, y), x.contiguous() @ y)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef

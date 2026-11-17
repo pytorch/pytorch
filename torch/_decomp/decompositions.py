@@ -5363,23 +5363,32 @@ def _matmul_fold_broadcast_batch(
 
     n, m1 = sizes1[-2:]
     m2, p = tensor2.shape[-2:]
+    keep_sizes = [sizes1[i] for i in keep]
+    fold_sizes = [sizes1[i] for i in fold]
+    # If expanding tensor2 does not copy it, keep the existing path
+    sizes2 = [*sizes1[:-2], m2, p]
+    strides2 = [0] * nb + list(tensor2.stride()[-2:])
+    for i in keep:
+        strides2[i] = tensor2.stride(i - offset)
+    bmm_shape2 = [prod(keep_sizes) * prod(fold_sizes), m2, p]
+    if _compute_stride(sizes2, strides2, bmm_shape2, size_oblivious=True) is not None:
+        return None
+
     perm = keep + fold + [nb, nb + 1]
     non_unit = [i for i in perm if not guard_or_false(sizes1[i] == 1)]
     in_order = non_unit == sorted(non_unit)
     # Putting the result back in order copies it. That only costs less than expanding
     # tensor2 for vector rows (n == 1) with m, p > 1, if tensor2 is not already expanded
     if not in_order:
-        strides2 = [tensor2.stride(i - offset) for i in keep if i in non_unit]
+        keep_strides2 = [tensor2.stride(i - offset) for i in keep if i in non_unit]
         if not (
             guard_or_false(n == 1)
             and guard_or_false(m1 > 1)
             and guard_or_false(p > 1)
-            and all(guard_or_false(s != 0) for s in strides2)
+            and all(guard_or_false(s != 0) for s in keep_strides2)
         ):
             return None
 
-    keep_sizes = [sizes1[i] for i in keep]
-    fold_sizes = [sizes1[i] for i in fold]
     t1 = tensor1.permute(perm)
     t1_shape = [prod(keep_sizes), prod(fold_sizes) * n, m1]
     t1_stride = _compute_stride(t1.shape, t1.stride(), t1_shape, size_oblivious=True)
