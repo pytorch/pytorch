@@ -375,8 +375,12 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         ).to_remote_buffer()
         check = _Engine.transfer_check_status
         stuck = {1, 2, 3}
+        orders = []
 
         def check_unless_stuck(engine, batch_id):
+            if batch_id == 3 and not orders:
+                with first._poll_cv:
+                    orders.append(list(first._batches))
             return 0 if batch_id in stuck else check(engine, batch_id)
 
         with (
@@ -393,6 +397,8 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             for work in works[3:]:
                 work.wait(timedelta(seconds=5))
             self.assertFalse(any(w.is_completed() for w in works[:3]))
+            # The first sweep checked only 1 and 2 and moved them to the back.
+            self.assertEqual(orders, [[3, 4, 5, 1, 2]])
             stuck.clear()
             for work in works[:3]:
                 work.wait(timedelta(seconds=5))
