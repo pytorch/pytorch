@@ -1101,8 +1101,9 @@ void fakeFallback(
 
   bool has_mode_fakes = false;
   bool has_python_inputs = false;
-  const bool symbolic_sizes = std::any_of(
-      stack->end() - num_arguments, stack->end(), [&](const auto& value) {
+  const auto inputs = torch::jit::last(*stack, num_arguments);
+  const bool symbolic_sizes =
+      std::any_of(inputs.begin(), inputs.end(), [&](const auto& value) {
         return has_symbolic_sizes(value, mode);
       });
   for_each_tensor(
@@ -1131,8 +1132,8 @@ void fakeFallback(
       schema.name() == "aten::_to_copy" && schema.overload_name().empty();
   const auto avoiding_device_init = [&] {
     if (is_to_copy) {
-      const auto& device =
-          (*stack)[arguments_begin + *schema.argumentIndexWithName("device")];
+      const auto device_index = schema.argumentIndexWithName("device").value();
+      const auto& device = (*stack)[arguments_begin + device_index];
       return device.isDevice() && !device.toDevice().is_cpu() &&
           mode->avoid_device_init_;
     }
