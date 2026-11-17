@@ -203,6 +203,19 @@ class TestDecompSharding(TestCase):
         out = aten.polar.default(x, y)
         self.assertEqual(out.placements, (Partial(),))
 
+    def test_assert_async(self):
+        """assert ops have no output to propagate but must not raise either:
+        they turn up inside other ops' decompositions, which we trace to derive
+        a sharding strategy for the enclosing op."""
+        aten = torch.ops.aten
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = distribute_tensor(torch.full((16,), 0.5), mesh, [Shard(0)])
+
+        msg = "x must be non-negative"
+        aten._assert_async.msg(torch.all(x >= 0), msg)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            aten._assert_async.msg(torch.all(x < 0), msg)
+
     def test_roll_flip_strategies(self):
         """roll and flip unshard on active dims, keep sharding on others."""
         from torch.distributed.tensor import empty as d_empty

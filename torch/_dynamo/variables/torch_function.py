@@ -44,7 +44,6 @@ from torch.utils._device import DeviceContext
 
 from .. import graph_break_hints
 from ..exc import unimplemented
-from ..guards import GuardBuilder, install_guard
 from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
 from ..utils import (
@@ -61,7 +60,7 @@ from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
-from .tensor import TensorSubclassVariable, TensorVariable
+from .tensor import TensorVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -195,22 +194,22 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         )
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
             return ConstantVariable.create(None)
 
-        TorchInGraphFunctionVariable(
+        SourcelessBuilder.create_internal_torch_function(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
         return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslatorBase", *args: Any) -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
-        TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
-            tx, [], {}
-        )
+        SourcelessBuilder.create_internal_torch_function(
+            torch._C._pop_torch_function_stack
+        ).call_function(tx, [], {})
         return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
@@ -380,6 +379,8 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
     @classmethod
     def register_device_context_insertion(cls, tx: "InstructionTranslatorBase") -> None:
+        from .builder import VariableBuilder
+
         stack = tx.symbolic_torch_function_state.mode_stack
         if stack and cls.is_device_context(stack[0]):
             return
@@ -387,8 +388,8 @@ class TorchFunctionModeStackVariable(VariableTracker):
             cls.offset += 1
             stack.insert(
                 0,
-                TorchFunctionModeVariable(
-                    None, source=TorchFunctionModeStackSource(-cls.offset)
+                VariableBuilder.create_internal_torch_function_mode_stack_entry(
+                    TorchFunctionModeStackSource(-cls.offset)
                 ),
             )
 
@@ -642,8 +643,10 @@ class TensorWithTFOverrideVariable(TensorVariable):
         return self.class_type
 
     def class_type_var(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return TensorSubclassVariable(
-            self.class_type, source=GlobalSource(self.global_mangled_class_name(tx))
+        from .builder import VariableBuilder
+
+        return VariableBuilder.create_internal_tensor_subclass(
+            self.class_type, GlobalSource(self.global_mangled_class_name(tx))
         )
 
     def global_mangled_class_name(self, tx: "InstructionTranslatorBase") -> str:
@@ -657,6 +660,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # [Note: __torch_function__] We currently only support attributes that are defined on
         # base tensors, custom attribute accesses will graph break.
         import torch
+
+        from .builder import VariableBuilder
 
         # I think only `_base` is breaking because we aren't modelling view
         # relationship perfectly in some scenarios.
@@ -706,9 +711,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 cls_source = GlobalSource(self.global_mangled_class_name(tx))
                 attr_source = AttrSource(cls_source, name)
                 if isinstance(attr, types.FunctionType):
-                    install_guard(attr_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                     return UserMethodVariable(
-                        UserFunctionVariable(attr, source=attr_source), self
+                        UserFunctionVariable.create_with_source(attr, attr_source),
+                        self,
                     )
 
                 elif isinstance(attr, property):
@@ -721,9 +726,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
                 elif isinstance(attr, classmethod):
                     return UserMethodVariable(
-                        UserFunctionVariable(
+                        VariableBuilder.create_internal_user_function(
                             attr.__func__,
-                            source=attr_source and AttrSource(attr_source, "__func__"),
+                            source=AttrSource(attr_source, "__func__"),
                         ),
                         self.class_type_var(tx),
                         source=attr_source,
