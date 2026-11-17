@@ -6614,6 +6614,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             guarding_hint_or_throw(unbacked_float.node)
         self.assertIsNone(unbacked_float.node.hint)
 
+    @torch.compiler.disable
     def test_set_get_fake_dispatch_keys(self):
         mode = CppFakeTensorMode()
         meta = torch.empty(2, device="meta")
@@ -6969,6 +6970,7 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     @parametrize("active", [False, True])
     @parametrize("device,source_device", [("cpu", "cuda:0"), ("cuda:0", "cpu")])
+    @torch.compiler.disable
     def test_fake_shallow_copy_data(self, active, device, source_device):
         mode = FakeTensorMode()
         meta_dst = torch.empty(2, device="meta", requires_grad=True)
@@ -7333,6 +7335,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             (None, True),
         ],
     )
+    @torch.compiler.disable
     def test_cpp_fake_tensor_mode_rebuild(self, callback, propagate_real_tensors):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
