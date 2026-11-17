@@ -11,6 +11,7 @@ import unittest
 
 import torch
 import torch.library
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._dynamo.utils import counters
@@ -58,8 +59,20 @@ def _triton_unavailable(device_type):
     Derived from the backend inductor selects for the injected device instead
     of a table of device names, so out-of-tree accelerators and future in-tree
     backends are handled without editing this file.
+
+    The answer is per device: HAS_TRITON is process-wide (has_triton() returns
+    True as soon as any registered device has a working Triton), so it would
+    not skip a backend that lacks Triton on a machine with two accelerators.
+    Out-of-tree backends that don't override DeviceInterface.is_triton_capable
+    are reported as incapable by the base implementation, so fall back to the
+    process-wide flag for them instead of skipping them wholesale.
     """
-    return is_triton_backend(device_type) and not HAS_TRITON
+    if not is_triton_backend(device_type):
+        return False
+    interface = get_interface_for_device(device_type)
+    if interface.is_triton_capable is DeviceInterface.is_triton_capable:
+        return not HAS_TRITON
+    return not interface.is_triton_capable()
 
 
 # Make the helper files in test/ importable
