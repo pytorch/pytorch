@@ -212,13 +212,13 @@ class PgTransportCPU(MultiProcContinuousTest):
     def backend_str(cls) -> str | None:
         return "gloo"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cpu"
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self.device_type())
+        return torch.device(self._device_type)
 
     def test_pg_transport(self) -> None:
         _test_pg_transport(self, self.device)
@@ -237,11 +237,11 @@ class PgTransportGPU(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str | None:
-        return dist.get_default_backend_for_device(cls.device_type())
+        return dist.get_default_backend_for_device(cls._device_type.fget(cls))
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"{self.device_type()}:{self.rank}")
+        return torch.device(f"{self._device_type}:{self.rank}")
 
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
