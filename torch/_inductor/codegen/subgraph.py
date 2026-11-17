@@ -200,7 +200,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             is_backward=V.graph.is_backward,
             name=f"benchmark_{safe_name}",
             # Only benchmarked, never captured.
-            partition_plan=GraphPartitionPlan.unsplit(),
+            partition_plan=GraphPartitionPlan.no_partition(),
         )
         # Donation indices use the parent graph's placeholder ordering, not ours
         # (same as SubgraphLowering).

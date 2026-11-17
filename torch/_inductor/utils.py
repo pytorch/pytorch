@@ -725,21 +725,20 @@ class GraphPartitionPlan:
         )
 
     @staticmethod
-    def unsplit() -> GraphPartitionPlan:
+    def no_partition() -> GraphPartitionPlan:
+        """One callable whatever config.graph_partition says: subgraph bodies
+        and benchmark-only lowerings."""
         return GraphPartitionPlan(cudagraphs_top_level=config.triton.cudagraphs)
 
     @staticmethod
-    def from_config(cudagraphs: bool | None = None) -> GraphPartitionPlan:
-        """The plan config.graph_partition implies, for a compile whose capture
-        setting is ``cudagraphs`` (default: config.triton.cudagraphs)."""
-        if cudagraphs is None:
-            cudagraphs = config.triton.cudagraphs
+    def from_config() -> GraphPartitionPlan:
+        """The plan config.graph_partition and config.triton.cudagraphs imply."""
         if not config.graph_partition:
-            return GraphPartitionPlan(cudagraphs_top_level=cudagraphs)
+            return GraphPartitionPlan.no_partition()
         return GraphPartitionPlan(
             GraphPartitionMode.CONFIG,
-            cudagraphs_top_level=cudagraphs,
-            cudagraphs_per_partition=cudagraphs
+            cudagraphs_top_level=config.triton.cudagraphs,
+            cudagraphs_per_partition=config.triton.cudagraphs
             or _unstable_customized_partition_wrapper.wrapper is not None,
         )
 
