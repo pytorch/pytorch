@@ -1,9 +1,14 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <ATen/Utils.h>
 #include <ATen/core/ivalue.h>
+
+namespace caffe2::serialize {
+class PyTorchStreamWriter;
+}
 
 namespace torch::jit {
 
@@ -106,6 +111,15 @@ struct WriteableTensorData {
   uint64_t size_;
 };
 
+// Write the bytes of a pickle archive and the tensors referenced inside that
+// archive
+TORCH_API void writeArchiveAndTensors(
+    const std::string& archive_name,
+    const char* pickle_bytes,
+    size_t size,
+    const std::vector<at::Tensor>& tensors,
+    caffe2::serialize::PyTorchStreamWriter& out);
+
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
 // if it was CUDA and to_cpu is True.
 TORCH_API WriteableTensorData
@@ -201,6 +215,22 @@ inline void setTensorMetadata(
     metadata[key] = pair.value().toBool();
   }
   setTensorMetadata(t, std::move(metadata));
+}
+
+// Copy backend metadata (c10::BackendMeta) from src to dst: via
+// BackendMeta::clone_for_fake() when for_fake (copying onto a FakeTensor), else
+// BackendMeta::clone(). A no-op when src has none or the backend declines the
+// fake copy; other tensor metadata on dst is left untouched.
+inline void copyBackendMeta(
+    const at::Tensor& src,
+    const at::Tensor& dst,
+    bool for_fake = false) {
+  if (auto meta = src.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
+    auto copied = for_fake ? meta->clone_for_fake(meta) : meta->clone(meta);
+    if (copied) {
+      dst.unsafeGetTensorImpl()->set_backend_meta(copied);
+    }
+  }
 }
 
 // Register function pointer of Tensor BackendMetadata for serialization.

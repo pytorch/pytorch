@@ -36,7 +36,7 @@ def _blackwell_decompose_k_partial_impl(
         start = split * k_part
         end = min(start + k_part, k)
         partial = torch.mm(a[:, start:end], b[start:end], out_dtype=torch.float32)
-        partials.append(F.pad(partial, (0, 0, 0, m_pad - m)))
+        partials.append(F.pad(partial, [0, 0, 0, m_pad - m]))
     return torch.stack(partials).view(k_split * m_pad, n)
 
 
@@ -159,6 +159,11 @@ def _reserve_rng_state(device: torch.device, used_offset):
     else:
         base = torch.div(off_t + intra_t, 4, rounding_mode="floor")
     return seed_t, base
+
+
+def rand_eager_vec(dtype: torch.dtype | None) -> int:
+    """Vector width of eager CUDA dropout (fused_dropout_kernel_vec) for an aligned tensor."""
+    return 8 if dtype in (torch.float16, torch.bfloat16) else 4
 
 
 def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:
