@@ -2673,12 +2673,11 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
-  if [[ "${NUM_TEST_SHARDS}" -gt 1 ]]; then
-    test_python_shard "${SHARD_NUMBER}"
-  else
-    test_python
-  fi
+if [[ "${TEST_CONFIG}" == "fake_tensor" ]]; then
+  NO_TD=1 INCLUDE_CLAUSE="--include test_fake_tensor" test_python
+elif [[ "$TEST_CONFIG" == "default" && "${CPP_FAKETENSOR:-0}" == 1 ]]; then
+  install_torchvision
+  INCLUDE_CLAUSE="--compiler-tests" test_python_shard "${SHARD_NUMBER}"
 elif [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"

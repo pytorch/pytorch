@@ -380,7 +380,6 @@ def scaled_grouped_mm_wrap(
             use_fast_accum=use_fast_accum)
 
 
-
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: torch.Tensor | None = None) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
@@ -964,7 +963,6 @@ class TestFP8MatmulGeneric(TestCase):
                 self.assertEqual(result.shape, (1, 16, 16))
 
 
-
 class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1056,7 +1054,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         else:
             # Non-CUDA: test basic TN layout as sanity check
             self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=True, y_cm=False)
-
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -3717,7 +3714,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(out.cpu(), expected, atol=0, rtol=0, equal_nan=True)
 
 
-
 class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
 
     hw_classification = HardwareClassification.CUDA
@@ -3917,7 +3913,6 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
             )
         self.assertEqual(fake_result.dtype, out_dtype)
         self.assertEqual(fake_result.shape, out.shape)
-
 
 
     @unittest.skipIf(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM, "cuBLASLt FP8 grouped GEMM is supported")
@@ -5405,7 +5400,6 @@ print("tunableop_keys_ok")
                     swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
                     swizzle_b=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
                 )
-
 
 
     @onlyAccelerator

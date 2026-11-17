@@ -25,12 +25,12 @@ mkdir -p "$TMP_DIR"/build/torch
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-if [[ "$TEST_CONFIG" = "force_on_cpu" || "$TEST_CONFIG" = "openreg" ]]; then
-  # run the full test suite for force_on_cpu test and openreg test
+if [[ "$TEST_CONFIG" = "force_on_cpu" || "$TEST_CONFIG" = "openreg" || "$TEST_CONFIG" = "fake_tensor" ]]; then
+  # These configurations run on CPU.
   export USE_CUDA=0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != "fake_tensor" ]]; then
   # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
@@ -49,7 +49,7 @@ run_tests() {
         fi
     done
 
-    if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
+    if [[ "$TEST_CONFIG" == "fake_tensor" || ( "$TEST_CONFIG" == "default" && "${CPP_FAKETENSOR:-0}" == 1 ) ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         return
     fi

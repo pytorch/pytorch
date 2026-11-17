@@ -49,6 +49,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
+    parametrize,
     run_tests,
     skipIfCppFakeTensor,
     skipIfTorchDynamo,
@@ -3273,6 +3274,27 @@ _reuse_test_global = None
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("tracing_mode", ["fake", "symbolic"])
+    @parametrize("noncontiguous_grad", [False, True])
+    def test_make_fx_backward(self, device, tracing_mode, noncontiguous_grad):
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        subgraph = torch.fx.symbolic_trace(lambda x: (x.sin(),))
+
+        def f(x, grad):
+            (y,) = invoke_subgraph(subgraph, "sin", x)
+            return torch.autograd.grad(y, x, grad)[0]
+
+        x = torch.randn(3, 4, device=device, requires_grad=True)
+        grad = (
+            torch.randn(4, 3, device=device).t()
+            if noncontiguous_grad
+            else torch.randn_like(x)
+        )
+        gm = make_fx(f, tracing_mode=tracing_mode)(x, grad)
+        self.assertEqual(gm(x, grad), x.cos() * grad)
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4819")
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)

@@ -9,6 +9,7 @@ from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
     lift_constants_pass,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_constant
 from torch.export._unlift import _unlift_exported_program_lifted_states
 from torch.export.exported_program import (
     ExportGraphSignature,
@@ -31,6 +32,7 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 class GraphBuilder:
     def __init__(self) -> None:
         self.graph = torch.fx.Graph()
+        self.fake_mode = FakeTensorMode()
         self.nodes = {}
         self.values = {}
         self.nn_module_stack_key: dict[str, int] = {}
@@ -39,7 +41,7 @@ class GraphBuilder:
 
     def input(self, name: str, value: torch.Tensor, kind: InputKind):
         node = self.graph.placeholder(name)
-        node.meta["val"] = value
+        node.meta["val"] = self.fake_mode.from_tensor(value)
         self.nodes[name] = node
         self.values[name] = value
         self.input_to_kind[node] = kind
@@ -210,7 +212,9 @@ class TestLift(TestCase):
         lifted_tensor_placeholder = placeholder_nodes[2]
         self.assertEqual(lifted_tensor_placeholder.target, "lifted_tensor_0")
         # It should have a val equivalent to the constant
-        self.assertEqual(lifted_tensor_placeholder.meta["val"], const_tensor)
+        self.assertEqual(
+            maybe_get_fake_constant(lifted_tensor_placeholder.meta["val"]), const_tensor
+        )
 
         lifted_obj_placeholder = placeholder_nodes[3]
         self.assertEqual(lifted_obj_placeholder.target, "lifted_custom_0")

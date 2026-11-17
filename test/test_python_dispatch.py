@@ -541,7 +541,6 @@ class TestPythonRegistration(TestCase):
         # test guards that the contract holds end-to-end.
         from torch._inductor.runtime import debug_utils
 
-        debug_utils.register_check_mem_op.cache_clear()
         debug_utils.register_check_mem_op()
         gc.collect()
 
@@ -3082,6 +3081,7 @@ class TestWrapperSubclassAliasingDevice(TestCase):
 instantiate_device_type_tests(
     TestWrapperSubclassAliasingDevice, globals(), allow_xpu=True
 )
+
 
 if __name__ == "__main__":
     run_tests()
