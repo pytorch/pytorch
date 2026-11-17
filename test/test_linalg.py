@@ -12901,10 +12901,12 @@ class TestGroupedMM(TestCase):
         out_op = torch.ops.aten._grouped_mm.out
         mode = FakeTensorMode()
         fake_args = [mode.from_tensor(t) for t in (a, b, offs) if t is not None]
+        shifted = torch.full((expected.numel() + 1,), math.nan, device=device, dtype=dtype)[1:]
         outs = {
             "empty": torch.empty(0, device=device, dtype=dtype),
             "contiguous": torch.full_like(expected, math.nan, memory_format=torch.contiguous_format),
             "column_major": torch.full_like(expected.mT, math.nan, memory_format=torch.contiguous_format).mT,
+            "misaligned": shifted.view_as(expected),
         }
         for layout, out in outs.items():
             with self.subTest(layout=layout):
@@ -12929,8 +12931,12 @@ class TestGroupedMM(TestCase):
         a = self._make_grouped_mm_matrix((2, 8, 32), True, device, torch.float32)
         b = self._make_grouped_mm_matrix((2, 17, 32), True, device, torch.float32).transpose(-2, -1)
         expected = torch._grouped_mm(a, b)
-        if expected.is_contiguous():
-            self.skipTest("the functional result has no padded rows here")
+        # ROCm builds and XPU do not pad the functional result.
+        if not torch.version.hip and torch.device(device).type != "xpu":
+            self.assertFalse(expected.is_contiguous())
+        with FakeTensorMode() as mode:
+            fake = torch._grouped_mm(mode.from_tensor(a), mode.from_tensor(b))
+        self.assertEqual(fake.stride(), expected.stride())
         out_op = torch.ops.aten._grouped_mm.out
 
         def flat(a, b, out):
@@ -12955,18 +12961,34 @@ class TestGroupedMM(TestCase):
                 self.assertEqual(eager_out, expected)
                 out = make_out()
                 self.assertEqual(torch.func.functionalize(fn)(a, b, out), eager_ret)
-                self.assertEqual((out, out.stride()), (eager_out, eager_out.stride()))
+                self.assertEqual(out, eager_out)
         for backend in ("aot_eager", "inductor"):
             with self.subTest(backend=backend):
                 out = contiguous()
                 ret = torch.compile(flat, backend=backend, fullgraph=True)(a, b, out)
                 self.assertEqual(ret, expected.flatten())
-                self.assertEqual((out, out.stride()), (expected, contiguous().stride()))
+                self.assertEqual(out, expected)
 
         def resized(a, b):
             return out_op(a, b, out=torch.empty(0, device=a.device))
 
         self.assertEqual(torch.func.functionalize(resized)(a, b).stride(), resized(a, b).stride())
+
+    @onlyCUDA
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_grouped_mm_out_writes_in_place(self, device, dtype):
+        a = self._make_grouped_mm_matrix((64, 32), True, device, dtype)
+        b = self._make_grouped_mm_matrix((4, 17, 32), True, device, dtype).transpose(-2, -1)
+        offs = torch.tensor([16, 32, 48, 64], device=device, dtype=torch.int32)
+        expected = torch._grouped_mm(a, b, offs=offs)
+        out = torch.empty_strided(expected.shape, expected.stride(), device=device, dtype=dtype).fill_(math.nan)
+        with torch.profiler.profile(record_shapes=True) as prof:
+            torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
+        self.assertEqual(out, expected)
+        # An out with the kernel's own layout must be written directly, not through a temporary.
+        full_copies = [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == list(out.shape)]
+        self.assertEqual(full_copies, [])
 
     @onlyCPU
     def test_grouped_mm_out_variant_lookup(self, device):

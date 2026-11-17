@@ -19,6 +19,7 @@
 #include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/native/GroupedMMUtils.h>
+#include <ATen/native/Resize.h>
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 #include <ATen/native/cuda/CublasGroupedArgs.h>
 #endif
@@ -682,10 +683,9 @@ void run_cublaslt_grouped_gemm(
 
 } // namespace
 
-static Tensor grouped_mm_cublaslt(const Tensor& mat_a, const Tensor& mat_b,
+static void grouped_mm_cublaslt(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
-const std::optional<at::Tensor>& bias,
-std::optional<c10::ScalarType> out_dtype) {
+Tensor& out) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   TORCH_CHECK(
       mat_a.dtype() == at::kBFloat16 || mat_a.dtype() == at::kHalf,
@@ -698,14 +698,10 @@ std::optional<c10::ScalarType> out_dtype) {
       ? offs->size(0) : mat_a.size(0);
   const int batchCount = static_cast<int>(batchCount64);
 
-  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-
   const bool needs_int64 = cublaslt_grouped_mm_use_int64(mat_a, mat_b, out);
 
   cublasGroupedArgs args(mat_a, mat_b, offs, out, batchCount, needs_int64);
   run_cublaslt_grouped_gemm(args, mat_a.scalar_type(), mat_b.scalar_type(), out.scalar_type());
-  return out;
 #else
   TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
@@ -1100,14 +1096,31 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
 }
 #endif
 
-Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+// Size and strides of the output that the grouped GEMM kernels write. ROCm
+// outputs are contiguous.
+static std::pair<c10::SmallVector<int64_t, 3>, std::vector<int64_t>>
+grouped_mm_cuda_output_layout(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+c10::ScalarType out_dtype) {
+  auto layout = compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype);
+  if (layout.second.empty()) {
+    const auto strides = c10::contiguous_strides(layout.first);
+    layout.second.assign(strides.begin(), strides.end());
+  }
+  return layout;
+}
+
+// Writes the grouped GEMM into `out`, an uninitialized, 16-byte aligned tensor
+// laid out as grouped_mm_cuda_output_layout describes.
+static void _grouped_mm_cuda_impl(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
-std::optional<c10::ScalarType> out_dtype) {
-  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+std::optional<c10::ScalarType> out_dtype,
+Tensor& out) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   if (should_use_cublaslt_grouped_gemm(mat_a, mat_b, offs, out_dtype)) {
-    return grouped_mm_cublaslt(mat_a, mat_b, offs, bias, out_dtype);
+    grouped_mm_cublaslt(mat_a, mat_b, offs, out);
+    return;
   }
 #endif
   bool a_b_and_out_are_bf16 = (
@@ -1117,8 +1130,6 @@ std::optional<c10::ScalarType> out_dtype) {
   );
 #ifndef USE_ROCM
   bool use_fast_path = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true) && a_b_and_out_are_bf16;
-  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
@@ -1129,7 +1140,6 @@ std::optional<c10::ScalarType> out_dtype) {
   // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
   // Keep use_fast_path as false till ck kernel perf is optimal.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
 #if defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
@@ -1138,22 +1148,57 @@ std::optional<c10::ScalarType> out_dtype) {
 
   const bool use_ck_tile = at::globalContext().rocmAllowGroupGemmCkTile() &&
       supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs);
-  // ck_tile zeroes the 2D x 2D groups with K == 0 itself, so it skips the zero-filled allocation the other paths need.
-  Tensor out = use_ck_tile
-      ? at::empty(compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first, mat_a.options().dtype(out_dtype_))
-      : create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_ck_tile) {
     at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
-  } else if (at::globalContext().rocmAllowGroupGemmCk() && (supported_ck_tile_arch || at::detail::getCUDAHooks().isGPUArch({"gfx90a"}))) {
-    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
-  } else {
-    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+    return;
   }
-#else
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
 #endif //USE_ROCM_CK_GEMM
+  // ck_tile zeroes the 2D x 2D groups with K == 0 itself; the other paths need a zero-filled output.
+  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
+    out.zero_();
+  }
+#if defined(USE_ROCM_CK_GEMM)
+  if (at::globalContext().rocmAllowGroupGemmCk() && (supported_ck_tile_arch || at::detail::getCUDAHooks().isGPUArch({"gfx90a"}))) {
+    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+    return;
+  }
+#endif //USE_ROCM_CK_GEMM
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
 #endif //ifndef USE_ROCM
+}
+
+Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  const auto [out_size, out_stride] = grouped_mm_cuda_output_layout(mat_a, mat_b, offs, out_dtype_);
+  Tensor out = at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
+  _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, out);
+  return out;
+}
+
+Tensor& _grouped_mm_out_cuda(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype,
+Tensor& out) {
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  TORCH_CHECK(out.scalar_type() == out_dtype_, "Expected out tensor to have dtype ", out_dtype_, " but got ", out.scalar_type(), " instead");
+  const auto [out_size, out_stride] = grouped_mm_cuda_output_layout(mat_a, mat_b, offs, out_dtype_);
+  at::native::resize_output(out, out_size);
+  // The kernels need this exact layout and an aligned address, so any other
+  // `out` gets the result through a copy, as a structured kernel's proxy output would.
+  if (out.strides() == IntArrayRef(out_stride) &&
+      reinterpret_cast<uintptr_t>(out.const_data_ptr()) % 16 == 0) {
+    _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, out);
+  } else {
+    Tensor result = at::empty_strided(out_size, out_stride, out.options());
+    _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, result);
+    out.copy_(result);
+  }
   return out;
 }
 

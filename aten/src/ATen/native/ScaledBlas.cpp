@@ -18,6 +18,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_addmm_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
@@ -654,14 +655,6 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
   }
 }
 
-// TODO(vasiliy, future PR): figure out why we need to declare this function, when
-// other functions that live in ATen/native/*.cpp without declarations
-// or headers work just fine.
-Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
-const std::optional<at::Tensor>& offs,
-const std::optional<at::Tensor>& bias,
-std::optional<c10::ScalarType> out_dtype);
-
 Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
@@ -669,6 +662,21 @@ std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  return out;
+}
+
+Tensor& _grouped_mm_out(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype,
+Tensor& out) {
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  TORCH_CHECK(out.scalar_type() == out_dtype_, "Expected out tensor to have dtype ", out_dtype_, " but got ", out.scalar_type(), " instead");
+  TORCH_CHECK(out.device() == mat_a.device(), "Expected out tensor to be on device ", mat_a.device(), " but got ", out.device(), " instead");
+  TORCH_CHECK(!offs.has_value() || offs->device() == mat_a.device(), "Expected offs to be on device ", mat_a.device(), " but got ", offs->device(), " instead");
+  at::native::resize_output(out, compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first);
   _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   return out;
 }
