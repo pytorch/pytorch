@@ -1169,6 +1169,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
             fake_handler = self.python_key_table.get(FakeTensorMode)
             if fake_handler is not None:
 
+                @torch._disable_dynamo
                 def fake_mode_handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
                     with unset_fake_temporarily() as mode:
                         if mode is not None:
