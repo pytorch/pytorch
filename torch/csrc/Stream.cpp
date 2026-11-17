@@ -295,7 +295,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       static_cast<c10::DeviceType>(self->device_type);
 
   // No operation is performed if the stream does not belong to an accelerator.
-  if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
+  if (!at::accelerator::isAccelerator(stream_device_type)) [[unlikely]] {
     return Py_NewRef(_self);
   }
 
@@ -358,8 +358,8 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   auto self = reinterpret_cast<THPStream*>(_self);
 
   // No operation is performed if the stream does not belong to an accelerator.
-  if (C10_UNLIKELY(!at::accelerator::isAccelerator(
-          static_cast<c10::DeviceType>(self->device_type)))) {
+  if (!at::accelerator::isAccelerator(
+          static_cast<c10::DeviceType>(self->device_type))) [[unlikely]] {
     Py_RETURN_NONE;
   }
 
