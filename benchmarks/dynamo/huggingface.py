@@ -136,15 +136,17 @@ if not BATCH_SIZE_KNOWN_MODELS:
 
 try:
     from .huggingface_llm_models import (
+        CACHE_TRANSFORMERS_VERSION,
         HF_LLM_MODELS,
-        PREFILL_MODELS,
-        PREFILL_TRANSFORMERS_VERSION,
+        INFERENCE_PHASES,
+        TextGenerationBenchmark,
     )
 except ImportError:
     from huggingface_llm_models import (
+        CACHE_TRANSFORMERS_VERSION,
         HF_LLM_MODELS,
-        PREFILL_MODELS,
-        PREFILL_TRANSFORMERS_VERSION,
+        INFERENCE_PHASES,
+        TextGenerationBenchmark,
     )
 
 
@@ -428,29 +430,43 @@ class HuggingfaceRunner(BenchmarkRunner):
         return AutoConfig.from_pretrained(model_name)
 
     def validate_args(self, args):
-        if args.hf_inference_mode != "prefill":
+        mode = args.hf_inference_mode
+        if mode != "decode" and args.decode_length is not None:
+            raise ValueError("--decode-length requires --hf-inference-mode=decode")
+        if mode == "generate":
             if args.prompt_length is not None:
-                raise ValueError("--prompt-length requires --hf-inference-mode=prefill")
+                raise ValueError(
+                    "--prompt-length requires --hf-inference-mode=prefill or decode"
+                )
             return
         installed = importlib.metadata.version("transformers")
-        if Version(installed) != Version(PREFILL_TRANSFORMERS_VERSION):
+        if Version(installed) != Version(CACHE_TRANSFORMERS_VERSION):
             raise ValueError(
-                f"--hf-inference-mode=prefill requires "
-                f"transformers=={PREFILL_TRANSFORMERS_VERSION}, found {installed}; "
-                "prefill cache initialization depends on this version's internals"
+                f"--hf-inference-mode={mode} requires "
+                f"transformers=={CACHE_TRANSFORMERS_VERSION}, found {installed}; "
+                "static cache initialization depends on this version's internals"
             )
         if args.prompt_length is not None and args.prompt_length <= 0:
             raise ValueError(
                 f"--prompt-length must be positive, got {args.prompt_length}"
             )
+        max_decode_length = TextGenerationBenchmark.OUTPUT_LENGTH - 1
+        if args.decode_length is not None and not (
+            1 <= args.decode_length <= max_decode_length
+        ):
+            raise ValueError(
+                f"--decode-length must be between 1 and {max_decode_length}, "
+                f"got {args.decode_length}"
+            )
         if args.batch_size is not None and args.batch_size <= 0:
             raise ValueError(f"--batch-size must be positive, got {args.batch_size}")
         if not args.inference:
-            raise ValueError("--hf-inference-mode=prefill requires --inference")
-        if args.only is not None and args.only not in PREFILL_MODELS:
+            raise ValueError(f"--hf-inference-mode={mode} requires --inference")
+        supported = INFERENCE_PHASES[mode].models
+        if args.only is not None and args.only not in supported:
             raise ValueError(
-                f"--hf-inference-mode=prefill does not support {args.only}; "
-                f"supported models: {', '.join(sorted(PREFILL_MODELS))}"
+                f"--hf-inference-mode={mode} does not support {args.only}; "
+                f"supported models: {', '.join(sorted(supported))}"
             )
 
         unsupported = []
@@ -482,25 +498,25 @@ class HuggingfaceRunner(BenchmarkRunner):
                 unsupported.append("--" + flag.replace("_", "-"))
         if unsupported:
             raise ValueError(
-                "--hf-inference-mode=prefill does not support " + ", ".join(unsupported)
+                f"--hf-inference-mode={mode} does not support " + ", ".join(unsupported)
             )
         if args.iterations_per_run <= 0:
-            raise ValueError("--iterations-per-run must be positive for prefill")
+            raise ValueError(f"--iterations-per-run must be positive for {mode}")
         if args.backend is None:
             raise ValueError(
-                "--hf-inference-mode=prefill requires --backend or --inductor"
+                f"--hf-inference-mode={mode} requires --backend or --inductor"
             )
 
     def get_workload(self, example_inputs, *, is_performance=False):
-        if self.args.hf_inference_mode == "prefill":
+        if self.args.hf_inference_mode != "generate":
+            phase = INFERENCE_PHASES[self.args.hf_inference_mode]
+            tokens = example_inputs[phase.tokens_input].numel()
             return BenchmarkWorkload(
-                self.prefill_forward,
-                setup_fn=self.setup_prefill,
+                phase.iter_fn,
+                setup_fn=phase.setup_fn,
                 compile_forward=True,
                 report_eager_latency=True,
-                request_tokens={
-                    "input_tokens_per_second": example_inputs["input_ids"].numel()
-                },
+                request_tokens={phase.tokens_column: tokens},
                 measure_iters=1,
                 stabilization_iters=4,
             )
@@ -513,16 +529,8 @@ class HuggingfaceRunner(BenchmarkRunner):
             )
         return super().get_workload(example_inputs, is_performance=is_performance)
 
-    def setup_prefill(self, model, example_inputs):
-        torch.compiler.cudagraph_mark_step_begin()
-        model.prepare_for_prefill(example_inputs["input_ids"])
-
     def generate(self, model, example_inputs, collect_outputs=True):
         return model.generate(**example_inputs)
-
-    def prefill_forward(self, model, example_inputs, collect_outputs=True):
-        with torch.no_grad():
-            return model(**example_inputs)
 
     def load_model(
         self,
@@ -554,15 +562,17 @@ class HuggingfaceRunner(BenchmarkRunner):
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"  # noqa: G004
                 )
         # --batch_size_file values reach here without passing validate_args.
-        if self.args.hf_inference_mode == "prefill" and batch_size <= 0:
+        if self.args.hf_inference_mode != "generate" and batch_size <= 0:
             raise ValueError(f"--batch-size must be positive, got {batch_size}")
 
         # Config downloads belong in the load path so failures produce model
         # results, while invalid dimensions still fail before downloading weights.
         if model_name in HF_LLM_MODELS:
             benchmark_cls = HF_LLM_MODELS[model_name]
-            if self.args.hf_inference_mode == "prefill":
+            mode = self.args.hf_inference_mode
+            if mode != "generate":
                 prompt_length = self.args.prompt_length or benchmark_cls.INPUT_LENGTH
+                decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
                 if self.args.prompt_length is not None:
                     config = self._download_config(model_name).get_text_config(
                         decoder=True
@@ -583,7 +593,8 @@ class HuggingfaceRunner(BenchmarkRunner):
                     device,
                     batch_size=batch_size,
                     prompt_length=prompt_length,
-                    inference_mode="prefill",
+                    inference_mode=mode,
+                    decode_length=decode_length,
                 )
             else:
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
@@ -634,8 +645,8 @@ class HuggingfaceRunner(BenchmarkRunner):
     def iter_model_names(self, args):
         model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
         model_names = set(model_names)
-        if args.hf_inference_mode == "prefill":
-            model_names &= PREFILL_MODELS
+        if args.hf_inference_mode != "generate":
+            model_names &= INFERENCE_PHASES[args.hf_inference_mode].models
         model_names = sorted(model_names)
 
         start, end = self.get_benchmark_indices(len(model_names))

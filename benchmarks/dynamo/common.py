@@ -425,16 +425,6 @@ def output_json(filename, headers, row):
             print(json.dumps(record, default=str), file=f)
 
 
-def get_suite_from_model_iter_fn(model_iter_fn):
-    # TODO: This is a bit of a hack
-    suite = None
-    if (runner := getattr(model_iter_fn, "__self__", None)) and hasattr(
-        runner, "suite_name"
-    ):
-        suite = runner.suite_name
-    return suite
-
-
 def output_signpost(data, args, suite, error=None):
     from torch.utils._stats import simple_call_counter
 
@@ -636,7 +626,7 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
             elif col in ("abs_latency", "eager_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
-            elif col == "input_tokens_per_second":
+            elif col in ("input_tokens_per_second", "output_tokens_per_second"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
@@ -1258,11 +1248,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields + c_data,
     )
 
-    output_signpost(
-        dict(zip(headers, row)),
-        args,
-        get_suite_from_model_iter_fn(model_iter_fn),
-    )
+    output_signpost(dict(zip(headers, row)), args, kwargs.get("suite"))
 
     return msg
 
@@ -1854,6 +1840,8 @@ class BenchmarkWorkload:
 
 
 class BenchmarkRunner:
+    suite_name: str | None = None
+
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
@@ -2068,12 +2056,14 @@ class BenchmarkRunner:
         return 1
 
     def validate_args(self, args):
-        if args.hf_inference_mode == "prefill":
+        if args.hf_inference_mode != "generate":
             raise ValueError(
-                "--hf-inference-mode=prefill requires the huggingface suite"
+                f"--hf-inference-mode={args.hf_inference_mode} requires the huggingface suite"
             )
         if args.prompt_length is not None:
             raise ValueError("--prompt-length requires the huggingface suite")
+        if args.decode_length is not None:
+            raise ValueError("--decode-length requires the huggingface suite")
 
     def get_workload(self, example_inputs, *, is_performance=False):
         # Suites may retain a different accuracy workload, such as forward vs generate.
@@ -3103,6 +3093,7 @@ class BenchmarkRunner:
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
             experiment_kwargs["batch_size"] = batch_size
+            experiment_kwargs["suite"] = self.suite_name
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
@@ -3502,14 +3493,19 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--hf-inference-mode",
-        choices=("generate", "prefill"),
+        choices=("generate", "prefill", "decode"),
         default="generate",
         help="Inference workload for registered Hugging Face generation models.",
     )
     parser.add_argument(
         "--prompt-length",
         type=int,
-        help="Uniform prompt length for Hugging Face prefill benchmarks (default: 1000).",
+        help="Uniform prompt length for Hugging Face prefill and decode benchmarks (default: 1000).",
+    )
+    parser.add_argument(
+        "--decode-length",
+        type=int,
+        help="Timed decode steps per request for Hugging Face decode benchmarks (default: 128).",
     )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
@@ -4797,9 +4793,9 @@ def run(runner, args, original_dir=None):
 
     if args.output:
         output_filename = args.output
-    elif args.hf_inference_mode == "prefill" and output_filename:
+    elif args.hf_inference_mode != "generate" and output_filename:
         stem, ext = os.path.splitext(output_filename)
-        output_filename = f"{stem}_prefill{ext}"
+        output_filename = f"{stem}_{args.hf_inference_mode}{ext}"
 
     if output_filename:
         if args.output_directory:
@@ -4842,8 +4838,8 @@ def run(runner, args, original_dir=None):
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
-            if args.hf_inference_mode == "prefill":
-                args.profiler_trace_name += "_prefill"
+            if args.hf_inference_mode != "generate":
+                args.profiler_trace_name += f"_{args.hf_inference_mode}"
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
