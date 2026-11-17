@@ -241,6 +241,7 @@
     "test_fake_tensor.py::TestFakeTensorDeviceCPU::test_normalize_device_*",
     "test_fake_tensor.py::TestFakeTensorDeviceCPU::test_setitem_*",
     "test_fake_tensor.py::TestFakeTensorDeviceCPU::test_upsample_bilinear_small_channels_*",
+    "test_fake_tensor.py::TestFakeTensorViewCopy",
     "test_meta.py::TestMetaKernelRegistrations::test_aminmax_out_dtype_mismatch",
     "test_meta.py::TestMetaKernelRegistrations::test_arange_meta_barebones_unsigned_*",
     "test_meta.py::TestMetaKernelRegistrations::test_arange_symbolic_fake_tensor_*",
