@@ -4133,6 +4133,11 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 def _reshape_view_helper_core_alg(
     a: TensorLikeType, shape, allow_copy: bool
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import (
+        has_free_symbols,
+        statically_known_true,
+    )
+
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
     # the output shape, left to right. It does this by, conceptually, accumulating
@@ -4209,10 +4214,49 @@ def _reshape_view_helper_core_alg(
         )
         a_ = squeeze(a_, idx)
 
-    if a_ is a:
-        return prims.view_of(a)
-    else:
-        return a_
+    # Native view consumes size-one dimensions with the chunk to their right.
+    # Repair their strides after the left-to-right decomposition without
+    # testing symbolic stride relationships that would introduce new guards.
+    strides = None
+    for dim in range(len(shape) - 1, -1, -1):
+        if not statically_known_true(shape[dim] == 1):
+            continue
+        if dim == len(shape) - 1:
+            stride = a.stride(-1)
+        else:
+            next_stride = a_.stride(dim + 1) if strides is None else strides[dim + 1]
+            stride = shape[dim + 1] * next_stride
+        if not statically_known_true(a_.stride(dim) == stride):
+            if strides is None:
+                strides = list(a_.stride())
+            strides[dim] = stride
+    if strides is not None:
+        from torch._prims.context import TorchRefsMode
+        from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+        # A symbolic dimension can become one at runtime, so keep the view
+        # primitives when tracing a symbolic decomposition.
+        if get_proxy_mode() is not None and has_free_symbols((a.shape, a_.shape)):
+            strides = None
+        elif builtins.any(
+            isinstance(mode, TorchRefsMode)
+            for mode in torch.overrides._get_current_function_mode_stack()
+        ):
+            # TorchRefsMode's as_strided primitive checks storage bounds.
+            if not torch._C._has_storage(a_):
+                strides = None
+            else:
+                # Inspect the storage without passing through TorchRefsMode.
+                with torch._C.DisableTorchFunction():
+                    storage_bytes = a_.untyped_storage().nbytes()
+                if has_free_symbols(
+                    (storage_bytes, a_.shape, strides, a_.storage_offset())
+                ):
+                    strides = None
+
+        if strides is not None:
+            return torch.as_strided(a_, a_.shape, strides)
+    return prims.view_of(a) if a_ is a else a_
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
