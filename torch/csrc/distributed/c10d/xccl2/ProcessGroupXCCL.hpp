@@ -275,6 +275,10 @@ class TORCH_API ProcessGroupXCCL : public ::c10d::Backend {
   // tears down with onecclCommDestroy instead. See XcclApi.cpp.
   void abortXcclComm();
 
+  // Runs the abort hooks and terminates the process. `reason` is logged after
+  // "Aborting process on rank N due to ".
+  [[noreturn]] void abortProcess(const std::string& reason);
+
   // Signals the watchdog thread to exit and reaps it. Detaches instead of
   // joining when called from the watchdog thread itself.
   void stopWatchdog();
