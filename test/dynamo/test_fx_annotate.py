@@ -30,6 +30,35 @@ def checkpoint_wrapper(fn):
 
 
 class AnnotateTests(torch._dynamo.test_case.TestCase):
+    def test_empty_hooks_preserve_input_annotation(self):
+        # Reusing empty-hook trackers must leave input annotation in the child's scope.
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.child(x)
+
+        module = Parent()
+        for name, child in module.named_modules():
+            child.forward = fx_traceback.annotate_fn({"module_path": name})(
+                child.forward
+            )
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(module, backend=backend, fullgraph=True)
+        x = torch.randn(1, 2)
+        self.assertEqual(compiled(x), module(x))
+        nodes = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.op in ("placeholder", "call_function")
+        ]
+        self.assertEqual(len(nodes), 4)
+        for node in nodes:
+            self.assertEqual(node.meta.get("custom"), {"module_path": "child"})
+
     def test_annotations(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
@@ -366,6 +395,84 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             self._custom_meta_by_target(backend.graphs, (torch.sin,)),
             [{"tag": first}, {"tag": second}],
+        )
+
+    def test_annotate_specializes_dynamic_float(self):
+        class Layer(torch.nn.Module):
+            def __init__(self, knob):
+                super().__init__()
+                self.knob = knob
+
+            def forward(self, x):
+                with fx_traceback.annotate({"knob": self.knob}):
+                    return torch.sin(x)
+
+        backend = EagerAndRecordGraphs()
+        x = torch.randn(3)
+        for knob in (0.5, 0.25, 0.75):
+            layer = Layer(knob)
+            self.assertEqual(layer(x), torch.compile(layer, backend=backend)(x))
+
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.sin,)),
+            [{"knob": 0.5}, {"knob": 0.25}, {"knob": 0.75}],
+        )
+
+    def test_annotate_dynamic_int_is_unsupported(self):
+        def fn(x):
+            with fx_traceback.annotate({"seq_len": x.shape[0]}):
+                return x.sin()
+
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "dynamic value in torch.fx.traceback.annotate",
+        ):
+            opt_fn(x)
+
+    def test_annotate_dict_subclass_is_unsupported(self):
+        class AnnotationDict(dict):
+            def __getitem__(self, key):
+                return super().__getitem__(key) + 1.0
+
+        def fn(x, annotation):
+            with fx_traceback.annotate(annotation):
+                return x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "dict subclass in torch.fx.traceback.annotate",
+        ):
+            opt_fn(torch.randn(3), AnnotationDict(knob=0.5))
+
+    def test_annotation_context_across_graph_break(self):
+        def fn(x):
+            unused = fx_traceback.annotate({"stage": 0})
+            later = fx_traceback.annotate({"stage": 1})
+            x = torch.sin(x)
+            torch._dynamo.graph_break()
+            with later:
+                x = torch.cos(x)
+            return x, unused
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(3)
+        contexts = []
+        for _ in range(2):
+            out, ctx = opt_fn(x)
+            self.assertEqual(out, x.sin().cos())
+            contexts.append(ctx)
+
+        self.assertIsNot(contexts[0], contexts[1])
+        for ctx in contexts:
+            with ctx:
+                self.assertEqual(fx_traceback.current_meta["custom"], {"stage": 0})
+        self.assertEqual(
+            self._custom_meta_by_target(backend.graphs, (torch.cos,)), [{"stage": 1}]
         )
 
     def test_annotation_on_runtime_asserts(self):

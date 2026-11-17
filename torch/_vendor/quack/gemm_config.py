@@ -195,6 +195,7 @@ def _get_sm80_configs() -> List[GemmConfig]:
 
 def _get_sm100_configs(
     epilogue: Optional[str] = None,
+    device_capacity: int = 10,
 ) -> List[GemmConfig]:
     tile_n_vals = [16, 32, 64, 128, 160, 192, 224, 256]
     tile_mn_cluster_vals = (
@@ -217,7 +218,7 @@ def _get_sm100_configs(
     if epilogue in ["lse", "gated"]:
         swap_ab_vals = [False]
     GemmConfigCls = partial(
-        GemmConfig, pingpong=False, device_capacity=10
+        GemmConfig, pingpong=False, device_capacity=device_capacity
     )  # There's no pingpong on Sm100
     use_clc_vals = [True, False]
     use_tma_gather_vals = [True, False]
@@ -281,6 +282,7 @@ def get_all_configs(
         _get_sm80_configs()
         + _get_sm90_configs(epilogue, tune_coop)
         + _get_sm100_configs(epilogue)
+        + _get_sm100_configs(epilogue, device_capacity=11)
         + _get_sm120_configs(epilogue, tune_coop)
     )
 
@@ -356,7 +358,7 @@ def _default_config_for_cap(cap):
             cluster_n=1,
             pingpong=False,
             is_dynamic_persistent=True,
-            device_capacity=10,
+            device_capacity=cap,
         )
     elif cap == 12:
         return GemmConfig(
