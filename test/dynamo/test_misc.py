@@ -7864,6 +7864,66 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         Meta.mro = lambda cls: [cls]
         self.assertEqual(fn(Foo), [Foo])
 
+    def test_type_mro_method_metaclass_pending_override(self):
+        class Meta(type):
+            pass
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(cls, meta, x):
+            meta.mro = lambda c: [c]
+            return x + len(cls.mro())
+
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(Foo, Meta, torch.ones(1)), torch.full((1,), 2.0))
+
+    def test_class_attr_pending_metaclass_setattr(self):
+        class Meta(type):
+            scale = 1
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(cls, meta, x):
+            meta.scale = 2
+            return x * cls.scale
+
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(Foo, Meta, torch.ones(1)), torch.full((1,), 2.0))
+
+    def test_type_mro_method_metaclass_aliases_type_mro(self):
+        class Meta(type):
+            mro = type.mro
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(cls, x):
+            return x + len(cls.mro())
+
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(Foo, torch.ones(1)), torch.full((1,), 3.0))
+
+    def test_type_mro_method_metaclass_bases_assignment(self):
+        class Meta(type):
+            pass
+
+        class Mixin(type):
+            def mro(cls):
+                return [cls]
+
+        class Foo(metaclass=Meta):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            return cls.mro()
+
+        self.assertEqual(fn(Foo), [Foo, object])
+        Meta.__bases__ = (Mixin,)
+        self.assertEqual(fn(Foo), [Foo])
+
     def test_builtin_str_on_user_defined_function(self):
         def another_fn():
             pass

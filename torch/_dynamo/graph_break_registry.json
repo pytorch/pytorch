@@ -7031,6 +7031,16 @@
       ]
     }
   ],
+  "GB3841": [
+    {
+      "Gb_type": "Class attribute set on its metaclass in this frame",
+      "Context": "{self.value.__qualname__}.{name}",
+      "Explanation": "Dynamo looks up class attributes in the metaclass dicts, which do not have a store made earlier in this frame yet.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0442": [
     {
       "Gb_type": "backward() with empty inputs",
