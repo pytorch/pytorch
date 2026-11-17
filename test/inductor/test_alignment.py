@@ -376,7 +376,6 @@ if RUN_GPU:
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

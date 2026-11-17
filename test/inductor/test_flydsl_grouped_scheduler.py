@@ -177,6 +177,5 @@ class TestFlyDSLGroupedScheduler(TestCase):
 
 instantiate_device_type_tests(TestFlyDSLGroupedScheduler, globals(), only_for="cuda")
 
-
 if __name__ == "__main__":
     run_tests()

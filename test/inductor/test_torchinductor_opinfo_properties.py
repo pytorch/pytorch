@@ -1292,6 +1292,5 @@ instantiate_device_type_tests(
     TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True
 )
 
-
 if __name__ == "__main__":
     run_tests()

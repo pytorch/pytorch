@@ -7,12 +7,7 @@ import torch
 import torch._dynamo.trace_rules as trace_rules
 import torch._native.registry as registry_module
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-    skipIfTorchDynamo,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class _CowStateWrapperTensor(torch.Tensor):
@@ -421,7 +416,6 @@ def _restore_override_libs(registry, saved):
     return bool(clobbered)
 
 
-@instantiate_parametrized_tests
 @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
 class TestRegistryRuntime(TestCase):
     """End-to-end runtime tests that exercise the real dispatcher.

@@ -2229,7 +2229,6 @@ class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
 
 instantiate_device_type_tests(AotAutogradFallbackTestsDevice, globals())
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

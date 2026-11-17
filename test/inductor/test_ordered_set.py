@@ -2131,7 +2131,6 @@ class TestGraphs(TestCase):
 
 # ==============================================================================
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

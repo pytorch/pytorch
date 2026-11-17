@@ -3339,6 +3339,5 @@ class TestScoreFusionMemory(TestCase):
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestScoreFusionMemory, globals(), allow_xpu=True)
 
-
 if __name__ == "__main__":
     run_tests()

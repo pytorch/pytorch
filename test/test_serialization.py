@@ -5804,6 +5804,5 @@ instantiate_parametrized_tests(TestSubclassSerialization)
 instantiate_parametrized_tests(TestOldSerialization)
 instantiate_parametrized_tests(TestSerialization)
 
-
 if __name__ == '__main__':
     run_tests()

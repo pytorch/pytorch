@@ -1546,7 +1546,6 @@ if RUN_GPU:
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
