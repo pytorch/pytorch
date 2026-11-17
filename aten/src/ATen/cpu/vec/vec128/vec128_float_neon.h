@@ -251,6 +251,9 @@ class Vectorized<float> {
         vshlq_u32(vandq_u32(is_zero_vec, vdupq_n_u32(1)), shift);
     return vaddvq_u32(bits_vec);
   }
+  float reduce_add() const {
+    return vaddvq_f32(values);
+  }
   float reduce_max() const {
     return vmaxvq_f32(values);
   }
@@ -287,13 +290,18 @@ class Vectorized<float> {
     }
     return loadu(tmp);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<float> or_nan_if(const Vectorized<float>& mask) const {
+    return Vectorized<float>(vreinterpretq_f32_u32(
+        vorrq_u32(vreinterpretq_u32_f32(values), vreinterpretq_u32_f32(mask))));
+  }
   Vectorized<float> abs() const {
     return Vectorized<float>(vabsq_f32(values));
   }
   Vectorized<float> angle() const {
     auto zero = Vectorized<float>(0);
     auto pi = Vectorized<float>(c10::pi<float>);
-    auto tmp = blendv(zero, pi, *this < zero);
+    auto tmp = blendv(zero, pi, pi.copysign(*this) < zero);
     return blendv(tmp, *this, isnan());
   }
   Vectorized<float> real() const {
