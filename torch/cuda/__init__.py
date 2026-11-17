@@ -41,6 +41,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
+from .memory_planning import MemoryPlannedGraph
 from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
@@ -2274,7 +2275,9 @@ __all__ = [
     "memory_stats",
     "memory_stats_as_nested_dict",
     "memory_summary",
+    "memory_planning",
     "memory_usage",
+    "MemoryPlannedGraph",
     "MemPool",
     "LocalizedAllocator",
     "use_mem_pool",
