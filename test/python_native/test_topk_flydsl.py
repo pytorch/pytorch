@@ -194,6 +194,74 @@ class TestFlyDSLTopK(TestCase):
                         self._assert_topk_matches_aten(x, k, largest=largest)
                         self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
 
+    def test_specials_are_inside_the_selected_set(self):
+        # A random row hides every planted value except the winning extreme.
+        # Fill with the losing extreme so each planted value, and that
+        # extreme, is inside the selected K.
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        for dtype in _SUPPORTED_DTYPES:
+            for largest in (True, False):
+                for k in (8, 65):
+                    n = _test_n(k, dtype)
+                    m = _test_m(k, dtype)
+                    kernel = _expected_kernel(k, n, dtype)
+                    with self.subTest(dtype=dtype, largest=largest, k=k):
+                        if dtype.is_floating_point:
+                            background = float("-inf") if largest else float("inf")
+                            tiny = torch.tensor(
+                                torch.finfo(dtype).smallest_normal / 2,
+                                dtype=dtype,
+                                device="cuda",
+                            )
+                            planted = (
+                                float("inf") if largest else float("-inf"),
+                                -0.0,
+                                0.0,
+                                tiny,
+                            )
+                        else:
+                            info = torch.iinfo(dtype)
+                            background = info.min if largest else info.max
+                            planted = (
+                                info.max if largest else info.min,
+                                -1,
+                                0,
+                                1,
+                            )
+                        x = torch.full((m, n), background, dtype=dtype, device="cuda")
+                        for col, value in enumerate(planted):
+                            x[:, col] = value
+                        if dtype.is_floating_point:
+                            bits = x.view(
+                                torch.int32 if dtype == torch.float32 else torch.int16
+                            )
+                            bits[:, 1] = -(1 << (bits.element_size() * 8 - 1))
+
+                        misses = topk_cache_info(kernel).misses
+                        got_v, _ = torch.topk(x, k, largest=largest)
+                        self.assertEqual(
+                            topk_cache_info(kernel).misses, misses + 1
+                        )
+                        for value in (background, *planted):
+                            skip_zero = (
+                                dtype.is_floating_point
+                                and not isinstance(value, torch.Tensor)
+                                and value == 0
+                            )
+                            if skip_zero:
+                                continue
+                            self.assertTrue(
+                                got_v.eq(value).any(dim=-1).all(),
+                                f"{value} missing from the selected set",
+                            )
+                        if dtype.is_floating_point:
+                            got_bits = got_v.view(bits.dtype)
+                            neg_zero = -(1 << (got_bits.element_size() * 8 - 1))
+                            self.assertTrue(got_bits.eq(neg_zero).any(dim=-1).all())
+                            self.assertTrue(got_bits.eq(0).any(dim=-1).all())
+                        self._assert_topk_matches_aten(x, k, largest=largest)
+
     def test_3d_input(self):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
@@ -276,11 +344,12 @@ class TestFlyDSLTopK(TestCase):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
         payloads = {
-            torch.float16: (0x7E01, 0xFE02 - (1 << 16)),
-            torch.bfloat16: (0x7FC1, 0xFFC2 - (1 << 16)),
+            torch.float32: (torch.int32, 0x7FC12345, 0xFFC54321 - (1 << 32)),
+            torch.float16: (torch.int16, 0x7E01, 0xFE02 - (1 << 16)),
+            torch.bfloat16: (torch.int16, 0x7FC1, 0xFFC2 - (1 << 16)),
         }
         k = 65
-        for dtype, (positive_nan, negative_nan) in payloads.items():
+        for dtype, (bit_dtype, positive_nan, negative_nan) in payloads.items():
             n = _test_n(k, dtype)
             m = _test_m(k, dtype)
             for largest in (True, False):
@@ -288,14 +357,14 @@ class TestFlyDSLTopK(TestCase):
                     misses = topk_cache_info("radix").misses
                     x = _make_test_input((m, n), dtype)
                     cols = _special_cols(n)[:2]
-                    x_bits = x.view(torch.int16)
+                    x_bits = x.view(bit_dtype)
                     x_bits[:, cols[0]] = positive_nan
                     x_bits[:, cols[1]] = negative_nan
 
                     got_v, got_i = torch.topk(x, k, largest=largest)
                     gathered = torch.gather(x, -1, got_i)
                     self.assertEqual(
-                        gathered.view(torch.int16), got_v.view(torch.int16)
+                        gathered.view(bit_dtype), got_v.view(bit_dtype)
                     )
                     sorted_i = got_i.sort(dim=-1).values
                     self.assertTrue(sorted_i.diff(dim=-1).ne(0).all())
