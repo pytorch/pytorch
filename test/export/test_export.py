@@ -15758,8 +15758,12 @@ def forward(self, x, b_t, y):
 
         x, y = torch.randn(4, 4), torch.randn(4, 4)
         with torch.autocast("cpu", dtype=torch.bfloat16):
-            ep = torch.export.export(Model(), (x, y))
-        self.assertEqual(ep.module()(x, y).dtype, torch.float32)
+            ep = export(Model(), (x, y))
+        expected = torch.float32
+        if is_training_ir_test(self._testMethodName):
+            # These variants lower inside the autocast, which records the casts.
+            expected = torch.bfloat16
+        self.assertEqual(ep.module()(x, y).dtype, expected)
 
         with torch.autocast("cpu", dtype=torch.bfloat16):
             lowered = ep.run_decompositions()
