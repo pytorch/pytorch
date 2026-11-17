@@ -1158,7 +1158,7 @@ class ParentWithChildModule(torch.nn.Module):
         # guard is rooted at the key and a load must leave it unseeded, which is
         # the negative test_load_seeds_exactly_the_recorded_globals pins;
         # keep_builtin_guards keeps the guard instead, which is how the seeding
-        # itself gets pinned.
+        # itself gets pinned. Avoid non-alias globals such as torch in this fixture.
         if not len(x.shape):
             raise TypeError(type(x))
         return self.lin(x)

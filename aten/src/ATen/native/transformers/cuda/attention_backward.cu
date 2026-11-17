@@ -577,10 +577,11 @@ _efficient_attention_backward(
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;
+    // CK reads the int64 seed/offset of the forward as uint64.
     const auto ck_philox_seed =
-        use_dropout ? philox_seed : at::zeros({}, at::dtype(at::kLong));
+        use_dropout ? philox_seed.view(at::kUInt64) : at::zeros({}, at::dtype(at::kLong));
     const auto ck_philox_offset =
-        use_dropout ? philox_offset : at::zeros({}, at::dtype(at::kLong));
+        use_dropout ? philox_offset.view(at::kUInt64) : at::zeros({}, at::dtype(at::kLong));
     auto
         [dQ,
          dK,
@@ -605,7 +606,8 @@ _efficient_attention_backward(
                      max_seqlen_k,
                      float(dropout_p),
                      my_softmax_scale,
-                     custom_mask_type == 0 ? false : true, // is_causal
+                     custom_mask_type != static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask), // is_causal
+                     custom_mask_type == static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft), // causal_top_left
                      false, // deterministic
                      false, // zero_tensors
                      ck_philox_seed,

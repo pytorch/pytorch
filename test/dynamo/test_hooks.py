@@ -109,11 +109,11 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         # Existing always_call set insertion observes IDs and recompiles per module.
         self.assertEqual(cnt.frame_count, 2)
 
-    @parametrize("key, known_hash", [(True, 1), (1.0, 1), ("1", 1), (2, 3)])
-    def test_known_hook_hash_rejects_invalid_key(self, key, known_hash):
+    @parametrize("key", [True, 1.0, "1"])
+    def test_lazy_hook_key_requires_exact_int(self, key):
         key_var = LazyVariableTracker.create(key, LocalSource("key"))
-        with self.assertRaisesRegex(AssertionError, "exact-int key.*matching hash"):
-            HashableTracker(key_var, known_hash=known_hash)
+        with self.assertRaisesRegex(AssertionError, "unrealized exact-int key"):
+            HashableTracker.lazy_int_key(key_var)
 
     @parametrize("name", ["_forward_hooks", "_backward_hooks"])
     def test_hook_dictionary_direct_mutation(self, name):
@@ -660,13 +660,14 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             ),
         ],
     )
+    @torch._dynamo.config.patch(allow_unspec_int_on_nn_module=True)
     def test_materialized_hook_keys(self, operation):
         def fn(x, module):
             return x + operation(module._forward_hooks)
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
-        for keys in ((2, 3), (1, 3)):
+        for keys in ((2, 3), (4, 3), (1, 3)):
             module = torch.nn.Identity()
             for key in keys:
                 module._forward_hooks[key] = identity_forward_hook
