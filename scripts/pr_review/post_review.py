@@ -9,6 +9,8 @@ that fails is dropped, never repaired. `--mark-pending` and `--restore-pending`
 take no row: they mark the previous review in progress for RUN_ID, or put it
 back (see Invariants). `--too-large`, and a `skipped_too_large` row, post a
 notice that the PR is over the size limit instead of a verdict.
+`--withdraw-opted-out` takes no row either: it runs when the opt-out label is
+added.
 
 Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
@@ -25,8 +27,9 @@ Invariants:
   finding.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
-  The only other dismissal is a run retracting its own review because the
-  head moved.
+  The only other dismissals are a run retracting its own review because the
+  head moved, and `--withdraw-opted-out`, which dismisses every standing
+  request once the PR carries the opt-out label.
 - While a run reviews, the newest visible review is marked in progress, its
   body collapsed under a status line (`--mark-pending`). A run that ends
   without replacing it, failed, skipped or opted out, puts the body back
@@ -1245,6 +1248,19 @@ def decline(gh, pr, sha, author, opt_out, limits) -> int:
     return 0
 
 
+OPTED_OUT = "Withdrawn: this PR opted out of automated review."
+
+
+def withdraw_opted_out(gh: GitHub, pr: int, author: str, opt_out: str) -> None:
+    """Dismiss this workflow's standing change requests if the PR carries
+    `opt_out`. The label is read again, since it may have been removed since
+    it triggered this run."""
+    if not opted_out(gh, pr, opt_out):
+        print(f"PR does not carry '{opt_out}'; withdrawing nothing")
+        return
+    withdraw(gh, pr, author, OPTED_OUT)
+
+
 def run(
     gh: GitHub,
     row: dict,
@@ -1414,6 +1430,11 @@ def main() -> int:
         action="store_true",
         help="say the PR at REVIEWED_SHA is too large to review",
     )
+    mode.add_argument(
+        "--withdraw-opted-out",
+        action="store_true",
+        help="dismiss the automated change requests of a PR that opted out",
+    )
     args = ap.parse_args()
     try:
         gh = GitHub(os.environ["GH_TOKEN"], os.environ["REPO"])
@@ -1426,6 +1447,14 @@ def main() -> int:
                 os.environ.get("OPT_OUT_LABEL", "no automated review"),
                 size_limits(),
             )
+        if args.withdraw_opted_out:
+            withdraw_opted_out(
+                gh,
+                int(os.environ["PR_NUMBER"]),
+                os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR),
+                os.environ.get("OPT_OUT_LABEL", "no automated review"),
+            )
+            return 0
         if args.mark_pending or args.restore_pending:
             run_id = os.environ["RUN_ID"]
             if not run_id.isdigit():
@@ -1455,13 +1484,14 @@ def main() -> int:
             size_limits(),
         )
     except Exception as exc:  # noqa: BLE001 - an API failure never fails the job
-        what = (
-            "posted"
-            if args.row_file or args.too_large
-            else "marked"
-            if args.mark_pending
-            else "put back"
-        )
+        if args.row_file or args.too_large:
+            what = "posted"
+        elif args.mark_pending:
+            what = "marked"
+        elif args.restore_pending:
+            what = "put back"
+        else:
+            what = "withdrawn"
         warn(f"automated review not {what}: {exc!r}")
         return 0
 
