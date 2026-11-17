@@ -4299,6 +4299,8 @@ class TestPrecompileNumerics(TestCase):
         from torch._inductor.utils import fresh_cache
         from torch.compiler import _runtime_cache
 
+        # A rerun in this process must compile again, not reuse a tuned kernel.
+        torch._dynamo.reset()
         x = make_tensor((1 << 22,), device=device, dtype=torch.float32)
         expected = _precompile_pointwise(x)
         launches = []
@@ -4339,9 +4341,9 @@ class TestPrecompileNumerics(TestCase):
             out = next(
                 arg for arg in args if isinstance(arg, torch.Tensor) and arg is not x
             )
-            _runtime_cache._frozen_triton_kernels["source"] = (
-                _runtime_cache._freeze_triton_kernel("source", [kernel])
-            )
+            payload, tuning = _runtime_cache._freeze_triton_kernel("source", [kernel])
+            self.assertTrue(tuning)
+            _runtime_cache._frozen_triton_kernels["source"] = payload
             with (
                 mock.patch.dict(_shared_autotuner_registry, clear=True),
                 torch.compiler.precompile.no_compilation(),
@@ -8061,7 +8063,7 @@ class TestPrecompileRuntimeCache(TestCase):
         original_launchers = kernel.launchers
         original_fn = kernel.fn.fn
         with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
-            payload = _freeze_triton_kernel("source", [unexecuted, kernel])
+            payload, _ = _freeze_triton_kernel("source", [unexecuted, kernel])
         saved = pickle.loads(payload)
         self.assertEqual(saved.cache_key, "source")
         self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
@@ -8115,7 +8117,6 @@ class TestPrecompileRuntimeCache(TestCase):
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_keeps_incremental_candidates(self):
-        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
         from torch.compiler._runtime_cache import _freeze_triton_kernel
 
         kernel = _static_runtime_kernel(32)
@@ -8126,13 +8127,25 @@ class TestPrecompileRuntimeCache(TestCase):
         kernel._cached_launcher = None
         # The incremental plugin holds the candidates while it is still timing them.
         kernel._plugins = [types.SimpleNamespace(_state=object())]
-        with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
-            saved = pickle.loads(_freeze_triton_kernel("source", [kernel])).kernel
+        kernel.inductor_meta["coordinate_descent_tuning"] = True
+        kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
+        # A sibling that finished tuning, recorded later and never fast-path cached.
+        tuned = _static_runtime_kernel(256)
+        tuned._cached_launcher = None
+        payload, tuning = _freeze_triton_kernel("source", [kernel])
+        sibling, sibling_tuning = _freeze_triton_kernel("source", [kernel, tuned])
+        saved = pickle.loads(payload).kernel
         blocks = [result.config.kwargs["XBLOCK"] for result in saved.compile_results]
         self.assertEqual(blocks, [32, 64, 128])
+        self.assertTrue(tuning)
         self.assertFalse(saved.inductor_meta["coordinate_descent_tuning"])
+        self.assertIsNone(saved.inductor_meta["combo_tuning_groups"])
+        self.assertTrue(kernel.inductor_meta["coordinate_descent_tuning"])
         self.assertEqual(len(kernel.compile_results), 3)
         self.assertEqual(kernel.launchers, [])
+        results = pickle.loads(sibling).kernel.compile_results
+        self.assertEqual([result.config.kwargs["XBLOCK"] for result in results], [256])
+        self.assertFalse(sibling_tuning)
         kernel._plugins = [types.SimpleNamespace(_state=None)]
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
@@ -8153,25 +8166,26 @@ class TestPrecompileRuntimeCache(TestCase):
         kernel.launchers = []
         kernel._cached_launcher = None
         kernel._plugins = [types.SimpleNamespace(_state=object())]
-        with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
-            payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+        kernel.inductor_meta["incremental_autotune"] = incremental
+        payload, _ = _runtime_cache._freeze_triton_kernel("source", [kernel])
+        serves = mock.patch.object(
+            _runtime_cache, "_serves_incremental_autotune", return_value=True
+        )
         with (
             mock.patch.object(
                 _runtime_cache, "_frozen_triton_kernels", {"source": payload}
             ),
             mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
-            mock.patch.object(
-                _runtime_cache,
-                "_serves_incremental_autotune",
-                return_value=incremental,
-            ),
+            # Unmocked, the real check finds no incremental plugin on the kernel.
+            serves if incremental else contextlib.nullcontext(),
             mock.patch.object(StaticTritonCompileResult, "reload_cubin_path") as reload,
-            mock.patch.object(CachingAutotuner, "_make_launchers"),
+            mock.patch.object(CachingAutotuner, "_make_launchers") as make_launchers,
         ):
             loaded = _runtime_cache.load_triton_kernel("source")
         blocks = [result.config.kwargs["XBLOCK"] for result in loaded.compile_results]
         self.assertEqual(blocks, [32, 64] if incremental else [32])
         self.assertEqual(reload.call_count, len(blocks))
+        make_launchers.assert_called_once()
 
     def test_static_records_follow_cache_reset(self):
         import hashlib
@@ -8953,7 +8967,7 @@ class TestPrecompileRuntimeCache(TestCase):
                     side_effect=check_live_kernel,
                 ),
             ):
-                payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+                payload, _ = _runtime_cache._freeze_triton_kernel("source", [kernel])
         saved = pickle.loads(payload).kernel
         self.assertEqual(saved.compile_results[0].kernel.cubin_raw, b"from disk")
         self.assertIsNone(live_binary.cubin_raw)

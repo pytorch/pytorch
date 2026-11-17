@@ -332,24 +332,26 @@ def load_triton_kernel(key: str) -> CachingAutotuner | None:
 
 
 def _load_frozen_triton_kernel(key: str, payload: bytes) -> CachingAutotuner:
-    from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
     from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
 
     record = pickle.loads(payload)
     if not isinstance(record, StaticallyLaunchedAutotuner) or record.cache_key != key:
         raise RuntimeError("Invalid Inductor Triton source identity")
     kernel = record.kernel
-    if not kernel.compile_results or not all(
-        isinstance(result, StaticTritonCompileResult)
-        for result in kernel.compile_results
-    ):
+    if not kernel.is_statically_launchable():
         raise RuntimeError(
-            "Inductor Triton runtime artifact has no selected static kernel"
+            "Inductor Triton runtime artifact has a kernel that is not static"
         )
     kernel.restore_after_unpickle(old_values=None)
     if len(kernel.compile_results) > 1 and not _serves_incremental_autotune(kernel):
-        # Serving cannot benchmark, so without incremental autotuning keep the
-        # config a single-candidate artifact would have frozen.
+        # Without incremental autotuning nothing in this process chooses between
+        # the candidates, so keep the first.
+        log.warning(
+            "precompile serves %s with the first of its %d frozen candidate configs: "
+            "this process does not run incremental autotuning",
+            record.kernel_name,
+            len(kernel.compile_results),
+        )
         kernel.compile_results = kernel.compile_results[:1]
     with kernel.lock:
         for result in kernel.compile_results:
@@ -377,15 +379,9 @@ def _incrementally_tuning(kernel: CachingAutotuner) -> bool:
     The plugin empties ``launchers`` while it times candidates on real
     launches, so such a kernel has every static candidate but no launcher.
     """
-    from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
-
     return (
         not kernel.launchers
-        and bool(kernel.compile_results)
-        and all(
-            isinstance(result, StaticTritonCompileResult)
-            for result in kernel.compile_results
-        )
+        and kernel.is_statically_launchable()
         and any(
             getattr(plugin, "_state", None) is not None for plugin in kernel._plugins
         )
@@ -405,8 +401,6 @@ def _serves_incremental_autotune(kernel: CachingAutotuner) -> bool:
 def _triton_export_rejection(kernel: CachingAutotuner) -> str | None:
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
 
-    if _incrementally_tuning(kernel):
-        return None
     if len(kernel.launchers) != 1:
         return "launcher_count_not_one"
     result = getattr(kernel.launchers[0], "_compile_result", None)
@@ -482,19 +476,25 @@ def _retain_cubin(result: StaticTritonCompileResult) -> None:
             static_kernel.cubin_raw = f.read()
 
 
-def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
+def _freeze_triton_kernel(
+    key: str, instances: list[CachingAutotuner]
+) -> tuple[bytes, bool]:
+    """Freeze a Triton source, and say whether it was mid incremental tuning."""
     from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
     from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
 
     rejected: list[dict[str, object]] = []
-    # Rendering can create an unexecuted instance of an already warmed source.
-    for kernel in sorted(instances, key=lambda k: k._cached_launcher is None):
+    # Rendering can create an unexecuted instance of an already warmed source,
+    # and an instance that finished tuning beats one still being tuned.
+    for kernel in sorted(
+        instances, key=lambda k: (_incrementally_tuning(k), k._cached_launcher is None)
+    ):
         with kernel.lock:
-            reason = _triton_export_rejection(kernel)
+            tuning = _incrementally_tuning(kernel)
+            reason = None if tuning else _triton_export_rejection(kernel)
             if reason is not None:
                 rejected.append(_triton_export_diagnostic(kernel, reason))
                 continue
-            tuning = _incrementally_tuning(kernel)
             if tuning:
                 # Freezing one config would serve an arbitrary untuned config
                 # for the rest of training; ship every candidate so serving
@@ -531,11 +531,10 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
             diagnostic["error"] = str(exc)
             rejected.append(diagnostic)
             continue
-        return pickle.dumps(
-            StaticallyLaunchedAutotuner(
-                key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
-            )
+        record = StaticallyLaunchedAutotuner(
+            key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
         )
+        return pickle.dumps(record), tuning
     kernel_name = instances[0].inductor_meta.get("kernel_name")
     raise _UnresolvedTritonExport(
         [
@@ -693,21 +692,13 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
 
     static_kernels: dict[str, bytes] = {}
     rejected_sources: list[dict[str, object]] = []
+    tuning = 0
     for key, instances in kernels.items():
         try:
-            static_kernels[key] = _freeze_triton_kernel(key, instances)
+            static_kernels[key], mid_tuning = _freeze_triton_kernel(key, instances)
+            tuning += mid_tuning
         except _UnresolvedTritonExport as exc:
             rejected_sources.extend(exc.sources)
-    tuning = sum(
-        any(map(_incrementally_tuning, instances)) for instances in kernels.values()
-    )
-    if tuning:
-        log.warning(
-            "precompile froze %d of %d Triton kernels mid incremental autotuning; "
-            "serving finishes tuning them over their candidate configs",
-            tuning,
-            len(kernels),
-        )
     if rejected_sources:
         error = _UnresolvedTritonExport(rejected_sources)
         trace_structured(
@@ -721,6 +712,13 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
             record_logging_overhead=False,
         )
         raise error
+    if tuning:
+        log.warning(
+            "precompile froze %d of %d Triton kernels mid incremental autotuning, with "
+            "every candidate config; serving that runs it finishes the tuning",
+            tuning,
+            len(kernels),
+        )
     return pickle.dumps(static_kernels)
 
 
