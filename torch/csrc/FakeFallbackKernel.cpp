@@ -7,6 +7,7 @@
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/FunctionRef.h>
+#include <c10/util/LeftRight.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
@@ -27,6 +28,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -370,9 +372,6 @@ DEFINE_CACHED_PYTHON_IMPORT(
     get_decomposition_table,
     py::module::import("torch._decomp").attr("decomposition_table"))
 DEFINE_CACHED_PYTHON_IMPORT(
-    get_schema_info,
-    py::module::import("torch._subclasses.fake_tensor").attr("get_schema_info"))
-DEFINE_CACHED_PYTHON_IMPORT(
     get_check_for_subclass_arg,
     py::module::import("torch._subclasses.fake_tensor")
         .attr("_check_for_subclass_arg"))
@@ -606,12 +605,43 @@ void invalidate_written_to_constants(
     const c10::OperatorHandle& op,
     const torch::jit::Stack& stack,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
-  py::gil_scoped_acquire gil;
-  py::object schema_info_obj = get_schema_info()(getTorchApiFunction(op));
-  auto& schema_info = schema_info_obj.cast<torch::utils::SchemaInfo&>();
+  using MutableInputs = c10::SmallVector<size_t, 2>;
+  // SchemaInfo also accounts for training ops whose writes are not annotated
+  // in the schema. Drop cached results when an operator is deregistered.
+  static c10::LeftRight<std::unordered_map<c10::OperatorName, MutableInputs>>
+      cache;
+  class CacheInvalidator final : public c10::OpRegistrationListener {
+   public:
+    void onOperatorRegistered(const c10::OperatorHandle& op) override {}
+    void onOperatorDeregistered(const c10::OperatorHandle& op) override {
+      cache.write([&](auto& entries) { entries.erase(op.operator_name()); });
+    }
+  };
+  static auto listener = c10::Dispatcher::singleton().addRegistrationListener(
+      std::make_unique<CacheInvalidator>());
+  auto mutable_inputs =
+      cache.read([&](const auto& entries) -> std::optional<MutableInputs> {
+        const auto it = entries.find(op.operator_name());
+        if (it != entries.end()) {
+          return it->second;
+        }
+        return std::nullopt;
+      });
+  if (!mutable_inputs) {
+    mutable_inputs.emplace();
+    torch::utils::SchemaInfo schema_info(op.schema());
+    for (const auto i : c10::irange(op.schema().arguments().size())) {
+      if (schema_info.is_mutable({c10::SchemaArgType::input, i})) {
+        mutable_inputs->push_back(i);
+      }
+    }
+    cache.write([&](auto& entries) {
+      entries.try_emplace(op.operator_name(), *mutable_inputs);
+    });
+  }
   const auto arguments =
       torch::jit::last(stack, op.schema().arguments().size());
-  for (const auto i : c10::irange(arguments.size())) {
+  for (const auto i : *mutable_inputs) {
     if (!arguments[i].isTensor()) {
       continue;
     }
@@ -621,7 +651,7 @@ void invalidate_written_to_constants(
       continue;
     }
     auto constant = mode->get_constant(t.unsafeGetTensorImpl());
-    if (constant && schema_info.is_mutable({c10::SchemaArgType::input, i})) {
+    if (constant) {
       mode->invalidate_constant_aliases(
           constant->storage().unsafeGetStorageImpl());
     }
