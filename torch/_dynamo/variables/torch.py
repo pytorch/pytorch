@@ -2385,10 +2385,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         # same node shape but no such bound.
                         fx_node = item.as_proxy().node
                         item_node = fx_node.args[0] if fx_node.args else None
-                        source_dtype = (
-                            item_node.args[0].meta["example_value"].dtype
+                        tensor_node = (
+                            item_node.args[0]
                             if isinstance(item_node, torch.fx.Node)
                             and item_node.target == "item"
+                            else None
+                        )
+                        source_dtype = (
+                            tensor_node.meta["example_value"].dtype
+                            if isinstance(tensor_node, torch.fx.Node)
                             else None
                         )
                         is_tensor_item = (
