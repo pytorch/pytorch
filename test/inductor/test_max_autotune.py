@@ -6472,6 +6472,10 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
     @parametrize("operand", ("a", "b"))
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "native matmul never reaches the triton_mm template",
+    )
     def test_gather_prologue_ragged_dim(self, operand):
         # The fused gather loads idx along M (N for b), and no BLOCK_M (BLOCK_N)
         # divides 129, so that offset wraps inside the last tile.
