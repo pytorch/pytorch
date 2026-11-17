@@ -30,19 +30,16 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
         )
 
     def _capture_and_replay(self, op, async_op):
-        device_module = torch.get_device_module(self.device_type)
-        graph = (
-            device_module.XPUGraph()
-            if self.device_type == "xpu"
-            else device_module.CUDAGraph()
-        )
-        with device_module.graph(graph):
+        stream = torch.Stream()
+        graph = torch.accelerator.Graph()
+        with stream, graph:
             work = op()
             if async_op:
                 self.assertIsNotNone(work)
                 work.wait()
             else:
                 self.assertIsNone(work)
+        torch.accelerator.current_stream().wait_stream(stream)
         graph.replay()
         torch.accelerator.synchronize()
 
