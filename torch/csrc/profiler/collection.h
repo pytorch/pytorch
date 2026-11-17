@@ -462,8 +462,8 @@ struct KinetoObserverContext : public at::ObserverContext {
         std::numeric_limits<c10::approx_time_t>::min()};
 
     std::unique_ptr<perf_counters_t> counters_;
-    collective_meta_t* collective_meta_{};
-    kwinputs_t* kwinputs_{};
+    std::unique_ptr<collective_meta_t> collective_meta_;
+    std::unique_ptr<kwinputs_t> kwinputs_;
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -629,12 +629,6 @@ class TORCH_API ThreadLocalSubqueue {
 
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
-
-    // report collective communication metadata
-    AppendOnlyList<collective_meta_t, BlockSize> collective_meta_;
-
-    // report kwinputs
-    AppendOnlyList<kwinputs_t, BlockSize> kwinputs_;
 
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK

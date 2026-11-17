@@ -388,7 +388,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs(), config_.profile_memory);
     auto kwinputs = fn.kwinputs();
     if (!kwinputs.empty()) {
-      event->kwinputs_ = torch_ops_.kwinputs_.emplace_back(std::move(kwinputs));
+      event->kwinputs_ = std::make_unique<kwinputs_t>(std::move(kwinputs));
     }
   }
   bool pushed_correlation_id = false;
@@ -423,7 +423,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   if (fn.isNcclMeta()) {
     torch::profiler::impl::SaveNcclMetaConfig nccl_meta_config{
         true, true, true, false};
-    out->event_->collective_meta_ = torch_ops_.collective_meta_.emplace_back(
+    out->event_->collective_meta_ = std::make_unique<collective_meta_t>(
         torch::profiler::impl::saveNcclMetaTyped(fn, nccl_meta_config));
   }
 
@@ -543,8 +543,6 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 
   op_events_.clear();
   inputs_outputs_.clear();
-  collective_meta_.clear();
-  kwinputs_.clear();
 }
 
 template <size_t BlockSize>
