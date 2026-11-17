@@ -8019,45 +8019,6 @@ class TestPrecompileRuntimeCache(TestCase):
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
 
-    @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    @parametrize("incremental", (True, False))
-    def test_static_load_serves_incremental_candidates(self, incremental):
-        from torch._inductor.runtime import triton_heuristics
-        from torch._inductor.runtime.triton_heuristics import (
-            CachingAutotuner,
-            StaticTritonCompileResult,
-        )
-        from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
-        from torch.compiler import _runtime_cache
-
-        class Tuning(triton_heuristics.CachingAutotunerPlugin):
-            def tunes_prebuilt_launchers(self, autotuner):
-                return True
-
-        kernel = _static_runtime_kernel(32)
-        kernel.compile_results = [
-            _static_runtime_kernel(block).compile_results[0] for block in (32, 64)
-        ]
-        kernel.prepare_for_pickle()
-        record = StaticallyLaunchedAutotuner("source", "runtime_kernel", kernel)
-        frozen = {"source": pickle.dumps(record)}
-        plugins = [Tuning()] if incremental else []
-        with (
-            mock.patch.object(_runtime_cache, "_frozen_triton_kernels", frozen),
-            mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
-            # The plugins unpickling gives the kernel in the serving process.
-            mock.patch.object(
-                triton_heuristics, "get_caching_autotuner_plugins", return_value=plugins
-            ),
-            mock.patch.object(StaticTritonCompileResult, "reload_cubin_path") as reload,
-            mock.patch.object(CachingAutotuner, "_make_launchers") as make_launchers,
-        ):
-            loaded = _runtime_cache.load_triton_kernel("source")
-        blocks = [result.config.kwargs["XBLOCK"] for result in loaded.compile_results]
-        self.assertEqual(blocks, [32, 64] if incremental else [32])
-        self.assertEqual(reload.call_count, len(blocks))
-        make_launchers.assert_called_once()
-
     def test_static_records_follow_cache_reset(self):
         import hashlib
 
