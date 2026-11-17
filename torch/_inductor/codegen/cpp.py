@@ -1337,6 +1337,8 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def exp(x):
+        if config.cpp.vec_exp_u20 and x.dtype == torch.float:
+            return f"{x}.exp_u20()"
         return f"{x}.exp()"
 
     @staticmethod

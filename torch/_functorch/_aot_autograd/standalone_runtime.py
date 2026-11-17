@@ -9,12 +9,6 @@ intentional, single dependency surface of a standalone artifact: keep it small a
 stable, and update generated-artifact compatibility deliberately if it changes.
 """
 
-# Importing ``runtime_wrappers`` directly in a fresh process pulls in a name
-# (e.g. AutogradLazyBackwardCompileInfo) that is only bound once the dynamo init
-# chain has run, so importing it first triggers a circular ImportError. Force the
-# dynamo/aot chain to fully initialize before the ``from .runtime_wrappers``
-# import below so a bare ``import torch`` artifact stays self-contained.
-import torch._dynamo  # noqa: F401
 from torch._prims_common import CUDARngStateHelper
 
 # IDENTITY CONTRACT: these names MUST be plain re-exports that preserve the original
@@ -23,9 +17,8 @@ from torch._prims_common import CUDARngStateHelper
 # id() of these exact objects to recognize a global the codegen'd wrappers close over.
 # A wrapper would change id(), so the table lookup would silently miss and that global
 # would route to its internal AOTAutograd location instead of this stable surface.
-# The same contract covers ``CUDARngStateHelper`` (imported above for circular-import
-# ordering): the table keys on id() of its ``get_torch_state_as_tuple`` /
-# ``set_new_offset`` staticmethods, so it too must not be wrapped or aliased.
+# The same contract covers the get_torch_state_as_tuple and set_new_offset
+# staticmethods of CUDARngStateHelper.
 from .functional_utils import gen_alias_from_base
 from .runtime_wrappers import (
     _unwrap_tensoralias,
