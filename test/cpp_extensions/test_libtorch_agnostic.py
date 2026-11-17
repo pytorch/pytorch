@@ -5,6 +5,7 @@ import math
 import sysconfig
 import unittest
 import warnings
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -165,6 +166,40 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("case", ["view", "slice", "slice_none", "size"])
+    @parametrize("symbolic", [False, True])
+    def test_symint_dispatcher(self, device, case, symbolic):
+        import libtorch_agn_2_16  # noqa: F401
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        ops = torch.ops.libtorch_agn_2_16
+        mode = FakeTensorMode(shape_env=shape_env) if symbolic else nullcontext()
+        with mode:
+            size = shape_env.create_unbacked_symint() if symbolic else 3
+            x = torch.empty(size, 4, device=device)
+            if case == "size":
+                result = ops.symint_size(x, 0)
+            else:
+                if case == "view":
+                    result = ops.symint_view(x, [size, 4])
+                elif case == "slice":
+                    result = ops.symint_slice(x, 0, 0, size, 1)
+                else:
+                    result = ops.symint_slice(x, 0, None, None, 1)
+                self.assertEqual(result.shape[1], 4)
+                result = result.shape[0]
+            if symbolic:
+                self.assertIsInstance(result, torch.SymInt)
+                self.assertEqual(result.node.expr, size.node.expr)
+            else:
+                self.assertEqual(result, size)
+            self.assertEqual(shape_env.guards, [])
 
     @onlyCPU
     def test_slow_sgd(self, device):

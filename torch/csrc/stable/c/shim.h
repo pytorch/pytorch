@@ -23,6 +23,10 @@ extern "C" {
 // needed for backward compatibility when calling native functions via
 // the dispatcher. The caller should pass in the libtorch version the
 // extension is building with (NOT target version).
+// On runtimes 2.16 and newer, SymInt schema values (including list/optional
+// elements and returns) use owning SymInt words regardless of build version.
+// Box them with from(stable::SymInt); raw integers are compatible within
+// [-2^62, 2^63-1].
 AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
     const char* opName,
     const char* overloadName,
@@ -398,6 +402,18 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 // Returns whether the tensor is an inference tensor.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
+
+// A SymInt word is the integer itself in [-2^62, 2^63-1]. Other words are
+// opaque references; only libtorch may interpret them.
+// Constructs an owning word, including for integers outside the inline range.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_symint_from_int(int64_t value, int64_t* ret_word);
+
+// Acquires one reference for an opaque word; no-op for inline integers.
+AOTI_TORCH_EXPORT AOTITorchError torch_symint_incref(int64_t word);
+
+// Releases one owned reference; no-op for inline integers.
+AOTI_TORCH_EXPORT AOTITorchError torch_symint_decref(int64_t word);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 

@@ -169,3 +169,6 @@ torch_is_conj: TORCH_VERSION_2_16_0
 torch_is_inference: TORCH_VERSION_2_16_0
 torch_is_neg: TORCH_VERSION_2_16_0
 torch_is_warn_always_enabled: TORCH_VERSION_2_16_0
+torch_symint_decref: TORCH_VERSION_2_16_0
+torch_symint_from_int: TORCH_VERSION_2_16_0
+torch_symint_incref: TORCH_VERSION_2_16_0

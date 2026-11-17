@@ -222,7 +222,7 @@ You can always work with StableIValue abstractions in your custom kernel for typ
 | ? | ? | at::Generator | Generator |
 | std::vector<T>/torch::headeronly::HeaderOnlyArrayRef<T> | raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue pointing to a list of StableIValues recursively representing the underlying elements. | c10::List\<T> | Type[] |
 | ? | ? | ivalue::Tuple\<T> | (Type, ...) |
-| ? | ? | c10::SymInt | SymInt |
+| torch::stable::SymInt (2.16+) | an owning 64-bit word; integers in [-2^62, 2^63-1] are stored directly, otherwise the word refers to a reference-counted node | c10::SymInt | SymInt |
 | ? | ? | c10::SymFloat | SymFloat |
 | ? | ? | c10::SymBool | SymBool |
 | ? | ? | at::QScheme | QScheme |
