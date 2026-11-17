@@ -949,7 +949,9 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
         value = self._print(expr.args[0])
-        return f"triton_helpers.trunc_to_float({value}, {self._get_scalar_float_type()})"
+        return (
+            f"triton_helpers.trunc_to_float({value}, {self._get_scalar_float_type()})"
+        )
 
     @staticmethod
     def _get_scalar_float_type() -> str:

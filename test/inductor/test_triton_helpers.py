@@ -37,11 +37,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_GPU,
-    requires_gpu,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
 if HAS_GPU:
