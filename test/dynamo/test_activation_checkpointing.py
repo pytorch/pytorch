@@ -1836,6 +1836,10 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10)
         if prefer_cudnn and torch.version.cuda and TEST_CUDA:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+        elif torch.version.xpu and TEST_XPU:
+            sdpa_op = (
+                torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default
+            )
         else:
             sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
         self.assertTrue(count_ops(fwd_graph, [], freq=1, op=sdpa_op))
