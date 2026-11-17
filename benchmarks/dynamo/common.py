@@ -1048,6 +1048,9 @@ def rewritten(model_iter_fn):
     )
     found = _REWRITTEN.get(key)
     if found is None:
+        # As Dynamo does for its process the first time it compiles: the eager
+        # calls and the compiled ones are then timed as they are for it.
+        torch.distributions.Distribution.set_default_validate_args(False)
 
         def iterate(model, example_inputs, collect_outputs=True):
             return model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
