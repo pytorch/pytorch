@@ -13454,7 +13454,9 @@ class BaseScheduling:  # noqa: docstring_linter
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
-        return OrderedSet()
+        # Out-of-tree backends inherit this; keep their asserts inline as before
+        # instead of silently routing them through a fallback kernel.
+        return OrderedSet([BackendFeature.DEVICE_ASSERT_ASYNC])
 
     def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
         """Whether ``nodes`` codegen through the sub-parent staged emitter.
