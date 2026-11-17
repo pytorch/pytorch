@@ -26,7 +26,7 @@ the commit that added it; `git show --stat <sha>` lists every file it touched.
    parameters, so the new argument lands where existing callers pass `beta`/`alpha`
    positionally, e.g. `at::addmm_out(result, t, sparse, dense, 0, 1)` in
    `aten/src/ATen/native/sparse/SparseTensorMath.cpp`.
-   - `str` (`c10::string_view`): the literal `0` converts to it as a null pointer, so the
+   - `str` (`std::string_view`): the literal `0` converts to it as a null pointer, so the
      call becomes **ambiguous** and the build fails late.
    - `bool` / `int`: `0` converts by a standard conversion, which beats `Scalar`'s
      constructor, so the call **silently binds to the new overload**.
