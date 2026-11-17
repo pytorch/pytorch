@@ -92,6 +92,8 @@ def _oversized_shared_mem_limits() -> tuple[int, int]:
 
 @instantiate_parametrized_tests
 class TestStaticTritonLauncherUnit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _global_scratch_kernel(
         kernel_cls=StaticallyLaunchedCudaKernel, *, asm=None, **metadata_overrides
