@@ -51,7 +51,6 @@ from torch.testing._internal.common_device_type import (
     ops,
     PYTORCH_CUDA_MEMCHECK,
 )
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -4874,7 +4873,6 @@ with warnings.catch_warnings(record=True) as w:
             raise AssertionError("expected source to be not None")
         self.assertTrue("custom_op_db.py" in source)
 
-    @fake_tensor_test()
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @torch._dynamo.config.patch(fake_tensor_cache_enabled=False)
     @parametrize("profile_op", ["custom", "aten"])
@@ -6857,7 +6855,6 @@ class TestOpProfiles(TestCase):
             }
         }
 
-    @fake_tensor_test()
     def test_fake_registration(self):
         fm = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True)

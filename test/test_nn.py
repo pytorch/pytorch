@@ -1,7 +1,6 @@
 # Owner(s): ["module: nn"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import contextlib
 import ctypes
 import ctypes.util
@@ -3432,7 +3431,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
-    @fake_tensor_test()
     def test_pixel_shuffle_unshuffle_non_positive_factor(self):
         """The meta and decomposition paths must reject a non-positive factor
         the same way eager does, rather than dividing by it."""
@@ -16835,7 +16833,6 @@ class TestNNDeviceType(NNTestCase):
         _batch_norm_stats(
             torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device=device), torch.channels_last_3d, (0, 2, 3, 4))
 
-    @fake_tensor_test()
     def test_grid_sample_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
         grid = torch.empty(1, 1, 1, 2, device=device)
