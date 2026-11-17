@@ -493,6 +493,11 @@ def _problem(
             if _state.opening is not None:
                 _state.opening.close(env[uses[1]])
             return "asks for the type of a size"
+        if callee is type and len(uses) == 2:
+            if isinstance(env.get(uses[1]), torch.Tensor):
+                # A trace has a tensor of its own where the call has a
+                # Parameter or a tensor: its type is not theirs.
+                return "asks for the type of a tensor"
         if not _is_pure(callee) and not any(_involves_tensor(env.get(v)) for v in uses):
             return "no tensor or module involved"
     elif op == "to_bool" or (op == "unary" and inst["text"].split()[1] == "not"):
@@ -2113,6 +2118,19 @@ def _set_grad_enabled_checked(mode: bool) -> None:
         raise Untraceable("changes whether gradients are recorded")
 
 
+# What a trace has in the place of what it cannot hold (``_traps``). They are
+# objects of the trace: an instruction of a region that reads one (a function
+# kept in a variable, to be called after the region) gives back what stood
+# there before, by ``_ORIGINALS``.
+_TRAPS = (
+    (torch.autograd, "backward", _refuse("calls torch.autograd.backward")),
+    (torch.autograd, "grad", _refuse("calls torch.autograd.grad")),
+    (torch.autograd.Variable, "_execution_engine", _NoEngine()),
+    (torch._C, "_set_grad_enabled", _set_grad_enabled_checked),
+)
+_ORIGINALS: dict[int, Any] = {}
+
+
 @contextlib.contextmanager
 def _traps(modules: dict[int, nn.Module]) -> Any:
     """Turns what a trace would silently get wrong into an error."""
@@ -2125,13 +2143,12 @@ def _traps(modules: dict[int, nn.Module]) -> Any:
         reachable |= _module_state(module).ids
     # Nothing of torch.Tensor or nn.Module is replaced: see
     # ``_watch_module_changes``.
-    patches = [
-        (torch.autograd, "backward", _refuse("calls torch.autograd.backward")),
-        (torch.autograd, "grad", _refuse("calls torch.autograd.grad")),
-        (torch.autograd.Variable, "_execution_engine", _NoEngine()),
-        (torch._C, "_set_grad_enabled", _set_grad_enabled_checked),
-    ]
+    patches = _TRAPS
     saved = [(owner, name, owner.__dict__.get(name)) for owner, name, _ in patches]
+    for (_, _, replacement), (_, _, original) in zip(patches, saved):
+        # Not inside another trace, where what is there is a trap already.
+        if original is not None and id(original) not in _ORIGINALS:
+            _ORIGINALS[id(replacement)] = original
     watch: _Watch | None = None
     refuse_grad = _refuse("reads or sets the .grad of a tensor")
     real_grad = torch._C.TensorBase.grad.__get__  # type: ignore[attr-defined]
@@ -2214,6 +2231,9 @@ def _static_output(leaf: Any, reachable: set[int]) -> bool:
         return True
     if isinstance(leaf, nn.Module):
         return id(leaf) in reachable
+    if leaf is FakeTensor:
+        # The type of a tensor of the trace, which no call has.
+        return False
     return isinstance(leaf, (type, enum.Enum))
 
 
@@ -2329,6 +2349,8 @@ class _Recipes:
         return ["same", False, bool(obj) if type(obj) is torch.SymBool else float(obj)]
 
     def of(self, obj: Any, depth: int = 0) -> list[Any]:
+        if id(obj) in _ORIGINALS:
+            obj = _ORIGINALS[id(obj)]
         known = self.memo.get(id(obj))
         if known is not None:
             return known
@@ -2342,6 +2364,10 @@ class _Recipes:
         elif id(obj) in self.inputs:
             recipe = ["input", True, self.inputs[id(obj)]]
         elif is_fake_tensor(obj):
+            if getattr(obj, "_is_param", False):
+                # A graph gives back tensors: what it would give for one
+                # would be no Parameter.
+                raise Untraceable("gives a Parameter that it made")
             recipe = ["result", True, len(self.results)]
             self.results.append(obj)
         elif cls in _SYMS:
