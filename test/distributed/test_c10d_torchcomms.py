@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
 from torch.testing._internal.common_utils import (
     find_free_port,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
@@ -595,7 +596,15 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
 
     TIMEOUT = datetime.timedelta(seconds=30)
 
-    def _drive_member(self, *, backend, device_id, group_rank, group_size):
+    def _drive_member(
+        self,
+        *,
+        backend,
+        device_id,
+        group_rank,
+        group_size,
+        group_desc,
+    ):
         """Drive the members path down to ``new_comm``.
 
         ``new_comm`` is mocked to capture its device argument and the live env,
@@ -608,6 +617,8 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         def fake_new_comm(backend_str, device, name=None, store=None, hints=None):
             captured["backend_str"] = backend_str
             captured["device"] = device
+            captured["name"] = name
+            captured["store"] = store
             captured["rank_env"] = os.environ.get("TORCHCOMM_RANK")
             captured["size_env"] = os.environ.get("TORCHCOMM_SIZE")
             raise RuntimeError("stop-after-new_comm")
@@ -630,8 +641,43 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                     group_name=c10d.GroupName(self.id()),
                     timeout=self.TIMEOUT,
                     device_id=device_id,
+                    group_desc=group_desc,
                 )
         return captured
+
+    def test_group_description_used_as_comm_name(self):
+        group_desc = "logical_description"
+        cap = self._drive_member(
+            backend="nccl",
+            device_id=None,
+            group_rank=0,
+            group_size=1,
+            group_desc=group_desc,
+        )
+        self.assertEqual(cap["name"], group_desc)
+
+    def test_group_description_preserves_store_prefix(self):
+        cap = self._drive_member(
+            backend="nccl",
+            device_id=None,
+            group_rank=0,
+            group_size=1,
+            group_desc="logical_description",
+        )
+        cap["store"].set("probe", "value")
+        root_store = cap["store"]._underlying_non_prefix_store
+        self.assertTrue(root_store.check([f"{self.id()}//cuda//probe"]))
+
+    @parametrize("group_desc", [None, "", "undefined"])
+    def test_unspecified_description_uses_group_id(self, group_desc):
+        cap = self._drive_member(
+            backend="nccl",
+            device_id=None,
+            group_rank=0,
+            group_size=1,
+            group_desc=group_desc,
+        )
+        self.assertEqual(cap["name"], self.id())
 
     def test_new_comm_gets_indexed_device_id(self):
         # A subgroup's group-local rank differs from the rank's physical device,
@@ -642,6 +688,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
             device_id=torch.device("cuda:3"),
             group_rank=2,
             group_size=4,
+            group_desc=None,
         )
         self.assertEqual(cap["device"], torch.device("cuda:3"))
 
@@ -653,6 +700,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
             device_id=torch.device("cuda:3"),
             group_rank=1,
             group_size=4,
+            group_desc=None,
         )
         self.assertEqual(cap["device"], torch.device("cpu"))
 
@@ -664,6 +712,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
             device_id=None,
             group_rank=0,
             group_size=4,
+            group_desc=None,
         )
         self.assertEqual(cap["device"], torch.device("cuda"))
 
@@ -673,6 +722,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
             device_id=torch.device("cuda:1"),
             group_rank=2,
             group_size=7,
+            group_desc=None,
         )
         self.assertEqual(cap["rank_env"], "2")
         self.assertEqual(cap["size_env"], "7")
@@ -688,6 +738,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 device_id=torch.device("cuda:0"),
                 group_rank=0,
                 group_size=2,
+                group_desc=None,
             )
             self.assertIsNone(os.environ.get("TORCHCOMM_RANK"))
             self.assertIsNone(os.environ.get("TORCHCOMM_SIZE"))
@@ -699,6 +750,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 device_id=torch.device("cuda:0"),
                 group_rank=0,
                 group_size=2,
+                group_desc=None,
             )
             self.assertEqual(os.environ["TORCHCOMM_RANK"], "99")
             self.assertEqual(os.environ["TORCHCOMM_SIZE"], "77")
@@ -1420,6 +1472,9 @@ class TestC10dTorchCommsBackendConfig(TestCase):
             c10d._use_torchcomms_enabled = orig_use
             c10d._torchcomms_is_backend_registered = orig_registered
             c10d._torchcomms_is_backend_built = orig_built
+
+
+instantiate_parametrized_tests(TestC10dTorchCommsNewGroupHelper)
 
 
 if __name__ == "__main__":

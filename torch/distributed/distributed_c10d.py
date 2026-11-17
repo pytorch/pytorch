@@ -357,6 +357,7 @@ def _create_torchcomms_backend(
     backend_options: object | None,
     timeout: timedelta | None = None,
     enable_reconfigure: bool = False,
+    group_desc: str | None = None,
 ) -> C10DBackend:
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
@@ -387,7 +388,7 @@ def _create_torchcomms_backend(
         comm = new_comm(
             _resolve_torchcomms_backend(backend),
             torch_device,
-            name=group_name,
+            name=group_name if group_desc in (None, "", "undefined") else group_desc,
             store=store,
             hints=hints,
             **dynamic_options,
@@ -3118,6 +3119,7 @@ def _new_process_group_helper(
                 backend_options=backend_options,
                 timeout=timeout,
                 enable_reconfigure=enable_reconfigure,
+                group_desc=group_desc,
             )
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
