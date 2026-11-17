@@ -90,10 +90,10 @@ def strip_overloads(gm):
 def convert_to_jit(gm, gm_args):
     strip_overloads(gm)
     try:
-        return torch.jit.script(gm)
+        return torch.jit._script.script(gm)
     except Exception:
         pass
-    return torch.jit.trace(gm, gm_args)
+    return torch.jit._trace.trace(gm, gm_args)
 
 
 def to_channels_last(ten):
