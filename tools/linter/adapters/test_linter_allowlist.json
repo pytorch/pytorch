@@ -487,7 +487,6 @@
   "test/inductor/test_triton_heuristics.py",
   "test/inductor/test_triton_kernels.py",
   "test/inductor/test_triton_launcher_integration.py",
-  "test/inductor/test_triton_syntax.py",
   "test/inductor/test_triton_wrapper.py",
   "test/inductor/test_unbacked_symints.py",
   "test/inductor/test_user_streams.py",
