@@ -715,9 +715,7 @@ bool try_op_impl(
 }
 
 // Try op's prim_meta_impl (prims meta rule) if it defines one.
-bool try_prim_meta(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+bool try_prim_meta(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   py::gil_scoped_acquire gil;
   py::handle py_op = getTorchApiFunction(op);
   if (!py::hasattr(py_op, "prim_meta_impl")) {
@@ -901,9 +899,6 @@ void fakeFallback(
   const bool metadata_copy = schema.overload_name().empty() &&
       (schema.name() == "aten::detach" ||
        schema.name() == "aten::shallow_copy_data_");
-  if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
-    unsupported(op, "the Python dispatcher");
-  }
 
   // The active mode, or, as Python's FakeTensor dispatch enters a fake's
   // mode, the mode of the first fake input
@@ -915,6 +910,14 @@ void fakeFallback(
             mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
           }
         });
+  }
+  auto* modeless_fallback = at::impl::getModelessFakeFallback();
+  if (mode == nullptr && modeless_fallback != nullptr) {
+    modeless_fallback(op, dispatchKeySet, stack);
+    return;
+  }
+  if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
+    unsupported(op, "the Python dispatcher");
   }
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");

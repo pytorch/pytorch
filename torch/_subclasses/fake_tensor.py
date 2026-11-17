@@ -2491,7 +2491,6 @@ class FakeTensorMode(TorchDispatchMode):
         # pending a rework of how deferred runtime asserts in export.  Once
         # that's done, we can remove this.
         export: bool = False,
-        _force_python: bool = False,
     ) -> None:
         log.debug("create_mode 0x%x", id(self))
         super().__init__()
@@ -2578,12 +2577,6 @@ class FakeTensorMode(TorchDispatchMode):
                     "FakeTensorMode subclasses are not supported with "
                     "use_cpp_fake_tensor=True"
                 )
-            if kwargs.pop("_force_python", False):
-                return super().__new__(cls)
-            if not kwargs.get("allow_fallback_kernels", True):
-                return super().__new__(cls)
-            if kwargs.get("export", False):
-                return super().__new__(cls)
             # Returning an unrelated type skips FakeTensorMode.__init__.
             # pyrefly: ignore [bad-return]
             return CppFakeTensorMode(*args, **kwargs)
