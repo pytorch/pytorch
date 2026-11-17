@@ -5,8 +5,9 @@
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ScaledMM.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -71,8 +72,15 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
     TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::NO_SWIZZLE && swizzle_b_enum[0] == SwizzleType::NO_SWIZZLE,
                       "MPS does not support swizzle.");
   }
-  const auto gemm_impl = scaled::find_scaled_gemm_impl(
-      scale_kernel_dispatch, mat_a.scalar_type(), recipe_a, scale_a_ref, mat_b.scalar_type(), recipe_b, scale_b_ref);
+  const auto gemm_impl = scaled::find_scaled_gemm_impl(scale_kernel_dispatch,
+                                                       mat_a.scalar_type(),
+                                                       recipe_a,
+                                                       scale_a_ref,
+                                                       swizzle_a_enum,
+                                                       mat_b.scalar_type(),
+                                                       recipe_b,
+                                                       scale_b_ref,
+                                                       swizzle_b_enum);
   TORCH_CHECK_VALUE(
       gemm_impl != scaled::ScaledGemmImplementation::NONE,
       "MPS _scaled_mm_v2 only supports TensorWise or RowWise scaling with one Float scale per operand, got recipe_a=",
@@ -113,7 +121,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
                       bias->scalar_type());
   }
   // Kernel index math is 64-bit; the uint32 params and the uint row/col/k arithmetic need each dim to fit int32.
-  TORCH_CHECK_NOT_IMPLEMENTED(m <= INT32_MAX && n <= INT32_MAX && k <= INT32_MAX,
+  TORCH_CHECK_NOT_IMPLEMENTED(std::in_range<int32_t>(m) && std::in_range<int32_t>(n) && std::in_range<int32_t>(k),
                               "MPS _scaled_mm_v2 requires m, n and k to fit in int32");
   assert_no_internal_overlap(out);
   if (k == 0) {
@@ -149,9 +157,9 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   check_alignment(mat_b, "mat_b");
   const auto bias_vec = bias.has_value() ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
   const ScaledMMParams<> params{
-      .m = c10::checked_convert<uint32_t>(m, "m"),
-      .n = c10::checked_convert<uint32_t>(n, "n"),
-      .k = c10::checked_convert<uint32_t>(k, "k"),
+      .m = c10::safe_conv<uint32_t>(m, "mat_a.size(0)"),
+      .n = c10::safe_conv<uint32_t>(n, "mat_b.size(1)"),
+      .k = c10::safe_conv<uint32_t>(k, "mat_a.size(1)"),
       .a_row_stride = mat_a.stride(0),
       .a_col_stride = mat_a.stride(1),
       .b_row_stride = mat_b.stride(0),
@@ -164,10 +172,16 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   };
   using namespace std::string_view_literals;
   const auto type_str = scalarToMetalTypeString(dtype);
-  const bool few_rows = m <= scaled_mm_few_rows_max && mat_a.stride(1) == 1 && mat_b.stride(0) == 1;
+  const bool k_contiguous = mat_a.stride(1) == 1 && mat_b.stride(0) == 1;
+  const bool few_rows = m <= scaled_mm_few_rows_max && k_contiguous;
+  // MPP tensors take int32 strides
+  const bool native = !few_rows && k_contiguous && has_metal_4_1() && std::in_range<int32_t>(mat_a.stride(0)) &&
+      std::in_range<int32_t>(mat_b.stride(1));
   const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}", m, type_str)
+      : native                      ? fmt::format("scaled_mm_native_{}", type_str)
                                     : fmt::format("scaled_mm_{}{}", has_mpp() ? "mpp_"sv : ""sv, type_str);
-  const auto cols_per_group = few_rows ? scaled_mm_simdgroups : scaled_mm_tile;
+  const auto tile = native ? scaled_mm_native_tile : scaled_mm_tile;
+  const auto cols_per_group = few_rows ? scaled_mm_simdgroups : tile;
   auto pso = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -177,7 +191,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, mat_a, mat_b, out, scale_a, scale_b, bias_vec, params);
       [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(n, cols_per_group),
-                                                few_rows ? 1 : c10::metal::ceil_div<int64_t>(m, scaled_mm_tile),
+                                                few_rows ? 1 : c10::metal::ceil_div<int64_t>(m, tile),
                                                 1)
               threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);

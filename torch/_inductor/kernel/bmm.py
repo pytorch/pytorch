@@ -27,6 +27,7 @@ from ..utils import (
     use_cpp_bmm_template,
     use_cutlass_template,
     use_nv_universal_gemm_template,
+    use_triton_blackwell_bmm_template,
     use_triton_template,
 )
 from ..virtualized import ops, V
@@ -36,6 +37,7 @@ from .mm_common import (
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -149,16 +151,17 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
     if meta["TWO_CTAS"]:
         grid_m = cdiv(grid_m, 2) * 2
     tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
+    # Under 2CTA both tiles and NUM_SMS are even, so every CTA has a partner.
+    # The kernel strides by NUM_SMS, so the grid must not round it further.
     grid_x = min(meta["NUM_SMS"], tiles)
-    if meta["TWO_CTAS"]:
-        grid_x = grid_x // 2 * 2
     return (grid_x, 1, 1)
 
 
 blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     name="blackwell_bmm",
     grid=blackwell_bmm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm")
+    + load_kernel_template("triton_gemm_helpers"),
     cache_codegen_enabled_for_template=True,
 )
 
@@ -204,34 +207,10 @@ BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
 )
 
 
-def use_triton_blackwell_bmm_template(mat1, mat2, layout, out_dtype) -> bool:
-    """Whether tuned_bmm should offer the Blackwell persistent-TMA BMM template.
-
-    Mirrors the gating of the Blackwell mm template. The config heuristic also
-    rejects dynamic shapes and non-TMA-compatible operands, but raises when
-    neither matrix dim of an operand is contiguous, so that case is filtered
-    here.
-    """
-    if out_dtype is not None or torch.version.hip is not None:
-        return False
-    if not inductor_config.triton.enable_persistent_tma_matmul:
-        return False
-    if not use_triton_template(layout, check_max_autotune=True):
-        return False
-    if not all(m.get_stride()[1] == 1 or m.get_stride()[2] == 1 for m in (mat1, mat2)):
-        return False
-
-    from torch.utils._triton import has_triton_tensor_descriptor_host_tma
-
-    from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
-
-    return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
-
-
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_xpu" if torch.xpu._is_compiled() else "at::_bmm_out_dtype_cuda",
+    "at::bmm_dtype_out",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )
@@ -412,9 +391,12 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
-
-    if use_triton_blackwell_bmm_template(mat1, mat2, layout, out_dtype):
-        templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
+        if (
+            out_dtype is None
+            and use_triton_template(layout, check_max_autotune=True)
+            and use_triton_blackwell_bmm_template(mat1, mat2, layout)
+        ):
+            templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
 
     # Single unified call for all templates
     choices.extend(
@@ -487,6 +469,10 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
@@ -546,6 +532,17 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if beta == 0:
+            # bmm_template reads inp, and autotuning benchmarks every baddbmm
+            # choice on the same inputs, so ATen gets the zeros too.
+            *_, inp = mm_args(mat1, mat2, template_inp, layout=layout)
+            kernel_inputs = MMKernelInputs(
+                [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+            )
+        if use_triton_template(
+            layout, check_max_autotune=True
+        ) and use_triton_blackwell_bmm_template(mat1, mat2, layout):
+            templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
 
     # Single unified call for all templates
     choices.extend(
