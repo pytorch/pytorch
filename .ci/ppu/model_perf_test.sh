@@ -7,7 +7,7 @@ BENCH_CONFIG="${BENCH_CONFIG:-}"
 case "$BENCH_CONFIG" in
     huggingface | timm_models | cachebench) ;;
     *)
-        echo "[model-perf][error] BENCH_CONFIG 只支持 huggingface / timm_models / cachebench，实际: '${BENCH_CONFIG}'" >&2
+        echo "[model-perf][error] BENCH_CONFIG must be huggingface / timm_models / cachebench, got: '${BENCH_CONFIG}'" >&2
         exit 1
         ;;
 esac
@@ -15,26 +15,26 @@ esac
 SHARD_NUMBER="${SHARD_NUMBER:-1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:-1}"
 if (( SHARD_NUMBER < 1 || SHARD_NUMBER > NUM_TEST_SHARDS )); then
-    echo "[model-perf][error] SHARD_NUMBER=${SHARD_NUMBER} 不在 1..${NUM_TEST_SHARDS} 内" >&2
+    echo "[model-perf][error] SHARD_NUMBER=${SHARD_NUMBER} not in 1..${NUM_TEST_SHARDS}" >&2
     exit 1
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
-echo "[model-perf] 源码目录: $(pwd)"
-echo "[model-perf] 配置: BENCH_CONFIG=${BENCH_CONFIG} 分片=${SHARD_NUMBER}/${NUM_TEST_SHARDS}"
+echo "[model-perf] Source dir: $(pwd)"
+echo "[model-perf] Config: BENCH_CONFIG=${BENCH_CONFIG} shard=${SHARD_NUMBER}/${NUM_TEST_SHARDS}"
 
 source .ci/ppu/sdk_env.sh
 source .ci/ppu/nccl_env.sh
 bash .ci/ppu/install_wheel.sh
 bash .ci/ppu/install_triton.sh
 
-echo "=== 环境自检 (CUDA) ==="
+echo "=== Env check (CUDA) ==="
 echo "pr=${PR_NUMBER:-none} hostname=$(hostname) node=${NODE_NAME:-unknown}"
 echo "rank=${RANK:-0} nproc_per_node=${NPROC_PER_NODE:-1}"
 python --version
 (cd /tmp && python -c "import torch; print('torch', torch.__version__, torch.__file__); print('cuda_available', torch.cuda.is_available()); print('device_count', torch.cuda.device_count())")
-ppu-smi || echo "[warn] ppu-smi 不可用，请确认 pod 已分配 PPU 设备"
+ppu-smi || echo "[warn] ppu-smi unavailable; check that the pod has PPU devices"
 
 bash .ci/ppu/install_test_deps.sh
 ensure_bench_deps() {
@@ -42,7 +42,7 @@ ensure_bench_deps() {
     [[ -n "$want" ]] || return 0
     local -a specs
     read -r -a specs <<<"$want"
-    echo "[model-perf] 安装 benchmark 依赖（钉版本）: ${specs[*]}"
+    echo "[model-perf] Installing benchmark deps (pinned): ${specs[*]}"
     local torch_before
     torch_before="$(cd /tmp && python -c 'import torch;print(torch.__version__)')"
     local constraints="/tmp/model_perf_constraints.txt"
@@ -54,29 +54,29 @@ ensure_bench_deps() {
     for index in "${PIP_CANDIDATES[@]}" __pip_default__; do
         pip_args=(--disable-pip-version-check --retries 1 --timeout 30 -c "$constraints")
         if [[ "${index}" == "__pip_default__" ]]; then
-            label="pip 默认源"
+            label="pip default index"
         else
             label="${index}"
             pip_args+=(-i "${index}")
         fi
-        echo "[model-perf] 尝试源: ${label}"
+        echo "[model-perf] Trying index: ${label}"
         if python -m pip install "${pip_args[@]}" "${specs[@]}"; then
             installed=1
             break
         fi
-        echo "[model-perf][warn] 源 ${label} 失败，换下一个"
+        echo "[model-perf][warn] Index ${label} failed, trying next"
     done
     if [[ "$installed" != "1" ]]; then
-        echo "[model-perf][error] 所有候选源都装不上: ${specs[*]}" >&2
+        echo "[model-perf][error] No candidate index could install: ${specs[*]}" >&2
         exit 1
     fi
     local torch_after
     torch_after="$(cd /tmp && python -c 'import torch;print(torch.__version__)')"
     if [[ "$torch_before" != "$torch_after" ]]; then
-        echo "[model-perf][error] 装 benchmark 依赖后 torch 从 ${torch_before} 变成 ${torch_after}，被测 whl 已被覆盖" >&2
+        echo "[model-perf][error] torch changed from ${torch_before} to ${torch_after} after installing benchmark deps; the tested whl was overwritten" >&2
         exit 1
     fi
-    echo "[model-perf] 实际安装版本:"
+    echo "[model-perf] Installed versions:"
     python -m pip freeze 2>/dev/null | grep -iE '^(numpy|scipy|pandas|tqdm|transformers|timm|psutil)=' || true
 }
 ensure_bench_deps
@@ -124,7 +124,7 @@ try:
         data = json.load(fh)
 except Exception:
     sys.exit(1)
-# null / {} / [] 视为“无测量结果”
+# null / {} / [] means "no measurements"
 sys.exit(0 if data else 1)
 PY
             ;;
@@ -136,15 +136,15 @@ PY
 
 dump_result() {
     local f="$1"
-    echo "=== model-perf 结果: $(basename "$f") ==="
+    echo "=== model-perf result: $(basename "$f") ==="
     if [[ -s "$f" ]]; then
         cat "$f"
     fi
     if result_ok "$f"; then
         return 0
     fi
-    echo "[model-perf][error] ${f} 没有产出有效测量结果（文件缺失/为空/无数据行）。" \
-         "benchmark 命令可能以 0 退出但逐模型异常被吞掉，判定为失败。" >&2
+    echo "[model-perf][error] ${f} has no valid measurements (missing/empty/no data rows)." \
+         "The benchmark may exit 0 while per-model errors are swallowed; treating as failure." >&2
     BAD_RESULTS+=("$f")
 }
 
@@ -193,11 +193,11 @@ case "$BENCH_CONFIG" in
 esac
 
 if (( ${#BAD_RESULTS[@]} > 0 )); then
-    echo "[model-perf][error] 共 ${#BAD_RESULTS[@]} 个结果无有效测量数据，判定本 job 失败：" >&2
+    echo "[model-perf][error] ${#BAD_RESULTS[@]} results have no valid measurements; failing the job:" >&2
     for f in "${BAD_RESULTS[@]}"; do
         echo "  - $f" >&2
     done
     exit 1
 fi
 
-echo "[model-perf] 完成 (config=${BENCH_CONFIG} shard=${SHARD_NUMBER}/${NUM_TEST_SHARDS})"
+echo "[model-perf] Done (config=${BENCH_CONFIG} shard=${SHARD_NUMBER}/${NUM_TEST_SHARDS})"

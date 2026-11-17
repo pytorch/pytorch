@@ -3,20 +3,14 @@ set -euo pipefail
 
 export SDK_INSTALL_DIR="${SDK_INSTALL_DIR:-/usr/local}"
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-echo "[smoke] 源码目录: $(pwd)"
+echo "[smoke] Source dir: $(pwd)"
 source .ci/ppu/sdk_env.sh
 source .ci/ppu/nccl_env.sh
 bash .ci/ppu/install_wheel.sh
 bash .ci/ppu/install_triton.sh
-
-echo "=== 环境自检 ==="
-echo "pr=${PR_NUMBER:-none} hostname=$(hostname) node=${NODE_NAME:-unknown}"
-echo "rank=${RANK:-0} nproc_per_node=${NPROC_PER_NODE:-1}"
-python --version
-(cd /tmp && python -c "import torch; print('torch', torch.__version__, torch.__file__); print('cuda_available', torch.cuda.is_available()); print('device_count', torch.cuda.device_count())")
-ppu-smi || echo "[warn] ppu-smi 不可用，请确认 pod 已分配 PPU 设备"
 bash .ci/ppu/install_test_deps.sh
-echo "=== CUDA 冒烟用例（run_test.py --include 精确过滤，仅 CUDA 相关） ==="
+
+echo "=== CUDA smoke cases (run_test.py --include, CUDA only) ==="
 
 K_SKIP_CASES="not test_benchmark_choice_fail_in_subproc \
 and not test_lazy_template_fusion_multiple_candidates_use_async_compile \
@@ -215,15 +209,43 @@ and not test_mm_bmm_dtype_overload_bfloat16_M_64_N_1_K_1_batch_size_1_backend_cu
 and not test_mm_bmm_dtype_overload_bfloat16_M_64_N_1_K_1_batch_size_1_backend_cublaslt_cuda \
 and not test_triton_template_generated_code_caching_mm_plus_mm"
 
-python test/run_test.py \
-    --include \
-        test_matmul_cuda \
-        test_scaled_matmul_cuda \
-        nn/attention/test_open_registry \
-        inductor/test_flex_flash \
-        inductor/test_nv_universal_gemm \
-        inductor/test_max_autotune \
-    -k "$K_SKIP_CASES" \
-    --verbose
+PASSED_CASES=()
+FAILED_CASES=()
+run_case() {
+    local test_name="$1"
+    echo "=== [case] ${test_name} ==="
+    if python test/run_test.py \
+        --include "${test_name}" \
+        -k "$K_SKIP_CASES" \
+        --verbose; then
+        echo "=== [pass] ${test_name} ==="
+        PASSED_CASES+=("${test_name}")
+    else
+        echo "::error::[fail] ${test_name}"
+        FAILED_CASES+=("${test_name}")
+    fi
+}
 
-echo "[smoke] 完成"
+run_case test_matmul_cuda
+run_case test_scaled_matmul_cuda
+run_case nn/attention/test_open_registry
+run_case inductor/test_flex_flash
+run_case inductor/test_nv_universal_gemm
+run_case inductor/test_max_autotune
+
+total=$(( ${#PASSED_CASES[@]} + ${#FAILED_CASES[@]} ))
+echo "=== Smoke summary (${total} files: ${#PASSED_CASES[@]} passed, ${#FAILED_CASES[@]} failed) ==="
+if [ "${#PASSED_CASES[@]}" -ne 0 ]; then
+    for case_label in "${PASSED_CASES[@]}"; do
+        echo "  [pass] ${case_label}"
+    done
+fi
+if [ "${#FAILED_CASES[@]}" -ne 0 ]; then
+    for case_label in "${FAILED_CASES[@]}"; do
+        echo "  [fail] ${case_label}"
+    done
+    echo "::error::[smoke] ${#FAILED_CASES[@]} test files failed; see the [case] sections above"
+    exit 1
+fi
+
+echo "[smoke] Done, all passed"

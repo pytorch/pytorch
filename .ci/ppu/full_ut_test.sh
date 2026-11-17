@@ -2,200 +2,154 @@
 set -euo pipefail
 
 export SDK_INSTALL_DIR="${SDK_INSTALL_DIR:-/usr/local}"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-if [[ -z "${SHARD_NUMBER:-}" || -z "${NUM_TEST_SHARDS:-}" ]]; then
-    echo "[full-ut][error] 必须传 SHARD_NUMBER 与 NUM_TEST_SHARDS（由 workflow 的 matrix 给）" >&2
-    exit 1
-fi
-if (( NUM_TEST_SHARDS != 2 )); then
-    echo "[full-ut][error] 本脚本按 2 分片手工编排，NUM_TEST_SHARDS 必须为 2，实际: ${NUM_TEST_SHARDS}" >&2
-    exit 1
-fi
-if (( SHARD_NUMBER < 1 || SHARD_NUMBER > 2 )); then
-    echo "[full-ut][error] SHARD_NUMBER 只能是 1 或 2，实际: ${SHARD_NUMBER}" >&2
-    exit 1
-fi
+PPU_BOARD="${PPU_BOARD:-}"
+PPU_BRANCH="${PPU_BRANCH:-unknown}"
+NAS_LOG_DIR="${NAS_LOG_DIR:-/mnt/wl_nas/ut_test/logs}"
+SHARD_NUMBER="${SHARD_NUMBER:-1}"
+NUM_TEST_SHARDS="${NUM_TEST_SHARDS:-1}"
+TEE_WAIT_SECONDS="${TEE_WAIT_SECONDS:-60}"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$REPO_ROOT"
-echo "[full-ut] 源码目录: $(pwd)"
-echo "[full-ut] 分片=${SHARD_NUMBER}/${NUM_TEST_SHARDS}（单卡 pod）"
+copy_log_to_nas() {
+    local rc=$?
+    trap '' INT TERM
+    exec 1>&3 2>&4
+    local waited=0
+    while kill -0 "$TEE_PID" 2>/dev/null && (( waited < TEE_WAIT_SECONDS )); do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$TEE_PID" 2>/dev/null; then
+        echo "::warning::[full_ut] tee did not exit within ${TEE_WAIT_SECONDS}s (leftover processes may hold the pipe), killing it" >&2
+        kill "$TEE_PID" 2>/dev/null || true
+    fi
+    wait "$TEE_PID" 2>/dev/null || true
+    local nas_file="$NAS_LOG_FILE" suffix=2
+    while [[ -e "$nas_file" ]]; do
+        nas_file="${NAS_LOG_FILE%.txt}_${suffix}.txt"
+        suffix=$((suffix + 1))
+    done
+    if mkdir -p "$NAS_LOG_DIR" && cp -- "$LOCAL_LOG_FILE" "$nas_file"; then
+        echo "[full_ut] Log copied to NAS: ${nas_file}"
+    else
+        echo "::warning::[full_ut] Failed to copy log to NAS: ${LOCAL_LOG_FILE} -> ${nas_file}" >&2
+    fi
+    exit "$rc"
+}
+
+if [[ -n "$PPU_BOARD" ]]; then
+    LOG_NAME="$(TZ=UTC-8 date +%Y_%m_%d_%H)_${PPU_BRANCH//\//-}_full_ut_${PPU_BOARD}_shard${SHARD_NUMBER}.txt"
+    NAS_LOG_FILE="${NAS_LOG_DIR}/${LOG_NAME}"
+    LOCAL_LOG_FILE="${TMPDIR:-/tmp}/${LOG_NAME}"
+    : >"$LOCAL_LOG_FILE"
+    exec 3>&1 4>&2
+    exec > >(tee -a "$LOCAL_LOG_FILE") 2>&1
+    TEE_PID=$!
+    trap copy_log_to_nas EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    echo "[full_ut] Log will be copied to NAS on exit: ${NAS_LOG_FILE}"
+else
+    echo "::warning::[full_ut] PPU_BOARD not set, skipping log archiving" >&2
+fi
+echo "[full_ut] Source dir: $(pwd)"
+
+NAS_LIST_DIR="${NAS_LIST_DIR:-/mnt/wl_nas/ut_test/pytorch}"
+NAS_UT_FILES="${NAS_UT_FILES:-$NAS_LIST_DIR/ut_files.txt}"
+NAS_SKIP_FILE="${NAS_SKIP_FILE:-$NAS_LIST_DIR/full_ut_skip.txt}"
+LOCAL_LIST_DIR=".ci/ppu/badcase_list"
+LOCAL_UT_FILES="$LOCAL_LIST_DIR/ut_files.txt"
+LOCAL_SKIP_FILE="$LOCAL_LIST_DIR/full_ut_skip.txt"
+UT_FILES="${UT_FILES:-$LOCAL_UT_FILES}"
+CRASH_LIST="${CRASH_LIST:-$LOCAL_SKIP_FILE}"
+
+copy_nas_list() {
+    local label="$1" src="$2" dst="$3"
+    if [[ ! -f "$src" || ! -r "$src" ]]; then
+        echo "::error::[full_ut] NAS ${label} missing or unreadable: ${src}" >&2
+        exit 1
+    fi
+    if ! cp -- "$src" "$dst"; then
+        echo "::error::[full_ut] Failed to copy NAS ${label}: ${src} -> ${dst}" >&2
+        exit 1
+    fi
+    echo "[full_ut] Copied NAS ${label}: ${src} -> ${dst}"
+}
+
+mkdir -p "$LOCAL_LIST_DIR"
+copy_nas_list "test file list" "$NAS_UT_FILES" "$LOCAL_UT_FILES"
+copy_nas_list "skip list" "$NAS_SKIP_FILE" "$LOCAL_SKIP_FILE"
+
+TEST_FILES_RAW="$(python - "$UT_FILES" "$CRASH_LIST" "$SHARD_NUMBER" "$NUM_TEST_SHARDS" <<'PY'
+import re
+import sys
+
+ut_files, skip_file, shard_number, num_shards = sys.argv[1:]
+if not all(re.fullmatch(r"[1-9][0-9]*", value) for value in (shard_number, num_shards)):
+    sys.exit("[full_ut] SHARD_NUMBER and NUM_TEST_SHARDS must be positive integers")
+shard_number, num_shards = int(shard_number), int(num_shards)
+if shard_number > num_shards:
+    sys.exit("[full_ut] SHARD_NUMBER must not exceed NUM_TEST_SHARDS")
+
+with open(ut_files) as f:
+    test_files = [text for line in f if (text := line.split("#", 1)[0].strip())]
+if not test_files:
+    sys.exit("[full_ut] Test file list is empty")
+
+with open(skip_file) as f:
+    skipped_files = {
+        text for line in f
+        if (text := line.partition("\t")[0].strip())
+        and not text.startswith("#") and "::" not in text and text.endswith(".py")
+    }
+selected_files = []
+for test_file in test_files:
+    if test_file in skipped_files:
+        print(f"=== [skip] {test_file} (whole file) ===", file=sys.stderr)
+    else:
+        selected_files.append(test_file)
+
+for index, test_file in enumerate(selected_files):
+    if index % num_shards == shard_number - 1:
+        print(test_file)
+PY
+)"
+
 source .ci/ppu/sdk_env.sh
 source .ci/ppu/nccl_env.sh
 bash .ci/ppu/install_wheel.sh
-
 bash .ci/ppu/install_triton.sh
-
-echo "=== 环境自检 (CUDA) ==="
-echo "pr=${PR_NUMBER:-none} hostname=$(hostname) node=${NODE_NAME:-unknown}"
-echo "rank=${RANK:-0} nproc_per_node=${NPROC_PER_NODE:-1}"
-python --version
-(cd /tmp && python -c "import torch; print('torch', torch.__version__, torch.__file__); print('cuda_available', torch.cuda.is_available()); print('device_count', torch.cuda.device_count())")
-ppu-smi || echo "[warn] ppu-smi 不可用，请确认 pod 已分配 PPU 设备"
-
 bash .ci/ppu/install_test_deps.sh
 
 FAILED_CASES=()
-run_case() {
-    local test_name="$1"
-    local k_expr="${2:-}"
-    echo "=== [case] ${test_name}${k_expr:+  -k \"${k_expr}\"} ==="
-    if [[ -n "$k_expr" ]]; then
-        if python test/run_test.py --include "$test_name" -k "$k_expr" --verbose; then
-            echo "=== [pass] ${test_name} ==="
-        else
-            echo "::error::[fail] ${test_name}"
-            FAILED_CASES+=("${test_name}")
-        fi
+run_pytest() {
+    local test_file="$1"
+    echo "=== [case] ${test_file}  -k cuda ==="
+    if python .ci/ppu/multi_run_case.py "$test_file" --crash-list "$CRASH_LIST" -k "cuda"; then
+        echo "=== [done] ${test_file} (passed or skipped) ==="
     else
-        if python test/run_test.py --include "$test_name" --verbose; then
-            echo "=== [pass] ${test_name} ==="
-        else
-            echo "::error::[fail] ${test_name}"
-            FAILED_CASES+=("${test_name}")
-        fi
+        echo "::error::[fail] ${test_file}"
+        FAILED_CASES+=("${test_file}")
     fi
 }
 
-shard_heavy() {
-    run_case inductor/test_aot_inductor \
-        "cuda and not test_aoti_load_package_in_fresh_subprocess_cuda and not test_repeated_calling_cuda and not test_simple_multi_arch_embed_kernel_binary_False_cuda"
-
-    run_case test_transformers
-
-    run_case test_sparse \
-        "cuda and not test_mm_cuda_complex and not test_sparse_addmm and not test_sparse_matmul_cuda_bfloat16 and not test_sparse_matmul_cuda_complex and not test_sparse_matmul_cuda_float16 and not test_constructor_autograd_SparseBS and not test_gradcheck_mm_SparseCOO and not test_gradcheck_mm_SparseCSC and not test_gradcheck_mm_SparseCSR"
-}
-
-# shard 2：其余全部文件
-shard_rest() {
-    run_case test_torch \
-        "not test_corrcoef_cuda_complex64 and not test_terminate_handler_on_crash and not test_cov_cuda_complex and not test_put_cuda_float16"
-
-    run_case test_nn \
-        "not RNN and not GRU and not LSTM \
-and not test_cudnn_weight_format \
-and not test_upsampling \
-and not test_variable_sequence_cuda \
-and not test_cross_entropy_loss_2d_out_of_bounds_class_index_cuda \
-and not test_ctc_loss \
-and not test_mse_loss_error_cuda \
-and not test_nll_loss_ \
-and not test_smooth_l1_loss \
-and not test_smoothl1loss_backward_zero_beta_cuda \
-and not test_triplet_margin_with_distance_loss \
-and not test_grid_sample \
-and not test_fold_cuda \
-and not test_large_max_pool2d_ch_last_cuda \
-and not test_large_max_pool_contig_cuda \
-and not test_large_reflect_pad_cuda \
-and not test_pad_cuda \
-and not test_prelu_backward_32bit_indexing_cuda \
-and not test_replicatepad_64bit_indexing_cuda_float16 \
-and not test_groupnorm_nhwc_cuda \
-and not test_instancenorm \
-and not test_layernorm \
-and not test_normalization_mixed_dtype_cuda \
-and not test_rmsnorm \
-and not test_masked_softmax \
-and not test_softmax \
-and not test_warp_softmax_64bit_indexing_cuda \
-and not test_elu_inplace \
-and not test_glu_bfloat16_cuda \
-and not test_hardsigmoid_grad_cuda \
-and not test_hardswish \
-and not test_leaky_relu_inplace \
-and not test_mish_inplace_overlap_cuda \
-and not test_nonlinearity_propagate_nan_cuda \
-and not test_silu_inplace_overlap_cuda \
-and not test_softplus \
-and not test_softshrink \
-and not test_threshold_inplace_overlap \
-and not test_log_softmax \
-and not test_logsigmoid_out_cuda \
-and not test_gumbel_softmax_cuda \
-and not test_device_mask_cuda \
-and not test_invalid_reduction_strings_cuda \
-and not test_linear_empty_cuda \
-and not test_module_to_empty \
-and not test_nn_empty_cuda \
-and not test_nn_scalars \
-and not test_one_hot_cuda \
-and not test_overwrite_module_params_on_conversion_cpu_device_cuda \
-and not test_rrelu_bounds_validation \
-and not test_skip_in \
-and not test_to_complex_cuda_ \
-and not test_transformerencoderlayer"
-
-    run_case test_autograd "not test_thread_shutdown and not test_multi_grad_all_hooks"
-
-    run_case test_binary_ufuncs "TestBinaryUfuncsCUDA"
-
-    run_case test_unary_ufuncs "not TestUnaryUfuncsCPU"
-
-    run_case test_reductions "cuda and not test_ref_extremal_values_hash_tensor_cuda_float32"
-
-    run_case test_shape_ops "TestShapeOpsCUDA"
-
-    run_case test_indexing "cuda"
-
-    run_case test_tensor_creation_ops "cuda"
-
-    run_case test_dataloader \
-        "not test_fd_limit_exceeded and not test_multiprocessing_contexts and not test_sparse_tensor_multiprocessing and not test_early_exit and not test_segfault"
-
-    run_case test_optim "cuda"
-
-    run_case test_serialization "cuda"
-
-    run_case test_fx "cuda"
-
-    run_case test_autocast "cuda"
-
-    run_case test_type_promotion "cuda"
-
-    run_case test_complex "cuda"
-
-    run_case test_foreach "cuda and not test_parity__foreach_mm_fastpath_outplace_cuda_complex128 and not test_autodiff__foreach_mm_outplace_cuda_complex128 and not test_autodiff__foreach_mm_outplace_cuda_complex128"
-
-    run_case test_sort_and_select "cuda"
-
-    run_case nn/test_convolution \
-        "cuda and not test_conv_transposed_large_cuda and not test_cudnn_convolution_add_relu_cuda and not test_cudnn_convolution_relu_cuda and not test_depthwise_conv_64bit_indexing_cuda"
-
-    run_case nn/test_embedding
-
-    run_case nn/test_pooling
-
-    run_case dynamo/test_misc \
-        "not test_outside_linear_module_free and not test_packaging_version_parse and not test_parameter_free and not test_pytree_tree_ and not test_tracing_nested and not test_tracing_pytree_cxx"
-
-    run_case dynamo/test_compile
-
-    run_case dynamo/test_repros
-
-    run_case dynamo/test_export
-
-    run_case distributed/test_c10d_common "cuda and not testWithoutEnv and not testWithoutEnvWithFallback"
-
-    run_case test_dynamic_shapes "not test_do_not_guard_unbacked_inputs"
-}
-
-if (( SHARD_NUMBER == 1 )); then
-    echo "=== CUDA 全量 UT（shard 1/2：重型三件套） ==="
-    shard_heavy
-else
-    echo "=== CUDA 全量 UT（shard 2/2：其余全部文件） ==="
-    shard_rest
+echo "=== Full UT (shard ${SHARD_NUMBER}/${NUM_TEST_SHARDS}) ==="
+TEST_FILE_COUNT=0
+if [[ -n "$TEST_FILES_RAW" ]]; then
+    while IFS= read -r test_file; do
+        TEST_FILE_COUNT=$((TEST_FILE_COUNT + 1))
+        run_pytest "$test_file"
+    done <<<"$TEST_FILES_RAW"
 fi
 
 if [ "${#FAILED_CASES[@]}" -ne 0 ]; then
-    echo "=== 失败清单（${#FAILED_CASES[@]} 个文件）==="
+    echo "=== Failed (${#FAILED_CASES[@]} files) ==="
     for case_label in "${FAILED_CASES[@]}"; do
         echo "  - ${case_label}"
     done
-    echo "::error::[full-ut] ${#FAILED_CASES[@]} 个测试文件失败，详见上方各 [case] 段落的日志"
+    echo "::error::[full_ut] ${#FAILED_CASES[@]} test files failed; see the [case] sections above"
     exit 1
 fi
 
-echo "[full-ut] 完成，全部通过（shard=${SHARD_NUMBER}/${NUM_TEST_SHARDS}）"
+echo "[full_ut] Done, shard ${SHARD_NUMBER}/${NUM_TEST_SHARDS}: all ${TEST_FILE_COUNT} test files passed or skipped"

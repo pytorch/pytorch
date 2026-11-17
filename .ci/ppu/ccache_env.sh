@@ -12,23 +12,23 @@ log() {
 }
 
 if ! command -v ccache >/dev/null 2>&1; then
-    log "镜像未自带 ccache，尝试 apt 安装"
+    log "ccache not in image, trying apt install"
     for attempt in 1 2; do
         if apt-get update >/dev/null 2>&1 \
             && apt-get install -y --no-install-recommends ccache >/dev/null 2>&1; then
             break
         fi
-        log "第 ${attempt} 次安装失败" >&2
+        log "Install attempt ${attempt} failed" >&2
         sleep 5
     done
 fi
 
 if ! command -v ccache >/dev/null 2>&1; then
     if [[ "$PPU_CCACHE_REQUIRED" == "1" ]]; then
-        log "错误: PPU_CCACHE_REQUIRED=1 但 ccache 装不上" >&2
+        log "Error: PPU_CCACHE_REQUIRED=1 but ccache cannot be installed" >&2
         exit 1
     fi
-    log "警告: ccache 不可用，本轮退化成无缓存编译" >&2
+    log "Warning: ccache unavailable, building without cache" >&2
     export PPU_CCACHE_ENABLED=0
 else
     mkdir -p "$CCACHE_DIR"

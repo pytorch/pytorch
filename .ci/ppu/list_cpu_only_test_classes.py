@@ -23,11 +23,11 @@ ANY_CLASS_RE = re.compile(r"^\s*class\s+(\w+)\s*[(:]", re.M)
 
 
 def collect(test_dir: Path) -> tuple[set[str], set[str]]:
-    """返回 (CPU 专属类名集合, test/ 下所有类名集合)。"""
+    """Return (CPU-only class names, all class names under test/)."""
     cpu_only: set[str] = set()
     declared: set[str] = set()
     for path in sorted(test_dir.rglob("*.py")):
-        # errors="ignore"：test/ 下有少量刻意构造的非 UTF-8 / 二进制样例文件
+        # errors="ignore": test/ has a few intentionally non-UTF-8 / binary fixtures
         src = path.read_text(encoding="utf-8", errors="ignore")
         cpu_only.update(COPY_TESTS_RE.findall(src))
         cpu_only.update(CONVENTION_RE.findall(src))
@@ -37,12 +37,12 @@ def collect(test_dir: Path) -> tuple[set[str], set[str]]:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        print(f"用法: {argv[0]} <test 目录>", file=sys.stderr)
+        print(f"Usage: {argv[0]} <test dir>", file=sys.stderr)
         return 2
 
     test_dir = Path(argv[1])
     if not test_dir.is_dir():
-        print(f"[cuda-only] 目录不存在: {test_dir}", file=sys.stderr)
+        print(f"[cuda-only] Directory not found: {test_dir}", file=sys.stderr)
         return 1
 
     cpu_only, declared = collect(test_dir)
@@ -50,9 +50,9 @@ def main(argv: list[str]) -> int:
     stale = sorted(name for name in EXTRA_CPU_ONLY_CLASSES if name not in declared)
     if stale:
         print(
-            "[cuda-only] EXTRA_CPU_ONLY_CLASSES 已过期，请修正 "
-            ".ci/ppu/list_cpu_only_test_classes.py：\n"
-            "  以下类名在 test/ 下已不存在（被上游改名或删除了）: " + " ".join(stale),
+            "[cuda-only] EXTRA_CPU_ONLY_CLASSES is stale, please update "
+            ".ci/ppu/list_cpu_only_test_classes.py:\n"
+            "  these classes no longer exist under test/ (renamed or removed upstream): " + " ".join(stale),
             file=sys.stderr,
         )
         return 1
@@ -60,9 +60,9 @@ def main(argv: list[str]) -> int:
 
     if not cpu_only:
         print(
-            '[cuda-only] 没有从 test/ 扫到任何 CPU 专属测试类：copy_tests(..., "cpu") '
-            "与 *CpuTest* 命名约定可能都被上游改掉了，\n"
-            "  请修正 .ci/ppu/list_cpu_only_test_classes.py",
+            '[cuda-only] No CPU-only test classes found under test/: copy_tests(..., "cpu") '
+            "and the *CpuTest* naming convention may both have changed upstream;\n"
+            "  please update .ci/ppu/list_cpu_only_test_classes.py",
             file=sys.stderr,
         )
         return 1

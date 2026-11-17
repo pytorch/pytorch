@@ -6,22 +6,22 @@ NCCL_URL="${NCCL_URL:-$DEFAULT_NCCL_URL}"
 SDK_INSTALL_DIR="${SDK_INSTALL_DIR:-/usr/local}"
 ENVSETUP="$SDK_INSTALL_DIR/pccl/envsetup.sh"
 if [[ -f "$ENVSETUP" ]]; then
-    echo "[install_nccl] 检测到已安装 NCCL，跳过下载: $SDK_INSTALL_DIR/pccl"
+    echo "[install_nccl] NCCL already installed, skipping download: $SDK_INSTALL_DIR/pccl"
 else
     TARBALL="/tmp/$(basename "$NCCL_URL")"
-    echo "[install_nccl] 下载: $NCCL_URL"
-    echo "[install_nccl] 落盘: $TARBALL"
+    echo "[install_nccl] Downloading: $NCCL_URL"
+    echo "[install_nccl] Saving to: $TARBALL"
     if command -v wget >/dev/null 2>&1; then
         DOWNLOADER=wget
-        echo "[install_nccl] 下载器: $(wget --version 2>&1 | head -1)"
+        echo "[install_nccl] Downloader: $(wget --version 2>&1 | head -1)"
     elif command -v curl >/dev/null 2>&1; then
         DOWNLOADER=curl
-        echo "[install_nccl] 下载器: $(curl --version 2>&1 | head -1)"
+        echo "[install_nccl] Downloader: $(curl --version 2>&1 | head -1)"
     else
-        echo "[install_nccl] 镜像内既无 wget 也无 curl，无法下载 NCCL" >&2
+        echo "[install_nccl] Neither wget nor curl in image, cannot download NCCL" >&2
         exit 1
     fi
-    echo "[install_nccl] 磁盘可用量:"
+    echo "[install_nccl] Disk free:"
     df -h /tmp "$SDK_INSTALL_DIR" 2>&1 || true
 
     if [[ "$DOWNLOADER" == wget ]]; then
@@ -29,18 +29,18 @@ else
     else
         curl -fSL --retry 3 -o "$TARBALL" "$NCCL_URL" 2>&1
     fi
-    echo "[install_nccl] 下载完成: $(ls -lh "$TARBALL" | awk '{print $5}')"
+    echo "[install_nccl] Downloaded: $(ls -lh "$TARBALL" | awk '{print $5}')"
 
-    echo "[install_nccl] 解压到: $SDK_INSTALL_DIR"
+    echo "[install_nccl] Extracting to: $SDK_INSTALL_DIR"
     tar -zxf "$TARBALL" -C "$SDK_INSTALL_DIR"
     rm -f "$TARBALL"
     [[ -f "$ENVSETUP" ]] || {
-        echo "[install_nccl] 解压后未找到 $ENVSETUP" >&2; exit 1; }
+        echo "[install_nccl] $ENVSETUP not found after extraction" >&2; exit 1; }
 fi
 
 set +u
 source "$ENVSETUP"
 set -u
-echo "[install_nccl] envsetup.sh 已 source"
+echo "[install_nccl] envsetup.sh sourced"
 
-echo "[install_nccl] 完成: $SDK_INSTALL_DIR/pccl"
+echo "[install_nccl] Done: $SDK_INSTALL_DIR/pccl"

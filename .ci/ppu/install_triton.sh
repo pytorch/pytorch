@@ -6,14 +6,14 @@ TRITON_INDEX="${TRITON_INDEX:-${PIP_INDEX:-}}"
 
 if [[ -z "${TRITON_INDEX}" ]]; then
     cat >&2 <<'EOF'
-[triton][error] TRITON_INDEX / PIP_INDEX 均未设置，无法确定 triton 的来源。
-triton 只允许从内部 pypi_index 仓安装（公网 pypi 上的同版本号不是适配 PPU 的那一份），
-这里刻意不做默认源兜底。请在 workflow 的 command 里注入 TRITON_INDEX 或 PIP_INDEX。
+[triton][error] Neither TRITON_INDEX nor PIP_INDEX is set; cannot determine the triton source.
+triton must come from the internal pypi_index (the same version on public pypi is not the PPU build),
+so there is intentionally no default-index fallback. Set TRITON_INDEX or PIP_INDEX in the workflow command.
 EOF
     exit 1
 fi
 
-echo "=== 安装 triton==${TRITON_VERSION}（唯一源: ${TRITON_INDEX}） ==="
+echo "=== Installing triton==${TRITON_VERSION} (only index: ${TRITON_INDEX}) ==="
 env -u PIP_INDEX_URL -u PIP_EXTRA_INDEX_URL PIP_CONFIG_FILE=/dev/null \
     python -m pip install \
     --disable-pip-version-check --no-cache-dir --retries 3 --timeout 60 \
@@ -22,4 +22,4 @@ env -u PIP_INDEX_URL -u PIP_EXTRA_INDEX_URL PIP_CONFIG_FILE=/dev/null \
 
 (cd /tmp && python -c "import triton; print('triton', triton.__version__, triton.__file__)")
 
-echo "[triton] 完成"
+echo "[triton] Done"

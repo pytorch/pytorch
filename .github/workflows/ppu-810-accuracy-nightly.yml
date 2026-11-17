@@ -158,4 +158,5 @@ jobs:
             PIP_INDEX="${{ env.PIP_INDEX }}" \
             TRITON_INDEX="${{ env.PIP_INDEX }}" \
             TRITON_VERSION="${{ env.TRITON_VERSION }}" \
+            PPU_BOARD="810" \
             bash ${{ env.SOURCE_DIR }}/.ci/ppu/accuracy_test.sh

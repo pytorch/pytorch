@@ -163,6 +163,8 @@ jobs:
             PIP_INDEX="${{ env.PIP_INDEX }}" \
             TRITON_INDEX="${{ env.PIP_INDEX }}" \
             TRITON_VERSION="${{ env.TRITON_VERSION }}" \
+            PPU_BOARD="810" \
+            PPU_BRANCH="${{ github.ref_name }}" \
             SHARD_NUMBER="1" \
             NUM_TEST_SHARDS="2" \
             bash ${{ env.SOURCE_DIR }}/.ci/ppu/full_ut_test.sh
@@ -295,6 +297,8 @@ jobs:
             PIP_INDEX="${{ env.PIP_INDEX }}" \
             TRITON_INDEX="${{ env.PIP_INDEX }}" \
             TRITON_VERSION="${{ env.TRITON_VERSION }}" \
+            PPU_BOARD="810" \
+            PPU_BRANCH="${{ github.ref_name }}" \
             SHARD_NUMBER="2" \
             NUM_TEST_SHARDS="2" \
             bash ${{ env.SOURCE_DIR }}/.ci/ppu/full_ut_test.sh
