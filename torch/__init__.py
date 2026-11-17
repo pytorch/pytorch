@@ -115,7 +115,6 @@ __all__ = [
     "UntypedStorage",
     "are_deterministic_algorithms_enabled",
     "autocast",
-    "cfg_compile",
     "chunk",
     "compile",
     "cond",
@@ -139,6 +138,7 @@ __all__ = [
     "no_grad",
     "rand",
     "randn",
+    "rewrite",
     "save",
     "seed",
     "set_default_device",
@@ -3387,7 +3387,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import cfg_compile as cfg_compile, compiler as compiler, fx as fx
+from torch import compiler as compiler, fx as fx, rewrite as rewrite
 
 
 class _TritonLibrary:

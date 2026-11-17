@@ -1,9 +1,9 @@
-"""torch.cfg_compile: a prototype compiler that captures control-flow graphs.
+"""torch.rewrite: a prototype compiler that captures control-flow graphs.
 
 .. warning::
     This is an experiment and a temporary API. Everything about it may change.
 
-``torch.cfg_compile(fn)`` turns the bytecode of ``fn`` into one control-flow
+``torch.rewrite(fn)`` turns the bytecode of ``fn`` into one control-flow
 graph in SSA form, branches and loops included, and runs it in a small VM.
 There is no symbolic tracing and there are no fake tensors: the first run of
 each basic block is its trace. It runs on the real tensors, with a hook in the
@@ -11,7 +11,7 @@ dispatcher recording which kernel every tensor operation resolved to. The
 block is then specialized so that those operations call their post-dispatch
 kernel directly, guarded on the dispatch keys of their operands::
 
-    @torch.cfg_compile
+    @torch.rewrite
     def f(x, y):
         while x.sum() < 10:  # data-dependent control flow stays in the graph
             x = x * 2 + y
@@ -40,7 +40,7 @@ one more instruction of the graph, between the specialized ones. A whole
 training step can therefore be one compiled function, with the same results
 bit for bit as the interpreter::
 
-    @torch.cfg_compile
+    @torch.rewrite
     def step(model, opt, x, y):
         opt.zero_grad()
         loss = torch.nn.functional.mse_loss(model(x), y)
@@ -75,10 +75,10 @@ from . import _regions, _shortcuts
 __all__ = [
     "Pipeline",
     "Unsupported",
-    "cfg_compile",
     "is_available",
     "memory",
     "regions",
+    "rewrite",
 ]
 
 Pass = str | Callable[[Any], bool]
@@ -169,7 +169,7 @@ def _load_runtime() -> Any:
             _cfg_rs = importlib.import_module("torch._cfg_rs")
         except ImportError as e:
             raise RuntimeError(
-                "torch.cfg_compile needs its Rust runtime (torch._cfg_rs), which this build "
+                "torch.rewrite needs its Rust runtime (torch._cfg_rs), which this build "
                 "of PyTorch does not include. Build PyTorch with USE_CFG_COMPILE=1 "
                 "(requires cargo)."
             ) from e
@@ -179,7 +179,7 @@ def _load_runtime() -> Any:
 
 
 def is_available() -> bool:
-    """Whether this build of PyTorch has the cfg_compile runtime."""
+    """Whether this build of PyTorch has the torch.rewrite runtime."""
     try:
         _load_runtime()
     except RuntimeError:
@@ -187,7 +187,7 @@ def is_available() -> bool:
     return True
 
 
-def cfg_compile(
+def rewrite(
     fn: Any = None,
     *,
     pipeline: Pipeline | None = None,
@@ -213,7 +213,7 @@ def cfg_compile(
     Args:
         fn: a Python function, a bound method, or an ``nn.Module`` (whose
             ``forward`` is compiled; calling the result skips module hooks).
-            Can be omitted to use ``cfg_compile`` as a decorator with options.
+            Can be omitted to use ``rewrite`` as a decorator with options.
         pipeline: the passes that specialize the graph. Defaults to
             :meth:`Pipeline.default`.
         fallback: if the function uses something that is not supported, warn
@@ -250,7 +250,7 @@ def cfg_compile(
             function, or for calls that took a noticeable part (1/64) of
             its last call.
             On by default; the environment variable
-            ``TORCH_CFG_COMPILE_DEMOTE=0`` turns the default off, for looking
+            ``TORCH_REWRITE_DEMOTE=0`` turns the default off, for looking
             at the VM itself.
             A callee the compiler does not support runs in the interpreter.
         backend: hand the tensor work of each basic block to a graph compiler.
@@ -266,7 +266,7 @@ def cfg_compile(
             ``backend(graph_module, example_inputs)`` returning a callable is
             used as given. ``regions()`` on the result reports what was
             compiled and what was left to the VM, with the reason. See
-            ``torch/cfg_compile/_regions.py`` for what a compiled region
+            ``torch/rewrite/_regions.py`` for what a compiled region
             checks on every call and what it does not.
         region_min_ops: a region with fewer tensor operations than this is
             left to the VM, whose direct kernel calls are cheaper than
@@ -287,8 +287,8 @@ def cfg_compile(
             fault in the same pages. It holds what the tensors of a call
             hold at their peak and up to half as much again, 256 MB at
             most; what a few calls in a row did not ask for is given back.
-            ``torch.cfg_compile.memory(fn)`` reports it. On by
-            default (``TORCH_CFG_COMPILE_KEEP_MEMORY=0`` turns it off).
+            ``torch.rewrite.memory(fn)`` reports it. On by
+            default (``TORCH_REWRITE_KEEP_MEMORY=0`` turns it off).
         freeze: with ``backend="inductor"``, build the parameters and buffers
             of the modules a region reads into its graph when the call is
             one of inference (no gradients recorded, every module in eval
@@ -303,18 +303,18 @@ def cfg_compile(
             be a second copy), and memory PyTorch does not see the writes
             to (shared with another process, or a NumPy array's).
             ``regions()`` reports ``frozen`` per region. On by default
-            (``TORCH_CFG_COMPILE_FREEZE=0`` turns it off).
+            (``TORCH_REWRITE_FREEZE=0`` turns it off).
 
     Returns:
         A callable with the signature of ``fn``. It has ``dump()``, returning
         the graph as text, ``stats()`` and ``sites()``.
     """
     if demote is None:
-        demote = os.environ.get("TORCH_CFG_COMPILE_DEMOTE", "1") != "0"
+        demote = os.environ.get("TORCH_REWRITE_DEMOTE", "1") != "0"
     if keep_memory is None:
-        keep_memory = os.environ.get("TORCH_CFG_COMPILE_KEEP_MEMORY", "1") != "0"
+        keep_memory = os.environ.get("TORCH_REWRITE_KEEP_MEMORY", "1") != "0"
     if freeze is None:
-        freeze = os.environ.get("TORCH_CFG_COMPILE_FREEZE", "1") != "0"
+        freeze = os.environ.get("TORCH_REWRITE_FREEZE", "1") != "0"
     options: dict[str, Any] = {
         "pipeline": pipeline,
         "fallback": fallback,
@@ -335,15 +335,13 @@ def cfg_compile(
         "freeze": freeze,
     }
     if fn is None:
-        return functools.partial(cfg_compile, **options)
+        return functools.partial(rewrite, **options)
     if isinstance(fn, torch.nn.Module):
-        return types.MethodType(cfg_compile(type(fn).forward, **options), fn)
+        return types.MethodType(rewrite(type(fn).forward, **options), fn)
     if isinstance(fn, types.MethodType):
-        return types.MethodType(cfg_compile(fn.__func__, **options), fn.__self__)
+        return types.MethodType(rewrite(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
-        raise TypeError(
-            f"torch.cfg_compile expects a function, not {type(fn).__name__}"
-        )
+        raise TypeError(f"torch.rewrite expects a function, not {type(fn).__name__}")
     if pipeline is None:
         pipeline = Pipeline.default()
     runtime = _load_runtime()
@@ -379,7 +377,7 @@ def cfg_compile(
         if not fallback:
             raise Unsupported(f"{fn.__qualname__}: {e}") from None
         warnings.warn(
-            f"torch.cfg_compile left {fn.__qualname__} uncompiled: {e}", stacklevel=2
+            f"torch.rewrite left {fn.__qualname__} uncompiled: {e}", stacklevel=2
         )
         return fn
 
@@ -426,10 +424,10 @@ def memory(fn: Any) -> dict[str, int] | None:
 
 
 class _CallableModule(types.ModuleType):
-    # torch.cfg_compile is both the entry point and the namespace of the
-    # prototype: torch.cfg_compile(fn) and torch.cfg_compile.Pipeline.
+    # torch.rewrite is both the entry point and the namespace of the
+    # prototype: torch.rewrite(fn) and torch.rewrite.Pipeline.
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return cfg_compile(*args, **kwargs)
+        return rewrite(*args, **kwargs)
 
 
 sys.modules[__name__].__class__ = _CallableModule

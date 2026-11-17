@@ -3,7 +3,7 @@ name = "torch_cfg_rs"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "CFG/SSA compiler and VM behind torch.cfg_compile"
+description = "CFG/SSA compiler and VM behind torch.rewrite"
 
 [lib]
 name = "_cfg_rs"
