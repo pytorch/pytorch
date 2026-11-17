@@ -37,7 +37,9 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
+    isRocmArchAnyOf,
     MI350_ARCH,
+    NAVI4_ARCH,
     skipIfCppFakeTensor,
     skipIfRocm,
     skipIfRocmArch,
@@ -1128,6 +1130,7 @@ class TestTransformersAccelerator(NNTestCase):
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
 
+    @xfailIfNoAcceleratorTriton
     @tf32_off()
     def test_transformer_encoder_layer_fwd_fake(self, device):
         model = torch.nn.TransformerEncoder(
@@ -1186,6 +1189,7 @@ class TestTransformersAccelerator(NNTestCase):
         # Without the fix this raises GuardOnDataDependentSymNode while tracing.
         make_fx(fn, tracing_mode="symbolic")(torch.tensor(3, device=device))
 
+    @xfailIfNoAcceleratorTriton
     def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
         # The fused kernel always returns a contiguous tensor, so its meta rule
         # must not hand back the strides of a non-contiguous src: inductor asserts
@@ -6103,7 +6107,7 @@ class TestSDPAAccelerator(NNTestCase):
                 fudge_factors['grad_query'] = 670.0
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
-            if "gfx95" in torch.cuda.get_device_properties(0).gcnArchName:
+            if isRocmArchAnyOf(MI350_ARCH + NAVI4_ARCH):
                 fudge_factors['grad_value'] = 16.0
 
         check_out_and_grad(
@@ -6235,7 +6239,7 @@ class TestSDPAAccelerator(NNTestCase):
                 fudge_factors['grad_query'] = 670.0  # gfx90a
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
-                if "gfx95" in torch.cuda.get_device_properties(0).gcnArchName:
+                if isRocmArchAnyOf(MI350_ARCH):
                     fudge_factors['grad_value'] = 16.0
 
         check_out_and_grad(
