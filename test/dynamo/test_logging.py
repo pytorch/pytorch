@@ -1726,7 +1726,6 @@ for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

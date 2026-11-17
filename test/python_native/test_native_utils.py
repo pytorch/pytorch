@@ -9,7 +9,6 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     run_tests,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -19,7 +18,6 @@ from torch.testing._internal.common_utils import (
 
 # These predicates inspect tensor identity, which Dynamo rewrites across a FakeTensorMode
 # graph break; the resumed frame can therefore hold a non-fake tensor.
-@instantiate_parametrized_tests
 @skipIfTorchDynamo("host-side capability predicates need no dynamo compilation")
 class TestNativeUtils(TestCase):
     def test_lazy_module_defers_import(self):

@@ -1060,6 +1060,5 @@ class TestHopPrintDTensor(DTensorTestBase):
 
 instantiate_device_type_tests(TestHopPrintDTensor, globals())
 
-
 if __name__ == "__main__":
     run_tests()
