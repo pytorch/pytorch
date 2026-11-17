@@ -872,24 +872,6 @@ jobs:
             --out /tmp/pr-interdiff.txt \
             --max-bytes "${MAX_DIFF_BYTES}"
 
-      # Installs Bun so both model steps skip the action's own "Install Bun".
-      # That step runs setup-bun, which asks api.github.com for Bun's tag list
-      # on every run, even with the version pinned, using this job's
-      # GITHUB_TOKEN: a call on the repository's shared API budget, made before
-      # each stage. An explicit download URL skips that lookup. On failure the
-      # path below is empty and the action installs Bun itself, as before.
-      # Before the AWS credentials, so the download runs without them.
-      # Keep the version equal to the bun-version the pinned action installs.
-      # A download URL also turns setup-bun's cache off (isCacheEnabled in
-      # src/action.ts at this SHA), which this job must not write.
-      - name: Install Bun
-        id: bun
-        if: steps.diff.outputs.too_large == 'false'
-        continue-on-error: true
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip
-
       - name: Configure AWS credentials via OIDC
         id: aws
         if: steps.diff.outputs.too_large == 'false'
@@ -1035,8 +1017,6 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
-          # See the Install Bun step; empty makes the action install Bun itself.
-          path_to_bun_executable: ${{ steps.bun.outcome == 'success' && steps.bun.outputs.bun-path || '' }}
           # See stage B for these three.
           allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           github_token: ${{ github.token }}
@@ -1099,8 +1079,6 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
-          # See the Install Bun step; empty makes the action install Bun itself.
-          path_to_bun_executable: ${{ steps.bun.outcome == 'success' && steps.bun.outputs.bun-path || '' }}
           # The actor is whoever triggered Stage 1: on `labeled`, whoever
           # applied `in progress`; on a push, the pusher. The action rejects
           # bot actors unless listed here. pytorch-bot applies the label once
