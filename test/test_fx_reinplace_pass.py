@@ -36,6 +36,7 @@ class TestReinplacePass(TestCase):
         self.assertExpectedInline(f2.code, """\
 
 
+
 def forward(self, x_1):
     clone = torch.ops.aten.clone.default(x_1);  x_1 = None
     add = torch.ops.aten.add_.Tensor(clone, 1);  add = None
@@ -60,6 +61,7 @@ def forward(self, x_1):
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
+
 
 
 def forward(self, x_1):
@@ -87,6 +89,7 @@ def forward(self, x_1):
         self.assertExpectedInline(f2.code, """\
 
 
+
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
     add = torch.ops.aten.add.Tensor(clone, 1)
@@ -107,6 +110,7 @@ def forward(self, a__1):
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
+
 
 
 def forward(self, a__1):
@@ -144,6 +148,7 @@ def forward(self, a__1):
         # is effectively just moving some metadata around (and allocating a new TensorImpl).
         # We can/should update the pass in the future to clean this up.
         self.assertExpectedInline(f2.code, """\
+
 
 
 def forward(self, a__1):
@@ -185,6 +190,7 @@ def forward(self, a__1):
         self.assertExpectedInline(f2.code, """\
 
 
+
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
     select = torch.ops.aten.select.int(clone, 1, 1)
@@ -221,6 +227,7 @@ def forward(self, a__1):
         self.assertExpectedInline(f2.code, """\
 
 
+
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
     select = torch.ops.aten.select.int(clone, 1, 1)
@@ -255,6 +262,7 @@ def forward(self, a__1):
         self.assertExpectedInline(f2.code, """\
 
 
+
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
     select = torch.ops.aten.select.int(clone, 1, 1)
@@ -284,6 +292,7 @@ def forward(self, a__1):
         actual_out = f2(inpt)  # noqa: F841
         # self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
+
 
 
 def forward(self, a__1):
@@ -316,6 +325,7 @@ def forward(self, a__1):
         self.assertExpectedInline(f2.code, """\
 
 
+
 def forward(self):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros)
@@ -336,6 +346,7 @@ def forward(self):
         actual_out = f2()
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
+
 
 
 def forward(self):
@@ -372,6 +383,7 @@ def forward(self):
         self.assertEqual(actual_out, expected_out)
         print(f2.code)
         self.assertExpectedInline(f2.code, """\
+
 
 
 def forward(self, x_1, index_1):
