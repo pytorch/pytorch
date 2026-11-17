@@ -62,13 +62,13 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
         local_embedding = torch.nn.Embedding(
             num_embeddings,
             embedding_dim,
-            device=self.device_type,
+            device=self._device_type,
             **kwargs,
         )
         sharded_embedding = torch.nn.Embedding(
             num_embeddings,
             embedding_dim,
-            device=self.device_type,
+            device=self._device_type,
             **kwargs,
         )
 
@@ -84,10 +84,10 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
         # Run sharded computation
         torch.manual_seed(10)
         inp = torch.randint(
-            0, num_embeddings, tuple(input_size), device=self.device_type
+            0, num_embeddings, tuple(input_size), device=self._device_type
         )
         target = torch.empty(
-            *inp.size(), embedding_dim, dtype=torch.float, device=self.device_type
+            *inp.size(), embedding_dim, dtype=torch.float, device=self._device_type
         ).random_(0, 1)
         dist_inp = distribute_tensor(inp, device_mesh, [Replicate()])
 
@@ -175,9 +175,9 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
         from torch.distributed.tensor.placement_types import _MaskPartial
 
         # test collectives
-        embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
+        embedding_mod = torch.nn.Embedding(10, 20, device=self._device_type)
         sharded_embedding = self._apply_sharding(embedding_mod, 0, mesh)
-        inp = torch.randint(0, 10, (8, 8), device=self.device_type)
+        inp = torch.randint(0, 10, (8, 8), device=self._device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_embedding(replicated_inp)
         self.assertIsInstance(output.placements[0], _MaskPartial)
@@ -193,7 +193,7 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
     def test_multiple_embeddings_rowwise(self):
         mesh = self.build_device_mesh()
 
-        inp = torch.randint(0, 10, (4, 4), device=self.device_type)
+        inp = torch.randint(0, 10, (4, 4), device=self._device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
 
         from torch.distributed.tensor.placement_types import _MaskPartial
@@ -201,11 +201,11 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
         # case 1: two embeddings with the same shape, thus sharing the underlying _MaskPartial
         # and MaskBuffer, because of cache hit from sharding propagation
 
-        emb1 = torch.nn.Embedding(10, 23, device=self.device_type)
+        emb1 = torch.nn.Embedding(10, 23, device=self._device_type)
         sharded_emb1 = self._apply_sharding(emb1, 0, mesh)
         output1 = sharded_emb1(replicated_inp)
 
-        emb2 = torch.nn.Embedding(10, 23, device=self.device_type)
+        emb2 = torch.nn.Embedding(10, 23, device=self._device_type)
         sharded_emb2 = self._apply_sharding(emb2, 0, mesh)
         output2 = sharded_emb2(replicated_inp)
 
@@ -222,7 +222,7 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
         # case 2: two embeddings with the same logical_dim_size, but different logical_shape
         # thus they will have different _MaskPartial placements (with no cache hit)
 
-        emb3 = torch.nn.Embedding(10, 29, device=self.device_type)
+        emb3 = torch.nn.Embedding(10, 29, device=self._device_type)
         sharded_emb3 = self._apply_sharding(emb3, 0, mesh)
         output3 = sharded_emb3(replicated_inp)
         partial_placement3 = output3.placements[0]
@@ -241,13 +241,13 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
         mesh = self.build_device_mesh()
         torch.manual_seed(0)
 
-        emb_small = torch.nn.Embedding(16, 12, device=self.device_type)
-        emb_large = torch.nn.Embedding(32, 12, device=self.device_type)
+        emb_small = torch.nn.Embedding(16, 12, device=self._device_type)
+        emb_large = torch.nn.Embedding(32, 12, device=self._device_type)
         sharded_emb_small = self._apply_sharding(emb_small, 1, mesh)
         sharded_emb_large = self._apply_sharding(emb_large, 1, mesh)
 
-        inp_small = torch.randint(0, 16, (4, 4), device=self.device_type)
-        inp_large = torch.randint(0, 32, (4, 4), device=self.device_type)
+        inp_small = torch.randint(0, 16, (4, 4), device=self._device_type)
+        inp_large = torch.randint(0, 32, (4, 4), device=self._device_type)
         dist_inp_small = DTensor.from_local(
             inp_small, mesh, [Replicate()], run_check=False
         )
