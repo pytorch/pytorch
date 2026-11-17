@@ -54,8 +54,8 @@ class ReplicateTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return dist.get_default_backend_for_device(DEVICE_TYPE)
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return DEVICE_TYPE
 
     @classmethod
