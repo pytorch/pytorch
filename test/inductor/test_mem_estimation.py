@@ -360,7 +360,6 @@ instantiate_device_type_tests(
     TestMemoryTracker, globals(), except_for="cpu", allow_xpu=True
 )
 
-
 if __name__ == "__main__":
     if has_triton():
         run_tests(needs="filelock")

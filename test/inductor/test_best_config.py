@@ -85,7 +85,6 @@ instantiate_device_type_tests(
     TestKernelBestConfig, globals(), allow_xpu=True, except_for="cpu"
 )
 
-
 if __name__ == "__main__":
     if IS_LINUX and HAS_TRITON:
         run_tests()

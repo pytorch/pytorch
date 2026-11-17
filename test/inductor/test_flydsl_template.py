@@ -2844,7 +2844,6 @@ class TestFlyDSLMXFPDevice(TestCase):
 
 instantiate_device_type_tests(TestFlyDSLMXFPDevice, globals(), only_for="cuda")
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

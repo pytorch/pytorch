@@ -128,6 +128,5 @@ class TestTorchbindAOTIDevice(TestCase):
 
 instantiate_device_type_tests(TestTorchbindAOTIDevice, globals(), allow_xpu=True)
 
-
 if __name__ == "__main__":
     run_tests()

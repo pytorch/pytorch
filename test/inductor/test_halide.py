@@ -316,7 +316,6 @@ if (
     make_halide(test_torchinductor.SweepInputsGPUTest)
     make_halide(test_torchinductor.GPUTests)
 
-
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:
         run_tests(needs="filelock")

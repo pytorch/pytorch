@@ -947,7 +947,6 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCpuTest, "cpu")
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

@@ -14659,6 +14659,5 @@ instantiate_device_type_tests(
 
 instantiate_parametrized_tests(TestControlFlowAndRNGCUDA)
 
-
 if __name__ == "__main__":
     run_tests()

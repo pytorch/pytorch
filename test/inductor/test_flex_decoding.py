@@ -2564,7 +2564,6 @@ if LONG_COMPILATION_ON_CPU and "TestFlexDecodingCPU" in globals():
         globals()["TestFlexDecodingCPU"]
     )
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
