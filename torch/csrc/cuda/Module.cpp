@@ -2811,6 +2811,7 @@ void initCusparseltBindings(PyObject* module);
 
 namespace memory_planner {
 void initMemoryPlanningUtilsBindings(PyObject* module);
+void initMemoryPlannerBindings(PyObject* module);
 } // namespace memory_planner
 
 void initModule(PyObject* module) {
@@ -2829,6 +2830,7 @@ void initModule(PyObject* module) {
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
   memory_planner::initMemoryPlanningUtilsBindings(module);
+  memory_planner::initMemoryPlannerBindings(module);
   initCudaMethodBindings(module);
 }
 
