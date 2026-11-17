@@ -6008,6 +6008,21 @@ instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
 class TestFXDevice(JitTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    def setUp(self):
+        super().setUp()
+        # Checking for mutable operations while tracing is feature flagged
+        # Enable it in testing but not by default
+        self.orig_tracer_mutable_flag = (
+            torch.fx.proxy.TracerBase.check_mutable_operations
+        )
+        torch.fx.proxy.TracerBase.check_mutable_operations = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch.fx.proxy.TracerBase.check_mutable_operations = (
+            self.orig_tracer_mutable_flag
+        )
+
     @xfailIfNoAcceleratorTriton
     def test_graph_module_with_hop_serialization(self, device):
         """
@@ -6018,6 +6033,11 @@ class TestFXDevice(JitTestCase):
         so they can be symbolically traced during deserialization without needing
         special handling.
         """
+        from torch.utils._triton import has_triton
+
+        if not has_triton(include_cpu=True):
+            self.skipTest("mul2_kernel is only defined when Triton is usable")
+
         from torch._higher_order_ops.triton_kernel_wrap import (
             kernel_side_table,
             triton_kernel_wrapper_functional,
