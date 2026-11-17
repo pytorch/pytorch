@@ -605,7 +605,13 @@ Tensor to_dense_backward(
     semantics. Masked semantics of tensors is implemented in the
     framework of masked tensors.
   */
-  const auto input_layout = input_.layout();
+  auto input_layout = input_.layout();
+  if (input_.is_fake()) {
+    const auto keys = input_.unsafeGetTensorImpl()->fake_dispatch_keys();
+    if (keys.has_value() && keys->has_all(c10::mkldnn_ks)) {
+      input_layout = kMkldnn;
+    }
+  }
   const bool masked_grad = masked_grad_.value_or(true);
   switch (input_layout) {
     case kStrided:
