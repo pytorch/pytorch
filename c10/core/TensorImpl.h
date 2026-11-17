@@ -244,9 +244,9 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // reports its own layout.
 // Python keeps them on the output of a top-level alias or detach (dispatched,
 // through functionalization, or by calling fast_detach directly), but not of
-// other views. Here ExtraMeta's copy constructor copies them, so every shallow
-// copy, such as detach, keeps them, while views, including alias, drop them;
-// matching Python is left to the C++ fake dispatch path (later in this stack).
+// other views. The fake fallback (FakeFallbackKernel.cpp) does the same for a
+// dispatched op. A shallow copy made outside dispatch keeps them, as
+// ExtraMeta's copy constructor copies them.
 // Functionalization's alias/detach handling currently covers only a Python
 // FakeTensor. Unlike Python, fake.data = other gives the fake other's keys, as
 // set_data replaces the whole ExtraMeta.
@@ -654,14 +654,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * valid as long as the tensor is live and not resized.
    */
   IntArrayRef sizes() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return sizes_custom();
     }
     return sizes_and_strides_.sizes_arrayref();
   }
 
   SymIntArrayRef sym_sizes() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return sym_sizes_custom();
     }
     // Sizes guaranteed to be non-negative, so unchecked cast is OK
@@ -670,7 +670,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   IntArrayRef sizes_default() const {
-    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (has_symbolic_sizes_strides_) [[unlikely]] {
       throw_cannot_call_with_symbolic("sizes");
     }
     return sizes_and_strides_.sizes_arrayref();
@@ -733,21 +733,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * of sizes of a tensor.
    */
   int64_t numel() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return numel_custom();
     }
     return numel_;
   }
 
   c10::SymInt sym_numel() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return sym_numel_custom();
     }
     return c10::SymInt(SymInt::UNCHECKED, numel_);
   }
 
   int64_t numel_default() const {
-    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (has_symbolic_sizes_strides_) [[unlikely]] {
       throw_cannot_call_with_symbolic("numel");
     }
     return numel_;
@@ -766,7 +766,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * represents a Tensor that is a Scalar, e.g., one that has a single element.
    */
   int64_t dim() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return dim_custom();
     }
     return static_cast<int64_t>(sizes_and_strides_.size());
@@ -789,21 +789,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   int64_t storage_offset() const {
     // TODO: maybe this should be toggled by strides
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return storage_offset_custom();
     }
     return storage_offset_;
   }
 
   c10::SymInt sym_storage_offset() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return sym_storage_offset_custom();
     }
     return c10::SymInt(SymInt::UNCHECKED, storage_offset_);
   }
 
   int64_t storage_offset_default() const {
-    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (has_symbolic_sizes_strides_) [[unlikely]] {
       throw_cannot_call_with_symbolic("storage_offset");
     }
     return storage_offset_;
@@ -822,21 +822,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * valid as long as the tensor is live and not restrided.
    */
   IntArrayRef strides() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       return strides_custom();
     }
     return sizes_and_strides_.strides_arrayref();
   }
 
   c10::SymIntArrayRef sym_strides() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       return sym_strides_custom();
     }
     return c10::fromIntArrayRefKnownNonNegative(strides_default());
   }
 
   IntArrayRef strides_default() const {
-    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (has_symbolic_sizes_strides_) [[unlikely]] {
       throw_cannot_call_with_symbolic("strides");
     }
     return sizes_and_strides_.strides_arrayref();
@@ -852,7 +852,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymBool sym_is_contiguous(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       return sym_is_contiguous_custom(memory_format);
     }
     return sym_is_contiguous_default(memory_format);
@@ -896,7 +896,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   bool is_contiguous(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       return is_contiguous_custom(memory_format);
     }
     return is_contiguous_default(memory_format);
@@ -951,7 +951,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * be faster
    */
   int64_t size(int64_t d) const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return size_custom(d);
     }
     d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
@@ -959,7 +959,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   c10::SymInt sym_size(int64_t d) const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
+    if (matches_policy(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
       return sym_size_custom(d);
     }
     d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
@@ -976,7 +976,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   int64_t stride(int64_t d) const {
     d = maybe_wrap_dim(d, dim(), false);
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       // TODO: provide stride_custom, symmetrically with size_custom.
       // There is presently no user for it; only NestedTensor is using
       // size_custom overrideability
@@ -1112,7 +1112,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * operations.
    */
   TENSORIMPL_MAYBE_VIRTUAL const Storage& storage() const {
-    if (C10_UNLIKELY(storage_access_should_throw_)) {
+    if (storage_access_should_throw_) [[unlikely]] {
       throw_storage_access_error();
     }
     return storage_;
@@ -1165,7 +1165,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_meta() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_meta();
     }
     return device_opt_.has_value() && device_opt_->type() == kMeta;
@@ -1178,7 +1178,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_cpu();
     }
     // Note: we cannot rely on dispatch keys to determine the device type
@@ -1190,7 +1190,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_cuda();
     }
     return device_opt_.has_value() && device_opt_->type() == kCUDA;
@@ -1199,42 +1199,42 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_xpu();
     }
     return device_opt_.has_value() && device_opt_->type() == kXPU;
   }
 
   bool is_ipu() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_ipu();
     }
     return device_opt_.has_value() && device_opt_->type() == kIPU;
   }
 
   bool is_xla() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_xla();
     }
     return device_opt_.has_value() && device_opt_->type() == kXLA;
   }
 
   bool is_mtia() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_mtia();
     }
     return device_opt_.has_value() && device_opt_->type() == kMTIA;
   }
 
   bool is_hpu() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_hpu();
     }
     return device_opt_.has_value() && device_opt_->type() == kHPU;
   }
 
   bool is_lazy() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_lazy();
     }
     return device_opt_.has_value() && device_opt_->type() == kLazy;
@@ -1243,7 +1243,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_hip();
     }
     return device_opt_.has_value() && device_opt_->type() == kHIP;
@@ -1252,7 +1252,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_ve();
     }
     return device_opt_.has_value() && device_opt_->type() == kVE;
@@ -1261,7 +1261,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_privateuseone() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_privateuseone();
     }
     return device_opt_.has_value() && device_opt_->type() == kPrivateUse1;
@@ -1272,28 +1272,28 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_vulkan() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_vulkan();
     }
     return device_opt_.has_value() && device_opt_->type() == kVulkan;
   }
 
   bool is_metal() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_metal();
     }
     return device_opt_.has_value() && device_opt_->type() == kMetal;
   }
 
   bool is_mps() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_mps();
     }
     return device_opt_.has_value() && device_opt_->type() == kMPS;
   }
 
   bool is_maia() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().is_maia();
     }
     return device_opt_.has_value() && device_opt_->type() == kMAIA;
@@ -1325,14 +1325,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   DeviceIndex get_device() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom().index();
     }
     return device_default().index();
   }
 
   Device device() const {
-    if (C10_UNLIKELY(device_policy_)) {
+    if (device_policy_) [[unlikely]] {
       return device_custom();
     }
     return device_default();
@@ -1347,7 +1347,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  public:
   Layout layout() const {
-    if (C10_UNLIKELY(layout_policy_)) {
+    if (layout_policy_) [[unlikely]] {
       return layout_custom();
     }
 
@@ -1775,7 +1775,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T, typename Func>
   __ubsan_ignore_pointer_overflow__ T* data_ptr_impl_impl(
       const Func& get_data) const {
-    if (C10_UNLIKELY(!has_storage())) {
+    if (!has_storage()) [[unlikely]] {
       throw_data_ptr_access_error();
     }
     TORCH_CHECK(
@@ -1833,7 +1833,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /// std::byte const*, etc.
   template <typename Void, typename Func>
   Void* data_impl(const Func& get_data) const {
-    if (C10_UNLIKELY(!has_storage())) {
+    if (!has_storage()) [[unlikely]] {
       throw_data_ptr_access_error();
     }
     TORCH_CHECK(
@@ -2596,7 +2596,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_strides_like(at::MemoryFormat memory_format) const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       return is_strides_like_custom(memory_format);
     }
     return is_strides_like_default(memory_format);
@@ -2616,14 +2616,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_non_overlapping_and_dense() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       return is_non_overlapping_and_dense_custom();
     }
     return is_non_overlapping_and_dense_default();
   }
 
   SymBool sym_is_non_overlapping_and_dense() const {
-    if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
+    if (matches_policy(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
       return sym_is_non_overlapping_and_dense_custom();
     }
     return sym_is_non_overlapping_and_dense_default();
