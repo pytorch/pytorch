@@ -1431,7 +1431,6 @@ def aot_compile_fullgraph(
             raise AssertionError("guards_state must not be None")
 
         source_info = SourceInfo(inlined_sources=set())
-        # traced_code has one entry per inline call site; record each code once.
         traced_codes = {id(c): c for c in graph_capture_output.traced_code}
         for traced_code in traced_codes.values():
             source_info.add_code(traced_code)
