@@ -3884,7 +3884,9 @@ class TestFxGraphCacheHashing(TestCase):
     def test_hash_aten_c_shim_ops(self):
         from torch._inductor.codegen.common import get_device_op_overrides
 
-        with mock.patch.object(get_device_op_overrides("cpu"), "get_aten_c_shim_ops") as hook:
+        with mock.patch.object(
+            get_device_op_overrides("cpu"), "get_aten_c_shim_ops"
+        ) as hook:
             hook.return_value = {"aten.mul.Tensor": {}, "aten.add.Tensor": {}}
             details1 = FxGraphHashDetails(None, [], {}, [])
             hook.return_value = {"aten.add.Tensor": {}, "aten.mul.Tensor": {}}
