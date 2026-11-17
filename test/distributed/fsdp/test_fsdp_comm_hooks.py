@@ -133,15 +133,16 @@ class TestCommunicationHooks(FSDPTestContinuous):
         Arguments:
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
         """
+        device = torch.device(torch.device(device).type, self.rank)
         out_dim = self.world_size
         net = torch.nn.Linear(1, out_dim, bias=False)
-        inpt = torch.tensor([self.rank]).float().to(self.rank)
+        inpt = torch.tensor([self.rank]).float().to(device)
 
         net_default_hook = FSDP(
             net,
-            device_id=torch.accelerator.current_device_index(),
+            device_id=device,
             sharding_strategy=sharding_strategy,
-        ).to(self.rank)
+        ).to(device)
 
         # Check that by default, `_comm_hook` is None
         for entry in FSDP.fsdp_modules(net_default_hook):
