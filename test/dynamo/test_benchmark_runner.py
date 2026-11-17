@@ -3,6 +3,7 @@
 import collections
 import contextlib
 import csv
+import dataclasses
 import functools
 import importlib.metadata
 import os
@@ -17,6 +18,7 @@ from unittest import mock
 from packaging.version import Version
 
 import torch
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -91,8 +93,16 @@ class BenchmarkRunnerTests(TestCase):
         self.assertEqual(policy.keywords["min_num_params"], int(1e5))
 
     @skipIfTorchDynamo("parse_args is slow to trace")
-    @parametrize("flag", ("--hf-inference-mode=prefill", "--prompt-length=8"))
-    def test_prefill_options_require_huggingface(self, flag):
+    @parametrize(
+        "flag",
+        (
+            "--hf-inference-mode=prefill",
+            "--hf-inference-mode=decode",
+            "--prompt-length=8",
+            "--decode-length=8",
+        ),
+    )
+    def test_hf_inference_options_require_huggingface(self, flag):
         args = common.parse_args(["--performance", "--inference", flag])
         with self.assertRaisesRegex(ValueError, "requires the huggingface suite"):
             common.BenchmarkRunner().validate_args(args)
@@ -210,7 +220,7 @@ class TestHuggingFaceLLMPerformance(TestCase):
 
 
 @skipIfTorchDynamo("drives the benchmark harness, which calls set_stance")
-class HuggingFacePrefillTestCase(TestCase):
+class HuggingFaceLLMPhaseTestCase(TestCase):
     def setUp(self):
         super().setUp()
         # The inductor_benchmark_runner CI jobs supply the pinned transformers for these
@@ -230,13 +240,13 @@ class HuggingFacePrefillTestCase(TestCase):
                 side_effect=unavailable("requires compatible transformers"),
             ):
                 from benchmarks.dynamo.huggingface_llm_models import (
-                    PREFILL_TRANSFORMERS_VERSION,
+                    CACHE_TRANSFORMERS_VERSION,
                 )
         except ImportError as e:
             raise unavailable("requires compatible transformers") from e
-        if Version(version) != Version(PREFILL_TRANSFORMERS_VERSION):
+        if Version(version) != Version(CACHE_TRANSFORMERS_VERSION):
             raise unavailable(
-                f"requires transformers == {PREFILL_TRANSFORMERS_VERSION}, "
+                f"requires transformers == {CACHE_TRANSFORMERS_VERSION}, "
                 f"found {version}"
             )
         from transformers import AutoConfig
@@ -255,14 +265,14 @@ class HuggingFacePrefillTestCase(TestCase):
         common.load_yaml_file.cache_clear()
         self.addCleanup(common.load_yaml_file.cache_clear)
 
-    def _runner_args(self, *extra):
+    def _runner_args(self, *extra, mode="prefill"):
         return common.parse_args(
             [
                 "-dcpu",
                 "--backend=eager",
                 "--performance",
                 "--inference",
-                "--hf-inference-mode=prefill",
+                f"--hf-inference-mode={mode}",
                 *extra,
             ]
         )
@@ -270,7 +280,7 @@ class HuggingFacePrefillTestCase(TestCase):
     def _make_model(self, model_type, device, dtype=torch.float32):
         import transformers
 
-        from benchmarks.dynamo.huggingface_llm_models import TextGenerationPrefillModel
+        from benchmarks.dynamo.huggingface_llm_models import TextGenerationCacheModel
 
         model_cls = getattr(transformers, model_type + "ForCausalLM")
         config_name = "Qwen3_5Text" if model_type == "Qwen3_5" else model_type
@@ -298,7 +308,39 @@ class HuggingFacePrefillTestCase(TestCase):
             )
         config = config_cls(**config_kwargs)
         model = model_cls(config).eval().to(device=device, dtype=dtype)
-        return TextGenerationPrefillModel(model, 2, 4, 11).eval()
+        return TextGenerationCacheModel(model, 2, 4, 11).eval()
+
+    def _decode_inputs(self, device):
+        return {
+            "input_ids": torch.randint(0, 32, (2, 4), device=device),
+            "decode_ids": torch.randint(0, 32, (2, 5), device=device),
+        }
+
+    def _decode(self, model, example_inputs):
+        phase = self.huggingface.INFERENCE_PHASES["decode"]
+        phase.setup_fn(model, example_inputs)
+        return phase.iter_fn(model, example_inputs)
+
+    @contextlib.contextmanager
+    def _patch_phase(self, mode, **changes):
+        phases = self.huggingface.INFERENCE_PHASES
+        phase = dataclasses.replace(phases[mode], **changes)
+        with mock.patch.dict(phases, {mode: phase}):
+            yield
+
+    @contextlib.contextmanager
+    def _record_cache_lengths(self, mode):
+        iter_fn = self.huggingface.INFERENCE_PHASES[mode].iter_fn
+        cache_lengths = []
+
+        def record(model, example_inputs, collect_outputs=True):
+            before = int(model.cache.get_seq_length())
+            result = iter_fn(model, example_inputs, collect_outputs)
+            cache_lengths.append((before, int(model.cache.get_seq_length())))
+            return result
+
+        with self._patch_phase(mode, iter_fn=record):
+            yield cache_lengths
 
     @contextlib.contextmanager
     def _mock_pretrained(self):
@@ -319,9 +361,9 @@ class HuggingFacePrefillTestCase(TestCase):
             yield
 
 
-class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
+class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
     @torch._dynamo.config.patch(repro_tolerance=1e-4)
-    @parametrize("mode", ("generate", "prefill"))
+    @parametrize("mode", ("generate", "prefill", "decode"))
     def test_timing_units_setup_and_csv_columns(self, mode):
         clock = [0.0]
         calls = collections.Counter()
@@ -341,13 +383,15 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                 calls["setup"] += 1
                 clock[0] += 100.0
 
+            prepare_for_decode = prepare_for_prefill
+
         inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
+        if mode == "decode":
+            # One step per request, so every mode times the same 16 forwards.
+            inputs["decode_ids"] = torch.zeros(2, 1, dtype=torch.long)
         runner = self.huggingface.HuggingfaceRunner()
         runner.args = self._runner_args(
-            f"--hf-inference-mode={mode}",
-            "--iterations-per-run=4",
-            "--repeat=1",
-            "--export-profiler-trace",
+            "--iterations-per-run=4", "--repeat=1", "--export-profiler-trace", mode=mode
         )
         runner.args.profile_details = {}
         runner.args.profiler_trace_name = "profile"
@@ -402,7 +446,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                 (row,) = csv.DictReader(f)
         self.assertEqual(calls["forward"], 16)
         self.assertEqual(calls["generate"], 16 if mode == "generate" else 0)
-        self.assertEqual(calls["setup"], 16 if mode == "prefill" else 0)
+        self.assertEqual(calls["setup"], 0 if mode == "generate" else 16)
         trace = Path(profile.export_chrome_trace.call_args.args[0])
         self.assertEqual(trace.name, "profile_Qwen_Qwen3-0.6B.json")
         self.assertEqual(row["name"], Model.name)
@@ -413,12 +457,15 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         self.assertEqual(float(row["eager_peak_mem"]), 5.0)
         self.assertEqual(float(row["dynamo_peak_mem"]), 6.0)
         self.assertEqual(int(row["calls_captured"]), 7)
-        if mode == "prefill":
-            self.assertEqual(float(row["eager_latency"]), 4000.0)
-            self.assertEqual(float(row["input_tokens_per_second"]), 12.0)
-        else:
-            self.assertNotIn("eager_latency", row)
-            self.assertNotIn("input_tokens_per_second", row)
+        # Four requests per 2 s, each with 6 prompt tokens or 2 decode tokens.
+        expected = {
+            "generate": {},
+            "prefill": {"eager_latency": 4000.0, "input_tokens_per_second": 12.0},
+            "decode": {"eager_latency": 4000.0, "output_tokens_per_second": 4.0},
+        }
+        columns = set().union(*expected.values())
+        actual = {column: float(row[column]) for column in columns & row.keys()}
+        self.assertEqual(actual, expected[mode])
 
     @parametrize(
         "extra, message",
@@ -432,10 +479,11 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             ("--iterations-per-run=0", "--iterations-per-run must be positive"),
         ],
     )
-    def test_invalid_prefill_options(self, extra, message):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_invalid_phase_options(self, extra, message, mode):
         runner = self.huggingface.HuggingfaceRunner()
         with self.assertRaisesRegex(ValueError, message):
-            runner.validate_args(self._runner_args(extra))
+            runner.validate_args(self._runner_args(extra, mode=mode))
 
     @parametrize("version", ("5.0.0", "5.14.2"))
     def test_prefill_requires_transformers_version(self, version):
@@ -446,7 +494,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         ):
             runner.validate_args(self._runner_args())
 
-    def test_generate_import_does_not_require_prefill_cache_classes(self):
+    def test_generate_import_does_not_require_cache_classes(self):
         from benchmarks.dynamo import huggingface_llm_models as llm
 
         transformers = types.ModuleType("transformers")
@@ -486,7 +534,11 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             ),
             (
                 ["--prompt-length=7", "--multiprocess"],
-                "--prompt-length requires --hf-inference-mode=prefill",
+                "--prompt-length requires --hf-inference-mode=prefill or decode",
+            ),
+            (
+                ["--decode-length=7", "--multiprocess"],
+                "--decode-length requires --hf-inference-mode=decode",
             ),
             (
                 ["--hf-inference-mode=prefill", "--quantization=int8dynamic"],
@@ -516,9 +568,10 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                 ],
             )
 
-    def test_prefill_requires_inference_backend(self):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_phase_requires_inference_backend(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._runner_args()
+        args = self._runner_args(mode=mode)
         args.inference = False
         with self.assertRaisesRegex(ValueError, "requires --inference"):
             runner.validate_args(args)
@@ -526,15 +579,16 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         args.backend = None
         with self.assertRaisesRegex(ValueError, "requires --backend or --inductor"):
             runner.validate_args(args)
-        flags = ["--inference", "--inductor", "--hf-inference-mode=prefill"]
+        flags = ["--inference", "--inductor", f"--hf-inference-mode={mode}"]
         args = common.parse_args(["--performance", *flags])
         self.assertEqual(args.backend, "inductor")
         runner.validate_args(args)
 
+    @parametrize("mode", ("prefill", "decode"))
     @parametrize("name", ("Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"))
-    def test_prefill_honors_model_filter(self, name):
+    def test_phase_honors_model_filter(self, mode, name):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._runner_args()
+        args = self._runner_args(mode=mode)
         args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
         runner.args = args
         with mock.patch.dict(
@@ -547,17 +601,50 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         with self.assertRaisesRegex(ValueError, "does not support openai/whisper-tiny"):
             runner.validate_args(args)
 
-    def test_prompt_length_requires_prefill(self):
+    def test_decode_excludes_gemma2(self):
         runner = self.huggingface.HuggingfaceRunner()
-        args = common.parse_args(["--performance", "--inference", "--prompt-length=8"])
-        with self.assertRaisesRegex(ValueError, "requires --hf-inference-mode=prefill"):
+        args = self._runner_args(mode="decode")
+        args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
+        runner.args = args
+        names = {"google/gemma-2-2b": 8, "Qwen/Qwen3-0.6B": 8}
+        with mock.patch.dict(
+            self.huggingface.BATCH_SIZE_KNOWN_MODELS, names, clear=True
+        ):
+            self.assertEqual(list(runner.iter_model_names(args)), ["Qwen/Qwen3-0.6B"])
+        args.only = "google/gemma-2-2b"
+        with self.assertRaisesRegex(ValueError, "does not support google/gemma-2-2b"):
             runner.validate_args(args)
 
+    def test_prompt_length_requires_prefill_or_decode(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = common.parse_args(["--performance", "--inference", "--prompt-length=8"])
+        message = "requires --hf-inference-mode=prefill or decode"
+        with self.assertRaisesRegex(ValueError, message):
+            runner.validate_args(args)
+
+    @parametrize("mode", ("generate", "prefill"))
+    def test_decode_length_requires_decode(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args("--decode-length=8", mode=mode)
+        with self.assertRaisesRegex(ValueError, "requires --hf-inference-mode=decode"):
+            runner.validate_args(args)
+
+    @parametrize("decode_length", (0, 2000))
+    def test_decode_length_range(self, decode_length):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args(f"--decode-length={decode_length}", mode="decode")
+        with self.assertRaisesRegex(ValueError, "must be between 1 and 1999"):
+            runner.validate_args(args)
+        for valid in (1, 1999):
+            args.decode_length = valid
+            runner.validate_args(args)
+
+    @parametrize("mode", ("prefill", "decode"))
     @parametrize("prompt_length", (None, 7))
-    def test_requested_input_dimensions(self, prompt_length):
+    def test_requested_input_dimensions(self, mode, prompt_length):
         runner = self.huggingface.HuggingfaceRunner()
         extra = () if prompt_length is None else (f"--prompt-length={prompt_length}",)
-        runner.args = self._runner_args("--batch-size=3", *extra)
+        runner.args = self._runner_args("--batch-size=3", *extra, mode=mode)
         with self._mock_pretrained(), mock.patch.object(runner, "validate_model"):
             _, _, _, inputs, batch_size = runner.load_model(
                 "cpu", "Qwen/Qwen3-0.6B", batch_size=3
@@ -565,6 +652,18 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         expected_length = prompt_length or 1000
         self.assertEqual(inputs["input_ids"].shape, (3, expected_length))
         self.assertEqual(batch_size, 3)
+        if mode == "decode":
+            self.assertEqual(inputs["decode_ids"].shape, (3, 128))
+        else:
+            self.assertNotIn("decode_ids", inputs)
+
+    def test_requested_decode_length(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = self._runner_args("--decode-length=5", mode="decode")
+        name = "Qwen/Qwen3-0.6B"
+        with self._mock_pretrained(), mock.patch.object(runner, "validate_model"):
+            _, _, _, inputs, _ = runner.load_model("cpu", name, batch_size=2)
+        self.assertEqual(inputs["decode_ids"].shape, (2, 5))
 
     def test_prompt_must_fit_generation_context(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -604,8 +703,9 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         self.assertEqual(download.call_count, 2)
         sleep.assert_called_once_with(30)
 
+    @parametrize("mode", ("prefill", "decode"))
     @parametrize("sweep", (False, True))
-    def test_config_download_failure_records_result(self, sweep):
+    def test_config_download_failure_records_result(self, mode, sweep):
         name = "Qwen/Qwen3-0.6B"
 
         def child(cmd, **kwargs):
@@ -643,7 +743,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                 "--backend=eager",
                 "-dcpu",
                 "--no-skip",
-                "--hf-inference-mode=prefill",
+                f"--hf-inference-mode={mode}",
                 "--prompt-length=7",
                 f"--output={output}",
                 f"--filter=^{name}$" if sweep else f"--only={name}",
@@ -658,25 +758,19 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         self.assertEqual(row["accuracy"], "eager_fail_to_run")
 
     @torch._dynamo.config.patch(repro_tolerance=1e-4)
-    def test_prefill_performance_run(self):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_phase_performance_run(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
-        original_forward = runner.prefill_forward
-        cache_lengths = []
-
-        def prefill_forward(model, example_inputs, collect_outputs=True):
-            before = int(model.cache.get_seq_length())
-            result = original_forward(model, example_inputs, collect_outputs)
-            cache_lengths.append((before, int(model.cache.get_seq_length())))
-            return result
-
         with (
             tempfile.TemporaryDirectory() as tmp,
             torch._dynamo.config.patch(base_dir=tmp),
             # run() rebinds module globals such as output_filename and current_name.
             mock.patch.dict(vars(common)),
-            mock.patch.object(runner, "prefill_forward", prefill_forward),
+            mock.patch.object(common, "output_signpost") as signpost,
+            self._record_cache_lengths(mode) as cache_lengths,
             self._mock_pretrained(),
         ):
+            extra = ("--decode-length=3",) if mode == "decode" else ()
             args = self._runner_args(
                 "--only=Qwen/Qwen3-0.6B",
                 "--batch-size=2",
@@ -684,59 +778,63 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
                 "--repeat=1",
                 "--iterations-per-run=2",
                 "--export-profiler-trace",
+                *extra,
+                mode=mode,
             )
             common.run(runner, args)
-            self.assertTrue(
-                os.path.exists(os.path.join(tmp, "eager_prefill_Qwen_Qwen3-0.6B.json"))
-            )
-            with open(os.path.join(tmp, "speedup_eager_prefill.csv")) as f:
+            signpost.assert_called_once_with(mock.ANY, args, "huggingface")
+            trace = os.path.join(tmp, f"eager_{mode}_Qwen_Qwen3-0.6B.json")
+            self.assertTrue(os.path.exists(trace))
+            with open(os.path.join(tmp, f"speedup_eager_{mode}.csv")) as f:
                 (row,) = csv.DictReader(f)
         # validate_model, eager and compiled warmup, timed runs, and profiled runs.
-        self.assertEqual(cache_lengths, [(0, 7)] * 15)
+        self.assertEqual(cache_lengths, [(0, 7) if mode == "prefill" else (7, 10)] * 15)
         self.assertEqual(row["name"], "Qwen/Qwen3-0.6B")
         self.assertEqual(int(row["batch_size"]), 2)
         self.assertGreater(float(row["eager_latency"]), 0)
-        tokens_per_second = 2 * 2 * 7 / (float(row["abs_latency"]) / 1000)
-        self.assertEqual(
-            float(row["input_tokens_per_second"]), tokens_per_second, rtol=1e-3, atol=0
-        )
+        column, tokens = {
+            "prefill": ("input_tokens_per_second", 7),
+            "decode": ("output_tokens_per_second", 3),
+        }[mode]
+        tokens_per_second = 2 * 2 * tokens / (float(row["abs_latency"]) / 1000)
+        self.assertEqual(float(row[column]), tokens_per_second, rtol=1e-3, atol=0)
 
-    def test_prefill_operator_logging_prepares_cache(self):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_operator_logging_prepares_cache(self, mode):
         from benchmarks.dynamo.microbenchmarks.operator_inp_utils import (
             OperatorInputsMode,
         )
 
         runner = self.huggingface.HuggingfaceRunner()
-        original_setup = runner.setup_prefill
-        original_forward = runner.prefill_forward
+        phase = self.huggingface.INFERENCE_PHASES[mode]
 
-        def setup_prefill(model, example_inputs):
+        def setup_fn(model, example_inputs):
             modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
             self.assertFalse(any(isinstance(m, OperatorInputsMode) for m in modes))
-            original_setup(model, example_inputs)
+            phase.setup_fn(model, example_inputs)
 
         def forward(model, example_inputs, collect_outputs=True):
             self.assertIsNotNone(model.cache)
-            return original_forward(model, example_inputs, collect_outputs)
+            return phase.iter_fn(model, example_inputs, collect_outputs)
 
+        setup = mock.Mock(side_effect=setup_fn)
+        run_forward = mock.Mock(side_effect=forward)
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict(vars(common)),
             mock.patch.dict(os.environ),
-            mock.patch.object(
-                runner, "setup_prefill", side_effect=setup_prefill
-            ) as setup,
-            mock.patch.object(
-                runner, "prefill_forward", side_effect=forward
-            ) as run_forward,
+            self._patch_phase(mode, setup_fn=setup, iter_fn=run_forward),
             self._mock_pretrained(),
         ):
+            extra = ("--decode-length=3",) if mode == "decode" else ()
             args = self._runner_args(
                 "--only=Qwen/Qwen3-0.6B",
                 "--batch-size=2",
                 "--prompt-length=7",
                 "--log-operator-inputs",
                 f"--output={tmp}/results.csv",
+                *extra,
+                mode=mode,
             )
             common.run(runner, args)
             self.assertGreaterEqual(run_forward.call_count, 2)
@@ -745,7 +843,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             self.assertIn("aten.", log.read_text())
 
 
-class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
+class TestHuggingFaceLLMPhasesDevice(HuggingFaceLLMPhaseTestCase):
     def _cache_tensors(self, model):
         return [
             (layer.conv_states[0], layer.recurrent_states[0])
@@ -878,14 +976,47 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             expected = model.model(**inputs, use_cache=False, logits_to_keep=1)
         self.assertEqual(output, expected.logits[:, -1, :])
 
-    def test_accuracy_compilation_boundary(self, device):
+    @parametrize("model_type", ("Llama", "Qwen3", "Qwen3_5"))
+    def test_decode_matches_full_forward(self, device, model_type):
         runner = self.huggingface.HuggingfaceRunner()
-        runner.args = self._runner_args()
+        runner.args = self._runner_args("--iterations=2", mode="decode")
+        model = self._make_model(model_type, device)
+        inputs = self._decode_inputs(device)
+        with self._record_cache_lengths("decode") as cache_lengths:
+            workload = runner.get_workload(inputs)
+            output = runner.run_n_iterations(
+                model, inputs, workload.iter_fn, setup_fn=workload.setup_fn
+            )
+        self.assertEqual(cache_lengths, [(4, 9)] * 2)
+        full_ids = torch.cat([inputs["input_ids"], inputs["decode_ids"]], dim=1)
+        with torch.no_grad():
+            expected = model.model(full_ids, use_cache=False, logits_to_keep=1)
+        self.assertEqual(output, expected.logits[:, -1, :])
+
+    @parametrize("model_type", ("Llama", "Qwen3", "Qwen3_5"))
+    def test_decode_compiles_once(self, device, model_type):
+        model = self._make_model(model_type, device)
+        inputs = self._decode_inputs(device)
+        torch._dynamo.reset()
+        counter = CompileCounter()
+        model.forward = torch.compile(model.forward, backend=counter, fullgraph=True)
+        self._decode(model, {**inputs, "decode_ids": inputs["decode_ids"][:, :1]})
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(2):
+                self._decode(model, inputs)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("mode", ("prefill", "decode"))
+    def test_accuracy_compilation_boundary(self, device, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = self._runner_args(mode=mode)
         runner.args.performance, runner.args.accuracy = False, True
         runner.hf_llm = True
         runner.model_iter_fn = runner.forward_pass
         model = self._make_model("Llama", device)
-        inputs = {"input_ids": torch.randint(0, 32, (2, 4), device=device)}
+        inputs = self._decode_inputs(device)
+        if mode == "prefill":
+            del inputs["decode_ids"]
         compiled_functions = []
 
         def optimize(fn):
@@ -957,12 +1088,52 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
                 self.assertEqual(manager.path_state, ExecutionState.EXECUTION)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
 
+    @onlyCUDA
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
+    @parametrize(
+        "model_type, cudagraphs",
+        [
+            ("Llama", False),
+            ("Llama", True),
+            ("Qwen3", True),
+            ("Qwen3_5", False),
+            ("Qwen3_5", True),
+        ],
+    )
+    def test_inductor_decode(self, device, model_type, cudagraphs):
+        from torch._dynamo.utils import counters
+        from torch._inductor.cudagraph_trees import get_manager
+
+        model = self._make_model(model_type, device)
+        inputs = self._decode_inputs(device)
+        expected = self._decode(model, inputs)
+        pointers = [(k.data_ptr(), v.data_ptr()) for k, v in self._cache_tensors(model)]
+        # Also resets the cudagraph trees, so the manager only holds this test's graphs.
+        torch._dynamo.reset()
+        skips_before = counters["inductor"]["cudagraph_skips"]
+        model.forward = torch.compile(model.forward, backend="inductor", fullgraph=True)
+        with torch._inductor.config.patch(
+            {"triton.cudagraphs": cudagraphs, "triton.cudagraph_trees": True}
+        ):
+            for _ in range(3):
+                self.assertEqual(self._decode(model, inputs), expected)
+                cache = self._cache_tensors(model)
+                actual_pointers = [(k.data_ptr(), v.data_ptr()) for k, v in cache]
+                self.assertEqual(actual_pointers, pointers)
+        if cudagraphs:
+            index = inputs["input_ids"].device.index
+            manager = get_manager(index, create_if_none_exists=False)
+            roots = [node for nodes in manager.roots.values() for node in nodes]
+            self.assertEqual(len(roots), 1)
+            self.assertEqual(roots[0].num_descendants(), 0)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
+
 
 instantiate_parametrized_tests(BenchmarkRunnerTests)
 instantiate_parametrized_tests(TestHuggingFaceLLMPerformance)
-instantiate_parametrized_tests(TestHuggingFacePrefill)
+instantiate_parametrized_tests(TestHuggingFaceLLMPhases)
 instantiate_device_type_tests(
-    TestHuggingFacePrefillDevice, globals(), only_for=("cpu", "cuda")
+    TestHuggingFaceLLMPhasesDevice, globals(), only_for=("cpu", "cuda")
 )
 
 

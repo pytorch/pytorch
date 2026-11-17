@@ -90,7 +90,7 @@ As an example, the commands to run first line of the dashboard (performance only
 ./benchmarks/dynamo/timm_models.py --performance --inference --bfloat16 --backend=inductor --output=timm_models_inference.csv
 ```
 
-### Decoder-only generation and prefill
+### Decoder-only generation, prefill, and decode
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
 by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
@@ -103,8 +103,9 @@ unpadded prompts:
   --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
 ```
 
-Prefill requires exactly Transformers 5.14.1 because cache preallocation uses
-private APIs from that release. Other versions are rejected before loading models.
+Prefill and decode require exactly Transformers 5.14.1 because cache
+preallocation uses private APIs from that release. Other versions are rejected
+before loading models.
 
 Prefill measures one forward over the prompt, returning last-position logits and
 populating a reusable static cache. The cache holds `prompt_length + 1999`
@@ -113,10 +114,28 @@ spans the same KV length as in generation; `prompt_length + 2000` must fit the
 model's context length. Cache allocation and reset occur outside the compiled
 and timed forward. Use `--accuracy` to check correctness or
 `--disable-cudagraphs` to measure without CUDA graphs. `--prompt-length`
-(default 1000) and `--batch-size` configure the prefill workload; generation
-retains its existing `1 x 1000` inputs and rejects `--prompt-length`.
+(default 1000) and `--batch-size` configure the prefill and decode workloads;
+generation retains its existing `1 x 1000` inputs and rejects `--prompt-length`.
 
-Prefill requires `--inference` and a backend. It rejects `--amp`,
+Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
+`Qwen/Qwen3.5-0.8B`. `gemma-2-2b` is excluded because its sliding-window cache
+recompiles on every step.
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=decode --prompt-length=1000 \
+  --decode-length=128 --batch-size=1 --only=Qwen/Qwen3-0.6B \
+  --output=decode_performance.csv
+```
+
+Each decode request prefills the prompt eagerly into the static cache outside
+the timed region, then times `--decode-length` (default 128, at most 1999)
+single-token compiled forwards. Decode feeds fixed random tokens rather than
+sampled ones and returns the last step's logits. Profiler traces and the
+`eager_peak_mem`, `dynamo_peak_mem`, and `compression_ratio` columns include the
+eager prefill.
+
+Prefill and decode require `--inference` and a backend. They reject `--amp`,
 `--aot-precompile`, `--batch-invariant`, `--compare-backed-unbacked`, `--ddp`,
 `--dynamic-batch-only`, `--dynamic-shapes`, `--enable-activation-checkpointing`,
 `--export`, `--export-aot-inductor`, `--export-nativert`, `--find-batch-sizes`,
@@ -125,10 +144,11 @@ Prefill requires `--inference` and a backend. It rejects `--amp`,
 `--trace-on-xla`, `--unbacked-batch-only`, and `--xla`.
 
 CSV `abs_latency` and `eager_latency` are milliseconds for all
-`--iterations-per-run` requests; `input_tokens_per_second` includes all batch
-elements. Rows do not record the inference mode or prompt length, so write each
-mode and input size to its own file. Default output and profiler trace names get
-a `_prefill` suffix.
+`--iterations-per-run` requests. Prefill reports `input_tokens_per_second` and
+decode reports `output_tokens_per_second`, both counting all batch elements.
+Rows do not record the inference mode, prompt length, or decode length, so write
+each mode and input size to its own file. Default output and profiler trace
+names get a `_prefill` or `_decode` suffix.
 
 With `--log-operator-inputs`, use a separate output directory for each mode and
 input size. Operator logs are named by model, and existing logs are skipped.
