@@ -573,6 +573,15 @@ class ConstantVariable(VariableTracker):
         is_constant, other_value = other.try_as_python_constant()
         if not is_constant:
             return ConstantVariable.create(NotImplemented)
+        return self._nb_binary_value_impl(tx, other_value, op, reverse)
+
+    def _nb_binary_value_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other_value: Any,
+        op: Any,
+        reverse: bool,
+    ) -> VariableTracker:
         v, w = (other_value, self.value) if reverse else (self.value, other_value)
         try:
             result = op(v, w)
@@ -764,14 +773,7 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if not type_implements_nb_multiply(type(self.value)):
             return ConstantVariable.create(NotImplemented)
-        v, w = (other_val, self.value) if reverse else (self.value, other_val)
-        try:
-            result = operator.mul(v, w)
-        except (TypeError, ValueError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        if result is NotImplemented:
-            return ConstantVariable.create(NotImplemented)
-        return VariableTracker.build(tx, result)
+        return self._nb_binary_value_impl(tx, other_val, operator.mul, reverse)
 
     def sq_repeat_impl(
         self,

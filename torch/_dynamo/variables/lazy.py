@@ -194,15 +194,6 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def is_realized(self) -> bool:
         return self._cache.vt is not None
 
-    def as_python_constant(self) -> Any:
-        return self.realize().as_python_constant()
-
-    def try_as_python_constant(self) -> tuple[bool, Any]:
-        return self.realize().try_as_python_constant()
-
-    def is_python_constant(self) -> bool:
-        return self.realize().is_python_constant()
-
     def can_load_const_for_codegen(self) -> bool:
         return self.is_realized() and self.unwrap().can_load_const_for_codegen()
 
