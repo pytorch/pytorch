@@ -927,9 +927,10 @@ c10::intrusive_ptr<c10::TensorImpl> from_real_tensor(
     // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
     // describer then reads the source's fake device, which Fake exclusion no
     // longer hides (see Note [C++ in_kernel_invocation]). from_real_tensor
-    // must only query the source's metadata, build outputs with an explicit
-    // meta device, and run ops on the fakes it makes only under
-    // in_kernel_invocation_manager (as its set_ for a shared storage does).
+    // must query source metadata and build outputs with an explicit meta
+    // device. Ops on its fakes must preserve fake metadata, restore fake
+    // dispatch (dtype-view replay), or use in_kernel_invocation_manager
+    // (set_ for shared storage).
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(
