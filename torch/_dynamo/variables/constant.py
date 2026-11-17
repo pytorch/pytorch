@@ -225,6 +225,9 @@ class ConstantVariable(VariableTracker):
         cls = _CONSTANT_VT_FOR_TYPE.get(type(value))
         if cls is not None:
             return cls(value, **kwargs)
+        # Fast path: a plain leaf literal needs none of the collection routing.
+        if type(value) in common_constant_types:
+            return ConstantVariable(value, **kwargs)
 
         source = kwargs.get("source")
 
@@ -283,6 +286,9 @@ class ConstantVariable(VariableTracker):
 
     def is_python_constant(self) -> Literal[True]:
         return True
+
+    def python_type(self) -> type:
+        return type(self.value)
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         return ConstantVariable.create(repr(self.value))
