@@ -147,6 +147,7 @@ try:
         INFERENCE_PHASES,
         TextGenerationBenchmark,
         TP_MODELS,
+        WhisperBenchmark,
     )
 except ImportError:
     from huggingface_llm_models import (
@@ -155,6 +156,7 @@ except ImportError:
         INFERENCE_PHASES,
         TextGenerationBenchmark,
         TP_MODELS,
+        WhisperBenchmark,
     )
 
 
@@ -580,7 +582,9 @@ class HuggingfaceRunner(BenchmarkRunner):
                 measure_iters=1,
                 stabilization_iters=4,
             )
-        if self.hf_llm and is_performance:
+        # Training times forward and backward, as for other models. Only Whisper
+        # supplies labels; text-generation models have no loss to backpropagate.
+        if self.hf_llm and is_performance and not self.args.training:
             return BenchmarkWorkload(
                 self.generate,
                 compile_forward=True,
@@ -701,10 +705,15 @@ class HuggingfaceRunner(BenchmarkRunner):
                     decode_length=decode_length,
                     **tp_kwargs,
                 )
+            elif benchmark_cls is WhisperBenchmark:
+                model, example_inputs = WhisperBenchmark.get_model_and_inputs(
+                    model_name, device, training=is_training
+                )
             else:
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
                     model_name, device
                 )
+            if mode == "generate":
                 model.generation_config.disable_compile = True
             self.hf_llm = True
 
