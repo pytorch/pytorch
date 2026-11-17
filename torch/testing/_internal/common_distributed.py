@@ -1880,10 +1880,6 @@ class MultiProcContinuousTest(TestCase):
         # instantiate_device_type_tests, or falls back to the current
         # accelerator in the legacy flow.
         device_type = getattr(self, "device_type", None)
-        if isinstance(device_type, property):
-            # Evaluating at class level passes cls as self. DTensorTestMixin
-            # still defines `device_type` as a property until it is migrated.
-            device_type = device_type.fget(self)
         if device_type is not None:
             return device_type
         curr_device = torch.accelerator.current_accelerator()
