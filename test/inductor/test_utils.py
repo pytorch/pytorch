@@ -2,6 +2,7 @@
 
 import builtins
 import math
+import operator
 import os
 import sys
 import tempfile
@@ -34,6 +35,7 @@ from torch._inductor.fx_utils import (
     countable_fx,
     FakeTensorUpdater,
     get_fake,
+    get_mutated_storages,
     get_node_storage,
     get_storage,
 )
@@ -59,6 +61,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
@@ -75,6 +78,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils import _triton as triton_utils
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Identity
 
 
@@ -1231,7 +1235,7 @@ class TestFakeTensorUpdater(TestCase):
         self.assertTrue(view.meta["val"].is_neg())
         self._check_graph(gm, inputs, -inputs[0].view(-1))
 
-    def test_targeted_metadata_refresh_falls_back_before_lowering(self):
+    def test_targeted_metadata_refresh_stops_before_unchanged_lowering(self):
         def f(x):
             return x.clone().neg()
 
@@ -1249,7 +1253,7 @@ class TestFakeTensorUpdater(TestCase):
         with V.set_fake_mode(detect_fake_mode([root.meta["val"]])):
             updated = updater.incremental_update_from_nodes([root])
 
-        self.assertEqual(set(updated), set(gm.graph.nodes))
+        self.assertEqual(set(updated), {root})
         self.assertIs(lowering.meta["val"], original_lowering_metadata)
         self.assertEqual(get_node_storage(root), get_node_storage(root.args[0]))
 
@@ -1295,7 +1299,7 @@ class TestFakeTensorUpdater(TestCase):
         fake_mode = self._get_faketensormode(gm)
         with V.set_fake_mode(fake_mode):
             placeholder.meta["val"] = fake_mode.from_tensor(torch.randn(3, 2))
-            with self.assertRaisesRegex(RuntimeError, "live call_function nodes"):
+            with self.assertRaisesRegex(RuntimeError, "live executable nodes"):
                 updater.incremental_update_from_nodes([placeholder])
 
     def test_targeted_metadata_refresh_rejects_invalid_roots(self):
@@ -1311,9 +1315,9 @@ class TestFakeTensorUpdater(TestCase):
         gm.graph.erase_node(removed)
 
         self.assertFalse(updater.incremental_update_from_nodes([]))
-        with self.assertRaisesRegex(RuntimeError, "live call_function nodes"):
+        with self.assertRaisesRegex(RuntimeError, "live executable nodes"):
             updater.incremental_update_from_nodes([foreign])
-        with self.assertRaisesRegex(RuntimeError, "live call_function nodes"):
+        with self.assertRaisesRegex(RuntimeError, "live executable nodes"):
             updater.incremental_update_from_nodes([removed])
 
     def test_targeted_metadata_refresh_orders_multiple_roots(self):
@@ -1427,11 +1431,12 @@ class TestFakeTensorUpdater(TestCase):
         with V.set_fake_mode(detect_fake_mode([root.meta["val"]])):
             updated = updater.incremental_update_from_nodes([root])
 
-        self.assertEqual(set(updated), set(gm.graph.nodes))
+        self.assertEqual(set(updated), {root, view})
         self.assertEqual(get_node_storage(root), get_node_storage(root.args[0]))
         self.assertEqual(get_node_storage(view), get_node_storage(root.args[0]))
 
-    def test_targeted_metadata_refresh_unsupported_lowering(self):
+    @parametrize("new_node", [False, True])
+    def test_targeted_metadata_refresh_unsupported_lowering(self, new_node):
         def f(x):
             return x.sin().view(-1)
 
@@ -1439,7 +1444,15 @@ class TestFakeTensorUpdater(TestCase):
         updater = FakeTensorUpdater(gm)
         root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
         self.assertNotEqual(get_node_storage(root), get_node_storage(root.args[0]))
-        root.target = self._make_inductor_lowering_function()
+        lowering = self._make_inductor_lowering_function()
+        if new_node:
+            view = next(n for n in gm.graph.nodes if n.target is aten.view.default)
+            with gm.graph.inserting_before(view):
+                inserted = gm.graph.call_function(lowering, (root,))
+            inserted.meta["val"] = root.meta["val"]
+            root = inserted
+        else:
+            root.target = lowering
 
         with (
             V.set_fake_mode(detect_fake_mode([root.meta["val"]])),
@@ -1447,26 +1460,66 @@ class TestFakeTensorUpdater(TestCase):
         ):
             updater.incremental_update_from_nodes([root])
 
-    def test_targeted_metadata_refresh_subgraph_fallback(self):
+    def test_targeted_metadata_refresh_ignores_unrelated_subgraph(self):
         def f(x, pred):
-            value = x.sin()
-            return torch.ops.higher_order.cond(
-                pred, lambda x: (x.cos(),), lambda x: (x.neg(),), (value,)
+            value = x.sin().view(-1)
+            branch = torch.ops.higher_order.cond(
+                pred, lambda x: (x.cos(),), lambda x: (x.neg(),), (x,)
             )
+            return value, branch
 
         inputs = (torch.randn(2, 2), torch.tensor(True))
         gm = make_fx(f, tracing_mode="fake")(*inputs)
         updater = FakeTensorUpdater(gm)
         root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        view = next(n for n in root.users if n.target is aten.view.default)
         self.assertTrue(updater.subgraph_updaters)
+        root.target = aten.cos.default
+
+        with V.set_fake_mode(detect_fake_mode([root.meta["val"]])):
+            updated = updater.incremental_update_from_nodes([root])
+
+        self.assertEqual(set(updated), {root, view})
+        self._check_graph(
+            gm,
+            inputs,
+            (inputs[0].cos().view(-1), (inputs[0].cos(),)),
+        )
+
+    def test_metadata_refresh_subgraph_stride(self):
+        def f(x, pred):
+            value = x.sin()
+            branch = torch.ops.higher_order.cond(
+                pred, lambda x: (x.cos(),), lambda x: (x.neg(),), (value,)
+            )
+            return branch, x.neg()
+
+        inputs = (torch.randn(2, 2), torch.tensor(True))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        updater = FakeTensorUpdater(gm)
+        root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        invocation = next(
+            n for n in gm.graph.nodes if n.target is torch.ops.higher_order.cond
+        )
+        projection = next(n for n in invocation.users if n.target is operator.getitem)
+        unrelated = next(n for n in gm.graph.nodes if n.target is aten.neg.default)
+        unrelated_metadata = unrelated.meta["val"]
         root.target = aten.t.default
         with V.set_fake_mode(detect_fake_mode([root.meta["val"]])):
             updated = updater.incremental_update_from_nodes([root])
-        self.assertEqual(set(updated), set(gm.graph.nodes))
+            self.assertEqual(set(updated), {root, invocation, projection})
+        self.assertIs(unrelated.meta["val"], unrelated_metadata)
         self.assertEqual(root.meta["val"].stride(), (1, 2))
-        self._check_graph(gm, inputs, (inputs[0].t().cos(),))
+        self.assertEqual(invocation.meta["val"][0].stride(), (1, 2))
+        self.assertEqual(projection.meta["val"].stride(), (1, 2))
+        for subgraph in updater.subgraph_updaters:
+            placeholder = next(iter(subgraph.graph.find_nodes(op="placeholder")))
+            self.assertEqual(placeholder.meta["val"].stride(), (1, 2))
+            for value in subgraph.graph.output_node().args[0]:
+                self.assertEqual(value.meta["val"].stride(), (1, 2))
+        self._check_graph(gm, inputs, ((inputs[0].t().cos(),), inputs[0].neg()))
 
-    def test_targeted_metadata_refresh_forces_root_during_subgraph_fallback(self):
+    def test_targeted_metadata_refresh_forces_reached_root(self):
         def f(x, pred):
             value = aten.alias.default(x)
             return torch.ops.higher_order.cond(
@@ -1484,6 +1537,300 @@ class TestFakeTensorUpdater(TestCase):
             updater.incremental_update_from_nodes([root])
 
         self.assertEqual(get_node_storage(root), get_node_storage(root.args[0]))
+
+    def test_acknowledge_metadata_preserves_valid_rewires(self):
+        def f(x, y):
+            return x.sin().view(-1)
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(2, 2), torch.randn(2, 2))
+        updater = FakeTensorUpdater(gm)
+        x, y = gm.graph.find_nodes(op="placeholder")
+        root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        root.target = self._make_inductor_lowering_function(
+            output_metadata_ignores_input_storage=True
+        )
+        original_metadata = root.meta["val"]
+        fake_mode = self._get_faketensormode(gm)
+        with V.set_fake_mode(fake_mode):
+            root.update_arg(0, y)
+            updater.acknowledge_metadata([root])
+            self.assertEqual(updater.incremental_update(), 0)
+            root.update_arg(0, x)
+            updater.acknowledge_metadata([root])
+            self.assertEqual(updater.incremental_update(), 0)
+        self.assertIs(root.meta["val"], original_metadata)
+
+    @parametrize("foreign", [False, True])
+    def test_acknowledge_metadata_rejects_invalid_nodes(self, foreign):
+        gm = make_fx(lambda x: x.sin(), tracing_mode="fake")(torch.randn(2, 2))
+        updater = FakeTensorUpdater(gm)
+        if foreign:
+            other = make_fx(lambda x: x.cos(), tracing_mode="fake")(torch.randn(2, 2))
+            invalid = next(n for n in other.graph.nodes if n.target is aten.cos.default)
+        else:
+            with gm.graph.inserting_before(gm.graph.output_node()):
+                invalid = gm.graph.call_function(
+                    aten.neg.default, (gm.graph.output_node().args[0],)
+                )
+            gm.graph.erase_node(invalid)
+        with self.assertRaisesRegex(RuntimeError, "live nodes in the owning graph"):
+            updater.acknowledge_metadata([invalid])
+
+    @parametrize("targeted", [False, True])
+    def test_metadata_refresh_accepts_self_keyword(self, targeted):
+        inputs = (torch.randn(2, 2),)
+        gm = make_fx(lambda x: x.sin(), tracing_mode="fake")(*inputs)
+        root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        root.kwargs = {"self": root.args[0]}
+        root.args = ()
+        updater = FakeTensorUpdater(gm)
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            if targeted:
+                self.assertEqual(
+                    set(updater.incremental_update_from_nodes([root])), {root}
+                )
+            else:
+                self.assertEqual(updater.incremental_update(), 0)
+            self.assertEqual(updater.incremental_update(), 0)
+        self._check_graph(gm, inputs, inputs[0].sin())
+
+    def _build_graph_with_shared_subgraph(
+        self, start_aliased=False, num_invocations=2, dtype=torch.float32
+    ):
+        def inner(a, b):
+            return a.view_as(a), b.view_as(b)
+
+        values = tuple(torch.randn(2, 2, dtype=dtype) for _ in range(num_invocations))
+        subgraph = make_fx(inner, tracing_mode="fake")(values[0], values[0].clone())
+        graph = torch.fx.Graph()
+        inputs = tuple(graph.placeholder(f"input_{i}") for i in range(num_invocations))
+        target = aten.alias.default if start_aliased else aten.sin.default
+        roots = [graph.call_function(target, (value,)) for value in inputs]
+        shared = graph.get_attr("shared")
+        invocations = [
+            graph.call_function(
+                torch.ops.higher_order.invoke_subgraph,
+                (shared, "shared", root, value),
+            )
+            for root, value in zip(roots, inputs, strict=True)
+        ]
+        graph.output(tuple(invocations))
+        gm = torch.fx.GraphModule({"shared": subgraph}, graph)
+        FakeTensorProp(gm).propagate(*values)
+        updater = FakeTensorUpdater(gm)
+        self.assertEqual(len(updater.subgraph_updaters), 1)
+        return updater, roots, invocations, subgraph, values
+
+    def _build_graph_with_call_module_subgraphs(self):
+        updater, roots, invocations, subgraph, values = (
+            self._build_graph_with_shared_subgraph()
+        )
+        gm = updater.gm
+        gm.add_module("shared_alias", subgraph)
+        a, b = subgraph.graph.find_nodes(op="placeholder")
+        for i, invocation in enumerate(invocations):
+            operands = invocation.args[2:]
+            invocation.op = "call_module"
+            invocation.target = "shared" if i == 0 else "shared_alias"
+            invocation.args = operands if i == 0 else ()
+            if i == 1:
+                invocation.kwargs = {a.target: operands[0], b.target: operands[1]}
+        output = gm.graph.output_node()
+        with gm.graph.inserting_before(output):
+            unrelated = gm.graph.call_function(
+                aten.neg.default, (next(iter(gm.graph.find_nodes(op="placeholder"))),)
+            )
+        output.args = ((*output.args[0], unrelated),)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        FakeTensorProp(gm).propagate(*values)
+        updater = FakeTensorUpdater(gm)
+        self.assertEqual(len(updater.subgraph_updaters), 1)
+        return updater, roots, invocations, subgraph, values, unrelated
+
+    @parametrize("targeted", [False, True])
+    @parametrize("change", ["stride", "alias", "output"])
+    def test_call_module_subgraph_refresh(self, targeted, change):
+        updater, roots, invocations, subgraph, values, unrelated = (
+            self._build_graph_with_call_module_subgraphs()
+        )
+        original_unrelated = unrelated.meta["val"]
+        if change == "output":
+            a, b = subgraph.graph.find_nodes(op="placeholder")
+            subgraph.graph.output_node().args = ((b, a),)
+            subgraph.recompile()
+            changed = invocations[:1]
+            expected = tuple((value, value.sin()) for value in values)
+        else:
+            for root in roots:
+                root.target = (
+                    aten.t.default if change == "stride" else aten.alias.default
+                )
+            changed = roots
+            expected = tuple(
+                (value.t() if change == "stride" else value, value) for value in values
+            )
+        with V.set_fake_mode(self._get_faketensormode(updater.gm)):
+            if targeted:
+                updated = updater.incremental_update_from_nodes(changed)
+                self.assertTrue(all(node in updated for node in invocations))
+                self.assertNotIn(unrelated, updated)
+            else:
+                self.assertGreater(updater.incremental_update(), 0)
+        self.assertIs(unrelated.meta["val"], original_unrelated)
+        updater.gm.recompile()
+        actual = updater.gm(*values)
+        self.assertEqual(actual, (*expected, -values[0]))
+        inputs = tuple(
+            get_fake(n, updater.gm)
+            for n in updater.gm.graph.find_nodes(op="placeholder")
+        )
+        metadata = tuple(invocation.meta["val"] for invocation in invocations)
+        self.assertEqual(
+            updater.storage_alias_groups((metadata, inputs)),
+            updater.storage_alias_groups((actual[:2], values)),
+        )
+
+    @parametrize("targeted", [False, True])
+    def test_call_module_subgraph_pytree_inputs(self, targeted):
+        values = (torch.randn(2, 2), torch.randn(2, 2))
+        child = make_fx(lambda xs: xs[0] + xs[1], tracing_mode="fake")(list(values))
+        graph = torch.fx.Graph()
+        inputs = (graph.placeholder("x"), graph.placeholder("y"))
+        roots = [graph.call_function(aten.sin.default, (value,)) for value in inputs]
+        invocation = graph.call_module("child", (roots,))
+        graph.output(invocation)
+        gm = torch.fx.GraphModule({"child": child}, graph)
+        FakeTensorProp(gm).propagate(*values)
+        updater = FakeTensorUpdater(gm)
+        for root in roots:
+            root.target = aten.t.default
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            if targeted:
+                updater.incremental_update_from_nodes(roots)
+            else:
+                updater.incremental_update()
+        expected = values[0].t() + values[1].t()
+        self.assertEqual(invocation.meta["val"].stride(), expected.stride())
+        gm.recompile()
+        self.assertEqual(gm(*values), expected)
+
+    @parametrize("start_aliased", [False, True])
+    def test_targeted_metadata_refresh_shared_subgraph_aliases(self, start_aliased):
+        updater, roots, invocations, subgraph, (x, y) = (
+            self._build_graph_with_shared_subgraph(start_aliased)
+        )
+        gm = updater.gm
+        inputs = tuple(gm.graph.find_nodes(op="placeholder"))
+        a, b = subgraph.graph.find_nodes(op="placeholder")
+        self.assertEqual(get_node_storage(a) == get_node_storage(b), start_aliased)
+        for root in roots:
+            root.target = aten.clone.default if start_aliased else aten.alias.default
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            updated = updater.incremental_update_from_nodes(roots)
+        self.assertTrue(all(n in updated for n in invocations))
+        a, b = subgraph.graph.find_nodes(op="placeholder")
+        self.assertEqual(get_node_storage(a) == get_node_storage(b), not start_aliased)
+        self.assertEqual(get_node_storage(a), get_node_storage(roots[0]))
+        self.assertEqual(get_node_storage(b), get_node_storage(inputs[0]))
+        for value, argument in zip(
+            subgraph.graph.output_node().args[0], (a, b), strict=True
+        ):
+            self.assertEqual(get_node_storage(value), get_node_storage(argument))
+        expected = tuple(
+            (value.clone() if start_aliased else value, value) for value in (x, y)
+        )
+        self._check_graph(gm, (x, y), expected)
+        actual = gm(x, y)
+        metadata = tuple(invocation.meta["val"] for invocation in invocations)
+        self.assertEqual(
+            updater.storage_alias_groups(
+                (metadata, tuple(get_fake(n, gm) for n in inputs))
+            ),
+            updater.storage_alias_groups((actual, (x, y))),
+        )
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            self.assertEqual(updater.incremental_update(), 0)
+
+    @parametrize("targeted", [False, True])
+    def test_metadata_refresh_shared_subgraph_output_rewire(self, targeted):
+        updater, roots, invocations, subgraph, inputs = (
+            self._build_graph_with_shared_subgraph()
+        )
+        with V.set_fake_mode(self._get_faketensormode(updater.gm)):
+            updater.incremental_update()
+        for invocation in invocations:
+            first, second = invocation.meta["val"]
+            self.assertNotEqual(get_storage(first), get_storage(second))
+
+        output = subgraph.graph.output_node()
+        first = output.args[0][0]
+        output.update_arg(0, (first, first))
+        subgraph.recompile()
+
+        with V.set_fake_mode(self._get_faketensormode(updater.gm)):
+            if targeted:
+                # Reach the last invocation through its operand, not as a root.
+                updated = updater.incremental_update_from_nodes([roots[-1]])
+                self.assertTrue(all(node in updated for node in invocations))
+            else:
+                updater.incremental_update()
+            for invocation, root in zip(invocations, roots, strict=True):
+                for value in invocation.meta["val"]:
+                    self.assertEqual(get_storage(value), get_node_storage(root))
+            self.assertEqual(updater.incremental_update(), 0)
+
+        self._check_graph(
+            updater.gm, inputs, tuple((value.sin(), value.sin()) for value in inputs)
+        )
+
+    @parametrize("targeted", [False, True])
+    def test_metadata_refresh_accepts_shared_subgraph_alias_variation(self, targeted):
+        updater, roots, invocations, _, (x, y) = (
+            self._build_graph_with_shared_subgraph()
+        )
+        roots[0].target = aten.alias.default
+        with V.set_fake_mode(self._get_faketensormode(updater.gm)):
+            if targeted:
+                updater.incremental_update_from_nodes([roots[0]])
+            else:
+                updater.incremental_update()
+        metadata = tuple(n.meta["val"] for n in invocations)
+        self.assertEqual(updater.storage_alias_groups(metadata), (0, 0, 1, 2))
+        self._check_graph(updater.gm, (x, y), ((x, x), (y.sin(), y)))
+        with V.set_fake_mode(self._get_faketensormode(updater.gm)):
+            self.assertEqual(updater.incremental_update(), 0)
+
+    @parametrize("first_invocation", [False, True])
+    @parametrize("view_bit", ["conjugate", "negative"])
+    def test_subgraph_argument_validation_accepts_view_bits(
+        self, first_invocation, view_bit
+    ):
+        dtype = torch.complex64 if view_bit == "conjugate" else torch.float32
+        updater, _, invocations, subgraph, _ = self._build_graph_with_shared_subgraph(
+            dtype=dtype
+        )
+        gm = updater.gm
+        target = (
+            aten._conj.default if view_bit == "conjugate" else aten._neg_view.default
+        )
+        placeholders = tuple(subgraph.graph.find_nodes(op="placeholder"))
+        original = tuple(node.meta["val"] for node in placeholders)
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            argument = target(original[1])
+            changed = updater._update_subgraph_arguments(
+                invocations[0], subgraph, (original[0], argument), first_invocation
+            )
+            self.assertEqual(changed, int(first_invocation))
+            if first_invocation:
+                updater.subgraph_updaters[subgraph].incremental_update()
+        flag = "is_conj" if view_bit == "conjugate" else "is_neg"
+        self.assertTrue(getattr(argument, flag)())
+        self.assertEqual(getattr(placeholders[1].meta["val"], flag)(), first_invocation)
+        self.assertEqual(
+            getattr(subgraph.graph.output_node().args[0][1].meta["val"], flag)(),
+            first_invocation,
+        )
 
     def test_fake_tensor_same_accepts_identical_storage(self):
         with torch._subclasses.FakeTensorMode() as mode:
@@ -1526,6 +1873,170 @@ class TestFakeTensorUpdater(TestCase):
                 ),
                 not aliases_output,
             )
+
+    @parametrize("targeted", [False, True])
+    def test_metadata_refresh_preserves_control_deps_mutation_storage(self, targeted):
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+
+        def f(x):
+            return aten.add_.Tensor(x.sin(), 1)
+
+        inputs = (torch.randn(2, 2),)
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        mutation = next(n for n in gm.graph.nodes if n.target is aten.add_.Tensor)
+        preserve_node_ordering(gm.graph, {mutation: OrderedSet([root])})
+        updater = FakeTensorUpdater(gm)
+        self.assertIn(get_node_storage(root), get_mutated_storages(gm))
+        root.target = aten.cos.default
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            if targeted:
+                updater.incremental_update_from_nodes([root])
+            else:
+                updater.incremental_update()
+        self.assertIn(get_node_storage(root), get_mutated_storages(gm))
+        self._check_graph(gm, inputs, inputs[0].cos() + 1)
+
+    def test_targeted_metadata_refresh_keeps_equivalent_shared_arguments(self):
+        updater, roots, invocations, subgraph, _ = (
+            self._build_graph_with_shared_subgraph(num_invocations=4)
+        )
+        with V.set_fake_mode(self._get_faketensormode(updater.gm)):
+            updater.incremental_update()
+            original = tuple(
+                n.meta["val"] for n in subgraph.graph.find_nodes(op="placeholder")
+            )
+            roots[-1].target = aten.cos.default
+            updated = updater.incremental_update_from_nodes([roots[-1]])
+            self.assertEqual(set(updated), {roots[-1], invocations[-1]})
+            for node, old in zip(
+                subgraph.graph.find_nodes(op="placeholder"), original, strict=True
+            ):
+                self.assertIs(node.meta["val"], old)
+            self.assertEqual(updater.incremental_update(), 0)
+
+    def test_acknowledge_metadata_tracks_new_subgraph_name(self):
+        updater, _, invocations, subgraph, values = (
+            self._build_graph_with_shared_subgraph()
+        )
+        gm = updater.gm
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            updater.incremental_update()
+            gm.shared_alias = subgraph
+            with gm.graph.inserting_before(invocations[1]):
+                alias = gm.graph.get_attr("shared_alias")
+            invocations[1].update_arg(0, alias)
+            updater.acknowledge_metadata([invocations[1]])
+            root = next(
+                n for n in subgraph.graph.nodes if n.target is aten.view.default
+            )
+            root.target = aten.neg.default
+            root.args = (root.args[0],)
+            subgraph.recompile()
+            updated = updater.incremental_update_from_nodes([invocations[0]])
+            self.assertTrue(all(invocation in updated for invocation in invocations))
+            for invocation in invocations:
+                self.assertNotEqual(
+                    invocation.meta["val"][0].untyped_storage()._cdata,
+                    get_node_storage(invocation.args[2]),
+                )
+            self.assertEqual(updater.incremental_update(), 0)
+        self._check_graph(gm, values, tuple((-value.sin(), value) for value in values))
+
+    @parametrize("targeted", [False, True])
+    @parametrize("change", ["shape", "shared_stride"])
+    def test_metadata_refresh_rejects_incompatible_subgraph_arguments(
+        self, targeted, change
+    ):
+        updater, roots, _, _, _ = self._build_graph_with_shared_subgraph()
+        targets = {
+            "shape": aten.sum.default,
+            "shared_stride": aten.t.default,
+        }
+        messages = {
+            "shape": "other than striding",
+            "shared_stride": "consistent values",
+        }
+        roots[0].target = targets[change]
+        with (
+            V.set_fake_mode(self._get_faketensormode(updater.gm)),
+            self.assertRaisesRegex(AssertionError, messages[change]),
+        ):
+            if targeted:
+                updater.incremental_update_from_nodes([roots[0]])
+            else:
+                updater.incremental_update()
+
+    @parametrize("targeted", [False, True])
+    def test_lowering_input_metadata_only_requires_selected_input(self, targeted):
+        gm = make_fx(lambda x, y: x.sin().view(-1), tracing_mode="fake")(
+            torch.randn(2, 2), torch.randn(2, 2)
+        )
+        updater = FakeTensorUpdater(gm)
+        x, y = gm.graph.find_nodes(op="placeholder")
+        root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        view = next(n for n in gm.graph.nodes if n.target is aten.view.default)
+        mode = self._get_faketensormode(gm)
+        root.target = self._make_inductor_lowering_function(
+            output_metadata_is_input="selected"
+        )
+        root.args = (y,)
+        root.kwargs = {"selected": x}
+        y.meta.clear()
+        with V.set_fake_mode(mode):
+            if targeted:
+                updater.incremental_update_from_nodes([root])
+            else:
+                updater.incremental_update()
+        self.assertEqual(get_node_storage(root), get_node_storage(x))
+        self.assertEqual(get_node_storage(view), get_node_storage(x))
+
+    @parametrize("targeted", [False, True])
+    def test_lowering_input_metadata_rejects_missing_selected_input(self, targeted):
+        gm = make_fx(lambda x: x.sin(), tracing_mode="fake")(torch.randn(2, 2))
+        updater = FakeTensorUpdater(gm)
+        x = next(iter(gm.graph.find_nodes(op="placeholder")))
+        root = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        mode = self._get_faketensormode(gm)
+        root.target = self._make_inductor_lowering_function(output_metadata_is_input=0)
+        x.meta.clear()
+        with (
+            V.set_fake_mode(mode),
+            self.assertRaisesRegex(RuntimeError, "pass-through.*unavailable"),
+        ):
+            if targeted:
+                updater.incremental_update_from_nodes([root])
+            else:
+                updater.incremental_update()
+
+    def test_targeted_metadata_refresh_subgraph_offset(self):
+        x = torch.randn(4, 2)
+        subgraph = make_fx(lambda a: (a.view(-1),), tracing_mode="fake")(x[:2])
+
+        def f(x):
+            value = x[:2]
+            return torch.ops.higher_order.invoke_subgraph(subgraph, "offset", value)
+
+        gm = make_fx(f, tracing_mode="fake")(x)
+        updater = FakeTensorUpdater(gm)
+        root = next(n for n in gm.graph.nodes if n.target is aten.slice.Tensor)
+        root.update_arg(2, 1)
+        root.update_arg(3, 3)
+        with V.set_fake_mode(self._get_faketensormode(gm)):
+            updater.incremental_update_from_nodes([root])
+        nested = next(iter(updater.subgraph_updaters))
+        for node in nested.graph.nodes:
+            if isinstance(node.meta.get("val"), torch.Tensor):
+                self.assertEqual(node.meta["val"].storage_offset(), 2)
+        invocation = next(
+            n
+            for n in gm.graph.nodes
+            if n.target is torch.ops.higher_order.invoke_subgraph
+        )
+        self.assertEqual(invocation.meta["val"][0].storage_offset(), 2)
+        self._check_graph(gm, (x,), (x[1:3].view(-1),))
 
     def test_targeted_with_effects_unbacked_symbols(self):
         from torch._higher_order_ops.effects import with_effects
