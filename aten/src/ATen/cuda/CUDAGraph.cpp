@@ -154,7 +154,10 @@ std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>(
   };
 }
 
-void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode capture_mode) {
+void CUDAGraph::capture_begin(
+    MempoolId_t pool /*={0,0}*/,
+    cudaStreamCaptureMode capture_mode,
+    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator) {
   TORCH_CHECK(!has_graph_exec_ && !has_graph_ && !allocated_pool_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, call reset() or create a new instance.");
@@ -261,6 +264,14 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
       capture_dev_,
       c10::cuda::CUDAGraphMemory::CaptureRegistration{
           capture_id_, std::nullopt});
+  if (allocator) {
+    // The pool's allocation scope is open (beginAllocateToPool rejects a
+    // second one) and the capture's id is known: until its markCaptureEnd,
+    // the capture's allocations into the pool are made by `allocator`.
+    c10::cuda::CUDACachingAllocator::get()->setPoolCaptureAllocator(
+        capture_dev_, mempool_id_, capture_id_, std::move(allocator));
+    has_capture_allocator_ = true;
+  }
 
   {
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -461,6 +472,13 @@ void CUDAGraph::reset() {
 
   // Python retains these buffers with synchronization before release.
   captured_generator_states_.clear();
+
+  if (has_capture_allocator_) {
+    // A no-op unless the capture was abandoned before capture_end().
+    c10::cuda::CUDACachingAllocator::get()->clearPoolCaptureAllocator(
+        capture_dev_, mempool_id_, capture_id_);
+    has_capture_allocator_ = false;
+  }
 
   if (capture_id_ != 0) {
 #if defined(USE_ROCM)
