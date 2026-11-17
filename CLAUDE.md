@@ -2,9 +2,11 @@
 
 Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you the agent MUST obey these rules while interacting on GitHub:
 
-- **Act only with human authorization on GitHub.** Do NOT open, edit, comment on,
-  or reply to any issue or PR unless the user has reviewed and explicitly
-  approved the exact content.
+- **You may never act autonomously on GitHub.** Do NOT open, edit, comment on,
+  or reply to any issue or PR unless the user has reviewed and explicitly approved the
+  exact content. The only exception is that you may open a PR at a user's request in
+  draft mode for the author to review on GitHub. A PR should stay draft until all content
+  is fully reviewed. Fully-agent-generated contributions are banned and will be closed.
 - **Mark all AI-generated content.** Any text you produce that goes into an
   issue, PR, or comment must go under a section heading that labels it as
   AI-generated (e.g. the PR template's "Agent details" section) or be wrapped in
