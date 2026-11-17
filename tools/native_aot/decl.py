@@ -21,16 +21,8 @@ registration.
 
 Required exports (module or declaration object):
 
-  ATEN_OP: str                name of a structured op: a base name
-                              ("topk") when the base resolves to exactly
-                              one structured group, or overload-qualified
-                              ("gt.Tensor", "all.dim") when overloads
-                              have separate structured groups. With
-                              STRUCTURED=False, the exact name of an
-                              unstructured functional overload returning
-                              fresh tensors. decl_id()
-                              (dots -> underscores) names the stub, the
-                              generated kernel, and the covers op.
+  ATEN_OP: str               Unique structured base or qualified overload name; an
+                              unstructured hook names an exact fresh-output or inplace op.
   DISPATCH_KEY: str           e.g. "CUDA"
   KERNEL_MODULE: str          sibling module exporting build(spec); the
                               export tool package-imports it with the
@@ -66,21 +58,20 @@ Required exports (module or declaration object):
                               (the schema's return type). No fallback:
                               the chain's return false IS the fallback.
 
-Emitted C++ (any of the cpp_* exports) sees ATen/core/Tensor.h, not
-ATen/ATen.h -- Tensor methods all work, but calling an at:: FACTORY
-(at::empty, at::zeros, at::cat, ...) or an operator like `t + t` needs
-its per-op header added to FILE_TMPL in gen_aot_lib.py. The failure is a
-loud "'empty' is not a member of 'at'" at build time, not a silent one.
+decl_id() names the stub, kernel, artifact directory and coverage op.
+
+Emitted C++ uses ATen/core/Tensor.h. Add per-op headers through cpp_includes()
+when calling factories or operators such as at::empty or `t + t`.
 
 Optional exports:
 
-  STRUCTURED: bool           True by default. False opts a functional
-                              unstructured operator into a hook before
-                              its backend implementation. The declaration
-                              must validate inputs, allocate outputs, and
-                              assign aot_result only when it handles the
-                              call. The device guard and device checks
-                              have already run; meta() has not.
+  STRUCTURED: bool           True by default; False runs before the backend, with a
+                              device guard but no meta(). Validate all inputs/devices;
+                              on handled calls, fill fresh aot_result or mutate self.
+                              Inplace hooks receive and return self as aot_result.
+  EXACT: bool                Match one exact functional name even when a bare
+                              name also has structured overloads, e.g. round.
+  cpp_includes() -> str      Additional per-declaration C++ includes.
   cpp_dispatch_prelude() -> str | None
                               shared front half of the dispatch chain:
                               cheap universal rejects and setup (locals,

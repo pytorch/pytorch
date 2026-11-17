@@ -1090,6 +1090,8 @@ void initDispatchBindings(PyObject* module) {
              const py::args& args,
              const py::kwargs& kwargs) {
             const auto& op = self.opHandle();
+            // Python kernels unwrap wrapped Tensor arguments into numbers.
+            torch::jit::ToIValueAllowNumbersAsTensors allow_numbers(true);
             auto stack = torch::jit::createStackForSchema(
                 op.schema(),
                 args,
