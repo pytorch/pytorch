@@ -325,7 +325,7 @@ def graph(model, args, verbose=False, use_strict_trace=True):
     """
     with _set_model_to_eval(model):
         try:
-            trace = torch.jit.trace(model, args, strict=use_strict_trace)
+            trace = torch.jit._trace.trace(model, args, strict=use_strict_trace)
             graph = trace.graph
             torch._C._jit_pass_inline(graph)
         except RuntimeError as e:
