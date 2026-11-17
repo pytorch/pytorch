@@ -6197,6 +6197,31 @@ class TestCfgRegions(TestCase):
                 second.bias = torch.nn.Parameter(torch.ones(4))
                 self.assertEqual(compiled(*args), f(*args))
 
+    def test_a_trace_does_not_use_up_an_iterator_of_the_call(self):
+        def made(ks, x):
+            y = x * 2 + 1
+            gen = (k + 1 for k in ks)
+            t = tuple(gen)
+            return t, y
+
+        def advanced(ks, x):
+            y = x * 2 + 1
+            it = iter(ks)
+            first = next(it)
+            rest = list(it)
+            return first, rest, y
+
+        x = torch.ones(3)
+        for fn in (made, advanced):
+            compiled = torch.rewrite(
+                fn, passes=with_graphs("aot_eager"), fallback=False
+            )
+            # On every call, also the ones on which a region is traced: the
+            # trace has the generator itself, which it cannot copy, and must
+            # not run what takes from it.
+            for _ in range(8):
+                self.assertEqual(compiled([1, 2], x), fn([1, 2], x))
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.rewrite(region_infer, passes=with_graphs("nope"))
