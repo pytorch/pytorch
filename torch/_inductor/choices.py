@@ -27,6 +27,7 @@ from .heuristics.template.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
+from .codegen.triton_utils import use_block_ptr_enabled
 from .kernel_inputs import KernelInputs, MMKernelInputs
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
@@ -132,10 +133,6 @@ class FusionScore:
             other.buffer_overlap_score,
             other.proximity_score,
         )
-
-
-# The dtypes tl.dot takes.
-_TL_DOT_DTYPES = (torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
 
 
 class InductorChoices:
@@ -499,16 +496,35 @@ class InductorChoices:
         bmm, addmm, baddbmm and mm_plus_mm, only about matmuls it can lower
         natively. A dot cannot go back to the extern kernel: the device's
         scheduling emits it. This default leaves it to Triton's native matmul
-        codegen, so it declines other backends (config.cuda_backend "halide")
-        and the dtypes tl.dot does not take (float64).
+        codegen, so it declines other backends (config.cuda_backend "halide"),
+        the dtypes tl.dot does not take (float64) and dims of size 1.
         """
+        if not config.triton.native_matmul:
+            return False
+        # If tma matmul is on, don't do native matmul
+        if (
+            config.triton.enable_persistent_tma_matmul
+            and torch.utils._triton.has_triton_tma_device()
+        ):
+            raise AssertionError("native matmul doesn't support tma codegen yet")
+        # Currently only enable native matmul for default indexing.
+        # TODO: support block ptr
+        if use_block_ptr_enabled():
+            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
         device_type = mat1.get_device_or_error().type
+        # Currently, tl.dot only supports following dtypes
+        dtypes = (torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+        # (..., M, K) @ (..., K, N)
+        m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
+        sizevars = V.graph.sizevars
         return (
-            config.triton.native_matmul
-            and device_type in ("cuda", "xpu")
+            device_type in ("cuda", "xpu")
             and get_current_backend(device_type) == "triton"
-            and mat1.get_dtype() in _TL_DOT_DTYPES
-            and mat2.get_dtype() in _TL_DOT_DTYPES
+            and mat1.get_dtype() in dtypes
+            and mat2.get_dtype() in dtypes
+            # Consider the shape (m,k,n) > 1
+            # TODO : support when size = 1
+            and not any(sizevars.statically_known_leq(s, 1) for s in (m, k, n))
         )
 
     def triton_kernel_kwargs(

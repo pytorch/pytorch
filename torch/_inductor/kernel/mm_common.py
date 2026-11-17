@@ -12,7 +12,6 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
-from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import load_template, triton_type
@@ -179,19 +178,6 @@ def use_native_matmul(mat1, mat2):
     if is_bf16x9_matmul(device_type, mat1.get_dtype()):
         return False
 
-    if config.triton.native_matmul:
-        # If tma matmul is on, don't do native matmul
-        if (
-            config.triton.enable_persistent_tma_matmul
-            and torch.utils._triton.has_triton_tma_device()
-        ):
-            raise AssertionError("native matmul doesn't support tma codegen yet")
-
-        # Currently only enable native matmul for default indexing.
-        # TODO: support block ptr
-        if use_block_ptr_enabled():
-            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-
     # (..., M, K) @ (..., K, N)
     m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
 
@@ -202,15 +188,6 @@ def use_native_matmul(mat1, mat2):
     # In particular, it fails at _split_iteration_ranges in codegen/simd.py.
     # See this : https://github.com/pytorch/pytorch/pull/131649
     if any(map(has_free_unbacked_symbols, [m, k, n])):
-        return False
-
-    # Consider the shape (m,k,n) > 1
-    # TODO : support when size = 1
-    if (
-        V.graph.sizevars.statically_known_leq(m, 1)
-        or V.graph.sizevars.statically_known_leq(k, 1)
-        or V.graph.sizevars.statically_known_leq(n, 1)
-    ):
         return False
 
     return V.choices.use_native_matmul(mat1, mat2)
