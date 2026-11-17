@@ -81,14 +81,9 @@ __device__ __forceinline__ index_t idx_cl(
 }
 
 #ifdef USE_ROCM
-// __hip_atomic_store is deprecated. Scoped atomics take __MEMORY_SCOPE_*.
-#if defined(__has_builtin) && __has_builtin(__scoped_atomic_store_n)
+// LLVM 18+. __MEMORY_SCOPE_DEVICE is the agent scope.
 #define TORCH_HIP_RELAXED_AGENT_STORE(ptr, val) \
   __scoped_atomic_store_n((ptr), (val), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)
-#else
-#define TORCH_HIP_RELAXED_AGENT_STORE(ptr, val) \
-  __hip_atomic_store((ptr), (val), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
-#endif
 
 // This function implements a committed store.
 // Upon returning, the store is committed to global memory.
