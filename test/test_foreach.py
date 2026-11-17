@@ -1835,29 +1835,46 @@ class TestForeachDevice(TestCase):
             self.assertEqual(dst, ref)
 
     @onlyAccelerator
-    @parametrize("op_name", ["add", "sub"])
-    @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    def test_binary_op_list_inplace_with_multi_dtypes(self, device, dtype, op_name):
-        foreach_op_ = getattr(torch, f"_foreach_{op_name}_")
-        ref_op_ = getattr(torch.Tensor, f"{op_name}_")
+    @ops(
+        filter(
+            lambda op: op.name in ("_foreach_add", "_foreach_sub"), foreach_binary_op_db
+        ),
+        dtypes=(torch.float32, torch.float16, torch.bfloat16),
+    )
+    @parametrize("inplace", [False, True])
+    def test_binary_op_list_with_multi_dtypes(self, device, dtype, op, inplace):
+        foreach_op = op.inplace_variant if inplace else op.method_variant
+        ref_op = op.ref_inplace if inplace else op.ref
         # 17 and 645 elements are not multiples of kILP (scalar path), 192 is
         # vectorized, and 70000 spans two chunks.
         sizes = ((17,), (64, 3), (5, 129), (70000,))
+        # Stress CUDA FMA while retaining the existing alpha on other accelerators.
+        alpha = 1 + 2**-23 if torch.device(device).type == "cuda" else 0.5
         for other_dtype in floating_types_and(torch.half, torch.bfloat16):
             if other_dtype == dtype:
                 continue
             dsts = [make_tensor(s, dtype=dtype, device=device) for s in sizes]
             others = [make_tensor(s, dtype=other_dtype, device=device) for s in sizes]
-            ref = [ref_op_(s.clone(), o, alpha=0.5) for s, o in zip(dsts, others)]
-            ForeachFuncWrapper(foreach_op_)(
+            # These FMA residuals remain distinct even after narrowing to fp16.
+            for dst, other in zip(dsts, others):
+                dst.view(-1)[0] = -9 if op.name == "_foreach_add" else 9
+                other.view(-1)[0] = 9
+            ref_inputs = [s.clone() for s in dsts]
+            ref = [ref_op(s, o, alpha=alpha) for s, o in zip(ref_inputs, others)]
+            actual = ForeachFuncWrapper(foreach_op)(
                 (dsts, others),
                 device=device,
-                expect_fastpath=other_dtype != torch.float64,
-                alpha=0.5,
+                expect_fastpath=(
+                    other_dtype != torch.float64
+                    and torch.float32 in (dtype, other_dtype)
+                ),
+                alpha=alpha,
             )
-            self.assertEqual(dsts, ref, atol=0, rtol=0)
+            self.assertEqual(actual, ref, atol=0, rtol=0)
+            if not inplace:
+                self.assertEqual(dsts, ref_inputs, atol=0, rtol=0)
             with self.assertRaisesRegex(RuntimeError, "Boolean alpha"):
-                foreach_op_(dsts, others, alpha=True)
+                foreach_op(dsts, others, alpha=True)
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
@@ -2135,6 +2152,36 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
 
 
 instantiate_device_type_tests(TestForeachDevice, globals(), allow_xpu=True)
+
+
+class TestForeachMixedDtypeCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @ops(
+        filter(lambda op: op.name == "_foreach_sub", foreach_binary_op_db),
+        dtypes=(torch.float32,),
+    )
+    @parametrize("inplace", [False, True])
+    @parametrize("alpha", [0, -(2**63), 2**64 - 1])
+    def test_binary_op_list_mixed_dtype_integer_alpha(
+        self, device, dtype, op, inplace, alpha
+    ):
+        foreach_op = op.inplace_variant if inplace else op.method_variant
+        xs = [torch.full((17,), -0.0, device=device, dtype=dtype) for _ in range(2)]
+        ys = [torch.ones_like(x, dtype=torch.bfloat16) for x in xs]
+        # The legacy tensor fallback negates integer Scalars before conversion.
+        # Use floating alpha to check the original mixed-inplace arithmetic.
+        ref = [op.ref(x, y, alpha=float(alpha)) for x, y in zip(xs, ys)]
+        actual = ForeachFuncWrapper(foreach_op)(
+            (xs, ys), device=device, expect_fastpath=True, alpha=alpha
+        )
+        self.assertEqual(
+            [x.view(torch.int32) for x in actual],
+            [x.view(torch.int32) for x in ref],
+        )
+
+
+instantiate_device_type_tests(TestForeachMixedDtypeCUDA, globals(), only_for="cuda")
 
 
 class TestForeachPublicAPI(TestCase):
