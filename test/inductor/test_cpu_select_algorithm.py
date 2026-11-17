@@ -208,6 +208,24 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    def test_addmm_zero_beta_nan_bias(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.full((64,), float("nan"))
+                self.weight = torch.randn(128, 64)
+
+            def forward(self, x):
+                # alpha != 1 keeps freezing from packing this into an mkldnn linear.
+                return torch.addmm(self.bias, x, self.weight, beta=0, alpha=0.5)
+
+        counters.clear()
+        self.common(M().eval(), (torch.randn(32, 128),))
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @requires_mkl
     @parametrize("in_features", (1000,))
     @parametrize("out_features", (1024,))
@@ -1476,6 +1494,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     ):
         if not int8_mixed_bf16 and dtype == torch.bfloat16:
             return
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self.skipTest(
+                "oneDNN qlinear binary with a bf16 operand needs bf16 hardware support"
+            )
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
         input2 = torch.randn(*B, in_features).to(dtype=torch.float32)
@@ -1651,6 +1673,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
 
+    @skipIfNoONEDNN
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
