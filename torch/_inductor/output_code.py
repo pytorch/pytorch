@@ -52,6 +52,7 @@ from torch._inductor.utils import (
     BoxedBool,
     CUDAGraphWrapperMetadata,
     GraphPartitionMap,
+    GraphPartitionPlan,
     InputType,
     is_gpu,
     output_node,
@@ -565,8 +566,7 @@ class CompiledFxGraph(OutputCode):
     compiled_with_cudagraphs: bool
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
-    split_into_partitions: bool
-    cudagraphs_per_partition: bool
+    partition_plan: GraphPartitionPlan
     has_uncaptured_partition: bool
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
@@ -667,8 +667,7 @@ class CompiledFxGraph(OutputCode):
         self.compiled_with_cudagraphs = bool(cudagraphs)
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
-        self.split_into_partitions = graph.split_into_partitions
-        self.cudagraphs_per_partition = graph.cudagraphs_per_partition
+        self.partition_plan = graph.partition_plan
         self.has_uncaptured_partition = graph.has_uncaptured_partition
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         storage_mutation_info = get_input_storage_mutation_info(gm)
@@ -890,7 +889,7 @@ class CompiledFxGraph(OutputCode):
         The results of this function are *not* saved in the cache itself.
         """
         customized_wrapper = _unstable_customized_partition_wrapper.wrapper
-        if self.split_into_partitions and customized_wrapper:
+        if self.partition_plan.split_into_partitions and customized_wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             if self.recursively_apply_fns is None:
                 raise AssertionError("self.recursively_apply_fns must not be None")
@@ -973,7 +972,7 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if self.cudagraphs_per_partition and policy is None:
+                if self.partition_plan.cudagraphs_per_partition and policy is None:
                     # When the partitions are for CUDA Graphs, we skip some
                     # cudagraph checks if it's supported with partition, so we use
                     # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
