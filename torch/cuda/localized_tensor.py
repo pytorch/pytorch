@@ -285,7 +285,7 @@ class _LocalizedTensor(torch.Tensor):
     """Tensor subclass that splits a weight across CUDA locality domains.
 
     The halves are plain ``torch.Tensor`` objects allocated in different
-    ``MemPool``s. ``__torch_dispatch__`` runs the ops registered
+    ``MemPool``s. ``__torch_function__`` runs the ops registered
     in :data:`_LOCALIZABLE_OPS` as parallel branches on green-context-backed
     streams and concatenates the results. Concatenation always happens along
     dimension -1.
@@ -750,7 +750,9 @@ def localize(
     localized, are left alone.  The same ``module`` object is returned for
     chaining.
 
-    Localization targets inference: any live ``.grad`` on a swapped
+    Localization and subsequent forward calls must run inside
+    :func:`torch.inference_mode`. Calling :func:`localize` outside inference
+    mode raises a :class:`RuntimeError`. Any live ``.grad`` on a swapped
     parameter is cleared, and the fork/join is not set up to backprop
     through the split, so localized modules should not be trained.
 
@@ -769,6 +771,8 @@ def localize(
         num_partitions: forwarded to the per-tensor splitter.  Defaults
             to the device's locality-domain count (see
             :func:`torch.cuda.green_contexts.get_num_locality_domains`).
+            Currently only two domains are supported; this argument can be
+            omitted to query the count automatically.
         mark_static_halves: when True (default), each per-domain
             half of every localized weight/bias is tagged with
             :func:`torch._dynamo.mark_static_address`.  The halves live
