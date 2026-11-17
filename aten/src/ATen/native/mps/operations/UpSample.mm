@@ -64,7 +64,7 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 // Encode a forward/backward upsample kernel: bind the PSO, the two tensors and
-// the params struct, then launch one thread per output spatial element.
+// the params struct, then launch one thread per job.
 template <typename params_t>
 static void dispatch_upsample(const std::string& fname,
                               const Tensor& a,
@@ -115,16 +115,110 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
     return;
   }
 
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic(fmt::format("upsample_{}_backward", name));
-
   UpsampleParams<N> params(grad_input, grad_output, align_corners, scales);
-  dispatch_upsample(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)),
-                    grad_input,
-                    grad_output,
-                    params,
-                    c10::multiply_integers(output_size));
+
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms();
+  if (serial && grad_input.scalar_type() != kFloat) {
+    auto grad_input_float = grad_input.to(kFloat);
+    upsample_kernel_backward_out_template<N>(
+        grad_input_float, grad_output.to(kFloat), output_size, align_corners, scales, name);
+    grad_input.copy_(grad_input_float);
+    return;
+  }
+  auto njobs = serial ? grad_output.size(0) * grad_output.size(1) : c10::multiply_integers(output_size);
+
+  dispatch_upsample(
+      fmt::format("upsample_{}_backward_{}{}", name, scalarToMetalTypeString(grad_input), serial ? "_serial" : ""),
+      grad_input,
+      grad_output,
+      params,
+      njobs);
+}
+
+// Launch a (w, h, planes) grid over the tensor each thread writes one (y, x) of: `b` for the forward, `a` (grad_input)
+// for the backward. The (n, c) planes that don't fit in the grid fold into per-thread loops.
+static void dispatch_plane_grid(const std::string& name,
+                                const Tensor& a,
+                                const Tensor& b,
+                                bool grid_over_a,
+                                bool align_corners,
+                                std::initializer_list<std::optional<double>> scales) {
+  // Kernels split the plane index into (n, c) with a 32-bit IntDivider, valid up to INT32_MAX; shard along N, or
+  // along C first if C alone exceeds it.
+  constexpr int64_t max_planes = std::numeric_limits<int32_t>::max();
+  if (a.size(0) * a.size(1) > max_planes) {
+    const int64_t dim = a.size(1) > max_planes ? 1 : 0;
+    const auto chunk = dim == 0 ? max_planes / a.size(1) : max_planes;
+    for (int64_t start = 0; start < a.size(dim); start += chunk) {
+      const auto len = std::min(chunk, a.size(dim) - start);
+      dispatch_plane_grid(
+          name, a.narrow(dim, start, len), b.narrow(dim, start, len), grid_over_a, align_corners, scales);
+    }
+    return;
+  }
+  const auto& owner = grid_over_a ? a : b;
+  const UpsampleParams<4> params(a, b, align_corners, scales);
+  const bool channels_last = owner.suggest_memory_format() == MemoryFormat::ChannelsLast;
+  const auto height = static_cast<NSUInteger>(owner.size(2));
+  const auto width = static_cast<NSUInteger>(owner.size(3));
+  const auto all_planes = static_cast<NSUInteger>(owner.size(0) * owner.size(1));
+  const c10::IntDivider<uint32_t> channels(static_cast<uint32_t>(owner.size(1)));
+  static const auto core_count = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      const bool use_u32 = offsetsFitIn<int32_t>(a, b);
+      auto pso = lib.getPipelineStateForFunc(
+          fmt::format("upsample_{}_{}{}", name, scalarToMetalTypeString(a), mtlIdxSuffix(use_u32)));
+      const auto max_threads = [pso maxTotalThreadsPerThreadgroup];
+      const auto simd_width = [pso threadExecutionWidth];
+      // Grid threads before (n, c) planes fold into per-thread loops; fewer would starve the GPU.
+      const auto threads_in_flight = core_count * max_threads * PLANE_GRID_TGS_PER_CORE;
+      const auto planes =
+          std::min(all_planes, at::round_up(at::ceil_div(threads_in_flight, height * width), simd_width));
+      // channels_last keeps each simdgroup on adjacent channels (threads are numbered x-first), unless there are
+      // fewer planes than a simdgroup; then widen along x so threadgroups aren't just a handful of threads.
+      const auto tg_planes = std::min(planes, max_threads);
+      const auto cl_width = tg_planes < simd_width ? PLANE_GRID_TARGET_TG_THREADS / tg_planes : 1;
+      const auto tg_width = std::min<NSUInteger>({width, channels_last ? cl_width : max_threads, max_threads});
+      const auto threadgroup = MTLSizeMake(tg_width, 1, std::min(tg_planes, max_threads / tg_width));
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      // Metal truncates grid sizes to 32 bits: tile larger H or W and pass each tile's origin.
+      const NSUInteger max_tile = std::numeric_limits<int32_t>::max();
+      for (NSUInteger y = 0; y < height; y += max_tile) {
+        for (NSUInteger x = 0; x < width; x += max_tile) {
+          const std::array<int64_t, 2> origin{static_cast<int64_t>(x), static_cast<int64_t>(y)};
+          mtl_setArgs(encoder, a, b, params, channels, origin);
+          [encoder dispatchThreads:MTLSizeMake(std::min(width - x, max_tile), std::min(height - y, max_tile), planes)
+              threadsPerThreadgroup:threadgroup];
+        }
+      }
+    }
+  });
+}
+
+static void upsample_plane_grid_out_template(const Tensor& input,
+                                             const Tensor& output,
+                                             bool align_corners,
+                                             std::initializer_list<std::optional<double>> scales,
+                                             const std::string& name,
+                                             std::string_view op_name) {
+  // Matches the kernel instantiations: bilinear is float and uint8; nearest adds bool and signed ints.
+  const auto dtype = input.scalar_type();
+  const bool float_type = dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
+  const bool supported = name == "bilinear2d"
+      ? float_type || dtype == kByte
+      : float_type || (isIntegralType(dtype, /*includeBool=*/true) && !isBarebonesUnsignedType(dtype));
+  TORCH_CHECK_NOT_IMPLEMENTED(supported, op_name, " not implemented for ", dtype, " on MPS");
+  if (output.numel() == 0) {
+    return;
+  }
+  dispatch_plane_grid(name, input, output, /*grid_over_a=*/false, align_corners, scales);
 }
 
 static void upsample_gather_backward_out_template(const Tensor& grad_input,
@@ -140,40 +234,24 @@ static void upsample_gather_backward_out_template(const Tensor& grad_input,
   if (grad_input.numel() == 0) {
     return;
   }
-  const UpsampleParams<4> params(grad_input, grad_output, align_corners, scales);
-  const bool channels_last = grad_input.suggest_memory_format() == MemoryFormat::ChannelsLast;
-  const auto height = static_cast<NSUInteger>(grad_input.size(2));
-  const auto width = static_cast<NSUInteger>(grad_input.size(3));
-  const auto all_planes = static_cast<NSUInteger>(grad_input.size(0) * grad_input.size(1));
-  static const auto core_count = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      const bool use_u32 = offsetsFitIn<int32_t>(grad_input, grad_output);
-      auto pso = lib.getPipelineStateForFunc(
-          fmt::format("upsample_{}_backward_{}{}", name, scalarToMetalTypeString(grad_input), mtlIdxSuffix(use_u32)));
-      const auto max_threads = [pso maxTotalThreadsPerThreadgroup];
-      const auto simd_width = [pso threadExecutionWidth];
-      // Grid threads before (n, c) planes fold into per-thread loops; fewer would starve the GPU.
-      const auto threads_in_flight = core_count * max_threads * GATHER_BACKWARD_TGS_PER_CORE;
-      const auto planes =
-          std::min(all_planes, at::round_up(at::ceil_div(threads_in_flight, height * width), simd_width));
-      const auto tg_width = std::min(width, max_threads);
-      const auto threadgroup = channels_last ? MTLSizeMake(1, 1, std::min(planes, max_threads))
-                                             : MTLSizeMake(tg_width, 1, std::min(planes, max_threads / tg_width));
-      auto encoder = stream->commandEncoder();
-      [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, grad_input, grad_output, params);
-      [encoder dispatchThreads:MTLSizeMake(width, height, planes) threadsPerThreadgroup:threadgroup];
-    }
-  });
+  // The backward kernel computes source runs in int.
+  constexpr int64_t max_dim = std::numeric_limits<int32_t>::max();
+  for (const auto& t : {grad_input, grad_output}) {
+    TORCH_CHECK(t.size(2) <= max_dim && t.size(3) <= max_dim,
+                "upsample_",
+                name,
+                "_backward: spatial sizes must not exceed INT32_MAX, got ",
+                t.sizes());
+  }
+  dispatch_plane_grid(name + "_backward", grad_input, grad_output, /*grid_over_a=*/true, align_corners, scales);
 }
 
 } // anonymous namespace
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  upsample_kernel_out_template<3>(input, output_size, false, {scale}, output, "nearest1d");
+  upsample_plane_grid_out_template(
+      input.unsqueeze(2), output.unsqueeze(2), false, {scale, std::nullopt}, "nearest2d", "upsample_nearest1d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
@@ -188,7 +266,12 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  upsample_kernel_out_template<3>(input, output_size, false, {scale}, output, "nearest_exact1d");
+  upsample_plane_grid_out_template(input.unsqueeze(2),
+                                   output.unsqueeze(2),
+                                   false,
+                                   {scale, std::nullopt},
+                                   "nearest_exact2d",
+                                   "_upsample_nearest_exact1d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_backward_out_mps)
@@ -207,7 +290,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_kernel_out_template<4>(input, output_size, false, {scales_w, scales_h}, output, "nearest2d");
+  upsample_plane_grid_out_template(input, output, false, {scales_w, scales_h}, "nearest2d", "upsample_nearest2d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_mps)
@@ -226,7 +309,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_kernel_out_template<4>(input, output_size, false, {scales_w, scales_h}, output, "nearest_exact2d");
+  upsample_plane_grid_out_template(
+      input, output, false, {scales_w, scales_h}, "nearest_exact2d", "_upsample_nearest_exact2d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
@@ -262,7 +346,8 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_kernel_out_template<4>(input, output_size, align_corners, {scales_w, scales_h}, output, "bilinear2d");
+  upsample_plane_grid_out_template(
+      input, output, align_corners, {scales_w, scales_h}, "bilinear2d", "upsample_bilinear2d");
 }
 
 TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_mps)
