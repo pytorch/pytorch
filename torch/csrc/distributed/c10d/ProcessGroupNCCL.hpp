@@ -379,6 +379,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // instead of the tensor output.
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
 
+    bool hasFutureResult() const override {
+      return true;
+    }
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
@@ -572,6 +576,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // when the device is bound. Such a group can't be split from until its
     // first operation.
     bool lazy_init{false};
+
+    // nccl2 only: process-global pre-shared key for NCCL's TLS socket
+    // encryption (NCCL 2.32.3+ built with TLS support). See the pybind
+    // docstring for constraints.
+    std::optional<std::string> encryption_psk;
 
    private:
     // Keeps clone()'s strdup'ed config.netName alive; see clone().
@@ -1008,6 +1017,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void waitForPendingWorks() override;
 
   void enableCollectivesTiming() override;
+  bool collectivesTimingEnabled() const override {
+    return enableTiming_.load();
+  }
 
   c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
