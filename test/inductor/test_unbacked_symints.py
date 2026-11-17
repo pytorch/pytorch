@@ -1152,6 +1152,59 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @parametrize("dynamic", ["unbacked", "backed"])
+    def test_reshape_indexer_dynamic_size(self, device, dynamic):
+        # Reshape [u0, 4096] -> [32*u0, 128]
+        def fn(qkv):
+            y = qkv[:, :4096].reshape(-1, 128).sin()
+            return y.reshape(qkv.shape[0], 4096)
+
+        mark = (
+            torch._dynamo.decorators.mark_unbacked
+            if dynamic == "unbacked"
+            else torch._dynamo.mark_dynamic
+        )
+        compiled = torch.compile(fn, fullgraph=True)
+        for n in (16, 3):
+            x = torch.randn(n, 4608, device=device)
+            mark(x, 0)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_reshape_indexer_unbacked_sizes_match(self, device):
+        # Reshape [u0, 32, 4096] -> [32*u0, 4096]
+        def fn(x):
+            return x[:, :32, :].reshape(x.shape[0] * 32, 4096).sin()
+
+        compiled = torch.compile(fn, fullgraph=True)
+        for n in (4, 7):
+            x = torch.randn(n, 33, 4096, device=device)
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_reshape_indexer_unbacked_total_size_fixes_value(self, device):
+        # Reshape [4*u0, 32, 4096] -> [128, 4096]
+        def fn(x):
+            q = torch.cat([x, x, x, x], 0)[:, :, :4096]
+            return q.reshape(128, 4096).sin()
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = torch.randn(1, 32, 4608, device=device)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(compiled(x), fn(x))
+
+        bad = torch.randn(2, 32, 4608, device=device)
+        torch._dynamo.decorators.mark_unbacked(bad, 0)
+        with self.assertRaisesRegex(RuntimeError, r"Eq\(u0, 1\)"):
+            compiled(bad)
+
+    def test_reshape_indexer_fallback(self, device):
+        # Reshape [6, 4] -> [8, 3]
+        def fn(x):
+            return x[:, :-1].reshape(8, 3).sin()
+
+        x = torch.randn(6, 5, device=device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
 
 class TestUnbackedSymintsCompilerLogic(InductorTestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1490,60 +1543,7 @@ class TestUnbackedSymintsHintLogic(InductorTestCase):
         )
         self.assertEqual(stride_order, [2, 1, 0])
 
-    @parametrize("dynamic", ["unbacked", "backed"])
-    def test_reshape_indexer_dynamic_size(self, device, dynamic):
-        # Reshape [u0, 4096] -> [32*u0, 128]
-        def fn(qkv):
-            y = qkv[:, :4096].reshape(-1, 128).sin()
-            return y.reshape(qkv.shape[0], 4096)
-
-        mark = (
-            torch._dynamo.decorators.mark_unbacked
-            if dynamic == "unbacked"
-            else torch._dynamo.mark_dynamic
-        )
-        compiled = torch.compile(fn, fullgraph=True)
-        for n in (16, 3):
-            x = torch.randn(n, 4608, device=device)
-            mark(x, 0)
-            self.assertEqual(compiled(x), fn(x))
-
-    def test_reshape_indexer_unbacked_sizes_match(self, device):
-        # Reshape [u0, 32, 4096] -> [32*u0, 4096]
-        def fn(x):
-            return x[:, :32, :].reshape(x.shape[0] * 32, 4096).sin()
-
-        compiled = torch.compile(fn, fullgraph=True)
-        for n in (4, 7):
-            x = torch.randn(n, 33, 4096, device=device)
-            torch._dynamo.decorators.mark_unbacked(x, 0)
-            self.assertEqual(compiled(x), fn(x))
-
-    def test_reshape_indexer_unbacked_total_size_fixes_value(self, device):
-        # Reshape [4*u0, 32, 4096] -> [128, 4096]
-        def fn(x):
-            q = torch.cat([x, x, x, x], 0)[:, :, :4096]
-            return q.reshape(128, 4096).sin()
-
-        compiled = torch.compile(fn, fullgraph=True)
-        x = torch.randn(1, 32, 4608, device=device)
-        torch._dynamo.decorators.mark_unbacked(x, 0)
-        self.assertEqual(compiled(x), fn(x))
-
-        bad = torch.randn(2, 32, 4608, device=device)
-        torch._dynamo.decorators.mark_unbacked(bad, 0)
-        with self.assertRaisesRegex(RuntimeError, r"Eq\(u0, 1\)"):
-            compiled(bad)
-
-    def test_reshape_indexer_fallback(self, device):
-        # Reshape [6, 4] -> [8, 3]
-        def fn(x):
-            return x[:, :-1].reshape(8, 3).sin()
-
-        x = torch.randn(6, 5, device=device)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
-
-    def test_dynamic_reshape_indexer_unbacked(self, device):
+    def test_dynamic_reshape_indexer_unbacked(self):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         def reindex(old_size_fn, new_size_fn):
