@@ -527,7 +527,7 @@ Tensor isreal(const Tensor& self) {
 static bool is_fp8_type_without_inf(ScalarType dtype) {
   const bool without_inf = dtype == kFloat8_e4m3fn ||
       dtype == kFloat8_e4m3fnuz || dtype == kFloat8_e5m2fnuz ||
-      dtype == kFloat8_e8m0fnu;
+      dtype == kFloat8_e8m0fnu || dtype == kFloat8_e5m3fnu;
   TORCH_INTERNAL_ASSERT(
       without_inf || dtype == kFloat8_e5m2 || !c10::isFloat8Type(dtype),
       "unhandled fp8 dtype ",
@@ -558,8 +558,7 @@ Tensor isinf(const Tensor& self) {
 
 Tensor isfinite(const Tensor& self) {
   // Note: Integral tensor values are always finite
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
-      self.scalar_type() == kFloat8_e8m0fnu) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
