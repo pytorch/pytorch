@@ -648,6 +648,42 @@ for more details.
 In the unfortunate case where your model uses an ATen operator that is does not
 have a FakeTensor kernel implementation yet, please file an issue.
 
+### Autocast Active Outside the Module
+
+`torch.export` records a {class}`torch.autocast` region only when it starts
+inside `forward`. An autocast that is already active when
+{func}`torch.export.export` is called is not recorded. Export still traces under
+it, so the dtypes in the graph follow the autocast, but the graph has none of
+the casts that autocast inserts. When the exported program runs outside that
+autocast, it gives different results, or fails with a dtype mismatch.
+
+To keep the autocast, do one of these:
+
+- Enter {class}`torch.autocast` inside `forward`. Export records it as a region
+  of the graph. Modules called inside the region are not visible to
+  {func}`~torch.export.unflatten.unflatten`, so for a model you plan to
+  unflatten, enter the autocast inside the submodules instead.
+- Run or lower the exported program under the same autocast: call the module
+  returned by {meth}`~torch.export.ExportedProgram.module`, or call
+  {meth}`~torch.export.ExportedProgram.run_decompositions` or
+  {func}`torch._inductor.aoti_compile_and_package`, inside it.
+
+In this example the autocast starts inside `forward`, so the program returns
+bfloat16 even outside any autocast:
+
+```{code-cell}
+import torch
+
+class M(torch.nn.Module):
+    def forward(self, x, y):
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            return x @ y
+
+x, y = torch.randn(4, 4), torch.randn(4, 4)
+ep = torch.export.export(M(), (x, y))
+print(ep.module()(x, y).dtype)  # torch.bfloat16
+```
+
 ## Read More
 
 ```{toctree}

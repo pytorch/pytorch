@@ -15751,6 +15751,21 @@ def forward(self, x, b_t, y):
             gm.code,
         )
 
+    def test_export_with_outer_autocast(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        x, y = torch.randn(4, 4), torch.randn(4, 4)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            ep = torch.export.export(Model(), (x, y))
+        self.assertEqual(ep.module()(x, y).dtype, torch.float32)
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            lowered = ep.run_decompositions()
+        self.assertEqual(lowered.module()(x, y).dtype, torch.bfloat16)
+        self.assertIn("torch.ops.aten._to_copy.default", lowered.graph_module.code)
+
     def test_export_as_backend(self):
         def f(x, y):
             return x + y
