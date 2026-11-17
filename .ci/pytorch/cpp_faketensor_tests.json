@@ -249,7 +249,7 @@
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_custom_op_fallback_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_data_dependent_operator_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_embedding_bag_meta_*",
-    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_embedding_meta_indices_*",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_embedding_meta_indices_propagate_real_tensors",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_fake_dispatch_keys_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_fake_grad_copy_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_fake_mode_dispatch_api_*",
@@ -528,6 +528,10 @@
     "test_proxy_tensor.py::TestFakeProxyTensor::test_use_fake_and_tensor",
     "test_proxy_tensor.py::TestGenericProxyTensorReal::test_proxy_tensor_mode_with_decomp_table_preserves_proxy",
     "test_proxy_tensor.py::TestGenericProxyTensorFake::test_proxy_tensor_mode_with_decomp_table_preserves_proxy",
-    "test_proxy_tensor.py::TestGenericProxyTensorSymbolic::test_proxy_tensor_mode_with_decomp_table_preserves_proxy"
+    "test_proxy_tensor.py::TestGenericProxyTensorSymbolic::test_proxy_tensor_mode_with_decomp_table_preserves_proxy",
+    "dynamo/test_misc.py::MiscTests::test_compile_with_userland_fake_tensor_mode",
+    "export/test_lift_unlift.py::TestLift::test_duplicate_constant_access",
+    "export/test_lift_unlift.py::TestLift::test_lift_basic",
+    "export/test_lift_unlift.py::TestLift::test_lift_nested"
   ]
 }
