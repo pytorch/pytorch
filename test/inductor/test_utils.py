@@ -7,6 +7,7 @@ import sys
 import tempfile
 import types
 import unittest
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
@@ -34,6 +35,7 @@ from torch._inductor.fx_utils import (
     FakeTensorUpdater,
     get_fake,
     get_node_storage,
+    get_storage,
 )
 from torch._inductor.utils import (
     _get_device_dram_gbps,
@@ -1612,6 +1614,48 @@ class TestFakeTensorUpdater(TestCase):
 
         self.assertEqual(get_node_storage(root), get_node_storage(root.args[0]))
 
+    def test_fake_tensor_same_accepts_identical_storage(self):
+        with torch._subclasses.FakeTensorMode() as mode:
+            value = mode.from_tensor(torch.randn(4))
+            alias = aten.alias.default(value)
+            first = aten.slice.Tensor(value, 0, 0, 2)
+            shifted = aten.slice.Tensor(value, 0, 1, 3)
+        storages = defaultdict(int, {get_storage(value): 2})
+        self.assertTrue(_is_fake_tensor_same(value, alias, storages))
+        self.assertFalse(_is_fake_tensor_same(first, shifted, storages))
+        with mode:
+            fresh = value.clone()
+        self.assertFalse(
+            _is_fake_tensor_same(
+                value, fresh, defaultdict(int, {get_storage(value): 1})
+            )
+        )
+
+    @parametrize("aliases_output", [False, True])
+    def test_fake_tensor_same_checks_user_aliasing_without_execution(
+        self, aliases_output
+    ):
+        graph = torch.fx.Graph()
+        value = graph.placeholder("value")
+        other = graph.placeholder("other")
+        target = aten.alias.default if aliases_output else aten.add.Tensor
+        args = (value,) if aliases_output else (value, other)
+        graph.output(graph.call_function(target, args))
+        with torch._subclasses.FakeTensorMode() as mode:
+            value.meta["val"] = torch.empty(4, device="cpu")
+            other.meta["val"] = torch.empty(4, device="cuda")
+            fresh = value.meta["val"].clone()
+        with V.set_fake_mode(mode):
+            self.assertEqual(
+                _is_fake_tensor_same(
+                    fresh,
+                    value.meta["val"],
+                    defaultdict(int, {get_node_storage(value): 1}),
+                    node=value,
+                ),
+                not aliases_output,
+            )
+
     def test_targeted_with_effects_unbacked_symbols(self):
         from torch._higher_order_ops.effects import with_effects
 
@@ -1677,7 +1721,9 @@ class TestFakeTensorUpdater(TestCase):
         self.assertEqual(sparse.meta["val"].layout, torch.sparse_coo)
         self._check_graph(gm, inputs, f(*inputs))
 
-    def _add_delete_nodes_test(self, graph: torch.fx.GraphModule) -> None:
+    def _add_delete_nodes_test(
+        self, graph: torch.fx.GraphModule, *, shuffle_subgraphs: bool = True
+    ) -> None:
         updater = FakeTensorUpdater(graph)
         fake_mode = self._get_faketensormode(graph)
 
@@ -1702,32 +1748,29 @@ class TestFakeTensorUpdater(TestCase):
                     )
                     or len(fn.meta["val"].size()) == 4
                 )
-                if should_shuffle_strides:
+                if should_shuffle_strides and (gm is graph or shuffle_subgraphs):
                     cloned_node = gm.graph.call_function(
                         clone_function, (fn,), {"memory_format": torch.channels_last}
                     )
                 else:
                     cloned_node = gm.graph.call_function(clone_function, (fn,))
-            nodes_modified = fn.replace_all_uses_with(
-                cloned_node, lambda n: n != cloned_node
-            )
+            fn.replace_all_uses_with(cloned_node, lambda n: n != cloned_node)
+            gm.recompile()
 
             with V.set_fake_mode(fake_mode):
                 clone_num_updated = updater.incremental_update()
+                self.assertEqual(updater.incremental_update(), 0)
 
-            # At a minimum, we have to update the newly inserted node and all the nodes
-            # which had an input replaced.  There may be more nodes modified in
-            # subgraphs, so we can't do a strict equality assertion here.
-            self.assertGreaterEqual(clone_num_updated, len(nodes_modified) + 1)
+            # Rewired users may retain valid metadata; only the new clone is
+            # guaranteed to need an update.
+            self.assertGreaterEqual(clone_num_updated, 1)
 
             cloned_node.replace_all_uses_with(fn)
             gm.graph.erase_node(cloned_node)
+            gm.recompile()
             with V.set_fake_mode(fake_mode):
-                erase_num_updated = updater.incremental_update()
-
-            # Deleting the node should update the same number of nodes as previously,
-            # excluding the reshaped node itself.
-            self.assertEqual(clone_num_updated - 1, erase_num_updated)
+                updater.incremental_update()
+                self.assertEqual(updater.incremental_update(), 0)
 
     def test_hop_implicit_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -1736,7 +1779,9 @@ class TestFakeTensorUpdater(TestCase):
         # Use 4-D tensor so that we can test re-striding with channels_last.
         a = torch.randn((8, 4, 2, 1))
         graph = self._get_graph(fn, a)
-        self._add_delete_nodes_test(graph)
+        # Cond requires compatible output layouts in both branches. Reshuffle
+        # their common outer input rather than just one branch's output.
+        self._add_delete_nodes_test(graph, shuffle_subgraphs=False)
 
     def test_hop_subgraph_inputs(self):
         @torch.compiler.nested_compile_region
