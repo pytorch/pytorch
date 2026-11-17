@@ -1354,6 +1354,53 @@ torch.ones(10) * 2
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
 
+    def test_toggle_stack_collection(self):
+        toggle = torch._C._autograd._toggle_python_collection_dynamic
+        with self.assertRaisesRegex(RuntimeError, "active Kineto profiler"):
+            toggle(False)
+        with _profile_legacy():
+            with self.assertRaisesRegex(RuntimeError, "active Kineto profiler"):
+                toggle(False)
+
+        def before_stop():
+            torch.ones(8, 8).sin()
+
+        def after_stop():
+            torch.ones(8, 8).cos()
+
+        with (
+            profile(activities=[ProfilerActivity.CPU], with_stack=True) as p,
+            patch("torch.profiler.profiler._WARNINGS_SHOWN", set()),
+        ):
+            with self.assertWarnsRegex(UserWarning, "private, experimental"):
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
+                    p._toggle_stack_collection(True)
+            before_stop()
+            rf = record_function("open_across_stop")
+            rf.__enter__()
+            p._toggle_stack_collection(False)
+            after_stop()
+            # Stopping again does nothing.
+            p._toggle_stack_collection(False)
+        rf.__exit__(None, None, None)
+
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                events = json.load(f)["traceEvents"]
+        python_events = [e for e in events if e.get("cat") == "python_function"]
+        self.assertTrue(any("before_stop" in e["name"] for e in python_events))
+        self.assertFalse(any("after_stop" in e["name"] for e in python_events))
+        # CPU ops are still recorded, and frames open at the stop end before them.
+        cos = next(e for e in events if e.get("name") == "aten::cos")
+        self.assertLessEqual(max(e["ts"] + e["dur"] for e in python_events), cos["ts"])
+        # An op still running at the end of the session keeps the session end.
+        (op,) = [e for e in p.events() if e.name == "open_across_stop"]
+        self.assertGreaterEqual(
+            op.time_range.end,
+            max(e.time_range.end for e in p.events() if e.name != op.name),
+        )
+
     def test_profiler_correlation_id(self):
         """
         We expect the correlation_id of CPU operator events to be unique across

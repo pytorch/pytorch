@@ -972,6 +972,21 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertIs(type(result[0]), builtins.frozendict)
         self.assertIs(result[0]["a"], result[0]["b"])
 
+    @torch._dynamo.config.patch(allow_unspec_int_on_nn_module=True)
+    def test_fromkeys_observes_hook_keys(self):
+        def fn(x, module):
+            detached = builtins.frozendict.fromkeys(module._forward_hooks)
+            return x + (9 in detached)
+
+        x = torch.ones(1)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for key in (2, 9, 2):
+            module = torch.nn.Identity()
+            module._forward_hooks = {key: lambda mod, args, output: output}
+            self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_fromkeys_does_not_compare_iterable_type(self):
         class Meta(type):
             def __eq__(cls, other):
