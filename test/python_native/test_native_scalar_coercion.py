@@ -65,6 +65,15 @@ class TestNativeScalarCoercion(TestCase):
         expected = torch.tensor(value, dtype=dtype).float().item()
         self.assertEqual(f32(value), expected)
 
+    def test_row_first_grid_limit(self) -> None:
+        from torch._native.ops.pointwise.layout import tma_layout
+
+        shape = (32, 192 * 65535 + 32)
+        layout = tma_layout(
+            ((torch.float32, shape, (1, 32)),), shape, torch.bool, (shape[1], 1)
+        )
+        self.assertIsNone(layout)
+
 
 instantiate_parametrized_tests(TestNativeScalarCoercion)
 

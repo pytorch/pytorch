@@ -1205,7 +1205,7 @@ def _register_overrides_from_graph(
         initialize_runtime: bool,
     ) -> Any:
         # covers() degrades exceptions to "uncovered", so this is safe on FakeTensors.
-        if coverage is not None and coverage.covers(args, kwargs):
+        if coverage is not None and coverage.covers(args, kwargs, op_symbol=op_symbol):
             return _NO_MATCH
         for cond, impl_name, try_initialize_runtime in cond_impl:
             try:

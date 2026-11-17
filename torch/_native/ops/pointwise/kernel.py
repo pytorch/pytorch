@@ -13,8 +13,10 @@ import torch
 from torch._prims_common import (
     get_computation_dtype,
     is_non_overlapping_and_dense_or_false,
+    make_contiguous_strides_for,
 )
 
+from ... import cutedsl_utils as cu
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.config import (
     POINTWISE_DENSE_MIN as _DENSE_MIN,
@@ -27,8 +29,15 @@ from ...cutedsl.plan_cache import cached_plan
 from ...cutedsl.types import Index, MathFn, MathResult, NumericType, Scalar
 from ...utils.device import check_current
 from ...utils.tensor import can_use_32bit_indexing, const_data_ptr
-from ._types import CacheKey, DTypes, Path, RowGap, Shape
-from .layout import row_gap_view as _row_gap_view
+from ._types import CacheKey, DTypes, Load, Path, RowGap, Shape
+from .layout import (
+    row_gap_view as _row_gap_view,
+    tma_layout,
+    TMA_SMEM_ALIGNMENT,
+    TMA_STAGES,
+    TMA_TILE,
+    TmaLayout,
+)
 from .signature import Functor, inspect_functor, resolve_type
 
 
@@ -407,6 +416,80 @@ class _Plan(NamedTuple):
     out_dtypes: DTypes
     fn: "Function"
     rowgap: RowGap | None = None
+    tma: TmaLayout | None = None
+
+
+def tma_eligible(
+    inputs: Sequence[torch.Tensor],
+    shape: Shape,
+    dtype: torch.dtype,
+    target: torch.Tensor | None = None,
+    *,
+    force: bool = False,
+    out_strides: Shape | None = None,
+) -> TmaLayout | None:
+    tensors = [t for t in inputs if t.numel() != 1]
+    if not tensors or len(shape) < 1:
+        return None
+    ref = tensors[0]
+    storage = (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.int16,
+        torch.uint16,
+        torch.int32,
+        torch.uint32,
+    )
+    if ref.dtype not in storage or dtype not in (*storage, torch.bool):
+        return None
+    if any(
+        t.device != ref.device
+        or t.is_neg()
+        or t.is_conj()
+        or not can_use_32bit_indexing(t)
+        or (t.numel() != 1 and (t.dtype != ref.dtype or tuple(t.shape) != shape))
+        for t in inputs
+    ):
+        return None
+    if not ref.is_cuda:
+        return None
+    hw = _hw.caps(ref.device)
+    if hw.cc[0] not in cu.POINTWISE_ARCH_MAJORS:
+        return None
+    if target is not None and (
+        tuple(target.shape) != shape
+        or target.dtype != dtype
+        or target.device != ref.device
+        or target.is_neg()
+        or target.is_conj()
+        or any(torch._C._is_alias_of(target, t) for t in inputs)
+    ):
+        return None
+    layout = tma_layout(
+        tuple((t.dtype, tuple(t.shape), t.stride()) for t in inputs),
+        shape,
+        dtype,
+        target.stride()
+        if target is not None
+        else out_strides
+        if out_strides is not None
+        else make_contiguous_strides_for(shape),
+    )
+    if layout is None:
+        return None
+    # Small padded-only calls measured slower than ATen; keep them on the fallback.
+    if not force and not any(layout.transposed) and math.prod(shape) < 16 * 1024 * 1024:
+        return None
+    if any(
+        orientation is not None and const_data_ptr(t) % (128 if orientation else 16)
+        for t, orientation in zip(inputs, layout.transposed)
+    ) or (target is not None and const_data_ptr(target) % 16):
+        return None
+    ntma = sum(t is not None for t in layout.transposed)
+    smem = ntma * (TMA_STAGES * TMA_TILE**2 * ref.element_size() + TMA_SMEM_ALIGNMENT)
+    smem += TMA_STAGES * 8
+    return layout if smem <= hw.smem_per_block_optin else None
 
 
 def _build_plan(
@@ -421,6 +504,7 @@ def _build_plan(
     block: int | None,
     ept: int | None,
     vec_bits: int | None,
+    load: Load | None,
     out_refs: Sequence[torch.Tensor] | None = None,
     with_index: bool = False,
     input_casts: DTypes | None = None,
@@ -445,6 +529,8 @@ def _build_plan(
     ):
         raise ValueError("pointwise plan requires 32-bit counts and element offsets")
     # Device-scaled measured defaults apply unless the caller supplies tuning values.
+    try_tma = load != "direct"
+    force_tma = load == "tma"
     row_ept = 1 if ept is None else ept
     hw = _hw.caps(ref.device)
     storage_bits = max((t.element_size() * 8 for t in inputs), default=compute.width)
@@ -514,7 +600,36 @@ def _build_plan(
         and all(o.is_contiguous() and _is_16b_aligned(o) for o in seed_outs)
         else None
     )
-    if vec1 or rg is not None:
+    tma = (
+        tma_eligible(inputs, shape, out_dtypes[0], seed_outs[0], force=force_tma)
+        if try_tma
+        and nout == 1
+        and not with_index
+        and (
+            force_tma
+            or (not vec1 and any(not t.is_contiguous() for t in (*inputs, *seed_outs)))
+        )
+        else None
+    )
+    if tma is not None:
+        from .tma import ElementwiseTma
+
+        storage = next(t.dtype for t in inputs if t.numel() != 1)
+        out_type = out_types[0]
+        op = ElementwiseTma(
+            fn,
+            len(consts),
+            compute,
+            out_type,
+            torch2cute[storage],
+            tma,
+            input_types,
+            result_types=result_types,
+        )
+        cin, cout = op.fake_args(tma, tuple(torch2cute[t.dtype] for t in inputs))
+        path = "tma"
+        kkey = common + (path, tma)
+    elif vec1 or rg is not None:
         if rg is None:
             cin = [
                 input_types[k](1)
@@ -589,7 +704,7 @@ def _build_plan(
         lambda: _L.compile_kernel(op, compile_ins, cout, compile_consts, _L.stream()),
         op=op_name,
     )
-    return _Plan(path, shape, V, tuple(out_dtypes), compiled, rowgap)
+    return _Plan(path, shape, V, tuple(out_dtypes), compiled, rowgap, tma)
 
 
 def run(
@@ -608,6 +723,8 @@ def run(
     with_index: bool = False,
     input_casts: DTypes | None = None,
     result_dtypes: DTypes | None = None,
+    *,
+    load: Load | None = None,
 ) -> tuple[torch.Tensor, ...]:
     r"""Run matching nin/nout on the current CUDA device, with CPU inputs limited to 0D.
     Callers validate aliases and supplied outputs' broadcast shape, dtype and device."""
@@ -659,6 +776,7 @@ def run(
         block,
         ept,
         vec_bits,
+        load,
         layouts,
         input_casts,
         result_dtypes,
@@ -678,6 +796,7 @@ def run(
             block,
             ept,
             vec_bits,
+            load,
             out,
             with_index,
             input_casts,
@@ -691,7 +810,10 @@ def run(
         else [torch.empty(plan.shape, device=dev, dtype=d) for d in plan.out_dtypes]
     )
     storage_outs = [o.view(torch.int8) if o.dtype is torch.bool else o for o in outs]
-    if plan.rowgap is not None:
+    if plan.tma is not None:
+        cin = [_L.read_only(t.as_strided(*v)) for t, v in zip(inputs, plan.tma.inputs)]
+        cout = [storage_outs[0].as_strided(*plan.tma.output)]
+    elif plan.rowgap is not None:
         rows, run, row_step = plan.rowgap
         cin = [
             _L.read_only(_view_rowvec(t, rows, run, row_step, plan.V)) for t in inputs
