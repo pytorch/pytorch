@@ -28,7 +28,7 @@ from torch.onnx._internal.exporter import (
 from torch.onnx._internal.exporter._errors import DynamicShapeSpecializationWarning
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, PythonMod
 
 
 class SampleModel(torch.nn.Module):
@@ -788,6 +788,45 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
                 )
                 self.assertIn("To fix:", messages[0])
 
+    def test_odd_branch_divisibility_warns(self):
+        with torch.library._scoped_library("specialization_test", "FRAGMENT") as lib:
+            lib.define("parity(Tensor x) -> Tensor", tags=torch.Tag.pt2_compliant_tag)
+            lib.impl("parity", lambda x: x + 1, "CPU")
+            torch.library.register_fake(
+                "specialization_test::parity", lambda x: torch.empty_like(x), lib=lib
+            )
+            target = torch.ops.specialization_test.parity.default
+
+            def decompose(x):
+                return x * 2 if x.shape[0] % 2 == 0 else x + 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return target(x)
+
+            ep = torch.export.export(
+                Model(),
+                (torch.randn(5, 2),),
+                dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
+                strict=False,
+            )
+            create_table = _fx_passes._decomp.create_onnx_friendly_decomposition_table
+            with (
+                mock.patch.object(
+                    _fx_passes._decomp,
+                    "create_onnx_friendly_decomposition_table",
+                    side_effect=lambda ops: create_table(ops) | {target: decompose},
+                ),
+                self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+            ):
+                torch.onnx.export(ep, verbose=False)
+        message = str(caught.warning)
+        self.assertRegex(
+            message, r"specialization_test\.parity\.default: Ne\(Mod\(s\d+, 2\), 0\)"
+        )
+        self.assertIn("may give wrong results", message)
+        self.assertNotIn("will give wrong results", message)
+
     def test_attribution_preserves_decomposed_graph(self):
         class ResnetBlock(torch.nn.Module):
             def __init__(self):
@@ -1110,7 +1149,10 @@ class TestSpecializationHelpers(common_utils.TestCase):
             ("Eq(6, s)", "pin"),
             ("Eq(FloorDiv(s, 2), 3)", "pin"),
             ("Eq(s, t)", "relation"),
+            ("Ne(Mod(s, 2), 0)", "divisibility"),
+            ("Ne(PythonMod(s, 2), 0)", "divisibility"),
             ("Ne(s, 1)", "bound"),
+            ("Ne(s, 0)", "bound"),
             ("s < 6", "bound"),
             ("s <= 6", "bound"),
             ("Or(Eq(s, 6), Eq(s, 8))", "bound"),
@@ -1121,7 +1163,8 @@ class TestSpecializationHelpers(common_utils.TestCase):
         ],
     )
     def test_constraint_classification(self, expression, expected):
-        expr = sympy.sympify(expression, locals={"FloorDiv": FloorDiv})
+        names = {"FloorDiv": FloorDiv, "PythonMod": PythonMod}
+        expr = sympy.sympify(expression, locals=names)
         self.assertEqual(_specialization._constraint_kind(expr), expected)
 
     def test_attribution_records_outermost_call_even_on_error(self):

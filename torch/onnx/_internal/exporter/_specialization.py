@@ -180,11 +180,13 @@ def _constraint_kind(expr: sympy.Expr) -> str:
         return max(
             map(_constraint_kind, expr.args), key=_CONSTRAINT_PRIORITY.__getitem__
         )
-    if isinstance(expr, sympy.Eq):
+    if isinstance(expr, (sympy.Eq, sympy.Ne)):
         lhs, rhs = expr.args
         mod_types = (sympy.Mod, Mod, PythonMod)
         if isinstance(lhs, mod_types) or isinstance(rhs, mod_types):
             return "divisibility"
+        if isinstance(expr, sympy.Ne):
+            return "bound"
         if (lhs.is_number and rhs.free_symbols) or (rhs.is_number and lhs.free_symbols):
             return "pin"
         if lhs.free_symbols and rhs.free_symbols:
