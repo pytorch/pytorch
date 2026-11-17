@@ -241,7 +241,7 @@ def _current_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
     if context := torch._guards.TracingContext.try_get():
         fake_mode = context.fake_mode
     if fake_mode is not None:
-        return torch._guards.require_python_fake_mode(fake_mode)
+        return fake_mode
 
     shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
     return FakeTensorMode(shape_env=shape_env)
