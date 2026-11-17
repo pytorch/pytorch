@@ -1898,7 +1898,7 @@ def aot_export_joint_simple(
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)
         if fake_mode is None:
-            fake_mode = FakeTensorMode(_force_python=True)
+            fake_mode = FakeTensorMode()
         with fake_mode:
             fw_module(*args)
     return fx_g

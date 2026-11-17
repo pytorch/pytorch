@@ -633,7 +633,7 @@ def get_kernel_by_name_via_args(
         # A scheduler-fused epilogue may change D's dtype. Candidate generation
         # selected the base GEMM using its original output dtype, so recover
         # that metadata without allocating device memory.
-        with FakeTensorMode(_force_python=True):
+        with FakeTensorMode():
             query_out = torch.empty_strided(
                 tuple(query_out.shape),
                 tuple(query_out.stride),
