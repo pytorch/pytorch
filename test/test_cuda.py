@@ -16449,6 +16449,480 @@ class TestCudaArchList(TestCase):
             self.assertEqual(torch.cuda.get_arch_list(), expected)
 
 
+# Once enabled, graph allocators stay enabled for the rest of the process:
+# their tests run in subprocesses (TestGraphAllocatorsSubprocess).
+_GRAPH_ALLOCATORS_TEST = os.environ.get("_PYTORCH_TEST_GRAPH_ALLOCATORS") == "1"
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+@unittest.skipIf(TEST_WITH_ROCM, "graph allocators are not tested on ROCm")
+@unittest.skipUnless(
+    _GRAPH_ALLOCATORS_TEST, "run in a subprocess by TestGraphAllocatorsSubprocess"
+)
+class TestGraphAllocators(TestCase):
+    class Bump:
+        # A bump allocator over a caching-allocator tensor. Its first
+        # allocation is the tensor's own address (the start of a live caching
+        # allocator block); it never reuses memory and logs every call.
+        def __init__(self, nbytes=64 << 20):
+            self.buffer = torch.empty(nbytes, dtype=torch.uint8, device="cuda")
+            self.base = self.buffer.data_ptr()
+            self.top = self.base
+            self.end = self.base + nbytes
+            self.live = {}
+            self.events = []
+            # through a weak reference: the allocator, which C++ owns, must not
+            # keep the buffer alive in a cycle the garbage collector can't see
+            # (a tensor that outlives the Bump frees nothing)
+            ref = weakref.ref(self)
+            self.allocator = torch.cuda.memory._CUDAAllocator(
+                torch._C._cuda_createPythonAllocator(
+                    lambda *args: ref()._alloc(*args),
+                    lambda *args: (bump := ref()) is not None and bump._free(*args),
+                )
+            )
+
+        def _alloc(self, size, device, stream):
+            ptr = self.top
+            self.top = (ptr + size + 255) // 256 * 256
+            if self.top > self.end:
+                return None
+            self.live[ptr] = size
+            self.events.append(("alloc", ptr, size))
+            return ptr
+
+        def _free(self, ptr, size, device, stream):
+            self.events.append(("free", ptr, size, self.live.pop(ptr, None) == size))
+
+        def owns(self, ptr):
+            if isinstance(ptr, torch.Tensor):
+                ptr = ptr.data_ptr()
+            return self.base <= ptr < self.end
+
+        def frees(self):
+            return [(p, s) for e, p, s, *_ in self.events if e == "free"]
+
+    @staticmethod
+    def _python_allocator(alloc_fn, free_fn=lambda *args: None):
+        return torch.cuda.memory._CUDAAllocator(
+            torch._C._cuda_createPythonAllocator(alloc_fn, free_fn)
+        )
+
+    def test_capture_routes_tensors_exact_sizes_frees_in_order(self):
+        bump = self.Bump()
+        x = torch.randn(64, 64, device="cuda")
+        w = torch.randn(64, 64, device="cuda")
+        step = lambda: torch.relu(x + w).sum(0)  # noqa: E731
+        eager = step()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, allocator=bump.allocator):
+            out = step()
+        self.assertTrue(bump.owns(out))
+        after = torch.empty(1024, device="cuda")
+        self.assertFalse(bump.owns(after))
+
+        # two temporaries (add, relu) and the output, each at its exact size,
+        # the temporaries freed in order as soon as they died in the capture
+        allocs = [(e[1], e[2]) for e in bump.events if e[0] == "alloc"]
+        self.assertEqual([s for _, s in allocs], [64 * 64 * 4, 64 * 64 * 4, 64 * 4])
+        self.assertEqual(allocs[0][0], bump.base)
+        self.assertEqual(bump.frees(), allocs[:2])
+        self.assertEqual(bump.live, {out.data_ptr(): out.untyped_storage().nbytes()})
+
+        for _ in range(3):
+            g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(out, eager)
+        # the output is freed to the allocator when it dies, after the capture
+        ptr = out.data_ptr()
+        del out
+        self.assertEqual(bump.events[-1], ("free", ptr, 64 * 4, True))
+        self.assertEqual(bump.live, {})
+        self.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
+
+    def test_pools_other_threads_and_devices_stay_native(self):
+        bump = self.Bump()
+        x = torch.ones(1024, device="cuda")
+        pool_before = torch.cuda.MemPool()
+        if TEST_MULTIGPU:
+            # a cached block for the in-capture allocation on device 1: a
+            # cudaMalloc on another device from the capturing thread is not
+            # allowed during the capture
+            with torch.cuda.device(1):
+                warm = torch.empty(1024, device="cuda")
+        allocated_before = torch.cuda.memory_allocated()
+        other = {}
+
+        def worker():
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                other["thread"] = x + 4
+            stream.synchronize()
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            g, capture_error_mode="thread_local", allocator=bump.allocator
+        ):
+            with torch.cuda.use_mem_pool(pool_before):
+                a = x + 1
+            pool_inside = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool_inside):
+                b = x + 2
+            c = torch.empty(16 << 20, dtype=torch.uint8, device="cuda")
+            c.fill_(3)
+            t = threading.Thread(target=worker)
+            t.start()
+            t.join()
+            if TEST_MULTIGPU:
+                del warm
+                with torch.cuda.device(1):
+                    other["device"] = torch.empty(1024, device="cuda")
+
+        def in_pool(tensor, pool):
+            return any(
+                s["address"] <= tensor.data_ptr() < s["address"] + s["total_size"]
+                for s in torch.cuda.memory.memory_snapshot(pool.id)
+            )
+
+        self.assertTrue(in_pool(a, pool_before))
+        self.assertTrue(in_pool(b, pool_inside))
+        self.assertTrue(bump.owns(c))
+        for tensor in other.values():
+            self.assertFalse(bump.owns(tensor))
+        # the allocator's memory is not in the statistics
+        self.assertLess(torch.cuda.memory_allocated() - allocated_before, 16 << 20)
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(a, x + 1)
+        self.assertEqual(b, x + 2)
+        self.assertEqual(c, torch.full_like(c, 3))
+
+    def test_raw_allocations_stay_native(self):
+        # raw allocations (caching_allocator_alloc, Thrust, workspaces) inside
+        # the capture go to the capture's own pool, as without an allocator
+        bump = self.Bump()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, allocator=bump.allocator):
+            p = torch.cuda.caching_allocator_alloc(1000)
+            self.assertFalse(bump.owns(p))
+            torch.cuda.caching_allocator_delete(p)
+        self.assertEqual(bump.live, {})
+
+    def test_resize_storage(self):
+        # FSDP2-style: a storage created eagerly and resized inside the capture
+        bump = self.Bump()
+        param = torch.empty(0, device="cuda").untyped_storage()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, allocator=bump.allocator):
+            param.resize_(4096)
+            self.assertTrue(bump.owns(param.data_ptr()))
+            self.assertEqual(bump.events[-1], ("alloc", param.data_ptr(), 4096))
+            param.resize_(0)
+            self.assertEqual(bump.events[-1][:2], ("free", bump.base))
+            param.resize_(2048)
+            self.assertTrue(bump.owns(param.data_ptr()))
+        # after the capture, the storage re-allocates from the caching
+        # allocator and its old memory goes back to the allocator
+        ptr = param.data_ptr()
+        param.resize_(8192)
+        self.assertFalse(bump.owns(param.data_ptr()))
+        self.assertEqual(bump.events[-1], ("free", ptr, 2048, True))
+        self.assertEqual(bump.live, {})
+
+    def test_multiple_graphs_and_shared_pools(self):
+        bump = self.Bump()
+        other = self.Bump(1 << 20)
+        x = torch.ones(1024, device="cuda")
+        native = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(native):
+            y0 = x * 2
+        handle = torch.cuda.graph_pool_handle()
+        graphs = [torch.cuda.CUDAGraph() for _ in range(6)]
+        with torch.cuda.graph(graphs[0], allocator=bump.allocator):
+            y1 = x + 1
+        with torch.cuda.graph(graphs[1], allocator=other.allocator):
+            y2 = x + 2
+        # graphs sharing a pool: each capture uses its own allocator, or none
+        with torch.cuda.graph(graphs[2], pool=handle, allocator=bump.allocator):
+            y3 = x + 3
+        with torch.cuda.graph(graphs[3], pool=handle):
+            y4 = x + 4
+        with torch.cuda.graph(graphs[4], pool=handle, allocator=bump.allocator):
+            y5 = x + 5
+        with torch.cuda.graph(graphs[5], pool=native.pool(), allocator=bump.allocator):
+            y6 = x + 6
+        for y in (y1, y3, y5, y6):
+            self.assertTrue(bump.owns(y))
+        self.assertTrue(other.owns(y2))
+        for y in (y0, y4):
+            self.assertFalse(bump.owns(y) or other.owns(y))
+        for g in graphs:
+            g.replay()
+        native.replay()
+        torch.cuda.synchronize()
+        for i, y in enumerate((y1, y2, y3, y4, y5, y6), 1):
+            self.assertEqual(y, x + i)
+        self.assertEqual(y0, x * 2)
+        live = {y.data_ptr(): y.untyped_storage().nbytes() for y in (y1, y3, y5, y6)}
+        self.assertEqual(bump.live, live)
+        del y, y1, y2, y3, y5, y6, graphs
+        self.assertEqual(bump.live, {})
+        self.assertEqual(other.live, {})
+
+    def test_errors(self):
+        bump = self.Bump()
+        with self.assertRaises(torch.OutOfMemoryError):
+            with torch.cuda.graph(
+                torch.cuda.CUDAGraph(),
+                allocator=self._python_allocator(lambda *a: None),
+            ):
+                torch.empty(1024, device="cuda")
+        misaligned = self._python_allocator(lambda size, d, s: bump.base + 128)
+        with self.assertRaisesRegex(RuntimeError, "not aligned to 256 bytes"):
+            with torch.cuda.graph(torch.cuda.CUDAGraph(), allocator=misaligned):
+                torch.empty(1024, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, allocator=bump.allocator):
+            t = torch.empty(1024, device="cuda")
+        # goes to the allocator (a Python allocator ignores it)
+        t.record_stream(torch.cuda.Stream())
+        del t
+        self.assertEqual(bump.live, {})
+
+        # a capture_begin that fails leaves no allocator on the pool
+        x = torch.ones(1024, device="cuda")
+        pool = torch.cuda.MemPool()
+        failed = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(torch.cuda.Stream()):
+            with torch.cuda.use_mem_pool(pool):
+                with self.assertRaisesRegex(RuntimeError, "already recording"):
+                    failed.capture_begin(pool=pool.id, allocator=bump.allocator)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, pool=pool.id):
+            y = x + 1
+        self.assertFalse(bump.owns(y))
+        with torch.cuda.graph(
+            torch.cuda.CUDAGraph(), pool=pool.id, allocator=bump.allocator
+        ):
+            z = x + 2
+        self.assertTrue(bump.owns(z))
+        failed.reset()
+        del z
+        self.assertEqual(bump.live, {})
+        with self.assertRaisesRegex(RuntimeError, "change_current_allocator"):
+            torch.cuda.memory.change_current_allocator(bump.allocator)
+        self.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
+
+    def test_free_while_an_exception_propagates(self):
+        # a tensor of the allocator freed while a Python exception propagates
+        # (a temporary of the expression that raised): the free reaches the
+        # allocator, and the exception raised is the original one
+        bump = self.Bump()
+        x = torch.ones(1024, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "must match the size of tensor b"):
+            with torch.cuda.graph(torch.cuda.CUDAGraph(), allocator=bump.allocator):
+                (x * 2) + torch.ones(3, device="cuda")
+        self.assertEqual(bump.live, {})
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+@unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
+class TestMemoryPlanningUtils(TestCase):
+    # the CUDA driver and graph helpers of torch.cuda.memory_planning
+
+    @staticmethod
+    def _tensor(ptr, nbytes):
+        class Memory:
+            __cuda_array_interface__ = {
+                "shape": (nbytes // 4,),
+                "typestr": "<i4",
+                "data": (ptr, False),
+                "version": 3,
+            }
+
+        return torch.as_tensor(Memory(), device="cuda")
+
+    def test_virtual_memory(self):
+        # one chunk of memory mapped at two addresses: what is written through
+        # one is read through the other
+        C = torch._C
+        device = torch.cuda.current_device()
+        n = C._cuda_vmmGranularity(device)
+        self.assertGreater(n, 0)
+        handle = C._cuda_vmmCreate(n, device)
+        base = C._cuda_vmmAddressReserve(2 * n)
+        for ptr in (base, base + n):
+            C._cuda_vmmMap(ptr, n, handle)
+        C._cuda_vmmSetAccess(base, 2 * n, device)
+        a, b = self._tensor(base, n), self._tensor(base + n, n)
+        a.fill_(7)
+        self.assertTrue(b.eq(7).all().item())
+        del a, b
+        torch.cuda.synchronize()
+        for ptr in (base, base + n):
+            C._cuda_vmmUnmap(ptr, n)
+        C._cuda_vmmAddressFree(base, 2 * n)
+        C._cuda_vmmRelease(handle)
+
+    def test_capture_info_and_topology(self):
+        # the frontier read during a capture names nodes of the captured graph
+        C = torch._C
+        x = torch.ones(16, device="cuda")
+        s = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g, stream=s):
+            y = x + 1
+            graph, frontier = C._cuda_streamCaptureInfo(s.cuda_stream)
+            y.mul_(2)
+        self.assertEqual(C._cuda_streamCaptureInfo(s.cuda_stream), (0, []))
+        self.assertEqual(graph, g.raw_cuda_graph())
+        nodes, edges = C._cuda_graphTopology(graph)
+        self.assertEqual(C._cuda_graphSize(graph), (2, 1))
+        self.assertEqual(len(frontier), 1)
+        (mul,) = set(nodes) - set(frontier)
+        self.assertEqual(edges, [(frontier[0], mul)])
+        self.assertEqual(C._cuda_streamDevice(s.cuda_stream), torch.cuda.current_device())
+
+
+@unittest.skipIf(not TEST_CUDA or _GRAPH_ALLOCATORS_TEST, "runs subprocesses")
+@unittest.skipIf(TEST_WITH_ROCM, "graph allocators are not tested on ROCm")
+class TestGraphAllocatorsSubprocess(TestCase):
+    @staticmethod
+    def _run(code, alloc_conf=None, env=None):
+        env = {**os.environ, **(env or {})}
+        env.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+        env.pop("PYTORCH_ALLOC_CONF", None)
+        if alloc_conf is not None:
+            env["PYTORCH_CUDA_ALLOC_CONF"] = alloc_conf
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+
+    def test_pass_through(self):
+        # on its own, the layer forwards every call to the caching allocator
+        code = """
+import torch
+old = torch.empty(0, device="cuda").untyped_storage()  # created before the layer
+x = torch.ones(1024, device="cuda")
+torch.cuda.memory._enable_graph_allocators()
+torch.cuda.memory._enable_graph_allocators()  # again: a no-op
+print("backend", torch.cuda.memory.get_allocator_backend())
+base = torch.cuda.memory_allocated()
+y = x + 1
+p = torch.cuda.caching_allocator_alloc(1024)
+old.resize_(4096)
+print("allocated", torch.cuda.memory_allocated() - base)
+torch.cuda.caching_allocator_delete(p)
+del y
+old.resize_(0)
+print("freed", torch.cuda.memory_allocated() - base)
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g):
+    z = x * 2
+g.replay()
+torch.cuda.synchronize()
+print("z", z.sum().item())
+try:
+    torch.cuda.memory.change_current_allocator(
+        torch.cuda.memory._get_current_allocator())
+except RuntimeError as e:
+    print("ERROR", e)
+"""
+        proc = self._run(code)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("backend native", proc.stdout)
+        self.assertIn(f"allocated {4096 + 1024 + 4096}", proc.stdout)
+        self.assertIn("freed 0", proc.stdout)
+        self.assertIn("z 2048.0", proc.stdout)
+        self.assertIn(
+            "cannot be used once CUDA graph allocators are enabled", proc.stdout
+        )
+        proc = self._run(
+            "import torch; torch.cuda.memory._enable_graph_allocators()",
+            "backend:cudaMallocAsync",
+        )
+        self.assertIn("requires the native CUDA caching allocator", proc.stderr)
+
+    def test_graph_allocators(self):
+        # TestGraphAllocators with graph allocators enabled at the start of the
+        # process (with and without expandable segments), and enabled by the
+        # first capture given an allocator, after CUDA is initialized
+        module = os.path.splitext(os.path.basename(__file__))[0]
+        code = (
+            "import sys, unittest; "
+            "sys.modules['torchvision'] = None; "
+            "import torch; "
+            "ENABLE; "
+            f"suite = unittest.defaultTestLoader.loadTestsFromName('{module}.TestGraphAllocators'); "
+            "result = unittest.TextTestRunner(verbosity=2).run(suite); "
+            "raise SystemExit(0 if result.wasSuccessful() and result.testsRun else 1)"
+        )
+        env = {"_PYTORCH_TEST_GRAPH_ALLOCATORS": "1"}
+        at_start = code.replace("ENABLE", "torch.cuda.memory._enable_graph_allocators()")
+        lazily = code.replace("ENABLE", "torch.ones(1, device='cuda')")
+        for run, alloc_conf in (
+            (at_start, None),
+            (at_start, "expandable_segments:True"),
+            (lazily, None),
+        ):
+            proc = self._run(run, alloc_conf, env)
+            self.assertEqual(proc.returncode, 0, msg=f"{alloc_conf}\n{proc.stderr}")
+
+    def test_enabled_mid_process(self):
+        # enabled by the first capture given an allocator, after an eager
+        # warm-up: a storage created before is resized into the allocator
+        code = """
+import torch
+log = []
+def alloc(size, device, stream):
+    log.append(size)
+    return buffer.data_ptr() + 256 * len(log) * 64
+buffer = torch.empty(1 << 20, dtype=torch.uint8, device="cuda")
+allocator = torch.cuda.memory._CUDAAllocator(
+    torch._C._cuda_createPythonAllocator(alloc, lambda *a: None))
+param = torch.empty(0, device="cuda").untyped_storage()
+x = torch.ones(16, device="cuda")
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g, allocator=allocator):
+    param.resize_(4096)
+    y = x + 1
+print("log", log)
+torch.cuda.memory._enable_graph_allocators()  # again: a no-op
+g.replay()
+torch.cuda.synchronize()
+print("y", y.sum().item())
+"""
+        out = self._run(code).stdout
+        self.assertIn("log [4096, 64]", out)
+        self.assertIn("y 32.0", out)
+
+    def test_requires_native_allocator(self):
+        code = """
+import torch
+allocator = torch.cuda.memory._CUDAAllocator(
+    torch._C._cuda_createPythonAllocator(lambda *a: None, lambda *a: None))
+for enable in (
+    torch.cuda.memory._enable_graph_allocators,
+    lambda: torch.cuda.CUDAGraph().capture_begin(allocator=allocator),
+):
+    try:
+        enable()
+    except RuntimeError as e:
+        print("ERROR", e)
+print("capturing", torch.cuda.is_current_stream_capturing())
+"""
+        out = self._run(code, "backend:cudaMallocAsync").stdout
+        self.assertEqual(out.count("requires the native CUDA caching allocator"), 2)
+        self.assertIn("capturing False", out)
+
+
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaAllocator)
 instantiate_parametrized_tests(TestMemPool)
