@@ -947,7 +947,7 @@ if HAS_CUDA_AND_TRITON:
             compiled = torch.compile(f)
             x = torch.randn(8, device="cuda")
             with (
-                _force_partition_plan(GraphPartitionPlan.unsplit()),
+                _force_partition_plan(GraphPartitionPlan.no_partition()),
                 mock.patch.object(
                     _unstable_customized_partition_wrapper,
                     "wrapper",
