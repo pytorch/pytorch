@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 def _supported(device: torch.device) -> bool:
-    # CPU, or this process's accelerator (CUDA / ROCm, XPU, ...); NIXL rejects device memory it cannot register.
+    # CPU, or this process's accelerator.
     if device.type == "cpu":
         return True
     accelerator = torch.accelerator.current_accelerator()
@@ -56,6 +56,9 @@ class NIXLTransport(Transport):
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
+
+    Tensors must be on CPU or the current accelerator; which accelerators work
+    depends on the NIXL build.
     """
 
     def __init__(
