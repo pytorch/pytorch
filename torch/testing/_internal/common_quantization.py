@@ -44,7 +44,7 @@ from torch.ao.quantization.quantization_mappings import (
 )
 
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import add_skip_condition, TEST_WITH_ROCM, TestCase
 
 try:
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
@@ -356,6 +356,9 @@ def skipIfNoFBGEMM(fn):
         else:
             fn(*args, **kwargs)
 
+    add_skip_condition(
+        wrapper, lambda cls: "fbgemm" not in torch.backends.quantized.supported_engines, reason
+    )
     return wrapper
 
 

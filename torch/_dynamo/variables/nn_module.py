@@ -61,7 +61,6 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
-    enumerate_items_with_dict_position,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -85,8 +84,6 @@ from .user_defined import can_guard_class_function_code, UserDefinedObjectVariab
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-
-    from .constant import ConstantVariable
 
 
 def initialize_lazy_module(
@@ -372,16 +369,6 @@ class NNModuleVariable(VariableTracker):
                 )
             )
         return result
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        mod = tx.output.get_submodule(self.module_key)
-        result = hasattr(mod, name)
-        install_guard(
-            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
-        )
-        return VariableTracker.build(tx, result)
 
     def is_training(self, tx: "InstructionTranslatorBase") -> bool:
         mod = tx.output.get_submodule(self.module_key)
@@ -1594,6 +1581,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import _dict_input_snapshot
+
         if (
             tx.output.side_effects.is_attribute_mutation(self)
             and name
@@ -1681,8 +1670,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(hooks_dict)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(hooks_dict)
             )
 
             # noqa: RVT001
