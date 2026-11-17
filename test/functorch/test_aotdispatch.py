@@ -10,6 +10,7 @@ import copy
 import gc
 import io
 import itertools
+import logging
 import math
 import operator
 import unittest
@@ -73,6 +74,7 @@ from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._inductor.utils import fresh_cache
+from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
@@ -6672,7 +6674,7 @@ graph():
             ) as cm:
                 aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
         self.assertNotIn("ViewAndMutationMeta", str(cm.exception))
-        self.assertIn("TORCH_TRACE", str(cm.exception))
+        self.assertIn("rerun with TORCH_TRACE", str(cm.exception))
         (call,) = trace_mock.call_args_list
         self.assertEqual(call.args, ("artifact",))
         self.assertEqual(
@@ -6680,6 +6682,16 @@ graph():
             "aot_export_requires_grad_mutation_fw_metadata",
         )
         self.assertIn("ViewAndMutationMeta", call.kwargs["payload_fn"]())
+
+        with (
+            patch("torch._functorch.aot_autograd.trace_structured"),
+            patch.object(trace_log, "handlers", [logging.NullHandler()]),
+            self.assertRaisesRegex(
+                RuntimeError, "is logged to the structured trace"
+            ) as cm,
+        ):
+            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
+        self.assertNotIn("rerun with TORCH_TRACE", str(cm.exception))
 
         gm, _ = aot_export_module(mod, [inp], trace_joint=False)
         self.assertExpectedInline(

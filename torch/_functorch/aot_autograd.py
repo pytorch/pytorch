@@ -29,6 +29,7 @@ from torch._dynamo.utils import (
 from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 from torch._logging import trace_structured
+from torch._logging._internal import trace_log
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
 from torch._subclasses import FakeTensorMode
@@ -490,10 +491,9 @@ def _log_export_error_fw_metadata(
         payload_fn=lambda: dataclass_repr(fw_metadata),
         expect_trace_id=False,
     )
-    return (
-        f"The full fw_metadata is logged to the structured trace as `{artifact_name}`.\n"
-        'To collect it, rerun with TORCH_TRACE="/tmp/tracedir" and attach the tlparse output to your issue.'
-    )
+    if trace_log.handlers:
+        return f"The full fw_metadata is logged to the structured trace as `{artifact_name}`; attach the tlparse output to your issue."
+    return f'To collect the full fw_metadata, rerun with TORCH_TRACE="/tmp/tracedir" and attach the tlparse output (artifact `{artifact_name}`) to your issue.'
 
 
 def create_aot_state(
