@@ -665,14 +665,6 @@ class DTensorTestMixin:
             return device_type
         return _get_device_type(self.world_size)
 
-    @property
-    def device_type(self) -> str:
-        # Temporary alias so not-yet-migrated test readers keep working; it
-        # mirrors the pre-migration derivation and is removed once
-        # `device_type` is owned only by the device base classes from
-        # instantiate_device_type_tests.
-        return _get_device_type(self.world_size)
-
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self._device_type, (self.world_size,))
 
