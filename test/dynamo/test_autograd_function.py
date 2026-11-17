@@ -2301,6 +2301,69 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(res3.requires_grad)
         res1.sum().backward()
 
+    def test_mark_single_output_non_differentiable(self):
+        # https://github.com/pytorch/pytorch/issues/205009
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2
+                ctx.mark_non_differentiable(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        ref = MyFunction.apply(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
+        self.assertFalse(ref.requires_grad)
+        self.assertFalse(res.requires_grad)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIn(
+            "non_differentiable_idx = [0]",
+            cnt.graphs[0].print_readable(print_output=False),
+        )
+
+    def test_mark_non_differentiable_in_backward_single_output(self):
+        # https://github.com/pytorch/pytorch/issues/205009
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                out = grad * 2
+                ctx.mark_non_differentiable(out)
+                return out
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x_ref = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        x_res = x_ref.detach().clone().requires_grad_(True)
+        ref = MyFunction.apply(x_ref)
+        res = fn(x_res)
+        self.assertEqual(ref, res)
+        self.assertTrue(ref.requires_grad)
+        self.assertTrue(res.requires_grad)
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x_ref.grad, x_res.grad)
+
     def test_default_values(self):
         from torch.autograd import Function
 
