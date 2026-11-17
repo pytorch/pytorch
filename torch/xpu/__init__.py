@@ -142,7 +142,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
     The populated ``_cached_zes_device_infos`` list is indexed by Level Zero
-    Sysman device ordinal (dGPU first); callers should match entries by UUID.
+    Sysman logical index (dGPU first); callers should match entries by UUID.
 
     Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
     dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
