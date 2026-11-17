@@ -1,6 +1,7 @@
 # Owner(s): ["module: __torch_dispatch__"]
 # ruff: noqa: F841
 
+import contextlib
 import gc
 import pickle
 import sys
@@ -8,14 +9,15 @@ import tempfile
 import unittest
 import weakref
 from copy import deepcopy
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
 from torch import SymInt
 from torch._C import DispatchKey, DispatchKeySet
 from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
     FakeTensorMode,
+    maybe_get_fake_mode,
     unset_fake_temporarily,
 )
 from torch.cuda.jiterator import _create_jit_fn
@@ -29,7 +31,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
-    fake_tensor_modes,
     first_sample,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -38,6 +39,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_WITH_ROCM,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -1923,9 +1925,23 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
 
-    @parametrize("mode_type", ["infra", "python_fake", "cpp_fake"])
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
-    def test_mode_detection(self, mode_type):
+    @parametrize(
+        "mode_type,dispatch",
+        [
+            ("infra", "direct"),
+            ("fake", "direct"),
+            ("fake", "python_cia"),
+            ("fake", "native_cia"),
+        ],
+    )
+    @parametrize("active", [False, True])
+    @parametrize("raises", [False, True])
+    def test_mode_detection(self, mode_type, dispatch, active, raises):
+        from torch.utils._python_dispatch import _cpp_fake_mode_tls
+
+        if dispatch != "direct" and TEST_WITH_TORCHDYNAMO:
+            self.skipTest("tests dispatch callbacks without Dynamo")
+
         class InfraMode(TorchDispatchMode):
             @classmethod
             def is_infra_mode(cls):
@@ -1936,10 +1952,26 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
         mode_cls = {
             "infra": InfraMode,
-            "python_fake": FakeTensorMode,
-            "cpp_fake": CppFakeTensorMode,
+            "fake": FakeTensorMode,
         }[mode_type]
-        with mode_cls() as mode:
+        mode = mode_cls()
+        seen = []
+
+        def state():
+            return (
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
+                torch._C._dispatch_tls_is_dispatch_key_included(DispatchKey.Fake),
+                list(_cpp_fake_mode_tls.stack),
+                torch._C._only_lift_cpu_tensors(),
+                is_in_torch_dispatch_mode(),
+            )
+
+        def check_mode(t=None):
+            seen.append(True)
+            if t is not None:
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+                self.assertFalse(t.is_meta)
+                self.assertTrue(torch._C._only_lift_cpu_tensors())
             self.assertTrue(is_in_torch_dispatch_mode())
             self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
             with mode:
@@ -1962,21 +1994,53 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.assertTrue(is_in_torch_dispatch_mode())
                 self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
             with self.assertRaisesRegex(ValueError, "nested mode"):
-                with mode_cls():
+                with mode_cls() as inner:
+                    if t is not None:
+                        self.assertIs(torch._guards.active_fake_mode(), inner)
                     raise ValueError("nested mode")
             self.assertTrue(is_in_torch_dispatch_mode())
+            if t is not None:
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+            if raises:
+                raise ValueError("outer mode")
+            if t is not None:
+                return t.sin()
 
+        before = state()
+        with (
+            patch.object(type(mode), "avoid_device_init", True)
+            if mode_type != "infra"
+            else contextlib.nullcontext(),
+            _scoped_library("_test_mode_detection", "DEF") as lib,
+            torch.inference_mode(),
+        ):
+            call, args = check_mode, ()
+            if dispatch != "direct":
+                args = (mode.from_tensor(torch.randn(2, 3)),)
+                lib.define("probe(Tensor x) -> Tensor")
+                call = torch.ops._test_mode_detection.probe.default
+                if dispatch == "python_cia":
+                    call.py_impl(DispatchKey.CompositeImplicitAutograd)(check_mode)
+                else:
+                    lib.impl("probe", check_mode, "CompositeImplicitAutograd")
+            with mode if active or dispatch == "direct" else contextlib.nullcontext():
+                installed = state()
+                if raises:
+                    with self.assertRaisesRegex(ValueError, "outer mode"):
+                        call(*args)
+                else:
+                    result = call(*args)
+                    if dispatch != "direct":
+                        self.assertIs(maybe_get_fake_mode(result), mode)
+                self.assertEqual(state(), installed)
+
+        self.assertEqual(seen, [True])
+        self.assertEqual(state(), before)
         self.assertFalse(is_in_torch_dispatch_mode())
         self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
-        with self.assertRaisesRegex(ValueError, "outer mode"):
-            with mode:
-                raise ValueError("outer mode")
-        self.assertFalse(is_in_torch_dispatch_mode())
 
-    @fake_tensor_modes
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
-    def test_mode_detection_without_enter(self, mode_cls):
-        mode = mode_cls()
+    def test_mode_detection_without_enter(self):
+        mode = FakeTensorMode()
         fake_key = torch._C._TorchDispatchModeKey.FAKE
         self.assertFalse(is_in_torch_dispatch_mode())
         torch._C._set_dispatch_mode(mode)
@@ -1996,15 +2060,13 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(is_in_torch_dispatch_mode())
 
     @skipIfTorchDynamo("uses torch.compile")
-    @fake_tensor_modes
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
-    def test_mode_detection_compiles(self, mode_cls):
+    def test_mode_detection_compiles(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f():
             return is_in_torch_dispatch_mode()
 
         self.assertFalse(f())
-        with mode_cls():
+        with FakeTensorMode():
             self.assertTrue(f())
             with torch._dynamo.config.patch(error_on_recompile=True):
                 self.assertTrue(f())
