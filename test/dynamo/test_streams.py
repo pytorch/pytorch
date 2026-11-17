@@ -26,6 +26,7 @@ from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -4312,6 +4313,8 @@ class TestPrivateUse1StreamHandler(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1.0))
         self.assertIn("bad device argument", str(ctx.exception))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

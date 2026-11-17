@@ -32,7 +32,14 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    run_tests,
+    TEST_HPU,
+    TEST_XPU,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -1323,6 +1330,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(dp_cp_mesh.get_group(), mesh_3d.get_group(mesh_dim="dp_cp"))
 
 
+@instantiate_parametrized_tests
 class TestMeshEnv(DTensorTestBase):
     @property
     def world_size(self):
@@ -1398,6 +1406,7 @@ class TestMeshEnv(DTensorTestBase):
             all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
         )
 
+    @fake_tensor_test()
     @with_comms
     def test_mesh_slice_fake_tensor_mode(self):
         mesh_shape = (2, self.world_size // 2)

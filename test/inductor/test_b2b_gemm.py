@@ -8,6 +8,7 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import recover_orig_fp32_precision, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -355,6 +356,8 @@ class B2BGEMMTest(TestCase):
         # flaky test assertion: disabled
         # self.assertTrue(average_speedup > 1)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_GPU:

@@ -11,6 +11,7 @@ from torch._inductor import config
 from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 @unittest.skipIf(not torch.distributed.is_available(), "requires distributed support")
@@ -278,6 +279,8 @@ class TestDecomposeShardDimAllToAll(TestCase):
         self.assertFalse(calls[1][0].requires_grad)
         self.assertEqual(x.grad, torch.full_like(x, 7.0))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

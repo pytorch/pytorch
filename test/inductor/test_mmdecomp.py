@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -580,6 +581,8 @@ device_types = ("cpu", GPU_TYPE)
 instantiate_device_type_tests(
     TestDecomp, globals(), only_for=device_types, allow_xpu=True
 )
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     # We don't support torch.compile() on Windows

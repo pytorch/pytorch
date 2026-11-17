@@ -15,6 +15,7 @@ from torch._inductor.codegen.memory_planning import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import align
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.utils._sympy.functions import Max
 
 
@@ -114,6 +115,8 @@ class PoolAlignmentTest(TestCase):
             [0, 0, prefix, prefix + align(c), 0],
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

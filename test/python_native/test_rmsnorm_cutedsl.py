@@ -9,6 +9,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -35,6 +36,7 @@ _TOLERANCES = {torch.float16: 3e-3, torch.bfloat16: 3e-2, torch.float32: 2e-4}
 @skipIfTorchDynamo("host-side capability predicates need no dynamo compilation")
 @instantiate_parametrized_tests
 class TestRmsNormCapability(TestCase):
+    @fake_tensor_test()
     @parametrize("kind", ["meta", "fake", "functional_fake"])
     def test_traced_inputs_decline(self, kind: str) -> None:
         from torch._native.ops.norm.rmsnorm_impl import _is_supported

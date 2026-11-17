@@ -22,6 +22,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.utils.checkpoint import create_selective_checkpoint_contexts
 
 
@@ -1093,6 +1094,8 @@ class GraphModule(torch.nn.Module):
             out = torch.compile(model, backend=backend)(x)
         self.assertEqual(out[0].shape, x.shape)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

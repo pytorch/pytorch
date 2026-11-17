@@ -8,6 +8,7 @@ import torch
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
@@ -995,6 +996,8 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
         sched = CuteDSLScheduling(scheduler=None)
         self.assertIs(sched.can_fuse_horizontal(MagicMock(), MagicMock()), False)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

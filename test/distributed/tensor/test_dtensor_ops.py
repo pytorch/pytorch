@@ -5,6 +5,7 @@ import copy
 import random
 import re
 import threading
+import unittest
 import warnings
 
 import torch
@@ -28,10 +29,13 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import (
+    decorateIf,
     freeze_rng_state,
+    instantiate_parametrized_tests,
     np,
     run_tests,
     SEED,
@@ -288,17 +292,6 @@ dtensor_compiled_fails = {
     xfail("nn.functional.linear_cross_entropy", "chunked_none"),
 }
 
-if not torch._dynamo.config.use_cpp_fake_tensor:
-    dtensor_compiled_fails |= {
-        # The log_sigmoid_forward decomp checks self.is_cuda, which on a Python
-        # FakeTensor dispatches prim::device into PlacementTrackingMode, where
-        # sharding propagation fails. C++ FakeTensor answers it from the
-        # TensorImpl without dispatching.
-        xfail("nn.functional.binary_cross_entropy_with_logits"),
-        xfail("nn.functional.logsigmoid"),
-        xfail("nn.functional.multilabel_soft_margin_loss"),
-    }
-
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
 # These are excluded from TestCompiledDTensorOps skip list since we don't check numerics.
 dtensor_numeric_only_fails = {
@@ -416,6 +409,7 @@ OP_DB_WORLD_SIZE = 4
 DEVICE_TYPE = "cpu"
 
 
+@instantiate_parametrized_tests
 class DTensorOpsMixin:
     @property
     def world_size(self) -> int:
@@ -661,6 +655,7 @@ class DTensorOpsMixin:
             else:
                 self.assertTrue("S(0)->R" in debug_mode.debug_string())
 
+    @fake_tensor_test()
     def test_embedding_error_msg(self):
         self.mesh_2d = init_device_mesh(
             DEVICE_TYPE, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
@@ -688,6 +683,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
+    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -696,9 +692,11 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op, sample_lock=self.__class__._op_db_sample_lock)
 
+    @fake_tensor_test()
     def test_mean(self):
         self.run_mean()
 
+    @fake_tensor_test()
     def test_one_hot(self):
         self.run_one_hot()
 
@@ -723,6 +721,7 @@ class TestLocalDTensorOps(DTensorOpsMixin, TestCase):
         except AssertionError:
             pass
 
+    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -731,10 +730,12 @@ class TestLocalDTensorOps(DTensorOpsMixin, TestCase):
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)
 
+    @fake_tensor_test()
     def test_mean(self):
         with LocalTensorMode(frozenset(range(self.world_size))):
             self.run_mean()
 
+    @fake_tensor_test()
     def test_one_hot(self):
         self.run_one_hot()
 
@@ -966,6 +967,7 @@ class TestUnbackedDTensorOps(DTensorOpsMixin, TestCase):
                     ) from e
         return rs
 
+    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -1002,6 +1004,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
 
         self.skipTest(f"Op {torch_op} failed to extract aten op")
 
+    @fake_tensor_test()
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -1192,6 +1195,7 @@ class TestCompiledDTensorOps(DTensorOpsMixin, TestCase):
                         continue
                 raise
 
+    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -1202,6 +1206,16 @@ class TestCompiledDTensorOps(DTensorOpsMixin, TestCase):
             | dtensor_compiled_fails
         )
         - dtensor_numeric_only_fails,
+    )
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda p: not p["use_cpp_fake_tensor"]
+        and p["op"].name
+        in (
+            "nn.functional.binary_cross_entropy_with_logits",
+            "nn.functional.logsigmoid",
+            "nn.functional.multilabel_soft_margin_loss",
+        ),
     )
     def test_compiled_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op, requires_grad=False)

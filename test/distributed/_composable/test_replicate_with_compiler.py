@@ -30,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     sm_is_or_higher_than,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import IS_LINUX, run_tests
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -456,6 +457,8 @@ class DDP_TP_Test(InductorTestCase):
         # ):
         #     self.assertEqual(p1.grad, p2.grad)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

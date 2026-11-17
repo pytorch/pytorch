@@ -38,6 +38,7 @@ from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -4897,6 +4898,8 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         # bufC is a graph output, so it is never freed.
         self.assertEqual(peak, 350)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

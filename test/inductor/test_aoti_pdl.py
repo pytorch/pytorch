@@ -8,6 +8,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -61,6 +62,8 @@ class AOTInductorPDLTest(TestCase):
 
 instantiate_parametrized_tests(AOTInductorPDLTest)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -11,6 +11,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._higher_order_ops.schema import find_hop_schema
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 
@@ -468,6 +469,8 @@ class GraphModule(torch.nn.Module):
 
 instantiate_parametrized_tests(BaseHOPTest)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

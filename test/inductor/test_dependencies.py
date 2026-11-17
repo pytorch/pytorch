@@ -19,6 +19,7 @@ from torch._inductor.ir import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -305,6 +306,8 @@ class TestDependencies(InductorTestCase):
         # unequal due to different offset
         self.assertTrue(normalized_loop_order1 != normalized_loop_order2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

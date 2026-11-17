@@ -4,6 +4,7 @@
 import logging
 
 import torch
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -76,6 +77,8 @@ class TestDebugGradLog(TestCase):
         debug_grad_log(x)
         self.assertEqual(len(self._log_records), 0)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

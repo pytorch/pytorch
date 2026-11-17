@@ -10,6 +10,7 @@ import torch._dynamo as torchdynamo
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export, FlatArgsAdapter, unflatten
 from torch.export.unflatten import _assign_attr, _AttrKind, _disable_interpreter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_MACOS,
@@ -1227,6 +1228,8 @@ def forward(self, x):
         with self.assertRaisesRegex(RuntimeError, "single-tensor mutation"):
             _IVals().read(None, node)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

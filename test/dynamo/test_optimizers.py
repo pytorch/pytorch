@@ -13,6 +13,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.variables.optimizer import OptimizerVariable
 from torch.nn import Parameter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -186,6 +187,8 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
                     f"{device_type} should NOT be capturable",
                 )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -5,6 +5,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 try:
@@ -179,6 +180,8 @@ for case in xfails:
     unittest.expectedFailure(case)
 
 del case, xfails
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

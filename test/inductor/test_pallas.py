@@ -19,6 +19,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
@@ -2686,6 +2687,8 @@ if test_torchinductor.RUN_TPU and has_tpu_pallas():
 
     make_pallas(test_torchinductor.SweepInputsTpuTest)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests(needs="filelock")

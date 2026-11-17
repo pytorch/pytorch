@@ -8,6 +8,7 @@ from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.verifier import SpecViolationError, Verifier
 from torch.export import export
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -225,6 +226,8 @@ class TestVerifier(TestCase):
         with self.assertRaisesRegex(SpecViolationError, "Number of output nodes"):
             ep.validate()
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

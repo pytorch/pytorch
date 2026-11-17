@@ -9,6 +9,7 @@ import torch
 import torch._dynamo
 import torch.utils._pytree as python_pytree
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -1325,6 +1326,8 @@ class TreeMapWithPathCompileTests(TestCase):
         self.assertEqual(result["obj"].val, 84)
         self.assertTrue(torch.allclose(result["tensor"], torch.ones(2) + 1))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":  # pragma: no cover
     run_tests()

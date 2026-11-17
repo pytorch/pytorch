@@ -9,6 +9,7 @@ from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -527,6 +528,7 @@ class TestCOW(TestCase):
 class TestCOWFallback(TestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @fake_tensor_test()
     @parametrize("name", ["_is_cow_tensor", "_cow_record_done"])
     def test_fake_tensor_unsupported(self, device, name):
         from torch._subclasses.fake_tensor import FakeTensorMode

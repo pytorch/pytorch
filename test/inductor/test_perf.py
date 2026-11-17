@@ -13,6 +13,7 @@ from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 ########################
 # Explanation of Tests #
@@ -1429,6 +1430,8 @@ class WouldBeNiceIfItWorked:
         inp = (T(10, 1, 8), T(1, 10, 8))
         self.assertExpectedInline(count_numel(f, *inp), """170""")
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

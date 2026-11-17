@@ -9,6 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import xfailIfNoAcceleratorTriton
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
@@ -258,6 +259,8 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertEqual(len(costs), len(fusible_nodes))
         self.assertTrue(all(c >= 0.0 for c in costs.values()))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests

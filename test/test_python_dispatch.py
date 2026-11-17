@@ -29,6 +29,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     first_sample,
@@ -541,7 +542,6 @@ class TestPythonRegistration(TestCase):
         # test guards that the contract holds end-to-end.
         from torch._inductor.runtime import debug_utils
 
-        debug_utils.register_check_mem_op.cache_clear()
         debug_utils.register_check_mem_op()
         gc.collect()
 
@@ -3082,6 +3082,8 @@ class TestWrapperSubclassAliasingDevice(TestCase):
 instantiate_device_type_tests(
     TestWrapperSubclassAliasingDevice, globals(), allow_xpu=True
 )
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

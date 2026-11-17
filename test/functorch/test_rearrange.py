@@ -29,6 +29,7 @@ import numpy as np
 
 import torch
 from functorch.einops import rearrange
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -205,6 +206,8 @@ class TestRearrangeTorchFuncExport(TestCase):
         result = torch_func_rearrange(x, "b h w -> h (b w)")
         self.assertEqual(result.shape, torch.Size([3, 8]))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

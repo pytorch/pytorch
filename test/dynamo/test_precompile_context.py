@@ -9,6 +9,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
     BundledAOTAutogradCacheArtifact,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
 
 
@@ -115,6 +116,8 @@ class PrecompileContextTests(InductorTestCase):
         entry = next(iter(aot_autograd_artifacts.values())).content
         self.assertEqual(entry._my_private_field, 42)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

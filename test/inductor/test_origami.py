@@ -26,6 +26,7 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MI350_ARCH,
@@ -1631,6 +1632,8 @@ class TestOrigamiPackageVersionGate(TestCase):
 
 instantiate_parametrized_tests(TestOrigami)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     if HAS_GPU_AND_TRITON and IS_ROCM:

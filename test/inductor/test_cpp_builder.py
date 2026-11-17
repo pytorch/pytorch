@@ -15,6 +15,7 @@ from torch._dynamo.device_interface import (
 from torch._inductor import cpp_builder
 from torch._inductor.cpp_builder import get_cpp_torch_device_options
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -419,6 +420,8 @@ class TestCppBuilder(TestCase):
         command = builder(True, False, "mock_own_options").get_command_line()
         self.assertIn("-Wl,--as-needed", command.split())
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

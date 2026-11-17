@@ -18,6 +18,7 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS
 
 
@@ -523,6 +524,8 @@ class GraphModule(torch.nn.Module):
         compiled_b(torch.randn(5, 7))
         self.assertEqual(cc_backend.frame_count, 0)  # No recompilation needed
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

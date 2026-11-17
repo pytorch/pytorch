@@ -50,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
@@ -11816,6 +11817,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         with self.assertRaisesRegex(PrecompileError, "produced by torch 0.0"):
             exec(python_code, {"__name__": "artifact"})
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

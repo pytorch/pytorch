@@ -17,6 +17,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1754,6 +1755,8 @@ class TestRegisterFakeClass(TestCase):
 instantiate_parametrized_tests(TestExportTorchbind)
 instantiate_parametrized_tests(TestCompileTorchbind)
 instantiate_device_type_tests(TestCompileTorchbindDevice, globals(), allow_xpu=True)
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

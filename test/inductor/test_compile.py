@@ -23,6 +23,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU
 
 
@@ -789,6 +790,8 @@ class TestStandaloneInductor(TestCase):
         finally:
             cpp_builder._is_msvc_cl.cache_clear()
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     if HAS_CPU:

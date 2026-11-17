@@ -2,6 +2,7 @@
 
 import torch
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -53,6 +54,8 @@ class TestTritonSyntacticallyValid(TestCase):
         scaled_newton_schulz(model[0].weight.grad, 6)
         scaled_newton_schulz(model[1].weight.grad, 6)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -7,6 +7,7 @@ from torch._inductor.optimize_loop_body import eliminate_redundant_lowp_round_tr
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.inductor_utils import requires_triton
 
@@ -60,6 +61,8 @@ instantiate_device_type_tests(
     TestOptimizeLoopBodyDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()
