@@ -156,8 +156,10 @@ def _connect_rank_worker(rank, port):
 
 
 def _next_notifications(transport):
-    transport.wait_notifications(timeout=10).wait()
-    return transport.poll_notifications()
+    notifications = transport.wait_notifications(timeout=10)
+    if not notifications:
+        raise AssertionError("timed out waiting for a notification")
+    return notifications
 
 
 def _notification_worker(rank, connection, progress_thread):
