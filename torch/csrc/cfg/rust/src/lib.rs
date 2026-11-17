@@ -22,7 +22,8 @@ mod vm;
 
 use pyo3::prelude::*;
 
-#[pymodule]
+// The VM's state is only guarded by the GIL.
+#[pymodule(gil_used = true)]
 fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyapi::init, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::compile, m)?)?;
@@ -42,6 +43,8 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyapi::module_identity, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::tensor_key, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::tensor_stamp, m)?)?;
+    m.add_function(wrap_pyfunction!(shapes::snapshot, m)?)?;
+    m.add_class::<shapes::Snapshot>()?;
     m.add_class::<pyapi::CfgFunction>()?;
     m.add_class::<pyapi::Region>()?;
     m.add_class::<pyapi::Replay>()?;

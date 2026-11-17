@@ -302,11 +302,6 @@ struct LoadCaches(Vec<std::cell::Cell<LoadCache>>);
 unsafe impl Send for LoadCaches {}
 unsafe impl Sync for LoadCaches {}
 
-#[inline(always)]
-unsafe fn dict_version(dict: Obj) -> u64 {
-    (*(dict as *mut ffi::PyDictObject)).ma_version_tag
-}
-
 /// Lowers a Python function to the graph the VM runs.
 pub fn lower(
     py: pyo3::Python<'_>,
@@ -543,11 +538,68 @@ struct Frame {
     ptr: *mut std::ffi::c_void,
     instr: *mut *mut u16,
     code: *mut u16,
-    /// The variables of the frame: an owned reference or null each.
+    /// The variables of the frame: an owned reference or null each, the
+    /// way the interpreter keeps one (see `frame_ref`).
     locals: *mut Obj,
     /// Where the frame has its frame object: null until something looks at
     /// the frame (a traceback, a debugger).
     object: *mut Obj,
+}
+
+/// What a variable of an interpreter frame holds for an owned reference, or
+/// for null: in 3.12 just that.
+#[cfg(not(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64")))]
+#[inline(always)]
+unsafe fn frame_ref(owned: Obj) -> Obj {
+    owned
+}
+
+/// What is to be released of what a variable of a frame held.
+#[cfg(not(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64")))]
+#[inline(always)]
+unsafe fn frame_owned(held: Obj) -> Obj {
+    held
+}
+
+/// The object a variable of a frame holds, borrowed, or null.
+#[cfg(not(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64")))]
+#[inline(always)]
+unsafe fn frame_value(held: Obj) -> Obj {
+    held
+}
+
+/// What a variable of an interpreter frame holds for an owned reference, or
+/// for null. In 3.14 it is a stack reference: the pointer, with its lowest
+/// bit set if the reference is not the variable's to release. That bit alone
+/// is NULL, and a reference to an immortal object always has it, as
+/// PyStackRef_FromPyObjectSteal makes them in the default build, the only
+/// one frames are pushed in (see cfg.cpp).
+#[cfg(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64"))]
+#[inline(always)]
+unsafe fn frame_ref(owned: Obj) -> Obj {
+    if owned.is_null() {
+        return 1 as Obj;
+    }
+    (owned as usize | ((*owned).ob_refcnt.refcnt_and_flags.ob_flags & 1) as usize) as Obj
+}
+
+/// What is to be released of what a variable of a frame held.
+#[cfg(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64"))]
+#[inline(always)]
+unsafe fn frame_owned(held: Obj) -> Obj {
+    if held as usize & 1 == 0 {
+        held
+    } else {
+        null_mut()
+    }
+}
+
+/// The object a variable of a frame holds, borrowed, or null: what the
+/// interpreter bound an argument to, in a frame it made.
+#[cfg(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64"))]
+#[inline(always)]
+unsafe fn frame_value(held: Obj) -> Obj {
+    (held as usize & !1) as Obj
 }
 
 impl Frame {
@@ -667,6 +719,44 @@ struct Unbound {
 
 unsafe impl Send for Unbound {}
 unsafe impl Sync for Unbound {}
+
+/// What the interpreter says of an object that `with` cannot use, for lack
+/// of the method `name`.
+#[cfg(not(Py_3_14))]
+unsafe fn not_a_context_manager(o: Obj, name: &str) -> String {
+    let missed = if name == "__exit__" { " (missed __exit__ method)" } else { "" };
+    format!("'{}' object does not support the context manager protocol{}", pyffi::type_name(o), missed)
+}
+
+/// What the interpreter says of an object that `with` cannot use, for lack
+/// of the method `name`. From 3.14 on it names the type in full and either
+/// method, and points an asynchronous context manager to `async with`.
+#[cfg(Py_3_14)]
+unsafe fn not_a_context_manager(o: Obj, name: &str) -> String {
+    let ty = ffi::Py_TYPE(o);
+    let full = ffi::PyType_GetFullyQualifiedName(ty);
+    let type_name = if full.is_null() {
+        ffi::PyErr_Clear();
+        pyffi::type_name(o)
+    } else {
+        let text = pyffi::str_to_string(full);
+        ffi::Py_DECREF(full);
+        text
+    };
+    let asynchronous = [c"__aenter__", c"__aexit__"].iter().all(|method| {
+        let method = ffi::PyUnicode_InternFromString(method.as_ptr());
+        let found = if method.is_null() { null_mut() } else { pyffi::_PyType_Lookup(ty, method) };
+        xdecref(method);
+        !found.is_null() && (*ffi::Py_TYPE(found)).tp_descr_get.is_some()
+    });
+    ffi::PyErr_Clear();
+    let hint = if asynchronous {
+        " but it supports the asynchronous context manager protocol. Did you mean to use 'async with'?"
+    } else {
+        ""
+    };
+    format!("'{}' object does not support the context manager protocol (missed {} method){}", type_name, name, hint)
+}
 
 /// `match_keys` of ceval.c: the values `map` has for `keys`, as a tuple; None
 /// if it lacks one of them; null with an error set if looking raised.
@@ -868,8 +958,8 @@ unsafe fn tick() -> bool {
         std::sync::atomic::AtomicPtr::new(null_mut());
     let mut nothing = NOTHING.load(Ordering::Relaxed);
     if nothing.is_null() {
-        let py = pyo3::Python::assume_gil_acquired();
-        match py.eval_bound("lambda: None", None, None) {
+        let py = pyo3::Python::assume_attached();
+        match py.eval(c"lambda: None", None, None) {
             Ok(function) => {
                 nothing = function.into_ptr();
                 NOTHING.store(nothing, Ordering::Relaxed);
@@ -1288,7 +1378,7 @@ impl Compiled {
             o
         };
         // The slot first: letting go of what it held can run a finalizer.
-        xdecref(std::mem::replace(&mut *place, bound));
+        xdecref(frame_owned(std::mem::replace(&mut *place, frame_ref(bound))));
     }
 
     #[inline(never)]
@@ -1312,7 +1402,7 @@ impl Compiled {
             if boxed.is_null() {
                 ffi::PyErr_Clear();
             } else {
-                xdecref(std::mem::replace(&mut *place, boxed));
+                xdecref(frame_owned(std::mem::replace(&mut *place, frame_ref(boxed))));
             }
         }
         if !raised.is_null() {
@@ -1693,7 +1783,7 @@ impl Compiled {
                         for (slot, v) in self.func.params.iter().enumerate() {
                             let o = reg(&regs, *v);
                             if !o.is_null() {
-                                *frame.locals.add(slot) = new_ref(o);
+                                *frame.locals.add(slot) = frame_ref(new_ref(o));
                             }
                         }
                     }
@@ -1779,7 +1869,7 @@ impl Compiled {
         let mut regs = self.frames.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); nregs]);
         regs[nregs - 1] = new_ref(function);
         for (slot, v) in self.func.params.iter().enumerate() {
-            let o = *frame.locals.add(slot);
+            let o = frame_value(*frame.locals.add(slot));
             if !o.is_null() {
                 regs[*v as usize] = new_ref(o);
             }
@@ -1989,7 +2079,7 @@ impl Compiled {
             callees.left.borrow_mut().insert(code as usize, PyObj::from_borrowed(code));
             return DEMOTED;
         }
-        let py = pyo3::Python::assume_gil_acquired();
+        let py = pyo3::Python::assume_attached();
         let bound = pyo3::Bound::from_borrowed_ptr(py, func);
         let _nobody = Hooked::nobody();
         match lower(py, &callees.table, &bound, &self.options) {
@@ -2553,7 +2643,7 @@ impl Compiled {
                 let cache = self.global_cache.0.get_unchecked(*name as usize);
                 let cached = cache.get();
                 let versions =
-                    (dict_version(f.globals.as_ptr()), dict_version(f.builtins.as_ptr()));
+                    (pyffi::dict_version(f.globals.as_ptr()), pyffi::dict_version(f.builtins.as_ptr()));
                 if (cached.version, cached.builtins_version) == versions {
                     return Ok(new_ref(cached.value));
                 }
@@ -2749,16 +2839,7 @@ impl Compiled {
                 let attr = pyffi::_PyType_Lookup(ty, f.consts[*name as usize].as_ptr());
                 if attr.is_null() {
                     let name = pyffi::str_to_string(f.consts[*name as usize].as_ptr());
-                    let missed =
-                        if name == "__exit__" { " (missed __exit__ method)" } else { "" };
-                    set_error(
-                        ffi::PyExc_TypeError,
-                        format!(
-                            "'{}' object does not support the context manager protocol{}",
-                            pyffi::type_name(o),
-                            missed
-                        ),
-                    );
+                    set_error(ffi::PyExc_TypeError, not_a_context_manager(o, &name));
                     return Err(());
                 }
                 match (*ffi::Py_TYPE(attr)).tp_descr_get {
@@ -2816,7 +2897,7 @@ impl Compiled {
                 }
                 Ok(null_mut())
             }
-            Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
+            Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
                 let func = ffi::PyFunction_New(self.obj(regs, *code), f.globals.as_ptr());
                 if func.is_null() {
                     return Err(());
@@ -2849,6 +2930,24 @@ impl Compiled {
                     ok = ok && ffi::PyFunction_SetAnnotations(func, dict) == 0;
                     xdecref(dict);
                 }
+                if *annotate != NONE {
+                    // As SET_FUNCTION_ATTRIBUTE does it, down to the name
+                    // the function that computes them goes by.
+                    let annotate = self.obj(regs, *annotate);
+                    ok = ok && ffi::PyObject_SetAttrString(func, c"__annotate__".as_ptr(), annotate) == 0;
+                    if ok && ffi::PyFunction_Check(annotate) != 0 {
+                        let of = ffi::PyObject_GetAttrString(func, c"__qualname__".as_ptr());
+                        let name = if of.is_null() {
+                            null_mut()
+                        } else {
+                            ffi::PyUnicode_FromFormat(c"%U.__annotate__".as_ptr(), of)
+                        };
+                        ok = !name.is_null()
+                            && ffi::PyObject_SetAttrString(annotate, c"__qualname__".as_ptr(), name) == 0;
+                        xdecref(of);
+                        xdecref(name);
+                    }
+                }
                 if !ok {
                     ffi::Py_DECREF(func);
                     return Err(());
@@ -2865,7 +2964,7 @@ impl Compiled {
                     if !dict.is_null() {
                         let cache = self.module_attr_cache.0.get_unchecked(*name as usize);
                         let cached = cache.get();
-                        let version = dict_version(dict);
+                        let version = pyffi::dict_version(dict);
                         if cached.owner == obj && cached.version == version {
                             return Ok(new_ref(cached.value));
                         }
@@ -3027,7 +3126,7 @@ impl Compiled {
             }
             Op::Format { val, conv, spec } => {
                 let val = self.obj(regs, *val);
-                let converted = match conv {
+                let converted = match conv & 3 {
                     1 => ffi::PyObject_Str(val),
                     2 => ffi::PyObject_Repr(val),
                     3 => ffi::PyObject_ASCII(val),
@@ -3036,7 +3135,7 @@ impl Compiled {
                 if converted.is_null() {
                     return Err(());
                 }
-                if *spec == NONE && ffi::PyUnicode_CheckExact(converted) != 0 {
+                if conv & CONVERT_ONLY != 0 || (*spec == NONE && ffi::PyUnicode_CheckExact(converted) != 0) {
                     return Ok(converted);
                 }
                 let spec = if *spec == NONE { null_mut() } else { self.obj(regs, *spec) };
@@ -3246,9 +3345,17 @@ impl Compiled {
                 let size = ffi::PyTuple_GET_SIZE(t);
                 if size != n {
                     ffi::Py_DECREF(t);
+                    // From 3.14 on the interpreter says how many there are
+                    // of what it knows the length of.
+                    let sized = cfg!(Py_3_14)
+                        && (ffi::PyList_CheckExact(seq) != 0
+                            || ffi::PyTuple_CheckExact(seq) != 0
+                            || ffi::PyDict_CheckExact(seq) != 0);
                     set_error(
                         ffi::PyExc_ValueError,
-                        if size > n {
+                        if size > n && sized {
+                            format!("too many values to unpack (expected {}, got {})", n, size)
+                        } else if size > n {
                             format!("too many values to unpack (expected {})", n)
                         } else {
                             format!("not enough values to unpack (expected {}, got {})", n, size)
@@ -3874,7 +3981,7 @@ impl Compiled {
             Err(err) => {
                 // A failing pass must not take the program down with it: the
                 // block simply stays generic.
-                let msg = pyo3::Python::with_gil(|py| err.value_bound(py).to_string());
+                let msg = pyo3::Python::attach(|py| err.value(py).to_string());
                 Err(format!("pass failed: {}", msg))
             }
         };

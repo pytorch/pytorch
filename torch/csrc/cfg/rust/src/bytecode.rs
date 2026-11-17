@@ -1,11 +1,18 @@
-//! Decoding of CPython 3.12 bytecode.
+//! Decoding of CPython bytecode: 3.12 and 3.14.
 //!
 //! Opcode numbers and inline cache sizes are read from the running
 //! interpreter's `opcode` module, so the decoder itself only knows opcode
-//! names. The meaning of the opcodes (in frontend.rs) is that of CPython 3.12.
+//! names. A `Bc` means one thing (in frontend.rs) whichever version the
+//! bytecode is of. Where 3.14 gave an instruction of 3.12 another meaning
+//! under the same name, this is where it shows: the name stands for another
+//! `Bc` (`bc_from_name`), the instruction is rewritten into what the frontend
+//! knows (`simplify`), or the table says which of the two it is
+//! (`callable_first`).
 
+use crate::pyffi::PyObj;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bc {
@@ -98,10 +105,36 @@ pub enum Bc {
     LoadAssertionError,
     LoadBuildClass,
     FormatValue,
+    // The rest is 3.14 only.
+    ToBool,
+    LoadSmallInt,
+    LoadCommonConstant,
+    CallKw,
+    /// CALL_FUNCTION_EX of 3.14: the keyword arguments always have their
+    /// place on the stack, which holds NULL if there are none.
+    CallFunctionExKwargs,
+    SetFunctionAttribute,
+    ConvertValue,
+    FormatSimple,
+    FormatWithSpec,
+    LoadSpecial,
+    /// WITH_EXCEPT_START of 3.14: `__exit__` is on the stack the way CALL
+    /// finds a callable, with the place for `self` on top of it.
+    WithExceptStartCall,
     Other,
 }
 
-fn bc_from_name(name: &str) -> Bc {
+fn bc_from_name(name: &str, v314: bool) -> Bc {
+    if v314 {
+        match name {
+            // Pops what FOR_ITER pushed for an exhausted iterator, and
+            // POP_ITER then pops the iterator; in 3.12 END_FOR pops both.
+            "END_FOR" => return Bc::PopTop,
+            "CALL_FUNCTION_EX" => return Bc::CallFunctionExKwargs,
+            "WITH_EXCEPT_START" => return Bc::WithExceptStartCall,
+            _ => {}
+        }
+    }
     match name {
         "CACHE" => Bc::Cache,
         "RESUME" => Bc::Resume,
@@ -192,6 +225,19 @@ fn bc_from_name(name: &str) -> Bc {
         "LOAD_ASSERTION_ERROR" => Bc::LoadAssertionError,
         "LOAD_BUILD_CLASS" => Bc::LoadBuildClass,
         "FORMAT_VALUE" => Bc::FormatValue,
+        // A borrowed reference is the interpreter's business.
+        "LOAD_FAST_BORROW" => Bc::LoadFast,
+        "NOT_TAKEN" => Bc::Nop,
+        "POP_ITER" => Bc::PopTop,
+        "TO_BOOL" => Bc::ToBool,
+        "LOAD_SMALL_INT" => Bc::LoadSmallInt,
+        "LOAD_COMMON_CONSTANT" => Bc::LoadCommonConstant,
+        "CALL_KW" => Bc::CallKw,
+        "SET_FUNCTION_ATTRIBUTE" => Bc::SetFunctionAttribute,
+        "CONVERT_VALUE" => Bc::ConvertValue,
+        "FORMAT_SIMPLE" => Bc::FormatSimple,
+        "FORMAT_WITH_SPEC" => Bc::FormatWithSpec,
+        "LOAD_SPECIAL" => Bc::LoadSpecial,
         _ => Bc::Other,
     }
 }
@@ -239,26 +285,81 @@ impl Bc {
     }
 }
 
+/// The two instructions a superinstruction of 3.14 stands for. The high four
+/// bits of its argument are the argument of the first, the low four that of
+/// the second.
+fn halves(name: &str) -> Option<(Bc, Bc)> {
+    match name {
+        "LOAD_FAST_LOAD_FAST" | "LOAD_FAST_BORROW_LOAD_FAST_BORROW" => Some((Bc::LoadFast, Bc::LoadFast)),
+        "STORE_FAST_LOAD_FAST" => Some((Bc::StoreFast, Bc::LoadFast)),
+        "STORE_FAST_STORE_FAST" => Some((Bc::StoreFast, Bc::StoreFast)),
+        _ => None,
+    }
+}
+
 pub struct OpcodeTable {
     pub kinds: Vec<Bc>,
     pub names: Vec<String>,
     pub caches: Vec<u32>,
+    /// What a call finds under its arguments. In 3.12 it is the method or
+    /// NULL, and then the callable or `self`; in 3.14 the callable, and then
+    /// `self` or NULL. Whatever leaves a callable for a call (PUSH_NULL,
+    /// LOAD_GLOBAL, LOAD_ATTR, LOAD_SUPER_ATTR) follows that order.
+    pub callable_first: bool,
+    /// The names LOAD_SPECIAL takes by index.
+    pub special_names: Vec<String>,
+    /// The objects LOAD_COMMON_CONSTANT takes by index.
+    pub common_constants: Vec<PyObj>,
+    halves: Vec<Option<(Bc, Bc)>>,
+    /// The argument of BINARY_OP that is a subscript, in 3.14.
+    subscr: Option<u32>,
+    /// In 3.14 the comparison of COMPARE_OP is its argument shifted by 5, not
+    /// 4, and the bit under it asks for the result as a bool.
+    compare_as_bool: bool,
 }
 
 impl OpcodeTable {
     pub fn load(py: Python<'_>) -> PyResult<OpcodeTable> {
         let version = py.version_info();
-        if (version.major, version.minor) != (3, 12) {
-            return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
-                "torch.rewrite only understands CPython 3.12 bytecode, not {}.{}",
-                version.major, version.minor
-            )));
-        }
-        let opcode = py.import_bound("opcode")?;
+        let v314 = match (version.major, version.minor) {
+            (3, 12) => false,
+            (3, 14) => true,
+            _ => {
+                return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
+                    "torch.rewrite only understands CPython 3.12 and 3.14 bytecode, not {}.{}",
+                    version.major, version.minor
+                )))
+            }
+        };
+        let opcode = py.import("opcode")?;
         let names: Vec<String> = opcode.getattr("opname")?.extract()?;
-        let caches: Vec<u32> = opcode.getattr("_inline_cache_entries")?.extract()?;
-        let kinds = names.iter().map(|n| bc_from_name(n)).collect();
-        Ok(OpcodeTable { kinds, names, caches })
+        // By opcode in 3.12, by name in 3.14.
+        let caches = opcode.getattr("_inline_cache_entries")?;
+        let caches: Vec<u32> = if v314 {
+            let by_name: HashMap<String, u32> = caches.extract()?;
+            names.iter().map(|n| by_name.get(n).copied().unwrap_or(0)).collect()
+        } else {
+            caches.extract()?
+        };
+        let binary: Vec<(String, String)> = opcode.getattr("_nb_ops")?.extract()?;
+        let (special_names, common_constants) = if v314 {
+            let constants = opcode.getattr("_common_constants")?;
+            let constants = constants.try_iter()?.map(|c| Ok(unsafe { PyObj::from_borrowed(c?.as_ptr()) }));
+            (opcode.getattr("_special_method_names")?.extract()?, constants.collect::<PyResult<_>>()?)
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        Ok(OpcodeTable {
+            kinds: names.iter().map(|n| bc_from_name(n, v314)).collect(),
+            halves: names.iter().map(|n| halves(n.as_str())).collect(),
+            names,
+            caches,
+            callable_first: v314,
+            special_names,
+            common_constants,
+            subscr: binary.iter().position(|(name, _)| name == "NB_SUBSCR").map(|i| i as u32),
+            compare_as_bool: v314,
+        })
     }
 }
 
@@ -275,6 +376,7 @@ pub struct Ins {
     pub target: Option<u32>,
 }
 
+/// The instructions as they are in the code object.
 pub fn decode(table: &OpcodeTable, code: &Bound<'_, PyBytes>) -> Vec<Ins> {
     let bytes = code.as_bytes();
     let mut out = Vec::new();
@@ -313,6 +415,36 @@ pub fn decode(table: &OpcodeTable, code: &Bound<'_, PyBytes>) -> Vec<Ins> {
     for ins in out.iter_mut() {
         if let Some(target) = ins.target.and_then(|t| prefixed.get(&t)) {
             ins.target = Some(*target);
+        }
+    }
+    out
+}
+
+/// Rewrites the instructions of 3.14 that are another way to write what 3.12
+/// has an instruction for, so that the frontend only knows the latter. Where
+/// one instruction becomes two, the second gets the odd offset that follows
+/// the instruction's own: no instruction is there, and it is in the same
+/// line and under the same exception handler.
+pub fn simplify(table: &OpcodeTable, decoded: Vec<Ins>) -> Vec<Ins> {
+    let mut out = Vec::with_capacity(decoded.len());
+    for mut ins in decoded {
+        let (off, code) = (ins.off + 1, ins.code);
+        let second = |op: Bc, arg: u32| Ins { off, start: off, op, code, arg, target: None };
+        if let Some((first, then)) = table.halves[ins.code as usize] {
+            let then = second(then, ins.arg & 15);
+            ins.op = first;
+            ins.arg >>= 4;
+            out.extend([ins, then]);
+        } else if ins.op == Bc::CompareOp && table.compare_as_bool {
+            let as_bool = (ins.arg & 16 != 0).then(|| second(Bc::ToBool, 0));
+            ins.arg = (ins.arg >> 5) << 4;
+            out.push(ins);
+            out.extend(as_bool);
+        } else {
+            if ins.op == Bc::BinaryOp && Some(ins.arg) == table.subscr {
+                ins.op = Bc::BinarySubscr;
+            }
+            out.push(ins);
         }
     }
     out
