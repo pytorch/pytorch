@@ -2,6 +2,7 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
+#include <c10/util/irange.h>
 #include <utility>
 
 C10_DEFINE_bool(
@@ -77,7 +78,7 @@ static c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
       sizes.size() == is_symbolic->size(),
       "Dims of two values are not consistent");
   std::vector<std::optional<int64_t>> symbolic_dims;
-  for (size_t i = 0; i < sizes.size(); i++) {
+  for (const auto i : c10::irange(sizes.size())) {
     if (is_symbolic->at(i)) {
       symbolic_dims.emplace_back(std::nullopt);
     } else {
