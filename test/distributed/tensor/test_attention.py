@@ -260,7 +260,7 @@ class RingAttentionTest(DTensorTestBase):
 
         set_rotate_method(rotater_enum_to_str[rotater])
         self.assertEqual(_cp_options.rotate_method, rotater)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+        device_mesh = DeviceMesh(self._device_type, torch.arange(0, self.world_size))
         bs = 8
         seq_length = 1024
         seq_dim = 2
@@ -277,7 +277,7 @@ class RingAttentionTest(DTensorTestBase):
         q, k, v = [
             torch.rand(
                 (bs, nheads, seq_length * self.world_size, dim),
-                device=self.device_type,
+                device=self._device_type,
                 dtype=dtype,
                 requires_grad=True,
             )
@@ -383,14 +383,16 @@ class RingAttentionTest(DTensorTestBase):
         old_load_balance = _cp_options.enable_load_balance
         try:
             _cp_options.enable_load_balance = True
-            device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+            device_mesh = DeviceMesh(
+                self._device_type, torch.arange(0, self.world_size)
+            )
             qkv_len = self.world_size
             for dim in [1, 2, 4, 8]:
                 with self.subTest(dim=dim):
                     qkv = [
                         torch.rand(
                             (1, 1, qkv_len, dim),
-                            device=self.device_type,
+                            device=self._device_type,
                             dtype=torch.bfloat16,
                         )
                         for _ in range(3)
@@ -541,7 +543,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         qkv = [
             torch.rand(
                 (bs, nheads, qkv_size, dim),
-                device=self.device_type,
+                device=self._device_type,
                 dtype=dtype,
                 requires_grad=True,
             )
@@ -555,7 +557,7 @@ class CPFlexAttentionTest(DTensorTestBase):
 
         # Prepare the required global vars for CP+Flex:
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
@@ -617,7 +619,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             return None
         if lb_type == "_HeadTailLoadBalancer":
             return _HeadTailLoadBalancer(
-                qkv_size, self.world_size, torch.device(self.device_type)
+                qkv_size, self.world_size, torch.device(self._device_type)
             )
         if lb_type == "_PTRRLoadBalancer":
             return _PTRRLoadBalancer(
@@ -631,7 +633,7 @@ class CPFlexAttentionTest(DTensorTestBase):
     def test_cp_flex_attention_preserves_block_size(self) -> None:
         qkv_size = 256 * self.world_size
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
@@ -641,7 +643,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             H=1,
             Q_LEN=qkv_size,
             KV_LEN=qkv_size,
-            device=self.device_type,
+            device=self._device_type,
             BLOCK_SIZE=(256, 128),
         )
 
@@ -673,7 +675,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         lengths = [
             generate_random_lengths(max_seq_len, doc_count) for _ in range(batch_size)
         ]
-        offsets = length_to_offsets(lengths, self.device_type)
+        offsets = length_to_offsets(lengths, self._device_type)
         document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
         block_mask = create_block_mask(
             document_causal_mask,
@@ -681,7 +683,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             H=1,
             Q_LEN=max_seq_len,
             KV_LEN=max_seq_len,
-            device=self.device_type,
+            device=self._device_type,
         )
 
         self._test_cp_flex_attention(
@@ -698,13 +700,13 @@ class CPFlexAttentionTest(DTensorTestBase):
             H=1,
             Q_LEN=qkv_size,
             KV_LEN=qkv_size,
-            device=self.device_type,
+            device=self._device_type,
         )
         qkv = [
-            torch.rand((2, 2, qkv_size, 32), device=self.device_type) for _ in range(3)
+            torch.rand((2, 2, qkv_size, 32), device=self._device_type) for _ in range(3)
         ]
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
@@ -734,20 +736,20 @@ class TestCPCustomOps(DTensorTestBase):
     @with_comms
     def test_flex_cp_custom_op(self) -> None:
         mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
         examples_k_v = [
             (
-                torch.randn(8, 8, 8, 8, device=self.device_type),
-                torch.randn(8, 8, 8, 8, device=self.device_type),
+                torch.randn(8, 8, 8, 8, device=self._device_type),
+                torch.randn(8, 8, 8, 8, device=self._device_type),
                 2,
                 c10d._get_process_group_name(mesh.get_group()),
             ),
             (
-                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
-                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
+                torch.randn(8, 8, 8, 8, device=self._device_type, requires_grad=True),
+                torch.randn(8, 8, 8, 8, device=self._device_type, requires_grad=True),
                 2,
                 c10d._get_process_group_name(mesh.get_group()),
             ),
@@ -768,15 +770,15 @@ class TestSharding(DTensorTestBase):
         seq_len = 32
 
         device_mesh = init_device_mesh(
-            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self._device_type
         )
-        freqs_cis = torch.arange(0, seq_len, device=self.device_type)
-        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        freqs_cis = torch.arange(0, seq_len, device=self._device_type)
+        q = torch.ones(B * seq_len, device=self._device_type).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=self._device_type).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=self._device_type).reshape(B, seq_len)
 
         load_balancer = _HeadTailLoadBalancer(
-            seq_len, self.world_size, torch.device(self.device_type)
+            seq_len, self.world_size, torch.device(self._device_type)
         )
         freqs_cis_shard, q_shard, k_shard, v_shard = _context_parallel_shard(
             device_mesh, [freqs_cis, q, k, v], [0, 1, 1, 1], load_balancer=load_balancer
@@ -814,18 +816,18 @@ class TestSharding(DTensorTestBase):
         device_mesh = init_device_mesh(
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
-            device_type=self.device_type,
+            device_type=self._device_type,
         )
         # cost[t] = causal work of the query at original position t (1..L per doc).
         cost = []
         for length in doc_lengths:
             cost.extend(range(1, length + 1))
-        cost = torch.tensor(cost, device=self.device_type)
+        cost = torch.tensor(cost, device=self._device_type)
 
         # A token-id buffer so each sharded position maps back to its origin.
-        buffer = torch.arange(seq_len, device=self.device_type).view(1, seq_len)
+        buffer = torch.arange(seq_len, device=self._device_type).view(1, seq_len)
         load_balancer = _PerDocumentHeadTailLoadBalancer(
-            [doc_lengths], self.world_size, torch.device(self.device_type)
+            [doc_lengths], self.world_size, torch.device(self._device_type)
         )
         (sharded,) = _context_parallel_shard(
             device_mesh, [buffer], [1], load_balancer=load_balancer
@@ -847,19 +849,19 @@ class TestSharding(DTensorTestBase):
         seq_len = 32
 
         device_mesh = init_device_mesh(
-            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self._device_type
         )
 
         # Create positions tensor and expand to add batch dimension
-        positions = torch.arange(0, seq_len, device=self.device_type)
+        positions = torch.arange(0, seq_len, device=self._device_type)
         positions = positions.expand(B, seq_len)
 
-        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
-        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        q = torch.ones(B * seq_len, device=self._device_type).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=self._device_type).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=self._device_type).reshape(B, seq_len)
 
         load_balancer = _HeadTailLoadBalancer(
-            seq_len, self.world_size, torch.device(self.device_type)
+            seq_len, self.world_size, torch.device(self._device_type)
         )
 
         # positions has seq_dim=1 (same as q, k, v) after expansion
@@ -899,7 +901,7 @@ class TestSharding(DTensorTestBase):
         dim = 32
 
         device_mesh = init_device_mesh(
-            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self._device_type
         )
 
         for backend in backends:
@@ -909,13 +911,13 @@ class TestSharding(DTensorTestBase):
                     dtype = torch.float32
                 # Create q, k, v tensors with shape (B, nheads, seq_len, dim)
                 q = torch.randn(
-                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                    B, nheads, seq_len, dim, device=self._device_type, dtype=dtype
                 )
                 k = torch.randn(
-                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                    B, nheads, seq_len, dim, device=self._device_type, dtype=dtype
                 )
                 v = torch.randn(
-                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                    B, nheads, seq_len, dim, device=self._device_type, dtype=dtype
                 )
                 q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
                 k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
@@ -947,9 +949,9 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
 
     def _create_test_tensors(self):
         """Helper to create test query, key, value tensors"""
-        query = torch.randn(2, 4, 128, 64, device=self.device_type)
-        key = torch.randn(2, 4, 128, 64, device=self.device_type)
-        value = torch.randn(2, 4, 128, 64, device=self.device_type)
+        query = torch.randn(2, 4, 128, 64, device=self._device_type)
+        key = torch.randn(2, 4, 128, 64, device=self._device_type)
+        value = torch.randn(2, 4, 128, 64, device=self._device_type)
         return query, key, value
 
     def _setup_mock_and_context(self, mock_allgather, key, value):
@@ -963,7 +965,7 @@ class TestContextParallelStyle(DTensorContinuousTestBase):
         cp_style = _ContextParallel(
             seq_dim=2, attention_type=_ContextParallel.AttentionType.FLEX
         )
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+        device_mesh = DeviceMesh(self._device_type, torch.arange(0, self.world_size))
 
         return cp_style, device_mesh, mock_key, mock_value
 
@@ -1114,9 +1116,9 @@ class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
 
     def _create_test_tensors(self):
         """Helper to create test query, key, value tensors"""
-        query = torch.randn(2, 4, 128, 64, device=self.device_type)
-        key = torch.randn(2, 4, 128, 64, device=self.device_type)
-        value = torch.randn(2, 4, 128, 64, device=self.device_type)
+        query = torch.randn(2, 4, 128, 64, device=self._device_type)
+        key = torch.randn(2, 4, 128, 64, device=self._device_type)
+        value = torch.randn(2, 4, 128, 64, device=self._device_type)
         return query, key, value
 
     def _setup_context(self):
@@ -1124,7 +1126,7 @@ class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
         cp_style = _ContextParallel(
             seq_dim=2, attention_type=_ContextParallel.AttentionType.SDPA
         )
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+        device_mesh = DeviceMesh(self._device_type, torch.arange(0, self.world_size))
         return cp_style, device_mesh
 
     @with_comms

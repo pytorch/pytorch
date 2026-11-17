@@ -80,13 +80,13 @@ class TestLocalMap(DTensorContinuousTestBase):
     @with_comms
     def test_local_map_correctness(self):
         device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
+            device_type=self._device_type, mesh_shape=(self.world_size,)
         )
         comm_mode = CommDebugMode()
 
         # Y = X @ W
-        X = torch.randn(16, 8, device=self.device_type, requires_grad=False)
-        W = torch.randn(8, 12, device=self.device_type, requires_grad=False)
+        X = torch.randn(16, 8, device=self._device_type, requires_grad=False)
+        W = torch.randn(8, 12, device=self._device_type, requires_grad=False)
         Y = torch.mm(X, W)
 
         X_dt = distribute_tensor(
@@ -135,13 +135,13 @@ class TestLocalMap(DTensorContinuousTestBase):
     def test_local_map_out_placements(self):
         # Test 1: wrap out into DTensor w/ `out_placements`
         device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
+            device_type=self._device_type, mesh_shape=(self.world_size,)
         )
         comm_mode = CommDebugMode()
 
         # X.equal(Y)
-        X = torch.randn(8, 8, device=self.device_type, requires_grad=False)
-        Y = torch.randn(8, 8, device=self.device_type, requires_grad=False)
+        X = torch.randn(8, 8, device=self._device_type, requires_grad=False)
+        Y = torch.randn(8, 8, device=self._device_type, requires_grad=False)
         X_dt = distribute_tensor(X, device_mesh, row_wise)
         Y_dt = distribute_tensor(Y, device_mesh, row_wise)
         local_equal_allgather_forward = local_map(
@@ -158,9 +158,9 @@ class TestLocalMap(DTensorContinuousTestBase):
         # Test 2: directly return out if no argument is DTensor
         # matmul in DDP
         X = torch.randn(
-            4 // self.world_size, 4, device=self.device_type, requires_grad=False
+            4 // self.world_size, 4, device=self._device_type, requires_grad=False
         )
-        W = torch.randn(4, 4, device=self.device_type, requires_grad=False)
+        W = torch.randn(4, 4, device=self._device_type, requires_grad=False)
         local_mm_all_gather_forward = local_map(
             mm_all_gather_forward,
             out_placements=row_wise,
@@ -181,13 +181,13 @@ class TestLocalMap(DTensorContinuousTestBase):
     @with_comms
     def test_local_map_in_placements(self):
         device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
+            device_type=self._device_type, mesh_shape=(self.world_size,)
         )
         comm_mode = CommDebugMode()
 
         # Y = X @ W
-        X = torch.randn(16, 8, device=self.device_type, requires_grad=False)
-        W = torch.randn(8, 12, device=self.device_type, requires_grad=False)
+        X = torch.randn(16, 8, device=self._device_type, requires_grad=False)
+        W = torch.randn(8, 12, device=self._device_type, requires_grad=False)
         Y = torch.mm(X, W)
 
         X_dt = distribute_tensor(
@@ -288,13 +288,13 @@ class TestLocalMap(DTensorContinuousTestBase):
     @with_comms
     def test_local_map_redistribute(self):
         device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
+            device_type=self._device_type, mesh_shape=(self.world_size,)
         )
         comm_mode = CommDebugMode()
 
         # Y = X @ W
-        X = torch.randn(16, 8, device=self.device_type, requires_grad=False)
-        W = torch.randn(8, 12, device=self.device_type, requires_grad=False)
+        X = torch.randn(16, 8, device=self._device_type, requires_grad=False)
+        W = torch.randn(8, 12, device=self._device_type, requires_grad=False)
         Y = torch.mm(X, W)
 
         X_dt = distribute_tensor(
@@ -340,16 +340,16 @@ class TestLocalMap(DTensorContinuousTestBase):
         `in_grad_placements`.
         """
         device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
+            device_type=self._device_type, mesh_shape=(self.world_size,)
         )
         torch.manual_seed(12)
 
         # ground truth output, consider X as a batch of 2 on dim 0.
-        X = torch.randn(4, 2, device=self.device_type, requires_grad=True)
+        X = torch.randn(4, 2, device=self._device_type, requires_grad=True)
         X1, X2 = torch.chunk(X, 2, dim=0)
         X1 = X1.detach().requires_grad_()
         X2 = X2.detach().requires_grad_()
-        W = torch.randn(2, 4, device=self.device_type, requires_grad=True)
+        W = torch.randn(2, 4, device=self._device_type, requires_grad=True)
         Y1 = torch.mm(X1, W)
         Y2 = torch.mm(X2, W)
         loss = Y1.sum() + Y2.sum()
@@ -401,16 +401,16 @@ class TestLocalMap(DTensorContinuousTestBase):
         on different device meshes.
         """
         mesh_full = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
+            device_type=self._device_type, mesh_shape=(self.world_size,)
         )
         mesh_2d = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size // 2, 2)
+            device_type=self._device_type, mesh_shape=(self.world_size // 2, 2)
         )
         comm_mode = CommDebugMode()
 
-        X = torch.randn(8, 32, device=self.device_type, requires_grad=False)
+        X = torch.randn(8, 32, device=self._device_type, requires_grad=False)
         x_placements = [Shard(1)]
-        W = torch.randn(16, 8, device=self.device_type, requires_grad=False)
+        W = torch.randn(16, 8, device=self._device_type, requires_grad=False)
         w_placements = [Shard(0), Shard(1)]
 
         X_dt = distribute_tensor(X, mesh_full, x_placements)
@@ -816,14 +816,14 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
                 assert_type(out, {dp: spmd.V})
 
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("dp",),
         )
         torch.manual_seed(42)
 
-        X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
-        W = torch.randn(8, 4, device=self.device_type, requires_grad=True)
+        X = torch.randn(4, 8, device=self._device_type, requires_grad=True)
+        W = torch.randn(8, 4, device=self._device_type, requires_grad=True)
 
         # Single-node reference
         X_ref = X.detach().clone().requires_grad_()
@@ -886,16 +886,16 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
         Matching grad_out placements need no redistribution; mismatched grads get implicitly redistributed.
         """
         device_mesh = init_device_mesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("dp",),
         )
 
         # S(0) @ R -> S(0) FWD: backward expects S(0) grad
         def s0_r_mm():
-            X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+            X = torch.randn(4, 8, device=self._device_type, requires_grad=True)
             X_dt = distribute_tensor(X, device_mesh, [Shard(0)])
-            W = torch.randn(8, 4, device=self.device_type, requires_grad=True)
+            W = torch.randn(8, 4, device=self._device_type, requires_grad=True)
             W_dt = distribute_tensor(W, device_mesh, [Replicate()])
 
             wrapped_shard = local_map(
@@ -933,9 +933,9 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
         )
 
         def s1_s0_mm():
-            X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+            X = torch.randn(4, 8, device=self._device_type, requires_grad=True)
             X_dt = distribute_tensor(X, device_mesh, [Shard(1)])
-            W = torch.randn(8, 4, device=self.device_type, requires_grad=True)
+            W = torch.randn(8, 4, device=self._device_type, requires_grad=True)
             W_dt = distribute_tensor(W, device_mesh, [Shard(0)])
             return wrapped_partial(X_dt, W_dt), X_dt, W_dt
 
@@ -957,7 +957,7 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
 
         # P output type with P output placement expects Replicate grad, so a
         # Partial grad_out redistributes via all-reduce.
-        X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+        X = torch.randn(4, 8, device=self._device_type, requires_grad=True)
         X_dt = DTensor.from_local(X, device_mesh, [Partial()], run_check=False)
         wrapped_partial_out = local_map(
             lambda X: X * 2,
@@ -976,7 +976,7 @@ class TestLocalMapSpmdTypesMultiGPU(DTensorTestBase):
 
         # V output type with S(1) output placement expects S(1) grad, so a
         # Partial grad_out redistributes via reduce-scatter along dim 1.
-        X = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+        X = torch.randn(4, 8, device=self._device_type, requires_grad=True)
         X_dt = distribute_tensor(X, device_mesh, [Shard(1)])
         wrapped_shard1_out = local_map(
             lambda X: X * 2,
