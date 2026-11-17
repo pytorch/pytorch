@@ -1725,18 +1725,70 @@ void tensorRelease(PyObject* tagged) {
   c10::raw::intrusive_ptr::decref(unboxedImpl(tagged));
 }
 
+// Frames are for 3.12, and for 3.14 in its default build on a 64-bit
+// platform: the variables of its frames are stack references, which the VM
+// writes itself (`frame_ref` in vm.rs) and whose header MSVC does not compile.
 #if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_13_PLUS
 #define TCFG_HAS_FRAMES 1
+#elif IS_PYTHON_3_14_PLUS && !IS_PYTHON_3_15_PLUS &&            \
+    !defined(Py_GIL_DISABLED) && !defined(Py_STACKREF_DEBUG) && \
+    !defined(_WIN32) && SIZEOF_VOID_P > 4
+#define TCFG_HAS_FRAMES 1
+#endif
+
+#ifdef TCFG_HAS_FRAMES
 
 extern "C" {
 // Copies of CPython internals that torch/csrc/dynamo/cpython_defs.c keeps.
 _PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
     PyThreadState* tstate,
     size_t size);
+#if !IS_PYTHON_3_13_PLUS
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
 void THP_PyThreadState_PopFrame(
     PyThreadState* tstate,
     _PyInterpreterFrame* frame);
+#endif
+}
+
+// Where the thread has its current frame.
+_PyInterpreterFrame*& currentFrame(PyThreadState* tstate) {
+#if IS_PYTHON_3_14_PLUS
+  return tstate->current_frame;
+#else
+  return tstate->cframe->current_frame;
+#endif
+}
+
+// The function and the code of a frame.
+PyFunctionObject* frameFunction(_PyInterpreterFrame* frame) {
+#if IS_PYTHON_3_14_PLUS
+  return reinterpret_cast<PyFunctionObject*>(
+      PyStackRef_AsPyObjectBorrow(frame->f_funcobj));
+#else
+  return reinterpret_cast<PyFunctionObject*>(frame->f_funcobj);
+#endif
+}
+
+PyCodeObject* frameCode(_PyInterpreterFrame* frame) {
+#if IS_PYTHON_3_14_PLUS
+  return reinterpret_cast<PyCodeObject*>(
+      PyStackRef_AsPyObjectBorrow(frame->f_executable));
+#else
+  return frame->f_code;
+#endif
+}
+
+// Disposes of a frame that is not, or no longer, the current one of the
+// thread, as the interpreter does when a call returns.
+void frameDispose(PyThreadState* tstate, _PyInterpreterFrame* frame) {
+#if IS_PYTHON_3_13_PLUS
+  // What the two copies below do, the interpreter exports from 3.13 on.
+  _PyEval_FrameClearAndPop(tstate, frame);
+#else
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+#endif
 }
 
 // A function that the VM runs is a Python call: it counts against the
@@ -1768,8 +1820,8 @@ void frameLink(
     uint16_t** code_start,
     PyObject*** locals,
     PyObject*** object) {
-  auto* function = reinterpret_cast<PyFunctionObject*>(frame->f_funcobj);
-  PyCodeObject* code = frame->f_code;
+  PyFunctionObject* function = frameFunction(frame);
+  PyCodeObject* code = frameCode(frame);
   // What COPY_FREE_VARS does. The other variables are what the caller bound
   // (the arguments, for a frame the interpreter made) or start out unbound:
   // the VM fills them in as the function binds them.
@@ -1777,17 +1829,22 @@ void frameLink(
     Py_ssize_t n = PyTuple_GET_SIZE(closure);
     Py_ssize_t first = code->co_nlocalsplus - n;
     for (Py_ssize_t i = 0; i < n; i++) {
-      frame->localsplus[first + i] = Py_NewRef(PyTuple_GET_ITEM(closure, i));
+      PyObject* cell = PyTuple_GET_ITEM(closure, i);
+#if IS_PYTHON_3_14_PLUS
+      frame->localsplus[first + i] = PyStackRef_FromPyObjectNew(cell);
+#else
+      frame->localsplus[first + i] = Py_NewRef(cell);
+#endif
     }
   }
   // A frame that has not reached its RESUME counts as not started, and is
   // skipped by whoever walks the stack.
-  frame->prev_instr = _PyCode_CODE(code) + code->_co_firsttraceable;
-  frame->previous = tstate->cframe->current_frame;
-  tstate->cframe->current_frame = frame;
-  *instr = reinterpret_cast<uint16_t**>(&frame->prev_instr);
+  PREV_INSTR(frame) = _PyCode_CODE(code) + code->_co_firsttraceable;
+  frame->previous = currentFrame(tstate);
+  currentFrame(tstate) = frame;
+  *instr = reinterpret_cast<uint16_t**>(&PREV_INSTR(frame));
   *code_start = reinterpret_cast<uint16_t*>(_PyCode_CODE(code));
-  *locals = frame->localsplus;
+  *locals = reinterpret_cast<PyObject**>(frame->localsplus);
   *object = reinterpret_cast<PyObject**>(&frame->frame_obj);
 }
 
@@ -1810,7 +1867,18 @@ void* framePush(
     return nullptr;
   }
   Py_INCREF(func);
+#if IS_PYTHON_3_14_PLUS
+  _PyFrame_Initialize(
+      tstate,
+      frame,
+      PyStackRef_FromPyObjectSteal(func),
+      nullptr,
+      code,
+      0,
+      nullptr);
+#else
   _PyFrame_Initialize(frame, function, nullptr, code, 0);
+#endif
   frameLink(tstate, frame, instr, code_start, locals, object);
   return frame;
 }
@@ -1825,8 +1893,7 @@ int32_t frameAdopt(
   PyThreadState* tstate = PyThreadState_Get();
   if (!enterPythonCall(tstate)) {
     // Whoever is handed a frame to run disposes of it.
-    THP_PyFrame_Clear(frame);
-    THP_PyThreadState_PopFrame(tstate, frame);
+    frameDispose(tstate, frame);
     return 0;
   }
   frameLink(tstate, frame, instr, code_start, locals, object);
@@ -1844,41 +1911,103 @@ void framePop(void* popped) {
   PyThreadState* tstate = PyThreadState_Get();
   // Unlinked before it is cleared, as in the interpreter: clearing can run
   // finalizers, which must not find a half-cleared frame on the stack.
-  tstate->cframe->current_frame = frame->previous;
-  THP_PyFrame_Clear(frame);
-  THP_PyThreadState_PopFrame(tstate, frame);
+  currentFrame(tstate) = frame->previous;
+  frameDispose(tstate, frame);
   ++tstate->py_recursion_remaining;
 }
 
 void* frameSwap(void* frame) {
   PyThreadState* tstate = PyThreadState_Get();
-  _PyInterpreterFrame* previous = tstate->cframe->current_frame;
-  tstate->cframe->current_frame = static_cast<_PyInterpreterFrame*>(frame);
+  _PyInterpreterFrame* previous = currentFrame(tstate);
+  currentFrame(tstate) = static_cast<_PyInterpreterFrame*>(frame);
   return previous;
 }
 
+#if IS_PYTHON_3_14_PLUS
+// The tools of sys.monitoring that stand for a trace function: pdb is the
+// first of them from 3.14 on, where it no longer calls sys.settrace.
+constexpr uint8_t kTracingTools =
+    1 << PY_MONITORING_DEBUGGER_ID | 1 << PY_MONITORING_COVERAGE_ID;
+#endif
+
+// Whether something is told about the frames the interpreter enters on this
+// thread, and the lines it runs in them.
+bool traced(PyThreadState* tstate) {
+  if (tstate->c_tracefunc != nullptr) {
+    return true;
+  }
+#if IS_PYTHON_3_14_PLUS
+  const auto& starts = tstate->interp->monitors.tools;
+  return (starts[PY_MONITORING_EVENT_PY_START] & kTracingTools) != 0;
+#else
+  return false;
+#endif
+}
+
 int32_t frameTraced() {
-  PyThreadState* tstate = PyThreadState_Get();
-  return tstate->c_tracefunc != nullptr;
+  return traced(PyThreadState_Get());
 }
 
 int32_t frameReturns(void* returning, PyObject* result) {
   auto* frame = static_cast<_PyInterpreterFrame*>(returning);
   PyThreadState* tstate = PyThreadState_Get();
   PyFrameObject* object = frame->frame_obj;
-  if (object == nullptr || object->f_trace == nullptr ||
-      tstate->c_tracefunc == nullptr || tstate->tracing != 0) {
+  if (object == nullptr || object->f_trace == nullptr || tstate->tracing != 0) {
     return 0;
   }
-  // What the interpreter does for a frame that has a trace function when it
-  // returns; the function is not itself traced.
-  Py_INCREF(object);
-  tstate->tracing++;
-  int failed =
-      tstate->c_tracefunc(tstate->c_traceobj, object, PyTrace_RETURN, result);
-  tstate->tracing--;
-  Py_DECREF(object);
-  return failed != 0 ? -1 : 0;
+  if (tstate->c_tracefunc != nullptr) {
+    // What the interpreter does for a frame that has a trace function when
+    // it returns; the function is not itself traced.
+    Py_INCREF(object);
+    tstate->tracing++;
+    int failed =
+        tstate->c_tracefunc(tstate->c_traceobj, object, PyTrace_RETURN, result);
+    tstate->tracing--;
+    Py_DECREF(object);
+    return failed != 0 ? -1 : 0;
+  }
+#if IS_PYTHON_3_14_PLUS
+  // The same for a debugger that listens through sys.monitoring: it asked
+  // for the returns of the code of the frames it put its trace function on,
+  // and is called as the interpreter calls a tool (call_one_instrument).
+  PyCodeObject* code = frameCode(frame);
+  uint8_t tools = code->_co_monitoring == nullptr
+      ? 0
+      : code->_co_monitoring->local_monitors
+            .tools[PY_MONITORING_EVENT_PY_RETURN];
+  tools &= kTracingTools;
+  if (tools == 0) {
+    return 0;
+  }
+  Py_ssize_t at =
+      (frame->instr_ptr - _PyCode_CODE(code)) * sizeof(_Py_CODEUNIT);
+  PyObject* offset = PyLong_FromSsize_t(at);
+  if (offset == nullptr) {
+    return -1;
+  }
+  PyObject* args[] = {reinterpret_cast<PyObject*>(code), offset, result};
+  int failed = 0;
+  for (int tool = 0; tool < PY_MONITORING_TOOL_IDS && failed == 0; tool++) {
+    PyObject* callback =
+        tstate->interp
+            ->monitoring_callables[tool][PY_MONITORING_EVENT_PY_RETURN];
+    if ((tools & (1 << tool)) == 0 || callback == nullptr) {
+      continue;
+    }
+    int outer = tstate->what_event;
+    tstate->what_event = PY_MONITORING_EVENT_PY_RETURN;
+    tstate->tracing++;
+    PyObject* told = PyObject_Vectorcall(callback, args, 3, nullptr);
+    tstate->tracing--;
+    tstate->what_event = outer;
+    failed = told == nullptr ? -1 : 0;
+    Py_XDECREF(told);
+  }
+  Py_DECREF(offset);
+  return failed;
+#else
+  return 0;
+#endif
 }
 
 // The frame evaluation function of the interpreter (PEP 523) while a
@@ -1919,20 +2048,21 @@ PyObject* evalFrame(
   // Offered: the frame of a call of a function, before its first
   // instruction. Not the body of a class or a module, which has its
   // variables in a dict; not a generator or a coroutine, whose frame outlives
-  // the call; nothing while a trace function is set, which the interpreter
-  // tells about the frames it runs; and nothing that is another evaluator's
+  // the call; nothing while the thread is traced, when it is the interpreter
+  // that tells of the frames it runs; and nothing that is another evaluator's
   // business: while one is in front of this one, or is running a frame that
   // this one handed on to it.
   constexpr int kinds =
       CO_OPTIMIZED | CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR;
   if (hook_wanted > 0 && throwflag == 0 &&
       frame->owner == FRAME_OWNED_BY_THREAD && frame->f_locals == nullptr &&
-      (frame->f_code->co_flags & kinds) == CO_OPTIMIZED &&
-      tstate->c_tracefunc == nullptr && PyFunction_Check(frame->f_funcobj) &&
+      (frameCode(frame)->co_flags & kinds) == CO_OPTIMIZED && !traced(tstate) &&
+      PyFunction_Check(frameFunction(frame)) &&
       (hook_handing == nullptr || hook_below == &_PyEval_EvalFrameDefault) &&
       _PyInterpreterState_GetEvalFrameFunc(tstate->interp) == &evalFrame) {
     PyObject* result = nullptr;
-    if (hook_take(frame->f_funcobj, frame, &result)) {
+    PyObject* function = reinterpret_cast<PyObject*>(frameFunction(frame));
+    if (hook_take(function, frame, &result)) {
       return result;
     }
   }

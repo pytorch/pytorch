@@ -65,6 +65,10 @@ struct Builder<'a> {
     /// loop header is read before the loop is complete, so whether it is NULL
     /// is only known once construction is done; a second run uses the answer.
     null_slots: Vec<Vec<bool>>,
+    /// What CALL_FUNCTION_EX found in the place of the NULL next to its
+    /// callable, where it was not the marker: a slot of a loop header whose
+    /// run has not learned yet that it is NULL, or else an error.
+    not_null: Vec<V>,
     forward: Vec<V>,
     phi_block: HashMap<V, usize>,
     phi_ops: HashMap<V, Vec<V>>,
@@ -322,6 +326,19 @@ impl<'a> Builder<'a> {
             }};
         }
 
+        // A callable that takes no `self`, as a call finds it under its
+        // arguments (see `OpcodeTable::callable_first`).
+        macro_rules! push_callable {
+            ($v:expr) => {{
+                let v = $v;
+                if self.table.callable_first {
+                    stack.extend([v, NULLMARK]);
+                } else {
+                    stack.extend([NULLMARK, v]);
+                }
+            }};
+        }
+
         for idx in start..end {
             let ins = self.instrs[idx].clone();
             let off = ins.off;
@@ -351,6 +368,11 @@ impl<'a> Builder<'a> {
                 Bc::LoadConst => {
                     let v = emit!(off, Op::Const(arg));
                     self.const_values.insert(v);
+                    stack.push(v);
+                }
+                // In 3.14 the cells of the closure are loaded like locals.
+                Bc::LoadFast if arg >= self.nfree_base => {
+                    let v = emit!(off, Op::LoadClosure(arg - self.nfree_base));
                     stack.push(v);
                 }
                 // A local that lives in a frame slot is read and written there.
@@ -416,14 +438,15 @@ impl<'a> Builder<'a> {
                     effect!(off, Op::StoreLocal(arg, UNDEF));
                 }
                 Bc::LoadGlobal => {
-                    if arg & 1 != 0 {
-                        stack.push(NULLMARK);
-                    }
                     let v = emit!(off, Op::LoadGlobal(self.names_base + (arg >> 1)));
                     if self.reads_frame.contains(&(arg >> 1)) {
                         self.frame_readers.insert(v);
                     }
-                    stack.push(v);
+                    if arg & 1 != 0 {
+                        push_callable!(v);
+                    } else {
+                        stack.push(v);
+                    }
                 }
                 Bc::StoreGlobal => {
                     let v = pop_value!();
@@ -452,14 +475,15 @@ impl<'a> Builder<'a> {
                 }
                 Bc::LoadAttr => {
                     let obj = pop_value!();
-                    if arg & 1 != 0 {
-                        // The method form leaves (method, self) or (NULL, attr)
-                        // on the stack; we always produce the latter, binding
-                        // the method.
-                        stack.push(NULLMARK);
-                    }
                     let v = emit!(off, Op::LoadAttr(obj, self.names_base + (arg >> 1)));
-                    stack.push(v);
+                    if arg & 1 != 0 {
+                        // The method form leaves the method and `self`, or
+                        // the attribute and NULL, on the stack; we always
+                        // produce the latter, binding the method.
+                        push_callable!(v);
+                    } else {
+                        stack.push(v);
+                    }
                 }
                 Bc::LoadSuperAttr => {
                     let this = pop_value!();
@@ -467,11 +491,12 @@ impl<'a> Builder<'a> {
                     let global_super = pop_value!();
                     let explicit = arg & 2 != 0;
                     let bound = emit!(off, Op::SuperObject { global_super, class, this, explicit });
-                    if arg & 1 != 0 {
-                        stack.push(NULLMARK);
-                    }
                     let v = emit!(off, Op::LoadAttr(bound, self.names_base + (arg >> 2)));
-                    stack.push(v);
+                    if arg & 1 != 0 {
+                        push_callable!(v);
+                    } else {
+                        stack.push(v);
+                    }
                 }
                 Bc::ImportName => {
                     let fromlist = pop_value!();
@@ -543,8 +568,37 @@ impl<'a> Builder<'a> {
                     let annotations = take(0x04)?;
                     let kwdefaults = take(0x02)?;
                     let defaults = take(0x01)?;
-                    let v = emit!(off, Op::MakeFunction { code, defaults, kwdefaults, annotations, closure });
+                    let annotate = NONE;
+                    let v = emit!(off, Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure });
                     stack.push(v);
+                }
+                // In 3.14 MAKE_FUNCTION takes the code alone, and one of
+                // these follows it for each of the other things, which were
+                // all made before it: they go into the instruction that
+                // makes the function.
+                Bc::SetFunctionAttribute => {
+                    let func = pop_value!();
+                    let attr = pop_value!();
+                    let made = match insts.last_mut() {
+                        Some(Inst { dst, op: Op::MakeFunction { defaults, kwdefaults, annotations, annotate, closure, .. }, .. })
+                            if *dst == func =>
+                        {
+                            match arg {
+                                0x01 => Some(defaults),
+                                0x02 => Some(kwdefaults),
+                                0x04 => Some(annotations),
+                                0x08 => Some(closure),
+                                0x10 => Some(annotate),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    match made {
+                        Some(place) => *place = attr,
+                        None => return unsupported("SET_FUNCTION_ATTRIBUTE does not follow MAKE_FUNCTION"),
+                    }
+                    stack.push(func);
                 }
                 Bc::BinaryOp => {
                     let rhs = pop_value!();
@@ -572,6 +626,14 @@ impl<'a> Builder<'a> {
                     let rhs = pop_value!();
                     let lhs = pop_value!();
                     let v = emit!(off, Op::Compare((arg >> 4) as u8, lhs, rhs));
+                    stack.push(v);
+                }
+                // In 3.14 the conditional jumps and UNARY_NOT take a bool,
+                // and this is how a value becomes one.
+                Bc::ToBool => {
+                    let a = pop_value!();
+                    let v = if self.bool_values.contains(&a) { a } else { emit!(off, Op::ToBool(a)) };
+                    self.bool_values.insert(v);
                     stack.push(v);
                 }
                 Bc::IsOp => {
@@ -677,7 +739,7 @@ impl<'a> Builder<'a> {
                         Bc::DictUpdate => Op::DictUpdate(container, item),
                         // The function the arguments are for is under
                         // them, for the error messages.
-                        _ => Op::DictMerge(container, item, peek!(arg as usize + 2)),
+                        _ => Op::DictMerge(container, item, peek!(arg as usize + 2 + self.table.callable_first as usize)),
                     };
                     effect!(off, op);
                 }
@@ -729,16 +791,36 @@ impl<'a> Builder<'a> {
                     }
                 }
                 Bc::KwNames => kwnames = arg,
-                Bc::Call => {
+                Bc::Call | Bc::CallKw => {
+                    if ins.op == Bc::CallKw {
+                        // The names of the keyword arguments are on top of
+                        // the arguments: a constant that was just loaded.
+                        let names = pop_value!();
+                        kwnames = match insts.last() {
+                            Some(Inst { dst, op: Op::Const(c), .. }) if *dst == names => *c,
+                            _ => return unsupported("CALL_KW does not follow the LOAD_CONST of its keyword names"),
+                        };
+                        if !stack.contains(&names) {
+                            insts.pop();
+                        }
+                    }
                     let mut args = pop_n!(arg as usize);
-                    let second = pop_value!();
+                    let second = pop!();
                     let first = pop!();
-                    let callee = if first == NULLMARK {
-                        second
-                    } else {
-                        args.insert(0, second);
-                        first
+                    // Under the arguments are NULL and the callable, in the
+                    // order of `callable_first`, or else the callable and
+                    // its first argument.
+                    let callee = match (first, second) {
+                        (NULLMARK, callee) if !self.table.callable_first => callee,
+                        (callee, NULLMARK) if self.table.callable_first => callee,
+                        (callee, receiver) => {
+                            args.insert(0, receiver);
+                            callee
+                        }
                     };
+                    if callee == NULLMARK || args.first() == Some(&NULLMARK) {
+                        return unsupported("unexpected NULL on the stack");
+                    }
                     let v = if args.is_empty() && kwnames == NONE && self.frame_readers.contains(&callee) {
                         let mut entries: Vec<(u32, V, bool)> = Vec::new();
                         for local in 0..self.nlocals as u32 {
@@ -762,12 +844,24 @@ impl<'a> Builder<'a> {
                     kwnames = NONE;
                     stack.push(v);
                 }
-                Bc::CallFunctionEx => {
-                    let kwargs = if arg & 1 != 0 { pop_value!() } else { NONE };
+                Bc::CallFunctionEx | Bc::CallFunctionExKwargs => {
+                    let kwargs = if ins.op == Bc::CallFunctionEx {
+                        if arg & 1 != 0 { pop_value!() } else { NONE }
+                    } else {
+                        match pop!() {
+                            NULLMARK => NONE,
+                            kwargs => kwargs,
+                        }
+                    };
                     let args = pop_value!();
-                    let callee = pop_value!();
-                    if pop!() != NULLMARK {
+                    let second = pop!();
+                    let first = pop!();
+                    let (null, callee) = if self.table.callable_first { (second, first) } else { (first, second) };
+                    if callee == NULLMARK {
                         return unsupported("unexpected CALL_FUNCTION_EX stack layout");
+                    }
+                    if null != NULLMARK {
+                        self.not_null.push(null);
                     }
                     let v = emit!(off, Op::CallEx { callee, args, kwargs });
                     stack.push(v);
@@ -878,6 +972,25 @@ impl<'a> Builder<'a> {
                     let v = emit!(off, Op::WithExceptStart { exit, exc });
                     stack.push(v);
                 }
+                Bc::WithExceptStartCall => {
+                    // exit, NULL, raising offset, previous exception, exception
+                    let (exit, null, exc) = (peek!(5), peek!(4), peek!(1));
+                    if null != NULLMARK {
+                        return unsupported("unexpected WITH_EXCEPT_START stack layout");
+                    }
+                    let v = emit!(off, Op::WithExceptStart { exit, exc });
+                    stack.push(v);
+                }
+                // What 3.14 has in place of BEFORE_WITH: the method is looked
+                // up and left for a CALL. Like LOAD_ATTR, we bind it.
+                Bc::LoadSpecial => {
+                    let owner = pop_value!();
+                    let Some(name) = self.table.special_names.get(arg as usize) else {
+                        return unsupported(format!("special method {} is not supported", arg));
+                    };
+                    let name = self.name_const(name);
+                    push_callable!(emit!(off, Op::LoadSpecial(owner, name)));
+                }
                 Bc::BeforeWith => {
                     let manager = pop_value!();
                     let enter = self.name_const("__enter__");
@@ -901,10 +1014,36 @@ impl<'a> Builder<'a> {
                     let v = emit!(off, Op::Const(c));
                     stack.push(v);
                 }
+                Bc::LoadCommonConstant | Bc::LoadSmallInt => {
+                    let obj = if ins.op == Bc::LoadSmallInt {
+                        unsafe { PyObj::from_owned(ffi::PyLong_FromLong(arg as _)) }
+                    } else {
+                        match self.table.common_constants.get(arg as usize) {
+                            Some(obj) => obj.clone(),
+                            None => return unsupported(format!("common constant {} is not supported", arg)),
+                        }
+                    };
+                    let c = self.extra_const(obj);
+                    let v = emit!(off, Op::Const(c));
+                    self.const_values.insert(v);
+                    stack.push(v);
+                }
                 Bc::FormatValue => {
                     let spec = if arg & 4 != 0 { pop_value!() } else { NONE };
                     let val = pop_value!();
                     let v = emit!(off, Op::Format { val, conv: (arg & 3) as u8, spec });
+                    stack.push(v);
+                }
+                // FORMAT_VALUE in the three steps 3.14 takes it in.
+                Bc::ConvertValue => {
+                    let val = pop_value!();
+                    let v = emit!(off, Op::Format { val, conv: (arg & 3) as u8 | CONVERT_ONLY, spec: NONE });
+                    stack.push(v);
+                }
+                Bc::FormatSimple | Bc::FormatWithSpec => {
+                    let spec = if ins.op == Bc::FormatWithSpec { pop_value!() } else { NONE };
+                    let val = pop_value!();
+                    let v = emit!(off, Op::Format { val, conv: 0, spec });
                     stack.push(v);
                 }
                 Bc::Other => {
@@ -953,7 +1092,7 @@ impl<'a> Builder<'a> {
         let obj = unsafe {
             let s = ffi::PyUnicode_FromStringAndSize(name.as_ptr() as *const _, name.len() as isize);
             if s.is_null() {
-                return Err(Python::with_gil(PyErr::fetch));
+                return Err(Python::attach(PyErr::fetch));
             }
             PyObj::from_owned(s)
         };
@@ -1000,8 +1139,8 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     }
     let cellvars: Vec<String> = code.getattr("co_cellvars")?.extract()?;
     let co_code = code.getattr("co_code")?;
-    let co_code = co_code.downcast::<PyBytes>()?;
-    let instrs = bytecode::decode(table, co_code);
+    let co_code = co_code.cast::<PyBytes>()?;
+    let instrs = bytecode::simplify(table, bytecode::decode(table, co_code));
     if instrs.is_empty() {
         return unsupported("empty bytecode");
     }
@@ -1012,7 +1151,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         .collect();
 
     let exc_table = code.getattr("co_exceptiontable")?;
-    let exc_table = exc_table.downcast::<PyBytes>()?;
+    let exc_table = exc_table.cast::<PyBytes>()?;
     let mut handled = bytecode::parse_exception_table(exc_table.as_bytes());
     // The handlers of an inlined comprehension only restore its variable and
     // re-raise. As long as nothing in the function catches exceptions, that
@@ -1034,7 +1173,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     }
 
     let mut lines: Vec<(u32, u32, i32)> = Vec::new();
-    for item in code.call_method0("co_lines")?.iter()? {
+    for item in code.call_method0("co_lines")?.try_iter()? {
         let (start, end, line): (u32, u32, Option<i32>) = item?.extract()?;
         if let Some(line) = line {
             lines.push((start, end, line));
@@ -1175,9 +1314,9 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
 
     // ---- function metadata ----
     let consts_tuple = code.getattr("co_consts")?;
-    let consts_tuple = consts_tuple.downcast::<PyTuple>()?;
+    let consts_tuple = consts_tuple.cast::<PyTuple>()?;
     let names_tuple = code.getattr("co_names")?;
-    let names_tuple = names_tuple.downcast::<PyTuple>()?;
+    let names_tuple = names_tuple.cast::<PyTuple>()?;
     let mut consts: Vec<PyObj> = Vec::new();
     for c in consts_tuple.iter() {
         consts.push(unsafe { PyObj::from_borrowed(c.as_ptr()) });
@@ -1189,8 +1328,8 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     // A compiled function runs under a frame of the interpreter that has its
     // variables (see `Op::StoreLocal`), so what reads them there finds them:
     // `eval`, `exec`, `locals`, `vars`, `dir` and `super()` are calls like
-    // any other. Where compiled functions have no frame (anything but
-    // CPython 3.12) those are out of reach, as are the function's globals
+    // any other. Where compiled functions have no frame (see `frame_push`
+    // in cfg.h) those are out of reach, as are the function's globals
     // and walking the stack; `locals`, `vars` and `dir` are then supported
     // where they are called on the spot (see `Op::Locals`). That is about
     // the globals of these names; an attribute may be called what it likes.
@@ -1239,7 +1378,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         instrs.iter().filter(|i| i.op == Bc::MakeCell).map(|i| i.arg).collect();
     let freevars: Vec<String> = code.getattr("co_freevars")?.extract()?;
     let varnames_tuple = code.getattr("co_varnames")?;
-    let varnames_tuple = varnames_tuple.downcast::<PyTuple>()?;
+    let varnames_tuple = varnames_tuple.cast::<PyTuple>()?;
     let mut varnames: Vec<String> = varnames_tuple.extract()?;
     // The frame's slots: the locals, then the cells that are not also
     // arguments, then (not numbered here) the cells of the closure.
@@ -1278,6 +1417,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             entry_depth: vec![None; nblocks],
             entry_stacks: vec![Vec::new(); nblocks],
             null_slots: null_slots.clone(),
+            not_null: Vec::new(),
             const_values: HashSet::new(),
             forward: Vec::new(),
             phi_block: HashMap::new(),
@@ -1362,6 +1502,9 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             null_slots[b] = slots;
         }
         if !learned {
+            if !builder.not_null.is_empty() {
+                return unsupported("unexpected CALL_FUNCTION_EX stack layout");
+            }
             break (builder, params);
         }
         attempts += 1;
@@ -1464,14 +1607,14 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     drop(builder);
 
     let globals = func.getattr("__globals__")?;
-    globals.downcast::<PyDict>()?;
+    globals.cast::<PyDict>()?;
     // The interpreter reads the globals of such a function through the
     // mapping protocol (a `__missing__`, a `__getitem__` of its own).
     if !globals.is_exact_instance_of::<PyDict>() {
         return unsupported("the globals of the function are not a plain dict");
     }
     let builtins = func.getattr("__builtins__")?;
-    let builtins = if builtins.downcast::<PyDict>().is_ok() {
+    let builtins = if builtins.cast::<PyDict>().is_ok() {
         builtins
     } else {
         builtins.getattr("__dict__")?
@@ -1561,8 +1704,8 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::FrameLeave
         | Op::CaughtLasti
         | Op::CaughtException => {}
-        Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
-            r!(code, defaults, kwdefaults, annotations, closure)
+        Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
+            r!(code, defaults, kwdefaults, annotations, annotate, closure)
         }
         Op::ImportName { fromlist, level, .. } => r!(fromlist, level),
         Op::LoadAttr(a, _)

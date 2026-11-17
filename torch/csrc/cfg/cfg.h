@@ -151,14 +151,16 @@ struct TcfgApi {
   // Interpreter frames, so that whatever looks at the Python stack while a
   // compiled function runs (a traceback, a warning, sys._getframe, the module
   // a new class is attributed to) finds the function there. Both are null
-  // where the layout of CPython's frames is not known: anything but 3.12.
+  // where the layout of CPython's frames is not known: it is for 3.12, and
+  // for the default build of 3.14 on 64-bit platforms other than Windows.
   //
   // Pushes a frame for func, a Python function, and makes it the current
   // frame of the thread. *instr gets the address of the frame's instruction
   // pointer and *code that of the first instruction of the function's code,
   // so the caller can keep the pointer on what it is executing. *locals gets
-  // the frame's variables, one owned reference or null each, in the order of
-  // the code's co_localsplusnames: the caller keeps them what the variables
+  // the frame's variables, one owned reference or null each (in 3.14 as the
+  // stack reference that stands for it), in the order of the code's
+  // co_localsplusnames: the caller keeps them what the variables
   // of the function are bound to, the cells of the closure excepted, which
   // are there already. The frame counts as one Python call against the
   // recursion limit. *object gets the address of the frame's frame object,
@@ -182,7 +184,9 @@ struct TcfgApi {
   // frames were pushed since.
   void* (*frame_swap)(void* frame);
   // Whether the thread has a trace function (sys.settrace): the interpreter
-  // calls it for the frames it enters and the lines it runs in them.
+  // calls it for the frames it enters and the lines it runs in them. In 3.14
+  // the same goes for a debugger or a coverage tool that asked sys.monitoring
+  // for the functions that start, which is how pdb listens there.
   int32_t (*frame_traced)();
 
   // The frames the interpreter makes itself: for the calls that C code makes
@@ -209,7 +213,9 @@ struct TcfgApi {
   // For a frame that is about to return result and has a frame object: if
   // a debugger put its trace function on the frame (it does so for every
   // frame of the stack it is entered under), tells it of the return, as the
-  // interpreter does. Returns -1 with a Python error set if it raised.
+  // interpreter does: through the thread's trace function, or in 3.14
+  // through what the debugger registered with sys.monitoring for the returns
+  // of the frame's code. Returns -1 with a Python error set if it raised.
   int32_t (*frame_returns)(void* frame, PyObject* result);
 
   // Whether torch.jit.trace is recording on this thread: one of the things

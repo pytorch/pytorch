@@ -6,8 +6,10 @@ import dis
 import functools
 import gc
 import importlib
+import io
 import math
 import os
+import pdb
 import random
 import shutil
 import signal
@@ -45,7 +47,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
 
 # The Rust runtime is only in builds made with USE_CFG_COMPILE=1, and only
-# understands CPython 3.12 bytecode.
+# understands the bytecode of CPython 3.12 and 3.14.
 try:
     cfg_rs = importlib.import_module("torch._cfg_rs")
 except ImportError:
@@ -54,7 +56,9 @@ except ImportError:
 # faster there, unless a test asks for it.
 os.environ["TORCH_REWRITE_DEMOTE"] = "0"
 
-HAS_RUNTIME = UNDISTURBED and cfg_rs is not None and sys.version_info[:2] == (3, 12)
+HAS_RUNTIME = (
+    UNDISTURBED and cfg_rs is not None and sys.version_info[:2] in ((3, 12), (3, 14))
+)
 canonical = torch.rewrite.canonical
 # The passes over the whole function, which the tests of one pass over a block keep.
 WHOLE = canonical[:3]
@@ -83,6 +87,11 @@ def call_outcome(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except Exception as e:
         return type(e), str(e)
+
+
+# How pdb can listen: with a trace function, and from 3.14 on, where
+# pdb.set_trace() and breakpoint() make it do so, through sys.monitoring.
+PDB_BACKENDS = ("settrace", "monitoring")[: 1 + (sys.version_info >= (3, 14))]
 
 
 def block_stats(fn, key):
@@ -2920,8 +2929,11 @@ class TestCfgWith(TestCase):
         compiled = torch.rewrite(f, fallback=False)
         for manager in (NoExit(), NoEnter(), 3):
             self.assertEqual(call_outcome(compiled, manager), call_outcome(f, manager))
-        missed = "'NoExit' object does not support the context manager protocol (missed __exit__ method)"
-        self.assertEqual(call_outcome(compiled, NoExit()), (TypeError, missed))
+        # 3.14 names the class in full, with what it is defined in.
+        missed = r"^'(.+\.)?NoExit' object does not support the context manager protocol \(missed __exit__ method\)$"
+        kind, message = call_outcome(compiled, NoExit())
+        self.assertIs(kind, TypeError)
+        self.assertRegex(message, missed)
 
     def test_no_grad_block(self):
         def f(x):
@@ -3105,6 +3117,22 @@ class TestCfgMoreBytecodes(TestCase):
             with self.assertRaises(error) as got:
                 compiled(bad)
             self.assertEqual(str(got.exception), str(expected.exception))
+
+    def test_star_arguments_made_in_a_loop(self):
+        def collect(*args, **kwargs):
+            return args, kwargs
+
+        def f(xs):
+            return (
+                collect(*xs, *[x * 2 for x in xs]),
+                collect(1, *[x for x in xs if x], k=2),
+                collect(*tuple(x + 1 for x in xs), **{str(x): x for x in xs}),
+            )
+
+        # The NULL next to `collect` is on the stack while the loops run.
+        compiled = torch.rewrite(f, fallback=False)
+        for xs in ([1, 2, 3], [], (0, 5)):
+            self.assertEqual(compiled(xs), f(xs))
 
     def test_class_statement(self):
         def f(x):
@@ -3415,7 +3443,8 @@ def frame_execs(a):
     scope = {}
     exec("c = a * 3", {"a": a}, scope)
     exec("d = a + 1")
-    return scope, locals()["d"]
+    # From 3.13 on what exec binds is not in what locals() returns (PEP 667).
+    return scope, locals().get("d")
 
 
 def frame_reads_through_another_name(a, b):
@@ -3842,6 +3871,56 @@ class TestCfgFrames(TestCase):
             self.assertEqual(returns(compiled), returns(f))
         self.assertEqual(returns(compiled), [("middle", "return"), ("f", "return")])
         self.assertEqual(compiled.stats()["interpreted_callees"], [])
+
+    @parametrize("backend", PDB_BACKENDS)
+    def test_pdb_stops_in_a_callee_and_on_the_way_out(self, backend):
+        def leaf(x):
+            return x + 1
+
+        def stops(x):
+            debugger.set_trace(sys._getframe())
+            return leaf(x)
+
+        def middle(x):
+            return stops(x) * 2
+
+        def f(x):
+            return leaf(middle(x))
+
+        def session(fn):
+            nonlocal debugger
+            commands = ["tbreak leaf", "continue", *["return"] * 4, "continue"]
+            out = io.StringIO()
+            debugger = pdb.Pdb(
+                stdin=io.StringIO("\n".join(commands) + "\n"),
+                stdout=out,
+                nosigint=True,
+                readrc=False,
+                **({"backend": backend} if len(PDB_BACKENDS) > 1 else {}),
+            )
+            debugger.use_rawinput = False
+            try:
+                self.assertEqual(fn(1), 5)
+            finally:
+                sys.settrace(None)
+                debugger.clear_all_breaks()
+                if backend == "monitoring":
+                    sys.monitoring.free_tool_id(sys.monitoring.DEBUGGER_ID)
+            # "> file(line)function()->value" is where it stopped.
+            stops = [line for line in out.getvalue().splitlines() if line[:1] == ">"]
+            return [line.split(")", 1)[1] for line in stops]
+
+        debugger = None
+        compiled = torch.rewrite(f, fallback=False, passes=without("inline"))
+        for _ in range(3):
+            self.assertEqual(session(compiled), session(f))
+        # Where it was entered, the breakpoint in a function that was called
+        # afterwards, and the returns of that function and of the three
+        # frames it was entered under, two of them rewritten.
+        self.assertEqual(
+            session(compiled),
+            ["stops()", "leaf()", "leaf()->2", "stops()->2", "middle()->4", "f()->5"],
+        )
 
     def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
@@ -6038,6 +6117,85 @@ class TestCfgRegions(TestCase):
             self.assertEqual([type(mode) for mode in stack], [DeviceContext])
         # The mode is not called for what the backend's code does.
         self.assertEqual(seen, [])
+
+    def looks(self, compiled, *args):
+        """How many tensors three calls each make their key of, and check
+        against what a graph has built in."""
+        keyed, stamped = [], []
+        real_key, real_stamp = cfg_rs.tensor_key, cfg_rs.tensor_stamp
+
+        def tensor_key(tensors, ints):
+            keyed.append(len(tensors))
+            return real_key(tensors, ints)
+
+        def tensor_stamp(tensors):
+            stamped.append(len(tensors))
+            return real_stamp(tensors)
+
+        counted = unittest.mock.patch.multiple(
+            cfg_rs, tensor_key=tensor_key, tensor_stamp=tensor_stamp
+        )
+        with counted:
+            for _ in range(3):
+                compiled(*args)
+        return keyed, stamped
+
+    def test_the_tensors_of_a_module_are_looked_at_once_a_call(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        passes = with_graphs("aot_eager")
+        compiled = torch.rewrite(region_infer, passes=passes, fallback=False)
+        x = torch.randn(2, 3, 6, 6)
+        with torch.no_grad():
+            for _ in range(10):
+                compiled(model, x)
+            # The key of a call is made of its input: what the module holds
+            # is what an earlier call found, and so is what the graph has
+            # built in.
+            self.assertEqual(self.looks(compiled, model, x), ([1, 1, 1], []))
+            # A weight that is written to, replaced, or of another size is
+            # found out all the same.
+            model.fc.weight.mul_(2)
+            self.assertEqual(compiled(model, x), region_infer(model, x))
+            model.fc.bias = torch.nn.Parameter(torch.ones(5))
+            self.assertEqual(compiled(model, x), region_infer(model, x))
+            model.fc = torch.nn.Linear(4 * 6 * 6, 7)
+            for _ in range(3):
+                self.assertEqual(compiled(model, x), region_infer(model, x))
+            model.bn.train()
+            for _ in range(3):
+                self.assertEqual(compiled(model, x), region_infer(model, x))
+
+    def test_modules_that_share_tensors_or_lie_inside_one_another(self):
+        torch.manual_seed(0)
+        first, second = torch.nn.Linear(4, 4), torch.nn.Linear(4, 4)
+        second.weight = first.weight
+        both = torch.nn.Sequential(first, second).eval()
+
+        def outside_in(both, second, x):
+            return both(x) + second(x) * 2 - x
+
+        def inside_out(second, both, x):
+            return both(x) + second(x) * 2 - x
+
+        passes = with_graphs("aot_eager")
+        x = torch.randn(3, 4)
+        with torch.no_grad():
+            for f, args in (
+                (outside_in, (both, second, x)),
+                (inside_out, (second, both, x)),
+            ):
+                compiled = torch.rewrite(f, passes=passes, fallback=False)
+                for _ in range(10):
+                    self.assertEqual(compiled(*args), f(*args))
+                self.assertEqual(len(self.compiled_regions(compiled)), 1)
+                # One module inside the other, and a weight that both layers
+                # have: every tensor is still looked at once.
+                self.assertEqual(self.looks(compiled, *args), ([1, 1, 1], []))
+                first.weight.add_(1)
+                self.assertEqual(compiled(*args), f(*args))
+                second.bias = torch.nn.Parameter(torch.ones(4))
+                self.assertEqual(compiled(*args), f(*args))
 
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):

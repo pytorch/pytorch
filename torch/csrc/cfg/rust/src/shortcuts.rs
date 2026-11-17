@@ -167,11 +167,6 @@ fn resolved() -> &'static ResolvedCache {
 }
 
 #[inline(always)]
-unsafe fn dict_version(dict: Obj) -> u64 {
-    (*(dict as *mut ffi::PyDictObject)).ma_version_tag
-}
-
-#[inline(always)]
 unsafe fn type_version(ty: *mut ffi::PyTypeObject) -> u32 {
     if ffi::PyType_HasFeature(ty, ffi::Py_TPFLAGS_VALID_VERSION_TAG) != 0 {
         (*ty).tp_version_tag
@@ -185,7 +180,7 @@ unsafe fn type_version(ty: *mut ffi::PyTypeObject) -> u32 {
 unsafe fn holds_now(condition: &Condition) -> bool {
     match condition {
         Condition::GlobalFalsy(globals, name, seen) => {
-            let version = dict_version(globals.as_ptr());
+            let version = pyffi::dict_version(globals.as_ptr());
             let (seen_version, mut value) = seen.get();
             if seen_version != version {
                 value = ffi::PyDict_GetItemWithError(globals.as_ptr(), name.as_ptr());
@@ -273,7 +268,7 @@ pub unsafe fn call_target(obj: Obj, ty: *mut ffi::PyTypeObject, call: Obj) -> Ob
         && entry.type_version != 0
         && entry.type_version == type_version(ty)
         && entry.dict == dict as usize
-        && entry.dict_version == dict_version(dict);
+        && entry.dict_version == pyffi::dict_version(dict);
     if !fresh {
         let found = registry().borrow().calls.iter().copied().find(|s| s.function.as_ptr() == call);
         let looked = found.and_then(|shortcut| resolve(shortcut, ty, dict).map(|r| (shortcut, r)));
@@ -288,7 +283,7 @@ pub unsafe fn call_target(obj: Obj, ty: *mut ffi::PyTypeObject, call: Obj) -> Ob
             // Read after the lookups, which may have given the type one.
             type_version: type_version(ty),
             dict: dict as usize,
-            dict_version: dict_version(dict),
+            dict_version: pyffi::dict_version(dict),
             shortcut: looked.map(|(shortcut, _)| shortcut),
             target: looked.map_or(null_mut(), |(_, (target, _))| target),
             watched: looked.map_or([null_mut(); MAX_WATCHED], |(_, (_, watched))| watched),
