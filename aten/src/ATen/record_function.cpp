@@ -286,7 +286,7 @@ void CacheEntry::getActiveCallbacksImpl() {
   // reaches zero at the start of this function something has gone wrong.
   TORCH_INTERNAL_ASSERT(sampling_countdown_ > 0, sampling_countdown_);
 
-  if (C10_UNLIKELY(!(--sampling_countdown_))) {
+  if (!(--sampling_countdown_)) [[unlikely]] {
     // Use inferred steps to update sampled callbacks.
     for (auto& i : callbacks_) {
       if (i.tries_left_ > 0) {
@@ -314,7 +314,7 @@ StepCallbacks CacheEntry::getActiveCallbacks() {
 
 std::optional<StepCallbacks> CacheEntry::getActiveCallbacksUnlessEmpty() {
   getActiveCallbacksImpl();
-  if (C10_LIKELY(active_callbacks_.empty())) {
+  if (active_callbacks_.empty()) [[likely]] {
     return std::nullopt;
   }
   return active_callbacks_;
@@ -389,7 +389,7 @@ const RecordFunctionTLS& LocalCallbackManager::getTLS() const {
 
 void LocalCallbackManager::rebuildActiveCallbacksIfNeeded() {
   const auto global_version = GlobalCallbackManager::get().version();
-  if (C10_UNLIKELY(global_version != global_version_)) {
+  if (global_version != global_version_) [[unlikely]] {
     rebuild_all(GlobalCallbackManager::get().getSnapshot());
   }
 }
