@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import inspect
 import os
 import re
 import sys
@@ -334,7 +335,7 @@ class Library:
 
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
-        caller_module_name = _get_pystub_module(frame)
+        caller_module_name = _caller_module_name_for_pystub(frame)
 
         # TODO(rzou): We're gonna need to stage this change with torchvision,
         # since torchvision is github first.
@@ -1657,13 +1658,16 @@ def register_vmap(
         return register(func)
 
 
-def _get_pystub_module(frame: FrameType) -> str | None:
+def _caller_module_name_for_pystub(frame: FrameType) -> str | None:
+    """Return the caller's module name if its file matches the executing frame.
+
+    Return None to skip the pystub check when the frame has no matching module.
+    """
     name = frame.f_globals.get("__name__")
     module = sys.modules.get(name) if isinstance(name, str) else None
     if not isinstance(module, ModuleType):
         return None
-    # Read only this module's namespace, without invoking a lazy module loader.
-    filename = object.__getattribute__(module, "__dict__").get("__file__")
+    filename = inspect.getattr_static(module, "__file__", None)
     source = frame.f_code.co_filename
     if not isinstance(filename, str) or not filename:
         return None

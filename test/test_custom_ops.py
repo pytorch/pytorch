@@ -6270,38 +6270,38 @@ Please use `add.register_fake` to add an fake impl.""",
 @instantiate_parametrized_tests
 class TestLibrarySourceLocation(TestCase):
     @parametrize(
-        "caller",
+        "name,module_file,code_file,registered,raises",
         [
-            "interactive",
-            "exec",
-            "unregistered",
-            "matching",
-            "mismatched",
-            "mismatched_virtual",
-            "mismatched_pyc",
-            "torchvision",
+            subtest(("__main__", None, "<string>", True, False), name="interactive"),
+            subtest(("_test_fake", "/m.py", "<string>", True, False), name="exec"),
+            subtest(
+                ("_test_fake", "/m.py", "/m.py", False, False), name="unregistered"
+            ),
+            subtest((None, "/m.py", "/m.py", True, False), name="matching"),
+            subtest(("_test_fake", "/m.py", "/m.py", True, True), name="mismatched"),
+            subtest(
+                ("_test_fake", "<virtual>", "<virtual>", True, True),
+                name="mismatched_virtual",
+            ),
+            subtest(
+                ("_test_fake", "/m.pyc", "/m.py", True, True), name="mismatched_pyc"
+            ),
+            subtest(
+                ("torchvision._test_fake", "/m.py", "/m.py", True, False),
+                name="torchvision",
+            ),
         ],
     )
-    def test_register_fake_caller_module(self, caller):
+    def test_register_fake_caller_module(
+        self, name, module_file, code_file, registered, raises
+    ):
         # quantized::add is defined in C++ with m.set_python_module.
         op = torch.ops.quantized.add.default
-        expected_module, _ = torch._C._dispatch_pystub("quantized::add", "")
-        name = {
-            "interactive": "__main__",
-            "matching": expected_module,
-            "torchvision": "torchvision._test_fake",
-        }.get(caller, "_test_fake_module")
+        if name is None:
+            name, _ = torch._C._dispatch_pystub("quantized::add", "")
         module = ModuleType(name)
-        filename = f"/{name}.py"
-        if caller != "interactive":
-            module.__file__ = filename
-        if caller in ("interactive", "exec"):
-            filename = "<string>"
-        if caller == "mismatched_virtual":
-            module.__file__ = filename = "<test_fake_caller>"
-        elif caller == "mismatched_pyc":
-            module.__file__ = filename + "c"
-        registered = {} if caller == "unregistered" else {name: module}
+        if module_file is not None:
+            module.__file__ = module_file
         calls = []
 
         def fake(a, b, scale, zero_point):
@@ -6310,18 +6310,18 @@ class TestLibrarySourceLocation(TestCase):
 
         with torch.library._scoped_library("quantized", "FRAGMENT") as lib:
             module.__dict__.update(torch=torch, lib=lib, fake=fake)
-            with patch.dict(sys.modules, registered):
+            with patch.dict(sys.modules, {name: module} if registered else {}):
                 exec(
                     compile(
                         'torch.library.register_fake("quantized::add", fake, lib=lib)',
-                        filename,
+                        code_file,
                         "exec",
                     ),
                     module.__dict__,
                 )
             with torch._subclasses.fake_tensor.FakeTensorMode():
                 a, b = torch.empty(2, 3), torch.empty(3, 5)
-                if caller.startswith("mismatched"):
+                if raises:
                     with self.assertRaisesRegex(RuntimeError, "actually found in"):
                         op(a, b, 1.0, 0)
                     self.assertEqual(calls, [])
