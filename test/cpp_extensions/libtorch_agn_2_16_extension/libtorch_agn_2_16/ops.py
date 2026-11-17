@@ -42,6 +42,10 @@ def my_default_inference_mode_guard() -> bool:
     return torch.ops.libtorch_agn_2_16.my_default_inference_mode_guard.default()
 
 
+def my_is_inference_mode_enabled() -> bool:
+    return torch.ops.libtorch_agn_2_16.my_is_inference_mode_enabled.default()
+
+
 def my_is_warn_always_enabled() -> bool:
     """Stable ``torch_is_warn_always_enabled`` (2.16+)."""
     return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()

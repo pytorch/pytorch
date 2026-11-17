@@ -13,6 +13,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 // An ABI-stable counterpart to c10::InferenceMode. The guard must be destroyed
 // on the thread where it was constructed, in reverse order of construction.
 // Minimum compatible version: PyTorch 2.16.
+// Build time minimum version: PyTorch 2.16.
 class InferenceMode {
  public:
   InferenceMode(bool enabled = true) {
