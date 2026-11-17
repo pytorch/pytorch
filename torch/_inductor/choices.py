@@ -15,6 +15,7 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
+from .codegen.triton_utils import use_block_ptr_enabled
 from .heuristics.template import get_template_heuristic
 from .heuristics.template.triton import (
     _origami_enabled,
@@ -27,7 +28,6 @@ from .heuristics.template.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
-from .codegen.triton_utils import use_block_ptr_enabled
 from .kernel_inputs import KernelInputs, MMKernelInputs
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
