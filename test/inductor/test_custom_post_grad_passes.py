@@ -391,6 +391,37 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             torch.testing.assert_close(torch.compile(f)(x), f(x))
             self.assertFalse(custom_pass.is_infer)
 
+    def test_custom_pass_is_not_deep_copied(self):
+        # Custom passes can hold arbitrary state, such as FX graphs and the fake
+        # tensors in their metadata, so torch.compile must not deep-copy them (for
+        # example to snapshot or log the config).
+        calls = []
+        copied = []
+
+        class NoCopyPass(CustomGraphPass):
+            def __call__(self, g: torch.fx.graph.Graph):
+                calls.append(g)
+
+            def uuid(self) -> None:
+                return None
+
+            def __deepcopy__(self, memo):
+                copied.append(self)
+                return self
+
+        def f(x):
+            return x.sin() + 1
+
+        custom_pass = NoCopyPass()
+        with config.patch(post_grad_custom_pre_pass=custom_pass):
+            compiled = torch.compile(f)
+            x = torch.randn(8)
+            torch.testing.assert_close(compiled(x), f(x))
+        self.assertTrue(calls)
+        self.assertEqual(copied, [])
+        compiler_config = compiled.get_compiler_config()
+        self.assertIs(compiler_config["post_grad_custom_pre_pass"], custom_pass)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
