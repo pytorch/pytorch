@@ -1218,6 +1218,7 @@ class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(RecompileTests)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
