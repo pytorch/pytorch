@@ -1,13 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
-import contextlib
 import ctypes
-import gc
 import itertools
 import os
 import threading
-import weakref
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -17,7 +14,7 @@ from unittest.mock import patch
 from transport_test_utils import TransportTestMixin
 
 import torch
-from torch.distributed._transport import new_transport, register_transport, wait_all
+from torch.distributed._transport import new_transport, register_transport
 from torch.distributed._transport.mooncake import (
     _transport as _mooncake,
     MooncakeMemory,
@@ -461,32 +458,46 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         first, second = self.make_transport_pair()
         engine = second._engine
         engine._notifies += [_Notify("raw", "not base64!"), _Notify("ok", "b2s=")]
-        self.assertEqual(second.poll_notifications(), [("ok", b"ok")])
+        self.assertEqual(second.wait_notifications(timeout=0), [("ok", b"ok")])
         engine._notifies.append(_Notify("raw", b"\xff"))
         with self.assertLogs(_mooncake.logger, "WARNING"):
-            self.assertEqual(second.poll_notifications(), [])
+            self.assertEqual(second.wait_notifications(timeout=0), [])
         first.send_notification(second.peer_id, b"still works").wait()
         self.assertEqual(self._receive(second), [(first.peer_id, b"still works")])
 
-    def test_watcher_failure_fails_waits_and_restarts(self):
+    def test_drain_failure_propagates(self):
         first, second = self.make_transport_pair()
-        real = second._engine.get_notifies
-        failed = []
-
-        def fail_once_in_watcher():
-            if not failed and threading.current_thread() is second._watcher:
-                failed.append(True)
-                raise RuntimeError("transient native error")
-            return real()
-
-        with patch.object(second._engine, "get_notifies", fail_once_in_watcher):
+        error = RuntimeError("transient native error")
+        with patch.object(second._engine, "get_notifies", side_effect=error):
             with self.assertRaisesRegex(RuntimeError, "transient native error"):
-                second.wait_notifications().wait(timedelta(seconds=30))
-            self.assertIsNone(second._watcher)
-            work = second.wait_notifications()
-            first.send_notification(second.peer_id, b"after").wait()
-            self.assertTrue(work.wait(timedelta(seconds=30)))
-        self.assertEqual(second.poll_notifications(), [(first.peer_id, b"after")])
+                second.wait_notifications(timeout=0)
+        first.send_notification(second.peer_id, b"after").wait()
+        self.assertEqual(self._receive(second), [(first.peer_id, b"after")])
+
+    def test_close_wakes_blocked_waiter(self):
+        first, second = self.make_transport_pair()
+        drained = threading.Event()
+        drain = second._drain_notifies
+        errors = []
+
+        def drain_and_signal():
+            drain()
+            drained.set()
+
+        def blocked():
+            try:
+                second.wait_notifications(timeout=30)
+            except RuntimeError as error:
+                errors.append(error)
+
+        with patch.object(second, "_drain_notifies", drain_and_signal):
+            waiter = threading.Thread(target=blocked)
+            waiter.start()
+            self.assertTrue(drained.wait(30))
+            second.close()
+            waiter.join(30)
+        self.assertFalse(waiter.is_alive())
+        self.assertRegex(str(errors[0]), "closed")
 
     def test_send_notification_wait_honors_timeout(self):
         first, second = self.make_transport_pair()
@@ -504,30 +515,6 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             release.set()
             self.assertTrue(work.wait(timedelta(seconds=30)))
         self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
-
-    def test_timed_out_notification_waits_are_released(self):
-        first, second = self.make_transport_pair()
-        works = []
-
-        async def run():
-            for _ in range(20):
-                work = second.wait_notifications()
-                with contextlib.suppress(TimeoutError):
-                    await wait_all([work], timeout=0.001)
-                self.assertFalse(work.is_completed())
-                works.append(weakref.ref(work))
-            del work
-            gc.collect()
-            self.assertEqual(sum(ref() is not None for ref in works), 0)
-            waiting = asyncio.ensure_future(
-                wait_all([second.wait_notifications()], timeout=30)
-            )
-            await asyncio.sleep(0)  # Let the wait register before the send.
-            first.send_notification(second.peer_id, b"x").wait()
-            await waiting
-
-        asyncio.run(run())
-        self.assertEqual(second.poll_notifications(), [(first.peer_id, b"x")])
 
 
 _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"
