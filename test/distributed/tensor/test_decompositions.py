@@ -274,7 +274,7 @@ class TestDecompShardingWithComms(DTensorContinuousTestBase):
         This checks the first call allows Shard(2) through, while the 2nd call forces Replicate.
         """
         device_mesh = self.build_device_mesh()
-        t = torch.randn(8, 8, 8, requires_grad=False, device=self.device_type)
+        t = torch.randn(8, 8, 8, requires_grad=False, device=self._device_type)
         dt = distribute_tensor(t, device_mesh, [Shard(2)])
 
         # chunk on non-sharding dim propagates through
@@ -296,7 +296,7 @@ class TestDecompShardingWithComms(DTensorContinuousTestBase):
         """Test that aminmax with different dim kwargs doesn't hit stale cache."""
         device_mesh = self.build_device_mesh()
         t = torch.randn(
-            self.world_size, 4, 4, requires_grad=False, device=self.device_type
+            self.world_size, 4, 4, requires_grad=False, device=self._device_type
         )
         dt = distribute_tensor(t, device_mesh, [Shard(0)])
 

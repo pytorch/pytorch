@@ -56,13 +56,13 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         )
         device_mesh = self.build_device_mesh()
         input = torch.arange(
-            8 * 4 * 3 * 3, device=self.device_type, dtype=torch.float32
+            8 * 4 * 3 * 3, device=self._device_type, dtype=torch.float32
         ).reshape(8, 4, 3, 3)
         input = input / input.numel()
-        weight = torch.linspace(0.5, 1.1, 4, device=self.device_type)
-        bias = torch.linspace(-0.2, 0.2, 4, device=self.device_type)
-        running_mean = torch.zeros(4, device=self.device_type)
-        running_var = torch.ones(4, device=self.device_type)
+        weight = torch.linspace(0.5, 1.1, 4, device=self._device_type)
+        bias = torch.linspace(-0.2, 0.2, 4, device=self._device_type)
+        running_mean = torch.zeros(4, device=self._device_type)
+        running_var = torch.ones(4, device=self._device_type)
 
         expected = torch.ops.aten._native_batch_norm_legit_functional(
             input,
@@ -114,7 +114,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         )
         device_mesh = self.build_device_mesh()
         input = torch.arange(
-            8 * 4, device=self.device_type, dtype=torch.float32
+            8 * 4, device=self._device_type, dtype=torch.float32
         ).reshape(8, 4)
         expected_values, expected_indices = torch.max(input, dim=1)
 
@@ -167,7 +167,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
     def test_copy_(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
 
         # basic test
         src_tensor = torch.randn((12, 12))
@@ -261,7 +261,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_inplace_op(self):
         mesh = self.build_device_mesh()
-        input_tensor = torch.randn((12, 3), device=self.device_type)
+        input_tensor = torch.randn((12, 3), device=self._device_type)
         dt_to_add = distribute_tensor(input_tensor, mesh, [Shard(0)])
         dt_to_mul = dt_to_add.clone()
         expected_add_dt = dt_to_add.clone() + 3
@@ -287,7 +287,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_op_out_variant(self):
         mesh = self.build_device_mesh()
-        input_tensor = torch.randn((12, 3), device=self.device_type)
+        input_tensor = torch.randn((12, 3), device=self._device_type)
         sharded_dt_input = distribute_tensor(input_tensor, mesh, [Shard(0)])
         expected_dt = sharded_dt_input.clone() + 3
         sharded_dt_out = sharded_dt_input.clone()
@@ -312,7 +312,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         for placement in (Shard(0), Shard(1)):
             local_size = list(input_size)
             local_size[placement.dim] //= self.world_size
-            local_tensor = torch.empty(*local_size, device=self.device_type)
+            local_tensor = torch.empty(*local_size, device=self._device_type)
             dtensor = DTensor.from_local(
                 local_tensor,
                 mesh,
@@ -465,7 +465,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(4)
     def test_stack(self):
         mesh_2d = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
         )
         partial_replicate_placement = [Partial(), Replicate()]
         partial_placement = [Partial(), Partial()]
@@ -479,7 +479,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertEqual(stack_dt.placements, tuple(partial_placement))
         self.assertEqual(stack_dt.shape, (2, 4, 8))
 
-        mesh_1d = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh_1d = DeviceMesh(self._device_type, torch.arange(self.world_size))
         # stack before/after shard dim
         global_input = torch.randn(8, 8)
         shard1_input = distribute_tensor(global_input, mesh_1d, [Shard(1)])
@@ -801,7 +801,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         meshes = [
             self.build_device_mesh(),  # 1D mesh
             # TODO(@azzolini): un-comment when DTensorConverter supports N-D mesh
-            # DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, -1)), # 2D mesh
+            # DeviceMesh(self._device_type, torch.arange(self.world_size).reshape(2, -1)), # 2D mesh
         ]
         for mesh in meshes:
             self._test_op(
@@ -912,13 +912,13 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             # )
 
     def test_index_put_scalar(self):
-        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
-        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self._device_type)
         global_index = [
-            torch.randint(global_input.shape[i], size=(), device=self.device_type)
+            torch.randint(global_input.shape[i], size=(), device=self._device_type)
             for i in range(3)
         ]
-        global_value = torch.randn(size=(), device=self.device_type)
+        global_value = torch.randn(size=(), device=self._device_type)
         value_dt = distribute_tensor(
             global_value, device_mesh, [Replicate(), Replicate()]
         )
@@ -935,12 +935,12 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                 self.assertEqual(output_dt.full_tensor(), ref)
 
     def test_index_put_tensor(self):
-        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
-        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self._device_type)
         global_index = [
-            torch.randint(global_input.shape[0], size=(), device=self.device_type)
+            torch.randint(global_input.shape[0], size=(), device=self._device_type)
         ]
-        global_value = torch.zeros([4, 8], device=self.device_type)
+        global_value = torch.zeros([4, 8], device=self._device_type)
         value_dt = distribute_tensor(global_value, device_mesh, [Shard(1), Replicate()])
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(0), Replicate()])
         for accumulate in [True, False]:
@@ -957,12 +957,12 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_index_put_requires_replicated_index(self):
         """Test that index_put correctly replicates sharded indices."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(4, 8, device=self.device_type)
-        global_value = torch.zeros([8], device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self._device_type)
+        global_value = torch.zeros([8], device=self._device_type)
 
         # Create sharded index - should be redistributed to replicated
-        idx_tensor = torch.tensor([0, 1], device=self.device_type)
+        idx_tensor = torch.tensor([0, 1], device=self._device_type)
         idx_dt = distribute_tensor(idx_tensor, device_mesh, [Shard(0)])
 
         input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
@@ -975,10 +975,10 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_index_put_no_shard_on_indexed_dim(self):
         """Test that index_put output is not sharded on indexed dims."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(4, 8, device=self.device_type)
-        global_value = torch.zeros([8], device=self.device_type)
-        global_index = [torch.tensor(0, device=self.device_type)]
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self._device_type)
+        global_value = torch.zeros([8], device=self._device_type)
+        global_index = [torch.tensor(0, device=self._device_type)]
 
         # Shard input on indexed dim 0
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
@@ -997,10 +997,10 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_index_put_partial_numerics(self):
         """Test index_put with Partial placements produces correct numerics."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(4, 8, device=self.device_type)
-        global_index = [torch.tensor(1, device=self.device_type)]
-        global_value = torch.randn(8, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self._device_type)
+        global_index = [torch.tensor(1, device=self._device_type)]
+        global_value = torch.randn(8, device=self._device_type)
 
         # Create Partial tensors - each rank has partial sum
         local_input = global_input / self.world_size
@@ -1021,12 +1021,12 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_index_put_duplicated_indices(self):
         """Test index_put with duplicated indices for both accumulate modes."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.zeros(4, 8, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.zeros(4, 8, device=self._device_type)
         # Duplicated indices - index 1 appears twice
-        idx_tensor = torch.tensor([1, 1, 2], device=self.device_type)
+        idx_tensor = torch.tensor([1, 1, 2], device=self._device_type)
         global_index = [idx_tensor]
-        global_value = torch.ones(3, 8, device=self.device_type)
+        global_value = torch.ones(3, 8, device=self._device_type)
 
         # Shard on non-indexed dim, index must be replicated
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(1)])
@@ -1052,13 +1052,13 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_index_put_broadcast_values(self):
         """Test index_put where values has size-1 broadcast dims."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         # self shape (4, 8), index on dim 0 -> non-indexed dim is 1
-        global_input = torch.randn(4, 8, device=self.device_type)
-        idx = torch.tensor([0, 1], device=self.device_type)
+        global_input = torch.randn(4, 8, device=self._device_type)
+        idx = torch.tensor([0, 1], device=self._device_type)
         global_index = [idx]
         # values shape (2, 1) — broadcast on the non-indexed dim
-        global_value = torch.randn(2, 1, device=self.device_type)
+        global_value = torch.randn(2, 1, device=self._device_type)
 
         # Shard self on non-indexed dim 1, values should be replicated (size 1)
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(1)])
@@ -1072,10 +1072,10 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     def _test_index_op_partial_propagation(self, op, reduce_op):
         """Helper: verify Partial placement propagates correctly through an
         index op that decomposes to index_put."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(4, 8, device=self.device_type)
-        idx = torch.tensor([1, 3], device=self.device_type)
-        global_source = torch.randn(4, 2, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self._device_type)
+        idx = torch.tensor([1, 3], device=self._device_type)
+        global_source = torch.randn(4, 2, device=self._device_type)
 
         # Create Partial tensors — each rank holds partial contribution
         if reduce_op == "sum":
@@ -1127,11 +1127,11 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         index_copy and index_add decompose to index_put with leading None,
         so they hit the same bug.
         """
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         n = self.world_size
-        global_input = torch.randn(n, 2 * n, device=self.device_type)
-        idx = torch.arange(n, device=self.device_type)
-        global_source = torch.randn(n, n, device=self.device_type)
+        global_input = torch.randn(n, 2 * n, device=self._device_type)
+        idx = torch.arange(n, device=self._device_type)
+        global_source = torch.randn(n, n, device=self._device_type)
 
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
         idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
@@ -1149,9 +1149,9 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_index_fill(self):
         """Test index_fill with sharded input."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(4, 8, device=self.device_type)
-        idx = torch.tensor([1, 3], device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self._device_type)
+        idx = torch.tensor([1, 3], device=self._device_type)
         fill_value = 5.0
 
         ref = global_input.index_fill(1, idx, fill_value)
@@ -1167,10 +1167,10 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     @parametrize("reduce_op", ["mean", "amax", "amin", "prod"])
     def test_index_reduce(self, reduce_op):
         """Test index_reduce with sharded input."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(4, 8, device=self.device_type)
-        idx = torch.tensor([1, 3], device=self.device_type)
-        global_source = torch.randn(4, 2, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self._device_type)
+        idx = torch.tensor([1, 3], device=self._device_type)
+        global_source = torch.randn(4, 2, device=self._device_type)
 
         ref = global_input.index_reduce(1, idx, global_source, reduce_op)
 
@@ -1189,13 +1189,13 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         None indices (meaning "select all along this dim") are only
         valid at the ATen level, not through Python's index_put.
         """
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         # 3D tensor indexed on dim 0, with trailing None
-        global_input = torch.randn(4, 8, 16, device=self.device_type)
-        idx = torch.tensor([1, 2], device=self.device_type)
+        global_input = torch.randn(4, 8, 16, device=self._device_type)
+        idx = torch.tensor([1, 2], device=self._device_type)
         # indices = [idx, None, None] -> indexed on dim 0, dims 1,2 not indexed
         # values shape = (2, 8, 16) matching (*broadcast_shape, *non_indexed_dims)
-        global_value = torch.randn(2, 8, 16, device=self.device_type)
+        global_value = torch.randn(2, 8, 16, device=self._device_type)
 
         ref = torch.ops.aten.index_put.default(
             global_input, [idx, None, None], global_value
@@ -1219,10 +1219,10 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         (e.g. backward of aten.index.Tensor), not by Python-level
         index_put_. We call the ATen op directly.
         """
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(4, 8, 16, device=self.device_type)
-        idx = torch.tensor([1, 2], device=self.device_type)
-        global_value = torch.randn(2, 8, 16, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, 16, device=self._device_type)
+        idx = torch.tensor([1, 2], device=self._device_type)
+        global_value = torch.randn(2, 8, 16, device=self._device_type)
 
         ref = torch.ops.aten.index_put_.default(
             global_input.clone(), [idx, None, None], global_value
@@ -1241,13 +1241,13 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         indexing moves the broadcast shape to the front of the output:
         output = (*broadcast_shape, *non_indexed_dim_sizes).
         """
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         # self[4, 8, 3, 16], index dims 0 and 2 (non-contiguous)
-        global_input = torch.randn(4, 8, 3, 16, device=self.device_type)
-        idx0 = torch.tensor([0, 1], device=self.device_type)
-        idx2 = torch.tensor([2, 0], device=self.device_type)
+        global_input = torch.randn(4, 8, 3, 16, device=self._device_type)
+        idx0 = torch.tensor([0, 1], device=self._device_type)
+        idx2 = torch.tensor([2, 0], device=self._device_type)
         # output shape = (2, 8, 16), values must be broadcastable to that
-        global_value = torch.randn(2, 8, 16, device=self.device_type)
+        global_value = torch.randn(2, 8, 16, device=self._device_type)
 
         ref = torch.ops.aten.index_put.default(
             global_input, [idx0, None, idx2], global_value
@@ -1266,12 +1266,12 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_index_put_mid_dim_indexed(self):
         """Test index_put when indexed dims are in the middle of the tensor."""
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         # self[16, 8, 4, 16]: index dim 2, non-indexed dims = [0, 1, 3]
-        global_input = torch.randn(16, 8, 4, 16, device=self.device_type)
-        idx = torch.tensor([1], device=self.device_type)
+        global_input = torch.randn(16, 8, 4, 16, device=self._device_type)
+        idx = torch.tensor([1], device=self._device_type)
         # values shape = [16, 8, 1, 16] (broadcast replaces dim 2 in-place)
-        global_value = torch.randn(16, 8, 1, 16, device=self.device_type)
+        global_value = torch.randn(16, 8, 1, 16, device=self._device_type)
 
         ref = torch.ops.aten.index_put.default(
             global_input, [None, None, idx], global_value
@@ -1466,7 +1466,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.init_manual_seed_for_rank()
         mesh = self.build_device_mesh()
 
-        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        partial_tensor = torch.randn(8, 8, device=self._device_type)
         partial_dt = DTensor.from_local(
             local_tensor=partial_tensor,
             device_mesh=mesh,
@@ -1547,7 +1547,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.init_manual_seed_for_rank()
         mesh = self.build_device_mesh()
 
-        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        partial_tensor = torch.randn(8, 8, device=self._device_type)
         partial_dt = DTensor.from_local(
             local_tensor=partial_tensor,
             device_mesh=mesh,
@@ -1563,12 +1563,12 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     @with_comms
     def test_select_scatter(self):
         device_mesh = self.build_device_mesh()
-        inp = torch.randn(8, 4, 6, device=self.device_type)
+        inp = torch.randn(8, 4, 6, device=self._device_type)
         # select_scatter(self, src, dim, index): insert src at self[:, :, index]
         for dim, idx in [(0, 2), (1, 1), (2, 3)]:
             src_shape = list(inp.shape)
             src_shape.pop(dim)
-            src = torch.randn(src_shape, device=self.device_type)
+            src = torch.randn(src_shape, device=self._device_type)
             expected = inp.select_scatter(src, dim, idx)
 
             for shard_dim in range(inp.ndim):
@@ -1584,10 +1584,10 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
     @with_comms
     def test_diagonal_scatter(self):
         device_mesh = self.build_device_mesh()
-        inp = torch.randn(8, 4, 6, device=self.device_type)
+        inp = torch.randn(8, 4, 6, device=self._device_type)
 
         # diagonal_scatter(self, src, offset, dim1, dim2)
-        src = torch.randn(8, 4, device=self.device_type)
+        src = torch.randn(8, 4, device=self._device_type)
         expected = inp.diagonal_scatter(src, 0, 1, 2)
 
         # shard on dim 0 (batch), which is not one of the diagonal dims
@@ -1606,10 +1606,10 @@ class DistBucketizeTest(LocalDTensorTestBase):
         # Partial("max") and Partial("min") can propagate directly.
         with LocalTensorMode(ranks=self.world_size):
             mesh = self.build_device_mesh()
-            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self._device_type)
             input_tensor = torch.tensor(
                 [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
-                device=self.device_type,
+                device=self._device_type,
             )
 
             # Non-linear reductions: must redistribute to Replicate
@@ -1655,8 +1655,8 @@ class DistBucketizeTest(LocalDTensorTestBase):
         # Sharded inputs should propagate sharding to output normally.
         with LocalTensorMode(ranks=self.world_size):
             mesh = self.build_device_mesh()
-            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
-            input_tensor = torch.randn(8, 4, device=self.device_type)
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self._device_type)
+            input_tensor = torch.randn(8, 4, device=self._device_type)
             expected = torch.bucketize(input_tensor, boundaries)
 
             for shard_dim in range(2):
@@ -1674,10 +1674,10 @@ class DistBucketizeTest(LocalDTensorTestBase):
         # (Partial("sum")) gives the correct global bucket index.
         with LocalTensorMode(ranks=self.world_size):
             mesh = self.build_device_mesh()
-            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self._device_type)
             input_tensor = torch.tensor(
                 [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
-                device=self.device_type,
+                device=self._device_type,
             )
             expected = torch.bucketize(input_tensor, boundaries)
 
@@ -1700,7 +1700,7 @@ class DistToCopyTest(LocalDTensorTestBase):
         ]
         with LocalTensorMode(ranks=self.world_size):
             mesh = self.build_device_mesh()
-            input_tensor = torch.randn(4, 4, device=self.device_type)
+            input_tensor = torch.randn(4, 4, device=self._device_type)
             for reduce_op, target_dtype, expect_partial in cases:
                 dt = DTensor.from_local(input_tensor, mesh, [Partial(reduce_op)])
                 result = dt.to(target_dtype)
@@ -1742,7 +1742,7 @@ class DistArgMaxArgMinTest(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(4)
     def test_argmax_argmin_with_placements(self):
         device_mesh = self.build_device_mesh()
-        local_tensor = torch.tensor(self.sample, device=self.device_type)
+        local_tensor = torch.tensor(self.sample, device=self._device_type)
         for placements in self.placements_tuples:
             dtensor_input = distribute_tensor(local_tensor, device_mesh, placements)
             for op in self._ops:
@@ -1758,8 +1758,8 @@ class DistArgMaxArgMinTest(DTensorContinuousTestBase):
         The strategy sets reduction_linear=False, which forces the input to
         be redistributed to Replicate on the sharded reduction dim before
         the op runs. No Partial placement appears in the output."""
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
-        tensor = torch.tensor(self.sample, device=self.device_type, dtype=torch.float)
+        mesh = init_device_mesh(self._device_type, (self.world_size,))
+        tensor = torch.tensor(self.sample, device=self._device_type, dtype=torch.float)
         dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
 
         for op in self._ops:
@@ -1767,7 +1767,7 @@ class DistArgMaxArgMinTest(DTensorContinuousTestBase):
             self.assertEqual(op(dtensor).full_tensor(), op(tensor))
 
     def build_device_mesh(self):
-        return init_device_mesh(self.device_type, (2, 2))
+        return init_device_mesh(self._device_type, (2, 2))
 
 
 DistArgMaxArgMinTestWithLocalTensor = create_local_tensor_test_class(
@@ -1852,17 +1852,17 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
         with implicit_replication():
             _clear_fast_path_sharding_prop_cache()
             dt = distribute_tensor(
-                torch.zeros(4, 4, device=self.device_type), mesh, [Shard(0)]
+                torch.zeros(4, 4, device=self._device_type), mesh, [Shard(0)]
             )
-            regular = torch.zeros(4, 4, device=self.device_type)
+            regular = torch.zeros(4, 4, device=self._device_type)
 
             torch._foreach_add_([dt, regular], 1)
             hits, misses = _get_fast_path_sharding_prop_cache_stats()
             self.assertEqual(misses, 1)
             self.assertEqual(
-                dt.full_tensor(), torch.ones(4, 4, device=self.device_type)
+                dt.full_tensor(), torch.ones(4, 4, device=self._device_type)
             )
-            self.assertEqual(regular, torch.ones(4, 4, device=self.device_type))
+            self.assertEqual(regular, torch.ones(4, 4, device=self._device_type))
 
             torch._foreach_add_([dt, regular], 1)
             hits, misses = _get_fast_path_sharding_prop_cache_stats()
@@ -1985,7 +1985,7 @@ class TestNewEmptyStridedUneven(DTensorContinuousTestBase):
         """
         mesh = self.build_device_mesh()
         partial_dt = DTensor.from_local(
-            torch.randn(4, 8, device=self.device_type),
+            torch.randn(4, 8, device=self._device_type),
             device_mesh=mesh,
             placements=[Partial()],
         )
@@ -2035,7 +2035,7 @@ class TestNewEmptyStridedUneven(DTensorContinuousTestBase):
                 w = w.transpose(1, 2).contiguous()
                 return torch.mm(x, w[0])
 
-        model = _Model().to(self.device_type)
+        model = _Model().to(self._device_type)
         with torch.no_grad():
             model.weight = torch.nn.Parameter(
                 DTensor.from_local(
@@ -2045,7 +2045,7 @@ class TestNewEmptyStridedUneven(DTensorContinuousTestBase):
                 )
             )
 
-        x = torch.randn(2, 8, device=self.device_type, requires_grad=True)
+        x = torch.randn(2, 8, device=self._device_type, requires_grad=True)
         out = model(x)
         out.sum().backward()
 
