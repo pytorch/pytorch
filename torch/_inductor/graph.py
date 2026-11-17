@@ -2050,7 +2050,17 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
-            origins |= gather_origins(args, kwargs)
+            if (
+                n.target is operator.getitem
+                and not kwargs
+                and len(args) == 2
+                and type(args[0]) in (list, tuple)
+                and type(args[1]) is int
+            ):
+                # Container indexing only consumes the selected value's origins.
+                origins |= gather_origins((args[0][args[1]],), {})
+            else:
+                origins |= gather_origins(args, kwargs)
             self._realize_inputs_at_context_boundaries(n)
         node_mempool = self._get_node_mempool(n)
         if node_mempool is not None and self.disable_cudagraphs_reason is None:

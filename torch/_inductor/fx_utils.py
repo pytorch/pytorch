@@ -710,14 +710,22 @@ class FakeTensorUpdater:
                 self.tracked_node_ids.add(id(node))
                 continue
 
-            is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
-            if not is_valid:
-                continue
-
             # NB: Be very careful about skipping nodes (via continues) here
             # and ask for a careful review when changing this code. The
             # consequence for incorrect FakeTensor metadata is difficult-to-debug
             # silent incorrectness.
+            # Avoid expanding list-valued metadata for every unchanged getitem.
+            if (
+                not self.subgraph_updaters
+                and node_hash in self.processed_hashes
+                and id(node) not in to_process
+            ):
+                continue
+
+            is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
+            if not is_valid:
+                continue
+
             if (
                 # Always run updates on nodes that invoke subgraphs
                 not (invokes_subgraph := node_invokes_subgraph(node, *args, **kwargs))

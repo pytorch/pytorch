@@ -517,6 +517,69 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
+def _tensor_storage_range(tensor: torch.Tensor) -> tuple[int, int] | None:
+    sizes, strides = tensor.size(), tensor.stride()
+    offset = tensor.storage_offset()
+    if any(type(v) is not int for v in (*sizes, *strides, offset)):
+        return None
+    if any(stride < 0 for stride in strides):
+        return None
+    itemsize = tensor.element_size()
+    start = offset * itemsize
+    if 0 in sizes:
+        return start, start
+    end = offset + 1 + sum((size - 1) * stride for size, stride in zip(sizes, strides))
+    return start, end * itemsize
+
+
+class _StorageRangeIndex:
+    """Index one storage's byte ranges, always including nodes with unknown bounds."""
+
+    def __init__(self, nodes: list[torch.fx.Node]) -> None:
+        self.nodes = nodes
+        self.unknown: list[torch.fx.Node] = []
+        ranges: list[tuple[int, int, torch.fx.Node]] = []
+        for node in nodes:
+            bounds = _tensor_storage_range(node.meta["val"])
+            if bounds is None:
+                self.unknown.append(node)
+            elif bounds[0] < bounds[1]:
+                ranges.append((*bounds, node))
+        self.ranges = sorted(ranges, key=lambda entry: entry[0])
+        self.leaves = 1 << (max(len(ranges), 1) - 1).bit_length()
+        # Subtree maxima let queries skip ranges ending before the query starts.
+        self.max_ends = [0] * (2 * self.leaves)
+        for i, (_, end, _) in enumerate(self.ranges):
+            self.max_ends[self.leaves + i] = end
+        for i in range(self.leaves - 1, 0, -1):
+            self.max_ends[i] = max(self.max_ends[2 * i], self.max_ends[2 * i + 1])
+
+    def overlapping(self, node: torch.fx.Node) -> list[torch.fx.Node]:
+        bounds = _tensor_storage_range(node.meta["val"])
+        if bounds is None:
+            return self.nodes
+        start, end = bounds
+        if start == end:
+            return []
+        result = list(self.unknown)
+        pending = [(1, 0, self.leaves)]
+        while pending:
+            index, lo, hi = pending.pop()
+            if (
+                lo >= len(self.ranges)
+                or self.ranges[lo][0] >= end
+                or self.max_ends[index] <= start
+            ):
+                continue
+            if hi - lo == 1:
+                result.append(self.ranges[lo][2])
+            else:
+                mid = (lo + hi) // 2
+                pending.append((2 * index + 1, mid, hi))
+                pending.append((2 * index, lo, mid))
+        return result
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -627,6 +690,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return True
         return False
 
+    storage_range_indexes: dict[int, _StorageRangeIndex] = {}
+
     def can_inplace(node, mutated_arg):
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
@@ -650,17 +715,30 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     return False
                 by_storage[storage].append(arg)
             for group in by_storage.values():
-                if len(group) > 1 and _overlap([a.meta["val"] for a in group]):
-                    return False
+                if len(group) > 1:
+                    bounds = [_tensor_storage_range(a.meta["val"]) for a in group]
+                    if all(bound is not None for bound in bounds):
+                        nonempty = sorted(
+                            b for b in bounds if b is not None and b[0] < b[1]
+                        )
+                        if all(a[1] <= b[0] for a, b in itertools.pairwise(nonempty)):
+                            continue
+                    if _overlap([a.meta["val"] for a in group]):
+                        return False
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
-        if get_node_storage(mutated_arg) is None:
+        storage = get_node_storage(mutated_arg)
+        if storage is None:
             return False
 
         if torch._debug_has_internal_overlap(mutated_arg.meta["val"]) == 1:
             return False
 
-        shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+        if storage not in storage_range_indexes:
+            storage_range_indexes[storage] = _StorageRangeIndex(
+                storage_to_nodes[storage]
+            )
+        shared_view_nodes = storage_range_indexes[storage].overlapping(mutated_arg)
 
         # Only keep tensor that might overlap with mutated_arg.
         shared_view_nodes = [

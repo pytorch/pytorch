@@ -2,6 +2,7 @@
 
 import builtins
 import math
+import operator
 import os
 import sys
 import tempfile
@@ -279,6 +280,19 @@ class TestFlopsFx(TestCase):
 
 
 class TestUtils(TestCase):
+    def test_getitem_foreach_output_aliases(self, device):
+        def f(x, y):
+            outputs = torch._foreach_add([x.sin(), y.cos()], [y, x])
+            outputs[0].add_(1)
+            return outputs[0], outputs[-1], outputs[0].view(-1)
+
+        args = (torch.randn(2, 4, device=device), torch.randn(2, 4, device=device))
+        expected = f(*args)
+        actual = torch.compile(f, fullgraph=True)(*args)
+        self.assertEqual(actual, expected)
+        actual[0].add_(1)
+        self.assertEqual(actual[2], actual[0].view(-1))
+
     @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
     def test_is_big_gpu_min_sms_config(self):
         # https://github.com/pytorch/pytorch/issues/201471
@@ -595,6 +609,77 @@ class TestUtils(TestCase):
     def test_get_device_tflops(self, dtype):
         ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
+
+
+@instantiate_parametrized_tests
+class TestGetitemOrigins(TestCase):
+    def _capture_origins(self, container, index):
+        from torch._inductor import graph, ir
+
+        fx_graph = torch.fx.Graph()
+        values = fx_graph.placeholder("values")
+        node = fx_graph.call_function(operator.getitem, (values, index))
+        lowering = mock.Mock(spec=graph.GraphLowering)
+        lowering.buffers = []
+        lowering.operations = []
+        lowering.fetch_args_kwargs_from_env.return_value = ((container, index), {})
+        lowering._get_node_mempool.return_value = None
+        with mock.patch.object(
+            ir.IRNode, "current_origins", side_effect=RuntimeError("origins captured")
+        ) as current_origins:
+            with self.assertRaisesRegex(RuntimeError, "origins captured"):
+                graph.GraphLowering.run_node(lowering, node)
+        return node, current_origins.call_args.args[0]
+
+    def _make_values(self, n):
+        from torch._inductor import ir
+        from torch.utils._ordered_set import OrderedSet
+
+        fx_graph = torch.fx.Graph()
+        producer = fx_graph.placeholder("producer")
+        siblings = [fx_graph.placeholder(f"sibling{i}") for i in range(n)]
+        values = []
+        for sibling in siblings:
+            with ir.IRNode.current_origins(OrderedSet([producer, sibling])):
+                value = ir.Pointwise(
+                    device=torch.device("cpu"),
+                    dtype=torch.float32,
+                    inner_fn=lambda i: 0,
+                    ranges=[1],
+                )
+                values.append(value)
+        return producer, siblings, values
+
+    @parametrize("container_type", [list, tuple])
+    @parametrize("index", [0, -1])
+    def test_selected_value_origins(self, container_type, index):
+        producer, siblings, values = self._make_values(4)
+        node, origins = self._capture_origins(container_type(values), index)
+        self.assertEqual(set(origins), {node, producer, siblings[index]})
+
+    def test_nested_selected_value_origins(self):
+        producer, siblings, values = self._make_values(3)
+        node, origins = self._capture_origins([values[:2], values[2]], 0)
+        self.assertEqual(set(origins), {node, producer, *siblings[:2]})
+
+    def test_slice_keeps_existing_origin_handling(self):
+        producer, siblings, values = self._make_values(3)
+        node, origins = self._capture_origins(values, slice(0, 1))
+        self.assertEqual(set(origins), {node, producer, *siblings})
+
+    @parametrize("n", [8, 64])
+    def test_getitem_origin_traversal_is_linear(self, n):
+        _, _, values = self._make_values(n)
+        flatten = inductor_utils.tree_flatten
+        with mock.patch.object(
+            inductor_utils, "tree_flatten", wraps=flatten
+        ) as flatten_spy:
+            for index in range(n):
+                self._capture_origins(values, index)
+        visits = sum(
+            len(flatten(call.args[0])[0]) for call in flatten_spy.call_args_list
+        )
+        self.assertLessEqual(visits, 4 * n)
 
 
 class TestDeviceTflopsTritonFallback(TestCase):
@@ -1038,6 +1123,23 @@ class TestTritonTypeMapping(TestCase):
 
 
 class TestFakeTensorUpdater(TestCase):
+    def test_unchanged_foreach_does_not_expand_metadata(self):
+        from torch._inductor import fx_utils
+
+        def f(*xs):
+            return torch._foreach_add(xs, xs)
+
+        gm = self._get_graph(f, *[torch.randn(8) for _ in range(64)])
+        updater = FakeTensorUpdater(gm)
+        with (
+            V.set_fake_mode(self._get_faketensormode(gm)),
+            mock.patch.object(
+                fx_utils, "get_fake_args_kwargs", wraps=fx_utils.get_fake_args_kwargs
+            ) as get_args,
+        ):
+            self.assertEqual(updater.incremental_update(), 0)
+        get_args.assert_not_called()
+
     @staticmethod
     def _get_faketensormode(
         graph: torch.fx.GraphModule,

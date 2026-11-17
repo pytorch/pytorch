@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+from unittest import mock
 
 import torch
 import torch._inductor.config as inductor_config
@@ -12,7 +13,10 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized_v2,
 )
 from torch._inductor import inductor_prims
-from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.reinplace import (
+    _StorageRangeIndex,
+    reinplace_inplaceable_ops_core,
+)
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -88,6 +92,108 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
         ReinplaceCounters.clear()
         return super().setUp()
+
+    @parametrize("strided", [False, True])
+    def test_storage_range_index(self, strided):
+        base = torch.empty(128)
+        views = [base[i : i + 16 : 2 if strided else 1] for i in range(0, 128, 8)]
+        views.extend([base, base[:0], base[32:48]])
+        graph = torch.fx.Graph()
+        nodes = [graph.placeholder(f"arg{i}") for i in range(len(views))]
+        ranges = {}
+        for node, view in zip(nodes, views):
+            node.meta["val"] = view
+            start = view.storage_offset()
+            end = start + (view.numel() - 1) * view.stride(0) + 1
+            if view.numel():
+                ranges[node] = (start, end)
+        index = _StorageRangeIndex(nodes)
+        for node in nodes:
+            actual = set(index.overlapping(node))
+            if node in ranges:
+                start, end = ranges[node]
+                expected = {
+                    other
+                    for other, (lo, hi) in ranges.items()
+                    if lo < end and hi > start
+                }
+            else:
+                expected = set()
+            self.assertEqual(actual, expected)
+
+    def test_foreach_reinplace_disjoint_bucket_overlap_checks(self):
+        from torch._inductor.fx_passes import reinplace
+
+        n = 64
+
+        def f(*args):
+            params, bufs = args[:n], args[n:]
+            outputs = torch._foreach_add(params, bufs)
+            for param, output in zip(params, outputs):
+                param.copy_(output)
+            return outputs
+
+        params = list(torch.randn(n * 16).split(16))
+        bufs = list(torch.randn(n * 16).split(16))
+        gm = make_fx(f, tracing_mode="fake")(*params, *bufs)
+        check_overlap = reinplace.compute_overlapping_tensors
+        with mock.patch.object(
+            reinplace, "compute_overlapping_tensors", wraps=check_overlap
+        ) as overlap:
+            reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_add_.List, targets)
+        self.assertNotIn(aten._foreach_add.List, targets)
+        self.assertNotIn(aten.copy_.default, targets)
+        self.assertLess(overlap.call_count, 8 * n)
+
+    def test_storage_range_index_symbolic(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            symbolic = torch.empty(shape_env.create_unbacked_symint())
+            concrete = torch.empty(8)
+        graph = torch.fx.Graph()
+        nodes = [graph.placeholder("symbolic"), graph.placeholder("concrete")]
+        for node, value in zip(nodes, (symbolic, concrete)):
+            node.meta["val"] = value
+        index = _StorageRangeIndex(nodes)
+        for node in nodes:
+            self.assertEqual(set(index.overlapping(node)), set(nodes))
+
+    def test_storage_range_index_mixed_dtypes(self):
+        base = torch.empty(8, dtype=torch.float64)
+        views = (base[:2], base.view(torch.float32)[2:4], base.view(torch.float32)[4:8])
+        graph = torch.fx.Graph()
+        nodes = [graph.placeholder(f"arg{i}") for i in range(len(views))]
+        for node, view in zip(nodes, views):
+            node.meta["val"] = view
+        index = _StorageRangeIndex(nodes)
+        self.assertEqual(set(index.overlapping(nodes[0])), set(nodes[:2]))
+        self.assertEqual(index.overlapping(nodes[2]), [nodes[2]])
+
+    @parametrize("overlapping", [False, True])
+    def test_foreach_reinplace_bucket_with_live_alias(self, overlapping):
+        def f(a, b, x, y):
+            outputs = torch._foreach_add([a, b], [x, y])
+            old = a.clone()
+            a.copy_(outputs[0])
+            b.copy_(outputs[1])
+            return outputs, old
+
+        base = torch.randn(32)
+        a, b = (base[:24], base[8:]) if overlapping else base.split(16)
+        gm = make_fx(f, tracing_mode="fake")(
+            a, b, torch.randn_like(a), torch.randn_like(b)
+        )
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_add.List, targets)
+        self.assertNotIn(aten._foreach_add_.List, targets)
 
     def _test(self, f):
         nf = torch.compile(f)
