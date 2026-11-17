@@ -6471,6 +6471,22 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
+    @parametrize("operand", ("a", "b"))
+    def test_gather_prologue_ragged_dim(self, operand):
+        # The fused gather loads idx along M (N for b), and no BLOCK_M (BLOCK_N)
+        # divides 129, so that offset wraps inside the last tile.
+        def fn(x, w, idx):
+            if operand == "a":
+                return x[idx] @ w
+            return x @ w[:, idx]
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        w = torch.randn(16, 16, device=GPU_TYPE)
+        idx = torch.randint(0, 16, (129,), device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(fn), x, w, idx)
+        self.assertEqual(out, fn(x, w, idx), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=None, num_deallocs=None)
+
 
 def autotune_select_algorithm_wrapper_return_multi():
     def wrapper(*args, **kwargs):
