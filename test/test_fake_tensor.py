@@ -1453,8 +1453,9 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     )
     @parametrize("active", [False, True])
     @parametrize("inference", [False, True])
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_mode(self, op, active, inference):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         real = torch.rand([4], device="cpu")
         mode = FakeTensorMode()
         with torch.inference_mode(inference):
@@ -2086,7 +2087,6 @@ def forward(self, x_1):
         )
 
     @skipIfTorchDynamo("uses torch.compile")
-    @skipIfPropagateRealTensors("uses default FakeTensorMode propagation")
     def test_embedding_meta_indices_torch_compile(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("uses default FakeTensorMode propagation")
@@ -2517,8 +2517,9 @@ def forward(self, x_1):
             ((), "cuda:0", "cpu"),
         ],
     )
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_inplace_and_out_identity(self, shape, input_device, other_device):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         fake, out, other = (
             self.fake_from_meta(mode, torch.empty(shape, device="meta"), device)
@@ -2541,10 +2542,11 @@ def forward(self, x_1):
                 self.assertEqual(destination.device, torch.device(input_device))
                 self.assertIs(maybe_get_fake_mode(destination), mode)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("layout", [torch.sparse_coo, torch.sparse_csr])
     @parametrize("python_dispatcher", [False, True])
     def test_sparse_metadata_without_backend_kernel(self, layout, python_dispatcher):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         meta = torch.eye(2).to_sparse(layout=layout).to("meta")
         sparse = self.fake_from_meta(mode, meta, "privateuseone:0")
@@ -2562,9 +2564,10 @@ def forward(self, x_1):
         self.assertEqual(sparse.device, torch.device("privateuseone:0"))
         self.assertIs(maybe_get_fake_mode(sparse), mode)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("python_dispatcher", [False, True])
     def test_sparse_meta_kernel_dispatch(self, python_dispatcher):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         if python_dispatcher:
             self.enterContext(enable_python_dispatcher())
         mode = FakeTensorMode()
