@@ -3,6 +3,10 @@
     "default"
   ],
   "tests": [
+    "export/test_torchbind.py::TestExportTorchbind::test_identifying_torchbind_ops",
+    "export/test_torchbind.py::TestExportTorchbind::test_method_schema_*",
+    "export/test_torchbind.py::TestExportTorchbind::test_torchbind_op_fallthrough_keys_respects_lib_impl",
+    "export/test_torchbind.py::TestExportTorchbind::test_torchbind_op_register_fallthrough",
     "functorch/test_control_flow.py::TestControlFlow::test_scan_xs_none_length_zero_output_*",
     "functorch/test_control_flow.py::TestControlFlowTraced::test_merge_output",
     "test_custom_ops.py::TestOpProfiles",
