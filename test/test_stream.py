@@ -2,6 +2,7 @@
 
 import sys
 import time
+import unittest
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -127,19 +128,68 @@ class TestStream(TestCase):
         m.current_stream().synchronize()
         self.assertTrue(m.current_stream().query())
 
-    # Check that `query` is True when the device finishes work, even if
-    # `synchronize` has not been called yet. Sleeping for 200 ms on host should
-    # give the device plenty of time to finish.
-    @skipCUDANonDefaultStreamIf(True)
-    def test_stream_query_no_sync(self, device):
+    # Makes the current stream wait on an event that is recorded after a short
+    # device-side sleep on another stream
+    def _wait_on_busy_stream(device):
+        if torch.device(device).type == "xpu" and not Xe2_Or_Later:
+            raise unittest.SkipTest("torch.xpu._sleep is not supported")
         m = torch.get_device_module(device)
-        x = torch.randn(1, device=device)
+        s = m.Stream()
+        with m.stream(s):
+            m._sleep(int(50 * get_cycles_per_ms(device)))
+            e = s.record_event()
+        m.current_stream().wait_event(e)
+        return s, e
+
+    # Check that `query` is True when the device finishes work, even if
+    # `synchronize` has not been called yet.
+    @skipCUDANonDefaultStreamIf(True)
+    @parametrize(
+        "case",
+        [
+            # Test querying for several different types of small workloads.
+            # (init_fn, case_fn)
+            (lambda device: [torch.randn(1, device=device)], lambda x: x + 1),
+            (
+                lambda device: [
+                    torch.randn(8, 8, device=device),
+                    torch.randn(8, 8, device=device),
+                ],
+                torch.mm,
+            ),
+            # Host-to-device copy
+            (
+                lambda device: [torch.randn(1024, device="cpu"), device],
+                lambda x, device: x.to(device, non_blocking=True),
+            ),
+            # Wait on an event that has not yet been signaled
+            (lambda device: [device], _wait_on_busy_stream),
+        ],
+    )
+    def test_stream_query_no_sync(self, device, case):
+        m = torch.get_device_module(device)
+        init_fn, case_fn = case
+        init_state = init_fn(device)
+
         m.current_stream().synchronize()
-        y = x + 1
+        final_state = case_fn(*init_state)
+
         done = m.current_stream().query()
+        # Sleeping for 200 ms on host should give the device plenty of time to
+        # finish.
         time.sleep(0.2)
         done = done or m.current_stream().query()
         self.assertTrue(done)
+        del final_state
+
+    def test_stream_query_after_event_sync(self, device):
+        m = torch.get_device_module(device)
+        e = m.Event()
+        x = torch.randn(1, device=device)
+        y = x + 1
+        e.record()
+        e.synchronize()
+        self.assertTrue(m.current_stream().query())
         del y
 
     # Check that the stream is reset correctly if an exception is raised within
@@ -229,6 +279,7 @@ class TestStream(TestCase):
         self.assertEqual(r1, r1_check)
         self.assertEqual(r2, r2_check)
 
+    @skipXPUIf(not Xe2_Or_Later, "torch.xpu._sleep is not supported")
     def test_record_stream(self, device):
         m = torch.get_device_module(device)
         cycles_per_ms = get_cycles_per_ms(device)

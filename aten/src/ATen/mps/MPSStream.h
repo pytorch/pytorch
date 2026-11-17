@@ -78,6 +78,7 @@ class TORCH_API MPSStream {
     return _serialQueue;
   }
 
+  // NOTE: After encoding work onto the command buffer, call `markWorkEncoded`.
   MPSCommandBuffer_t commandBuffer();
   // Must be called from a block running on queue(), and the returned encoder
   // is only valid for the rest of that block.
@@ -107,6 +108,17 @@ class TORCH_API MPSStream {
   void addCompletedHandler(MTLCommandBufferHandler block);
 
   bool query();
+
+  // If work was encoded since the last query signal, encodes a new one and
+  // returns true, and the caller must commit it. Otherwise, the query signal is
+  // not encoded and returns false, and the caller does not need to commit.
+  bool encodeQuerySignalIfNeeded();
+
+  // Any caller that encodes work into `commandBuffer` must call this function
+  // so that `query` detects the newly encoded work.
+  void markWorkEncoded() {
+    _hasWorkSinceQuerySignal = true;
+  }
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
