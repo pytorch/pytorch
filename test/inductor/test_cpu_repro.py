@@ -2313,8 +2313,8 @@ class CPUReproTests(TestCase):
     def test_dequant_quant_lowering_fp8_e5m2(self):
         self._test_dequant_quant_lowering_helper(torch.float8_e5m2)
 
-    @parametrize("scale_shape", ((), (1,)))
-    @parametrize("zero_point_shape", ((), (1,)))
+    @parametrize("scale_shape", ((), (1,), (1, 1)))
+    @parametrize("zero_point_shape", ((), (1,), (1, 1)))
     def test_quant_dequant_per_tensor_tensor_scalar_shapes(
         self, scale_shape, zero_point_shape
     ):
