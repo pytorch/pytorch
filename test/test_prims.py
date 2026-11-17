@@ -1,6 +1,5 @@
 # Owner(s): ["module: decompositions"]
 
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from functools import partial
 from itertools import product
 import unittest
@@ -45,7 +44,6 @@ GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decompositi
 class TestPrimsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @fake_tensor_test()
     @parametrize("op,kwargs", [
         ("fft_r2c", {"onesided": True}),
         ("fft_r2c", {"onesided": False}),
@@ -455,7 +453,6 @@ class TestRefs(TestCase):
         with torch._dispatch.python.enable_python_dispatcher():
             x = torch.ones(4, device=device)
             x.to(device="meta")
-
 
 
 instantiate_device_type_tests(TestRefs, globals())
