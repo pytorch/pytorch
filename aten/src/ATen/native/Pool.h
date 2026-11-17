@@ -1,12 +1,14 @@
+#include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/div_rtn.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/PoolingChecks.h>
 #include <c10/util/TypeCast.h>
-#include <c10/util/safe_numerics.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
+#include <c10/util/safe_numerics.h>
 
+#include <type_traits>
 #include <utility>
 
 #pragma once
@@ -54,7 +56,13 @@ template <typename dest_t, typename src_t>
 inline dest_t
 safe_downcast(src_t v)
 {
-  return c10::checked_convert<dest_t>(v, "dest_t");
+  if constexpr (
+      std::is_integral_v<dest_t> && std::is_integral_v<src_t> &&
+      !std::is_same_v<dest_t, bool> && !std::is_same_v<src_t, bool>) {
+    return c10::safe_conv<dest_t>(v, "dest_t");
+  } else {
+    return c10::checked_convert<dest_t>(v, "dest_t");
+  }
 }
 
 // dilation * (kernelSize - 1) + 1, i.e. how far the kernel reaches into the
