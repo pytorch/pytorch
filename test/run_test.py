@@ -2111,7 +2111,7 @@ def can_run_in_pytest(test):
 
 
 def get_selected_tests(options) -> list[str]:
-    selected_tests = options.include
+    selected_tests = options.include[:]
 
     # filter if there's JIT only and distributed only test options
     if options.jit:

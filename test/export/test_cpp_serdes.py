@@ -54,6 +54,7 @@ for test in tests:
     make_dynamic_cls(test)
 del test
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
