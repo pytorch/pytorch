@@ -44,7 +44,7 @@ class AbstractSuspendResumeTest:
 
     @property
     def device(self):
-        return torch.device(f"{self.device_type}:{self.rank}")
+        return torch.device(f"{self._device_type}:{self.rank}")
 
     def setUp(self):
         super().setUp()
@@ -74,7 +74,7 @@ class AbstractSuspendResumeTest:
 
     def _init_pg(self):
         os.environ["LOCAL_RANK"] = str(self.rank)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -130,12 +130,13 @@ class AbstractSuspendResumeTest:
 
 def _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel):
     class SuspendResumeTest(AbstractSuspendResumeTest, MultiProcessTestCase):
-        pass
+        @property
+        def _device_type(self) -> str:
+            return device_type
 
     class_name = backend_name.replace("-", " ").title().replace(" ", "")
     class_name = f"{class_name}SuspendResumeTest"
     SuspendResumeTest.backend_name = backend_name
-    SuspendResumeTest.device_type = device_type
     SuspendResumeTest.create_pair_channel = create_pair_channel
     SuspendResumeTest.__name__ = class_name
     SuspendResumeTest.__qualname__ = SuspendResumeTest.__name__

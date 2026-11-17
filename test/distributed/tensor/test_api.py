@@ -120,7 +120,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
     @with_comms
     def test_distribute_tensor_errors(self):
         device_mesh = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
         )
         tensor_shape = [3 * self.world_size, 3 * self.world_size]
         tensor_to_distribute = torch.randn(*tensor_shape)
@@ -143,7 +143,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
         dtensor = distribute_tensor(tensor_to_distribute, device_mesh, spec)
 
         with self.assertRaisesRegex(ValueError, "to a different device mesh"):
-            new_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+            new_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
             distribute_tensor(dtensor, new_mesh, [Shard(0)])
 
         with self.assertRaisesRegex(ValueError, "to a different placements"):
@@ -181,7 +181,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
     def test_distribute_module(self):
         device_mesh = self.build_device_mesh()
         # fully shard all linear modules on dim 0
-        module_to_shard = MyModel(5 * self.world_size, 20, device=self.device_type)
+        module_to_shard = MyModel(5 * self.world_size, 20, device=self._device_type)
         shard_spec = [Shard(0)]
 
         def shard_fn(name, module, device_mesh):
@@ -199,7 +199,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
 
         replica_spec = [Replicate()]
         # fully replicate all modules without passing in partition_fn
-        module_to_replicate = MyModel(5, 20, device=self.device_type)
+        module_to_replicate = MyModel(5, 20, device=self._device_type)
         replica_module = distribute_module(module_to_replicate, device_mesh)
         for param in replica_module.parameters():
             self.assertIsInstance(param, DTensor)
@@ -214,7 +214,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
                     )
                     module.register_parameter(name, dist_param)
 
-        module_to_replicate = MyModel(5, 20, device=self.device_type)
+        module_to_replicate = MyModel(5, 20, device=self._device_type)
         replica_module = distribute_module(
             module_to_replicate, device_mesh, replicate_fn
         )
@@ -231,7 +231,9 @@ class DTensorAPITest(DTensorContinuousTestBase):
                     )
                     module.register_parameter(name, dist_param)
 
-        module_to_distribute = MyModel(5 * self.world_size, 20, device=self.device_type)
+        module_to_distribute = MyModel(
+            5 * self.world_size, 20, device=self._device_type
+        )
         dist_module = distribute_module(module_to_distribute, device_mesh, shard_fn)
         for name, param in dist_module.named_parameters():
             self.assertIsInstance(param, DTensor)
@@ -245,7 +247,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
         device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
-        module_to_replicate = MyModel(20, 1, device=self.device_type)
+        module_to_replicate = MyModel(20, 1, device=self._device_type)
 
         # mark input sharding on dim 0
         def input_fn(mod, inputs, device_mesh):
@@ -263,13 +265,13 @@ class DTensorAPITest(DTensorContinuousTestBase):
             output_fn=output_fn,
         )
 
-        input_tensor = torch.randn(5, 20, device=self.device_type)
+        input_tensor = torch.randn(5, 20, device=self._device_type)
         local_out = replica_module(input_tensor)
         self.assertIsInstance(local_out, torch.Tensor)
         self.assertNotIsInstance(local_out, DTensor)
 
         # full replicate (even on inputs)
-        model = MyModel(10, 10, device=self.device_type)
+        model = MyModel(10, 10, device=self._device_type)
 
         def replicate_input_fn(mod, inputs, device_mesh):
             return DTensor.from_local(inputs[0], device_mesh, [Replicate()])
@@ -299,7 +301,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
             def forward(self, x):
                 return x + self.frozen + self.trainable
 
-        model = ModelWithFrozenParam().to(self.device_type)
+        model = ModelWithFrozenParam().to(self._device_type)
 
         distributed_model = distribute_module(model, device_mesh)
 
@@ -307,7 +309,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
         self.assertTrue(distributed_model.trainable.requires_grad)
 
         x = DTensor.from_local(
-            torch.randn(10, 10, device=self.device_type),
+            torch.randn(10, 10, device=self._device_type),
             device_mesh,
             [Replicate()],
         )
@@ -322,7 +324,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
         device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
-        module_to_replicate = MyModel(20, 1, device=self.device_type)
+        module_to_replicate = MyModel(20, 1, device=self._device_type)
 
         # mark input sharding on dim 0
         def input_fn(inputs, device_mesh):
@@ -341,7 +343,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
                 output_fn=output_fn,
             )
 
-        input_tensor = torch.randn(5, 20, device=self.device_type)
+        input_tensor = torch.randn(5, 20, device=self._device_type)
         local_out = replica_module(input_tensor)
         self.assertIsInstance(local_out, torch.Tensor)
         self.assertNotIsInstance(local_out, DTensor)
@@ -363,7 +365,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
         self.assertEqual(dt._local_tensor.dtype, torch.bfloat16)
 
         # check distribute_module casting
-        model = MyModel(10, 10, device=self.device_type)
+        model = MyModel(10, 10, device=self._device_type)
         replica_model = distribute_module(
             model,
             device_mesh,
@@ -377,13 +379,13 @@ class DTensorAPITest(DTensorContinuousTestBase):
         # check autocast
         # `distribute_module` is an in-place operation, so we need to create a
         # new model
-        model = MyModel(10, 10, device=self.device_type)
+        model = MyModel(10, 10, device=self._device_type)
         dt = distribute_tensor(torch.rand(10), device_mesh, [Replicate()])
         replica_model = distribute_module(
             model,
             device_mesh,
         )
-        with torch.autocast(device_type=self.device_type, dtype=torch.bfloat16):
+        with torch.autocast(device_type=self._device_type, dtype=torch.bfloat16):
             output = replica_model(dt)
         self.assertEqual(output.dtype, torch.bfloat16)
 
@@ -415,7 +417,7 @@ class DTensorAPITest(DTensorContinuousTestBase):
     @with_comms
     def test_checkpoint_apis_check_partial_placement(self):
         device_mesh = self.build_device_mesh()
-        tensor = torch.randn(5, 5, device=self.device_type)
+        tensor = torch.randn(5, 5, device=self._device_type)
         dtensor = DTensor.from_local(tensor, device_mesh, [Partial()])
         with self.assertRaisesRegex(
             ValueError, "Any checkpointing related operations are not supported for"
