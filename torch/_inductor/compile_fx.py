@@ -137,11 +137,13 @@ from .graph import GraphLowering
 from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
+    _unstable_customized_partition_wrapper,
     align_inputs_from_check_idxs,
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
     get_first_incompatible_cudagraph_node,
+    GraphPartitionMode,
     GraphPartitionPlan,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
@@ -1823,6 +1825,17 @@ class _InProcessFxCompile(FxCompile):
                             const_graph.codegen_with_cpp_wrapper()
                         )
 
+                # Per compile: override_cudagraphs can turn capture off for this
+                # graph while config.triton.cudagraphs stays on.
+                partition_plan = (
+                    GraphPartitionPlan(
+                        GraphPartitionMode.CONFIG,
+                        cudagraphs_per_partition=bool(cudagraphs)
+                        or _unstable_customized_partition_wrapper.wrapper is not None,
+                    )
+                    if config.graph_partition
+                    else GraphPartitionPlan.no_partition()
+                )
                 graph = GraphLowering(
                     gm,
                     # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -1847,9 +1860,7 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
-                    # Per compile: override_cudagraphs can turn capture off for
-                    # this graph while config.triton.cudagraphs stays on.
-                    partition_plan=GraphPartitionPlan.from_config(bool(cudagraphs)),
+                    partition_plan=partition_plan,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
