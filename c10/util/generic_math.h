@@ -33,7 +33,8 @@ namespace c10 {
 
 template <typename scalar_t>
 inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b) {
-  if (C10_UNLIKELY(b == 0)) {
+  if (b == 0) [[unlikely]] {
+
     // Divide by zero: return standard IEEE result
     return a / b;
   }
@@ -58,13 +59,13 @@ inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b) {
 
 template <typename scalar_t>
 inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
-  if (C10_UNLIKELY(b == 0)) {
+  if (b == 0) [[unlikely]] {
     return scalar_t(0);
   }
 
-  if (C10_UNLIKELY(
-          std::is_signed<scalar_t>::value &&
-          a == std::numeric_limits<scalar_t>::min() && b == scalar_t(-1))) {
+  if (std::is_signed<scalar_t>::value &&
+      a == std::numeric_limits<scalar_t>::min() && b == scalar_t(-1))
+      [[unlikely]] {
     return a;
   }
 
@@ -83,7 +84,7 @@ template <
     typename scalar_t,
     std::enable_if_t<std::is_floating_point_v<scalar_t>, int> = 0>
 inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b) {
-  if (C10_UNLIKELY(b == 0)) {
+  if (b == 0) [[unlikely]] {
     // Divide by zero: return standard IEEE result
     return std::fmod(a, b);
   }

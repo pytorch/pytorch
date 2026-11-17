@@ -26,6 +26,7 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
     FunctionalTensor,
@@ -37,12 +38,14 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
+    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -3140,6 +3143,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 @skipIfNoDynamoSupport
 class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(_TestControlFlowBase.setUp)
 
     @onlyAccelerator
     def test_cond_gpu(self, device):
@@ -4963,6 +4967,11 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, (init, xs, kv))
 
+    @decorateIf(
+        unittest.skip("init aliasing requires an AOT backend"),
+        lambda params: params["alias_site"] == "init"
+        and params["compile_mode"] in ("none", "eager"),
+    )
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_site", ["init", "nested"])
@@ -5421,6 +5430,7 @@ class GraphModule(torch.nn.Module):
 class AssociativeScanTestsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @preserves_device_selection
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -5439,14 +5449,21 @@ class AssociativeScanTestsDevice(TestCase):
                 "The number of elements requiring gradients is different for the results and the expected results"
             )
 
-        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        # All-ones upstream gradients can hide a backward that mixes up the leaves
+        gen = torch.Generator(device="cpu").manual_seed(1234)
+        grad_init = [
+            torch.rand(el.shape, generator=gen, dtype=el.dtype).to(el.device) + 0.5
+            for el in result_exp_flatten
+        ]
         expected_grads = torch.autograd.grad(
-            result_exp_flatten, grad_param, grad_exp_init
+            result_exp_flatten, grad_param, [g.clone() for g in grad_init]
         )
-        grad_init = [torch.ones_like(el) for el in result_flatten]
-        grads = torch.autograd.grad(result_flatten, grad_param, grad_init)
+        grads = torch.autograd.grad(
+            result_flatten, grad_param, [g.clone() for g in grad_init]
+        )
 
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+        return expected_grads
 
     def _run_test(self, model, model_fake, inputs, autograd_param=None):
         result = model(inputs)
@@ -6281,6 +6298,259 @@ class AssociativeScanTestsDevice(TestCase):
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
+    @parametrize("partial_grad", [False, True])
+    @parametrize("coupling", ["linear_recurrence", "quaternion"])
+    def test_associative_scan_coupled_grads(
+        self, device, compile_mode, reverse, partial_grad, coupling
+    ):
+        # The linear recurrence of https://github.com/pytorch/pytorch/issues/172568
+        def affine_compose(left, right):
+            a_l, b_l = left
+            a_r, b_r = right
+            return a_l * a_r, b_r + a_r * b_l
+
+        def quaternion_mul(left, right):
+            w1, x1, y1, z1 = left
+            w2, x2, y2, z2 = right
+            return (
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            )
+
+        combine_fn, num_leaves, used_outputs = {
+            "linear_recurrence": (affine_compose, 2, [1]),
+            "quaternion": (quaternion_mul, 4, [0, 1, 2, 3]),
+        }[coupling]
+
+        xs = tuple(
+            (torch.rand(7, 3, device=device, dtype=torch.double) + 0.5).requires_grad_(
+                ind < num_leaves - 1 or not partial_grad
+            )
+            for ind in range(num_leaves)
+        )
+
+        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+        ys = scan_fct(combine_fn, xs, 0, reverse)
+        ys_exp = _fake_associative_scan(combine_fn, xs, 0, reverse)
+        self.assertEqual(ys, ys_exp)
+
+        expected_grads = self._check_autograd(
+            [ys[ind] for ind in used_outputs],
+            [ys_exp[ind] for ind in used_outputs],
+            xs,
+        )
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
+
+        # gradcheck is slow, so it only runs for one variant
+        if compile_mode == "none" and not reverse and not TEST_WITH_TORCHDYNAMO:
+            self.assertTrue(
+                torch.autograd.gradcheck(
+                    lambda *leaves: scan_fct(combine_fn, leaves, 0, reverse),
+                    xs,
+                    fast_mode=True,
+                )
+            )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize(
+        "leaves",
+        [
+            "unequal",
+            "decay_input",
+            "decay_state",
+            "decay_no_grad",
+            "state_no_grad",
+            "dim",
+            "shared",
+            "nested",
+            "select",
+            "unflatten",
+            "slice",
+            "xs_slice",
+            "state_slice",
+            "dtype",
+            "real_complex",
+            "complex_states",
+        ],
+    )
+    def test_associative_scan_leaf_dependencies_grads(
+        self, device, compile_mode, reverse, leaves
+    ):
+        def uncoupled(left, right):
+            return left[0] * right[0], left[1] + right[1]
+
+        def affine_decay_input(left, right):
+            return left[0] * right[0], right[1] + right[0] * left[1]
+
+        def affine_decay_state(left, right):
+            return left[0] * right[0], left[0] * right[1] + left[1]
+
+        def shared_decay(left, right):
+            a, b, c = left
+            a2, b2, c2 = right
+            return a * a2, b2 + a2 * b, c2 + a2 * c
+
+        # Products of the matrices [[p, q, s], [0, r, w], [0, 0, z]]
+        def upper_triangular(left, right):
+            p, q, s, r, w, z = left
+            p2, q2, s2, r2, w2, z2 = right
+            return (
+                p * p2,
+                p * q2 + q * r2,
+                p * s2 + q * w2 + s * z2,
+                r * r2,
+                r * w2 + w * z2,
+                z * z2,
+            )
+
+        def select_decay_state(left, right):
+            return left[0] * right[0], left[0][..., 0, :] * right[1] + left[1]
+
+        def unflatten_decay_state(left, right):
+            a, b = left
+            a2, b2 = right
+            return a * a2, a.unflatten(-1, (4, 3)) * b2 + b
+
+        def slice_decay_state(left, right):
+            return left[0] * right[0], left[0][..., :1, :] * right[1] + left[1]
+
+        def xs_slice(left, right):
+            return (left[0] * right[0][..., :1, :],)
+
+        def state_slice(left, right):
+            return (left[0][..., :1, :] * right[0],)
+
+        def real(x):
+            return (x + x.conj_physical()) * 0.5
+
+        def complex_states(left, right):
+            a, u, w = left
+            a2, u2, w2 = right
+            return a * a2, real(u) * u2, real(w) * u2 + a * w2
+
+        one, row, mat = (1, 1), (1, 3), (4, 3)
+        combine_fn, shapes, no_grad = {
+            "unequal": (uncoupled, [(4,), (3,)], []),
+            "decay_input": (affine_decay_input, [row, mat], []),
+            "decay_state": (affine_decay_state, [row, mat], []),
+            "decay_no_grad": (affine_decay_state, [row, mat], [0]),
+            "state_no_grad": (affine_decay_state, [row, mat], [1]),
+            "dim": (affine_decay_state, [row, mat], []),
+            "shared": (shared_decay, [row, mat, (5, 3)], []),
+            "nested": (upper_triangular, [one, row, mat, one, row, one], []),
+            "select": (select_decay_state, [mat, (3,)], []),
+            "unflatten": (unflatten_decay_state, [(12,), mat], []),
+            "slice": (slice_decay_state, [mat, mat], []),
+            "xs_slice": (xs_slice, [mat], []),
+            "state_slice": (state_slice, [mat], []),
+            "dtype": (affine_decay_input, [mat, mat], []),
+            "real_complex": (uncoupled, [mat, mat], [1]),
+            "complex_states": (complex_states, [row, mat, mat], [1, 2]),
+        }[leaves]
+        dtypes = {
+            "dtype": [torch.float, torch.double],
+            "real_complex": [torch.double, torch.cdouble],
+            "complex_states": [torch.double, torch.cdouble, torch.cdouble],
+        }.get(leaves, [torch.double] * len(shapes))
+        dim = 1 if leaves == "dim" else 0
+
+        xs = tuple(
+            torch.rand(*shape[:dim], 6, *shape[dim:], device=device, dtype=dtype) + 0.5
+            for shape, dtype in zip(shapes, dtypes)
+        )
+        for ind, x in enumerate(xs):
+            x.requires_grad_(ind not in no_grad)
+
+        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+        ys = scan_fct(combine_fn, xs, dim, reverse)
+        ys_exp = _fake_associative_scan(combine_fn, xs, dim, reverse)
+        self.assertEqual(ys, ys_exp)
+
+        used = [ind for ind, y in enumerate(ys_exp) if y.requires_grad]
+        expected_grads = self._check_autograd(
+            [ys[ind] for ind in used], [ys_exp[ind] for ind in used], xs
+        )
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
+
+        if (
+            compile_mode == "none"
+            and not reverse
+            and not TEST_WITH_TORCHDYNAMO
+            and all(dtype == torch.double for dtype in dtypes)
+        ):
+            self.assertTrue(
+                torch.autograd.gradcheck(
+                    lambda *ls: scan_fct(combine_fn, ls, dim, reverse),
+                    xs,
+                    fast_mode=True,
+                )
+            )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_dependent_leaves_vmap_grads(self, device):
+        def affine(left, right):
+            (a_l, b_l), (a_r, b_r) = left, right
+            return a_l * a_r, b_r + a_r * b_l
+
+        def keep_y(a, b):
+            return associative_scan(affine, (a, b), 0, combine_mode="pointwise")[1]
+
+        a = torch.rand(2, 7, 3, device=device, dtype=torch.double) + 0.5
+        b = torch.rand(2, 7, 3, device=device, dtype=torch.double) + 0.5
+        xs = (a.requires_grad_(), b.requires_grad_())
+
+        y = torch.vmap(keep_y)(*xs)
+        y_exp = torch.stack(
+            [_fake_associative_scan(affine, (a[i], b[i]), 0)[1] for i in range(2)]
+        )
+        self.assertEqual(y, y_exp)
+        expected_grads = self._check_autograd(y, y_exp, xs)
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
+
+    # torch.func.grad does not support HOPs yet
+    @unittest.expectedFailure
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_func_grad(self, device):
+        def affine(left, right):
+            (a_l, b_l), (a_r, b_r) = left, right
+            return a_l * a_r, b_r + a_r * b_l
+
+        w = torch.rand(7, 3, device=device, dtype=torch.double) + 0.5
+
+        def loss(a, b):
+            y = associative_scan(affine, (a, b), 0, combine_mode="pointwise")[1]
+            return (y * w).sum()
+
+        def loss_exp(a, b):
+            return (_fake_associative_scan(affine, (a, b), 0)[1] * w).sum()
+
+        args = tuple(
+            torch.rand(7, 3, device=device, dtype=torch.double) + 0.5 for _ in range(2)
+        )
+        grads = torch.func.grad(loss, argnums=(0, 1))(*args)
+        self.assertEqual(grads, torch.func.grad(loss_exp, argnums=(0, 1))(*args))
+
+    @onlyAccelerator
+    def test_associative_scan_leaves_on_different_devices_grads(self, device):
+        def uncoupled(left, right):
+            return left[0] * right[0], left[1] + right[1]
+
+        xs = (
+            (torch.rand(6, 4, dtype=torch.double) + 0.5).requires_grad_(),
+            torch.rand(6, 4, device=device, dtype=torch.double).requires_grad_(),
+        )
+        ys = associative_scan(uncoupled, xs, 0, combine_mode="pointwise")
+        ys_exp = _fake_associative_scan(uncoupled, xs, 0)
+        self.assertEqual(ys, ys_exp)
+        self._check_autograd(list(ys), list(ys_exp), xs)
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
     def test_associative_scan_different_input_size(self, device, compile_mode, reverse):
         batch = 5
         hidden_dim = 3
@@ -6801,19 +7071,23 @@ class AssociativeScanTestsDevice(TestCase):
         grads_ref = torch.autograd.grad(result_ref.sum(), xs)
         self.assertEqual(grads, grads_ref)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
-    def test_associative_scan_pointwise_additional_input_requires_grad_raises(
-        self, device
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("xs_requires_grad", [False, True])
+    def test_associative_scan_pointwise_additional_input_requires_grad(
+        self, device, compile_mode, xs_requires_grad
     ):
         H = torch.rand(2, device=device, requires_grad=True)
 
         def combine_fn(x, y):
             return x + y + H
 
-        xs = torch.randn(4, 2, device=device, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
-            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+        xs = torch.randn(4, 2, device=device, requires_grad=xs_requires_grad)
+        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+        result = scan_fct(combine_fn, xs, 0, False)
+        result_exp = _fake_associative_scan(combine_fn, xs, 0)
+        self.assertEqual(result, result_exp)
+        self._check_autograd(result, result_exp, (xs, H))
 
     @onlyAccelerator
     def test_associative_scan_input_mutation(self, device):
@@ -8683,11 +8957,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     val = node.meta.get("val")
                     if isinstance(val, tuple):
                         for v in val:
-                            yield v.fake_mode.shape_env
+                            yield maybe_get_fake_mode(v).shape_env
                     elif isinstance(val, torch.SymInt):
                         yield val.node.shape_env
                     else:
-                        yield val.fake_mode.shape_env
+                        yield maybe_get_fake_mode(val).shape_env
 
         for shape_env in _node_shape_env_iter(symbolic_traced_graph):
             self.assertTrue(shape_env is graph_shape_env)
@@ -10703,6 +10977,224 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         ):
             functional_f(example_init, example_inputs)
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_joint_graph_keeps_node_meta(self):
+        # Scan re-traces its body twice to build the joint graph that min-cut
+        # partitions. An annotate() region set in the body must survive both.
+        from torch.fx.traceback import annotate
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, requires_grad=True)
+        xs = torch.randn(3, 4, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+        self.assertEqual(out, f(init, xs))
+        out.sum().backward()
+
+        # The forward and backward bodies are min-cut's output. The backward
+        # one recomputes the sin, and the copy must keep the region too.
+        for gm in (*backend.fw_graphs, *backend.bw_graphs):
+            (scan_node,) = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(gm, scan_node.args[0].target)
+            sins = body_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.sin.default
+            )
+            self.assertGreater(len(sins), 0)
+            for sin in sins:
+                self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_hop_joint_graph_keeps_node_meta_of_plain_fn(self):
+        # A plain-function body is re-run, not interpreted, by the first
+        # re-trace. Its annotate() region must still survive functionalization.
+        from torch._higher_order_ops.partitioner import create_hop_joint_graph
+        from torch.fx.traceback import annotate, preserve_node_meta
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        joint = {}
+
+        def f(carry, x):
+            joint["gm"] = create_hop_joint_graph(
+                body, (carry, x), functionalize=True
+            ).joint_gm
+            return carry.clone()
+
+        carry = torch.randn(4, requires_grad=True)
+        x = torch.randn(4, requires_grad=True)
+        with preserve_node_meta():
+            make_fx(f, tracing_mode="fake")(carry, x)
+        (sin,) = joint["gm"].graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_steers_partition(self):
+        # A "recompute" tag on a node in the scan body decides whether min-cut
+        # saves it for the backward or recomputes it there.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin()
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        def saved_by_forward_body(policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag the sin in Dynamo's body graph, before AOTAutograd runs.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.target in (torch.sin, "sin"):
+                                node.meta["recompute"] = policy
+                return record(gm, example_inputs)
+
+            init = torch.randn(4, requires_grad=True)
+            xs = torch.randn(3, 4, requires_grad=True)
+            torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return [n.target for n in body_gm.graph.output_node().args[0]]
+
+        sin = torch.ops.aten.sin.default
+        self.assertIn(sin, saved_by_forward_body(CheckpointPolicy.MUST_SAVE))
+        self.assertNotIn(sin, saved_by_forward_body(CheckpointPolicy.PREFER_RECOMPUTE))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_on_complex_symint(self):
+        # Under dynamic shapes, x.shape[0] * x.shape[1] is a complex SymInt
+        # node. Scan can't save it across the forward/backward boundary, so it
+        # overrides the body's tag with MUST_RECOMPUTE, and rejects MUST_SAVE.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin() * (x.shape[0] * x.shape[1])
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, 5, requires_grad=True)
+        xs = torch.randn(3, 4, 5, requires_grad=True)
+        expected = torch.autograd.grad(f(init, xs).sum(), (init, xs))
+
+        def compile_with_tags(symint_policy, tensor_policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag every node in the body, SymInt ops included.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.op == "call_function":
+                                val = node.meta.get("example_value")
+                                node.meta["recompute"] = (
+                                    symint_policy
+                                    if isinstance(val, torch.SymInt)
+                                    else tensor_policy
+                                )
+                return record(gm, example_inputs)
+
+            out = torch.compile(f, backend=backend, fullgraph=True, dynamic=True)(
+                init, xs
+            )
+            self.assertEqual(torch.autograd.grad(out.sum(), (init, xs)), expected)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return len(body_gm.graph.output_node().args[0])
+
+        for policy in (
+            CheckpointPolicy.PREFER_SAVE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+            CheckpointPolicy.MUST_RECOMPUTE,
+        ):
+            compile_with_tags(policy, policy)
+
+        # Tags still steer the tensor nodes: MUST_SAVE on them also saves y.
+        self.assertGreater(
+            compile_with_tags(
+                CheckpointPolicy.PREFER_RECOMPUTE, CheckpointPolicy.MUST_SAVE
+            ),
+            compile_with_tags(None, None),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Node mul\w* computes the SymInt expression .* is tagged "
+            r"CheckpointPolicy.MUST_SAVE\. .* can't be saved across the "
+            r"forward/backward boundary",
+        ):
+            compile_with_tags(CheckpointPolicy.MUST_SAVE, CheckpointPolicy.MUST_SAVE)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_dropout_in_checkpointed_body(self):
+        # Checkpoint tags dropout for recompute. The backward must still use
+        # the forward's mask, not draw a new one.
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.MUST_RECOMPUTE
+
+        def region(c, w):
+            return torch.nn.functional.dropout(c @ w, 0.5).sin()
+
+        sac = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        cases = [(c, b) for c in (None, sac) for b in ("aot_eager", "inductor")]
+        for context_fn, backend in cases:
+            kwargs = {"context_fn": context_fn} if context_fn else {}
+
+            def body(c, w):
+                y = checkpoint(region, c, w, use_reentrant=False, **kwargs)
+                return y, y.clone()
+
+            with self.subTest(sac=context_fn is not None, backend=backend):
+                torch._dynamo.reset()
+                init = torch.randn(2, 4, requires_grad=True)
+                xs = torch.randn(3, 4, 4, requires_grad=True)
+                f = torch.compile(scan, backend=backend, fullgraph=True)
+                carry, ys = f(body, init, xs)
+                grads = torch.autograd.grad(carry.sum() + ys.sum(), (init, xs))
+
+                # Eager rerun with the masks read back from ys.
+                c, outs = init, []
+                for t in range(3):
+                    c = (c @ xs[t] * (ys[t] != 0) * 2).sin()
+                    outs.append(c)
+                out = c.sum() + torch.stack(outs).sum()
+                expected = torch.autograd.grad(out, (init, xs))
+                self.assertEqual(grads, expected, atol=6e-05, rtol=6e-06)
+
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
@@ -10779,6 +11271,39 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             )
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
+
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_scan_in_vmap_output_drops_traced_step(self):
+        # Tracing runs the combine function for one step. Inside vmap, the
+        # output of scan keeps the wrapper that the combine function returned,
+        # but not the constant or real tensor of that step, and the step's own
+        # value keeps both.
+        from torch._functorch.vmap import vmap_increment_nesting
+        from torch._higher_order_ops.scan import _scan_output_value
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            maybe_get_fake_constant,
+            maybe_get_real_tensor,
+        )
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        with mode:
+            step = torch.tensor([5])
+        # As in trace_scan, the output node of the combine graph records the
+        # plain fake tensor.
+        node = torch.fx.Graph().placeholder("step")
+        node.meta["val"] = step
+        with vmap_increment_nesting(1, "error") as level:
+            with mode:
+                batched = functorch._add_batch_dim(step, 0, level)
+            out = _scan_output_value(node, batched)
+            self.assertTrue(functorch.is_batchedtensor(out))
+            inner = functorch.get_unwrapped(out)
+        self.assertIsNone(maybe_get_fake_constant(inner))
+        self.assertIsNone(maybe_get_real_tensor(inner))
+        self.assertIsNotNone(maybe_get_fake_constant(step))
+        self.assertIsNotNone(maybe_get_real_tensor(step))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_scan_in_vmap_simple(self):
@@ -11581,7 +12106,56 @@ class GraphModule(torch.nn.Module):
 
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                """\
+                expectedIfCppFakeTensor(
+                    """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
+        clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
+        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
+        zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
+        while_loop_cond_graph_1 = self.while_loop_cond_graph_1
+        while_loop_body_graph_1 = self.while_loop_body_graph_1
+        zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, clone, zeros_like, zeros_like_1), (cat, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = clone = zeros_like = zeros_like_1 = cat = primals_3 = primals_2 = None
+        getitem_2: "f32[3, 3]" = while_loop[1]
+        getitem_3: "f32[3]" = while_loop[2]
+        getitem_4: "f32[3, 3]" = while_loop[3];  while_loop = None
+        return (getitem_2, getitem_4, getitem_3)
+
+    class while_loop_cond_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
+            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
+
+            lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, sym_size_int_1);  arg0_1 = sym_size_int_1 = None
+            return lt
+
+    class while_loop_body_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
+            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
+
+            rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
+            sub: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
+            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub);  sub = None
+            select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
+            t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
+            t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg1_1, t_1);  t_1 = None
+            t_2: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1)
+            mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, select);  t_2 = None
+            t_3: "f32[3, 3]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
+            sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
+            view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
+            t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
+            mul_3: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
+            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
+            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_4);  mm = mul_4 = None
+            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_6, mul_3);  add_6 = mul_3 = None
+            add_8: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add_9: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
+            add_10: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
+            return (add_8, add_7, add_9, add_10)
+""",
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
@@ -11629,6 +12203,7 @@ class GraphModule(torch.nn.Module):
             add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
             return (add_4, add_3, add_5, add_6)
 """,
+                ),
             )
 
     def test_input_output_alias(self):
@@ -12916,6 +13491,73 @@ class <lambda>(torch.nn.Module):
             copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
             return (mm,)
 """,
+            )
+
+    # https://github.com/pytorch/pytorch/issues/201590
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_output_alias_input_raises(self, device, dynamic):
+        # A branch that mutates an operand makes cond's schema mutable, which routes
+        # cond_func through auto-functionalization.  The branch-output aliasing check
+        # must still run on that path.  The exception type depends on which backend
+        # wrapper surfaces it, so match on the message.
+        def f(pred, x, y):
+            def true_fn(x, y):
+                y.copy_(x * 2.0)
+                return x.view(x.shape)
+
+            def false_fn(x, y):
+                y.copy_(x + 1.0)
+                return x.view(x.shape)
+
+            return torch.cond(pred, true_fn, false_fn, (x, y))
+
+        pred = torch.tensor(True, device=device)
+        x = torch.ones(5, 5, device=device)
+        y = torch.zeros(5, 5, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_true might be aliasing the input or the output"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)(
+                pred, x, y
+            )
+
+    # https://github.com/pytorch/pytorch/issues/201590
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_output_alias_output_raises(self, device, dynamic):
+        # The same check also rejects output-output aliasing: a branch returning one
+        # tensor twice. Covered separately because the two kinds come from different
+        # maps in check_input_alias_and_mutation.
+        def f(pred, x, y):
+            def true_fn(x, y):
+                y.copy_(x * 2.0)
+                out = x + 1.0
+                return out, out
+
+            def false_fn(x, y):
+                y.copy_(x + 1.0)
+                out = x - 1.0
+                return out, out
+
+            return torch.cond(pred, true_fn, false_fn, (x, y))
+
+        pred = torch.tensor(True, device=device)
+        x = torch.ones(5, 5, device=device)
+        y = torch.zeros(5, 5, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_true might be aliasing the input or the output"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)(
+                pred, x, y
             )
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")

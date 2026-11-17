@@ -46,7 +46,7 @@ jobs:
         env:
           INPUT_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Fetch full history to ensure we have all commits
           fetch-depth: 0

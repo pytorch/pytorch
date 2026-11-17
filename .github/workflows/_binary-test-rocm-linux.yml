@@ -21,6 +21,10 @@ on:
       DESIRED_CUDA:
         required: true
         type: string
+      INDEX_SUBFOLDER:
+        required: false
+        default: ""
+        type: string
       GPU_ARCH_VERSION:
         required: true
         type: string
@@ -63,6 +67,7 @@ jobs:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      INDEX_SUBFOLDER: ${{ inputs.INDEX_SUBFOLDER }}
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
       SKIP_ALL_TESTS: 1
@@ -103,6 +108,7 @@ jobs:
             echo "PYTORCH_ROOT=${PYTORCH_ROOT}"
             echo "PACKAGE_TYPE=${PACKAGE_TYPE}"
             echo "DESIRED_CUDA=${DESIRED_CUDA}"
+            echo "INDEX_SUBFOLDER=${INDEX_SUBFOLDER}"
             echo "GPU_ARCH_VERSION=${GPU_ARCH_VERSION}"
             echo "GPU_ARCH_TYPE=${GPU_ARCH_TYPE}"
             echo "DOCKER_IMAGE=pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}"
