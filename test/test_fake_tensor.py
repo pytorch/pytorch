@@ -255,6 +255,52 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertTrue(is_fake_tensor(z))
             self.assertIs(maybe_get_fake_mode(z), mode)
 
+    @fake_tensor_modes
+    @parametrize("static_shapes", [True, False])
+    def test_reshape_with_singleton_strides(self, mode_cls, static_shapes):
+        if mode_cls is CppFakeTensorMode:
+            if TEST_WITH_TORCHDYNAMO:
+                self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
+            if not static_shapes:
+                self.skipTest("C++ fake fallback does not support symbolic view yet")
+            if torch._functorch.config.fake_tensor_propagate_real_tensors:
+                self.skipTest(
+                    "C++ fake fallback does not support propagate_real_tensors"
+                )
+
+        def reshape(x):
+            n = x.size(0)
+            return x.as_strided((n, 2, 1, 1, 2), (4, 0, 8, 2, 1)).reshape(n, 2, 1, 2)
+
+        x = torch.empty(2, 3)
+        eager = reshape(x)
+        eager_clone_stride = eager.clone().stride()
+        shape_env = None if static_shapes else ShapeEnv()
+        with mode_cls(shape_env=shape_env) as mode:
+            fake = reshape(mode.from_tensor(x, static_shapes=static_shapes))
+            self.assertEqual(fake.stride(), eager.stride())
+            self.assertEqual(fake.clone().stride(), eager_clone_stride)
+
+    @parametrize("remove_singleton", [False, True])
+    def test_view_does_not_guard_symbolic_stride(self, remove_singleton):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                if remove_singleton:
+                    y = x.as_strided((2, 1, 1, 3), (x.shape[1], 45, x.shape[1], 2))
+                    return y.view(2, 1, 3)
+                y = x.as_strided((2, 3), (x.shape[1], 2))
+                return y.view(y.shape)
+
+        model = Model()
+        x = torch.arange(32).reshape(4, 8)
+        cols = torch.export.Dim("cols", min=5, max=12)
+        exported = torch.export.export(model, (x,), dynamic_shapes=({1: cols},))
+        x = torch.arange(24).reshape(4, 6)
+        actual = exported.module()(x)
+        expected = model(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+
     def test_sparse_compressed_tensor_creation(self):
         def csr():
             crow = torch.tensor([0, 2, 4])

@@ -1368,11 +1368,35 @@ def _view_meta(
         return typing_cast(
             FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy)
         )
-    else:
-        return typing_cast(
-            FakeTensor,
-            torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
-        )
+    result = typing_cast(
+        FakeTensor,
+        torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
+    )
+    if allow_copy or not 1 < result.ndim < a.ndim:
+        return result
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    sizes = result.shape
+    singleton_dims = [
+        dim
+        for dim in range(len(sizes) - 2, -1, -1)
+        if statically_known_true(sizes[dim] == 1)
+    ]
+    if not singleton_dims or not statically_known_true(a.numel() > 0):
+        return result
+
+    # When a reshape removes dimensions, the left-to-right decomposition can
+    # retain the wrong singleton stride. Native view consumes these dimensions
+    # with the chunk to their right.
+    strides = list(result.stride())
+    changed = False
+    for dim in singleton_dims:
+        stride = sizes[dim + 1] * strides[dim + 1]
+        if not statically_known_true(strides[dim] == stride):
+            strides[dim] = stride
+            changed = True
+    return typing_cast(FakeTensor, result.as_strided(sizes, strides)) if changed else result
 
 
 @register_op_impl(aten.view_copy.default)
