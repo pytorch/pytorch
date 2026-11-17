@@ -161,6 +161,12 @@ static void dispatch_plane_grid(const std::string& name,
     return;
   }
   const auto& owner = grid_over_a ? a : b;
+  constexpr int64_t max_grid_dim = std::numeric_limits<uint32_t>::max();
+  TORCH_CHECK(owner.size(2) <= max_grid_dim && owner.size(3) <= max_grid_dim,
+              "upsample_",
+              name,
+              ": spatial sizes must not exceed UINT32_MAX, got ",
+              owner.sizes());
   const UpsampleParams<4> params(a, b, align_corners, scales);
   const bool channels_last = owner.suggest_memory_format() == MemoryFormat::ChannelsLast;
   const auto height = static_cast<NSUInteger>(owner.size(2));
@@ -217,6 +223,15 @@ static void upsample_gather_backward_out_template(const Tensor& grad_input,
                               grad_output.scalar_type());
   if (grad_input.numel() == 0) {
     return;
+  }
+  // The backward kernel computes source runs in int.
+  constexpr int64_t max_dim = std::numeric_limits<int32_t>::max();
+  for (const auto& t : {grad_input, grad_output}) {
+    TORCH_CHECK(t.size(2) <= max_dim && t.size(3) <= max_dim,
+                "upsample_",
+                name,
+                "_backward: spatial sizes must not exceed INT32_MAX, got ",
+                t.sizes());
   }
   dispatch_plane_grid(name + "_backward", grad_input, grad_output, /*grid_over_a=*/true, align_corners, scales);
 }
