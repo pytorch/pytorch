@@ -19,6 +19,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -616,6 +617,9 @@ class <lambda>(torch.nn.Module):
                 tracing_mode="fake",
                 dynamic_shapes=PARAMS({"x": T([VAR("Z"), STATIC])}),
             )(torch.randn(8, 3))
+
+
+instantiate_fake_tensor_tests(globals())
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -212,6 +213,7 @@ def forward(self, token, obj_attr, x, n):
     return (getitem, add)""",
         )
 
+    @fake_tensor_test()
     @parametrize("propagate_real_tensors", [False, True])
     @parametrize("active", [False, True])
     def test_method_schema(self, propagate_real_tensors, active):
