@@ -435,6 +435,8 @@ cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" ON
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+option(USE_CFG_COMPILE
+       "Build the Rust runtime of torch.rewrite (needs cargo)" OFF)
 # NNPACK has been removed; still reported via caffe2/core/macros.h.in
 set(USE_NNPACK OFF)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
