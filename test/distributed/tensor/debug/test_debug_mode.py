@@ -25,18 +25,23 @@ from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_nccl,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
     run_tests,
+    TEST_CUDA,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    requires_gpu_with_enough_memory,
+)
 from torch.utils._debug_mode import (
     _OpCall,
     _RedistributeCall,
@@ -47,6 +52,11 @@ from torch.utils._debug_mode import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class TestDebugModeLogSerialization(TestCase):
@@ -202,7 +212,7 @@ class TestDebugModeLogSerialization(TestCase):
         self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
 
 
-@requires_cuda
+@unittest.skipUnless(TEST_CUDA or TEST_XPU, "requires CUDA or XPU")
 class TestDTensorDebugMode(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -225,10 +235,9 @@ class TestDTensorDebugMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
 
     def test_debug_mode_mm(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=False)
         y = torch.randn(1, 32, requires_grad=True)
@@ -240,7 +249,26 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                f"""\
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$10: f32[8, 32]| S(0)
+    aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+      aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, device={device_type}, pin_memory=False)  ->  ft$2: f32[8, 8]
+      aten::empty_strided([8, 32], [32, 1], dtype=torch.float32, device={device_type}, pin_memory=False)  ->  ft$3: f32[8, 32]
+      aten::mm(ft$2: f32[8, 8], ft$3: f32[8, 32])  ->  ft$4: f32[8, 32]
+      -> output: S(0)
+      redistribute_input [implicit] (1, S(0) -> R)
+        redistribute_input(t$5: f32[1, 32], trace: S(0)->R)
+          _c10d_functional::all_gather_into_tensor(t$5: f32[1, 32], 8, 0)  ->  t$6: f32[8, 32]
+          _c10d_functional::_wrap_tensor_autograd(t$6: f32[8, 32])  ->  t$7: f32[8, 32]
+          _c10d_functional::wait_tensor(t$6: f32[8, 32])  ->  t$6: f32[8, 32]
+      aten::mm(t$8: f32[1, 8], t$6: f32[8, 32])  ->  t$9: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$10: f32[8, 32]| S(0))  ->  dt$14: f32[]| P(sum)
+    aten::sum(dt$10: f32[8, 32]| S(0))
+      aten::empty_strided([8, 32], [32, 1], dtype=torch.float32, device={device_type}, pin_memory=False)  ->  ft$11: f32[8, 32]
+      aten::sum(ft$11: f32[8, 32])  ->  ft$12: f32[]
+      aten::sum(t$9: f32[1, 32])  ->  t$13: f32[]""",
+                """\
   torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       -> output: S(0)
@@ -253,10 +281,14 @@ class TestDTensorDebugMode(TestCase):
   <method 'sum' of 'torch._C.TensorBase' objects>(dt$7: f32[8, 32]| S(0))  ->  dt$9: f32[]| P(sum)
     aten::sum(dt$7: f32[8, 32]| S(0))
       aten::sum(t$6: f32[1, 32])  ->  t$8: f32[]""",
+            ),
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
-        self.assertTrue(isinstance(debug_mode.operators[3], _RedistributeCall))
+        redistribute_idx = expectedIfCppFakeTensor(6, 3)
+        self.assertTrue(
+            isinstance(debug_mode.operators[redistribute_idx], _RedistributeCall)
+        )
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
         # check stringification
@@ -315,7 +347,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(hash_(torch.ones(5, dtype=torch.int8)), 1)
 
     def test_debug_string_inside_context(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=False)
         y = torch.randn(1, 32, requires_grad=True)
@@ -329,7 +361,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(s0, s1)
 
     def test_debug_mode_backward(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=True)
         y = torch.randn(8, 1, requires_grad=True)
@@ -452,7 +484,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
 
     def test_debug_mode_densor_redistribution_trace(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size).view(4, 2))
 
         x = torch.randn(16, 8, requires_grad=True)
         y = torch.randn(8, 16, requires_grad=True)
@@ -465,7 +497,30 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                f"""\
+  aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
+    aten::empty_strided([128, 8], [8, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+    aten::empty_strided([8, 128], [128, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+    aten::mm(ft: f32[128, 8], ft: f32[8, 128])
+    redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
+        _c10d_functional::wait_tensor(t: f32[16, 16])
+        aten::chunk(t: f32[16, 16], 2)
+        aten::cat(['t: f32[8, 16]', 't: f32[8, 16]'], 1)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 32], 4, 1)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[32, 32])
+        _c10d_functional::wait_tensor(t: f32[32, 32])
+        aten::chunk(t: f32[32, 32], 4)
+        aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::empty_strided([128, 128], [128, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+    aten::sum(ft: f32[128, 128])
+    aten::sum(t: f32[16, 128])""",
+                """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
     redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
       redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
@@ -482,11 +537,12 @@ class TestDTensorDebugMode(TestCase):
     aten::mm(t: f32[16, 8], t: f32[8, 128])
   aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
     aten::sum(t: f32[16, 128])""",
+            ),
         )
 
     def test_debug_mode_explicit_redistribute(self):
         """Test that explicit user-called redistribute shows [explicit] annotation."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         x = torch.randn(1, 8)
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
@@ -518,7 +574,7 @@ class TestDTensorDebugMode(TestCase):
 
     def test_output_placements(self):
         """Test that output placements are recorded for multi-output DTensor ops."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         # Use topk which returns multiple outputs (values, indices)
         # Shard on dim=1 (the topk dimension) to trigger redistribution
@@ -531,7 +587,21 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                f"""\
+  aten::topk(dt: f32[8, 16]| S(1), 4, 1)
+    aten::empty_strided([8, 16], [16, 1], dtype=torch.float32, device={device_type}, pin_memory=False)  ->  ft: f32[8, 16]
+    aten::topk(ft: f32[8, 16], 4, 1)  ->  ('ft: f32[8, 4]', 'ft: i64[8, 4]')
+    -> output: ('R', 'R')
+    redistribute_input [implicit] (0, S(1) -> R)
+      redistribute_input(t: f32[8, 2], trace: S(1)->R)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
+        aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
+        aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+                """\
   aten::topk(dt: f32[8, 16]| S(1), 4, 1)
     -> output: ('R', 'R')
     redistribute_input [implicit] (0, S(1) -> R)
@@ -542,10 +612,11 @@ class TestDTensorDebugMode(TestCase):
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+            ),
         )
 
     def test_debug_mode_einsum(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size).view(4, 2))
 
         # Create test tensors with mixed Partial placements: P(sum)R and RP(sum).
         # Per-input linearity allows bmm to operate directly on Partial inputs
@@ -561,38 +632,73 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             torch.einsum("bld,dnh->blnh", a_dt, b_dt)
 
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
+        cpp_expected = f"""\
   torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]| P(sum)R, dt: f32[8, 4, 4]| RP(sum))
     aten::unsqueeze(dt: f32[16, 6, 8]| P(sum)R, 3)
+      aten::empty_strided([16, 6, 8], [48, 8, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::unsqueeze(ft: f32[16, 6, 8], 3)
       aten::unsqueeze(t: f32[16, 6, 8], 3)
     aten::unsqueeze(dt: f32[16, 6, 8, 1]| P(sum)R, 4)
+      aten::empty_strided([16, 6, 8, 1], [48, 8, 1, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::unsqueeze(ft: f32[16, 6, 8, 1], 4)
       aten::unsqueeze(t: f32[16, 6, 8, 1], 4)
     aten::permute(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [0, 1, 3, 4, 2])
+      aten::empty_strided([16, 6, 8, 1, 1], [48, 8, 1, 1, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
     aten::unsqueeze(dt: f32[8, 4, 4]| RP(sum), 3)
+      aten::empty_strided([8, 4, 4], [16, 4, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::unsqueeze(ft: f32[8, 4, 4], 3)
       aten::unsqueeze(t: f32[8, 4, 4], 3)
     aten::unsqueeze(dt: f32[8, 4, 4, 1]| RP(sum), 4)
+      aten::empty_strided([8, 4, 4, 1], [16, 4, 1, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::unsqueeze(ft: f32[8, 4, 4, 1], 4)
       aten::unsqueeze(t: f32[8, 4, 4, 1], 4)
     aten::permute(dt: f32[8, 4, 4, 1, 1]| RP(sum), [3, 4, 1, 2, 0])
+      aten::empty_strided([8, 4, 4, 1, 1], [16, 4, 1, 1, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::permute(ft: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
       aten::permute(t: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
     aten::permute(dt: f32[16, 6, 1, 1, 8]| P(sum)R, [0, 1, 4, 2, 3])
+      aten::empty_strided([16, 6, 1, 1, 8], [48, 8, 1, 1, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
       aten::permute(t: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
     aten::view(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [1, 96, 8])
+      aten::empty_strided([16, 6, 8, 1, 1], [48, 8, 1, 1, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::view(ft: f32[16, 6, 8, 1, 1], [1, 96, 8])
       aten::view(t: f32[16, 6, 8, 1, 1], [1, 96, 8])
     aten::permute(dt: f32[1, 1, 4, 4, 8]| RP(sum), [4, 2, 3, 0, 1])
+      aten::empty_strided([1, 1, 4, 4, 8], [1, 1, 4, 1, 16], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::permute(ft: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
       aten::permute(t: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
+      aten::empty_strided([8, 4, 4, 1, 1], [16, 4, 1, 1, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::view(ft: f32[8, 4, 4, 1, 1], [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
+      aten::empty_strided([1, 96, 8], [768, 8, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::empty_strided([1, 8, 16], [128, 16, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::bmm(ft: f32[1, 96, 8], ft: f32[1, 8, 16])
       aten::bmm(t: f32[1, 96, 8], t: f32[1, 8, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
+      aten::empty_strided([1, 96, 16], [1536, 16, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::view(ft: f32[1, 96, 16], [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
     aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
+      aten::empty_strided([16, 6, 1, 4, 4], [96, 16, 16, 4, 1], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
     aten::view(dt: f32[16, 6, 4, 4, 1]| P(sum)P(sum), [16, 6, 4, 4])
-      aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
+      aten::empty_strided([16, 6, 4, 4, 1], [96, 16, 4, 1, 16], dtype=torch.float32, device={device_type}, pin_memory=False)
+      aten::view(ft: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])
+      aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])"""
+        python_expected = "\n".join(
+            line
+            for line in cpp_expected.splitlines()
+            if "aten::empty_strided" not in line and "(ft:" not in line
+        )
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            expectedIfCppFakeTensor(cpp_expected, python_expected),
         )
 
     def test_real_tensor(self):
@@ -609,7 +715,7 @@ class TestDTensorDebugMode(TestCase):
       aten::view(t: f32[8, 8, 8], [64, 8])
       aten::t(t: f32[8, 8])
       aten::addmm(t: f32[8], t: f32[64, 8], t: f32[8, 8])
-      aten::view(t: f32[64, 8], [8, 8, 8])
+      aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])
   <method 'sum' of 'torch._C.TensorBase' objects>(t: f32[8, 8, 8])
       aten::sum(t: f32[8, 8, 8])""",
         )
@@ -672,7 +778,7 @@ class TestDTensorDebugMode(TestCase):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 return func(*args, **kwargs)
 
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=True)
         y = torch.randn(1, 32, requires_grad=True)
@@ -1038,8 +1144,8 @@ class TestDTensorDebugMode(TestCase):
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
-        x = torch.randn(128, device=GPU_TYPE)
-        y = torch.randn(128, device=GPU_TYPE)
+        x = torch.randn(128, device=device_type)
+        y = torch.randn(128, device=device_type)
 
         with DebugMode() as debug_mode:
             torch.compile(call_triton)(x, y)
@@ -1051,8 +1157,8 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("[triton]", triton_calls[0].render([]))
 
     def test_check_hash_mismatches(self):
-        x = torch.randn(64, 64, device=GPU_TYPE)
-        x_different = torch.randn(64, 64, device=GPU_TYPE)
+        x = torch.randn(64, 64, device=device_type)
+        x_different = torch.randn(64, 64, device=device_type)
 
         # Identical runs should have no mismatches
         with DebugMode() as dm1, DebugMode.log_tensor_hashes():
@@ -1073,16 +1179,13 @@ class TestDTensorDebugMode(TestCase):
             [call["call"] for call in mismatches], ["aten::sin", "aten::sum"]
         )
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties(0).total_memory < 2**26,
-        "Being conservative, test peak memory is 25MB?",
-    )
+    # Being conservative, test peak memory is 25MB?
+    @requires_gpu_with_enough_memory(2**26)
     def test_tensor_hash_redistribute(self):
         # test that hashing collectives gives correct results
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
-        local_tensor = torch.ones(2**18, device=self.device_type)
+        local_tensor = torch.ones(2**18, device=device_type)
         dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
@@ -1113,9 +1216,9 @@ class TestDTensorDebugMode(TestCase):
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
-        a = torch.randn(128, device=GPU_TYPE)
-        b = torch.randn(128, device=GPU_TYPE)
-        c = torch.randn(128, device=GPU_TYPE)
+        a = torch.randn(128, device=device_type)
+        b = torch.randn(128, device=device_type)
+        c = torch.randn(128, device=device_type)
 
         # Run with hash logging to verify triton kernels can be hashed
         with DebugMode() as dm_t1, DebugMode.log_tensor_hashes(hash_inputs=True):
@@ -1139,7 +1242,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
     def test_check_structure_mismatches(self):
-        x = torch.randn(32, 32, device=self.device_type)
+        x = torch.randn(32, 32, device=device_type)
 
         with DebugMode() as dm1, DebugMode.log_tensor_hashes():
             x.sin()
@@ -1155,7 +1258,7 @@ class TestDTensorDebugMode(TestCase):
             DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
 
     def test_pretty_print_dtensor_make_fx(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         A = torch.randn(8, 32)
         B = torch.randn(32, 32)
@@ -1314,16 +1417,16 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._spawn_processes()
 
     def _init_process_group(self):
-        """Initialize NCCL process group for each spawned process."""
-        torch.cuda.set_device(self.rank)
+        """Initialize the accelerator process group for each spawned process."""
+        torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            dist.get_default_backend_for_device(device_type),
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        self.device = f"cuda:{self.rank}"
+        self.device = f"{device_type}:{self.rank}"
 
     def _destroy_process_group(self):
         """Destroy the process group."""
@@ -1336,7 +1439,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         except OSError:
             pass
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_allgather_base(self):
         self._init_process_group()
@@ -1362,7 +1465,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         self._destroy_process_group()
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_allgather_base_async_op(self):
         """Test all_gather_into_tensor with async_op=True."""
@@ -1397,7 +1500,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         self._destroy_process_group()
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_allgather_functional_with_async_collective_tensor(self):
         self._init_process_group()

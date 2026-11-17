@@ -16,7 +16,7 @@ class TestCustomBackend(TestCase):
         torch.ops.load_library(self.library_path)
         # Create an instance of the test Module and lower it for
         # the custom backend.
-        self.model = to_custom_backend(torch.jit.script(Model()))
+        self.model = to_custom_backend(torch.jit._script.script(Model()))
 
     def test_execute(self):
         """
@@ -42,8 +42,8 @@ class TestCustomBackend(TestCase):
         # Save and load.
         with tempfile.NamedTemporaryFile() as f:
             f.close()
-            torch.jit.save(self.model, f.name)
-            loaded = torch.jit.load(f.name)
+            torch.jit._serialization.save(self.model, f.name)
+            loaded = torch.jit._serialization.load(f.name)
             self.model = loaded
 
         # Test execution again.

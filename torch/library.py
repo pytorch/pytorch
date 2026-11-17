@@ -241,6 +241,7 @@ class Library:
 
         f = sys._getframe(1)
         filename, lineno = f.f_code.co_filename, f.f_lineno
+        self._site = f"{filename}:{lineno}"
         self.m: Any | None = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno
         )
@@ -746,9 +747,11 @@ def define(qualname, schema, *, lib=None, tags=()):
             f"to be instance of str, got {type(qualname)}"
         )
     namespace, name = torch._library.utils.parse_namespace(qualname)
+    caller = None
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
+        caller = (torch._library.utils.caller_module(), lib._site)
     if not NAMELESS_SCHEMA.fullmatch(schema):
         raise ValueError(
             f"define(qualname, schema, ...): expected schema "
@@ -756,6 +759,8 @@ def define(qualname, schema, *, lib=None, tags=()):
             f'got "{schema}"'
         )
     lib.define(name + schema, alias_analysis="", tags=tags)
+    if caller is not None:
+        torch._library.utils.REGISTRATION_CALLERS[qualname, ""] = caller
 
 
 @define.register
@@ -952,6 +957,10 @@ def _impl(
         else:
             for key in keys:
                 use_lib.impl(qualname, func, key)
+        if lib is None:
+            caller = (torch._library.utils.caller_module(), use_lib._site)
+            for key in keys:
+                torch._library.utils.REGISTRATION_CALLERS[qualname, key] = caller
 
     if func is None:
         return register_
@@ -1342,6 +1351,17 @@ def register_autograd(
     The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
     :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
     same as :meth:`torch.autograd.Function.backward`.
+
+    .. warning::
+        The strides of the gradients passed to ``backward_fn`` are undefined:
+        they may not match the strides of the corresponding forward outputs
+        (for example, the backward of :func:`torch.cat` produces gradients
+        that are non-contiguous views into a larger tensor). If
+        ``backward_fn`` calls a kernel that assumes a particular memory
+        layout (such as a raw Triton or CUDA kernel), it must call
+        :meth:`~torch.Tensor.contiguous` on the gradients or handle their
+        strides explicitly. Backward formulas composed of PyTorch operations
+        handle arbitrary strides automatically.
 
     ``setup_context(ctx, inputs, output)`` runs during the forward pass.
     Please save quantities needed for backward onto the ``ctx`` object via

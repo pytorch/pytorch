@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 
 from collections.abc import Callable, Sequence
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Any, Literal, overload, TypeAlias
 
 from torch import Tensor
@@ -603,6 +603,7 @@ def mse_loss(
     size_average: bool | None = ...,
     reduce: bool | None = ...,
     reduction: str = ...,
+    weight: Tensor | None = ...,
 ) -> Tensor: ...
 
 __all__ += ["mse_loss"]
@@ -686,7 +687,7 @@ __all__ += ["nll_loss"]
 def normalize(
     input: Tensor,
     p: float = ...,
-    dim: int = ...,
+    dim: int | _size = ...,
     eps: float = ...,
     out: Tensor | None = ...,
 ) -> Tensor: ...
@@ -705,6 +706,32 @@ def poisson_nll_loss(
 ) -> Tensor: ...
 
 __all__ += ["poisson_nll_loss"]
+
+def quantize_tensor(
+    input: Tensor,
+    *,
+    dim: tuple[int, int],
+    scaling_type: ScalingType,
+    qdata_dtype: _dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["quantize_tensor"]
+
+def quantize_tensor_dual(
+    input: Tensor,
+    *,
+    dim: tuple[int, int],
+    scaling_type: ScalingType,
+    qdata_dtype: _dtype,
+    scaling_algorithm: ScalingAlgorithm,
+    swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]: ...
+
+__all__ += ["quantize_tensor_dual"]
 
 def relu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
@@ -750,6 +777,44 @@ def scaled_mm(
 
 __all__ += ["scaled_mm"]
 
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor: ...
+
+__all__ += ["scaled_addmm"]
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor: ...
+
+__all__ += ["scaled_addmm_"]
+
 def grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -764,6 +829,8 @@ __all__ += ["grouped_mm"]
 class SwizzleType(Enum):
     NO_SWIZZLE = 0
     SWIZZLE_32_4_4 = 1
+    SWIZZLE_32_8 = 2
+    SWIZZLE_MN_K4 = 3
 
 __all__ += ["SwizzleType"]
 
@@ -776,6 +843,11 @@ class ScalingType(Enum):
     BlockWise128x128 = 5
 
 __all__ += ["ScalingType"]
+
+class ScalingAlgorithm(IntEnum):
+    MXFP_E8M0_RU = 0
+
+__all__ += ["ScalingAlgorithm"]
 
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
