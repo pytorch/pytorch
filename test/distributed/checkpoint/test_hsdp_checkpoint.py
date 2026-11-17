@@ -92,9 +92,9 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = init_device_mesh(self._device_type, (2, self.world_size // 2))
         model = FSDP(
-            simple_model().to(self.device_type),
+            simple_model().to(self._device_type),
             sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             device_mesh=mesh_2d,
         )
@@ -151,9 +151,9 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
         # save the hsdp model state_dict
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = init_device_mesh(self._device_type, (2, self.world_size // 2))
         hsdp_model = FSDP(
-            simple_model().to(self.device_type),
+            simple_model().to(self._device_type),
             sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             device_mesh=mesh_2d,
         )
@@ -169,9 +169,9 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
         )
 
         # initialize a fsdp model to load checkpoint into
-        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
+        mesh_1d = init_device_mesh(self._device_type, (self.world_size,))
         fsdp_model = FSDP(
-            simple_model().to(self.device_type),
+            simple_model().to(self._device_type),
             device_mesh=mesh_1d,
         )
         FSDP.set_state_dict_type(

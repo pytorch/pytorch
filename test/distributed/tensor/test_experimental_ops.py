@@ -30,8 +30,8 @@ class DistOtherOpsTest(DTensorContinuousTestBase):
         grad_output_list = torch.rand(ITER_TIME, 1024, 5) * 1e-3
 
         for i in range(ITER_TIME):
-            inp = input_list[i].to(self.device_type).requires_grad_()
-            grad_output = grad_output_list[i].to(self.device_type)
+            inp = input_list[i].to(self._device_type).requires_grad_()
+            grad_output = grad_output_list[i].to(self._device_type)
 
             # droppath  with dtensor
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
@@ -82,8 +82,8 @@ class DistOtherOpsTest(DTensorContinuousTestBase):
         grad_output_list = torch.rand(ITER_TIME, 1024, 10) * 1e-3
 
         for i in range(ITER_TIME):
-            inp = input_list[i].to(self.device_type).requires_grad_()
-            grad_output = grad_output_list[i].to(self.device_type)
+            inp = input_list[i].to(self._device_type).requires_grad_()
+            grad_output = grad_output_list[i].to(self._device_type)
 
             # bernoulli  with dtensor
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
@@ -146,8 +146,8 @@ class DistOtherOpsTest(DTensorContinuousTestBase):
         criterion = torch.nn.CrossEntropyLoss()
 
         for i in range(ITER_TIME):
-            pred = pred_list[i].to(self.device_type).requires_grad_()
-            target = target_list[i].to(self.device_type)
+            pred = pred_list[i].to(self._device_type).requires_grad_()
+            target = target_list[i].to(self._device_type)
 
             # nll with dtensor
             pred_dtensor = distribute_tensor(pred, device_mesh, shard_spec)

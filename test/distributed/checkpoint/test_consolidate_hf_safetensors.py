@@ -36,7 +36,7 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
     def _create_d_tensors(self) -> None:
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
         mesh_shape = (self.world_size,)
-        mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+        mesh_1d = init_device_mesh(self._device_type, mesh_shape)
 
         # Create local tensor with row-wise sharding
         rows_per_rank = global_tensor.shape[0] // self.world_size

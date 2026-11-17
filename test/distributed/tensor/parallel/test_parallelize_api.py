@@ -74,7 +74,7 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
         local_optim = torch.optim.SGD(local_module.parameters(), lr=LR)
         dist_optim = torch.optim.SGD(dist_module.parameters(), lr=LR)
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
         self._compare_params(local_module, dist_module, rank0_only)
 
         # check forward correctness
@@ -108,11 +108,11 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_parallelize_mlp_with_module_api(self):
         inp_size = [12, 10]
-        model = MLPModule(self.device_type)
+        model = MLPModule(self._device_type)
         model_tp = deepcopy(model)
 
         # Parallelize module.
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
         model_tp = parallelize_module(
             model_tp,
             device_mesh,
@@ -127,12 +127,12 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     def test_parallelize_mlp_with_module_api_nested(self):
         inp_size = [12, 10]
         model = torch.nn.Sequential(
-            OrderedDict([("dummy_encoder", MLPModule(self.device_type))])
+            OrderedDict([("dummy_encoder", MLPModule(self._device_type))])
         )
         model_tp = deepcopy(model)
 
         # Parallelize module.
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
         model_tp = parallelize_module(
             model_tp,
             device_mesh,
@@ -150,11 +150,11 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
         rowwise = RowwiseParallel()
 
         torch.manual_seed(5)
-        model = torch.nn.Linear(16, 10, device=self.device_type)
+        model = torch.nn.Linear(16, 10, device=self._device_type)
         model_tp = deepcopy(model)
 
         # parallelize model_tp
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         model_tp = parallelize_module(model_tp, device_mesh, rowwise)
 
         # let each rank generate unique local input
@@ -168,11 +168,11 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
         colwise = ColwiseParallel(output_layouts=Replicate())
 
         torch.manual_seed(5)
-        model = torch.nn.Linear(10, 16, device=self.device_type)
+        model = torch.nn.Linear(10, 16, device=self._device_type)
         model_tp = deepcopy(model)
 
         # parallelize model_tp
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         model_tp = parallelize_module(model_tp, device_mesh, colwise)
 
         self._compare_module(model, model_tp, inp_size)
@@ -180,7 +180,7 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_prepare_module_input(self):
         module = DummyModule()
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         parallelize_module(
             module,
             device_mesh,
@@ -188,14 +188,14 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
                 input_layouts=Shard(0), desired_input_layouts=Replicate()
             ),
         )
-        inp = torch.rand(5, 7, device=self.device_type)
+        inp = torch.rand(5, 7, device=self._device_type)
         output = module(inp).redistribute(device_mesh, [Shard(0)]).to_local()
         self.assertEqual(inp, output)
 
     @with_comms
     def test_prepare_module_output(self):
         module = DummyModule()
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         parallelize_module(
             module,
             device_mesh,
@@ -204,7 +204,7 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
             ),
         )
         torch.manual_seed(15)
-        inp = torch.rand(16, 7, device=self.device_type)
+        inp = torch.rand(16, 7, device=self._device_type)
         dtensor = DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False)
         output = module(dtensor)
         inp = dtensor.redistribute(device_mesh, [Shard(0)]).to_local()
@@ -213,7 +213,7 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_prepare_module_input_output(self):
         module = DummyModule()
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         parallelize_module(
             module,
             device_mesh,
@@ -224,7 +224,7 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
                 desired_output_layouts=Shard(1),
             ),
         )
-        inp = torch.rand(5, 7, device=self.device_type)
+        inp = torch.rand(5, 7, device=self._device_type)
         output = module(inp)
         inp = (
             DTensor.from_local(inp, device_mesh, [Shard(0)], run_check=False)
@@ -236,8 +236,8 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_parallelize_module_with_star(self):
         inp_size = [12, 10]
-        model = MLPModule(self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model = MLPModule(self._device_type)
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         model_tp = deepcopy(model)
         model_tp = parallelize_module(
@@ -253,8 +253,8 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     def test_parallelize_module_src_data_rank(self):
         # set seed different for each rank
         torch.manual_seed(self.rank)
-        model = MLPModule(self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model = MLPModule(self._device_type)
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         comm_mode = CommDebugMode()
 
@@ -294,8 +294,8 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_parallelize_module_with_question(self):
         inp_size = [12, 10]
-        model = MLPModule(self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model = MLPModule(self._device_type)
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         model_tp = deepcopy(model)
         model_tp = parallelize_module(
@@ -310,8 +310,8 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_parallelize_module_with_digit(self):
         inp_size = [12, 10]
-        model = MLPModule(self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model = MLPModule(self._device_type)
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         model_tp = deepcopy(model)
         model_tp = parallelize_module(
@@ -326,8 +326,8 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_parallelize_module_multi_wildcard(self):
         inp_size = [12, 10]
-        model = MLPStacked(self.device_type, n_layers=2)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model = MLPStacked(self._device_type, n_layers=2)
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         model_tp = deepcopy(model)
         model_tp = parallelize_module(
@@ -343,8 +343,8 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_parallelize_module_with_root_module(self):
         inp_size = [16, 10]
-        model = MLPModule(self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model = MLPModule(self._device_type)
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         model_tp = deepcopy(model)
         model_tp = parallelize_module(
@@ -366,8 +366,8 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_parallelize_module_with_no_match(self):
         inp_size = [16, 10]
-        model = MLPModule(self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model = MLPModule(self._device_type)
+        device_mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         model_tp = deepcopy(model)
         with self.assertWarns(UserWarning):
@@ -390,11 +390,11 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
         colwise = ColwiseParallel(output_layouts=Replicate())
 
         torch.manual_seed(5)
-        model = torch.nn.Linear(10, 16, device=self.device_type)
+        model = torch.nn.Linear(10, 16, device=self._device_type)
         model_tp = deepcopy(model)
 
         # Call parallelize_module under DeviceMesh context.
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         with device_mesh:
             model_tp = parallelize_module(model_tp, parallelize_plan=colwise)
 
@@ -403,11 +403,11 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
     @with_comms
     def test_empty_plan(self):
         torch.manual_seed(5)
-        model = torch.nn.Linear(10, 16, device=self.device_type)
+        model = torch.nn.Linear(10, 16, device=self._device_type)
 
         # Call parallelize_module with empty plan.
         # Goal is not to crash.
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         with self.assertWarns(UserWarning):
             parallelize_module(model, device_mesh)
 

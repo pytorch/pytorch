@@ -191,7 +191,7 @@ class _DTensorBoolReductionTestBase(DTensorContinuousTestBase):
 
     @classmethod
     def backend_str(cls):
-        return dist.get_default_backend_for_device(cls.device_type)
+        return dist.get_default_backend_for_device(cls._device_type.fget(cls))
 
     def _get_mesh(self, device):
         cls = type(self)
@@ -564,7 +564,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         # Tensor with NaN values sharded across the reduction dim
         tensor = torch.tensor(
             [[1.0, float("nan"), 3.0], [float("nan"), 5.0, 6.0]],
-            device=self.device_type,
+            device=self._device_type,
         )
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
 
@@ -586,7 +586,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @with_comms
     def test_prims_amax_amin(self):
         device_mesh = self.build_device_mesh()
-        tensor = torch.randn(12, 8, 8, device=self.device_type)
+        tensor = torch.randn(12, 8, 8, device=self._device_type)
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
 
         for op in (torch.ops.prims.amax.default, torch.ops.prims.amin.default):
@@ -616,7 +616,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_softmax_fwd(self):
         device_mesh = self.build_device_mesh()
 
-        x = torch.rand(8, 12, 16, device=self.device_type)
+        x = torch.rand(8, 12, 16, device=self._device_type)
         dims = range(3)  # used to convert -1 to the actual dim
         softmax_dims = [-1, 0, 1, 2]
         shard_dims = [-1, 0, 1, 2]
@@ -653,7 +653,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
         for params in test_list:
             softmax_dim, shard_dim = params
-            x = torch.rand(8, 12, 16, device=self.device_type, requires_grad=True)
+            x = torch.rand(8, 12, 16, device=self._device_type, requires_grad=True)
             self.assertTrue(x.requires_grad)
             local_y = torch.nn.functional.softmax(
                 x, dim=softmax_dim, dtype=torch.float32
@@ -696,8 +696,8 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             (3, (8, channel_size, 12), (8, 12)),  # calling aten.nll_loss2d_forward
         ]
         for input_ndim, input_size, target_size in test_setup:
-            x = torch.rand(*input_size, device=self.device_type, requires_grad=True)
-            target = torch.randint(channel_size, target_size, device=self.device_type)
+            x = torch.rand(*input_size, device=self._device_type, requires_grad=True)
+            target = torch.randint(channel_size, target_size, device=self._device_type)
             dist_target = distribute_tensor(target, device_mesh, [Replicate()])
 
             shard_dims = list(range(input_ndim))
@@ -763,8 +763,8 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         device_mesh = self.build_device_mesh()
         samples_per_rank = 2
         batch = self.world_size * samples_per_rank
-        x = torch.zeros(batch, 2, device=self.device_type)
-        target = torch.empty(batch, device=self.device_type, dtype=torch.long)
+        x = torch.zeros(batch, 2, device=self._device_type)
+        target = torch.empty(batch, device=self._device_type, dtype=torch.long)
 
         for rank in range(self.world_size):
             start = rank * samples_per_rank
@@ -773,7 +773,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             target[start : start + samples_per_rank] = cls
             x[start : start + samples_per_rank, cls] = -loss
 
-        weight = torch.tensor([1.0, 10.0], device=self.device_type)
+        weight = torch.tensor([1.0, 10.0], device=self._device_type)
         dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
         dist_target = distribute_tensor(target, device_mesh, [Replicate()])
         dist_weight = distribute_tensor(weight, device_mesh, [Replicate()])
@@ -797,7 +797,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_shard_math_ops(self):
         mesh_shape = (2, self.world_size // 2)
         mesh = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(self.world_size).reshape(*mesh_shape),
         )
         global_tensor = torch.ones(4, 4)
@@ -824,14 +824,14 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         # NLP example from pytorch docs
         # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
         batch, sentence_length, embedding_dim = 20, 5, 10
-        x = torch.rand(batch, sentence_length, embedding_dim, device=self.device_type)
+        x = torch.rand(batch, sentence_length, embedding_dim, device=self._device_type)
         norm_shape_idx_list = list(range(x.ndim))
         shard_dims = [-1, 0, 1, 2]
         elementwise_affine_list = [False, True]
 
         # Test RMSNorm as well if running on an accelerator
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
+        if self._device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
@@ -846,9 +846,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             layer_norm = norm_type(
                 normalized_shape,
                 elementwise_affine=elementwise_affine,
-                device=self.device_type,
+                device=self._device_type,
             )
-            layer_norm_local = copy.deepcopy(layer_norm).to(self.device_type)
+            layer_norm_local = copy.deepcopy(layer_norm).to(self._device_type)
 
             def _replicate_fn(name, module, device_mesh):
                 for name, param in module.named_parameters():
@@ -899,7 +899,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
         # Test both LayerNorm and RMSNorm (if on an accelerator)
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
+        if self._device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
@@ -914,16 +914,16 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                 batch,
                 sentence_length,
                 embedding_dim,
-                device=self.device_type,
+                device=self._device_type,
                 requires_grad=True,
             )
             normalized_shape = x.shape[norm_idx:]
             layer_norm = norm_type(
                 normalized_shape,
                 elementwise_affine=elementwise_affine,
-                device=self.device_type,
+                device=self._device_type,
             )
-            layer_norm_local = copy.deepcopy(layer_norm).to(self.device_type)
+            layer_norm_local = copy.deepcopy(layer_norm).to(self._device_type)
 
             def _replicate_fn(name, module, device_mesh):
                 for name, param in module.named_parameters():
@@ -1015,7 +1015,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
         # Test both LayerNorm and RMSNorm (if on an accelerator)
         norm_types = [torch.nn.LayerNorm]
-        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
+        if self._device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
             norm_types.append(torch.nn.RMSNorm)
 
         # build our subtest configurations and filter out invalid ones
@@ -1089,7 +1089,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                 }
 
                 model = LnTpBlock()
-                model_local = copy.deepcopy(model).to(device=self.device_type)
+                model_local = copy.deepcopy(model).to(device=self._device_type)
                 model_dist = parallelize_module(model, device_mesh, parallel_plan)
                 req_grad_map = {
                     "preln_embeddings": emb_req_grad,
@@ -1113,7 +1113,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                                 )
 
                 # forward step for both local and distributed models
-                x = torch.randint(vocab_size, (batch, seq_len), device=self.device_type)
+                x = torch.randint(
+                    vocab_size, (batch, seq_len), device=self._device_type
+                )
                 x_local = x.detach().clone()
                 output_local = model_local(x_local)
 
@@ -1214,7 +1216,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         shard_dims = [0, 1, 2]
         for topk_dim, shard_dim in itertools.product(topk_dims, shard_dims):
             # Reference: plain (non-distributed) backward
-            x = torch.randn(12, 8, 8, device=self.device_type, requires_grad=True)
+            x = torch.randn(12, 8, 8, device=self._device_type, requires_grad=True)
             ref_topk = x.topk(3, dim=topk_dim)
             ref_topk.values.sum().backward()
 
@@ -1243,7 +1245,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_shard0_svd(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(42)
-        replicated_x = torch.randn((8, 8), device=self.device_type)
+        replicated_x = torch.randn((8, 8), device=self._device_type)
         sharded_x = distribute_tensor(replicated_x, device_mesh, (Shard(0),))
         with CommDebugMode() as comm_mode:
             U, S, V = torch.linalg.svd(sharded_x, full_matrices=False)
@@ -1366,8 +1368,8 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
         torch.manual_seed(42)
         tensors = [
-            torch.randn(12, 8, device=self.device_type),
-            torch.randn(8, 8, device=self.device_type),
+            torch.randn(12, 8, device=self._device_type),
+            torch.randn(8, 8, device=self._device_type),
         ]
         sharded_tensors = [
             distribute_tensor(tensor, device_mesh, [Shard(0)]) for tensor in tensors
@@ -1509,7 +1511,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_foreach_norm_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
-            self.device_type, mesh_shape, mesh_dim_names=("x", "y")
+            self._device_type, mesh_shape, mesh_dim_names=("x", "y")
         )
 
         mesh_x = mesh_2d["x"]
@@ -1535,7 +1537,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_norm_0_on_psum(self):
         # L0 norm on P(sum) should not propagate -> P(sum), should replicate
         device_mesh = self.build_device_mesh()
-        t = torch.tensor([0, 1, 0, 3, 0, 5], device=self.device_type).float()
+        t = torch.tensor([0, 1, 0, 3, 0, 5], device=self._device_type).float()
         dt = distribute_tensor(t, device_mesh, [Partial()])
         out = torch.ops.aten.linalg_vector_norm(dt, 0)
         self.assertEqual(out.full_tensor().item(), 3.0)
@@ -1545,7 +1547,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_max_min_dim_sharded(self):
         """max.dim/min.dim on sharded tensors produce correct values and indices."""
         device_mesh = self.build_device_mesh()
-        t = torch.randn(128, 64, device=self.device_type)
+        t = torch.randn(128, 64, device=self._device_type)
 
         for op in [torch.max, torch.min]:
             expected_vals, expected_idx = op(t, dim=1)
@@ -1573,7 +1575,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
-            self.device_type, mesh_shape, mesh_dim_names=("x", "y")
+            self._device_type, mesh_shape, mesh_dim_names=("x", "y")
         )
 
         mesh_x = mesh_2d["x"]
@@ -1660,7 +1662,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_cumsum(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.rand(3, 5, device=self._device_type)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1688,7 +1690,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_scan_ops(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.rand(3, 5, device=self._device_type)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1723,7 +1725,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                         dim=dim,
                         has_zero=has_zero,
                     ):
-                        x = torch.rand(12, 8, device=self.device_type).add_(0.1)
+                        x = torch.rand(12, 8, device=self._device_type).add_(0.1)
                         if has_zero:
                             x.select(dim, x.size(dim) // 2).zero_()
                         x.requires_grad_()
@@ -1745,7 +1747,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_cumprod_backward_higher_order(self):
         device_mesh = self.build_device_mesh()
         dim = 0
-        x = torch.rand(4, 3, device=self.device_type).add_(0.1)
+        x = torch.rand(4, 3, device=self._device_type).add_(0.1)
         x.select(dim, x.size(dim) // 2).zero_()
         x.requires_grad_()
 
@@ -1769,8 +1771,8 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @with_comms
     def test_masked_cumprod_backward(self):
         device_mesh = self.build_device_mesh()
-        row_idx = torch.arange(12, device=self.device_type).unsqueeze(1)
-        col_idx = torch.arange(8, device=self.device_type).unsqueeze(0)
+        row_idx = torch.arange(12, device=self._device_type).unsqueeze(1)
+        col_idx = torch.arange(8, device=self._device_type).unsqueeze(0)
         mask = (row_idx + col_idx) % 2 == 0
 
         for placements, dim in itertools.product(
@@ -1778,7 +1780,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             [0, 1],
         ):
             with self.subTest(placements=placements, dim=dim):
-                x = torch.rand(12, 8, device=self.device_type).add_(0.1)
+                x = torch.rand(12, 8, device=self._device_type).add_(0.1)
                 x.requires_grad_()
                 ref_out = torch.masked.cumprod(x, mask=mask, dim=dim)
                 ref_out.sum().backward()
@@ -1799,7 +1801,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_scan_ops_with_indices(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(12, 8, device=self.device_type)
+        inp = torch.rand(12, 8, device=self._device_type)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -1827,7 +1829,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         ):
             for dim in [0, 1]:
                 with self.subTest(op=op.__name__, placements=placements, dim=dim):
-                    x = torch.randn(12, 8, device=self.device_type, requires_grad=True)
+                    x = torch.randn(12, 8, device=self._device_type, requires_grad=True)
                     ref_values, ref_indices = op(x, dim=dim)
                     ref_values.sum().backward()
 
@@ -1846,7 +1848,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @with_comms
     def test_median(self):
         device_mesh = self.build_device_mesh()
-        tensor = torch.randn(12, 8, device=self.device_type)
+        tensor = torch.randn(12, 8, device=self._device_type)
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
 
         # Global median
@@ -1860,7 +1862,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @with_comms
     def test_dim_reductions_with_indices(self):
         device_mesh = self.build_device_mesh()
-        tensor = torch.randn(12, 8, device=self.device_type)
+        tensor = torch.randn(12, 8, device=self._device_type)
         shard_dim = 0
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
 
@@ -1903,7 +1905,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         comm_mode = CommDebugMode()
 
         freqs_cis = torch.randn(
-            1, 1, dtype=torch.complex64, requires_grad=False, device=self.device_type
+            1, 1, dtype=torch.complex64, requires_grad=False, device=self._device_type
         )
         freqs_cis_dt = distribute_tensor(
             freqs_cis, device_mesh=mesh, placements=[Replicate()]
@@ -1926,9 +1928,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             xq_out = torch.view_as_real(xq_ * freqs_cis)
             return xq_out
 
-        xq = torch.randn(1, 1, 2, requires_grad=True, device=self.device_type)
+        xq = torch.randn(1, 1, 2, requires_grad=True, device=self._device_type)
         freqs_cis = torch.randn(
-            1, 1, dtype=torch.complex64, requires_grad=False, device=self.device_type
+            1, 1, dtype=torch.complex64, requires_grad=False, device=self._device_type
         )
 
         xq_dt = distribute_tensor(xq, device_mesh=mesh, placements=[Replicate()])
@@ -1989,7 +1991,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     def test_logsumexp(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
-        inp = torch.rand(3, 5, device=self.device_type)
+        inp = torch.rand(3, 5, device=self._device_type)
 
         shard_dim = 0
         input_dtensor = distribute_tensor(
@@ -2019,7 +2021,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         rank = dist.get_rank()
 
         torch.manual_seed(rank)
-        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self._device_type)
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("sum")]
         )
@@ -2032,7 +2034,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
         )
 
-        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self._device_type)
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("sum")]
         )
@@ -2045,7 +2047,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
         )
 
-        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self._device_type)
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("sum")]
         )
@@ -2064,7 +2066,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         rank = dist.get_rank()
 
         torch.manual_seed(rank)
-        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self._device_type)
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("max")]
         )
@@ -2082,7 +2084,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(4)
     @with_comms
     def test_std(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+        mesh = DeviceMesh(self._device_type, torch.arange(4).reshape(2, 2))
         rank = self.rank
         comm_mode = CommDebugMode()
 
@@ -2191,7 +2193,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         device_mesh = self.build_device_mesh()
 
         # Single-output pooling
-        inp_4d = torch.randn(8, 3, 16, 16, device=self.device_type)
+        inp_4d = torch.randn(8, 3, 16, 16, device=self._device_type)
         dt_4d = distribute_tensor(inp_4d, device_mesh, [Shard(0)])
 
         for op, args in [
@@ -2217,7 +2219,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             self.assertTrue(dt_val.placements[0].is_shard(0))
 
         # 3D pooling
-        inp_5d = torch.randn(8, 3, 8, 8, 8, device=self.device_type)
+        inp_5d = torch.randn(8, 3, 8, 8, 8, device=self._device_type)
         dt_5d = distribute_tensor(inp_5d, device_mesh, [Shard(0)])
 
         expected = torch.nn.functional.avg_pool3d(inp_5d, 3)
@@ -2235,7 +2237,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         # Spatial size 9 keeps pooling windows misaligned with shard boundaries,
         # so wrongly sharding a spatial dim gives wrong results or errors.
         shape = (12,) * (2 if batched else 1) + (9,) * spatial_rank
-        x = torch.randn(*shape, device=self.device_type, requires_grad=True)
+        x = torch.randn(*shape, device=self._device_type, requires_grad=True)
         dt_x = distribute_tensor(x.detach(), device_mesh, [Shard(shard_dim)])
         dt_x.requires_grad_()
 
@@ -2261,14 +2263,14 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         spatial_rank, index_fn, fn, linear = POOL_BACKWARD_PARTIAL_FNS[op_name]
         device_mesh = self.build_device_mesh()
         size = 16 if spatial_rank == 2 else 8
-        x = torch.randn(12, 12, *(size,) * spatial_rank, device=self.device_type)
+        x = torch.randn(12, 12, *(size,) * spatial_rank, device=self._device_type)
         idx = index_fn(x)
         # Positions that share an index get the same value, so the reference
         # does not depend on which duplicate max_unpool happens to keep.
-        values = torch.randn(12, 12, size**spatial_rank, device=self.device_type)
+        values = torch.randn(12, 12, size**spatial_rank, device=self._device_type)
         g = values.gather(2, idx.flatten(2)).view_as(idx)
         # Every rank holds a different share; the shares reduce back to g.
-        shares = torch.randn(self.world_size, *g.shape, device=self.device_type)
+        shares = torch.randn(self.world_size, *g.shape, device=self._device_type)
         total = g if reduce_op == "sum" else g * self.world_size
         shares[-1] = total - shares[:-1].sum(0)
         local_g = map_local_for_rank(self.rank, lambda rank: shares[rank])
@@ -2311,8 +2313,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         expected_backward_allreduce = {"sum": 0, "none": 0, "mean": 0}
 
         for reduction, expected_allreduce_count in expected_backward_allreduce.items():
-            x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
-            target = torch.randint(channel_size, (8,), device=self.device_type)
+            x = torch.rand(
+                8, channel_size, device=self._device_type, requires_grad=True
+            )
+            target = torch.randint(channel_size, (8,), device=self._device_type)
 
             dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
             dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
@@ -2349,11 +2353,11 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_linalg_ops(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
 
         # Batched positive-definite matrix for ops that require it (cholesky, inv)
-        A = torch.randn(8, 4, 4, device=self.device_type)
-        spd = A @ A.mT + 4 * torch.eye(4, device=self.device_type)
+        A = torch.randn(8, 4, 4, device=self._device_type)
+        spd = A @ A.mT + 4 * torch.eye(4, device=self._device_type)
         dt_spd = distribute_tensor(spd, device_mesh, [Shard(0)])
 
         # cholesky
@@ -2369,7 +2373,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertTrue(result.placements[0].is_shard(0))
 
         # lu_factor
-        B = torch.randn(8, 4, 4, device=self.device_type)
+        B = torch.randn(8, 4, 4, device=self._device_type)
         dt_B = distribute_tensor(B, device_mesh, [Shard(0)])
         exp_LU, exp_piv = torch.linalg.lu_factor(B)
         res_LU, res_piv = torch.linalg.lu_factor(dt_B)
@@ -2383,7 +2387,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertTrue(result_vals.placements[0].is_shard(0))
 
         # solve
-        rhs = torch.randn(8, 4, 2, device=self.device_type)
+        rhs = torch.randn(8, 4, 2, device=self._device_type)
         dt_rhs = distribute_tensor(rhs, device_mesh, [Shard(0)])
         expected = torch.linalg.solve(spd, rhs)
         result = torch.linalg.solve(dt_spd, dt_rhs)
@@ -2393,9 +2397,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_linalg_cross(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        a = torch.randn(8, 4, 3, device=self.device_type)
-        b = torch.randn(8, 4, 3, device=self.device_type)
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
+        a = torch.randn(8, 4, 3, device=self._device_type)
+        b = torch.randn(8, 4, 3, device=self._device_type)
 
         # Shard on batch dim (dim=0), cross on default dim=-1
         dt_a = distribute_tensor(a, device_mesh, [Shard(0)])
@@ -2415,10 +2419,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_linalg_solve_partial(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        A = torch.randn(4, 4, device=self.device_type, dtype=torch.float64)
-        A = A @ A.mT + 4 * torch.eye(4, device=self.device_type, dtype=torch.float64)
-        B = torch.randn(4, 2, device=self.device_type, dtype=torch.float64)
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
+        A = torch.randn(4, 4, device=self._device_type, dtype=torch.float64)
+        A = A @ A.mT + 4 * torch.eye(4, device=self._device_type, dtype=torch.float64)
+        B = torch.randn(4, 2, device=self._device_type, dtype=torch.float64)
 
         dt_A = distribute_tensor(A, device_mesh, [Replicate()])
         dt_B = distribute_tensor(B, device_mesh, [Partial()])
@@ -2458,7 +2462,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         ]
 
         # lanczos is CPU-only; this branch is exercised when running without GPUs
-        if self.device_type == "cpu":
+        if self._device_type == "cpu":
             test_configs.append(
                 ((8, 4, 8, 8), dict(size=(16, 16), mode="lanczos", antialias=True)),
             )
@@ -2470,7 +2474,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                 with self.subTest(shape=shape, placements=placements, **kwargs):
                     # Reference: plain tensor forward + backward
                     inp_ref = torch.randn(
-                        shape, device=self.device_type, requires_grad=True
+                        shape, device=self._device_type, requires_grad=True
                     )
                     out_ref = F.interpolate(inp_ref, **kwargs)
                     out_ref.sum().backward()
@@ -2493,7 +2497,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                     self.assertEqual(dt_inp.grad.full_tensor(), inp_ref.grad)
 
         # Forward-only tests for pooling ops (backward uses different ops)
-        inp = torch.randn(8, 3, 16, 16, device=self.device_type)
+        inp = torch.randn(8, 3, 16, 16, device=self._device_type)
         dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
 
         # F.interpolate with area mode
@@ -2514,11 +2518,11 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         F = torch.nn.functional
 
         N, C, H, W = 8, 6, 4, 4
-        inp = torch.randn(N, C, H, W, device=self.device_type)
-        weight = torch.randn(C, device=self.device_type)
-        bias = torch.randn(C, device=self.device_type)
-        running_mean = torch.zeros(C, device=self.device_type)
-        running_var = torch.ones(C, device=self.device_type)
+        inp = torch.randn(N, C, H, W, device=self._device_type)
+        weight = torch.randn(C, device=self._device_type)
+        bias = torch.randn(C, device=self._device_type)
+        running_mean = torch.zeros(C, device=self._device_type)
+        running_var = torch.ones(C, device=self._device_type)
 
         replicate = [Replicate()]
         dt_inp = distribute_tensor(inp, device_mesh, [Shard(0)])
@@ -2538,9 +2542,9 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         # batch_norm with channel-dim sharding — forward + backward
         # Use C divisible by world_size for even channel sharding across ranks
         C_s = self.world_size * 2
-        inp_s = torch.randn(N, C_s, H, W, device=self.device_type)
-        weight_s = torch.randn(C_s, device=self.device_type)
-        bias_s = torch.randn(C_s, device=self.device_type)
+        inp_s = torch.randn(N, C_s, H, W, device=self._device_type)
+        weight_s = torch.randn(C_s, device=self._device_type)
+        bias_s = torch.randn(C_s, device=self._device_type)
 
         ref_inp = inp_s.clone().detach().requires_grad_(True)
         ref_w = weight_s.clone().detach().requires_grad_(True)
@@ -2555,16 +2559,16 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             bias_s.clone().detach().requires_grad_(True), device_mesh, [Shard(0)]
         )
         dt_rmean = distribute_tensor(
-            torch.zeros(C_s, device=self.device_type), device_mesh, [Shard(0)]
+            torch.zeros(C_s, device=self._device_type), device_mesh, [Shard(0)]
         )
         dt_rvar = distribute_tensor(
-            torch.ones(C_s, device=self.device_type), device_mesh, [Shard(0)]
+            torch.ones(C_s, device=self._device_type), device_mesh, [Shard(0)]
         )
 
         expected_out = F.batch_norm(
             ref_inp,
-            torch.zeros(C_s, device=self.device_type),
-            torch.ones(C_s, device=self.device_type),
+            torch.zeros(C_s, device=self._device_type),
+            torch.ones(C_s, device=self._device_type),
             ref_w,
             ref_b,
             training=True,
@@ -2609,7 +2613,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
         # Batch-sharded GroupNorm backward, including bias-only affine parameters.
         batch = self.world_size * 2
-        group_input = torch.randn(batch, C, H, W, device=self.device_type)
+        group_input = torch.randn(batch, C, H, W, device=self._device_type)
         for use_weight, use_bias in [
             (True, True),
             (False, False),

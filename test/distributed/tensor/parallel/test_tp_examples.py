@@ -86,8 +86,8 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         # Ensure all tp ranks have same input.
         rng_seed = self.rank if is_seq_parallel else 0
         torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
+        model = MLPModule(self._device_type)
         model_tp = deepcopy(model)
 
         # Ensure model are initialized the same way.
@@ -96,7 +96,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         # Shard module and initialize optimizer.
         LR = 0.25
         device_mesh = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(0, NUM_DEVICES),
         )
         parallelize_plan = {
@@ -160,7 +160,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         # Due to the trick we use for Partial aggregation, we only check the weight when local_rank = 0.
         self._check_module(model, model_tp)
 
-        inp = torch.rand(*inp_size, device=self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
         output = model(inp)
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
@@ -169,8 +169,8 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         inp_size = [8, 10]
         # Ensure all tp ranks have same input.
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
+        model = MLPModule(self._device_type)
         model_tp = deepcopy(model)
 
         # Ensure model are initialized the same way.
@@ -200,19 +200,19 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
     @with_comms
     def test_mlp_inference(self):
         device_mesh = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(0, NUM_DEVICES),
         )
         with torch.inference_mode():
             self._test_mlp_inference(device_mesh)
 
     def _setup_single_gpu_model(self, model_args, dtype):
-        return Transformer(model_args).to(device=self.device_type, dtype=dtype)
+        return Transformer(model_args).to(device=self._device_type, dtype=dtype)
 
     def _setup_tp_model(self, model, is_seq_parallel, dtype):
         model_tp = deepcopy(model)
         self._check_module(model, model_tp)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, NUM_DEVICES))
+        device_mesh = DeviceMesh(self._device_type, torch.arange(0, NUM_DEVICES))
         local_output_for_attn = dtype is torch.float64
         return Transformer.parallelize(
             model_tp,
@@ -325,7 +325,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         steps = 10 if type(model) is torch.float64 else 1
         for _ in range(steps):
             inp = torch.randint(
-                model_args.vocab_size, inp_size, device=self.device_type
+                model_args.vocab_size, inp_size, device=self._device_type
             )
             expected_fwd_comms = (
                 EXP_SEQ_PARALLEL_CC.fwd if is_seq_parallel else EXP_BASE_CC.fwd
@@ -453,7 +453,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
                 )
 
         torch.manual_seed(0)
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self._device_type)
         output, output_tp = self._validate_fwd(model, model_tp, inp, check_comms=False)
         self._validate_bwd(
             model, model_tp, output, output_tp, exp_cnts.bwd, check_comms=True
@@ -476,17 +476,17 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
             def forward(self, x):
                 return self.fc(self.embedding(x))
 
-        model = TestModule().to(self.device_type)
+        model = TestModule().to(self._device_type)
         parallelize_plan = {
             "embedding": ColwiseParallel(),
             "fc": RowwiseParallel(),
         }
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = DeviceMesh(self._device_type, list(range(self.world_size)))
         parallelize_module(model, device_mesh, parallelize_plan)
 
         input_size = [5]
         torch.manual_seed(0)
-        inp = torch.randint(16, input_size, device=self.device_type)
+        inp = torch.randint(16, input_size, device=self._device_type)
 
         @maybe_run_for_local_tensor
         def assert_not_equal(a, b):
@@ -523,10 +523,10 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
             (2, (8, channel_size), (8,)),  # calling aten.nll_loss_forward
             (3, (8, channel_size, 12), (8, 12)),  # calling aten.nll_loss2d_forward
         ]
-        weight = torch.rand(channel_size, device=self.device_type)
+        weight = torch.rand(channel_size, device=self._device_type)
         for input_ndim, input_size, target_size in test_setup:
-            x = torch.rand(*input_size, device=self.device_type, requires_grad=True)
-            target = torch.randint(channel_size, target_size, device=self.device_type)
+            x = torch.rand(*input_size, device=self._device_type, requires_grad=True)
+            target = torch.randint(channel_size, target_size, device=self._device_type)
 
             shard_dims = list(range(input_ndim))
             reductions = ["none", "mean", "sum"]
@@ -575,15 +575,15 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         """Test loss_parallel with multi-dimensional DeviceMesh (e.g. DP + TP)."""
         # Create a 2D mesh: (dp=2, tp=2) on 4 GPUs
         mesh_2d = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(self.world_size).reshape(2, 2),
             mesh_dim_names=("dp", "tp"),
         )
 
         channel_size, channel_dim = 16, 1
-        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
-        target = torch.randint(channel_size, (8,), device=self.device_type)
-        weight = torch.rand(channel_size, device=self.device_type)
+        x = torch.rand(8, channel_size, device=self._device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self._device_type)
+        weight = torch.rand(channel_size, device=self._device_type)
 
         # Input: Shard(0) on dp (batch), Shard(1) on tp (vocab/channel)
         dist_x = distribute_tensor(x, mesh_2d, [Shard(0), Shard(channel_dim)])
@@ -682,14 +682,14 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
     def test_loss_parallel_replicate_non_tp_dim(self):
         """Non-TP mesh dim = Replicate (not Shard) must also work."""
         mesh_2d = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(self.world_size).reshape(2, 2),
             mesh_dim_names=("rep", "tp"),
         )
 
         channel_size, channel_dim = 16, 1
-        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
-        target = torch.randint(channel_size, (8,), device=self.device_type)
+        x = torch.rand(8, channel_size, device=self._device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self._device_type)
 
         # Input: Replicate on the first dim, Shard(channel_dim) on TP
         dist_x = distribute_tensor(x, mesh_2d, [Replicate(), Shard(channel_dim)])
@@ -728,14 +728,14 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         """TP mesh dim need not be the last dim: (tp, dp) ordering must also work."""
         # Create a 2D mesh with TP as the FIRST dim: (tp=2, dp=2)
         mesh_2d = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(self.world_size).reshape(2, 2),
             mesh_dim_names=("tp", "dp"),
         )
 
         channel_size, channel_dim = 16, 1
-        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
-        target = torch.randint(channel_size, (8,), device=self.device_type)
+        x = torch.rand(8, channel_size, device=self._device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self._device_type)
 
         # Input: Shard(channel_dim) on tp (first), Shard(0) on dp (second)
         dist_x = distribute_tensor(x, mesh_2d, [Shard(channel_dim), Shard(0)])
@@ -763,7 +763,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         the (batch, seq) target) and the ``nll_loss2d_forward/backward`` path.
         """
         mesh_2d = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(self.world_size).reshape(2, 2),
             mesh_dim_names=("cp", "tp"),
         )
@@ -771,9 +771,9 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         batch, channel_size, seq = 4, 16, 6
         channel_dim = 1
         x = torch.rand(
-            batch, channel_size, seq, device=self.device_type, requires_grad=True
+            batch, channel_size, seq, device=self._device_type, requires_grad=True
         )
-        target = torch.randint(channel_size, (batch, seq), device=self.device_type)
+        target = torch.randint(channel_size, (batch, seq), device=self._device_type)
 
         # Input: Shard(seq) on cp (non-TP), Shard(class) on tp.
         dist_x = distribute_tensor(x, mesh_2d, [Shard(2), Shard(channel_dim)])
@@ -821,16 +821,16 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
     def test_loss_parallel_invalid_non_tp_placement(self):
         """Non-TP mesh dim with a placement that is neither Shard nor Replicate is rejected."""
         mesh_2d = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(self.world_size).reshape(2, 2),
             mesh_dim_names=("dp", "tp"),
         )
 
         channel_size, channel_dim = 16, 1
         local_x = torch.rand(
-            4, channel_size // 2, device=self.device_type, requires_grad=True
+            4, channel_size // 2, device=self._device_type, requires_grad=True
         )
-        local_target = torch.randint(channel_size, (4,), device=self.device_type)
+        local_target = torch.randint(channel_size, (4,), device=self._device_type)
 
         # Force a Partial placement on the non-TP (dp) mesh dim via from_local.
         dist_x = DTensor.from_local(
@@ -852,14 +852,14 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
         target is ambiguous (full global vs. local slice) and must be rejected.
         """
         mesh_2d = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(self.world_size).reshape(2, 2),
             mesh_dim_names=("dp", "tp"),
         )
 
         channel_size, channel_dim = 16, 1
-        x = torch.rand(8, channel_size, device=self.device_type, requires_grad=True)
-        target = torch.randint(channel_size, (8,), device=self.device_type)
+        x = torch.rand(8, channel_size, device=self._device_type, requires_grad=True)
+        target = torch.randint(channel_size, (8,), device=self._device_type)
 
         dist_x = distribute_tensor(x, mesh_2d, [Shard(0), Shard(channel_dim)])
 

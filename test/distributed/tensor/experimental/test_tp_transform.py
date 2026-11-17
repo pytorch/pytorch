@@ -67,8 +67,8 @@ class TensorParallelTest(DTensorContinuousTestBase):
 
     @with_comms
     def test_tp_transform_with_uncovered_op(self):
-        model = DummyModel().to(device=self.device_type)
-        inputs = (torch.randn(7, 3, requires_grad=False).to(device=self.device_type),)
+        model = DummyModel().to(device=self._device_type)
+        inputs = (torch.randn(7, 3, requires_grad=False).to(device=self._device_type),)
         with torch.no_grad():
             res = model(*inputs)
             exported_program = torch.export.export(
@@ -78,7 +78,7 @@ class TensorParallelTest(DTensorContinuousTestBase):
             exported_program,
             self.rank,
             self.world_size,
-            self.device_type,
+            self._device_type,
             {"fc": ColwiseParallel},
         )
         tp_model = tp_exported_program.module()
@@ -97,8 +97,8 @@ class TensorParallelTest(DTensorContinuousTestBase):
     @with_comms
     def test_tp_transform_e2e(self):
         torch.manual_seed(0)
-        model = MLPListModule(2).to(device=self.device_type)
-        inputs = (torch.randn((10, 12)).to(device=self.device_type),)
+        model = MLPListModule(2).to(device=self._device_type)
+        inputs = (torch.randn((10, 12)).to(device=self._device_type),)
         parallel_strategies: dict[str, ParallelStyle] = {
             "mlps.0.0": ColwiseParallel,
             "mlps.0.2": RowwiseParallel,
@@ -115,7 +115,7 @@ class TensorParallelTest(DTensorContinuousTestBase):
             exported_program,
             self.rank,
             self.world_size,
-            self.device_type,
+            self._device_type,
             parallel_strategies,
         )
         tp_model = tp_exported_program.module()
@@ -134,8 +134,8 @@ class TensorParallelTest(DTensorContinuousTestBase):
     @with_comms
     def test_tp_transform_no_bias(self):
         torch.manual_seed(0)
-        model = MLPListModule(1, bias=False).to(device=self.device_type)
-        inputs = (torch.randn((10, 12)).to(device=self.device_type),)
+        model = MLPListModule(1, bias=False).to(device=self._device_type)
+        inputs = (torch.randn((10, 12)).to(device=self._device_type),)
         parallel_strategies: dict[str, ParallelStyle] = {
             "mlps.0.0": ColwiseParallel,
             "mlps.0.2": RowwiseParallel,
@@ -150,7 +150,7 @@ class TensorParallelTest(DTensorContinuousTestBase):
             exported_program,
             self.rank,
             self.world_size,
-            self.device_type,
+            self._device_type,
             parallel_strategies,
         )
         tp_model = tp_exported_program.module()

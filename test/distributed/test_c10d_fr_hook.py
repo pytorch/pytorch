@@ -45,9 +45,9 @@ class AbstractFlightRecorderHookTest:
 
     @property
     def device(self):
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             return torch.device(f"cuda:{self.rank}")
-        return torch.device(self.device_type)
+        return torch.device(self._device_type)
 
     def setUp(self):
         super().setUp()
@@ -77,7 +77,7 @@ class AbstractFlightRecorderHookTest:
 
     def _init_pg(self, enable_reconfigure=False):
         os.environ["LOCAL_RANK"] = str(self.rank)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.set_device(self.rank)
         if self._communicates:
             self.store = dist.FileStore(self.file_name, self.world_size)
@@ -175,7 +175,7 @@ class AbstractFlightRecorderHookTest:
         dist.all_reduce(t)
         dist.broadcast(t, src=0)
         dist.barrier()
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         entries = self._await_retired(before + 3)[before:]
@@ -214,7 +214,7 @@ class AbstractFlightRecorderHookTest:
         t = torch.ones(8, device=self.device)
         for _ in range(3):
             dist.all_reduce(t, group=sub_pg)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         entries = self._await_retired(before + 3)[before:]
@@ -239,7 +239,7 @@ class AbstractFlightRecorderHookTest:
         t = torch.ones(8, device=self.device)
         for _ in range(3):
             dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         entries = self._await_retired(before + 3)[before:]
@@ -316,7 +316,7 @@ class AbstractFlightRecorderHookTest:
         # collective is stuck must show that collective as not completed, and
         # must still show the ones before it as completed. Rank 1 joins late,
         # so rank 0's second all_reduce is genuinely in flight while it dumps.
-        if not self._communicates or self.device_type != "cuda":
+        if not self._communicates or self._device_type != "cuda":
             self.skipTest("needs a backend whose collectives really block")
         pg = self._init_pg()
         hook = self._fr_hook(pg)
@@ -382,7 +382,7 @@ class AbstractFlightRecorderHookTest:
         with dist._coalescing_manager():
             for _ in range(2):
                 dist.reduce_scatter_tensor(torch.empty_like(shard), flat)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         entries = self._hook_entries()[before:]
@@ -474,7 +474,7 @@ class AbstractFlightRecorderHookTest:
         hook = self._fr_hook(sub)
 
         dist.all_reduce(torch.ones(4, device=self.device), group=sub)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         trace = json.loads(
@@ -596,7 +596,7 @@ class AbstractFlightRecorderHookTest:
         else:
             dist.recv(recv_t, peer)
             dist.send(send_t, peer)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         entries = self._hook_entries()[before:]
@@ -664,12 +664,12 @@ class AbstractFlightRecorderHookTest:
         reconfigure(1)
         ops()
         # Reconfigure may revoke in-flight work.
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
         before = len(self._hook_entries())
         reconfigure(2)
         ops()
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         # The reconfigure itself is not recorded, and the reconfigured group
@@ -701,7 +701,7 @@ class AbstractFlightRecorderHookTest:
             dist.send(t, peer)
         else:
             dist.recv(t, peer)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         entries = self._hook_entries()[before:]
@@ -740,7 +740,7 @@ class AbstractFlightRecorderHookTest:
         dist.reduce_scatter(
             torch.empty_like(t), [torch.ones_like(t) for _ in range(self.world_size)]
         )
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         # Before the cross-rank comparison: an entry the backend has not reported
@@ -806,7 +806,7 @@ class AbstractFlightRecorderHookTest:
 
         t = torch.ones(4, device=self.device)
         dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         torch._C._distributed_c10d._dump_fr_trace_file(
@@ -836,7 +836,7 @@ class AbstractFlightRecorderHookTest:
 
         t = torch.ones(4, device=self.device)
         dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         server = _WorkerServer("", 0)
@@ -908,7 +908,7 @@ class AbstractFlightRecorderHookTest:
         t = torch.ones(8, device=self.device)
         dist.all_reduce(t)
         dist.broadcast(t, src=0)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         names = [e["profiling_name"] for e in self._hook_entries()[before:]]
@@ -928,7 +928,7 @@ class AbstractFlightRecorderHookTest:
 
         t = torch.ones(8, device=self.device)
         dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         names = [e["profiling_name"] for e in self._all_entries()[before:]]
@@ -946,7 +946,7 @@ class AbstractFlightRecorderHookTest:
         t = torch.ones(4, device=self.device)
         for _ in range(3):
             dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
         self.assertGreaterEqual(len(self._all_entries()), 3)
 
@@ -957,7 +957,7 @@ class AbstractFlightRecorderHookTest:
 
         for _ in range(2):
             dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
         entries = self._all_entries()
         self.assertEqual(len(entries), 2)
@@ -986,7 +986,7 @@ class AbstractFlightRecorderHookTest:
         hook = self._fr_hook(pg)
         t = torch.ones(4, device=self.device)
         dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
         self.assertEqual(len(self._hook_entries()), before + 1)
         # remove() must not throw either: unregisterAbortHook throws on a
@@ -1004,7 +1004,7 @@ class AbstractFlightRecorderHookTest:
 
         t = torch.ones(4, device=self.device)
         dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
 
         entries = self._hook_entries()[before:]
@@ -1033,7 +1033,7 @@ class AbstractFlightRecorderHookTest:
         t = torch.ones(4, device=self.device)
         # Warm up so lazy communicator setup does not add entries of its own.
         dist.all_reduce(t)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
         before = len(self._all_entries())
 
@@ -1142,7 +1142,7 @@ class AbstractFlightRecorderHookTest:
         # entry the hook could never observe would read as a collective that
         # never finished, so nothing is recorded at all -- which is also what
         # stock ProcessGroupNCCL does under capture.
-        if self.device_type != "cuda":
+        if self._device_type != "cuda":
             self.skipTest("capture test is CUDA only")
         pg = self._init_pg()
         hook = self._fr_hook(pg)
@@ -1177,7 +1177,7 @@ class AbstractFlightRecorderHookTest:
         # cudaEventQuery on a capturing stream, which invalidates the capture
         # and surfaces from cudaStreamEndCapture as an unrelated
         # cudaErrorStreamCaptureInvalidated.
-        if self.device_type != "cuda":
+        if self._device_type != "cuda":
             self.skipTest("capture test is CUDA only")
         pg = self._init_pg()
         hook = self._fr_hook(pg)
@@ -1248,17 +1248,18 @@ class AbstractFlightRecorderHookTest:
         t = torch.ones(8, device=self.device)
         dist.all_reduce(t)
         dist.all_reduce(t, group=sub_pg)
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.synchronize()
         self.assertEqual(self._hook_entries()[before:], [])
 
 
 def _make_fr_hook_test_class(backend_name, device_type):
     class FlightRecorderHookTest(AbstractFlightRecorderHookTest, MultiProcessTestCase):
-        pass
+        @property
+        def _device_type(self) -> str:
+            return device_type
 
     FlightRecorderHookTest.backend_name = backend_name
-    FlightRecorderHookTest.device_type = device_type
     FlightRecorderHookTest.__name__ = (
         f"{backend_name.capitalize()}FlightRecorderHookTest"
     )

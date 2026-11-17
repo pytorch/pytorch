@@ -81,14 +81,14 @@ class TestCommModeFeatures(DTensorTestBase):
         tests parameters and sharding on a module level
         """
         device_mesh = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(0, NUM_DEVICES),
         )
 
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
+        model = MLPModule(self._device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -119,14 +119,14 @@ class TestCommModeFeatures(DTensorTestBase):
         """
 
         device_mesh = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(0, NUM_DEVICES),
         )
 
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
+        model = MLPModule(self._device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -141,7 +141,7 @@ class TestCommModeFeatures(DTensorTestBase):
             output_tp = model(inp)
             output_tp.sum().backward()
 
-        model2 = MLPStacked(self.device_type)
+        model2 = MLPStacked(self._device_type)
 
         parallelize_plan = {
             "layers.0.net1": ColwiseParallel(),
@@ -174,13 +174,13 @@ class TestCommModeFeatures(DTensorTestBase):
         """
 
         device_mesh = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(0, NUM_DEVICES),
         )
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
+        model = MLPModule(self._device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -229,13 +229,13 @@ class TestCommModeFeatures(DTensorTestBase):
         ensures that comm_module depth and tracing dictionaries correctly reset
         """
         device_mesh = DeviceMesh(
-            self.device_type,
+            self._device_type,
             torch.arange(0, NUM_DEVICES),
         )
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=self._device_type)
+        model = MLPModule(self._device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -256,12 +256,12 @@ class TestCommModeFeatures(DTensorTestBase):
             model(inp)
 
         model_args = ModelArgs(dropout_p=0.0)
-        model2 = Transformer(model_args).to(device=self.device_type)
+        model2 = Transformer(model_args).to(device=self._device_type)
         model2 = Transformer.parallelize(model2, device_mesh, is_seq_parallel)
 
         inp_size = [8, 8]
 
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self._device_type)
         inp = distribute_tensor(inp, device_mesh=device_mesh)
 
         comm_mode = CommDebugMode()
