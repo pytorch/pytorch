@@ -725,7 +725,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         finally:
             torch._dynamo.reset()
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
         with FakeTensorMode():
@@ -748,7 +747,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertNotIn("fake_device", reconstructed.__dict__)
         self.assertEqual(reconstructed.to("meta").fake_device, torch.device("meta"))
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_rejects_device_conflict(self):
         with FakeTensorMode() as mode:
@@ -761,7 +759,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     fake_device=torch.device("cuda:0"),
                 )
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_accepts_normalized_device_aliases(self):
         with FakeTensorMode() as mode:
@@ -775,7 +772,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         self.assertEqual(fake.fake_device, torch.device("cuda:0"))
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     @parametrize("device_kwarg_name", ["fake_device", "device"])
     def test_parameter_state_reconstruction_device_names(self, device_kwarg_name):
@@ -2639,11 +2635,12 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("op", ["detach", "data", "shallow_copy_data"])
     @parametrize("active", [False, True])
     @parametrize("symbolic", [False, True])
     def test_metadata_copy(self, device, op, active, symbolic):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode(shape_env=ShapeEnv() if symbolic else None)
         source = mode.from_tensor(torch.arange(3.0, device=device))
         target = mode.from_tensor(torch.zeros(3, device=device))
@@ -3465,7 +3462,6 @@ instantiate_parametrized_tests(TestFakeTensorCUDA)
 make_propagate_real_tensors_cls(TestFakeTensorCUDA)
 
 
-@instantiate_parametrized_tests
 class TestFakeTensorMoveModule(TestCase):
     # No hw_classification: it uses GPU_TYPE, so it runs on whichever accelerator
     # is present (CUDA, XPU or MPS), which neither GENERIC nor one device label fits.
@@ -7071,7 +7067,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(src.requires_grad)
         self.assertFalse(torch._C._in_kernel_invocation())
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @skipIfTorchDynamo("Dynamo cannot execute the plain Tensor subclass cases")
     @parametrize(
         "kind", ["tensor", "parameter", "parameter_subclass", "tensor_subclass"]
     )
