@@ -101,6 +101,7 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
     instantiate_device_type_tests,
+    largeMPSBufferTest,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import (
@@ -4874,6 +4875,26 @@ for dtype in (torch.int32, torch.int64):
         if torch.device(self.device).type == "mps":
             actual = actual.cpu()
         self.assertTrue((actual == 2).all())
+
+    @serialTest()
+    @skip_if_cpu
+    @skip_if_halide  # only 32-bit indexing
+    @skip_if_pallas  # only 32-bit indexing
+    @largeTensorTest("5GB", inductor=True)
+    @largeMPSBufferTest(65 * 32 * 64 * 256 * 129)
+    def test_large_pointwise_over_uint32(self):
+        # More than 2**32 elements do not fit in a 32-bit thread grid axis
+        def fn(b):
+            return b.expand(-1, -1, 64, -1, -1).contiguous()
+
+        shape = (65, 32, 1, 256, 129)
+        b = torch.randint(0, 127, shape, dtype=torch.int8, device=self.device)
+        out = torch.compile(fn, fullgraph=True)(b)
+        self.assertGreater(out.numel(), 2**32)
+        ref = b.expand(-1, -1, 64, -1, -1)
+        # Compare per batch row: MPS rejects whole-tensor ops over 2**32 elements
+        bad = sum(int((out[i] != ref[i]).sum()) for i in range(out.shape[0]))
+        self.assertEqual(bad, 0)
 
     @skip_if_halide  # only 32-bit indexing
     @skip_if_pallas  # only 32-bit indexing
@@ -15884,12 +15905,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
-    def test_float_repr_dynamic_shapes(self):
+    @parametrize("prefer_nd_tiling", (False, True))
+    def test_float_repr_dynamic_shapes(self, prefer_nd_tiling):
         @torch.compile(dynamic=True)
         def fn(x):
             return F.interpolate(x, scale_factor=1 / 300, mode="linear")
 
-        self.common(fn, [torch.randn(1, 8, 396 * 300)])
+        with torch._inductor.config.patch(
+            {"triton.prefer_nd_tiling": prefer_nd_tiling}
+        ):
+            self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
     def test_broadcast_symbolic_size_one_dynamic_shapes(self):
         # y has symbolic size trunc(s0 / 300) which the shape env knows is 1.
