@@ -46,7 +46,6 @@
   "test/distributed/_shard/sharded_tensor/ops/test_init.py",
   "test/distributed/_shard/sharded_tensor/ops/test_tensor_ops.py",
   "test/distributed/_shard/sharded_tensor/test_sharded_tensor.py",
-  "test/distributed/_shard/sharded_tensor/test_sharded_tensor_reshard.py",
   "test/distributed/_shard/sharding_plan/test_sharding_plan.py",
   "test/distributed/_shard/sharding_spec/test_sharding_spec.py",
   "test/distributed/_shard/test_sharder.py",
