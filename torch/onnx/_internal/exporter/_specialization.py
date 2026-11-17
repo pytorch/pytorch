@@ -87,7 +87,9 @@ def snapshot(
     implemented = set(_decomp.get_onnx_implemented_overloads(registry))
     candidate_ops = {
         node.target
-        for node in exported_program.graph.nodes
+        for module in exported_program.graph_module.modules()
+        if isinstance(module, torch.fx.GraphModule)
+        for node in module.graph.nodes
         if node.op == "call_function"
         and isinstance(node.target, torch._ops.OpOverload)
         and not node.target._schema.is_mutable

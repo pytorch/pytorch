@@ -687,6 +687,48 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
             self.assertIn("specialization_test.specialize.default", message)
             self.assertIn("Constraints added while decomposing", message)
 
+    def test_op_inside_cond_branch_is_attributed(self):
+        with torch.library._scoped_library("specialization_test", "FRAGMENT") as lib:
+            lib.define(
+                "specialize(Tensor x) -> Tensor", tags=torch.Tag.pt2_compliant_tag
+            )
+            lib.impl("specialize", lambda x: x + x.shape[0] // 2, "CPU")
+            torch.library.register_fake(
+                "specialization_test::specialize",
+                lambda x: torch.empty_like(x),
+                lib=lib,
+            )
+            target = torch.ops.specialization_test.specialize.default
+
+            def decompose(x):
+                return x + int(x.shape[0] // 2)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(
+                        x.sum() > 0, lambda x: target(x), lambda x: x.clone(), (x,)
+                    )
+
+            ep = torch.export.export(
+                Model(),
+                (torch.randn(6, 2),),
+                dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
+                strict=False,
+            )
+            create_table = _fx_passes._decomp.create_onnx_friendly_decomposition_table
+            with (
+                mock.patch.object(
+                    _fx_passes._decomp,
+                    "create_onnx_friendly_decomposition_table",
+                    side_effect=lambda ops: create_table(ops) | {target: decompose},
+                ),
+                self.assertWarns(DynamicShapeSpecializationWarning) as caught,
+            ):
+                torch.onnx.export(ep, verbose=False)
+        message = str(caught.warning)
+        self.assertIn("  specialization_test.specialize.default: Eq(", message)
+        self.assertNotIn("may be responsible", message)
+
     def test_only_specializing_op_is_named(self):
         with torch.library._scoped_library("specialization_test", "FRAGMENT") as lib:
             for name in ("pin", "benign"):
