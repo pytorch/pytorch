@@ -2094,9 +2094,9 @@ class BuiltinVariable(TypeVariable):
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *(type(x) for x in args), True)
+            key = (self.fn, *map(type, args), True)
         else:
-            key = (self.fn, *(type(x) for x in args))
+            key = (self.fn, *map(type, args))
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
@@ -3161,7 +3161,7 @@ class BuiltinVariable(TypeVariable):
         left: VariableTracker,
         right: VariableTracker,
     ) -> VariableTracker:
-        from .tensor import supported_tensor_comparison_op_values
+        from .tensor import _richcompare_operand, supported_tensor_comparison_op_values
 
         op = self.fn
 
@@ -3178,16 +3178,15 @@ class BuiltinVariable(TypeVariable):
         # must be a type that can participate in a traced numeric comparison.
         # Anything else (classes, DataPtrVariable, etc.) is a different type
         # entirely — the comparison result is known at compile time.
-        non_symnode = right if isinstance(left, SymNodeVariable) else left
-        if not isinstance(
-            non_symnode, (SymNodeVariable, ConstantVariable, TensorVariable)
-        ):
+        if isinstance(left, SymNodeVariable):
+            args = (left.as_proxy(), _richcompare_operand(right))
+        else:
+            args = (_richcompare_operand(left), right.as_proxy())
+        if any(arg is NotImplemented for arg in args):
             # pyrefly: ignore [bad-argument-type]
             return VariableTracker.build(tx, op(object(), None))
 
-        proxy = tx.output.create_proxy(
-            "call_function", op, (left.as_proxy(), right.as_proxy()), {}
-        )
+        proxy = tx.output.create_proxy("call_function", op, args, {})
         return SymNodeVariable.create(
             tx,
             proxy,
@@ -3445,7 +3444,22 @@ class DictBuiltinVariable(TypeVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
+            obj = args[0].realize()
+            if name == "__repr__":
+                if not isinstance(obj, ConstDictVariable):
+                    unimplemented(
+                        gb_type="Unsupported builtin dictionary storage operation",
+                        context=f"dict.{name} on {obj.python_type_name()}",
+                        explanation="Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+                        hints=[],
+                    )
+                # Explicit dict slots bypass OrderedDict's linked-order behavior.
+                slotdef = obj.lookup_slotdefs(name)
+                if slotdef is None:
+                    raise AssertionError(f"Missing dict slot for {name}")
+                return slotdef.wrapper(
+                    obj, tx, getattr(ConstDictVariable, slotdef.impl), args[1:], kwargs
+                )
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
@@ -3638,23 +3652,10 @@ class HasAttrBuiltinVariable(BuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BuiltinVariable):
@@ -3950,18 +3951,10 @@ class ListBuiltinVariable(TypeVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/listobject.c#L1265-L1287
-        if kwargs:
-            raise_type_error(
-                tx,
-                "list() takes no keyword arguments",
-            )
-        if len(args) == 0:
+        no_keywords(tx, "list", kwargs)
+        check_positional(tx, "list", len(args), 0, 1)
+        if not args:
             return ListVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"list expected at most 1 argument, got {len(args)}",
-            )
 
         obj = args[0]
         if obj.source and not is_constant_source(obj.source):
@@ -4187,10 +4180,8 @@ class FloatBuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "float() takes no keyword arguments")
-        if len(args) > 1:
-            raise_type_error(tx, f"float expected at most 1 argument, got {len(args)}")
+        no_keywords(tx, "float", kwargs)
+        check_positional(tx, "float", len(args), 0, 1)
         if not args:
             return ConstantVariable.create(0.0)
         return pynumber_float(tx, args[0])
@@ -4224,10 +4215,8 @@ class BoolBuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "bool() takes no keyword arguments")
-        if len(args) > 1:
-            raise_type_error(tx, f"bool expected at most 1 argument, got {len(args)}")
+        no_keywords(tx, "bool", kwargs)
+        check_positional(tx, "bool", len(args), 0, 1)
         if not args:
             return ConstantVariable.create(False)
         # bool(a) on a lazy constant stays lazy; generic_is_true would realize
@@ -4302,15 +4291,14 @@ class TupleBuiltinVariable(TypeVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
-        if kwargs:
-            raise_type_error(tx, "tuple() takes no keyword arguments")
-        if len(args) == 0:
+        no_keywords(tx, "tuple", kwargs)
+        check_positional(tx, "tuple", len(args), 0, 1)
+        if not args:
             return TupleVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(tx, f"tuple expected at most 1 argument, got {len(args)}")
 
         obj = args[0]
         if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
+            # CPython: tuple(exact_tuple) returns the same object, no copy.
             return obj
 
         items = unpack_iterable(tx, args[0])
@@ -4356,12 +4344,10 @@ class SetBuiltinVariable(TypeVariable):
         # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
         # CPython set_init rejects keywords before unpacking positional args, so
         # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
-        if kwargs:
-            raise_type_error(tx, "set() takes no keyword arguments")
-        if len(args) == 0:
+        no_keywords(tx, "set", kwargs)
+        check_positional(tx, "set", len(args), 0, 1)
+        if not args:
             return variables.SetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(tx, f"set expected at most 1 argument, got {len(args)}")
 
         s = SetVariable([], mutation_type=ValueMutationNew())
         s.call_method(tx, "update", [args[0]], kwargs)
@@ -4386,14 +4372,10 @@ class FrozenSetBuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "frozenset() takes no keyword arguments")
-        if len(args) == 0:
+        no_keywords(tx, "frozenset", kwargs)
+        check_positional(tx, "frozenset", len(args), 0, 1)
+        if not args:
             return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx, f"frozenset expected at most 1 argument, got {len(args)}"
-            )
 
         if istype(args[0], variables.FrozensetVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
@@ -4402,6 +4384,8 @@ class FrozenSetBuiltinVariable(TypeVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], variables.ConstDictVariable):
+            args[0].install_dict_order_guard(tx)
         if isinstance(
             args[0],
             (

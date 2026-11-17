@@ -602,6 +602,10 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        # An as_strided of a graph input that may read outside the input's own
+        # elements. AOTI's CUDA graphs copy only those, so
+        # aot_inductor.cudagraphs rejects such graphs.
+        self.input_as_strided_node: torch.fx.Node | None = None
         self.kernel_free_cudagraph: bool = False
 
         # only keeping one node per device for stack trace purposes
@@ -1081,11 +1085,15 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_info(self, device: torch.device) -> None:
+    def add_device_info(self, device: torch.device, *, runs_work: bool = True) -> None:
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
-        if V.graph.current_node and device not in self.device_node_mapping:
+        if (
+            runs_work
+            and V.graph.current_node
+            and device not in self.device_node_mapping
+        ):
             self.device_node_mapping[device] = V.graph.current_node
 
     @property
@@ -3282,14 +3290,27 @@ class GraphLowering(torch.fx.Interpreter):
     def get_output_names(self) -> list[str]:
         return self._get_output_names(self.graph_outputs)
 
+    def is_zero_dim_cpu_buffer(self, name: str) -> bool:
+        """Check CPU scalar eligibility, not whether codegen unwraps the buffer.
+
+        GPU consumers must first register intermediate buffers with the
+        scheduler; `should_unwrap_unspec_arg` decides whether to unwrap them.
+        """
+        buffer = self.name_to_buffer.get(name, self.graph_inputs.get(name))
+        return (
+            isinstance(buffer, (ir.Buffer, TensorBox))
+            and get_device_type(buffer) == "cpu"
+            and not isinstance(
+                buffer.get_output_spec(), (ir.NoneLayout, ir.MultiOutputLayout)
+            )
+            and buffer.get_size() == []
+        )
+
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
-            name in self.graph_inputs
-            and self.graph_inputs[name].get_numel() == 1
-            and len(self.graph_inputs[name].get_size()) == 0
-            and get_device_type(self.graph_inputs[name]) == "cpu"
+            name in self.graph_inputs and self.is_zero_dim_cpu_buffer(name)
         ) or name in self.zero_dim_cpu_tensor_list
 
 
