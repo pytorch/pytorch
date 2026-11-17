@@ -99,6 +99,11 @@ def _make_test_input(shape, dtype: torch.dtype) -> torch.Tensor:
     return make_tensor(shape, device="cuda", dtype=dtype, **kwargs)
 
 
+def _tied_input(shape, dtype: torch.dtype) -> torch.Tensor:
+    # Four distinct values, so many elements tie at the K-th threshold.
+    return torch.randint(0, 4, shape, device="cuda").to(dtype)
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoFlyDSL
 @unittest.skipIf(
@@ -602,57 +607,74 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(got_v, ref_v)
         self.assertEqual(torch.gather(x, -1, got_i), got_v)
 
+    @parametrize("dtype", _SUPPORTED_DTYPES)
+    @parametrize("largest", (False, True))
     @parametrize("k", (64, 257, 704, 1023))
-    def test_deterministic_mode_matches_aten_with_heavy_ties(self, k: int):
+    def test_deterministic_mode_matches_aten_with_heavy_ties(
+        self, k: int, largest: bool, dtype: torch.dtype
+    ):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
         torch.manual_seed(6)
-        n = _test_n(k)
-        self.assertEqual(_expected_kernel(k, n), "radix")
-        x = torch.randint(0, 4, (_test_m(), n), device="cuda", dtype=torch.float32)
+        n = _test_n(k, dtype)
+        self.assertEqual(_expected_kernel(k, n, dtype), "radix")
+        x = _tied_input((_test_m(k, dtype), n), dtype)
 
         prior = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(True)
             with pn.flydsl.disabled():
-                ref_v, ref_i = torch.topk(x, k, dim=-1)
-            v1, i1 = torch.topk(x, k, dim=-1)
-            v2, i2 = torch.topk(x, k, dim=-1)
+                ref_v, ref_i = torch.topk(x, k, dim=-1, largest=largest)
+            v1, i1 = torch.topk(x, k, dim=-1, largest=largest)
+            v2, i2 = torch.topk(x, k, dim=-1, largest=largest)
         finally:
             torch.use_deterministic_algorithms(prior)
 
         self.assertEqual(topk_cache_info("radix").misses, 1)
-        self.assertEqual(v1, v2)
+        self.assertEqual(v1, v2, atol=0, rtol=0)
         self.assertEqual(i1, i2)
-        self.assertEqual(v1, ref_v)
+        self.assertEqual(v1, ref_v, atol=0, rtol=0)
         self.assertEqual(i1, ref_i)
 
+    @parametrize("dtype", _SUPPORTED_DTYPES)
+    @parametrize("largest", (False, True))
     @parametrize("k", _REGISTER_KS)
-    def test_register_tie_order_is_value_desc_index_asc(self, k: int):
+    def test_register_tie_order_is_value_desc_index_asc(
+        self, k: int, largest: bool, dtype: torch.dtype
+    ):
+        # Stable argsort puts the smaller index first. largest=False checks
+        # that rule on ascending values; the name describes the descending case.
         torch.manual_seed(7)
-        n = _test_n(k)
-        self.assertEqual(_expected_kernel(k, n), "register")
-        x = torch.randint(0, 3, (_test_m(), n), device="cuda", dtype=torch.float32)
-        expected_i = torch.argsort(x, dim=-1, descending=True, stable=True)[:, :k]
+        n = _test_n(k, dtype)
+        self.assertEqual(_expected_kernel(k, n, dtype), "register")
+        x = _tied_input((_test_m(k, dtype), n), dtype)
+        expected_i = torch.argsort(x, dim=-1, descending=largest, stable=True)[:, :k]
 
         prior = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(True)
-            v1, i1 = torch.topk(x, k, dim=-1)
-            v2, i2 = torch.topk(x, k, dim=-1)
+            v1, i1 = torch.topk(x, k, dim=-1, largest=largest)
+            v2, i2 = torch.topk(x, k, dim=-1, largest=largest)
         finally:
             torch.use_deterministic_algorithms(prior)
 
         self.assertEqual(i1, i2)
-        self.assertEqual(v1, v2)
+        self.assertEqual(v1, v2, atol=0, rtol=0)
         self.assertEqual(i1, expected_i)
-        self.assertEqual(torch.gather(x, -1, i1), v1)
+        self.assertEqual(torch.gather(x, -1, i1), v1, atol=0, rtol=0)
 
+    @parametrize("dtype", _SUPPORTED_DTYPES)
     @parametrize("k", _GATE_MAX_N_KS)
-    def test_correctness_at_gate_n_ceiling(self, k: int):
+    def test_correctness_at_gate_n_ceiling(self, k: int, dtype: torch.dtype):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
         torch.manual_seed(12)
-        x = make_tensor((_test_m(), _test_n_max(k)), device="cuda", dtype=torch.float32)
+        n = _test_n_max(k, dtype)
+        kernel = _expected_kernel(k, n, dtype)
+        x = _make_test_input((_test_m(k, dtype), n), dtype)
+        misses = topk_cache_info(kernel).misses
         self._assert_topk_matches_aten(x, k)
+        self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
 
     @parametrize("k", (8, 704))
     def test_autograd_passes_through(self, k: int):
