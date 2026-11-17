@@ -1060,9 +1060,6 @@ void fakeFallback(
     modeless_fallback(op, dispatchKeySet, stack);
     return;
   }
-  if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
-    unsupported(op, "the Python dispatcher");
-  }
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
   }
