@@ -72,6 +72,7 @@ def parse_args() -> Any:
         "--test-matrix", type=str, required=True, help="the original test matrix"
     )
     parser.add_argument("--cpp-faketensor", action="store_true")
+    parser.add_argument("--tests-to-include", default="")
     parser.add_argument(
         "--selected-test-configs",
         type=str,
@@ -633,15 +634,21 @@ def enforce_lf_allowlist(
 def add_cpp_faketensor_configs(
     test_matrix: dict[str, list[Any]],
     job_name: str | None,
+    tests_to_include: str = "",
 ) -> dict[str, list[Any]]:
     selection = (
         Path(__file__).resolve().parents[2] / ".ci/pytorch/cpp_faketensor_tests.json"
     )
-    configs = (
-        json.loads(selection.read_text())["test_configs"]
-        if selection.exists()
-        else None
-    )
+    manifest = json.loads(selection.read_text()) if selection.exists() else None
+    configs = manifest["test_configs"] if manifest is not None else None
+    if manifest is not None and tests_to_include.strip():
+        files = {
+            selector.split("::")[0].removesuffix(".py")
+            for selector in manifest["tests"]
+        }
+        requested = {test.split(".", 1)[0] for test in tests_to_include.split()}
+        if files.isdisjoint(requested):
+            return test_matrix
     entries = test_matrix.get("include", [])
     if any("fake_tensor" in entry for entry in entries):
         return test_matrix
@@ -677,6 +684,11 @@ def main() -> None:
         # We handle invalid test matrix gracefully by marking it as empty
         set_output("is-test-matrix-empty", True)
         sys.exit(0)
+
+    if args.cpp_faketensor:
+        test_matrix = add_cpp_faketensor_configs(
+            test_matrix, args.job_name, args.tests_to_include
+        )
 
     pr_number = args.pr_number
     tag = args.tag
@@ -753,11 +765,6 @@ def main() -> None:
     )
 
     filtered_test_matrix = enforce_lf_allowlist(filtered_test_matrix, args.lf_runners)
-    if args.cpp_faketensor:
-        filtered_test_matrix = add_cpp_faketensor_configs(
-            filtered_test_matrix, args.job_name
-        )
-
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
 
