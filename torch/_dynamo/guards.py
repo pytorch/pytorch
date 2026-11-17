@@ -6504,6 +6504,10 @@ class CheckFunctionManager:
                 if k in used_local_vars or k in self.additional_used_local_vars
             },
             global_scope=global_scope_state,
+            constant_result_names=(
+                output_graph_guards_state.constant_result_names
+                & global_scope_state.keys()
+            ),
             _guards=torch._guards.GuardsSet(
                 OrderedSet(
                     dataclasses.replace(
