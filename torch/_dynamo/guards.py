@@ -130,6 +130,7 @@ from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
     is_fake_tensor,
+    maybe_get_fake_constant,
     maybe_get_fake_dispatch_keys,
     maybe_get_fake_pytype,
 )
@@ -4946,6 +4947,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
+        # Guard replay reads this metadata after dropping the user's attribute.
+        object.__setattr__(ret, "constant", maybe_get_fake_constant(ret))
         # A .grad the guards never read is pruned to the _Missing sentinel on
         # the way in (only a training capture has one to prune at all); it was
         # not guarded on, so the rebuilt tensor does not need it, but assigning
