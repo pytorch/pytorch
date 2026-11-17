@@ -51,8 +51,8 @@ mha_fwd_aot(
     const float p_dropout,
     const float softmax_scale,
     bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const bool return_softmax,
     const std::optional<at::Generator>& gen_);
 
@@ -87,8 +87,8 @@ mha_varlen_fwd_aot(
     const float softmax_scale,
     const bool zero_tensors,
     bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const bool return_softmax,
     const std::optional<at::Generator>& gen_);
 
@@ -110,8 +110,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd_aot(
     const float p_dropout, // probability to drop
     const float softmax_scale,
     const bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const bool deterministic,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset);
@@ -141,8 +141,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd_aot(
     const float softmax_scale,
     const bool zero_tensors,
     const bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const bool deterministic,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset);
@@ -267,6 +267,16 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varle
     const bool deterministic,
     const at::Tensor philox_seed,
     const at::Tensor philox_offset);
+
+// CK tells -1 apart from other negative window sizes. AOTriton builds used to
+// turn every negative size into -1 before reaching CK, so keep doing that.
+inline int ck_window_size(int window_size) {
+#ifndef DISABLE_AOTRITON
+  return window_size < 0 ? -1 : window_size;
+#else
+  return window_size;
+#endif
+}
 #endif
 
 TORCH_API
@@ -290,8 +300,8 @@ mha_fwd(
     const float p_dropout,
     const float softmax_scale,
     bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_);
@@ -328,8 +338,8 @@ mha_varlen_fwd(
     const float softmax_scale,
     const bool zero_tensors,
     bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_) {
@@ -337,8 +347,6 @@ mha_varlen_fwd(
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
     std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
-    const int non_null_window_left = window_size_left.value_or(-1);
-    const int non_null_window_right = window_size_right.value_or(-1);
     return mha_varlen_fwd_ck(
         q,
         k,
@@ -353,8 +361,8 @@ mha_varlen_fwd(
         softmax_scale,
         zero_tensors,
         is_causal,
-        non_null_window_left,
-        non_null_window_right,
+        ck_window_size(window_size_left),
+        ck_window_size(window_size_right),
         return_softmax,
         gen_,
         dummy_attn_bias); // Not used in flash attention
@@ -400,8 +408,8 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
     const float p_dropout, // probability to drop
     const float softmax_scale,
     const bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const float softcap,
     const bool deterministic,
     const at::Tensor philox_seed,
@@ -411,8 +419,6 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
     std::optional<at::Tensor> non_null_dbias = std::nullopt;
-    const int non_null_window_left = window_size_left.value_or(-1);
-    const int non_null_window_right = window_size_right.value_or(-1);
     auto[dQuery,
          dKey,
          dValue,
@@ -433,8 +439,8 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
                              p_dropout,
                              softmax_scale,
                              is_causal,
-                             non_null_window_left,
-                             non_null_window_right,
+                             ck_window_size(window_size_left),
+                             ck_window_size(window_size_right),
                              deterministic,
                              philox_seed,
                              philox_offset);
@@ -488,8 +494,8 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd
     const float softmax_scale,
     const bool zero_tensors,
     const bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const float softcap,
     const bool deterministic,
     const at::Tensor philox_seed,
@@ -498,8 +504,6 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
     std::optional<at::Tensor> non_null_dbias = std::nullopt;
-    const int non_null_window_left = window_size_left.value_or(-1);
-    const int non_null_window_right = window_size_right.value_or(-1);
     auto[dQuery,
          dKey,
          dValue,
@@ -525,8 +529,8 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd
                                     softmax_scale,
                                     zero_tensors,
                                     is_causal,
-                                    non_null_window_left,
-                                    non_null_window_right,
+                                    ck_window_size(window_size_left),
+                                    ck_window_size(window_size_right),
                                     deterministic,
                                     philox_seed,
                                     philox_offset);
