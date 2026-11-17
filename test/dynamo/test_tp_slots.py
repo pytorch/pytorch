@@ -20,10 +20,13 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestTypeSlots(TestCase):
     """Test suite for type slot detection."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _get_slot_info(self, obj_type):
         """Helper to get and unpack slot information."""
