@@ -18,7 +18,10 @@ try:
         download_retry_decorator,
         load_yaml_file,
         main,
+        parse_inductor_config,
         reset_rng_state,
+        should_diff_branch,
+        tensor_parallel_backend,
     )
 except ImportError:
     from common import (
@@ -27,7 +30,10 @@ except ImportError:
         download_retry_decorator,
         load_yaml_file,
         main,
+        parse_inductor_config,
         reset_rng_state,
+        should_diff_branch,
+        tensor_parallel_backend,
     )
 
 from packaging.version import Version
@@ -140,6 +146,7 @@ try:
         HF_LLM_MODELS,
         INFERENCE_PHASES,
         TextGenerationBenchmark,
+        TP_MODELS,
     )
 except ImportError:
     from huggingface_llm_models import (
@@ -147,6 +154,7 @@ except ImportError:
         HF_LLM_MODELS,
         INFERENCE_PHASES,
         TextGenerationBenchmark,
+        TP_MODELS,
     )
 
 
@@ -431,6 +439,10 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def validate_args(self, args):
         mode = args.hf_inference_mode
+        if args.tp_size < 1:
+            raise ValueError(f"--tp-size must be positive, got {args.tp_size}")
+        if args.tp_size > 1 and mode == "generate":
+            raise ValueError("--tp-size requires --hf-inference-mode=prefill or decode")
         if mode != "decode" and args.decode_length is not None:
             raise ValueError("--decode-length requires --hf-inference-mode=decode")
         if mode == "generate":
@@ -463,9 +475,12 @@ class HuggingfaceRunner(BenchmarkRunner):
         if not args.inference:
             raise ValueError(f"--hf-inference-mode={mode} requires --inference")
         supported = INFERENCE_PHASES[mode].models
+        if args.tp_size > 1:
+            supported = supported & TP_MODELS
         if args.only is not None and args.only not in supported:
+            tp = f"--tp-size={args.tp_size} with " if args.tp_size > 1 else ""
             raise ValueError(
-                f"--hf-inference-mode={mode} does not support {args.only}; "
+                f"{tp}--hf-inference-mode={mode} does not support {args.only}; "
                 f"supported models: {', '.join(sorted(supported))}"
             )
 
@@ -506,6 +521,51 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"--hf-inference-mode={mode} requires --backend or --inductor"
             )
+        if args.tp_size > 1:
+            self.validate_tensor_parallel_args(args)
+
+    def validate_tensor_parallel_args(self, args):
+        unsupported = [
+            "--" + flag.replace("_", "-")
+            for flag in (
+                "device_index",
+                "warm_start_latency",
+                "caching_precompile",
+                "save_model_outputs_to",
+                "compare_model_outputs_with",
+                "minify",
+                "log_operator_inputs",
+            )
+            if getattr(args, flag)
+        ]
+        if should_diff_branch(args):
+            unsupported.append("--diff-branch")
+        if args.devices and len(args.devices) > 1:
+            unsupported.append("multiple --devices")
+        if unsupported:
+            raise ValueError("--tp-size does not support " + ", ".join(unsupported))
+        cudagraphs = False
+        if args.backend == "inductor":
+            config = parse_inductor_config(args.inductor_config)
+            cudagraphs = config.get("triton.cudagraphs", False)
+            if args.inductor:
+                options = torch._inductor.list_mode_options(
+                    args.inductor_compile_mode or "default"
+                )
+                cudagraphs |= options.get("triton.cudagraphs", False)
+        if not args.disable_cudagraphs or args.backend == "cudagraphs" or cudagraphs:
+            raise ValueError(
+                "--tp-size requires --disable-cudagraphs and a backend other than "
+                "cudagraphs, without compile options that re-enable CUDA graphs"
+            )
+        if not (args.bfloat16 or args.float16 or args.float32):
+            raise ValueError("--tp-size requires --bfloat16, --float16, or --float32")
+        cpu = tensor_parallel_backend(args) == "gloo"
+        if cpu and args.backend not in ("eager", "aot_eager"):
+            raise ValueError(
+                "CPU tensor parallelism supports only --backend=eager or "
+                "--backend=aot_eager; Inductor TP requires CUDA/NCCL"
+            )
 
     def get_workload(self, example_inputs, *, is_performance=False):
         if self.args.hf_inference_mode != "generate":
@@ -528,6 +588,27 @@ class HuggingfaceRunner(BenchmarkRunner):
                 stabilization_iters=4,
             )
         return super().get_workload(example_inputs, is_performance=is_performance)
+
+    def get_model_metadata(self, example_inputs):
+        if self.args.hf_inference_mode == "generate":
+            return {}
+        prompt = example_inputs["input_ids"]
+        decode = example_inputs.get("decode_ids")
+        return {
+            "batch_size": prompt.shape[0],
+            "phase": self.args.hf_inference_mode,
+            "prompt_length": prompt.shape[1],
+            "decode_length": decode.shape[1] if decode is not None else 0,
+        }
+
+    def deepcopy_model(self, model):
+        if self.args.tp_size == 1:
+            return super().deepcopy_model(model)
+        # A deepcopy would duplicate every shard on the device, and HF's TP hooks
+        # close over the device mesh. Copies share the sharded weights instead, so
+        # a dtype cast of a copy (check_accuracy's fp64 reference) casts them all;
+        # check_accuracy casts back to the run dtype before the eager runs.
+        return model.copy_sharing_weights()
 
     def generate(self, model, example_inputs, collect_outputs=True):
         return model.generate(**example_inputs)
@@ -588,6 +669,13 @@ class HuggingfaceRunner(BenchmarkRunner):
                             f"generated-token slots exceeds {model_name}'s context length "
                             f"{context_length}"
                         )
+                tp_kwargs = {}
+                if self.args.tp_size > 1:
+                    tp_kwargs = {"tp_size": self.args.tp_size, "dtype": torch.float32}
+                    if self.args.bfloat16:
+                        tp_kwargs["dtype"] = torch.bfloat16
+                    elif self.args.float16:
+                        tp_kwargs["dtype"] = torch.float16
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
                     model_name,
                     device,
@@ -595,6 +683,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                     prompt_length=prompt_length,
                     inference_mode=mode,
                     decode_length=decode_length,
+                    **tp_kwargs,
                 )
             else:
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
@@ -647,6 +736,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_names = set(model_names)
         if args.hf_inference_mode != "generate":
             model_names &= INFERENCE_PHASES[args.hf_inference_mode].models
+        if args.tp_size > 1:
+            model_names &= TP_MODELS
         model_names = sorted(model_names)
 
         start, end = self.get_benchmark_indices(len(model_names))

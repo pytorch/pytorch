@@ -1374,7 +1374,8 @@ test_inductor_pallas() {
 }
 
 test_inductor_benchmark_runner() {
-  python test/run_test.py --include dynamo/test_benchmark_runner --verbose
+  # Also runs the multi-process tensor-parallel tests.
+  PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --include dynamo/test_benchmark_runner --verbose
   assert_git_not_dirty
 }
 
