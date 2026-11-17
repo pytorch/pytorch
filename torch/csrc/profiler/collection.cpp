@@ -67,9 +67,7 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
 RawTensorMetadata::RawTensorMetadata(const at::Tensor& t, bool with_weak_ref)
     : RawTensorMetadataBase(t),
       impl_{t.unsafeGetTensorImpl()},
-      weak_self_{
-          with_weak_ref ? std::optional<WeakTensor>(WeakTensor(t))
-                        : std::nullopt},
+      weak_self_{with_weak_ref ? WeakTensor(t) : WeakTensor()},
       device_type_{t.device().type()},
       device_index_{t.device().index()} {}
 
