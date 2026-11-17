@@ -21,8 +21,7 @@ from concurrent.futures.process import BrokenProcessPool
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, cast, NamedTuple, Optional, Self, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -43,7 +42,8 @@ from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.functions import CeilDiv, Max, Min
+from ..utils._sympy.functions import CeilDiv, FloorDiv, Max, Min
+from ..utils._sympy.symbol import symbol_is_type, SymT
 from . import config, ir
 from .autotune_process import (
     AsyncAutotuner,
@@ -106,6 +106,7 @@ from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
+    forwarded_cuda_compile_options,
     fp32_matmul_precision_key,
     get_dtype_size,
     get_num_sms,
@@ -115,7 +116,6 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
-    tlx_only_cuda_options,
     triton_type,
     triton_type_to_torch,
     unique,
@@ -410,6 +410,43 @@ class SubgraphInfo:
         }
 
 
+class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
+    """Ops handler used while generating code for producers fused into a template.
+
+    Example: addmm(bias * 2.0 - 1.0, a, b) with the bias producer fused. The
+    default handler would emit:
+
+        tmp3 = tmp1 * 2.0 - 1.0
+        tl.store(buf0 + idx, tmp3)   # write computed bias to memory
+        ...
+        bias = tl.load(buf0 + idx)   # template reads it back
+        out = acc + bias
+
+    This handler instead:
+      - skips the tl.store, so buf0 is never written or allocated.
+      - records every store in cse.store_cache for loads by later producer nodes.
+      - records terminal prefix-input stores in captured_values for the explicit
+        handoff to the template epilogue.
+    """
+
+    def __init__(self, inner: Any, capture_names: OrderedSet[str]):
+        super().__init__(inner)
+        self.capture_names = capture_names
+        self.captured_values: dict[str, CSEVariable] = {}
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mode: StoreMode = None,
+    ):
+        V.kernel.store_buffer_names.add(name)
+        V.kernel.cse.store_cache[name] = value
+        if name in self.capture_names:
+            self.captured_values[name] = value
+
+
 class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     """Handles placeholder substitutions during subgraph processing."""
 
@@ -605,10 +642,11 @@ class TritonTemplateKernel(TritonKernel):
         transpose_discontiguous_tensor_descriptors_override=None,
         prefix_args=0,
         suffix_args=0,
+        prefix_inputs_fusion_indices: tuple[int, ...] = (),
         epilogue_fn=identity,
         subgraphs: list[ir.ComputedBuffer] | None = None,
         workspace_arg: WorkspaceArg | None = None,
-        prologue_loads_all_inputs=False,
+        prologue_loads_all_named_inputs=False,
         hint_override: int | None = None,
         triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
@@ -624,7 +662,7 @@ class TritonTemplateKernel(TritonKernel):
                     f"TMA template output rank must be in {supported_ranks}, "
                     f"got {output_rank}"
                 )
-            prefixes = ("x", "y", "z")
+            prefixes = ("x", "y", "z0_")
             tiling = dict(zip(prefixes, output_node.get_size()))
             tiling["r0_"] = sympy.S.One
         else:
@@ -639,7 +677,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_tiled:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
+            # ["z0_", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
@@ -677,10 +715,20 @@ class TritonTemplateKernel(TritonKernel):
         self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
         self.meta = meta
+        # Input args given a device-side TMA descriptor under HOST_SIDE_TMA.
+        self.device_tma_descriptor_args = OrderedSet[str]()
         self.call_sizes = call_sizes
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
+        # Prefix input indices that are allowed to use store-output input-producer fusion.
+        self.prefix_inputs_fusion_indices = prefix_inputs_fusion_indices
+        for index in prefix_inputs_fusion_indices:
+            if index < 0 or index >= prefix_args:
+                raise AssertionError(
+                    f"prefix input fusion index {index} is out of bounds "
+                    f"for {prefix_args} prefix inputs"
+                )
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
@@ -700,14 +748,20 @@ class TritonTemplateKernel(TritonKernel):
         # `set_subgraph_body`
         self.subgraph_bodies: dict[str, SubgraphInfo] = {}
 
-        # input buffers which we are allowed to prologue fuse into
-        self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
+        # Inputs that are allowed to use producer fusion, separated by codegen destination.
+        self.load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
+        self.store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
+        # Track producer-fusion-supported input indices before duplicate
+        # arguments are deduplicated.
+        self._producer_fusion_allowed_input_indices: OrderedSet[int] = OrderedSet()
 
-        # input buffers which we are fusing into
-        self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
-        # input buffers which we are fusing into, which preserve a zero mask
+        # Inputs whose producers are actually fused, separated by destination.
+        self.load_input_fused_inputs: OrderedSet[str] = OrderedSet()
+        self.store_output_fused_inputs: OrderedSet[str] = OrderedSet()
+        # Producer groups for inputs consumed by store_output().
+        self.store_output_input_producer_groups: dict[str, list[Any]] = {}
+        # Load-input fused inputs whose producers preserve a zero mask.
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
-        self.prologue_descriptor_vars: dict[str, str] = {}
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -755,9 +809,9 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
-        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
-        # by adding all inputs.
-        self.prologue_loads_all_inputs = prologue_loads_all_inputs
+        # When prologue_loads_all_named_inputs is true, load_input_fusion_allowed_inputs
+        # is populated during def_kernel by adding all named inputs.
+        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
         # always freeze the layout immediately, bypassing layout constraints.
@@ -779,6 +833,26 @@ class TritonTemplateKernel(TritonKernel):
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
+    def _finalize_fusion_allowed_inputs(self) -> None:
+        # Remove a producer-fusible buffer if it also appears at an unsupported
+        # template input position.
+        unsupported_names = OrderedSet(
+            input_node.get_name()
+            for index, input_node in enumerate(self.input_nodes)
+            if index not in self._producer_fusion_allowed_input_indices
+        )
+        self.load_input_fusion_allowed_inputs -= unsupported_names
+        self.store_output_fusion_allowed_inputs -= unsupported_names
+
+    def _is_input_fused(self, input_name: str) -> bool:
+        return (
+            input_name in self.load_input_fused_inputs
+            or input_name in self.store_output_fused_inputs
+        )
+
+    def _is_input_arg_omitted(self, input_name: str) -> bool:
+        return input_name in V.graph.removed_buffers or self._is_input_fused(input_name)
+
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -787,7 +861,10 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.input_buffers,
                 self.args.sizevars,
                 self.args.workspace_args,
-                self.prologue_supported_inputs,
+                self.load_input_fusion_allowed_inputs,
+                self.store_output_fusion_allowed_inputs,
+                # Record occurrence-only changes for generated-code cache replay.
+                self._producer_fusion_allowed_input_indices,
                 self.frozen_layouts_cnt,
             ]
         )
@@ -811,6 +888,7 @@ class TritonTemplateKernel(TritonKernel):
     def replay_cached_events(self, events: RecordedEventsType) -> None:
         for f, args, kwargs in events:
             getattr(self, f)(*args, **kwargs)
+        self._finalize_fusion_allowed_inputs()
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -997,9 +1075,10 @@ class TritonTemplateKernel(TritonKernel):
         if kpack is not None:
             triton_meta["kpack"] = kpack
 
-        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        # Forwarded CUDA options (ctas_per_cga, tlx) carry dynamic string keys
+        # outside the TritonMeta schema.
         triton_meta_extra = cast(dict[str, Any], triton_meta)
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := self.meta.get(k, None):
                 triton_meta_extra[k] = v
 
@@ -1043,9 +1122,10 @@ class TritonTemplateKernel(TritonKernel):
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
 
-        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        # Forwarded CUDA options (ctas_per_cga, tlx) carry dynamic string keys
+        # outside the TritonMeta schema.
         triton_meta_extra = cast(dict[str, Any], self.triton_meta)
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := self.meta.get(k, None):
                 template_args += f"""
                     {k}={v},
@@ -1093,28 +1173,32 @@ class TritonTemplateKernel(TritonKernel):
                 )
             )
 
+        for input_index in self.prefix_inputs_fusion_indices:
+            input_name = self.input_nodes[input_index].get_name()
+            self.store_output_fusion_allowed_inputs.add(input_name)
+            self._producer_fusion_allowed_input_indices.add(input_index)
+
         for input_node in self.input_nodes[: self.prefix_args]:
+            if self._is_input_arg_omitted(input_node.get_name()):
+                continue
             # get args in correct order
             self.args.input(input_node.get_name())
 
         for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
-            if input_node.get_name() in V.graph.removed_buffers:
-                continue
-            if input_node.get_name() in self.prologue_fused_inputs:
+            if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
             self.args.input_buffers[input_node.get_name()] = arg_name
 
         # The args may be duplicated, so renaming must be after args are de-duplicated.
-        for name in argnames:
+        for named_index, name in enumerate(argnames, start=self.prefix_args):
             input_node = self.named_input_nodes[name]
-            if self.prologue_loads_all_inputs:
-                self.prologue_supported_inputs.add(input_node.get_name())
-            if input_node.get_name() in V.graph.removed_buffers:
-                continue
-            if input_node.get_name() in self.prologue_fused_inputs:
+            if self.prologue_loads_all_named_inputs:
+                self.load_input_fusion_allowed_inputs.add(input_node.get_name())
+                self._producer_fusion_allowed_input_indices.add(named_index)
+            if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
             arg_name = self.args.input_buffers[input_node.get_name()]
@@ -1126,9 +1210,7 @@ class TritonTemplateKernel(TritonKernel):
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
-            if input_node.get_name() in V.graph.removed_buffers:
-                continue
-            if input_node.get_name() in self.prologue_fused_inputs:
+            if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
             self.args.input(input_node.get_name())
@@ -1196,12 +1278,14 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to declare a TMA descriptor.
 
-        When HOST_SIDE_TMA is True: registers the input's pointer arg in
-        host_tma_descriptor_args so the launcher replaces it with a
-        TensorDescriptor. Emits an alias so the template can use desc_name.
+        When HOST_SIDE_TMA is True and the launcher can evaluate the input's
+        sizes and strides (integers, or dynamic sizes it reads at launch):
+        registers the input's pointer arg in host_tma_descriptor_args so the
+        launcher replaces it with a TensorDescriptor. Emits an alias so the
+        template can use desc_name.
 
-        When HOST_SIDE_TMA is False: emits device-side descriptor creation
-        using tl.make_tensor_descriptor().
+        Otherwise (HOST_SIDE_TMA False, or a dim the launcher cannot evaluate):
+        emits device-side descriptor creation using tl.make_tensor_descriptor().
 
         dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
             transposes a 2D tensor so the contiguous dim is last. If None,
@@ -1217,24 +1301,65 @@ class TritonTemplateKernel(TritonKernel):
         if dim_order is None:
             dim_order = list(range(ndim))
 
-        if self.meta.get("HOST_SIDE_TMA", False):
-            if input_name is None:
-                raise NotImplementedError(
-                    "host-side TMA descriptors for template outputs are not supported"
-                )
-            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
+        host_side = self.meta.get("HOST_SIDE_TMA", False)
+        arg_name = (
+            self.args.input_buffers.get(node.get_name(), input_name)
+            if input_name is not None
+            else None
+        )
+        launch_args: OrderedSet[str] | None = None
+        dims: list[sympy.Expr] = []
+        if host_side and arg_name is not None:
             # Read dims off the IR node rather than via self.size()/self.stride():
             # those wrap the result in tl.full(...) under int64 indexing, which is
             # kernel-side syntax the host launcher cannot resolve.
-            node_size = node.get_size()
             node_stride = self.get_stride_and_maybe_freeze_layout(node)
+            dims = [
+                sympy.sympify(dim)
+                for dim in [size[d] for d in dim_order]
+                + [node_stride[d] for d in dim_order]
+            ]
+            launch_args = self._host_tma_launch_args(dims)
+            # def_kernel merges operands that view one buffer into a single arg,
+            # and the launcher would hand that arg to all of them as one
+            # TensorDescriptor. Views with dynamic dims have differing shapes, so
+            # a shared arg keeps launch-time dims out and falls back, as do dims
+            # the launcher cannot evaluate; once one view falls back, all do.
+            shared = (
+                sum(
+                    self.args.input_buffers.get(n.get_name(), name) == arg_name
+                    for name, n in self.named_input_nodes.items()
+                )
+                > 1
+            )
+            if launch_args and shared:
+                launch_args = None
+            device_args = self.device_tma_descriptor_args
+            if arg_name in device_args or launch_args is None:
+                if arg_name in self.host_tma_descriptor_args:
+                    raise NotImplementedError(
+                        f"host-side TMA cannot share arg {arg_name} with a "
+                        "device-side descriptor for a dynamic view"
+                    )
+                device_args.add(arg_name)
+                host_side = False
+        if host_side:
+            if arg_name is None:
+                raise NotImplementedError(
+                    "host-side TMA descriptors for template outputs are not supported"
+                )
+            if launch_args is None:
+                raise AssertionError("host-side descriptor without resolved dims")
+            rendered = [self._host_tma_dim(self.rename_indexing(d)) for d in dims]
             desc: dict[str, Any] = {
                 "block_shape": [int(b) for b in block_shape],
-                "shape": [texpr(self.rename_indexing(node_size[d])) for d in dim_order],
-                "strides": [
-                    texpr(self.rename_indexing(node_stride[d])) for d in dim_order
-                ],
+                "shape": rendered[: len(dim_order)],
+                "strides": rendered[len(dim_order) :],
             }
+            if launch_args:
+                # The kernel's size args these dims read; the launcher evaluates
+                # the rendered expressions over them at each launch.
+                desc["launch_args"] = sorted(launch_args)
             prev = self.host_tma_descriptor_args.get(arg_name)
             if prev is not None and prev != desc:
                 # def_kernel dedupes operands that alias one buffer into a single
@@ -1246,6 +1371,66 @@ class TritonTemplateKernel(TritonKernel):
             self.host_tma_descriptor_args[arg_name] = desc
             return f"{desc_name} = {input_name}"
 
+        return self._device_tma_descriptor(
+            desc_name, input_name, block_shape, dim_order
+        )
+
+    def _host_tma_launch_args(self, dims: list[sympy.Expr]) -> OrderedSet[str] | None:
+        """Kernel size args a host-side descriptor's dims read at launch, or None
+        if a dim cannot be evaluated by the launcher.
+
+        A dim can be read at launch when it is an integer expression whose free
+        symbols are all graph sizes (dynamic shapes), which become the kernel's
+        size args (ks0), built only from operations that pexpr prints as plain
+        Python (see _host_tma_plain_dim). The C++ wrapper builds descriptors from
+        the tensor's own sizes, so there every dim must be a compile-time integer.
+        """
+        launch_args: OrderedSet[str] = OrderedSet()
+        for dim in dims:
+            dim = V.graph.sizevars.simplify(dim)
+            if not dim.free_symbols:
+                continue
+            if (
+                V.graph.cpp_wrapper
+                or not dim.is_integer
+                or not self._host_tma_plain_dim(dim)
+            ):
+                return None
+            if not all(
+                symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                for sym in dim.free_symbols
+            ):
+                return None
+            launch_args.update(
+                str(self.rename_indexing(sym)) for sym in dim.free_symbols
+            )
+        return launch_args
+
+    @staticmethod
+    def _host_tma_plain_dim(dim: sympy.Expr) -> bool:
+        """Whether pexpr renders dim with only integers, names, + * // and
+        builtin max/min. Others print as math.floor(...), torch.sym_float(...)
+        and so on, which the launchers do not bind."""
+        if dim.is_Integer or dim.is_Symbol:
+            return True
+        if isinstance(dim, (sympy.Add, sympy.Mul, FloorDiv, Max, Min)):
+            return all(
+                TritonTemplateKernel._host_tma_plain_dim(arg) for arg in dim.args
+            )
+        return False
+
+    @staticmethod
+    def _host_tma_dim(dim: sympy.Expr) -> int | str:
+        """A host-side descriptor dim: an int, or launcher (Python) source."""
+        return int(dim) if dim.is_number else pexpr(dim)
+
+    def _device_tma_descriptor(
+        self,
+        desc_name: str,
+        input_name: str | None,
+        block_shape: list[int],
+        dim_order: list[int],
+    ) -> str:
         base_name = input_name if input_name is not None else "output"
         stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
         size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
@@ -1369,10 +1554,6 @@ class TritonTemplateKernel(TritonKernel):
         other: float | int | None = 0.0,
         indent_width: int = 4,
         index_shape: tuple[str] | None = None,
-        unfused_load: str | None = None,
-        prologue_descriptor_offsets: tuple[str, ...] | None = None,
-        prologue_descriptor_block_shape: tuple[str, ...] | None = None,
-        prologue_descriptor_cat2: bool = False,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1383,37 +1564,15 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the load operation.
             other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
             indent_width (int): The number of spaces to use for indentation.
-            prologue_descriptor_offsets: Descriptor offsets for source loads in
-                a fused prologue. Must be paired with prologue_descriptor_block_shape.
-            prologue_descriptor_block_shape: Descriptor block shape for source
-                loads in a fused prologue.
-            prologue_descriptor_cat2: Generate two half-width descriptor loads
-                for an exact contiguous cat/cast producer when possible.
         """
 
-        if (prologue_descriptor_offsets is None) != (
-            prologue_descriptor_block_shape is None
-        ):
-            raise AssertionError(
-                "descriptor offsets and block shape must be provided together"
-            )
-
         input_node = self.named_input_nodes[input_name]
-        cat2_code = None
-        if (
-            prologue_descriptor_cat2
-            and prologue_descriptor_offsets is not None
-            and prologue_descriptor_block_shape is not None
-            and input_node.get_name() in self.prologue_fused_inputs
-        ):
-            cat2_code = self.codegen_cat2_prologue_descriptors(
-                input_node,
-                output_name,
-                prologue_descriptor_offsets,
-                prologue_descriptor_block_shape,
+        if not self.prologue_loads_all_named_inputs:
+            self.load_input_fusion_allowed_inputs.add(input_node.get_name())
+            named_input_index = self.prefix_args + list(self.named_input_nodes).index(
+                input_name
             )
-        if not self.prologue_loads_all_inputs:
-            self.prologue_supported_inputs.add(input_node.get_name())
+            self._producer_fusion_allowed_input_indices.add(named_input_index)
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
@@ -1471,20 +1630,6 @@ class TritonTemplateKernel(TritonKernel):
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 name = "StoreOutputSubstitution"
 
-                def load(self, name: str, index: sympy.Expr):
-                    if prologue_descriptor_offsets is not None:
-                        if prologue_descriptor_block_shape is None:
-                            raise AssertionError("missing descriptor block shape")
-                        return V.kernel.load_prologue_descriptor(
-                            name,
-                            index,
-                            tuple(indices),
-                            tuple(lengths),
-                            prologue_descriptor_offsets,
-                            prologue_descriptor_block_shape,
-                        )
-                    return super().load(name, index)
-
                 def store(
                     self,
                     name: str,
@@ -1494,7 +1639,7 @@ class TritonTemplateKernel(TritonKernel):
                 ):
                     V.kernel.store_buffer_names.add(name)
                     V.kernel.cse.store_cache[name] = value
-                    if name in V.kernel.prologue_fused_inputs:
+                    if name in V.kernel.load_input_fused_inputs:
                         # We load masked out values with 0, then apply a prologue.
                         # The masked out values may not necessarily be 0 any more
                         # so we need to reapply the mask.
@@ -1571,143 +1716,17 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             with self.set_subgraph_body(hook_key):
                 self.cse.invalidate(OrderedSet())
-                if (
-                    cat2_code is not None
-                    and input_node.get_name() in self.prologue_fused_inputs
-                ):
-                    self.body.writeline(cat2_code)
-                else:
-                    self.codegen_body()
+                self.codegen_body()
                 self.cse.invalidate(OrderedSet())
-                if input_node.get_name() not in self.prologue_fused_inputs:
-                    if unfused_load is not None:
-                        self.body.writeline(f"{output_name} = {unfused_load}")
-                    elif load_code is None:
+                if input_node.get_name() not in self.load_input_fused_inputs:
+                    if load_code is None:
                         raise AssertionError("load_code must not be None")
-                    else:
-                        self.body.writeline(load_code)
+                    self.body.writeline(load_code)
 
                 result = self.body.getvalue()
                 if indent_width:
                     result = textwrap.indent(result, " " * indent_width)
                 return result.strip()
-
-        return self._register_hook(hook_key, hook)
-
-    def codegen_cat2_prologue_descriptors(
-        self,
-        input_node: Any,
-        output_name: str,
-        offsets: tuple[str, ...],
-        block_shape: tuple[str, ...],
-    ) -> str | None:
-        """Codegen an exact ``cat([Kx64, Kx64], 1).to(BF16)`` via TMA."""
-        from .kernel.decompose_k import get_cat2_fp32_prologue_sources
-
-        source_names = get_cat2_fp32_prologue_sources(input_node)
-        if (
-            source_names is None
-            or len(offsets) != 2
-            or len(block_shape) != 2
-            or block_shape[1] != "BLOCK_N"
-        ):
-            return None
-
-        descriptor_names: list[str] = []
-        for source_name in source_names:
-            source = V.graph.get_buffer(source_name)
-            source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
-
-            descriptor = self.prologue_descriptor_vars.get(source_name)
-            if descriptor is None:
-                descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
-                self.prologue_descriptor_vars[source_name] = descriptor
-                source_var = self.args.input(source_name)
-                source_k = texpr(self.rename_indexing(source_size[0]))
-                self.prologue.writeline(
-                    f"{descriptor} = tl.make_tensor_descriptor("
-                    f"{source_var}, shape=[{source_k}, 64], strides=[64, 1], "
-                    f"block_shape=[{block_shape[0]}, 64])"
-                )
-            descriptor_names.append(descriptor)
-
-        return (
-            f"{output_name}_left = {descriptor_names[0]}.load([{offsets[0]}, 0])\n"
-            f"{output_name}_right = {descriptor_names[1]}.load([{offsets[0]}, 0])\n"
-            f"{output_name} = tl.cat({output_name}_left, {output_name}_right, "
-            "dim=1).to(tl.bfloat16)"
-        )
-
-    def load_prologue_descriptor(
-        self,
-        name: str,
-        index: sympy.Expr,
-        index_names: tuple[str, ...],
-        expected_size: tuple[sympy.Expr, ...],
-        offsets: tuple[str, ...],
-        block_shape: tuple[str, ...],
-    ) -> CSEVariable:
-        """Load a contiguous rank-2 FP32 or BF16 prologue source through TMA."""
-        buffer = V.graph.get_buffer(name)
-        size = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_size())
-        stride = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_stride())
-        expected_index = sympy_dot(
-            stride,
-            [sympy.Symbol(index_name, integer=True) for index_name in index_names],
-        )
-        if (
-            len(size) != 2
-            or len(stride) != 2
-            or buffer.get_dtype() not in (torch.float32, torch.bfloat16)
-            or size != expected_size
-            or not V.graph.sizevars.statically_known_equals(stride[1], 1)
-            or not V.graph.sizevars.statically_known_equals(stride[0], size[1])
-            or not V.graph.sizevars.statically_known_equals(
-                buffer.get_layout().offset, 0
-            )
-            # CSEProxy canonicalizes the exact contiguous expression to xindex.
-            or not (
-                str(index) == "xindex"
-                or V.graph.sizevars.statically_known_equals(index, expected_index)
-            )
-        ):
-            return super().load(name, index)
-
-        descriptor = self.prologue_descriptor_vars.get(name)
-        if descriptor is None:
-            descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
-            self.prologue_descriptor_vars[name] = descriptor
-            var = self.args.input(name)
-            shape_str = ", ".join(texpr(self.rename_indexing(s)) for s in size)
-            stride_str = ", ".join(texpr(self.rename_indexing(s)) for s in stride)
-            block_shape_str = ", ".join(block_shape)
-            self.prologue.writeline(
-                f"{descriptor} = tl.make_tensor_descriptor("
-                f"{var}, shape=[{shape_str}], strides=[{stride_str}], "
-                f"block_shape=[{block_shape_str}])"
-            )
-
-        return self.cse.generate(
-            self.loads,
-            f"{descriptor}.load([{', '.join(offsets)}])",
-            dtype=buffer.get_dtype(),
-            shape=block_shape,
-        )
-
-    def unfused_input(
-        self,
-        input_name: str,
-        code: str,
-        indent_width: int = 4,
-    ) -> str:
-        """Emit ``code`` only when ``input_name`` was not prologue-fused."""
-        input_node = self.named_input_nodes[input_name]
-        hook_key = f"<UNFUSED_INPUT_{input_name}_{self._gen_tmp_var()}>"
-
-        def hook() -> str:
-            if input_node.get_name() in self.prologue_fused_inputs:
-                return ""
-            return textwrap.indent(code, " " * indent_width).strip()
 
         return self._register_hook(hook_key, hook)
 
@@ -1805,7 +1824,8 @@ class TritonTemplateKernel(TritonKernel):
         tile_origin: tuple[str, ...] | None = None,
         batch_loop: tuple[str, str] | None = None,
     ):
-        """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
+        """Generates store-output input producers fusion, applies output epilogue fusions,
+        and stores the final output unless it has been optimized away.
 
         Args:
             indices (Union[List, Tuple]): The index for each dimension of the output. The dot product of
@@ -1897,6 +1917,14 @@ class TritonTemplateKernel(TritonKernel):
                 if not val_shape:
                     raise AssertionError(
                         "Blocking indexing requires passing in val_shape"
+                    )
+                # Same ranks the constructor allows for TMA tiling: 3D only
+                # for TMA stores, so the pointer path stays 2D.
+                supported_ranks = (2, 3) if self.tma_store else (2,)
+                if len(lengths) not in supported_ranks:
+                    raise AssertionError(
+                        f"Blocking indexing supports output ranks {supported_ranks}, "
+                        f"got {len(lengths)}"
                     )
                 if len(val_shape) != len(lengths):
                     raise AssertionError(
@@ -2023,6 +2051,44 @@ class TritonTemplateKernel(TritonKernel):
             )
             output_dtype = self.output_node.get_dtype()
 
+            # Generate fused prefix-input producers and capture their values for
+            # the template epilogue. The store cache connects nodes within a group.
+            capture_names = OrderedSet(self.store_output_input_producer_groups)
+            store_output_capture = _StoreOutputCapture(
+                V.get_ops_handler(), capture_names
+            )
+            for input_index in self.prefix_inputs_fusion_indices:
+                input_node = self.input_nodes[input_index]
+                input_name = input_node.get_name()
+                fused_producer_group = self.store_output_input_producer_groups.get(
+                    input_name
+                )
+                if not fused_producer_group:
+                    continue
+
+                # Preserve standalone pointwise numerics by upcasting low-precision
+                # arithmetic unless every producer is safe without upcasts.
+                # Load-input prologue fusion uses the same policy below.
+                can_codegen_without_upcast = all(
+                    node.can_codegen_without_upcasts() for node in fused_producer_group
+                )
+                with (
+                    config.patch(
+                        "triton.codegen_upcast_to_fp32",
+                        not can_codegen_without_upcast,
+                    ),
+                    V.set_ops_handler(store_output_capture),
+                ):
+                    for producer_node in fused_producer_group:
+                        producer_node.codegen(
+                            self.split_and_set_ranges(producer_node.get_ranges())
+                        )
+
+                if input_name not in store_output_capture.captured_values:
+                    raise AssertionError(
+                        f"failed to capture store-output input producer for {input_name}"
+                    )
+
             epilogue_args = [
                 V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
             ]
@@ -2039,9 +2105,15 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
+                input_name = input_node.get_name()
+                if input_name in self.store_output_input_producer_groups:
+                    input_value = store_output_capture.captured_values[input_name]
+                else:
+                    input_value = input_node.make_loader()(index_symbols)
+                # For captured values, this only updates CSE use-count bookkeeping.
                 epilogue_arg = V.kernel.cse.generate(
                     self.compute,
-                    input_node.make_loader()(index_symbols),
+                    input_value,
                     dtype=acc_dtype,
                     shape=input_node.get_size(),
                 )
@@ -2150,7 +2222,6 @@ class TritonTemplateKernel(TritonKernel):
                 self.store_output,
                 self.epilogue_loop_init,
                 self.load_input,
-                self.unfused_input,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
@@ -2159,10 +2230,9 @@ class TritonTemplateKernel(TritonKernel):
                 *self.extra_template_env_fns,
             ]
         }
-        return PartialRender(
-            template.render(**template_env, **kwargs),
-            self.render_hooks,
-        )
+        rendered_template = template.render(**template_env, **kwargs)
+        self._finalize_fusion_allowed_inputs()
+        return PartialRender(rendered_template, self.render_hooks)
 
     def make_load(self, name, indices, mask):
         """
@@ -2261,6 +2331,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # Use FixedGrid which properly handles grid values passed as arguments
         inductor_meta = FixedGrid.setup_grid_as_args() if additional_call_args else None
+        if self.asserts_need_real_inputs:
+            inductor_meta = {**(inductor_meta or {}), "asserts_need_real_inputs": True}
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -2322,7 +2394,11 @@ class TritonTemplateKernel(TritonKernel):
             and sig.outer_name == self.workspace_arg.outer_name
         )
         for reduction in self.partial_reductions:
-            result.writeline(_partials_finish(f"args[{idx}]", reduction))
+            finish = _partials_finish(f"args[{idx}]", reduction)
+            # Like the wrapper, cast the fp32 partials to the output dtype.
+            if (dtype := V.graph.get_dtype(reduction.buffer)) != torch.float:
+                finish += f".to({dtype})"
+            result.writeline(finish)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
@@ -2378,14 +2454,31 @@ class TritonTemplateKernel(TritonKernel):
         # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
+    # DO NOT change the name, parameter count, or parameter order of this method, and
+    # keep calling it positionally. TorchTLX (triton 3.8:
+    # /tlx/language/tlx/inductor/registry.py) replaces it with a wrapper that
+    # takes exactly these four positional args, so any change raises a TypeError.
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
     ):
-        """Prepare epilogue/prologue routing before render().
+        """Route epilogue nodes to store-output subgraphs before render().
 
-        Default: trivial routing — all epilogues broadcast to every subgraph,
-        none unfused, no prologue source tracking.  Override in subclasses
-        for per-output routing.
+        By default, all epilogue nodes are emitted in every store-output subgraph.
+        ExternalTritonTemplateKernel overrides this for per-output routing,
+        retaining epilogues that cannot be fused, and prologue-source metadata.
+
+        Nodes are classified by graph position, not by where their code is emitted:
+        ``epilogue_nodes`` are downstream consumers of the template output, emitted
+        in store_output(). ``prologue_nodes`` are all fused upstream producers:
+        load-input producers (grouped in ``buf_name_to_prologue_group``, emitted in
+        load_input()) and prefix-input producers such as a computed addmm bias
+        (emitted in store_output()). ``prologue_nodes`` is unused here; it is kept
+        only for the signature constraint above.
+
+        The ``prologue``/``epilogue`` names are misleading now that producers can be
+        emitted in store_output(); ``producer_nodes``/``consumer_nodes`` would be
+        accurate. Unfortunately the signature is frozen by TorchTLX (see the comment
+        above), so the parameters stay as they are.
         """
         self._epilogue_nodes_by_subgraph: defaultdict[int, list[Any]] = defaultdict(
             lambda: epilogue_nodes
@@ -2398,15 +2491,33 @@ class TritonTemplateKernel(TritonKernel):
         scheduling,
         template_node,
         epilogue_nodes,
-        prologue_nodes,
         buf_name_to_prologue_group,
+        store_output_input_producer_groups,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
         """Generate template source code with fused prologues and epilogues.
 
+        ``epilogue_nodes`` contains the nodes ordered after the template in the
+        fused scheduler group. ``buf_name_to_prologue_group`` contains producer
+        groups emitted in load-input prologues.
+        ``store_output_input_producer_groups`` contains producer groups emitted in
+        store-output epilogues and is copied to kernel state for use during render().
+
         Returns the final source code string.
         """
+        self.store_output_input_producer_groups = store_output_input_producer_groups
+        prologue_nodes = list(
+            OrderedSet(
+                node
+                for groups in (
+                    buf_name_to_prologue_group,
+                    store_output_input_producer_groups,
+                )
+                for group in groups.values()
+                for node in group
+            )
+        )
         self._compute_fusion_metadata(
             scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
         )
@@ -2980,6 +3091,8 @@ class TritonTemplateKernel(TritonKernel):
             prologue_group = buf_name_to_prologue_group.get(buffer.get_name(), [])
             if not prologue_group:
                 continue
+            # Preserve standalone pointwise numerics by upcasting low-precision
+            # arithmetic unless every producer is safe without upcasts.
             can_codegen_without_upcast = all(
                 p_n.can_codegen_without_upcasts() for p_n in prologue_group
             )
@@ -3057,6 +3170,10 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             hint_override=None,
         )
         self._template_buffer = template_buffer
+        # External templates currently support producer fusion only in prologues.
+        self.load_input_fusion_allowed_inputs.update(
+            template_buffer.load_input_fusion_allowed_inputs
+        )
         # Extra inputs needed by fused ops beyond the template's own I/O
         self._extra_inputs: dict[str, str] = {}
         # Prologue primary source buffers, populated by load_input
@@ -3113,10 +3230,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
     ):
-        """Compute fusion metadata for external backends.
-
-        Determines eligible epilogues/prologues, builds epilogue specs,
-        and computes prologue sources — all before render().
+        """Compute external fusion metadata before render().
 
         Hook setup (_setup_epilogue_hook / _setup_prologue_hook) cannot
         happen here because it requires V.kernel context, which is only
@@ -3462,7 +3576,8 @@ class GenerateAndLoadResult(NamedTuple):
     mod: ModuleType
     extra: str
     input_call_args: tuple[str, ...]
-    prologue_supported_inputs: OrderedSet[str]
+    load_input_fusion_allowed_inputs: OrderedSet[str]
+    store_output_fusion_allowed_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
     output_tile: tuple[int, int, int] | None
@@ -3582,7 +3697,8 @@ class GeneratedCodeCache:
         # arg) vs mm(a, b) (two). Key the aliasing structure name-insensitively.
         #
         # def_kernel also drops inputs found in V.graph.removed_buffers or in
-        # kernel.prologue_fused_inputs, but neither needs keying: the cache is
+        # kernel.load_input_fused_inputs/store_output_fused_inputs, but neither
+        # needs keying: the cache is
         # only read and written while lowering generates autotune choices, and
         # both sets are populated only later, during scheduling, whose template
         # renders (SIMDScheduling.codegen_template via make_kernel_render)
@@ -3660,7 +3776,7 @@ class TritonTemplate(KernelTemplate):
         source: str,
         debug=False,
         cache_codegen_enabled_for_template=False,
-        prologue_loads_all_inputs=False,
+        prologue_loads_all_named_inputs=False,
         always_freeze_layout: bool = False,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
@@ -3678,9 +3794,9 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
-        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
-        # by adding all inputs.
-        self.prologue_loads_all_inputs = prologue_loads_all_inputs
+        # When prologue_loads_all_named_inputs is true, load_input_fusion_allowed_inputs
+        # is populated during def_kernel by adding all named inputs.
+        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
         # When always_freeze_layout is True, the kernel will always freeze layouts
         # immediately instead of using layout constraints. This is used by
         # FlexAttention templates which require frozen layouts.
@@ -3729,6 +3845,7 @@ class TritonTemplate(KernelTemplate):
         call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
+        prefix_inputs_fusion_indices: tuple[int, ...],
         epilogue_fn: Callable[..., Any] | None,
         epilogue_fn_hash: str | None,
         subgraphs: list[ir.Buffer] | None,
@@ -3810,9 +3927,10 @@ class TritonTemplate(KernelTemplate):
             "call_sizes": call_sizes,
             "prefix_args": prefix_args,
             "suffix_args": suffix_args,
+            "prefix_inputs_fusion_indices": prefix_inputs_fusion_indices,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
-            "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
+            "prologue_loads_all_named_inputs": self.prologue_loads_all_named_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
         }
@@ -3888,8 +4006,10 @@ class TritonTemplate(KernelTemplate):
                         code == code_test
                         and extra == extra_test
                         and kernel.args.input_buffers == kernel_test.args.input_buffers
-                        and kernel.prologue_supported_inputs
-                        == kernel_test.prologue_supported_inputs
+                        and kernel.load_input_fusion_allowed_inputs
+                        == kernel_test.load_input_fusion_allowed_inputs
+                        and kernel.store_output_fusion_allowed_inputs
+                        == kernel_test.store_output_fusion_allowed_inputs
                         and kernel.args.sizevars == kernel_test.args.sizevars
                     ):
                         raise AssertionError(
@@ -3931,7 +4051,12 @@ class TritonTemplate(KernelTemplate):
         mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
+        load_input_fusion_allowed_inputs = (
+            kernel.load_input_fusion_allowed_inputs.copy()
+        )
+        store_output_fusion_allowed_inputs = (
+            kernel.store_output_fusion_allowed_inputs.copy()
+        )
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
         if cache_hit:
@@ -3941,7 +4066,8 @@ class TritonTemplate(KernelTemplate):
             mod,
             extra,
             input_call_args,
-            prologue_supported_inputs,
+            load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
             output_tile,
@@ -3957,6 +4083,7 @@ class TritonTemplate(KernelTemplate):
         num_buffers_warp_spec: int = 0,
         prefix_args: int = 0,
         suffix_args: int = 0,
+        prefix_inputs_fusion_indices: tuple[int, ...] = (),
         epilogue_fn: Callable[..., Any] | None = identity,
         epilogue_fn_hash: str | None = None,
         subgraphs: list[ir.Buffer] | None = None,
@@ -3974,13 +4101,22 @@ class TritonTemplate(KernelTemplate):
         """This function generates a TritonTemplateCaller
 
         Args:
-            input_nodes: List of input nodes
+            input_nodes: Template inputs ordered as [prefix inputs, named inputs,
+                suffix inputs]. Named inputs correspond to the arguments passed to
+                def_kernel().
             layout: Output layout
             num_stages: Number of stages for triton launch
             num_warps: Number of warps for triton launch
-            prefix_args: Number of input nodes to be passed as arguments
-            suffix_args: Number of input nodes to be passed as arguments
-            epilogue_fn: Optional epilogue function to be called on the output
+            prefix_args: Number of leading input nodes consumed exclusively by
+                store_output(). They are loaded over the output iteration domain and
+                passed to epilogue_fn immediately after the accumulator.
+            suffix_args: Number of trailing input nodes consumed exclusively by
+                store_output(). They are loaded over the output iteration domain and
+                passed to epilogue_fn after the prefix inputs.
+            prefix_inputs_fusion_indices: Prefix input indices allowed to use
+                store-output input-producer fusion.
+            epilogue_fn: Optional function called as
+                epilogue_fn(accumulator, *prefix_inputs, *suffix_inputs).
             subgraphs: Optional subgraphs to be passed as arguments, these will be inlined
                 into the triton template string
             mutated_inputs: Optional list of input nodes that are mutated by the kernel, this is helpful
@@ -4004,6 +4140,7 @@ class TritonTemplate(KernelTemplate):
             call_sizes,
             prefix_args,
             suffix_args,
+            prefix_inputs_fusion_indices,
             epilogue_fn,
             epilogue_fn_hash,
             subgraphs,
@@ -4100,6 +4237,12 @@ class TritonTemplate(KernelTemplate):
                 triton_meta=triton_meta,
                 **options,
             )
+            kernel.load_input_fusion_allowed_inputs.update(
+                result.load_input_fusion_allowed_inputs
+            )
+            kernel.store_output_fusion_allowed_inputs.update(
+                result.store_output_fusion_allowed_inputs
+            )
             render = functools.partial(
                 kernel.render,
                 self.template,
@@ -4189,7 +4332,10 @@ class TritonTemplate(KernelTemplate):
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
-            allowed_prologue_inps=result.prologue_supported_inputs,
+            load_input_fusion_allowed_inputs=result.load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=(
+                result.store_output_fusion_allowed_inputs
+            ),
             hint_override=hint_override,
             output_tile=result.output_tile,
         )
@@ -4334,7 +4480,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         log_info: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None = None,
         mutated_inputs=None,
         workspace_arg: WorkspaceArg | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         hint_override: int | None = None,
         output_tile: tuple[int, int, int] | None = None,
     ) -> None:
@@ -4353,8 +4500,15 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
         self.mutated_inputs = mutated_inputs
         self.workspace_arg = workspace_arg
-        self.allowed_prologue_inps = (
-            allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
+        self.load_input_fusion_allowed_inputs = (
+            load_input_fusion_allowed_inputs
+            if load_input_fusion_allowed_inputs is not None
+            else OrderedSet()
+        )
+        self.store_output_fusion_allowed_inputs = (
+            store_output_fusion_allowed_inputs
+            if store_output_fusion_allowed_inputs is not None
+            else OrderedSet()
         )
         self.hint_override = hint_override
         self.output_tile = output_tile
@@ -4401,7 +4555,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             inputs=self.input_nodes,
             make_kernel_render=self.make_kernel_render,
             mutated_inputs=self.mutated_inputs,
-            allowed_prologue_inps=self.allowed_prologue_inps,
+            load_input_fusion_allowed_inputs=self.load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=(
+                self.store_output_fusion_allowed_inputs
+            ),
             output_tile=self.output_tile,
         )
         # Pass KTC annotation to the buffer for encoding
@@ -4581,6 +4738,8 @@ class ExternKernelCaller(ChoiceCaller):
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             inner.annotations["ktc"] = self.annotations["ktc"]
+        if isinstance(inner, ir.ExternKernel):
+            inner.tunable_dyn_dims_mask = self.tunable_dyn_dims_mask
         return ir.TensorBox.create(inner)
 
     def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
@@ -5221,13 +5380,19 @@ class AlgorithmSelectorCache(PersistentCache):
 
                     return timings
 
-            # We take the union of allowed prologue inputs from all choices,
-            # and, within benchmark fusion, don't allow prologue fusion for
-            # choices which don't support the whole union.
-            allowed_prologue_inps: OrderedSet[str] = OrderedSet()
+            # No choice has won yet, so take the union of inputs allowed at each
+            # producer-fusion placement. During benchmark fusion, only consider
+            # choices that support every input produced by the fused producers.
+            load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
+            store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
-                    allowed_prologue_inps |= c.allowed_prologue_inps
+                    load_input_fusion_allowed_inputs |= (
+                        c.load_input_fusion_allowed_inputs
+                    )
+                    store_output_fusion_allowed_inputs |= (
+                        c.store_output_fusion_allowed_inputs
+                    )
 
             # No single winning choice yet; selection is deferred to benchmark fusion
             return (
@@ -5237,7 +5402,8 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_nodes,
                         get_timings,
                         choices,
-                        allowed_prologue_inps,
+                        load_input_fusion_allowed_inputs,
+                        store_output_fusion_allowed_inputs,
                     )
                 ),
                 None,
@@ -6061,10 +6227,23 @@ class AlgorithmSelectorCache(PersistentCache):
                         hint_override=hint_override,
                     )
 
+                storage_offset = cast(int, storage_offset)
+                # Layout offsets are relative to the input data pointer, so views
+                # reaching before it have a negative offset and as_strided
+                # rejects those. Allocate the base to cover the rebased view and
+                # shift the offset into it instead. The base comes from
+                # benchmark_example_value, which already put the data pointer
+                # -storage_offset elements in, so this stays absolute.
+                shift = max(0, -storage_offset)
+                storage_offset += shift
+
                 # Check if the required storage size exceeds the current storage
                 # to avoid illegal memory access
-                needed_size = torch._prims_common.compute_required_storage_length(
-                    sizes, strides, cast(int, storage_offset)
+                needed_size = (
+                    torch._prims_common.compute_required_storage_length(
+                        sizes, strides, storage_offset
+                    )
+                    + shift
                 )
                 current_size = base.untyped_storage().size() // base.element_size()
                 if needed_size > current_size:
@@ -6098,8 +6277,13 @@ class AlgorithmSelectorCache(PersistentCache):
         # Only used for benchmarking tensor setup, not correctness.
         # Offset is almost always 0; use that as fallback.
         out_offset = V.graph.sizevars.optimization_hint(layout.offset, fallback=0)
-        needed_out_size = torch._prims_common.compute_required_storage_length(
-            out.size(), out.stride(), out_offset
+        out_shift = max(0, -out_offset)
+        out_offset += out_shift
+        needed_out_size = (
+            torch._prims_common.compute_required_storage_length(
+                out.size(), out.stride(), out_offset
+            )
+            + out_shift
         )
         # untyped_storage() counts bytes, unlike the deprecated TypedStorage.size().
         current_out_size = out_base.untyped_storage().size() // out_base.element_size()
@@ -6209,15 +6393,15 @@ class AlgorithmSelectorCache(PersistentCache):
         if not work.wait(timeout):
             raise TimeoutError("Barrier timeout before benchmarking")
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         total_time = 0.0
 
         for i in range(nruns):
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
-            start_evt = torch.cuda.Event(enable_timing=True)
-            end_evt = torch.cuda.Event(enable_timing=True)
+            start_evt = torch.Event(enable_timing=True)
+            end_evt = torch.Event(enable_timing=True)
 
             start_evt.record()
             choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
@@ -6254,7 +6438,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Use default process group (None = all ranks)
         process_group = None
-        rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
             cls._uses_layout_preserving_inputs(choice)
@@ -6276,10 +6459,9 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             avg_time = total_time / nruns
-
             # All-reduce to get avg time across ranks
             time_tensor = torch.tensor(
-                [avg_time], dtype=torch.float32, device=f"cuda:{rank}"
+                [avg_time], dtype=torch.float32, device=f"{inputs[0].device}"
             )
             work = dist.all_reduce(
                 time_tensor,
@@ -7042,6 +7224,25 @@ class AlgorithmSelectorCache(PersistentCache):
         # Preserve the original dtype before unwrapping, since dtype views
         # (e.g. uint8 -> float4_e2m1fn_x2) would be lost by unwrap_view.
         original_dtype = node.get_dtype()
+        # Read before unwrapping: the view's offset is relative to the buffer
+        # being unwrapped away, and unwrap_view would drop it.
+        view_offset = V.graph.sizevars.optimization_hint_with_override(
+            node.get_layout().offset,
+            hint_override=hint_override,
+        )
+        # The kernel indexes the whole view, which reaches past the buffer for a
+        # positive offset, so size the fake input for the view's span as well.
+        view_span = torch._prims_common.compute_required_storage_length(
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_size(),
+                hint_override=hint_override,
+            ),
+            V.graph.sizevars.optimization_hints_with_override(
+                get_strides_with_layout_constraints(node),
+                hint_override=hint_override,
+            ),
+            0,
+        )
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
 
@@ -7068,6 +7269,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 V.graph.get_allocation_size(node),
                 hint_override=hint_override,
             ),
+            view_offset,
+            view_span,
         )
         # Restore dtype if it was lost by unwrapping a dtype view
         if result.dtype != original_dtype:
@@ -7076,27 +7279,48 @@ class AlgorithmSelectorCache(PersistentCache):
 
     @staticmethod
     def generate_example_value(
-        size, stride, device, dtype, extra_size, allocation_size=None
+        size,
+        stride,
+        device,
+        dtype,
+        extra_size,
+        allocation_size=None,
+        view_offset=0,
+        view_span=None,
     ):
+        # Named for rand_strided, which the generated code calls positionally.
+        reserve = size if allocation_size is None else allocation_size
+        reserve_span = torch._prims_common.compute_required_storage_length(
+            reserve, stride, 0
+        )
+        if view_span is None:
+            # No separate view: the kernel indexes the buffer itself.
+            view_span = torch._prims_common.compute_required_storage_length(
+                size, stride, 0
+            )
+        # A negative view_offset reaches before the buffer and cannot be given
+        # to as_strided, so place the data pointer that much further in.
+        shift = max(0, -view_offset)
+        # The kernel can index both the buffer and the whole view, so the
+        # storage holds shift elements in front of the data pointer and then
+        # whichever of the two reaches further past it. A negative extra_size
+        # means the buffer has no leading region, not that it needs less of one.
+        backing_size = max(extra_size, 0) + shift + max(reserve_span, view_span)
+        # rand_strided allocates reserve_span + extra_size, and only pads behind,
+        # so the view's room in front of the buffer is requested as padding.
+        pad_after = backing_size - reserve_span
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
+        # Triton codegen relies on rand_strided filling non-float tensors with
+        # zeros (see TritonKernel._is_zero_in_autotune_block).
         with preserve_rng_state():
-            if allocation_size is None or allocation_size == size:
-                return rand_strided(
-                    size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                )
-            else:
-                return rand_strided(
-                    allocation_size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                ).as_strided(size, stride)
+            return rand_strided(
+                reserve,
+                stride,
+                device=device,
+                dtype=dtype,
+                extra_size=pad_after,
+            ).as_strided(size, stride, shift)
 
     @staticmethod
     def key_of(node):
