@@ -20,7 +20,6 @@ from torch._inductor.select_algorithm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, get_num_sms, TMA_DESCRIPTOR_SIZE
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1126,8 +1125,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         with patch.object(inductor_config.lookup_table, "check_src_hash", True):
             self.run_model("mm", tensors)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

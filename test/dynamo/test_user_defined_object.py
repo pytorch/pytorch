@@ -16,7 +16,6 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import common_constant_types, counters
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2285,8 +2284,6 @@ class TestGetattributeName(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, Plain())[1], fn(x, Plain())[1])
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

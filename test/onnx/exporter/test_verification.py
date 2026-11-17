@@ -8,7 +8,6 @@ import json
 import torch
 from torch.onnx._internal.exporter import _verification
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -145,8 +144,6 @@ class VerificationFunctionsTest(common_utils.TestCase):
         )
         self.assertEqual(len(verification_infos), 3)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

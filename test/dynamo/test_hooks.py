@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     preserves_device_selection,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils.hooks import RemovableHandle
 
@@ -1315,7 +1314,6 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
 
 instantiate_device_type_tests(HooksTestsDevice, globals(), allow_xpu=True)
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

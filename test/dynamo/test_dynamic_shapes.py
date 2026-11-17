@@ -5,7 +5,6 @@ import warnings
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.fx.experimental import _config as fx_config
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_S390X, periodic, slowTest, TEST_Z3
 
 
@@ -109,7 +108,6 @@ DynamicShapesMiscTests.test_recursion_depth_guards_dynamic_shapes = unittest.ski
     "test_recursion_depth_guards_nested_graph_breaks fails on s390x and python 3.12",
 )(DynamicShapesMiscTests.test_recursion_depth_guards_dynamic_shapes)  # noqa: F821
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

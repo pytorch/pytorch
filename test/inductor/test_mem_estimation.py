@@ -14,7 +14,6 @@ from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_leaves
@@ -361,7 +360,6 @@ instantiate_device_type_tests(
     TestMemoryTracker, globals(), except_for="cpu", allow_xpu=True
 )
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if has_triton():

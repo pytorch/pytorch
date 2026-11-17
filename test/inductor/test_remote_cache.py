@@ -14,7 +14,6 @@ from torch._inductor.remote_cache import (
     RemoteCacheBackend,
     RemoteCachePassthroughSerde,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, TestCase
 from torch.testing._internal.logging_utils import log_settings
 
@@ -173,8 +172,6 @@ class TestRemoteCache(TestCase):
             self.assertEqual(args[0], key)
             self.assertEqual(json.loads(args[1]), expected)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

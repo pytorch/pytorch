@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 def checkpoint_wrapper(fn):
@@ -669,8 +668,6 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

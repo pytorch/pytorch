@@ -16,7 +16,6 @@ from torch._inductor.kernel.flex.aux_vectorization import (
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -389,8 +388,6 @@ class TestFlexAuxVectorization(InductorTestCase):
                 ],
             )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

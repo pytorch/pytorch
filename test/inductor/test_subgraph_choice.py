@@ -19,7 +19,6 @@ from torch._inductor.lowering import lowerings, register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -329,8 +328,6 @@ class TestSubgraphChoice(TestCase):
 
             compiled_func(a_in, b_in)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     # Set env to make it work in CI.

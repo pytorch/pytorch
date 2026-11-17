@@ -10,7 +10,6 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -496,8 +495,6 @@ class CpuFlashAttentionSchemaTests(TestCase):
             {arg.name for arg in arguments if arg.kwarg_only}, {"attn_mask", "scale"}
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -19,7 +19,6 @@ from torch._inductor.kernel.custom_op import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
@@ -1545,8 +1544,6 @@ class TestCustomOpAutoTune(TestCase):
 
 instantiate_parametrized_tests(TestCustomOpAutoTune)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

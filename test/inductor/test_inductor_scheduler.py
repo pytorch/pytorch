@@ -65,7 +65,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     skipCUDAIf,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
@@ -3340,7 +3339,6 @@ class TestScoreFusionMemory(TestCase):
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestScoreFusionMemory, globals(), allow_xpu=True)
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

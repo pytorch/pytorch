@@ -17,7 +17,6 @@ from torch._inductor.fx_passes.decomp_comms import decomp_gram_matrix_all_gather
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
@@ -487,8 +486,6 @@ class TestDecompGramMatrixAllGather(InductorTestCase):
         )
         self.assertEqual(_count_ops(traced.graph, c10d.all_reduce.default), 0)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

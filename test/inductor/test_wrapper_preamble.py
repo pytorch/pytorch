@@ -16,7 +16,6 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import IndentedBuffer, run_and_get_code
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
@@ -325,8 +324,6 @@ class TestWrapperPreamble(TestCase):
             env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
             subprocess.check_call([sys.executable, path], env=env)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -10,7 +10,6 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -504,8 +503,6 @@ class TestDropoutAlignRandomEager(InductorTestCase):
                     masks_eq, lambda msg: f"{msg}\nseed={seed}: mask mismatch"
                 )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:

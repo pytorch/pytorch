@@ -19,7 +19,6 @@ from torch._dynamo.testing import (
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     find_free_port,
@@ -1727,7 +1726,6 @@ for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
 
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

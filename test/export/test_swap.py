@@ -13,7 +13,6 @@ from torch._export import config
 from torch._export.utils import register_dataclass_as_pytree_node
 from torch.export import export, register_dataclass
 from torch.export._swap import _swap_modules
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -450,8 +449,6 @@ def forward(self, x, y):
         self.assertTrue(torch.allclose(res1[1].a, res2[1].a))
         self.assertTrue(torch.allclose(res1[1].b, res2[1].b))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

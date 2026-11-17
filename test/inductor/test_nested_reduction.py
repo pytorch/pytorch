@@ -15,7 +15,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     add_skip_condition,
     instantiate_parametrized_tests,
@@ -3920,8 +3919,6 @@ class NestedReductionAOTITest(TestCase):
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
         self.assertEqual(metrics.codegen_nested_reduction, 1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_GPU:

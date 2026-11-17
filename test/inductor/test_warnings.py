@@ -10,7 +10,6 @@ from torch._inductor.utils import run_and_get_code
 from torch._logging import warning_once
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
@@ -124,8 +123,6 @@ class InductorWarningTests(TestCase):
         finally:
             torch.set_float32_matmul_precision(orig_matmul_precision)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

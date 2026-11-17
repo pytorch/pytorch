@@ -12,7 +12,6 @@ from torch._inductor.standalone_compile import NoRunnableInductorModuleError
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -538,8 +537,6 @@ class TestInductorCompileToPythonContract(TestCase):
         with torch.no_grad():
             self.assertEqual(load_from_python(src2)(_flat_inputs(m, x))[0], m(x))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -41,7 +41,6 @@ from torch._prims_common import is_float_dtype
 from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
     HardwareClassification,
@@ -8150,8 +8149,6 @@ class CPUReproTests(TestCase):
                 self.common(fn, (a,))
             self.common(fn_bitwise_bool, (a, b))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
