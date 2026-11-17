@@ -870,8 +870,9 @@ def _get_zes_device_info(device: Device = None) -> _ZesDeviceInfo:
 
     device = _get_device_index(device, optional=True)
     uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
-    # Match by UUID since Sysman and SYCL may enumerate devices in different
-    # orders. The list is read-only here so that lock-free access stays safe.
+    # Match by UUID since Level Zero Sysman and SYCL may enumerate devices in
+    # different orders. Concurrent re-enumeration only replaces entries with
+    # equivalent ones (same UUIDs, same order), so lock-free iteration is safe.
     for info in _cached_zes_device_infos:
         if info.uuid == uuid:
             return info
