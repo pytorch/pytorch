@@ -1,0 +1,31 @@
+{{sorted_prelude()}}
+    spos = first + pos
+    sp = tl.minimum(spos, NUM_TOKENS - 1)
+    skey = tl.where(spos < NUM_TOKENS, tl.load(SKEYS + sp), NUM_KEYS)
+    ptok = tl.load(PERM + sp).to(INDEX_DTYPE)[:, None]
+    next_skey = tl.gather(skey, tl.minimum(pos + 1, BLOCK_T - 1), 0)
+    seg_end = (skey < NUM_KEYS) & ((skey != next_skey) | (pos == BLOCK_T - 1))
+    head = (skey == first_key) & (first_key == prev_key)
+    tail = (skey == last_key) & (last_key == next_key) & ~head
+    direct = (seg_end & ~head & ~tail)[:, None]
+    out_key = tl.where(seg_end, skey, 0).to(INDEX_DTYPE)[:, None]
+    seg_key = tl.broadcast_to(skey.to(INDEX_DTYPE)[:, None], (BLOCK_T, BLOCK_D))
+    for it in tl.range(0, D_ITERS):
+        {{inner_block("D_ITERS", "BLOCK_D") | indent_except_first(2)}}
+
+        {{preagg_value("ptok", "inner", "val") | indent_except_first(2)}}
+
+        _, acc = tl.associative_scan((seg_key, val), 0, _preagg_segmented_sum)
+        mask = direct & inner_mask[None, :]
+        addr = tl.broadcast_to(
+            OUT + ({{preagg_addr("out_key", "inner")}}), [BLOCK_T, BLOCK_D]
+        )
+        old = tl.load(addr, mask=mask, other=0).to(acc.dtype)
+        tl.store(addr, (old + acc).to(OUT_DTYPE), mask=mask)
+        part = PART + pid_tok * NUM_INNER + inner_raw[None, :]
+        tl.store(
+            part + tl.where(head, 0, NUM_CHUNKS * NUM_INNER)[:, None],
+            acc,
+            mask=(seg_end & (head | tail))[:, None] & inner_mask[None, :],
+        )
+{{segmented_sum()}}

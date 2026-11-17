@@ -1,0 +1,40 @@
+{{sorted_prelude()}}
+    owns = (
+        (last_key == next_key)
+        & ((first_key != last_key) | (first_key != prev_key))
+        & (last_key < NUM_KEYS)
+    )
+    if owns:
+        out_key = last_key.to(INDEX_DTYPE)
+        for it in tl.range(0, D_ITERS):
+            {{inner_block("D_ITERS", "BLOCK_D") | indent_except_first(3)}}
+
+            acc = tl.load(
+                PART + NUM_CHUNKS * NUM_INNER + pid_tok * NUM_INNER + inner_raw,
+                mask=inner_mask,
+            )[None, :]
+            # Keys are sorted, so a later chunk continues the segment iff its
+            # first key is still last_key.
+            chunk = pid_tok + 1 + tl.arange(0, 32).to(INDEX_DTYPE)
+            more = True
+            while more:
+                in_seg = (chunk < NUM_CHUNKS) & (
+                    tl.load(SKEYS + tl.minimum(chunk, NUM_CHUNKS - 1) * BLOCK_T)
+                    == last_key
+                )
+                heads = tl.load(
+                    PART + chunk[:, None] * NUM_INNER + inner_raw[None, :],
+                    mask=in_seg[:, None] & inner_mask[None, :],
+                    other=0,
+                )
+                acc += tl.sum(heads, 0)[None, :]
+                more = (tl.max(chunk) + 1 < NUM_CHUNKS) & (
+                    tl.min(in_seg.to(tl.int32)) == 1
+                )
+                chunk += 32
+            addr = tl.broadcast_to(
+                OUT + ({{preagg_addr("out_key", "inner")}}), [1, BLOCK_D]
+            )
+            mask = inner_mask[None, :]
+            old = tl.load(addr, mask=mask, other=0).to(acc.dtype)
+            tl.store(addr, (old + acc).to(OUT_DTYPE), mask=mask)

@@ -7256,8 +7256,10 @@ class AOTInductorTestsTemplate:
             optimized(*input2)
 
     @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
+    @config.patch({"scatter_preagg_template": False})
     def test_index_put_with_none_index(self):
-        # index_put falls back in the deterministic mode
+        # index_put falls back in the deterministic mode without the scatter
+        # template, which would otherwise lower it
         with DeterministicGuard(True):
 
             class Model(torch.nn.Module):
