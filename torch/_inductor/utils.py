@@ -674,6 +674,9 @@ class GraphPartitionMode(enum.Enum):
     # out of CUDA Graphs while the rest is captured: the region gets its own
     # uncaptured partition.
     REGION_OPT_OUT = "region_opt_out"
+    # Forced on, with graph_partition off, for a compile whose nested regions opt
+    # in while the top level does not capture: only those regions are captured.
+    REGION_OPT_IN = "region_opt_in"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -702,11 +705,12 @@ class GraphPartitionPlan:
     def __post_init__(self) -> None:
         if self.cudagraphs_per_partition and not self.split_into_partitions:
             raise ValueError("cudagraphs_per_partition=True requires partitioning")
-        if (
-            self.mode is GraphPartitionMode.REGION_OPT_OUT
-            and not self.cudagraphs_top_level
+        if self.mode is GraphPartitionMode.REGION_OPT_OUT and not (
+            self.cudagraphs_top_level
         ):
             raise ValueError("REGION_OPT_OUT requires cudagraphs_top_level=True")
+        if self.mode is GraphPartitionMode.REGION_OPT_IN and self.cudagraphs_top_level:
+            raise ValueError("REGION_OPT_IN requires cudagraphs_top_level=False")
 
     @property
     def split_into_partitions(self) -> bool:
@@ -723,6 +727,11 @@ class GraphPartitionPlan:
             self.cudagraphs_per_partition
             and self.mode is not GraphPartitionMode.REGION_OPT_OUT
         )
+
+    @property
+    def captures_only_regions(self) -> bool:
+        """Whether only nested regions that opt in are captured."""
+        return self.mode is GraphPartitionMode.REGION_OPT_IN
 
     @staticmethod
     def no_partition() -> GraphPartitionPlan:

@@ -710,7 +710,22 @@ def deserialize_bundled_cache_entry(
     # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
     # which is set by compile_fx. But in precompile, we never actually call compile_fx
     # so we don't have a place to track cudagraphs here.
-    cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+    # A nested compile region's cudagraph opt-in belongs to the artifact, not to
+    # this process's config: a forward compiled for capture with the top level off
+    # got it from a region. One whose request was dropped asks too, so that
+    # post_compile reports the skip again.
+    fw_result = entry.compiled_fw.result
+    region_requested_cudagraphs = (
+        isinstance(fw_result, CompiledFxGraph)
+        and (
+            fw_result.cudagraph_info is not None
+            or "cudagraphs_dropped_reason" in fw_result.fx_kwargs
+        )
+        and not fw_result.fx_kwargs.get("cudagraphs_top_level", True)
+    )
+    cudagraphs = BoxedBool(
+        torch._inductor.config.triton.cudagraphs or region_requested_cudagraphs
+    )
     boxed_forward_device_index = BoxedDeviceIndex(None)
     # We need to make a clean copy of the cache entry
     # in case it needs to be serialized again
