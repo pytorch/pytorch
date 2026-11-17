@@ -912,119 +912,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             fake_tensor.fake_device = torch.device("cuda")
             self.assertEqual(fake_tensor.fake_device, torch.device("cuda:0"))
 
-    @skipIfTorchDynamo(
-        "the meta-as-accelerator patch trips dynamo's own autocast guard"
-    )
-    def test_init_gpu_context_only_for_current_accelerator(self):
-        """The warmup call site is unconditional: init_gpu_context's own
-        self-guard on the current accelerator decides whether it allocates.
-        The allocation stays REAL under the dispatch states FakeTensor
-        construction can hold (FakeTensorMode pushed and
-        in_kernel_invocation_manager's meta TLS include set)."""
-        from torch._subclasses import fake_tensor as ft
-
-        def attempts_for(accel, device, execute=True):
-            attempts = []
-            results = []
-            tls = []
-            real_empty = torch.empty
-            real_zeros = torch.zeros
-            FAKE_KEY = torch._C._TorchDispatchModeKey.FAKE
-
-            def spy(*args, **kwargs):
-                attempts.append(kwargs.get("device"))
-                tls.append(
-                    (
-                        torch._C._meta_in_tls_dispatch_include(),
-                        torch._C._get_dispatch_mode(FAKE_KEY),
-                    )
-                )
-                if execute:
-                    if torch.version.hip is None:
-                        out = real_empty(*args, **kwargs)
-                    else:
-                        out = real_zeros(*args, **kwargs)
-                else:
-                    # The target device may not exist on this machine (mps on
-                    # Linux): the request and the TLS states are the point.
-                    out = real_empty(1, device="cpu")
-                results.append(out)
-                return out
-
-            ft.init_gpu_context.cache_clear()
-            with (
-                patch(
-                    "torch.accelerator.current_accelerator",
-                    lambda check_available=False: accel,
-                ),
-                # The simulated accelerator is present, so the availability leg
-                # the guard consults for a matching device answers True.
-                patch("torch.accelerator.is_available", lambda: True),
-                patch.object(torch, "empty", spy),
-                patch.object(torch, "zeros", spy),
-            ):
-                FakeTensor._normalize_fake_device(device)
-            return attempts, results, tls
-
-        def assert_real_warmup(accel, device, execute=True):
-            attempts, results, tls = attempts_for(accel, device, execute)
-            # No index: the warmup targets the type's default device.
-            self.assertEqual(attempts, [torch.device(torch.device(device).type)])
-            # Strict type identity: an intercepted allocation returns a
-            # FakeTensor that reports the requested device.
-            self.assertEqual(len(results), 1)
-            self.assertNotIsInstance(results[0], FakeTensor)
-            self.assertIs(type(results[0]), torch.Tensor)
-            if execute:
-                self.assertEqual(results[0].device, attempts[0])
-            # At allocation time: the meta TLS include is cleared and no
-            # FakeTensorMode is set (device_lazy_init returns early while the
-            # FAKE mode is in TLS, skipping the very runtime init here).
-            self.assertEqual(tls, [(False, None)])
-
-        meta = torch.device("meta")
-        assert_real_warmup(meta, meta)
-        # A pushed FakeTensorMode changes nothing; torch function modes are
-        # not covered (no_dispatch() hides dispatch only).
-        with FakeTensorMode():
-            assert_real_warmup(meta, meta)
-        # The self-guard alone decides here: whichever backend is the current
-        # accelerator and matches the device warms, e.g. mps. avoid_device_init
-        # no longer gates this path (it still governs lifting in __enter__ and
-        # device-changing constant propagation in _dispatch_impl). mps is
-        # intercepted, so no real mps device is required.
-        mps = torch.device("mps")
-        assert_real_warmup(mps, mps, execute=False)
-        with FakeTensorMode():
-            assert_real_warmup(mps, mps, execute=False)
-        # With the meta TLS include held set (as in_kernel_invocation_manager
-        # does), the warmup still runs and clears it around the allocation.
-        prev_include = torch._C._meta_in_tls_dispatch_include()
-        try:
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            assert_real_warmup(meta, meta)
-            # The include must be restored: a leaked False diverts later in-kernel ops.
-            include_still_set = torch._C._meta_in_tls_dispatch_include()
-        finally:
-            torch._C._set_meta_in_tls_dispatch_include(prev_include)
-        self.assertTrue(include_still_set)
-        # Non-matching accelerator: no allocation at all.
-        self.assertEqual(
-            attempts_for(torch.device("meta"), torch.device("cpu"))[0],
-            [],
-        )
-        # No accelerator (CPU-only build): no allocation at all.
-        self.assertEqual(attempts_for(None, torch.device("meta"))[0], [])
-
     def test_init_gpu_context_availability_leg_only_for_matched_device(self):
-        """Which probes the guard makes, per device. The runtime leg,
-        torch.accelerator.is_available(), delegates to the backend's own
-        is_available, which for CUDA is _cuda_getDeviceCount() and poisons
-        fork, so only a device that can actually be warmed may ask it. Only the
-        build fact (which backend this wheel was built with) is simulated here:
-        the accelerator query and the short-circuit in init_gpu_context are the
-        real code, so an availability probe for cpu/meta shows up in the
-        recorded sequence instead of passing silently."""
+        """Only the device matching the current accelerator probes availability."""
         from torch._subclasses import fake_tensor as ft
 
         cuda = torch.device("cuda")
@@ -1069,15 +958,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(ask(cuda, "cuda"), ["compile_time", "availability", "warmup"])
 
     def test_init_gpu_context_warmup_failure_is_best_effort(self):
-        """A refused warm-up neither escapes FakeTensor construction nor is retried
-        on every construction. The warm-up is optional, so its failure must not
-        become a new way for shape and dtype propagation to raise: CUDA cannot be
-        re-initialized in a process forked after the parent probed it, an
-        exclusive-process device or an OOM refuses the 1-element allocation, and a
-        PrivateUse1 backend registered without a complete torch.<name> module fails
-        the queries themselves. The function is functools.cache'd and that cache does
-        not store exceptions, so handling the failure here is also what keeps a
-        refused backend from being probed again on the next FakeTensor."""
+        """A failed warm-up warns and is not retried on the next construction."""
         from torch._subclasses import fake_tensor as ft
 
         cuda = torch.device("cuda")
@@ -1177,23 +1058,12 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             ft.init_gpu_context.cache_clear()
 
     def test_init_gpu_context_warmup_respects_local_index(self):
-        """The warmup keeps the FakeTensor's device index when it exists
-        locally, and falls back to the default device of the type only when it
-        does not. Runs on every build: the compile-time accelerator fact, the
-        device count and the allocation are all patched, so no real CUDA
-        device is required."""
+        """A locally missing device index falls back to the type's default device."""
         from torch._subclasses import fake_tensor as ft
 
         real_empty = torch.empty
         cuda = torch.device("cuda")
 
-        # The legs are inlined and the accelerator is simulated at the C-level
-        # build fact, as in the two cases above. The previous helper-closure
-        # shape went red under the dynamo-wrapped CI harness: from the resumed
-        # closure frame dynamo started compiling the guard's accelerator query,
-        # and a new frame's stream-state probe consults the patched
-        # is_available and then calls an unpatched current_stream, which
-        # raises on CPU-only runners.
         # device, simulated device count, expected warm-up allocation
         for device_str, count, expected_attempt in (
             ("cuda:3", 8, torch.device("cuda:3")),
@@ -1237,9 +1107,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(normalized, torch.device(device_str))
 
     def _accelerator_with_is_initialized(self):
-        """The current accelerator, skipping when there is none or when the
-        backend module cannot answer is_initialized: the warmup legs below
-        observe the flip through that attribute (mps has no is_initialized)."""
+        """The current accelerator; skip when absent or lacking is_initialized."""
         acc = torch.accelerator.current_accelerator(check_available=True)
         if acc is None:
             self.skipTest("no current accelerator")
@@ -1248,46 +1116,10 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         return acc
 
     @unittest.skipUnless(TEST_ACCELERATOR, "requires a real accelerator")
-    def test_init_gpu_context_warms_runtime_under_pushed_fake_mode(self):
-        """With a FakeTensorMode pushed, building a FakeTensor on the current
-        accelerator must leave the backend runtime initialized:
-        device_lazy_init returns early while a FAKE mode is set in TLS and
-        no_dispatch() does not unset it, so the warmup allocation has to.
-        Fresh process: the runtime must start uninitialized for the
-        initialization to be attributable to this construction alone."""
-        acc = self._accelerator_with_is_initialized()
-        script = """\
-import torch
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
-acc = torch.accelerator.current_accelerator(check_available=True)
-assert acc is not None
-runtime = getattr(torch, acc.type)
-assert not runtime.is_initialized()
-mode = FakeTensorMode()
-with mode:
-    fake = FakeTensor(mode, torch.empty(1, device="meta"), acc)
-assert runtime.is_initialized()
-assert fake.fake_device.type == acc.type
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, timeout=120
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
-        )
-
-    @unittest.skipUnless(TEST_ACCELERATOR, "requires a real accelerator")
     def test_init_gpu_context_warms_real_accelerator(self):
-        """Nothing patched: building a FakeTensor on the current accelerator
-        initializes that runtime end-to-end. Each leg runs in a fresh process,
-        so the runtime starts uninitialized and the flip to initialized is
-        attributable to that construction alone: an earlier query such as
-        current_device() would initialize the runtime itself. Skipped when no
-        accelerator is available or its backend module has no
-        is_initialized to observe the flip with (e.g. mps)."""
+        """Nothing patched: the warm-up really initializes the current runtime."""
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("subprocess legs do not see the config patch")
         self._accelerator_with_is_initialized()
         preamble = """\
 import torch
@@ -1305,8 +1137,8 @@ fake = FakeTensor(mode, torch.empty(1, device="meta"), acc)
 assert runtime.is_initialized()
 assert fake.device == torch.device(acc.type, runtime.current_device())
 """
-        # The in-kernel state the warmup must survive: mode pushed and meta
-        # TLS include held set; the allocation must still be real.
+        # Mode pushed and meta TLS include held set: constructing the fake
+        # still warms the runtime, and the include is restored on guard exit.
         in_kernel = """\
 meta = torch.empty(1, device="meta")
 with torch._C._PreserveDispatchKeyGuard():

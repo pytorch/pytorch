@@ -94,31 +94,43 @@ class TestFakeTensor(TestCase):
             self.assertEqual(y.device.type, "openreg")
 
     def test_fake_tensor_mode_warms_runtime(self):
-        """Fakeifying an openreg tensor initializes the backend runtime, the way
-        it does for a built-in accelerator: backward errors later if no real
-        tensor was ever created on the device. Fresh process because
-        is_initialized only starts False once per process, and an earlier real
-        allocation (or an earlier query that initializes the runtime) would
-        hide the flip this construction is supposed to cause."""
-        script = """\
+        """Fakeifying an openreg tensor warms the runtime in every dispatch state."""
+        preamble = """\
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 assert not torch.openreg.is_initialized()
+"""
+        # Outside any pushed mode.
+        direct = """\
 mode = FakeTensorMode()
 with mode:
     fake = FakeTensor(mode, torch.empty(1, device="meta"), torch.device("openreg"))
 assert torch.openreg.is_initialized()
 assert fake.device.type == "openreg"
 """
-        result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, timeout=120
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
-        )
+        # The in-kernel state: meta TLS include held set and mode pushed. The
+        # warm-up must leave the include restored and still warm the runtime.
+        in_kernel = """\
+meta = torch.empty(1, device="meta")
+with torch._C._PreserveDispatchKeyGuard():
+    torch._C._set_meta_in_tls_dispatch_include(True)
+    with FakeTensorMode() as mode:
+        FakeTensor(mode, meta, torch.device("openreg"))
+    assert torch._C._meta_in_tls_dispatch_include()
+assert torch.openreg.is_initialized()
+"""
+
+        def run_leg(name, body):
+            # Fresh process per leg: is_initialized starts False only once per
+            # process, so an earlier leg's warm-up would mask the next one's.
+            cmd = [sys.executable, "-c", preamble + body]
+            result = subprocess.run(cmd, capture_output=True, timeout=120)
+            err = result.stderr.decode()
+            self.assertEqual(result.returncode, 0, f"{name} leg failed:\n{err}")
+
+        run_leg("direct", direct)
+        run_leg("in_kernel", in_kernel)
 
 
 class TestGuards(TestCase):
