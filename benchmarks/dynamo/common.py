@@ -332,12 +332,8 @@ TP_IDENTITY_HEADERS = ("phase", "tp_size", "prompt_length", "decode_length")
 
 
 def set_current_metadata(args, *, model_metadata=None):
-    global \
-        current_backend, \
-        current_mode, \
-        current_dtype, \
-        current_quantization, \
-        current_settings
+    global current_backend, current_mode, current_dtype
+    global current_quantization, current_settings
     current_backend = args.backend
     current_mode = (
         "training" if args.training else "inference" if args.inference else ""
@@ -809,7 +805,6 @@ def timed(
         request_times.append(t_iter_end - t_iter_begin)
 
     if group is not None:
-        # Each request takes as long as its slowest rank.
         request_times = list(map(max, *gather_across_ranks(request_times, group)))
     time_total = sum(request_times)
     if not sync_each_request:
@@ -1930,6 +1925,8 @@ class BenchmarkWorkload:
 
 
 class BenchmarkRunner:
+    suite_name: str | None = None
+
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
