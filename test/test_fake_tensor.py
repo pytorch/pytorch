@@ -4485,7 +4485,6 @@ class TestFakeTensorProp(TestCase):
                 value, None, another_optional_value
             )
 
-    @fake_tensor_test()
     def test_unbacked_shape_realloc(self):
         def f(x):
             return x.nonzero()
