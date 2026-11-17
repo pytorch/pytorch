@@ -2260,6 +2260,13 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         from .builder import SourcelessBuilder
 
         if self.source is None:
+            if args and issubclass(self.value, OSError):
+                unimplemented(
+                    gb_type="Sourceless OSError subclass constructed with arguments",
+                    context=f"class={self.value}, args={args}",
+                    explanation="OSError parses its arguments in __new__, which Dynamo does not model.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             # NB: If source is added via side effects, create the exception
             # object through side_effects as well. See FrozenDataClass creation
             var = tx.output.side_effects.track_new_user_defined_object(
