@@ -12268,6 +12268,16 @@ class Scheduler:
     def _invoke_subgraph_family_cudagraph_skip_reason(
         self, node: BaseSchedulerNode, region: ir.InvokeSubgraph
     ) -> str | None:
+        """Why one invoke_subgraph call cannot be captured, judged on its nodes
+        in the outer graph: the call and its MultiOutput nodes.
+
+        Those are separate scheduler nodes but must land in the same partition,
+        so they share one verdict: any of them off the GPU, using a
+        cudagraph-unsafe unbacked symint, or (under cudagraph_skip_dynamic_graphs)
+        having dynamic shapes rejects the whole call. Cached per call so every
+        node of the family gets the same answer. The body is checked separately
+        by _subgraph_cudagraph_skip_reason.
+        """
         cache = self._invoke_subgraph_family_skip_reason_cache
         if (region_name := region.get_name()) in cache:
             return cache[region_name]
