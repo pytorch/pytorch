@@ -3583,8 +3583,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> None:
         original_method = getattr(cls, method)
 
-        if original_method is getattr(VariableTracker, method) or hasattr(
-            original_method, "_call_once_guarded"
+        # A constant holds no other VTs, so it cannot be self-referential and
+        # skips the guard, which costs a contextvar lookup and a set update per
+        # call. ConstantVariable is not defined yet when its own class body is
+        # processed, hence the name check.
+        is_constant = (
+            cls.__name__ == "ConstantVariable"
+            and cls.__module__ == "torch._dynamo.variables.constant"
+        )
+        if (
+            is_constant
+            or original_method is getattr(VariableTracker, method)
+            or hasattr(original_method, "_call_once_guarded")
         ):
             return
 

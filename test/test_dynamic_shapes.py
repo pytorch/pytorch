@@ -74,12 +74,15 @@ from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._sympy.functions import (
     CleanDiv,
+    FloatTrueDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
     Min,
     Mod,
+    OpaqueUnaryFn_sqrt,
     PythonMod,
+    ToFloat,
 )
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -639,6 +642,40 @@ class TestPySymInt(TestCase):
         self.assertExpectedInline(
             str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s97)), 2.0)"""
         )
+
+    def test_evaluate_expr_float_without_hint(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        scale = FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        self.assertEqual(shape_env.guarding_hint_or_throw(scale), 0.125)
+        self.assertEqual(shape_env.evaluate_expr(scale), 0.125)
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s97))), 0.125)""",
+        )
+
+    @parametrize("hint", (None, 0.125))
+    def test_guarding_hint_or_throw_float(self, hint):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        expr = FloatTrueDiv(1.0, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        value = SymFloat(SymNode(expr, shape_env, float, hint=hint))
+        self.assertEqual(guarding_hint_or_throw(value), 0.125)
+        self.assertEqual(guarding_hint_or_throw(value.node), 0.125)
+        self.assertEqual(guarding_hint_or_throw(0.125), 0.125)
+
+    @parametrize("numerator", (1.0, 64.0))
+    def test_guarding_hint_or_throw_float_does_not_cache_hint(self, numerator):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        expr = FloatTrueDiv(numerator, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        node = SymNode(expr, shape_env, float, hint=sym_node._NO_HINT)
+        self.assertIsNone(node.hint)
+        for value in (SymFloat(node), node):
+            hint = guarding_hint_or_throw(value)
+            self.assertEqual(hint, numerator / 8.0)
+            self.assertIsInstance(hint, float)
+            self.assertIsNone(node.hint)
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -2278,6 +2315,9 @@ class f(torch.nn.Module):
                 (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
             )
             torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
+
+
+instantiate_parametrized_tests(TestPySymInt)
 
 
 @skipIfTorchDynamo(
@@ -7710,7 +7750,117 @@ class ShapeEnvReplacementCacheTest(TestCase):
 instantiate_parametrized_tests(ShapeEnvReplacementCacheTest)
 
 
+class ShapeEnvAxiomCacheInvalidationTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_explicit_axioms_preserve_pending_floor_div_resimplification(self):
+        for axioms in ((), (sympy.true,)):
+            with self.subTest(axioms=axioms):
+                shape_env = ShapeEnv()
+                a = create_symint(shape_env, 8, duck=False).node.expr
+                b = create_symint(shape_env, 5, duck=False).node.expr
+                floor_probe = sympy.Le(FloorDiv(a, 2), b, evaluate=False)
+                clean_probe = sympy.Le(CleanDiv(a, 2), b, evaluate=False)
+                shape_env.axioms.update(dict(shape_env.get_implications(floor_probe)))
+                shape_env._update_version_counter()
+                shape_env._add_divisible(Mod(a, 2))
+                previous_axioms = shape_env.axioms.copy()
+                version = shape_env._version_counter
+
+                self.assertIsNone(
+                    shape_env._maybe_evaluate_static(clean_probe, axioms=axioms)
+                )
+                self.assertTrue(shape_env._resimplify_floor_div_axioms)
+                self.assertEqual(shape_env._version_counter, version)
+                self.assertEqual(shape_env.axioms, previous_axioms)
+                self.assertEqual(
+                    shape_env._maybe_evaluate_static(clean_probe), sympy.true
+                )
+                self.assertFalse(shape_env._resimplify_floor_div_axioms)
+                self.assertGreater(shape_env._version_counter, version)
+                self.assertIn(canonicalize_bool_expr(clean_probe), shape_env.axioms)
+
+    @torch._dynamo.disable(reason="directly mutates the test's ShapeEnv")
+    def _check_adds_only_axioms(self, shape_env, condition):
+        state = (
+            shape_env.var_to_range.copy(),
+            len(shape_env.replacements),
+            len(shape_env.divisible),
+            shape_env.num_deferred_runtime_asserts,
+        )
+        n_axioms = len(shape_env.axioms)
+        torch._check(condition)
+        with self.subTest("axiom-only guard"):
+            self.assertEqual(
+                (
+                    shape_env.var_to_range,
+                    len(shape_env.replacements),
+                    len(shape_env.divisible),
+                    shape_env.num_deferred_runtime_asserts,
+                ),
+                state,
+            )
+            self.assertGreater(len(shape_env.axioms), n_axioms)
+
+    def test_guard_updates_static_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        probe = sympy.Le(a.node.expr, b.node.expr, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_static(probe))
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the same call retained None after the guard proved it.
+        with self.subTest("static result"):
+            self.assertEqual(shape_env._maybe_evaluate_static(probe), sympy.true)
+
+    def test_guard_updates_get_axioms_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        self.assertEqual(shape_env.get_axioms(), ())
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the cached tuple omitted the newly recorded guard.
+        with self.subTest("axioms result"):
+            self.assertIn(shape_env.guards[-1].expr, shape_env.get_axioms())
+
+    def test_guard_updates_max_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        difference = b.node.expr - a.node.expr
+        expr = Max(0, difference)
+        self.assertEqual(shape_env.simplify(expr), expr)
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the same call retained Max after its bound was proved.
+        with self.subTest("simplified result"):
+            self.assertEqual(shape_env.simplify(expr), difference)
+
+    @skipIfTorchDynamo("directly exercises ShapeEnv caches")
+    def test_guard_updates_floor_div_result(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 4, duck=False)
+        b = create_symint(shape_env, 10, duck=False)
+        difference = b.node.expr - a.node.expr
+        expr = FloorDiv(Max(0, difference), 2)
+        expected = CleanDiv(Max(0, difference), 2)
+        # The first call installs the exact division guard; the second warms
+        # the helper's cache with that guard in place.
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        hits = shape_env._simplify_floor_div.cache_info().hits
+        self.assertEqual(shape_env._simplify_floor_div(expr), expected)
+        self.assertEqual(shape_env._simplify_floor_div.cache_info().hits, hits + 1)
+        self._check_adds_only_axioms(shape_env, a <= b)
+        # Previously, the helper's cache retained the old Max-dependent result.
+        with self.subTest("floor division result"):
+            self.assertEqual(
+                shape_env._simplify_floor_div(expr), FloorDiv(difference, 2)
+            )
+
+
 class TestSingletonIntStaticEval(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_singleton_int_only_expr_can_be_statically_evaluated(self):
         from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -8474,7 +8624,6 @@ class TestTransferSymbolsFromForeignShapeEnvDevice(TestCase):
 instantiate_device_type_tests(
     TestTransferSymbolsFromForeignShapeEnvDevice,
     globals(),
-    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
