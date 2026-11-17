@@ -29,7 +29,7 @@ build on GPU-less machines. Each value names a device the containing build suppo
 the exporter chooses the widest compatible target from each op's ARCHS. The selected
 target is per-compile rather than per-process -- CuTeDSL takes --gpu-arch, which
 outranks CUTE_DSL_ARCH. CuTeDSL needs one warmup compile per process for that; see
-tools/native_aot/cutedsl_warmup.py.
+torch/_native/cutedsl/export.py.
 
 Usage (from the repo root, in a venv with torch built and the DSL wheel active):
     python tools/native_aot/export.py [--out-dir build/native_aot]

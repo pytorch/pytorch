@@ -46,14 +46,24 @@ SIDECAR: dict[str, Any] = {
 }
 
 
+# The host target the stand-in for torch._native.cutedsl.export pins. The real
+# table is tested with torch, in test/inductor/test_cutedsl_kernels.py.
+_FAKE_HOST_TARGET = "llvm -mtriple=fake-unknown-linux-gnu"
+
+
 @contextlib.contextmanager
 def _fake_cute_compile():
-    """Stand in for cutlass.cute, yielding the options export() compiled with."""
-    seen: dict[str, Any] = {}
+    """Stand in for cutlass.cute and for torch._native.cutedsl.export (torch does not
+    import here), yielding the options export() compiled with and the number of
+    exporter warm-ups it ran."""
+    seen: dict[str, Any] = {"warm_ups": 0}
 
     def fake_compile(fn, *args, **kwargs):
         seen["options"] = kwargs.get("options")
         return types.SimpleNamespace(export_to_c=lambda **kw: None)
+
+    def fake_warm_up():
+        seen["warm_ups"] += 1
 
     fake_cute = types.ModuleType("cutlass.cute")
     # cast: a ModuleType instance has no declared attributes, so plain assignment
@@ -61,12 +71,15 @@ def _fake_cute_compile():
     cast(Any, fake_cute).compile = fake_compile
     fake_cutlass = types.ModuleType("cutlass")
     cast(Any, fake_cutlass).cute = fake_cute
-    with (
-        mock.patch.dict(
-            sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
-        ),
-        mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
-    ):
+    fake_export = types.ModuleType("torch._native.cutedsl.export")
+    cast(Any, fake_export).host_target = lambda: _FAKE_HOST_TARGET
+    cast(Any, fake_export).warm_up_exporter = fake_warm_up
+    modules = {
+        "cutlass": fake_cutlass,
+        "cutlass.cute": fake_cute,
+        "torch._native.cutedsl.export": fake_export,
+    }
+    with mock.patch.dict(sys.modules, modules):
         yield seen
 
 
@@ -243,6 +256,8 @@ class TestExportJobs(unittest.TestCase):
     def test_cutedsl_export_passes_gpu_arch(self):
         # A --gpu-arch option rather than process state, which is what lets one
         # worker serve several arches, appended to any builder-supplied options.
+        # Each such export warms the exporter up first (the warm-up itself runs
+        # once per process), as a cross-arch export needs.
         tc = toolchains.CuteDslToolchain()
         with _fake_cute_compile() as seen:
             for opts in (None, "--enable-assertions"):
@@ -253,43 +268,40 @@ class TestExportJobs(unittest.TestCase):
                 self.assertTrue(seen["options"].endswith("--gpu-arch sm_90a"))
                 if opts:
                     self.assertTrue(seen["options"].startswith(opts))
+            self.assertEqual(seen["warm_ups"], 2)
             # No arch: the detect-from-device path must not inject --gpu-arch.
             tc.export(
                 {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
             )
             self.assertNotIn("--gpu-arch", seen["options"] or "")
+            self.assertEqual(seen["warm_ups"], 2)
 
     def test_cutedsl_export_pins_the_host_isa(self):
         # Unpinned, the DSL follows the build machine's CPU, so an AVX512 builder's
         # module loaders SIGILL elsewhere; a declaration's own choice still wins.
-        import platform  # local: a test below binds `platform` as a loop variable
-
+        # The pin is torch._native.cutedsl.export's, which Inductor shares.
         tc = toolchains.CuteDslToolchain()
-        pin = tc._HOST_TARGETS[platform.machine()]
-        self.assertIn("-mtriple=", pin)
         b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
         with _fake_cute_compile() as seen:
             tc.export(dict(b), "/tmp", arch="sm_90a")
-            self.assertIn(f"--host-target '{pin}'", seen["options"])
+            self.assertIn(f"--host-target '{_FAKE_HOST_TARGET}'", seen["options"])
             tc.export(dict(b, options="--host-target 'llvm -mcpu=neoverse-n1'"), "/tmp")
             self.assertEqual(seen["options"], "--host-target 'llvm -mcpu=neoverse-n1'")
 
     def test_export_refuses_an_unpinned_machine(self) -> None:
         # Falling back to the DSL default would target the builder's CPU, which is the
-        # bug the pin exists to prevent, so an unknown machine must fail the build.
-        import platform
-
+        # bug the pin exists to prevent, so the pin's refusal of an unknown machine
+        # must fail the build.
         tc = toolchains.CuteDslToolchain()
         b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
-        with (
-            _fake_cute_compile(),
-            mock.patch.object(toolchains.platform, "machine", lambda: "ppc64le"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "no pinned host target"):
-                tc.export(dict(b), "/tmp", arch="sm_90a")
-            # ...but a declaration that names its own is still served.
-            tc.export(dict(b, options="--host-target 'llvm -mtriple=x'"), "/tmp")
-        self.assertNotIn(platform.machine(), ("ppc64le",))
+        refusal = RuntimeError("CuTeDSL export: no pinned host target for 'ppc64le'")
+        with _fake_cute_compile():
+            helpers = sys.modules["torch._native.cutedsl.export"]
+            with mock.patch.object(helpers, "host_target", side_effect=refusal):
+                with self.assertRaisesRegex(RuntimeError, "no pinned host target"):
+                    tc.export(dict(b), "/tmp", arch="sm_90a")
+                # ...but a declaration that names its own is still served.
+                tc.export(dict(b, options="--host-target 'llvm -mtriple=x'"), "/tmp")
 
     def test_an_empty_host_target_from_a_declaration_is_refused(self) -> None:
         # The DSL reads an empty spec as the build host, so the flag being present is not
