@@ -135,6 +135,7 @@ class PrivateUse1BackendTest(TestCase):
     def setupClass(cls):
         pass
 
+    @torch._dynamo.disable
     def test_dlpack_device_after_backend_rename(self):
         from torch.utils.dlpack import DLDeviceType
 
@@ -147,9 +148,7 @@ class PrivateUse1BackendTest(TestCase):
         self.assertEqual(
             tensor.__dlpack_device__(), (DLDeviceType.kDLExtDev, expected_index)
         )
-        self.assertEqual(
-            torch.empty(0).__dlpack_device__(), (DLDeviceType.kDLCPU, 0)
-        )
+        self.assertEqual(torch.empty(0).__dlpack_device__(), (DLDeviceType.kDLCPU, 0))
 
     def test_accessing_is_pinned(self):
         a_cpu = torch.randn((2, 2))
