@@ -10,11 +10,12 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND as PromotionKind,
     is_non_overlapping_and_dense_or_false,
 )
+from torch._tensor_iterator import nullary_op
 
 from ... import cutedsl_utils as cu
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
-from ...utils.scalar import round_float
+from ...utils.scalar import check_scalar, f32, round_float
 from ...utils.tensor import can_use_32bit_indexing, const_data_ptr
 from .layout import output_strides, row_gap_view
 from .table import (
@@ -30,7 +31,7 @@ from .table import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from ._types import OperatorResult, PromotionOperands
+    from ._types import Number, OperatorResult, PromotionOperands
     from .signature import Functor, Signature
 
 
@@ -452,6 +453,7 @@ def _make_impl(
     return impl
 
 
+# Complex and float8 conversions use ATen.
 _CONV_DTYPES = (
     _SUPPORTED
     + _INT_DTYPES
@@ -464,8 +466,382 @@ _CONV_DTYPES = (
         torch.uint64,
     )
 )
-
 _CONV_SRC_DTYPES = _CONV_DTYPES + (torch.bool,)
+
+
+def _conv_serveable(src: torch.Tensor, dst_dtype: torch.dtype) -> bool:
+    # FP64-to-uint16 edges require ATen's conversion.
+    if src.dtype is torch.float64 and dst_dtype is torch.uint16:
+        return False
+    return (
+        _supported(src, _CONV_SRC_DTYPES)
+        and (
+            is_non_overlapping_and_dense_or_false(src) or row_gap_view(src) is not None
+        )
+        and dst_dtype in _CONV_DTYPES + (torch.bool,)
+        and not (dst_dtype is torch.bool and src.dtype is torch.bool)
+        and cap.device_ok(src, _ARCH_MAJORS)
+        and cap.on_current_device(src)
+    )
+
+
+def _needs_int64_detour(src_dtype: torch.dtype, dst_dtype: torch.dtype) -> bool:
+    # Match ATen's narrowing and signed-to-wider-unsigned conversions through Int64.
+    if dst_dtype.is_floating_point or dst_dtype is torch.bool:
+        return False
+    if src_dtype.is_floating_point:
+        return dst_dtype in (torch.uint8, torch.int8, torch.int16)
+    if dst_dtype.is_signed or not src_dtype.is_signed:
+        return False
+    return torch.iinfo(dst_dtype).bits > torch.iinfo(src_dtype).bits
+
+
+def _run_conversion(
+    aten_name: str, src: torch.Tensor, target: torch.Tensor
+) -> torch.Tensor:
+    # Bool storage uses Int8 views and stores normalized zero/one bytes.
+    ret = target
+    to_bool = target.dtype is torch.bool or src.dtype is torch.bool
+    if tuple(src.shape) != tuple(target.shape):
+        # Expand copy sources to the target shape; zero strides select generic indexing.
+        src = src.expand(target.shape)
+    if src.dtype is torch.bool:
+        src = src.view(torch.int8)
+    if target.dtype is torch.bool:
+        target = target.view(torch.int8)
+    if to_bool:
+        compute = src.dtype
+    elif _needs_int64_detour(src.dtype, target.dtype):
+        compute = torch.int64
+    else:
+        compute = target.dtype
+    key = (
+        aten_name,
+        (src.dtype,),
+        ((src.shape, src.stride()),),
+        (target.dtype,),
+        (),
+        compute,
+        to_bool,
+        ((const_data_ptr(src) % 16 == 0), (const_data_ptr(target) % 16 == 0)),
+    )
+    K.run(
+        ops.get_fn("_to_bool" if to_bool else "_identity"),
+        key,
+        1,
+        1,
+        (),
+        dt.torch2cute[compute],
+        [src],
+        (target.dtype,),
+        out=[target],
+    )
+    return ret
+
+
+def _to_copy_cond(
+    x: torch.Tensor,
+    *,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout | None = None,
+    device: torch.device | str | None = None,
+    pin_memory: bool | None = None,
+    non_blocking: bool = False,
+    memory_format: torch.memory_format | None = None,
+    **kw: Any,
+) -> bool:
+    # Layout, device and pinning changes use ATen.
+    if kw or layout not in (None, torch.strided) or pin_memory:
+        return False
+    if device is not None and torch.device(device) != x.device:
+        return False
+    if memory_format not in (None, torch.preserve_format, torch.contiguous_format):
+        return False
+    dst = x.dtype if dtype is None else dtype
+    # Rowvec preserves input gaps; _to_copy allocates contiguous output.
+    return _conv_serveable(x, dst) and x.is_contiguous()
+
+
+def _to_copy_impl(
+    x: torch.Tensor,
+    *,
+    dtype: torch.dtype | None = None,
+    memory_format: torch.memory_format | None = None,
+    **kw: Any,
+) -> torch.Tensor:
+    dst = x.dtype if dtype is None else dtype
+    out = (
+        torch.empty(x.shape, device=x.device, dtype=dst)
+        if memory_format is torch.contiguous_format
+        else torch.empty_strided(x.shape, x.stride(), device=x.device, dtype=dst)
+    )
+    return _run_conversion("_to_copy", x, out)
+
+
+def _copy_cond(
+    self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
+) -> bool:
+    # copy_ allows dtype casts and source broadcasting; cross-device copies use ATen.
+    if not (
+        isinstance(src, torch.Tensor)
+        and src.device == self.device
+        and can_use_32bit_indexing(self)
+    ):
+        return False
+    if not (_conv_serveable(src, self.dtype) and self.is_contiguous()):
+        return False
+    if cap.is_traced(self) or self.is_neg() or self.is_conj():
+        return False
+    if const_data_ptr(self) % 16 != 0:
+        return False
+    if _has_partial_overlap(self, src):
+        return False
+    if self.numel() == 0:
+        return False
+    try:
+        bshape = torch.broadcast_shapes(self.shape, src.shape)
+    except RuntimeError:
+        return False
+    return tuple(bshape) == tuple(self.shape)
+
+
+def _copy_impl(
+    self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
+) -> torch.Tensor:
+    return _run_conversion("copy_", src, self)
+
+
+_FILL_DTYPES = _SUPPORTED + _INT_DTYPES
+
+
+def _fill_cond(self: torch.Tensor, value: Number) -> bool:
+    if isinstance(value, complex):
+        return False
+    valid = (
+        isinstance(self, torch.Tensor)
+        and self.dtype in _FILL_DTYPES
+        and self.numel() > 0
+        and can_use_32bit_indexing(self)
+        and not self.is_neg()
+        and not self.is_conj()
+        and not cap.is_traced(self)
+        and cap.device_ok(self, _ARCH_MAJORS)
+        and cap.on_current_device(self)
+    )
+    if not valid:
+        return False
+    try:
+        check_scalar(value, self.dtype)
+    except (OverflowError, ValueError):
+        return False
+    return True
+
+
+def _fill_impl(self: torch.Tensor, value: Number) -> torch.Tensor:
+    # Narrow floating fills compute in FP32.
+    compute = (
+        torch.float32 if self.dtype in (torch.float16, torch.bfloat16) else self.dtype
+    )
+    key = (
+        "fill_",
+        (),
+        ((self.shape, self.stride()),),
+        (self.dtype,),
+        (),
+        compute,
+        ((const_data_ptr(self) % 16 == 0),),
+    )
+    # Box at compute precision to preserve FP64 constants.
+    K.run(
+        ops.get_fn("_fill"),
+        key,
+        0,
+        1,
+        (dt.scalar_arg(value, compute),),
+        dt.torch2cute[compute],
+        [],
+        (self.dtype,),
+        out=[self],
+    )
+    return self
+
+
+def _zero_cond(self: torch.Tensor) -> bool:
+    return _fill_cond(self, 0)
+
+
+def _zero_impl(self: torch.Tensor) -> torch.Tensor:
+    return _fill_impl(self, 0)
+
+
+_RANGE_DTYPES = _SUPPORTED + _INT_DTYPES
+
+
+def _range_out_serveable(out: torch.Tensor | None) -> bool:
+    if not (
+        isinstance(out, torch.Tensor)
+        and out.dtype in _RANGE_DTYPES
+        and out.numel() > 0
+        and can_use_32bit_indexing(out)
+        and not out.is_neg()
+        and not out.is_conj()
+        and not cap.is_traced(out)
+        and cap.device_ok(out, _ARCH_MAJORS)
+        and cap.on_current_device(out)
+    ):
+        return False
+    try:
+        nullary_op(out)
+    except RuntimeError:
+        return False
+    return True
+
+
+def _range_compute(dtype: torch.dtype) -> torch.dtype:
+    if dtype in _INT_DTYPES:
+        return torch.int64
+    return torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+
+
+def _arange_out_cond(
+    start: Number, end: Number, step: Number = 1, *, out: torch.Tensor | None = None
+) -> bool:
+    if (
+        isinstance(start, complex)
+        or isinstance(end, complex)
+        or isinstance(step, complex)
+    ):
+        return False
+    if out is None or not _range_out_serveable(out):
+        return False
+    if not all(math.isfinite(s) for s in (start, end, step)) or step == 0:
+        return False
+    try:
+        compute = _range_compute(out.dtype)
+        check_scalar(start, compute)
+        check_scalar(step, compute)
+    except (OverflowError, ValueError):
+        return False
+    if (step > 0 and end < start) or (step < 0 and end > start):
+        return False
+    if out.dtype is torch.int64 and all(type(s) is int for s in (start, end, step)):
+        try:
+            # Preserve native fallback when its Int64 count intermediates overflow.
+            distance = end - start
+            numerator = distance + step
+            sign = 1 if step > 0 else -1
+            for value in (end, distance, numerator, numerator - sign):
+                check_scalar(value, compute)
+        except (OverflowError, ValueError):
+            return False
+        count = -((start - end) // step)
+    else:
+        ratio = (float(end) - float(start)) / float(step)
+        if not math.isfinite(ratio):
+            return False
+        count = math.ceil(ratio)
+    return out.numel() == count
+
+
+def _arange_out_impl(
+    start: Number, end: Number, step: Number = 1, *, out: torch.Tensor | None = None
+) -> torch.Tensor:
+    # Optional out mirrors the schema; admission requires a tensor.
+    if out is None:
+        raise AssertionError("arange.start_out requires an out tensor")
+    compute = _range_compute(out.dtype)
+    ct = dt.torch2cute[compute]
+    key = (
+        "arange.start_out",
+        (),
+        ((out.shape, out.stride()),),
+        (out.dtype,),
+        (),
+        compute,
+        ((const_data_ptr(out) % 16 == 0),),
+    )
+    K.run(
+        ops.get_fn("_arange"),
+        key,
+        0,
+        1,
+        (dt.scalar_arg(start, compute), dt.scalar_arg(step, compute)),
+        ct,
+        [],
+        (out.dtype,),
+        out=[out],
+        with_index=True,
+    )
+    return out
+
+
+def _linspace_out_cond(
+    start: Number, end: Number, steps: int, *, out: torch.Tensor | None = None
+) -> bool:
+    if isinstance(start, complex) or isinstance(end, complex):
+        return False
+    # ATen handles steps 0/1 as empty/fill special cases.
+    if not isinstance(steps, int) or steps < 2:
+        return False
+    if out is None or not _range_out_serveable(out) or out.numel() != steps:
+        return False
+    if out.dtype.is_floating_point:
+        try:
+            round_float(float(start), out.dtype)
+            round_float(float(end), out.dtype)
+        except (OverflowError, ValueError):
+            return False
+    else:
+        limits = torch.iinfo(out.dtype)
+        if not all(limits.min <= s <= limits.max for s in (start, end)):
+            return False
+    return True
+
+
+def _linspace_out_impl(
+    start: bool | int | float,
+    end: bool | int | float,
+    steps: int,
+    *,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    # Integer endpoints truncate as in ATen; narrow floats compute in FP32.
+    if out is None:
+        raise AssertionError("linspace.out requires an out tensor")
+    if not out.dtype.is_floating_point:
+        start, end = int(start), int(end)
+    compute = (
+        out.dtype if out.dtype in (torch.float32, torch.float64) else torch.float32
+    )
+    ct = dt.torch2cute[compute]
+    storage = out.dtype if out.dtype.is_floating_point else torch.float32
+    start, end = round_float(start, storage), round_float(end, storage)
+    step = f32(end - start) if compute is torch.float32 else end - start
+    denominator = round_float(float(steps - 1), compute)
+    step = round_float(step / denominator, compute)
+    key = (
+        "linspace.out",
+        (),
+        ((out.shape, out.stride()),),
+        (out.dtype,),
+        (steps,),
+        compute,
+        ((const_data_ptr(out) % 16 == 0),),
+    )
+    K.run(
+        ops.get_fn("_linspace"),
+        key,
+        0,
+        1,
+        # Keep index distances integral until subtraction to avoid float rounding.
+        (ct(start), ct(end), ct(step), dt.Int64(steps // 2), dt.Int64(steps - 1)),
+        ct,
+        [],
+        (out.dtype,),
+        out=[out],
+        with_index=True,
+    )
+    return out
 
 
 def register_pointwise_overrides() -> None:
@@ -483,3 +859,17 @@ def register_pointwise_overrides() -> None:
                 cond=_make_cond(row, variant),
                 impl=_make_impl(row, variant),
             )
+    cu.register_op_override(
+        "aten", "_to_copy", "CUDA", cond=_to_copy_cond, impl=_to_copy_impl
+    )
+    cu.register_op_override("aten", "copy_", "CUDA", cond=_copy_cond, impl=_copy_impl)
+    cu.register_op_override(
+        "aten", "fill_.Scalar", "CUDA", cond=_fill_cond, impl=_fill_impl
+    )
+    cu.register_op_override("aten", "zero_", "CUDA", cond=_zero_cond, impl=_zero_impl)
+    cu.register_op_override(
+        "aten", "arange.start_out", "CUDA", cond=_arange_out_cond, impl=_arange_out_impl
+    )
+    cu.register_op_override(
+        "aten", "linspace.out", "CUDA", cond=_linspace_out_cond, impl=_linspace_out_impl
+    )
