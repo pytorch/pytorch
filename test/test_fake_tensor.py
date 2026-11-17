@@ -540,17 +540,9 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                         torch.ops.my_test_op.foo(value, **kwargs)
                 else:
                     out = torch.ops.my_test_op.foo(value, **kwargs)
-                    flat_out, out_spec = pytree.tree_flatten(out)
-                    flat_in, in_spec = pytree.tree_flatten(value)
-                    self.assertEqual(out_spec, in_spec)
-                    for actual, expected in zip(flat_out, flat_in):
-                        if isinstance(expected, torch.Tensor):
-                            self.assertIs(maybe_get_fake_mode(actual), mode)
-                            self.assertEqual(actual.shape, expected.shape)
-                            self.assertEqual(actual.stride(), expected.stride())
-                            self.assertEqual(actual.device, expected.device)
-                        else:
-                            self.assertEqual(actual, expected)
+                    self.assertEqual(
+                        pytree.tree_structure(out), pytree.tree_structure(value)
+                    )
                 self.assertIs(
                     maybe_get_fake_mode(x), None if allow_non_fake_inputs else mode
                 )
