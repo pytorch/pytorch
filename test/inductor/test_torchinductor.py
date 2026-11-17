@@ -12009,6 +12009,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    def test_any_all_empty_dim(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/198851
+        def fn(x):
+            return (
+                torch.any(x, dim=()),
+                torch.any(x, dim=(), keepdim=True),
+                torch.all(x, dim=()),
+                torch.all(x, dim=(), keepdim=True),
+            )
+
+        for x in (
+            torch.randn(4, 8),
+            torch.randint(0, 2, (4, 8)),
+            torch.rand(4, 8) > 0.5,
+        ):
+            self.common(fn, [x])
+
     @parametrize("reduction", ["any", "amax"])
     def test_bool_reduction_bitwise_op(self, reduction):
         # Regression test for https://github.com/pytorch/pytorch/issues/199745

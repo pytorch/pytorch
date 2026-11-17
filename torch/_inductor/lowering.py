@@ -8524,6 +8524,9 @@ def _current_node_uses_all_tuple_outputs(indices: tuple[int, ...]) -> bool:
 @register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
+    if isinstance(dim, (list, tuple)) and len(dim) == 0:
+        # dim=() is no reduction in eager: bool copy of input, keepdim ignored
+        return x
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
 
 
