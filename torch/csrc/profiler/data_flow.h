@@ -72,6 +72,7 @@ using StorageImplData = strong::type<
 // This means that we can safely use address identity to track `TensorImpls`.
 class WeakTensor {
  public:
+  WeakTensor() : WeakTensor(at::Tensor()) {}
   explicit WeakTensor(const at::Tensor& t) : weak_self_(t.getIntrusivePtr()) {}
 
   auto get() const {

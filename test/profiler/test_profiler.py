@@ -1462,6 +1462,15 @@ torch.ones(10) * 2
             concrete["aten::native_layer_norm_backward"],
         )
 
+    def test_record_shapes_without_profile_memory(self):
+        x = torch.ones(4)
+        with profile(record_shapes=True) as p:
+            x.mul(2)
+        self.assertTrue(any(e.name == "aten::mul" for e in p.events()))
+
+        # Tensors that were op inputs during profiling can still be swapped.
+        torch.utils.swap_tensors(x, torch.zeros(4))
+
     def test_concrete_inputs_profiling_toggling(self):
         try:
             for before, after in [(True, False), (False, True)]:
