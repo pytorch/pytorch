@@ -6825,7 +6825,6 @@ class TestTypeConversion(TestCase):
         self.assertEqual(result_type, list[int | float | str])
 
 
-@instantiate_parametrized_tests
 class TestOpProfiles(TestCase):
     def get_sample_op_profile(self, opname) -> dict[str, set[OpProfile]]:
         return {
