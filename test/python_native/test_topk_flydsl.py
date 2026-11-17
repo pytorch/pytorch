@@ -671,8 +671,11 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(torch.gather(x, -1, i1), v1, atol=0, rtol=0)
 
     @parametrize("dtype", _SUPPORTED_DTYPES)
+    @parametrize("largest", (False, True))
     @parametrize("k", _GATE_MAX_N_KS)
-    def test_correctness_at_gate_n_ceiling(self, k: int, dtype: torch.dtype):
+    def test_correctness_at_gate_n_ceiling(
+        self, k: int, largest: bool, dtype: torch.dtype
+    ):
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
         torch.manual_seed(12)
@@ -680,7 +683,7 @@ class TestFlyDSLTopK(TestCase):
         kernel = _expected_kernel(k, n, dtype)
         x = _make_test_input((_test_m(k, dtype), n), dtype)
         misses = topk_cache_info(kernel).misses
-        self._assert_topk_matches_aten(x, k)
+        self._assert_topk_matches_aten(x, k, largest=largest)
         self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
 
     @parametrize("k", (8, 704))
