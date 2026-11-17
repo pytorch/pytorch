@@ -16,6 +16,7 @@ import bisect
 import dataclasses
 import dis
 import sys
+from collections.abc import Iterator
 from typing import Any, TYPE_CHECKING
 
 
@@ -163,7 +164,9 @@ def livevars_analysis(
     must = ReadsWrites(set(), set(), set())
     may = ReadsWrites(set(), set(), set())
 
-    def walk(state: ReadsWrites, start: int) -> None:
+    # Nested walks are yielded to the loop below instead of recursing, so long
+    # functions with many exception-table entries stay within the recursion limit.
+    def walk(state: ReadsWrites, start: int) -> Iterator[tuple[ReadsWrites, int]]:
         if start in state.visited:
             return
         state.visited.add(start)
@@ -181,18 +184,24 @@ def livevars_analysis(
                 else:
                     raise NotImplementedError(f"unhandled {inst.opname}")
             if inst.exn_tab_entry:
-                walk(may, indexof[inst.exn_tab_entry.target])
+                yield may, indexof[inst.exn_tab_entry.target]
             if inst.opcode in JUMP_OPCODES:
                 if inst.target is None:
                     raise AssertionError(
                         f"jump instruction {inst.opname} has no target"
                     )
-                walk(may, indexof[inst.target])
+                yield may, indexof[inst.target]
                 state = may
             if inst.opcode in TERMINAL_OPCODES:
                 return
 
-    walk(must, indexof[instruction])
+    pending = [walk(must, indexof[instruction])]
+    while pending:
+        nested = next(pending[-1], None)
+        if nested is None:
+            pending.pop()
+        else:
+            pending.append(walk(*nested))
     return must.reads | may.reads
 
 
