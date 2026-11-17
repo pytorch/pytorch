@@ -73,7 +73,7 @@ IF(NOT MKLDNN_FOUND)
       endif()
       ExternalProject_Add(xpu_mkldnn_proj
         GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-        GIT_TAG v3.14
+        GIT_TAG v3.14.2
         PREFIX "${_xpu_mkldnn_prefix}"
         BUILD_IN_SOURCE 0
         CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
@@ -185,6 +185,8 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
     # oneDNN includes the Accelerate.h umbrella header, whose global bfloat16_t from arm_bf16.h clashes
     # with dnnl::impl::bfloat16_t, so shadow it with a header that only provides the CBLAS interface
+    # TODO: Replace the shim with -DACCELERATE_NEW_LAPACK once the oneDNN submodule includes
+    # https://github.com/uxlfoundation/oneDNN/pull/6436
     SET(ONEDNN_ACCELERATE_SHIM_DIR "${CMAKE_BINARY_DIR}/onednn_accelerate_shim")
     FILE(WRITE "${ONEDNN_ACCELERATE_SHIM_DIR}/Accelerate.h"
       "#pragma once\n#define ACCELERATE_NEW_LAPACK\n#include <vecLib/cblas_new.h>\n")

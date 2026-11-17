@@ -38,6 +38,232 @@
   - Lint
   - pull
 
+- name: OSS CI / Docker images
+  patterns:
+  - .ci/docker/**
+  approved_by:
+  - huydhn
+  - atalman
+  - malfet
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / CI scripts
+  patterns:
+  - .ci/pytorch/**
+  approved_by:
+  - huydhn
+  - georgehong
+  - atalman
+  - jathu
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / CI build scripts
+  patterns:
+  - .ci/pytorch/build.sh
+  - .ci/pytorch/common-build.sh
+  - .ci/pytorch/macos-build.sh
+  - .ci/pytorch/win-arm64-build.ps1
+  - .ci/pytorch/win-build.sh
+  approved_by:
+  - huydhn
+  - georgehong
+  - atalman
+  - jathu
+  - malfet
+  - zklaus
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / Binaries
+  patterns:
+  - .ci/docker/almalinux/**
+  - .ci/docker/manywheel/**
+  - .ci/flash-attention/**
+  - .ci/libtorch/**
+  - .ci/magma/**
+  - .ci/pytorch/binary_*
+  - .ci/pytorch/check_binary.sh
+  - .ci/pytorch/check_wheel_soabi.py
+  - .ci/pytorch/smoke_test/**
+  - .ci/pytorch/test_example_code/**
+  - .ci/wheel/**
+  - .github/actions/binary-docker-build/**
+  - .github/actions/test-pytorch-binary/**
+  - .github/regenerate.sh
+  - .github/scripts/build_triton_wheel.py
+  - .github/scripts/generate_binary_build_matrix.py
+  - .github/scripts/generate_ci_workflows.py
+  - .github/scripts/generate_docker_release_matrix.py
+  - .github/scripts/windows/**
+  - .github/templates/**
+  - .github/workflows/_binary-*
+  - .github/workflows/_build-triton-wheel-linux.yml
+  - .github/workflows/_upload-triton-wheel.yml
+  - .github/workflows/build-almalinux-images.yml
+  - .github/workflows/build-magma-*
+  - .github/workflows/build-manywheel-images*
+  - .github/workflows/build-triton-wheel.yml
+  - .github/workflows/create_release.yml
+  - .github/workflows/docker-builds.yml
+  - .github/workflows/docker-release.yml
+  - .github/workflows/generated-*
+  - .github/workflows/nightly-s3-uploads.yml
+  - .github/workflows/test-check-binary.yml
+  approved_by:
+  - atalman
+  - huydhn
+  - malfet
+  - zklaus
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / Actions
+  patterns:
+  - .github/actions/**
+  approved_by:
+  - huydhn
+  - jeanschmidt
+  - atalman
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / Merge bot
+  patterns:
+  - .github/auto_request_review.yml
+  - .github/label_to_label.yml
+  - .github/labeler.yml
+  - .github/merge_rules.yaml
+  - .github/pytorch-probot.yml
+  - .github/scripts/cherry_pick.py
+  - .github/scripts/delete_old_branches.py
+  - .github/scripts/export_pytorch_labels.py
+  - .github/scripts/gitutils.py
+  - .github/scripts/gql_mocks.json.gz
+  - .github/scripts/greenlight_*
+  - .github/scripts/label_utils.py
+  - .github/scripts/mergebot_status.py
+  - .github/scripts/native_stack.py
+  - .github/scripts/test_cherry_pick.py
+  - .github/scripts/test_delete_old_branches.py
+  - .github/scripts/test_gitutils.py
+  - .github/scripts/test_greenlight_*
+  - .github/scripts/test_label_utils.py
+  - .github/scripts/test_mergebot_status.py
+  - .github/scripts/test_native_stack.py
+  - .github/scripts/test_trymerge.py
+  - .github/scripts/test_tryrebase.py
+  - .github/scripts/trymerge.py
+  - .github/scripts/trymerge_explainer.py
+  - .github/scripts/tryrebase.py
+  - .github/workflows/auto_request_review.yml
+  - .github/workflows/check_mergeability_ghstack.yml
+  - .github/workflows/cherry-pick.yml
+  - .github/workflows/delete_old_branches.yml
+  - .github/workflows/revert.yml
+  - .github/workflows/stale.yml
+  - .github/workflows/trunk-tagging.yml
+  - .github/workflows/trymerge.yml
+  - .github/workflows/tryrebase.yml
+  - .github/workflows/update-viablestrict.yml
+  - .github/workflows/update_pytorch_labels.yml
+  approved_by:
+  - izaitsevfb
+  - jeanschmidt
+  - huydhn
+  - atalman
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / Runners
+  patterns:
+  - .github/arc.yaml
+  - .github/scripts/runner_determinator.py
+  - .github/scripts/test_runner_determinator.py
+  - .github/workflows/_runner-determinator.yml
+  - .github/workflows/_select-release-runner.yml
+  - .github/workflows/release-runner-groups-refresh.yml
+  approved_by:
+  - huydhn
+  - atalman
+  - zxiiro
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / Target determination
+  patterns:
+  - .github/actions/download-td-artifacts/**
+  - .github/workflows/llm_td_retrieval.yml
+  - .github/workflows/target-determination-indexer.yml
+  - .github/workflows/target_determination.yml
+  - .github/workflows/td-holdout-unstable.yml
+  - tools/test/heuristics/**
+  - tools/testing/do_target_determination_for_s3.py
+  - tools/testing/target_determination/**
+  approved_by:
+  - jeanschmidt
+  - georgehong
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / Test stats
+  patterns:
+  - .github/actions/upload-sccache-stats/**
+  - .github/actions/upload-utilization-stats/**
+  - .github/workflows/populate-clickhouse-owners.yml
+  - .github/workflows/upload-test-stats-while-running.yml
+  - .github/workflows/upload-test-stats.yml
+  - .github/workflows/upload-torch-dynamo-perf-stats.yml
+  - .github/workflows/upload_test_stats_intermediate.yml
+  - tools/stats/**
+  - tools/test/test_upload_stats_lib.py
+  - tools/test/test_upload_test_stats.py
+  - tools/testing/clickhouse.py
+  approved_by:
+  - georgehong
+  - jathu
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / Test infra
+  patterns:
+  - .github/actions/filter-test-configs/**
+  - .github/actions/pytest-cache-download/**
+  - .github/actions/pytest-cache-upload/**
+  - .github/scripts/filter_test_configs.py
+  - .github/scripts/pytest_cache.py
+  - .github/scripts/pytest_caching_utils.py
+  - .github/scripts/test_filter_test_configs.py
+  - .github/scripts/test_pytest_caching_utils.py
+  - tools/testing/**
+  approved_by:
+  - georgehong
+  - huydhn
+  - jathu
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: OSS CI
   patterns:
   - .github/**
@@ -46,7 +272,8 @@
   - tools/**
   approved_by:
   - alband
-  - pytorch/pytorch-dev-infra
+  - huydhn
+  - atalman
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -81,6 +308,26 @@
 - name: OSS CI /pytorchbot / Executorch
   patterns:
   - .ci/docker/ci_commit_pins/executorch.txt
+  approved_by:
+  - pytorchbot
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / pytorchbot / torchtitan
+  patterns:
+  - .github/ci_commit_pins/torchtitan.txt
+  approved_by:
+  - pytorchbot
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: OSS CI / pytorchbot / Metamates
+  patterns:
+  - .github/merge_rules.yaml
   approved_by:
   - pytorchbot
   mandatory_checks_name:
@@ -510,6 +757,8 @@
   - hameerabbasi
   - riccardofelluga
   - amjames
+  - dsashidh
+  - ayushsatyam146
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -658,6 +907,7 @@
   - anshul-si
   - aorenste
   - atalman
+  - banitag1
   - blaine-rister
   - bobrenjc93
   - BoyuanFeng
@@ -674,13 +924,17 @@
   - htyu
   - huydhn
   - IvanKobzarev
+  - ivy-zhou
   - izaitsevfb
   - jananisriram
   - janeyx99
   - jathu
   - jbschlosser
+  - jdonald
   - jeanschmidt
   - jerryzh168
+  - jijunyan
+  - joshuuuasu
   - kapilsh
   - karthickai
   - laithsakka
@@ -691,8 +945,8 @@
   - mlazos
   - nandesuka
   - NicolasHug
+  - Nicoshev
   - njriasan
-  - oulgen
   - pdesupinski
   - pianpwk
   - ryanzhang22
@@ -708,7 +962,6 @@
   - tushar00jain
   - vkuzo
   - warrendeng
-  - wconstab
   - weifengpy
   - williamwen42
   - ydwu4

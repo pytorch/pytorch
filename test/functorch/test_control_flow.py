@@ -38,6 +38,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipCUDAIf,
     skipXPUIf,
 )
@@ -3142,6 +3143,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 @skipIfNoDynamoSupport
 class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(_TestControlFlowBase.setUp)
 
     @onlyAccelerator
     def test_cond_gpu(self, device):
@@ -4965,6 +4967,11 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, (init, xs, kv))
 
+    @decorateIf(
+        unittest.skip("init aliasing requires an AOT backend"),
+        lambda params: params["alias_site"] == "init"
+        and params["compile_mode"] in ("none", "eager"),
+    )
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_site", ["init", "nested"])
@@ -5423,6 +5430,7 @@ class GraphModule(torch.nn.Module):
 class AssociativeScanTestsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @preserves_device_selection
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -10969,6 +10977,224 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         ):
             functional_f(example_init, example_inputs)
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_joint_graph_keeps_node_meta(self):
+        # Scan re-traces its body twice to build the joint graph that min-cut
+        # partitions. An annotate() region set in the body must survive both.
+        from torch.fx.traceback import annotate
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, requires_grad=True)
+        xs = torch.randn(3, 4, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+        self.assertEqual(out, f(init, xs))
+        out.sum().backward()
+
+        # The forward and backward bodies are min-cut's output. The backward
+        # one recomputes the sin, and the copy must keep the region too.
+        for gm in (*backend.fw_graphs, *backend.bw_graphs):
+            (scan_node,) = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(gm, scan_node.args[0].target)
+            sins = body_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.sin.default
+            )
+            self.assertGreater(len(sins), 0)
+            for sin in sins:
+                self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_hop_joint_graph_keeps_node_meta_of_plain_fn(self):
+        # A plain-function body is re-run, not interpreted, by the first
+        # re-trace. Its annotate() region must still survive functionalization.
+        from torch._higher_order_ops.partitioner import create_hop_joint_graph
+        from torch.fx.traceback import annotate, preserve_node_meta
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        joint = {}
+
+        def f(carry, x):
+            joint["gm"] = create_hop_joint_graph(
+                body, (carry, x), functionalize=True
+            ).joint_gm
+            return carry.clone()
+
+        carry = torch.randn(4, requires_grad=True)
+        x = torch.randn(4, requires_grad=True)
+        with preserve_node_meta():
+            make_fx(f, tracing_mode="fake")(carry, x)
+        (sin,) = joint["gm"].graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_steers_partition(self):
+        # A "recompute" tag on a node in the scan body decides whether min-cut
+        # saves it for the backward or recomputes it there.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin()
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        def saved_by_forward_body(policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag the sin in Dynamo's body graph, before AOTAutograd runs.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.target in (torch.sin, "sin"):
+                                node.meta["recompute"] = policy
+                return record(gm, example_inputs)
+
+            init = torch.randn(4, requires_grad=True)
+            xs = torch.randn(3, 4, requires_grad=True)
+            torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return [n.target for n in body_gm.graph.output_node().args[0]]
+
+        sin = torch.ops.aten.sin.default
+        self.assertIn(sin, saved_by_forward_body(CheckpointPolicy.MUST_SAVE))
+        self.assertNotIn(sin, saved_by_forward_body(CheckpointPolicy.PREFER_RECOMPUTE))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_on_complex_symint(self):
+        # Under dynamic shapes, x.shape[0] * x.shape[1] is a complex SymInt
+        # node. Scan can't save it across the forward/backward boundary, so it
+        # overrides the body's tag with MUST_RECOMPUTE, and rejects MUST_SAVE.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin() * (x.shape[0] * x.shape[1])
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, 5, requires_grad=True)
+        xs = torch.randn(3, 4, 5, requires_grad=True)
+        expected = torch.autograd.grad(f(init, xs).sum(), (init, xs))
+
+        def compile_with_tags(symint_policy, tensor_policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag every node in the body, SymInt ops included.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.op == "call_function":
+                                val = node.meta.get("example_value")
+                                node.meta["recompute"] = (
+                                    symint_policy
+                                    if isinstance(val, torch.SymInt)
+                                    else tensor_policy
+                                )
+                return record(gm, example_inputs)
+
+            out = torch.compile(f, backend=backend, fullgraph=True, dynamic=True)(
+                init, xs
+            )
+            self.assertEqual(torch.autograd.grad(out.sum(), (init, xs)), expected)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return len(body_gm.graph.output_node().args[0])
+
+        for policy in (
+            CheckpointPolicy.PREFER_SAVE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+            CheckpointPolicy.MUST_RECOMPUTE,
+        ):
+            compile_with_tags(policy, policy)
+
+        # Tags still steer the tensor nodes: MUST_SAVE on them also saves y.
+        self.assertGreater(
+            compile_with_tags(
+                CheckpointPolicy.PREFER_RECOMPUTE, CheckpointPolicy.MUST_SAVE
+            ),
+            compile_with_tags(None, None),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Node mul\w* computes the SymInt expression .* is tagged "
+            r"CheckpointPolicy.MUST_SAVE\. .* can't be saved across the "
+            r"forward/backward boundary",
+        ):
+            compile_with_tags(CheckpointPolicy.MUST_SAVE, CheckpointPolicy.MUST_SAVE)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_dropout_in_checkpointed_body(self):
+        # Checkpoint tags dropout for recompute. The backward must still use
+        # the forward's mask, not draw a new one.
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.MUST_RECOMPUTE
+
+        def region(c, w):
+            return torch.nn.functional.dropout(c @ w, 0.5).sin()
+
+        sac = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        cases = [(c, b) for c in (None, sac) for b in ("aot_eager", "inductor")]
+        for context_fn, backend in cases:
+            kwargs = {"context_fn": context_fn} if context_fn else {}
+
+            def body(c, w):
+                y = checkpoint(region, c, w, use_reentrant=False, **kwargs)
+                return y, y.clone()
+
+            with self.subTest(sac=context_fn is not None, backend=backend):
+                torch._dynamo.reset()
+                init = torch.randn(2, 4, requires_grad=True)
+                xs = torch.randn(3, 4, 4, requires_grad=True)
+                f = torch.compile(scan, backend=backend, fullgraph=True)
+                carry, ys = f(body, init, xs)
+                grads = torch.autograd.grad(carry.sum() + ys.sum(), (init, xs))
+
+                # Eager rerun with the masks read back from ys.
+                c, outs = init, []
+                for t in range(3):
+                    c = (c @ xs[t] * (ys[t] != 0) * 2).sin()
+                    outs.append(c)
+                out = c.sum() + torch.stack(outs).sum()
+                expected = torch.autograd.grad(out, (init, xs))
+                self.assertEqual(grads, expected, atol=6e-05, rtol=6e-06)
+
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
@@ -11045,6 +11271,39 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             )
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
+
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_scan_in_vmap_output_drops_traced_step(self):
+        # Tracing runs the combine function for one step. Inside vmap, the
+        # output of scan keeps the wrapper that the combine function returned,
+        # but not the constant or real tensor of that step, and the step's own
+        # value keeps both.
+        from torch._functorch.vmap import vmap_increment_nesting
+        from torch._higher_order_ops.scan import _scan_output_value
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            maybe_get_fake_constant,
+            maybe_get_real_tensor,
+        )
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        with mode:
+            step = torch.tensor([5])
+        # As in trace_scan, the output node of the combine graph records the
+        # plain fake tensor.
+        node = torch.fx.Graph().placeholder("step")
+        node.meta["val"] = step
+        with vmap_increment_nesting(1, "error") as level:
+            with mode:
+                batched = functorch._add_batch_dim(step, 0, level)
+            out = _scan_output_value(node, batched)
+            self.assertTrue(functorch.is_batchedtensor(out))
+            inner = functorch.get_unwrapped(out)
+        self.assertIsNone(maybe_get_fake_constant(inner))
+        self.assertIsNone(maybe_get_real_tensor(inner))
+        self.assertIsNotNone(maybe_get_fake_constant(step))
+        self.assertIsNotNone(maybe_get_real_tensor(step))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_scan_in_vmap_simple(self):
@@ -13232,6 +13491,73 @@ class <lambda>(torch.nn.Module):
             copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
             return (mm,)
 """,
+            )
+
+    # https://github.com/pytorch/pytorch/issues/201590
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_output_alias_input_raises(self, device, dynamic):
+        # A branch that mutates an operand makes cond's schema mutable, which routes
+        # cond_func through auto-functionalization.  The branch-output aliasing check
+        # must still run on that path.  The exception type depends on which backend
+        # wrapper surfaces it, so match on the message.
+        def f(pred, x, y):
+            def true_fn(x, y):
+                y.copy_(x * 2.0)
+                return x.view(x.shape)
+
+            def false_fn(x, y):
+                y.copy_(x + 1.0)
+                return x.view(x.shape)
+
+            return torch.cond(pred, true_fn, false_fn, (x, y))
+
+        pred = torch.tensor(True, device=device)
+        x = torch.ones(5, 5, device=device)
+        y = torch.zeros(5, 5, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_true might be aliasing the input or the output"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)(
+                pred, x, y
+            )
+
+    # https://github.com/pytorch/pytorch/issues/201590
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_output_alias_output_raises(self, device, dynamic):
+        # The same check also rejects output-output aliasing: a branch returning one
+        # tensor twice. Covered separately because the two kinds come from different
+        # maps in check_input_alias_and_mutation.
+        def f(pred, x, y):
+            def true_fn(x, y):
+                y.copy_(x * 2.0)
+                out = x + 1.0
+                return out, out
+
+            def false_fn(x, y):
+                y.copy_(x + 1.0)
+                out = x - 1.0
+                return out, out
+
+            return torch.cond(pred, true_fn, false_fn, (x, y))
+
+        pred = torch.tensor(True, device=device)
+        x = torch.ones(5, 5, device=device)
+        y = torch.zeros(5, 5, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_true might be aliasing the input or the output"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)(
+                pred, x, y
             )
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")

@@ -1,5 +1,6 @@
 load("//arvr/tools/build_defs:genrule_utils.bzl", "gen_cmake_header")
 load("//arvr/tools/build_defs:oxx.bzl", "oxx_static_library")
+load("@fbsource//xplat/caffe2/fb:subpackage_exports.bzl", "glob_with_subpackages", "subdir_glob_with_subpackages")
 
 cpu_supported_platforms = [
     "ovr_config//os:android",
@@ -28,7 +29,7 @@ def define_torch_headeronly_ovrsource(name, is_mobile):
         fbobjc_compiler_flags = [],
         public_include_directories = ["../.."],
         public_preprocessor_flags = pp_flags,
-        public_raw_headers = native.glob([
+        public_raw_headers = glob_with_subpackages([
             "core/**/*.h",
             "cpu/**/*.h",
             "cuda/*.h",
@@ -36,6 +37,8 @@ def define_torch_headeronly_ovrsource(name, is_mobile):
             "macros/*.h",
             "util/*.h",
         ]),
+        # Its raw headers include files of subpackages; see `subpackage_exports.bzl`.
+        raw_headers_as_headers_mode = "disabled",
         reexport_all_header_dependencies = False,
         visibility = [
             "//xplat/caffe2/torch/headeronly:torch_headeronly_ovrsource",
@@ -65,14 +68,14 @@ def define_ovrsource_targets():
     ]
 
     gen_cmake_header(
-        src = "macros/cmake_macros.h.in",
+        src = "//xplat/caffe2/torch/headeronly/macros:cmake_macros.h.in",
         defines = common_c10_cmake_defines + mobile_c10_cmake_defines,
         header = "torch/headeronly/macros/cmake_macros.h",
         prefix = "ovrsource_torch_headeronly_mobile_",
     )
 
     gen_cmake_header(
-        src = "macros/cmake_macros.h.in",
+        src = "//xplat/caffe2/torch/headeronly/macros:cmake_macros.h.in",
         defines = common_c10_cmake_defines + non_mobile_c10_cmake_defines,
         header = "torch/headeronly/macros/cmake_macros.h",
         prefix = "ovrsource_torch_headeronly_non_mobile_",

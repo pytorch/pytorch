@@ -32,7 +32,7 @@ setup_test_python() {
 test_python_all() {
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-jit-executor
+  time python test/run_test.py --verbose
 
   assert_git_not_dirty
 }
@@ -64,7 +64,7 @@ test_python_shard() {
 
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests --shard "$1" "$NUM_TEST_SHARDS"
+  time python test/run_test.py --verbose --exclude-distributed-tests --exclude-quantization-tests --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
@@ -342,7 +342,13 @@ test_timm_perf() {
   echo "timm benchmark on mps device completed"
 }
 
-if [[ $TEST_CONFIG == *"perf_all"* ]]; then
+if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
+  if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_python_shard "${SHARD_NUMBER}"
+  else
+    test_python_all
+  fi
+elif [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
   test_hf_perf
   test_timm_perf
