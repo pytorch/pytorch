@@ -237,11 +237,13 @@ struct LayerNormOp {
   opmath dir(opmath x) const {
     return (x - mean) * rstd;
   }
-  METAL_FUNC NormBackwardCoeffs<T> coeffs(
-      thread const NormBackwardRow<T>& row) const {
-    const auto sums = threadgroup_sum2(
-        row.tg_a, row.tg_b, row.sum_grad, row.sum_prod, row.tid, row.lsize);
-    return {rstd, sums[0] / row.size, sums[1] / row.size};
+  NormBackwardCoeffs<T> finish(
+      opmath sum_grad,
+      opmath sum_prod,
+      uint size,
+      uint,
+      bool) const {
+    return {rstd, sum_grad / size, sum_prod / size};
   }
   static acc_t column_term(
       opmath dy,
@@ -272,16 +274,20 @@ kernel void layer_norm_backward_affine_combine(
   }
 }
 
+#define REGISTER_LAYER_NORM_AFFINE_TILED(T, A)                                        \
+  template [[host_name(                                                               \
+      "layer_norm_backward_affine_tiled_" #T                                          \
+      "_" #A)]] [[kernel]] decltype(norm_backward_column_tiled<T, LayerNormOp<T>, A>) \
+      norm_backward_column_tiled<T, LayerNormOp<T>, A>
+
+REGISTER_LAYER_NORM_AFFINE_TILED(float, float);
+REGISTER_LAYER_NORM_AFFINE_TILED(half, half);
+REGISTER_LAYER_NORM_AFFINE_TILED(half, float);
+REGISTER_LAYER_NORM_AFFINE_TILED(bfloat, bfloat);
+REGISTER_LAYER_NORM_AFFINE_TILED(bfloat, float);
+
 #define REGISTER_LAYER_NORM_BACKWARD(T)                                       \
-  template [[host_name("layer_norm_backward_single_row_" #T)]] [[kernel]]     \
-  decltype(norm_backward_single_row<T, LayerNormOp<T>>)                       \
-      norm_backward_single_row<T, LayerNormOp<T>>;                            \
-  template [[host_name("layer_norm_backward_looped_" #T)]] [[kernel]]         \
-  decltype(norm_backward_looped<T, LayerNormOp<T>>)                           \
-      norm_backward_looped<T, LayerNormOp<T>>;                                \
-  template [[host_name("layer_norm_backward_affine_" #T)]] [[kernel]]         \
-  decltype(norm_backward_column_partials<T, LayerNormOp<T>>)                  \
-      norm_backward_column_partials<T, LayerNormOp<T>>;                       \
+  REGISTER_NORM_BACKWARD_ROWS("layer_norm_backward", T, LayerNormOp);         \
   template [[host_name("layer_norm_backward_affine_combine_" #T)]] [[kernel]] \
   decltype(layer_norm_backward_affine_combine<T>)                             \
       layer_norm_backward_affine_combine<T>
