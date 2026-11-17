@@ -2671,7 +2671,13 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == "onnx" ]]; then
+if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
+  if [[ "${NUM_TEST_SHARDS}" -gt 1 ]]; then
+    test_python_shard "${SHARD_NUMBER}"
+  else
+    test_python
+  fi
+elif [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
 elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
