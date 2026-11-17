@@ -448,7 +448,6 @@
   "test/inductor/test_pallas.py",
   "test/inductor/test_pattern_matcher.py",
   "test/inductor/test_perf.py",
-  "test/inductor/test_profiler.py",
   "test/inductor/test_profiler_trace.py",
   "test/inductor/test_provenance_tracing.py",
   "test/inductor/test_quantization.py",
