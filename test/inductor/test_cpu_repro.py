@@ -33,6 +33,7 @@ from torch._inductor.codegen.cpp import (
     LoopNest,
 )
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.cpp_builder import CppTorchDeviceOptions
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import fresh_cache, timed
@@ -551,6 +552,34 @@ class CPUReproTests(TestCase):
                             (v,),
                             **tol_kwargs,
                         )
+
+    @requires_vectorization
+    @parametrize("enabled", (False, True))
+    @parametrize("dtype", (torch.float32, torch.float64))
+    def test_sqrt_without_errno(self, enabled, dtype):
+        def fn(x):
+            return torch.nn.functional.layer_norm(x, [56]), torch.sqrt(x[:, 0])
+
+        x = torch.randn(9, 56, dtype=dtype)
+        # NaN for a negative or NaN input, -0 for -0, inf for inf; a subnormal
+        # input has a normal square root.
+        specials = (-1.0, -0.0, float("inf"), float("nan"), 0.0)
+        x[: len(specials), 0] = torch.tensor(specials, dtype=dtype)
+        x[len(specials), 0] = torch.finfo(dtype).smallest_normal / 4
+        with config.patch({"cpp.sqrt_without_errno": enabled}):
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+        self.assertEqual(actual[0], fn(x)[0], equal_nan=True)
+        # Both forms are IEEE square roots: correctly rounded, signed zero
+        # included. (Eager float32 sqrt can be 1 ulp off.)
+        expected = torch.sqrt(x[:, 0].double()).to(dtype)
+        self.assertEqual(actual[1], expected, equal_nan=True, atol=0, rtol=0)
+        self.assertTrue(actual[1][1].signbit())  # sqrt(-0) is -0
+        # LayerNorm's rsqrt and the explicit sqrt both use the helper when enabled.
+        n_rsqrt = code.count("1 / sqrt_without_errno(")
+        self.assertEqual(n_rsqrt > 0, enabled)
+        self.assertEqual(code.count("sqrt_without_errno(") > n_rsqrt, enabled)
+        self.assertEqual("std::sqrt(" in code, not enabled)
 
     @requires_vectorization
     def test_nn_fold_permuted_input(self):
@@ -1646,6 +1675,40 @@ class CPUReproTests(TestCase):
             # Use same criterion as test_inplace_squeeze_needed
             # for parallel reduction.
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+
+    @requires_vectorization
+    def test_simd_horizontal_reduction(self):
+        def fn(x):
+            return x.sum(-1), x.amax(-1)
+
+        # 37 columns leave a masked tail; bfloat16 accumulates in VectorizedN<float, 2>.
+        dtypes = (torch.float32, torch.bfloat16)
+        simdlens = sorted({isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()})
+        for dtype, simdlen in itertools.product(dtypes, simdlens):
+            x = torch.randn(4, 37, dtype=dtype)
+            for enabled in (False, True):
+                patches = {
+                    "cpp.simdlen": simdlen,
+                    "cpp.simd_horizontal_reduction": enabled,
+                }
+                with config.patch(patches):
+                    torch._dynamo.reset()
+                    actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+                self.assertEqual(actual, fn(x))
+                self.assertEqual("simd_vec_reduce_all" in code, enabled)
+
+    @requires_vectorization
+    def test_vec_exp_u20(self):
+        def fn(x):
+            return torch.softmax(x, -1)
+
+        x = torch.randn(3, 24) * 10
+        for enabled in (False, True):
+            with config.patch({"cpp.vec_exp_u20": enabled}):
+                torch._dynamo.reset()
+                actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+            self.assertEqual(".exp_u20()" in code, enabled)
+            self.assertEqual(actual, fn(x), atol=1e-6, rtol=1e-5)
 
     @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
@@ -3685,6 +3748,20 @@ class CPUReproTests(TestCase):
                 self.assertTrue(
                     torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
                 )
+
+    @parametrize("enabled", (False, True))
+    def test_force_inline_welford(self, enabled):
+        # use_two_step_variance keeps Welford for a single row. The flag only
+        # changes how the Welford helpers in cpp_prefix.h are compiled.
+        mod = torch.nn.LayerNorm(57).eval()
+        x = torch.randn(1, 57)
+        with config.patch({"cpp.force_inline_welford": enabled}), torch.no_grad():
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(torch.compile(mod), x)
+            definitions = CppTorchDeviceOptions(device_type="cpu").get_definitions()
+        self.assertEqual(actual, mod(x))
+        self.assertIn("welford_combine", code)
+        self.assertEqual("TORCH_INDUCTOR_FORCE_INLINE_WELFORD" in definitions, enabled)
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
