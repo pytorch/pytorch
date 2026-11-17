@@ -6373,6 +6373,67 @@ class TestCfgRegions(TestCase):
         self.assertEqual(list(got.items()), list(expected.items()))
         self.assertEqual(vars(got), vars(expected))
 
+    def test_the_dicts_of_a_module_are_walked_when_one_changed(self):
+        torch.rewrite._load_runtime()
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        types = (torch.Tensor, torch.nn.Parameter)
+        stamp, epoch = cfg_rs.module_look(model, types, True)
+        self.assertEqual(stamp, cfg_rs.module_stamp(model, types))
+        self.assertEqual(cfg_rs.module_epoch(), epoch)
+        # What is written to a tensor is in no dict.
+        with torch.no_grad():
+            model.fc.weight.mul_(2)
+        self.assertEqual(cfg_rs.module_epoch(), epoch)
+        changes = [
+            lambda: setattr(model, "note", 1),
+            lambda: model.bn.train(),
+            lambda: model.register_buffer("more", torch.ones(1)),
+            lambda: setattr(model.fc, "bias", torch.nn.Parameter(torch.ones(5))),
+            lambda: model.fc.register_forward_hook(lambda *args: None),
+            lambda: delattr(model, "note"),
+            lambda: model.add_module("extra", torch.nn.ReLU()),
+        ]
+        for change in changes:
+            before = cfg_rs.module_epoch()
+            change()
+            self.assertNotEqual(cfg_rs.module_epoch(), before)
+            # The dicts that are new are watched from the next walk on.
+            self.assertEqual(
+                cfg_rs.module_look(model, types, True)[1], cfg_rs.module_epoch()
+            )
+        # Nothing is promised for dicts that are not watched, nor for a
+        # module that keeps tensors in a list, which nothing watches.
+        self.assertIsNone(cfg_rs.module_look(torch.nn.Linear(2, 2), types, False)[1])
+        self.assertIsNone(cfg_rs.module_look(torch.nn.LSTM(2, 2), types, True)[1])
+
+        # A region walks the dicts of the module it is handed again when
+        # one of them changed, and not on the calls in between.
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        walks = []
+        real = cfg_rs.module_look
+
+        def module_look(*args):
+            walks.append(args[0])
+            return real(*args)
+
+        with unittest.mock.patch.object(cfg_rs, "module_look", module_look):
+            with torch.no_grad():
+                for _ in range(10):
+                    compiled(model, x)
+                del walks[:]
+                for _ in range(3):
+                    self.assertEqual(compiled(model, x), region_infer(model, x))
+                self.assertEqual(walks, [])
+                model.note = 1
+                for _ in range(3):
+                    self.assertEqual(compiled(model, x), region_infer(model, x))
+                self.assertEqual(walks, [model])
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.rewrite(region_infer, passes=with_graphs("nope"))
