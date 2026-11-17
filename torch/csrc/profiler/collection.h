@@ -583,6 +583,9 @@ class TORCH_API ThreadLocalSubqueue {
   ProfilerConfig config_;
   kineto::DeviceAndResource kineto_info_;
   std::unique_ptr<perf_profiler_t> perf_profiler_;
+  // Read once per profiling session. Changing the setting during a session
+  // isn't reflected in its events.
+  bool allow_tf32_cublas_;
 
   friend class RecordQueue;
   // See `containers.h` for block size benchmarks.
