@@ -184,6 +184,24 @@ class WorkspaceArg(CodegenSymbol):
         return f"{prefix}{next(V.graph.workspace_id)}"
 
     @staticmethod
+    def shared_name(tag: str, device: torch.device) -> str:
+        """A stable, device-scoped name shared by every workspace of one kind.
+
+        `unique_name` gives every workspace a fresh name, which forces one
+        allocation and one zero-fill per call site.  That is required for
+        ZERO_ON_CALL, where a kernel may leave the buffer dirty, but it defeats
+        sharing for ZERO_PER_GRAPH: those kernels are required to hand the
+        buffer back zeroed, so one buffer can serve all of them.  Because
+        `PythonWrapperCodegen.generate_workspace_allocation` merges same-named
+        ZERO_PER_GRAPH workspaces through `WorkspaceArg.maximum`, handing out a
+        stable name turns N per-call-site allocations plus N zero-fills into a
+        single allocation plus a single zero-fill per graph.  The device is part
+        of the name because the merge only happens within one device.
+        """
+        suffix = "" if device.index is None else f"_{device.index}"
+        return f"workspace_{tag}_{device.type}{suffix}"
+
+    @staticmethod
     def can_join(a: WorkspaceArg, b: WorkspaceArg) -> bool:
         return (
             a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device

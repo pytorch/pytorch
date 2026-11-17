@@ -3584,15 +3584,24 @@ class TritonTemplate(KernelTemplate):
         def make_kernel_render(out_node, hint_override: int | None = None):
             if result is None:
                 raise AssertionError("result must not be None")
-            # Create a new unique name for the workspace arg buffer for each render
-            # to prevent buffer reuse of the same workspace arg
+            # ZERO_PER_GRAPH workspaces are handed back zeroed by the kernel, so
+            # they are shareable and keep the stable name from the heuristic: the
+            # wrapper then folds every call site into one allocation plus one
+            # zero-fill per graph (see WorkspaceArg.shared_name).  Every other
+            # mode needs a fresh name per render to prevent buffer reuse of a
+            # workspace a kernel may have left dirty.
             kernel_workspace_arg = workspace_arg
             if workspace_arg is not None:
                 kernel_workspace_arg = WorkspaceArg(
                     count=workspace_arg.count,
                     zero_mode=workspace_arg.zero_mode,
                     device=workspace_arg.device,
-                    outer_name=WorkspaceArg.unique_name(),
+                    outer_name=(
+                        workspace_arg.outer_name
+                        if workspace_arg.zero_mode
+                        == WorkspaceZeroMode.ZERO_PER_GRAPH
+                        else WorkspaceArg.unique_name()
+                    ),
                     inner_name=workspace_arg.inner_name,
                     dtype=workspace_arg.dtype,
                 )

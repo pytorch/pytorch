@@ -3154,11 +3154,9 @@ def _xpu_descriptor_operands_compatible(matrices: Sequence[IRNode]) -> bool:
     return not aot_mode and sizevars.guard_or_false(condition)
 
 
-def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
-    """Whether the XPU mm templates may take this BF16/FP16 mm.
-    Gated to Xe2 or later by the device-ID table in torch.xpu._utils (currently
-    BMG only, where the configs were tuned); other devices keep the default templates."""
-    if not matrices or not config.triton.enable_xpu_mm_templates:
+def _xpu_descriptor_template_device_ok(layout: Layout) -> bool:
+    """Config, device, dtype and arch gate shared by the XPU descriptor templates."""
+    if not config.triton.enable_xpu_mm_templates:
         return False
     if layout.device.type != "xpu" or layout.dtype not in (
         torch.bfloat16,
@@ -3168,9 +3166,47 @@ def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
     from torch.utils._triton import has_triton_stable_tma_api
     from torch.xpu._utils import get_xpu_arch, XPUArch
 
-    if not has_triton_stable_tma_api() or get_xpu_arch(layout.device) < XPUArch.Xe2:
+    arch = get_xpu_arch(layout.device)
+    return has_triton_stable_tma_api() and arch is not None and arch >= XPUArch.Xe2
+
+
+def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
+    """Whether the XPU mm templates may take this BF16/FP16 mm.
+    Gated to Xe2 or later by the device-ID table in torch.xpu._utils (currently
+    BMG only, where the configs were tuned); other devices keep the default templates."""
+    if not matrices or not _xpu_descriptor_template_device_ok(layout):
         return False
     return _xpu_descriptor_operands_compatible(matrices)
+
+
+def xpu_descriptor_store_compatible(layout: Layout) -> bool:
+    """Whether the XPU mm templates can write this 2D output through a tensor
+    descriptor (unit inner stride, 16-byte aligned row stride and offset).
+
+    Operand admission does not imply this: with a column-major mat2 nothing
+    constrains N, so the output row pitch can be unaligned.
+    """
+    from .virtualized import V
+
+    sizevars = V.graph.sizevars
+    strides = layout.stride
+    if (
+        len(strides) != 2
+        or sizevars.replace_backed_symbols_with_hints(strides[1]) != 1
+    ):
+        return False
+    itemsize = layout.dtype.itemsize
+    conditions = [sympy.Eq(strides[1], 1)]
+    for nbytes in (strides[0] * itemsize, layout.offset * itemsize):
+        if not _bytes_aligned(sizevars.replace_backed_symbols_with_hints(nbytes)):
+            return False
+        conditions.append(sympy.Eq(Mod(nbytes, TMA_ALIGNMENT), 0))
+    if not _descriptor_shapes_fit_in_int32([layout.size], add_guards=True):
+        return False
+    condition = sympy.And(*conditions)
+    return sizevars.statically_known_true(condition) or sizevars.guard_or_false(
+        condition
+    )
 
 
 def use_triton_tma_template(
