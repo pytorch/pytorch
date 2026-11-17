@@ -280,9 +280,7 @@ class CacheCompiledArtifact(CompiledArtifact):
                 boxed_forward_device_index=BoxedDeviceIndex(0),
             )
 
-            context = torch._guards.TracingContext(
-                FakeTensorMode(_force_python=True, shape_env=ShapeEnv())
-            )
+            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
             with torch._guards.tracing(context):
                 compiled_fn = entry.wrap_post_compile(
                     [], entry.sanitized_aot_config, fx_config
@@ -459,7 +457,7 @@ def _resolve_fake_mode(
                     'when `dynamic_shapes="from_example_inputs"`.'
                 )
             return fake_mode
-        return FakeTensorMode(_force_python=True, shape_env=ShapeEnv())
+        return FakeTensorMode(shape_env=ShapeEnv())
     elif fake_mode is not None:
         raise ValueError(
             "standalone_compile only supports passing `fake_mode` when "
@@ -517,7 +515,7 @@ def _resolve_fake_mode(
                 if maybe_fake_mode is not None:
                     return maybe_fake_mode
 
-        return FakeTensorMode(_force_python=True, shape_env=ShapeEnv())
+        return FakeTensorMode(shape_env=ShapeEnv())
     else:
         raise ValueError(
             f"standalone_compile got unsupported `dynamic_shapes` value: dynamic_shapes={dynamic_shapes}."
