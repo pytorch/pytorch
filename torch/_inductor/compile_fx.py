@@ -104,7 +104,11 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
-from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    CppFakeTensorMode,
+    FakeTensorMode,
+)
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -952,7 +956,7 @@ def fake_tensor_prop(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
     force_allow_non_fake_inputs: bool = False,
-) -> torch._subclasses.FakeTensorMode:
+) -> FakeTensorMode | CppFakeTensorMode:
     """
     If we can not detect fake mode from the context of inputs, create one.
 

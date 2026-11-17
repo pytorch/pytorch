@@ -969,7 +969,7 @@ class CompiledFxGraph(OutputCode):
         )
 
         if self._original_gm is None and self._serialized_original_gm is not None:
-            from torch._subclasses import FakeTensorMode
+            from torch._subclasses.fake_tensor import FakeTensorMode
             from torch.fx._graph_pickler import GraphPickler
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
