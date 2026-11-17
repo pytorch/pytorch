@@ -225,6 +225,10 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         result = loaded(x, y)
         torch.testing.assert_close(result, expected)
 
+    @unittest.skipIf(
+        GPU_TYPE == "mps",
+        "AOTI on MPS never goes through Triton's CachingAutotuner.save_gpu_kernel",
+    )
     def test_aoti_schema_populated(self):
         """AOTI compilation should call save_gpu_kernel with a populated schema."""
         if GPU_TYPE == "mps":
