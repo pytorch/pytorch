@@ -18,6 +18,7 @@ import importlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -72,7 +73,7 @@ def run_one(name, compiled):
                 report["compiled"] += 1
             except torch.rewrite.Unsupported as e:
                 report["rejected"] += 1
-                reason = str(e).split(": ", 1)[-1]
+                reason = re.sub(r" \(line \d+\)", "", str(e).split(": ", 1)[-1])
                 reason = " ".join(
                     w for w in reason.split() if not w.rstrip(")").isdigit()
                 )
