@@ -47,7 +47,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
-from typing import cast
+from typing import cast, TypedDict
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -86,7 +86,8 @@ def _u32_to_i32(x: int) -> int:
 
 
 def _int_to_narrow_ord(bits, _width, _int_ty):
-    # Identity is its own inverse: applying it twice returns `bits`.
+    # A narrow integer is its own ordinal.
+    # Involutive: applying the transform twice returns the original bits.
     return bits
 
 
@@ -98,10 +99,74 @@ def _float_to_narrow_ord(bits, width, int_ty):
     # and returns the original bits.
     # Constants use the field's integer type, so a 16-bit value stays 16-bit.
     # `(1 << (width - 1)) - 1` is the bits under the sign at any width.
+    # Involutive: Applying the transform twice returns the original bits.
     low_mask = (1 << (width - 1)) - 1
     sign = (bits >> int_ty(width - 1)) & int_ty(1)
     mask = (int_ty(0) - sign) & int_ty(low_mask)
     return bits ^ mask
+
+
+class _OrdRow(TypedDict):
+    """One row of the ordinal table. ``None`` means the dtype has no NaN."""
+
+    elem_ty: type
+    int_ty: type
+    width: int
+    val_to_narrow_ord: Callable
+    nan_sentinel: int | None
+    positive_inf_bits: int | None
+
+
+_ORD_ROWS: dict[torch.dtype, _OrdRow] = {
+    torch.float32: {
+        "elem_ty": Float32,
+        "int_ty": Int32,
+        "width": 32,
+        "val_to_narrow_ord": _float_to_narrow_ord,
+        "nan_sentinel": 0x7FFFFFFF,
+        "positive_inf_bits": 0x7F800000,
+    },
+    torch.float16: {
+        "elem_ty": Float16,
+        "int_ty": Int16,
+        "width": 16,
+        "val_to_narrow_ord": _float_to_narrow_ord,
+        "nan_sentinel": 0x7FFF,
+        "positive_inf_bits": 0x7C00,
+    },
+    torch.bfloat16: {
+        "elem_ty": BFloat16,
+        "int_ty": Int16,
+        "width": 16,
+        "val_to_narrow_ord": _float_to_narrow_ord,
+        "nan_sentinel": 0x7FFF,
+        "positive_inf_bits": 0x7F80,
+    },
+    torch.int32: {
+        "elem_ty": Int32,
+        "int_ty": Int32,
+        "width": 32,
+        "val_to_narrow_ord": _int_to_narrow_ord,
+        "nan_sentinel": None,
+        "positive_inf_bits": None,
+    },
+    torch.int16: {
+        "elem_ty": Int16,
+        "int_ty": Int16,
+        "width": 16,
+        "val_to_narrow_ord": _int_to_narrow_ord,
+        "nan_sentinel": None,
+        "positive_inf_bits": None,
+    },
+    torch.int8: {
+        "elem_ty": Int8,
+        "int_ty": Int8,
+        "width": 8,
+        "val_to_narrow_ord": _int_to_narrow_ord,
+        "nan_sentinel": None,
+        "positive_inf_bits": None,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -196,62 +261,9 @@ class TopKSpec:
 
 @cache
 def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
-    # torch dtype: flydsl dtype, same-width signed int, bit width,
-    # NaN sentinel, positive-infinity bits.
-    # None for the NaN fields means the dtype has no NaN.
-    specs = {
-        torch.float32: dict(
-            elem_ty=Float32,
-            int_ty=Int32,
-            width=32,
-            nan_sentinel=0x7FFFFFFF,
-            positive_inf_bits=0x7F800000,
-            to_narrow_ord=_float_to_narrow_ord,
-        ),
-        torch.float16: dict(
-            elem_ty=Float16,
-            int_ty=Int16,
-            width=16,
-            nan_sentinel=0x7FFF,
-            positive_inf_bits=0x7C00,
-            to_narrow_ord=_float_to_narrow_ord,
-        ),
-        torch.bfloat16: dict(
-            elem_ty=BFloat16,
-            int_ty=Int16,
-            width=16,
-            nan_sentinel=0x7FFF,
-            positive_inf_bits=0x7F80,
-            to_narrow_ord=_float_to_narrow_ord,
-        ),
-        torch.int32: dict(
-            elem_ty=Int32,
-            int_ty=Int32,
-            width=32,
-            to_narrow_ord=_int_to_narrow_ord,
-        ),
-        torch.int16: dict(
-            elem_ty=Int16,
-            int_ty=Int16,
-            width=16,
-            to_narrow_ord=_int_to_narrow_ord,
-        ),
-        torch.int8: dict(
-            elem_ty=Int8,
-            int_ty=Int8,
-            width=8,
-            to_narrow_ord=_int_to_narrow_ord,
-        ),
-    }
-    if dtype not in specs:
+    if dtype not in _ORD_ROWS:
         raise NotImplementedError(f"FlyDSL topk has no ordinal spec for {dtype}")
-    dtype_spec = specs[dtype]
-    spec = TopKSpec(
-        dtype=dtype,
-        largest=largest,
-        val_to_narrow_ord=dtype_spec["to_narrow_ord"],
-        **{key: value for key, value in dtype_spec.items() if key != "to_narrow_ord"},
-    )
+    spec = TopKSpec(dtype=dtype, largest=largest, **_ORD_ROWS[dtype])
     if spec.width > _ORD_BITS or spec.width % _RADIX_BITS:
         raise NotImplementedError(
             f"FlyDSL topk ordinal does not fit a {_ORD_BITS}-bit key for {dtype}"
