@@ -21,7 +21,7 @@ KERNEL_CONFIGS_NAME = "KERNEL_CONFIGS"
 TRITON_MAX_BLOCK = {
     "X": 8192 if torch.version.hip else 4096,
     "Y": 1024,
-    "Z": 1024,
+    "Z0_": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
     "R2_": 2048 * 16,  # * 16 is multi-kernel only
@@ -33,7 +33,7 @@ TRITON_DOT_MIN_BLOCK = 16
 TRITON_DEFAULT_BLOCK_SIZES = {
     "XBLOCK": 128,
     "YBLOCK": 1,
-    "ZBLOCK": 1,
+    "Z0_BLOCK": 1,
     "R0_BLOCK": 1,
 }
 TRITON_DEFAULT_RSPLIT = 1
@@ -92,7 +92,7 @@ def native_matmul_block_numel(
     return (
         kwargs.get("XBLOCK", 1)
         * kwargs.get("YBLOCK", 1)
-        * kwargs.get("ZBLOCK", 1)
+        * kwargs.get("Z0_BLOCK", 1)
         * (kwargs.get("R0_BLOCK", 1) if r0_block is None else r0_block)
     )
 
@@ -352,6 +352,7 @@ class InductorMeta(typing.TypedDict, total=False):
     dynamic_disable_pipelining: bool
     are_deterministic_algorithms_enabled: bool
     is_hip: bool | None
+    sm100_outer_reduction_r0_block_8: bool
     is_fbcode: bool
     profile_bandwidth: bool
     profile_bandwidth_regex: str
