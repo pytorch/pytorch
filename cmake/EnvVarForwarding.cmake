@@ -50,7 +50,6 @@
 #   USE_KINETO=0              disables libkineto profiling
 #   USE_NUMPY=0               disables the NumPy build
 #   USE_ITT=0                 disables Intel(R) VTune ITT functionality
-#   USE_NNPACK=0              disables NNPACK build
 #   USE_DISTRIBUTED=0         disables distributed (c10d, gloo, mpi, etc.) build
 #   USE_TENSORPIPE=0          disables the Tensorpipe backend
 #   USE_GLOO=0                disables the gloo backend
@@ -66,6 +65,7 @@
 #   USE_ROCM_KERNEL_ASSERT=1 enables kernel assert on ROCm
 #   USE_ROCM_CK_GEMM=1       builds the CK GEMM backend on ROCm
 #   USE_ROCM_CK_SDPA=1       builds the CK SDPA backend on ROCm
+#   USE_ROCM_CK_SDPA_GFX11=1 enables CK SDPA for targeted gfx11 architectures
 #   USE_ROCM_CK_SDPA_GFX12=1 enables CK SDPA for targeted gfx12 architectures
 #   USE_LAYERNORM_FAST_RECIPROCAL  fast reciprocals for layer norm (default on)
 #   USE_MIMALLOC             static-link mimalloc into c10 (default: Windows/AArch64)
@@ -170,7 +170,6 @@ set(_ENV_PASSTHROUGH
   TORCH_CK_GEMM_ARCH_LIST
   TORCH_XPU_ARCH_LIST
   TRACING_BASED
-  PYTHON_SIX_SOURCE_DIR
 )
 
 # Env vars forwarded under a different CMake name ("env name=cmake name"). Where
