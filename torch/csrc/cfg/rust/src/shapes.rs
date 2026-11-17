@@ -13,8 +13,11 @@
 
 use crate::capi::{self, TcfgTensorInfo};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyList, PyTuple};
+
+type Obj = *mut ffi::PyObject;
 
 /// What a list of tensors is like, for the key of a region's variants:
 ///
@@ -188,6 +191,45 @@ pub fn snapshot(places: &Bound<'_, PyList>, tensors: &Bound<'_, PyList>) -> PyRe
     Ok(Some(Snapshot { places: which, tensors: found }))
 }
 
+impl Snapshot {
+    /// What `holds` says of the tensors themselves, for a caller that knows
+    /// every place to hold the tensor it held.
+    unsafe fn compare(&self, api: &capi::TcfgApi) -> u8 {
+        let mut same = 2;
+        for known in &self.tensors {
+            let mut info = TcfgTensorInfo::empty();
+            if (api.tensor_info)(known.object as Obj, &mut info) == 0 {
+                return 0;
+            }
+            let rank = info.ndim as usize;
+            let strided = !info.strides.is_null();
+            let key = &known.key;
+            let head = [
+                info.ndim as i64,
+                info.dtype as i64,
+                info.device as i64,
+                (info.requires_grad | (strided as i32) << 1) as i64,
+                info.key_set as i64,
+                info.storage_offset,
+            ];
+            if key.len() != 6 + rank * (1 + strided as usize)
+                || key[..6] != head
+                || key[6..6 + rank] != *std::slice::from_raw_parts(info.sizes, rank)
+                || (strided && key[6 + rank..] != *std::slice::from_raw_parts(info.strides, rank))
+            {
+                return 0;
+            }
+            if info.data as usize != known.data
+                || info.version != known.version
+                || info.version == capi::TCFG_NO_VERSION
+            {
+                same = 1;
+            }
+        }
+        same
+    }
+}
+
 #[pymethods]
 impl Snapshot {
     /// 0 if a place holds another object than it did, or a tensor is of
@@ -201,50 +243,25 @@ impl Snapshot {
         if places.len() != self.places.len() {
             return 0;
         }
-        let mut checked = vec![false; self.tensors.len()];
-        let mut same = 2;
-        for (i, which) in self.places.iter().enumerate() {
-            let known = &self.tensors[*which as usize];
-            unsafe {
-                let place = pyo3::ffi::PyList_GET_ITEM(places.as_ptr(), i as isize);
-                let object = at_place(place);
-                if object as usize != known.object {
+        unsafe {
+            for (i, which) in self.places.iter().enumerate() {
+                let place = ffi::PyList_GET_ITEM(places.as_ptr(), i as isize);
+                if at_place(place) as usize != self.tensors[*which as usize].object {
                     return 0;
-                }
-                if std::mem::replace(&mut checked[*which as usize], true) {
-                    continue;
-                }
-                let mut info = TcfgTensorInfo::empty();
-                if (api.tensor_info)(object, &mut info) == 0 {
-                    return 0;
-                }
-                let rank = info.ndim as usize;
-                let strided = !info.strides.is_null();
-                let key = &known.key;
-                let head = [
-                    info.ndim as i64,
-                    info.dtype as i64,
-                    info.device as i64,
-                    (info.requires_grad | (strided as i32) << 1) as i64,
-                    info.key_set as i64,
-                    info.storage_offset,
-                ];
-                if key.len() != 6 + rank * (1 + strided as usize)
-                    || key[..6] != head
-                    || key[6..6 + rank] != *std::slice::from_raw_parts(info.sizes, rank)
-                    || (strided && key[6 + rank..] != *std::slice::from_raw_parts(info.strides, rank))
-                {
-                    return 0;
-                }
-                if info.data as usize != known.data
-                    || info.version != known.version
-                    || info.version == capi::TCFG_NO_VERSION
-                {
-                    same = 1;
                 }
             }
+            self.compare(api)
         }
-        same
+    }
+
+    /// `holds` without a look at the places: for a caller that knows that
+    /// nothing the places are in has changed since `holds` was not 0 (see
+    /// `module_epoch`).
+    fn holds_in_place(&self) -> u8 {
+        match capi::api() {
+            Some(api) => unsafe { self.compare(api) },
+            None => 0,
+        }
     }
 }
 
