@@ -265,6 +265,14 @@ if not TEST_WITH_ASAN:
     ):
         hw_classification = HardwareClassification.ACCELERATOR
 
+        # Only the harness is decoupled here. CommonTemplate (in
+        # test_torchinductor.py) still reads GPU_TYPE in ~271 places, e.g. the
+        # `if self.device == GPU_TYPE:` branches and a few
+        # `torch.randn(..., device=GPU_TYPE)` allocations, so on a non-GPU_TYPE
+        # variant those assertions are dropped and those tests keep targeting
+        # GPU_TYPE until #193118 migrates CommonTemplate. Do not read the
+        # generated variants as full per-device coverage of CommonTemplate.
+
         # Matches the patch main applied to check_model_gpu; without it the
         # GPU-shape tests would inherit whatever triton.cudagraphs the
         # environment sets.
