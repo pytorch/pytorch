@@ -507,11 +507,18 @@ def generate_wheels_matrix(
                 "linux-s390x",
                 "macos-arm64",
                 "windows",
+                "windows-arm64",
             ] and (python_version == "3.14" or python_version == "3.14t"):
                 continue
 
             # TODO: Enable python 3.15 on non linux OSes
-            if os not in ["linux", "linux-aarch64", "windows", "macos-arm64"] and (
+            if os not in [
+                "linux",
+                "linux-aarch64",
+                "windows",
+                "windows-arm64",
+                "macos-arm64",
+            ] and (
                 python_version == "3.15" or python_version == "3.15t"
             ):
                 continue

@@ -154,7 +154,6 @@ _WINDOWS_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
 _WINDOWS_ARM64_WHEEL_CONFIGS = generate_binary_build_matrix.generate_wheels_matrix(
     OperatingSystem.WINDOWS_ARM64,
     arches=["cpu"],
-    python_versions=["3.11", "3.12", "3.13"],
 )
 
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
