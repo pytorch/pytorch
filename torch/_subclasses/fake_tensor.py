@@ -1154,7 +1154,8 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         out = torch._C._from_meta_and_device(t, torch.device(device), self)
         # Guard metadata belongs to this Python object, like FakeTensor.pytype;
         # new tensors produced by detach/clone do not inherit it.
-        out._fake_pytype = pytype
+        if pytype is not None:
+            out._fake_pytype = pytype
         if dispatch_keys is not None:
             torch._C._set_fake_dispatch_keys(out, dispatch_keys)
         return out
