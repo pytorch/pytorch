@@ -137,6 +137,23 @@ class TestPointwiseTma(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    @parametrize(
+        "rows,cols,x_pitch,y_pitch",
+        ((4096, 4096, 4128, 4128), (64, 96, 112, 128)),
+    )
+    def test_registered_padded_input_values(
+        self, device: str, rows: int, cols: int, x_pitch: int, y_pitch: int
+    ) -> None:
+        x = torch.randn(rows, x_pitch, device=device)[:, :cols]
+        y = torch.randn(rows, y_pitch, device=device)[:, :cols]
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = x + y
+        actual = x + y
+        with torch.backends.python_native.cutedsl.disabled():
+            self.assertEqual(actual, expected)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     def test_graph_replays_changed_inputs(self, device: str) -> None:
         x = torch.randn(96, 64, device=device).t()
         y = torch.tensor(1.0, device=device)
