@@ -43,6 +43,7 @@ from typing import (
     Generic,
     NamedTuple,
     NoReturn,
+    overload,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
@@ -128,32 +129,48 @@ from torch.fx.experimental._size_hinting import (
 )
 
 
+@overload
+def guarding_hint_or_throw(a: torch.SymBool | bool) -> bool: ...
+
+
+@overload
+def guarding_hint_or_throw(a: torch.SymInt | int) -> int: ...
+
+
+@overload
+def guarding_hint_or_throw(a: torch.SymFloat | float) -> float: ...
+
+
+@overload
+def guarding_hint_or_throw(a: SymNode) -> int | bool | float: ...
+
+
 def guarding_hint_or_throw(
-    a: torch.SymInt | torch.SymBool | int | bool | SymNode,
-) -> int | bool:
+    a: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | bool | SymNode,
+) -> int | bool | float:
     """
     Return a concrete hint for a symbolic value, for use in guarding decisions.
 
     Returns Python bool (True/False) for boolean inputs (SymBool, bool),
-    and Python int for integer inputs (SymInt, int).
+    Python int for integer inputs (SymInt, int), Python float for floating-point
+    inputs (SymFloat, float), and for a SymNode a value matching its pytype.
     """
     if isinstance(a, SymNode):
-        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
-        if a.pytype not in (int, bool):
-            raise AssertionError(f"Expected an int or bool SymNode, got {a.pytype}")
         if a._hint is not None:
             return a._hint  # pyrefly: ignore[bad-return]
         if a.shape_env is None:
             raise AssertionError("shape_env is required for guarding_hint_or_throw")
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
-        a._hint = hint
+        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
+        if a.pytype is not float:
+            a._hint = hint
         return hint
-    if isinstance(a, (torch.SymInt, torch.SymBool)):
+    if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         return guarding_hint_or_throw(a.node)
     if isinstance(a, bool):
         return a
-    if type(a) is not int:
-        raise AssertionError(f"Expected int, got {type(a)}")
+    if type(a) not in (int, float):
+        raise AssertionError(f"Expected int or float, got {type(a)}")
     return a
 
 
@@ -4872,7 +4889,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4882,6 +4899,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            len(self.axioms),
             self._var_to_range_version_counter,
         )
 
@@ -7524,10 +7542,7 @@ class ShapeEnv:
             return singleton_int_expr
 
         def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
-            if not self._resimplify_floor_div_axioms:
-                return
-            self._resimplify_floor_div_axioms = False
-            new_items = {}
+            new_items: dict[sympy.Expr, sympy.Expr] = {}
             for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
@@ -7540,7 +7555,10 @@ class ShapeEnv:
 
         # Pattern matching
         if axioms is None:
-            resimplify_floor_div(self.axioms)
+            if self._resimplify_floor_div_axioms:
+                self._resimplify_floor_div_axioms = False
+                resimplify_floor_div(self.axioms)
+                self._update_version_counter()
             subst = self.axioms
         else:
             subst = {}
@@ -7549,7 +7567,8 @@ class ShapeEnv:
                 if e.free_symbols.issubset(expr_free_symbols):
                     subst.update(dict(self.get_implications(self.simplify(e))))
 
-            resimplify_floor_div(subst)
+            if self._resimplify_floor_div_axioms:
+                resimplify_floor_div(subst)
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
@@ -7929,12 +7948,12 @@ class ShapeEnv:
         return result_expr
 
     @lru_cache(256)
-    def guarding_hint_or_throw(self, expr: sympy.Expr | int) -> int | bool:
+    def guarding_hint_or_throw(self, expr: sympy.Expr | int) -> int | bool | float:
         """
         Return a concrete hint for an expression.
 
         Returns Python bool (True/False) for boolean expressions (e.g. Eq, Ne),
-        and Python int for integer expressions.
+        Python float for float expressions, and Python int for integer expressions.
         """
         return _guarding_hint_or_throw_base(self, expr, {})
 
@@ -9119,6 +9138,7 @@ class ShapeEnv:
                     )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
+                    self._update_version_counter()
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 

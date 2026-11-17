@@ -2032,6 +2032,17 @@
       ]
     }
   ],
+  "GB3303": [
+    {
+      "Gb_type": "Unsupported unbound builtin __hash__ call",
+      "Context": "{self.fn.__name__}.__hash__({arg})",
+      "Explanation": "Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+      "Hints": [
+        "Use hash(x) if calling x's own hash implementation is intended.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0120": [
     {
       "Gb_type": "Unreachable sub-generator code",
@@ -2379,6 +2390,16 @@
       "Explanation": "Expected attribute to be one of {','.join(fields)} but got {name}",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9374": [
+    {
+      "Gb_type": "Reordered OrderedDict input with callback-sensitive keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Dynamo cannot restore an OrderedDict's storage order without potentially invoking user key hashing or equality.",
+      "Hints": [
+        "Construct the OrderedDict inside the compiled function."
       ]
     }
   ],
@@ -4469,6 +4490,26 @@
       ]
     }
   ],
+  "GB3826": [
+    {
+      "Gb_type": "kwargs expansion after iteration slot mutation",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot expand a mapping after changing its type's __iter__.",
+      "Hints": [
+        "Expand the mapping outside the compiled function."
+      ]
+    }
+  ],
+  "GB9653": [
+    {
+      "Gb_type": "Duplicate keyword mapping key",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot trace duplicate keys while expanding a custom mapping.",
+      "Hints": [
+        "Use unique keyword names or expand the mapping outside the compiled function."
+      ]
+    }
+  ],
   "GB0245": [
     {
       "Gb_type": "Attempted to use `nested_tensor` with non-list input",
@@ -5539,6 +5580,14 @@
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
+    }
+  ],
+  "GB9996": [
+    {
+      "Gb_type": "Input OrderedDict linked-order mutation",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo does not yet replay linked order for input OrderedDicts.",
+      "Hints": []
     }
   ],
   "GB0297": [
@@ -6814,6 +6863,14 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB3043": [
+    {
+      "Gb_type": "Unsupported builtin dictionary storage operation",
+      "Context": "dict.{name} on {obj.python_type_name()}",
+      "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+      "Hints": []
     }
   ],
   "GB0356": [
