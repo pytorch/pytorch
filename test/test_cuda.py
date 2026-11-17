@@ -11233,6 +11233,27 @@ print(*(start <= t.data_ptr() < start + size for t in (default, in_pool, capture
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_capture_does_not_retain_released_pool(self):
+        # g1.reset() releases mp's host pool, which stays around while kept
+        # lives. A capture that then uses mp must not take a reference on it.
+        mp = torch.cuda.MemPool()
+        baseline = self._allocations()
+        g1 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g1, pool=mp.id, capture_error_mode="thread_local"):
+            kept = torch.empty(1000, pin_memory=True)
+        g1.reset()
+        g2 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g2, capture_error_mode="thread_local"):
+            with torch.cuda.use_mem_pool(mp):
+                torch.ones(1, device="cuda")
+        g2.reset()
+        del kept
+        torch.accelerator.empty_host_cache()
+        self.assertEqual(self._allocations(), baseline)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_loader_thread_during_global_capture(self):
         # A thread inside a pool queries events and allocates while another
         # thread captures in the default (global) mode.

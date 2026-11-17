@@ -1246,11 +1246,12 @@ struct CachingHostAllocatorImpl {
   }
 
   // Takes a reference on an existing pool for a graph that uses it during
-  // capture, as the device allocator does for use_mem_pool. False if absent.
+  // capture, as the device allocator does for use_mem_pool. False if absent
+  // or already released.
   bool retain_pool(c10::MempoolId_t pool_id) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
     auto it = graph_pools_.find(pool_id);
-    if (it == graph_pools_.end()) {
+    if (it == graph_pools_.end() || it->second->use_count == 0) {
       return false;
     }
     it->second->use_count++;
