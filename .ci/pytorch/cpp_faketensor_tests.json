@@ -3,6 +3,8 @@
     "default"
   ],
   "tests": [
+    "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_fake_fallback_subclasses_without_python_dispatch_*",
+    "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_unset_rebuilds_mode_*",
     "test_fake_tensor.py::TestFakeTensor::test__adaptive_avg_pool2d_backward",
     "test_fake_tensor.py::TestFakeTensor::test_alias_call",
     "test_fake_tensor.py::TestFakeTensor::test_allow_meta",
@@ -24,6 +26,7 @@
     "test_fake_tensor.py::TestFakeTensor::test_constructor_rand",
     "test_fake_tensor.py::TestFakeTensor::test_constructor_zeros",
     "test_fake_tensor.py::TestFakeTensor::test_conv_nhwc",
+    "test_fake_tensor.py::TestFakeTensor::test_convert_fake_to_real",
     "test_fake_tensor.py::TestFakeTensor::test_custom_op_fallback",
     "test_fake_tensor.py::TestFakeTensor::test_embedding_bag_meta",
     "test_fake_tensor.py::TestFakeTensor::test_embedding_meta_indices",
@@ -109,6 +112,7 @@
     "test_fake_tensor.py::TestFakeTensor::test_randperm",
     "test_fake_tensor.py::TestFakeTensor::test_repr",
     "test_fake_tensor.py::TestFakeTensor::test_same_shape_env_preserved",
+    "test_fake_tensor.py::TestFakeTensor::test_scalar_inputs_*",
     "test_fake_tensor.py::TestFakeTensor::test_scalar_tensor_item_memo_invalidates_on_epoch",
     "test_fake_tensor.py::TestFakeTensor::test_select_out_of_bounds",
     "test_fake_tensor.py::TestFakeTensor::test_sparse_compressed_tensor_creation",
@@ -119,12 +123,16 @@
     "test_fake_tensor.py::TestFakeTensor::test_sparse_spdiags_compile_backend_eager",
     "test_fake_tensor.py::TestFakeTensor::test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo",
     "test_fake_tensor.py::TestFakeTensor::test_suggest_memory_format_with_degenerate_dimensions",
+    "test_fake_tensor.py::TestFakeTensor::test_tensor_constructor_meta_device_from_storage_*",
+    "test_fake_tensor.py::TestFakeTensor::test_tensor_constructor_meta_storage_device_*",
     "test_fake_tensor.py::TestFakeTensor::test_unbind_copy_out",
     "test_fake_tensor.py::TestFakeTensor::test_weight_int4pack_mm",
+    "test_fake_tensor.py::TestFakeTensorConstHandling::test_constant_propagate_through_functions",
     "test_fake_tensor.py::TestFakeTensorConstHandling::test_initial_constants_empty",
     "test_fake_tensor.py::TestFakeTensorConstHandling::test_initial_constants_one",
     "test_fake_tensor.py::TestFakeTensorConstHandling::test_initial_constants_scalar",
     "test_fake_tensor.py::TestFakeTensorConstHandling::test_initial_constants_two",
-    "test_fake_tensor.py::TestFakeTensorConverter::test_constant_conversion"
+    "test_fake_tensor.py::TestFakeTensorConverter::test_constant_conversion",
+    "test_fake_tensor.py::TestFakeTensorConverter::test_multiple_modes_*"
   ]
 }
