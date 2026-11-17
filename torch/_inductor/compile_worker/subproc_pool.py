@@ -130,23 +130,29 @@ class _SubprocExceptionInfo:
     use it for the message in the exception thrown in the main process.
     """
 
-    def __init__(self, details: str) -> None:
+    def __init__(self, details: str, exc_types: tuple[str, ...] = ()) -> None:
         self.details = details
+        self.exc_types = exc_types
 
 
 class SubprocException(Exception):
     """
-    Thrown when a job in a subprocess raises an Exception.
+    Thrown when a job in a subprocess raises an Exception. ``exc_types`` holds the
+    qualified names of the job exception's classes (its MRO); it is empty when the
+    pool itself failed to run the job.
     """
 
-    def __init__(self, details: str, name: str = "<unknown>") -> None:
+    def __init__(
+        self, details: str, name: str = "<unknown>", exc_types: tuple[str, ...] = ()
+    ) -> None:
         self.details = details
+        self.exc_types = exc_types
         super().__init__(
             f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
         )
 
     def with_name(self, name: str) -> "SubprocException":
-        return SubprocException(self.details, name)
+        return SubprocException(self.details, name, self.exc_types)
 
 
 class SubprocPickler:
@@ -424,7 +430,9 @@ class SubprocPool:
     def _resolve_future(future: Future[Any], result: object) -> None:
         try:
             if isinstance(result, _SubprocExceptionInfo):
-                future.set_exception(SubprocException(result.details))
+                future.set_exception(
+                    SubprocException(result.details, exc_types=result.exc_types)
+                )
             elif isinstance(result, Exception):
                 future.set_exception(result)
             else:
@@ -926,8 +934,11 @@ class SubprocMain:
             job = typing.cast(Callable[[], object], pickler.loads(data))
             try:
                 result = job()
-            except Exception:
-                result = _SubprocExceptionInfo(traceback.format_exc())
+            except Exception as e:
+                exc_types = tuple(
+                    f"{c.__module__}.{c.__qualname__}" for c in type(e).__mro__
+                )
+                result = _SubprocExceptionInfo(traceback.format_exc(), exc_types)
             return pickler.dumps(result)
         finally:
             watchdog.clear_current_job()
