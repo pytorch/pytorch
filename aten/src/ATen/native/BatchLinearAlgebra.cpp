@@ -10,6 +10,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 
+#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #include <utility>
@@ -1621,7 +1622,7 @@ void _linalg_check_errors(
 
   // If it's all zeros, we return early.
   // We optimise for the most likely case.
-  if (C10_LIKELY(!infos.any().item<bool>())) {
+  if (!infos.any().item<bool>()) [[likely]] {
     return;
   }
 
@@ -3329,7 +3330,7 @@ DEFINE_DISPATCH(lstsq_stub);
   * 'residuals' - Tensor to store values of the residual sum of squares for each column of the solution.
   * 'rank' - Tensor to store the rank of A.
   * 'singular_values' - Tensor to store the singular values of A.
-  * 'infos' - Tensor to store error codes of linear algebra math library.
+  * 'infos' - Tensor to store error codes of linear algebra math library, one per element of the broadcast batch.
 
   For further details, please see the LAPACK documentation for GELS/GELSY/GELSS/GELSD routines.
 */
@@ -3369,7 +3370,6 @@ static void linalg_lstsq_out_info(
 
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
   TORCH_INTERNAL_ASSERT(infos.device() == input.device());
-  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
   TORCH_INTERNAL_ASSERT(infos.is_contiguous());
 
   bool vector_case = linalg_solve_is_vector_rhs(input, other);
@@ -3379,6 +3379,7 @@ static void linalg_lstsq_out_info(
   TORCH_INTERNAL_ASSERT(input.size(-2) == other_2d.size(-2));
 
   std::vector<int64_t> expected_solution_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
+  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, c10::multiply_integers(expected_solution_shape)));
   // the actual shape of the solution returned is (*, n,) or (*, n, nrhs)
   // but LAPACK requires extra dimensions to store raw residuals
   // so the expected shape is (*, max(m, n),) or (*, max(m, n), nrhs)
@@ -3620,7 +3621,9 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     ? rcond.value()
     : _get_epsilon(c10::toRealValueType(input.scalar_type())) * static_cast<double>(std::max<int64_t>(input.size(-2), input.size(-1)));
 
-  auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  // The batched driver broadcasts input over other and writes one info per broadcast batch
+  std::vector<int64_t> batch_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
+  auto infos = at::zeros({std::max<int64_t>(1, c10::multiply_integers(batch_shape))}, input.options().dtype(kInt));
 
   // provided output tensor can be used directly if:
   // 1. the shape matches the expected shape
@@ -3628,7 +3631,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // 3. the tensor is contiguous
 
   // Checks for the 'solution' tensor
-  std::vector<int64_t> expected_solution_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
+  std::vector<int64_t> expected_solution_shape = batch_shape;
   // the actual shape of the shape of the solution returned in (*, n,) or (*, n, nrhs)
   // but LAPACK requires extra dimensions so the expected shape is (*, max(m, n),) or (*, max(m, n), nrhs)
   expected_solution_shape.push_back(std::max(input.size(-1), input.size(-2)));
@@ -3926,9 +3929,9 @@ Tensor& linalg_solve_triangular_out(
 
   Tensor out_f; // the out that will go into fortran
   // We use C10_LIKELY mostly for documentation as it helps following what's the most likely path
-  if C10_LIKELY (is_row_or_column_contiguous(out)) {
+  if (is_row_or_column_contiguous(out)) [[likely]] {
     out_f = out;
-    if C10_LIKELY (!out.is_same(B_)) {
+    if (!out.is_same(B_)) [[likely]] {
       out_f.copy_(B_);
     }
   } else {
@@ -3961,7 +3964,7 @@ Tensor& linalg_solve_triangular_out(
   bool A_is_conj = A_f.is_conj() != out_f.is_conj();
   bool A_is_neg = A_f.is_neg() != out_f.is_neg();
   bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
-  if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
+  if (!is_row_or_column_contiguous(A_f)) [[unlikely]] {
     // We first annotate with flags on A_f all the conj / transpose / neg coming from out
     // and then we clone the resulting tensor to resolve all of them in memory
     if (out_f.is_conj()) {
@@ -3980,8 +3983,8 @@ Tensor& linalg_solve_triangular_out(
     A_f = transpose_A ? A_f.clone(at::MemoryFormat::Contiguous)
                       : cloneBatchedColumnMajor(A_f);
     A_is_f_contig = true;
-  } else if C10_UNLIKELY (A_is_f_contig && A_is_conj) {
-    if C10_UNLIKELY (A_f.is_neg() || out_f.is_neg()) {
+  } else if (A_is_f_contig && A_is_conj) [[unlikely]] {
+    if (A_f.is_neg() || out_f.is_neg()) [[unlikely]] {
       // Cases A_is_neg (remember that B.is_neg() iff out_f.is_same(B))
       // -AX = -B => A(-X) = B. Swap neg of A_f. Nothing to do on X as X.is_same(B).
       // -AX = B. We resolve the neg in memory
@@ -4003,7 +4006,7 @@ Tensor& linalg_solve_triangular_out(
     }
     // As we've already resolved the conj of A in the clone
     A_is_conj = out_f.is_conj();
-  } else if C10_UNLIKELY (A_is_neg) {
+  } else if (A_is_neg) [[unlikely]] {
     // We follow the same logic as above, only that in this case we need to perform the
     // negation in memory
     if (out_f.is_neg()) {

@@ -89,6 +89,7 @@ from torch._prims_common import compute_required_storage_length
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    _static_skip_if,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -230,7 +231,7 @@ class TestMaxAutotune(TestCase):
         for size_hints in (
             {"x": 2048},
             {"x": 128, "y": 256},
-            {"x": 64, "y": 64, "z": 64},
+            {"x": 64, "y": 64, "z0_": 64},
         ):
             with self.subTest(size_hints=size_hints):
                 max_autotune_configs = pointwise(
@@ -7064,6 +7065,30 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         # when get_min_choice() is called during prologue fusion
                         run_and_get_code(compiled_f, a, b)
 
+    def test_fuse_epilogue_zero_unfused_occupancy(self):
+        from torch._inductor.scheduler import _fuse_epilogue
+
+        # 64-wide wavefronts: 200 regs * 8 warps * 64 lanes > 65536 regs per CU
+        device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=304,
+            cc=94,
+            regs_per_multiprocessor=65536,
+            warp_size=64,
+        )
+        self.assertFalse(
+            _fuse_epilogue(
+                ms1=0.1,
+                ms2=0.3,
+                unfused_n_regs=200,
+                fused_n_regs=240,
+                fused_n_spills=0,
+                num_warps=8,
+                device_props=device_props,
+            )
+        )
+
 
 class _TDMFakeSizeVars:
     """Sizevars stand-in for the descriptor-checker host tests.
@@ -8289,6 +8314,31 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 
         with mock.patch.object(AsyncAutotuner, "start", mock_start):
             test_aten_chosen()
+
+
+for _async_test_name in unittest.defaultTestLoader.getTestCaseNames(
+    TestMaxAutotuneAsyncPipelined
+):
+    _async_test = getattr(TestMaxAutotuneAsyncPipelined, _async_test_name)
+    if getattr(_async_test, "__unittest_skip__", False):
+        continue
+    for _skip_name, _skip_reason in TestMaxAutotuneAsyncPipelined.SKIP_TESTS.items():
+        if _skip_name in _async_test_name or TEST_XPU:
+            setattr(
+                TestMaxAutotuneAsyncPipelined,
+                _async_test_name,
+                _static_skip_if(lambda: True, _skip_reason)(_async_test),
+            )
+            break
+    else:
+        setattr(
+            TestMaxAutotuneAsyncPipelined,
+            _async_test_name,
+            _static_skip_if(
+                lambda: config.cpp_wrapper,
+                next(iter(TestMaxAutotuneAsyncPipelined.SKIP_TESTS.values())),
+            )(_async_test),
+        )
 
 
 @unittest.skipUnless(
