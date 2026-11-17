@@ -6,10 +6,10 @@
 using namespace metal;
 using namespace c10::metal;
 
-template <typename accscalar_t>
+template <typename accscalar_t, typename dst_t>
 accscalar_t area_pixel_compute_source_index(
     accscalar_t scale,
-    int dst_index,
+    dst_t dst_index,
     bool align_corners,
     bool cubic) {
   if (align_corners) {
@@ -534,7 +534,8 @@ struct NearestSource {
   // Metal (built with -fno-fast-math) is bit-stable across macOS versions,
   // unlike the MPSGraph resize which mis-rounds exact boundaries on macOS 14.
   // The float to index_t cast saturates, so callers can clamp in index_t.
-  inline index_t operator()(int dst) const {
+  template <typename dst_t>
+  inline index_t operator()(dst_t dst) const {
     return static_cast<index_t>(exact ? scale * (dst + 0.5f) : scale * dst);
   }
   // Analytic inverse of [idx, idx + 1), moved a step to match the forward's
@@ -574,16 +575,17 @@ kernel void upsample_nearest2d(
       static_cast<uint>(params.output_sizes[0]) * channels.divisor;
   const NearestSource<exact, index_t> source_x(params.scales[0], false);
   const NearestSource<exact, index_t> source_y(params.scales[1], false);
-  const int x = thread_index.x;
-  const int y = thread_index.y;
+  const uint x = thread_index.x;
+  const uint y = thread_index.y;
   const auto src_x =
       min(source_x(x), static_cast<index_t>(params.input_sizes[3]) - 1);
   const auto src_y =
       min(source_y(y), static_cast<index_t>(params.input_sizes[2]) - 1);
   device const auto* input =
       inputData + src_y * input_strides.z + src_x * input_strides.w;
-  device auto* output =
-      outputData + y * output_strides.z + x * output_strides.w;
+  device auto* output = outputData +
+      static_cast<index_t>(y) * output_strides.z +
+      static_cast<index_t>(x) * output_strides.w;
   for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
     const auto nc = channels.divmod(plane);
     const auto n = nc.div;
@@ -608,8 +610,8 @@ kernel void upsample_bilinear2d(
   const ::c10::IntDivider<uint> channels = channels_div;
   const auto planes =
       static_cast<uint>(params.output_sizes[0]) * channels.divisor;
-  const int x = thread_index.x;
-  const int y = thread_index.y;
+  const uint x = thread_index.x;
+  const uint y = thread_index.y;
   const auto real_x = area_pixel_compute_source_index(
       params.scales[0], x, params.align_corners, /*cubic=*/false);
   const auto real_y = area_pixel_compute_source_index(
@@ -626,8 +628,9 @@ kernel void upsample_bilinear2d(
       inputData + clamp(y0, index_t(0), max_y) * input_strides.z;
   device const T* row1 =
       inputData + clamp(y0 + 1, index_t(0), max_y) * input_strides.z;
-  device auto* output =
-      outputData + y * output_strides.z + x * output_strides.w;
+  device auto* output = outputData +
+      static_cast<index_t>(y) * output_strides.z +
+      static_cast<index_t>(x) * output_strides.w;
   for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
     const auto nc = channels.divmod(plane);
     const index_t in_off = nc.div * input_strides.x + nc.mod * input_strides.y;
