@@ -1198,7 +1198,7 @@ class TestCompiledDTensorOps(DTensorOpsMixin, TestCase):
     )
     @decorateIf(
         unittest.expectedFailure,
-        lambda p: not p["use_cpp_fake_tensor"]
+        lambda p: not torch._dynamo.config.use_cpp_fake_tensor
         and p["op"].name
         in (
             "nn.functional.binary_cross_entropy_with_logits",

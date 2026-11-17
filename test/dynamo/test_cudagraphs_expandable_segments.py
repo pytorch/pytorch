@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from dynamo.test_cudagraphs import CppTestAotCudagraphs, TestAotCudagraphs  # noqa: F401
+from dynamo.test_cudagraphs import TestAotCudagraphs  # noqa: F401
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent

@@ -43,11 +43,7 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -94,7 +90,6 @@ S = Shard
 R = Replicate()
 
 
-@instantiate_parametrized_tests
 class LocalTest(TestCase):
     def test_strided_shard_to_replicate_preserves_even_unbacked_shape(self):
         import torch.distributed.tensor.placement_types as placement_types
