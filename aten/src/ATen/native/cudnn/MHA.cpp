@@ -180,7 +180,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <cudnn.h>
 
 #include <cstdint>
@@ -1060,8 +1060,8 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
         .set_paged_attention_v_table(
             page_table_tensor(PAGE_TABLE_V, "page_table_v"))
         // cuDNN derives its maximum KV length from the page-table width.
-        .set_paged_attention_max_seq_len_kv(c10::checked_convert<int>(
-            max_seq_len_kv, "paged attention maximum KV sequence length"));
+        .set_paged_attention_max_seq_len_kv(
+            c10::safe_conv<int>(max_seq_len_kv, "int"));
   } else {
     K_ = mha_graph->tensor(fe::graph::Tensor_attributes()
                                .set_uid(K)
@@ -1420,7 +1420,9 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
                                    .set_attn_scale(attn_scale)
                                    .set_seq_len_q(SEQ_LEN_Q_)
                                    .set_seq_len_kv(SEQ_LEN_KV_)
-                                   .set_padding_mask(true);
+                                   .set_padding_mask(true)
+                                   .set_max_total_seq_len_q(q.size(0))
+                                   .set_max_total_seq_len_kv(k.size(0));
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_uid(SEED)

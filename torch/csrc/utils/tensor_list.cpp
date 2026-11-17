@@ -23,13 +23,13 @@ PyObject* fake_tensor_to_list(const Tensor& tensor) {
   if (tensor.dim() == 0) {
     return py::cast(tensor.item()).release().ptr();
   }
-  auto n = tensor.size(0);
-  auto list = THPObjectPtr(PyList_New(n));
+  // unbind (not select) matches the ops traced by the previous Python
+  // FakeTensor.tolist, which iterated the tensor; traced graphs depend on it.
+  auto elems = tensor.unbind(0);
+  auto list = THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(elems.size())));
   TORCH_CHECK_PYTHON(list);
-  for (const auto i : c10::irange(n)) {
-    Tensor elem = tensor.select(0, i);
-    PyObject* obj = tensor.dim() == 1 ? py::cast(elem.item()).release().ptr()
-                                      : fake_tensor_to_list(elem);
+  for (const auto i : c10::irange(elems.size())) {
+    PyObject* obj = fake_tensor_to_list(elems[i]);
     TORCH_CHECK_PYTHON(obj);
     PyList_SET_ITEM(list.get(), i, obj);
   }

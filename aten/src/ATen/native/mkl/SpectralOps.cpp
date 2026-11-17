@@ -383,8 +383,22 @@ static DftiDescriptor _plan_mkl_fft(
   TORCH_CHECK(in_strides[0] <= MKL_LONG_MAX && out_strides[0] <= MKL_LONG_MAX);
   MKL_LONG idist = in_strides[0];
   MKL_LONG odist = out_strides[0];
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_DISTANCE, idist));
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_DISTANCE, odist));
+  // MKL 2026.2 deprecates DFTI_{INPUT,OUTPUT}_{DISTANCE,STRIDES} in favor of the
+  // forward/backward domain names. The input of a forward transform is in the
+  // forward domain and its output is in the backward domain, and vice versa.
+#if INTEL_MKL_VERSION >= 20260200
+  const DFTI_CONFIG_PARAM in_distance_param = forward ? DFTI_FWD_DISTANCE : DFTI_BWD_DISTANCE;
+  const DFTI_CONFIG_PARAM out_distance_param = forward ? DFTI_BWD_DISTANCE : DFTI_FWD_DISTANCE;
+  const DFTI_CONFIG_PARAM in_strides_param = forward ? DFTI_FWD_STRIDES : DFTI_BWD_STRIDES;
+  const DFTI_CONFIG_PARAM out_strides_param = forward ? DFTI_BWD_STRIDES : DFTI_FWD_STRIDES;
+#else
+  const DFTI_CONFIG_PARAM in_distance_param = DFTI_INPUT_DISTANCE;
+  const DFTI_CONFIG_PARAM out_distance_param = DFTI_OUTPUT_DISTANCE;
+  const DFTI_CONFIG_PARAM in_strides_param = DFTI_INPUT_STRIDES;
+  const DFTI_CONFIG_PARAM out_strides_param = DFTI_OUTPUT_STRIDES;
+#endif
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), in_distance_param, idist));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), out_distance_param, odist));
 
   // signal strides
   // first val is offset, set to zero (ignored)
@@ -394,8 +408,8 @@ static DftiDescriptor _plan_mkl_fft(
     mkl_istrides[i] = in_strides[i];
     mkl_ostrides[i] = out_strides[i];
   }
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_STRIDES, mkl_istrides.data()));
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_STRIDES, mkl_ostrides.data()));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), in_strides_param, mkl_istrides.data()));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), out_strides_param, mkl_ostrides.data()));
   // if conjugate domain of real is involved, set standard CCE storage type
   // this will become default in MKL in future
   if (!complex_input || !complex_output) {
