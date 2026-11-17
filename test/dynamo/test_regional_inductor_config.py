@@ -2831,6 +2831,12 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
 
         del compiled_fn
         torch._dynamo.reset()
+        # Dynamo's __compiled_fn global, which holds the compiled graph, is
+        # removed by a weakref callback when the transformed code object dies.
+        # Free-threaded builds free code objects only in a GC pass (deferred
+        # refcounting), so the first collect drops the global and the second
+        # frees the now-unreferenced graph cycle.
+        gc.collect()
         gc.collect()
         self.assertEqual(self._live_cudagraph_state_keys() - initial_keys, set())
 
