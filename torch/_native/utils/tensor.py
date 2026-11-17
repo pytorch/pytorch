@@ -18,6 +18,14 @@ def row_alignment(n: int, element_size: int, max_alignment: int = 16) -> int:
     return math.gcd(n * element_size, max_alignment)
 
 
+def can_use_32bit_indexing(tensor: torch.Tensor, *, max_index: int = 2**31 - 1) -> bool:
+    r"""Check logical count and element offsets relative to the data pointer."""
+    span = sum(
+        (size - 1) * stride for size, stride in zip(tensor.shape, tensor.stride())
+    )
+    return tensor.numel() < max_index and span < max_index
+
+
 def reshape_contiguous(
     tensor: torch.Tensor, shape: tuple[int, ...], *, alignment: int = 1
 ) -> torch.Tensor:

@@ -2451,6 +2451,11 @@ def gen_source_files(
             op: m
             for (key, op), m in native_aot_manifests.items()
             if key == dispatch_key
+            or (
+                dispatch_key == DispatchKey.CompositeExplicitAutograd
+                and key == DispatchKey.CUDA
+                and not m.structured
+            )
         }
 
         register_dispatch_key_base_env = {
