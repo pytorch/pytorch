@@ -662,6 +662,63 @@ class GraphPartitionMap:
     constant_names: list[str]
 
 
+class GraphPartitionMode(enum.Enum):
+    """Whether, and why, a compile is split into partition functions."""
+
+    # One callable: graph_partition is off, unsupported (cpp_wrapper, fx_wrapper,
+    # AOT) or unwanted (subgraph bodies, benchmark-only lowerings).
+    NONE = "none"
+    # config.graph_partition=True.
+    CONFIG = "config"
+
+
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionPlan:
+    """How one compile is split into partitions, and what the partitions are for.
+
+    Decided once before lowering; GraphLowering and CompiledFxGraph carry it
+    instead of reading config.graph_partition. ConstructorMoverPass,
+    the cpp_wrapper/fx_wrapper setup and compile_fx's override_cudagraphs
+    handling still read the config itself, and the scheduler's
+    partition-minimizing reorder requires both it and config.triton.cudagraphs,
+    preserving that optimization's opt-in.
+    """
+
+    mode: GraphPartitionMode = GraphPartitionMode.NONE
+    # The partitions are for CUDA Graphs or a customized partition wrapper: the
+    # scheduler splits off ops that cannot be captured, call() leaves the input
+    # alignment and NaN asserts to the partition functions, and post_compile
+    # captures the partitions instead of the whole graph.
+    cudagraphs_per_partition: bool = False
+
+    def __post_init__(self) -> None:
+        if self.cudagraphs_per_partition and not self.split_into_partitions:
+            raise ValueError("cudagraphs_per_partition=True requires partitioning")
+
+    @property
+    def split_into_partitions(self) -> bool:
+        """Whether codegen emits partition functions and a Runner."""
+        return self.mode is not GraphPartitionMode.NONE
+
+    @staticmethod
+    def unsplit() -> GraphPartitionPlan:
+        return GraphPartitionPlan()
+
+    @staticmethod
+    def from_config(cudagraphs: bool | None = None) -> GraphPartitionPlan:
+        """The plan config.graph_partition implies, for a compile whose capture
+        setting is ``cudagraphs`` (default: config.triton.cudagraphs)."""
+        if not config.graph_partition:
+            return GraphPartitionPlan.unsplit()
+        if cudagraphs is None:
+            cudagraphs = config.triton.cudagraphs
+        return GraphPartitionPlan(
+            GraphPartitionMode.CONFIG,
+            cudagraphs_per_partition=cudagraphs
+            or _unstable_customized_partition_wrapper.wrapper is not None,
+        )
+
+
 def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
     """
     Returns benchmark results by examining torch profiler events.

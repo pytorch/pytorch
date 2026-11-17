@@ -137,12 +137,12 @@ from .graph import GraphLowering
 from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
-    _unstable_customized_partition_wrapper,
     align_inputs_from_check_idxs,
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
     get_first_incompatible_cudagraph_node,
+    GraphPartitionPlan,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
@@ -1849,11 +1849,7 @@ class _InProcessFxCompile(FxCompile):
                     get_decomp_fn=get_decomp_fn,
                     # Per compile: override_cudagraphs can turn capture off for
                     # this graph while config.triton.cudagraphs stays on.
-                    cudagraphs_per_partition=config.graph_partition
-                    and (
-                        bool(cudagraphs)
-                        or _unstable_customized_partition_wrapper.wrapper is not None
-                    ),
+                    partition_plan=GraphPartitionPlan.from_config(bool(cudagraphs)),
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -2024,7 +2020,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
-                        and not V.graph.cudagraphs_per_partition
+                        and not V.graph.partition_plan.cudagraphs_per_partition
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
@@ -2053,7 +2049,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         # pyrefly: ignore [unbound-name]
-                        and not V.graph.cudagraphs_per_partition
+                        and not V.graph.partition_plan.cudagraphs_per_partition
                         # pyrefly: ignore [unbound-name]
                         and not V.graph.disable_cudagraphs_reason
                     ):
@@ -2095,7 +2091,7 @@ class _InProcessFxCompile(FxCompile):
                                 V.graph.device_node_mapping,
                                 cpu_nodes_partitioned_out=(
                                     # pyrefly: ignore [unbound-name]
-                                    V.graph.cudagraphs_per_partition
+                                    V.graph.partition_plan.cudagraphs_per_partition
                                 ),
                             )
                         )
