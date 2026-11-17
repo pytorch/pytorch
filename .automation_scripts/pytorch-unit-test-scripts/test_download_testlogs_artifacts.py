@@ -213,6 +213,48 @@ class ApiRetryTest(unittest.TestCase):
         self.assertEqual(get.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
 
+    def test_workflow_jobs_use_small_pages(self):
+        pages = [
+            {"jobs": [{"id": i, "name": "a"} for i in range(50)], "total_count": 120},
+            {"jobs": [{"id": i, "name": "b"} for i in range(50)], "total_count": 120},
+            {"jobs": [{"id": i, "name": "c"} for i in range(20)], "total_count": 120},
+        ]
+        with mock.patch.object(dtl, "_fetch_jobs_page", side_effect=pages) as fetch:
+            jobs = dtl.get_workflow_jobs({"jobs_url": "jobs"}, all_attempts=True)
+
+        self.assertEqual(len(jobs), 120)
+        self.assertEqual(
+            [call.args[1] for call in fetch.call_args_list],
+            [
+                {"per_page": 50, "filter": "all"},
+                {"per_page": 50, "filter": "all", "page": 2},
+                {"per_page": 50, "filter": "all", "page": 3},
+            ],
+        )
+
+    def test_workflow_jobs_fall_back_to_smaller_pages(self):
+        pages = [
+            {"jobs": [{"id": i, "name": "a"} for i in range(50)], "total_count": 60},
+            Exception("jobs API did not return a 'jobs' payload (last HTTP 502)"),
+            {"jobs": [{"id": i, "name": "b"} for i in range(25)], "total_count": 60},
+            {"jobs": [{"id": i, "name": "c"} for i in range(25)], "total_count": 60},
+            {"jobs": [{"id": i, "name": "d"} for i in range(10)], "total_count": 60},
+        ]
+        with mock.patch.object(dtl, "_fetch_jobs_page", side_effect=pages) as fetch:
+            jobs = dtl.get_workflow_jobs({"jobs_url": "jobs"})
+
+        self.assertEqual(len(jobs), 60)
+        self.assertEqual(
+            [call.args[1] for call in fetch.call_args_list],
+            [
+                {"per_page": 50},
+                {"per_page": 50, "page": 2},
+                {"per_page": 25},
+                {"per_page": 25, "page": 2},
+                {"per_page": 25, "page": 3},
+            ],
+        )
+
     def test_workflow_runs_retry_bad_response(self):
         responses = [
             Response(503, {}),

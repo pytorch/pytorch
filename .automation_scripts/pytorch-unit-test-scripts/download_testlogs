@@ -5,6 +5,7 @@ try:
     import os
     import copy
     import json
+    import math
     import time
     import argparse
     import requests
@@ -168,6 +169,11 @@ def write_test_log_to_file(filename, test_key, jobs, sha):
         with open(filename + ".job_url", "w", encoding="utf-8") as f:
             f.write(job_url)
 
+# GitHub's max is 100, but large pytorch trunk runs often 502 at that size,
+# sometimes on every retry. Smaller pages fail less, so fall back on exhaustion.
+JOBS_PAGE_SIZES = (50, 25, 10)
+JOBS_PAGE_RETRIES = 5
+
 def _fetch_jobs_page(jobs_url, params, max_retries=7):
     """GET one page of the jobs API, retrying transient failures.
 
@@ -236,6 +242,19 @@ def _fetch_workflow_runs(workflow, params, max_retries=7):
         f"{max_retries} attempts (last {last_failure}) for {workflow}.yml"
     )
 
+def _fetch_all_jobs(jobs_url, page_size, all_attempts):
+    base_params = {'per_page': page_size}
+    if all_attempts:
+        base_params['filter'] = 'all'
+    response_json = _fetch_jobs_page(jobs_url, base_params, JOBS_PAGE_RETRIES)
+    jobs = response_json["jobs"]
+    for i in range(2, math.ceil(response_json['total_count'] / page_size) + 1):
+        page_json = _fetch_jobs_page(
+            jobs_url, {**base_params, 'page': i}, JOBS_PAGE_RETRIES
+        )
+        jobs += page_json["jobs"]
+    return jobs
+
 def get_workflow_jobs(wf, all_attempts=False):
     """Get all jobs for a workflow run.
 
@@ -247,18 +266,15 @@ def get_workflow_jobs(wf, all_attempts=False):
     """
     if wf is None:
         raise Exception("wf is None!")
-    page_size = 100 #max allowed by Github API
-    base_params = {'per_page': page_size}
-    if all_attempts:
-        base_params['filter'] = 'all'
-    response_json = _fetch_jobs_page(wf['jobs_url'], base_params)
-    jobs = response_json["jobs"]
-
-    if response_json['total_count'] > page_size:
-        import math
-        for i in range(2, math.ceil(response_json['total_count']/page_size) + 1):
-            page_json = _fetch_jobs_page(wf['jobs_url'], {**base_params, 'page': i})
-            jobs += page_json["jobs"]
+    for attempt, page_size in enumerate(JOBS_PAGE_SIZES):
+        try:
+            jobs = _fetch_all_jobs(wf['jobs_url'], page_size, all_attempts)
+            break
+        except Exception as error:
+            if attempt == len(JOBS_PAGE_SIZES) - 1:
+                raise
+            print(f"  WARNING: {error}; retrying with per_page="
+                  f"{JOBS_PAGE_SIZES[attempt + 1]}")
     # Record variant (rerun_disabled_tests / mem_leak_check) job IDs so their
     # near-empty artifacts can be excluded from the S3 download below.
     for j in jobs:
