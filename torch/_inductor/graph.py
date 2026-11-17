@@ -3260,6 +3260,7 @@ class GraphLowering(torch.fx.Interpreter):
                     **self.constants,
                     **self.torchbind_constants,
                     **self.opaque_value_type_classes,
+                    **self.wrapper_code.user_defined_cutedsl_launchers,
                 },
                 kernel_sources=self.wrapper_code.kernel_sources,
             )
