@@ -3616,6 +3616,64 @@ class TestCfgFrames(TestCase):
             self.assertEqual(compiled(x, log), x + 1)
         self.assertEqual(log, [[True] * 4] * 4)
 
+    def test_a_function_that_enters_a_debugger_is_left_to_the_interpreter(self):
+        stopped = []
+
+        def enters(x):
+            y = x + 1
+            breakpoint()
+            return y * 2
+
+        def f(x):
+            return enters(x) + 1
+
+        with self.assertRaisesRegex(torch.rewrite.Unsupported, "stops a debugger"):
+            torch.rewrite(enters, fallback=False)
+        compiled = torch.rewrite(f, fallback=False)
+        hook = lambda: stopped.append(sys._getframe(1).f_locals["y"])  # noqa: E731
+        with unittest.mock.patch("sys.breakpointhook", hook):
+            for _ in range(3):
+                self.assertEqual(compiled(3), 9)
+        # The debugger was in the frame of the function, which the
+        # interpreter ran.
+        self.assertEqual(stopped, [4, 4, 4])
+        names = compiled.stats()["interpreted_callees"]
+        self.assertEqual([name.rsplit(".", 1)[-1] for name in names], ["enters"])
+
+    def test_a_debugger_is_told_when_a_frame_it_is_on_returns(self):
+        events = []
+
+        def tracer(frame, event, arg):
+            events.append((frame.f_code.co_name, event))
+            return tracer
+
+        def enters():
+            # What pdb.set_trace() does to the frames it is entered under.
+            sys.settrace(tracer)
+            sys._getframe(1).f_trace = tracer
+            sys._getframe(2).f_trace = tracer
+
+        def middle(x):
+            enters()
+            return x + 1
+
+        def f(x):
+            return middle(x) * 2
+
+        def returns(fn):
+            events.clear()
+            try:
+                self.assertEqual(fn(1), 4)
+            finally:
+                sys.settrace(None)
+            return [e for e in events if e[1] == "return" and e[0] in ("middle", "f")]
+
+        compiled = torch.rewrite(f, fallback=False, passes=without("inline"))
+        for _ in range(3):
+            self.assertEqual(returns(compiled), returns(f))
+        self.assertEqual(returns(compiled), [("middle", "return"), ("f", "return")])
+        self.assertEqual(compiled.stats()["interpreted_callees"], [])
+
     def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
             return eval("'{}={}'.format(name, value)")
