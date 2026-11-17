@@ -6,7 +6,6 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
@@ -24,20 +23,23 @@ from torch.distributed.checkpoint._pg_transport import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.tensor import DTensor
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
-    at_least_x_gpu,
-    HAS_ACCELERATOR,
-    MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
+    MultiProcContinuousForInstantiateTest,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_ACCELERATOR,
+    TEST_MULTIACCELERATOR,
     TestCase,
 )
 
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 logger = logging.getLogger(__name__)
 
@@ -204,68 +206,62 @@ def _test_pg_transport_with_sharded_tensor(self, device) -> None:
     torch.testing.assert_close(expected_local_tensor, received_local_tensor)
 
 
-class PgTransportCPU(MultiProcContinuousTest):
+class PgTransportCPU(MultiProcContinuousForInstantiateTest):
+    hw_classification = HardwareClassification.CPU
+
     world_size = 8
     timeout: timedelta = timedelta(seconds=20)
 
-    @classmethod
-    def backend_str(cls) -> str | None:
-        return "gloo"
+    def test_pg_transport(self, device) -> None:
+        _test_pg_transport(self, device)
 
-    @classmethod
-    def device_type(cls) -> str:
-        return "cpu"
+    def test_pg_transport_with_mixed_content(self, device) -> None:
+        _test_pg_transport_with_mixed_content(self, torch.device(device))
 
-    @property
-    def device(self) -> torch.device:
-        return torch.device(self.device_type())
-
-    def test_pg_transport(self) -> None:
-        _test_pg_transport(self, self.device)
-
-    def test_pg_transport_with_mixed_content(self) -> None:
-        _test_pg_transport_with_mixed_content(self, self.device)
-
-    def test_pg_transport_with_sharded_tensor(self) -> None:
-        _test_pg_transport_with_sharded_tensor(self, self.device)
+    def test_pg_transport_with_sharded_tensor(self, device) -> None:
+        _test_pg_transport_with_sharded_tensor(self, torch.device(device))
 
 
-@skip_but_pass_in_sandcastle_if(not at_least_x_gpu(2), "test requires 2+ accelerators")
-class PgTransportGPU(MultiProcContinuousTest):
+@skip_but_pass_in_sandcastle_if(
+    not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+)
+class PgTransportGPU(MultiProcContinuousForInstantiateTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
 
-    @classmethod
-    def backend_str(cls) -> str | None:
-        return dist.get_default_backend_for_device(cls.device_type())
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(f"{self.device_type()}:{self.rank}")
-
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not at_least_x_gpu(2), "test requires 2+ accelerators"
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    def test_pg_transport(self) -> None:
-        _test_pg_transport(self, self.device)
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_pg_transport(self, device) -> None:
+        _test_pg_transport(self, self.current_device)
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not at_least_x_gpu(2), "test requires 2+ accelerators"
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    def test_pg_transport_with_mixed_content(self) -> None:
-        _test_pg_transport_with_mixed_content(self, self.device)
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_pg_transport_with_mixed_content(self, device) -> None:
+        _test_pg_transport_with_mixed_content(self, self.current_device)
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not at_least_x_gpu(2), "test requires 2+ accelerators"
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    def test_pg_transport_with_sharded_tensor(self) -> None:
-        _test_pg_transport_with_sharded_tensor(self, self.device)
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_pg_transport_with_sharded_tensor(self, device) -> None:
+        _test_pg_transport_with_sharded_tensor(self, self.current_device)
 
 
 class TestCastTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cast_tensor_different_dtypes(self):
         """Test casting tensors of different dtypes."""
         dtypes = [torch.float32, torch.float64, torch.int32, torch.int64, torch.bool]
@@ -310,6 +306,8 @@ class TestCastTensor(TestCase):
 
 
 class TestPrepareTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_prepare_tensor_basic(self):
         """Test basic tensor preparation."""
         tensor = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
@@ -357,6 +355,8 @@ class TestPrepareTensor(TestCase):
 
 
 class TestPrepareStateDict(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_prepare_state_dict_basic(self):
         """Test basic state dict preparation."""
         state_dict = {"weight": torch.randn(3, 4), "bias": torch.randn(4)}
@@ -413,6 +413,8 @@ class TestPrepareStateDict(TestCase):
 
 
 class TestPGTransportMocked(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.device = torch.device("cpu")
@@ -572,9 +574,10 @@ class TestPGTransportMocked(TestCase):
 
 
 class TestPGTransportEdgeCases(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
-        self.device = torch.device("cpu")
         self.pg = MagicMock()
         self.timeout = timedelta(seconds=10)
 
@@ -586,10 +589,11 @@ class TestPGTransportEdgeCases(TestCase):
         self.pg.send = MagicMock(return_value=self.mock_work)
         self.pg.recv = MagicMock(return_value=self.mock_work)
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_send_checkpoint_with_cpu_tensors(self):
+    # Requires an accelerator device; the process group is mocked.
+    @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
+    def test_send_checkpoint_with_cpu_tensors(self, device):
         """Test send_checkpoint with CPU tensors when device is accelerator."""
-        device = torch.device(f"{device_type}:0")
+        device = torch.device(device)
 
         # Create a state dict with CPU tensors
         state_dict = {
@@ -612,5 +616,12 @@ class TestPGTransportEdgeCases(TestCase):
         self.assertGreaterEqual(self.mock_work.wait.call_count, 4)
 
 
+instantiate_device_type_tests(PgTransportCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    PgTransportGPU, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestPGTransportEdgeCases, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
