@@ -23,7 +23,7 @@ from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
 from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
-from ..xpu.xpu_env import get_xpu_arch, get_xpu_version
+from ..xpu.xpu_env import get_xpu_arch_for_sycl_tla, get_xpu_version
 
 
 log = logging.getLogger(__name__)
@@ -233,7 +233,7 @@ def _normalize_cuda_arch(arch: str) -> str:
 @functools.lru_cache(8)
 def cutlass_arch(device_type: str) -> str:
     if device_type == "xpu":
-        arch = get_xpu_arch()
+        arch = get_xpu_arch_for_sycl_tla()
         return _normalize_xpu_arch(arch)
     else:
         arch = get_cuda_arch()
