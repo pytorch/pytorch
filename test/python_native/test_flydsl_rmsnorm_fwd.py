@@ -111,6 +111,89 @@ class TestFlyDSLRMSNormHelpers(TestCase):
         with self.assertRaisesRegex(RuntimeError, "requires an explicit weight"):
             _fused_rms_norm_impl(x, [128], None, EPS)
 
+    def test_cond_matches_legacy_predicate_grid(self):
+        """Size-first reorder must decide exactly as the previous predicate."""
+        from torch._native import flydsl_utils as fu
+        from torch._native.ops.norm import flydsl_rmsnorm_impl as impl
+        from torch._native.ops.norm.flydsl_rmsnorm_utils import (
+            SUPPORTED_DTYPES,
+            normalized_shape_1d,
+        )
+
+        def legacy_common_supported(input, n, weight):
+            if input.device.type != "cuda":
+                return False
+            device_index = input.device.index
+            if not fu._is_supported_arch(device_index, impl._SUPPORTED_ARCHES):
+                return False
+            if input.dtype not in SUPPORTED_DTYPES:
+                return False
+            if input.ndim < 1 or input.shape[-1] != n or input.numel() == 0:
+                return False
+            if not input.is_contiguous():
+                return False
+            if weight is None:
+                return False
+            return (
+                weight.shape == (n,)
+                and weight.dtype == input.dtype
+                and weight.device == input.device
+                and weight.is_contiguous()
+            )
+
+        def legacy_cond(input, normalized_shape, weight, eps):
+            n = normalized_shape_1d(normalized_shape)
+            if n is None:
+                return False
+            if eps is not None and not eps >= 0.0:
+                return False
+            if not legacy_common_supported(input, n, weight):
+                return False
+            rows_m = input.numel() // n
+            if not fu._fits_int32_buffer_span(rows_m, n, input.element_size()):
+                return False
+            return impl._fused_rms_norm_fwd_perf_wins(rows_m, n)
+
+        # CPU / shape cases that must not raise (n==0 especially).
+        cpu = torch.zeros(0, 0)
+        self.assertEqual(
+            impl._fused_rms_norm_cond(cpu, [0], None, EPS),
+            legacy_cond(cpu, [0], None, EPS),
+        )
+        self.assertFalse(impl._fused_rms_norm_cond(cpu, [0], None, EPS))
+        self.assertEqual(
+            impl._fused_rms_norm_cond(torch.zeros(()), [1], None, EPS),
+            legacy_cond(torch.zeros(()), [1], None, EPS),
+        )
+
+        if _UNSUPPORTED_REASON is not None:
+            return
+
+        device = "cuda"
+        cases = []
+        for n in (512, 4096, 8192, 16384, 114688, 114689):
+            for m in (0, 1, 2047, 2048, 4096, 8192):
+                cases.append((m, n, torch.float16, True))
+        cases.extend(
+            [
+                (8192, 4096, torch.float32, True),
+                (8192, 4096, torch.float64, True),
+                (8192, 4096, torch.float16, False),  # non-contiguous large input
+                (8, 128, torch.float16, True),
+            ]
+        )
+        for m, n, dtype, contiguous in cases:
+            x = make_tensor((max(m, 1), n), device=device, dtype=dtype)
+            if m == 0:
+                x = x[:0]
+            if not contiguous and x.numel() > 0:
+                x = x.t().contiguous().t()
+                self.assertFalse(x.is_contiguous())
+            weight = make_tensor((n,), device=device, dtype=x.dtype)
+            got = impl._fused_rms_norm_cond(x, [n], weight, EPS)
+            ref = legacy_cond(x, [n], weight, EPS)
+            self.assertEqual(got, ref, f"m={m} n={n} dtype={dtype} contig={contiguous}")
+
 
 @unittest.skipIf(_UNSUPPORTED_REASON is not None, str(_UNSUPPORTED_REASON))
 class TestFlyDSLRMSNorm(TestCase):
@@ -289,7 +372,11 @@ class TestFlyDSLRMSNorm(TestCase):
         stream = torch.cuda.Stream(device=x.device)
         with torch.cuda.stream(stream):
             out, rstd = rmsnorm_fwd(x, [128], weight, EPS)
-        stream.synchronize()
+            # An event on the side stream proves the launch was ordered there;
+            # a bare synchronize can pass if the kernel raced on the default stream.
+            done = torch.cuda.Event()
+            done.record(stream)
+        done.synchronize()
 
         self.assertEqual(out, ref_out)
         self.assertEqual(rstd, ref_rstd)
@@ -357,6 +444,31 @@ class TestFlyDSLRMSNorm(TestCase):
 
         self.assertEqual(got, ref)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+    def test_warm_cuda_graph_capture_reuses_specialization(self):
+        # Cold capture exercises the compile miss path. A warm capture must
+        # reuse the same specialization on the raw-stream hit path.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        x, weight = self._make_dispatch_inputs()
+        torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            got = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+
+        x.neg_()
+        with pn.flydsl.disabled():
+            ref = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        got.zero_()
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(got, ref)
+        info = rmsnorm_cache_info()["fwd"]
+        self.assertEqual(info.misses, 1)
+        self.assertGreaterEqual(info.hits, 1)
 
     @parametrize("n,min_rows", BAND_MINIMUMS)
     def test_band_minimum_dispatches(self, n, min_rows):
