@@ -10,7 +10,7 @@
     "export/test_export.py::TestExport::test_cond_in_vmap_strict_export",
     "export/test_export_strict.py::StrictExportTestExport::test_cond_in_vmap_strict_export_strict",
     "export/test_lift_unlift.py::TestLift::test_duplicate_constant_access",
-    "export/test_lift_unlift.py::TestLift::test_lift_basic",
+    "export/test_lift_unlift.py::TestLift::test_lift_basic_*",
     "export/test_lift_unlift.py::TestLift::test_lift_nested",
     "export/test_retraceability.py::RetraceExportNonStrictTestExport::test_cond_in_vmap_strict_export_retraceability_nonstrict",
     "export/test_retraceability.py::RetraceExportTestExport::test_cond_in_vmap_strict_export_retraceability_strict",
