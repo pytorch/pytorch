@@ -10,7 +10,8 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/rocm/*
+      # Same ciflow as CUDA torchtitan.yml — applying ciflow/torchtitan runs both.
+      - ciflow/torchtitan/*
   workflow_dispatch:
 
 concurrency:
