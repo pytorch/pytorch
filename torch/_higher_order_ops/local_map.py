@@ -250,9 +250,7 @@ def create_hop_fw_bw(
 
             fake_mode = detect_fake_mode(_args)
             if fake_mode is None:
-                fake_mode = FakeTensorMode(
-                    _force_python=True, allow_non_fake_inputs=True
-                )
+                fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
 
             with fake_mode:
                 fw_inputs = redistribute_fw_inputs(
