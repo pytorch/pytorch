@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import pickle
+import re
 import socket
 import threading
 import time
@@ -17,7 +18,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from enum import Enum
 from typing import Any
 
@@ -244,6 +245,24 @@ class _NodeDesc:
 
     def __repr__(self) -> str:
         return f"{self.addr}_{self.pid}_{self.local_id}"
+
+
+def _natural_sort_key(node: _NodeDesc) -> tuple:
+    """Return a key that sorts nodes by the natural order of their address.
+
+    Digit runs in the address compare numerically, so that ``node9`` sorts
+    before ``node66`` and rank assignment follows the numeric node order that
+    operators expect. For fleets whose hostnames use equal-width (zero-padded)
+    numbering the resulting order is identical to plain lexicographic order.
+    Ties on the address fall back to the previous ``(addr, pid, local_id)``
+    ordering, so processes on the same host stay grouped exactly as before.
+    """
+    chunks = tuple(
+        (0, int(chunk), "") if chunk.isdecimal() else (1, 0, chunk)
+        for chunk in re.split(r"(\d+)", node.addr)
+        if chunk
+    )
+    return (chunks, node.addr, node.pid, node.local_id)
 
 
 class _NodeDescGenerator:
@@ -476,7 +495,7 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
     def _sanitize(self) -> None:
         state = self._state
 
-        expire_time = datetime.now(timezone.utc) - (
+        expire_time = datetime.now(UTC) - (
             self._settings.keep_alive_interval * self._settings.keep_alive_max_attempt
         )
 
@@ -723,7 +742,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._record(message=msg)
         logger.debug(msg)
 
-        self._state.last_heartbeats[self._node] = datetime.now(timezone.utc)
+        self._state.last_heartbeats[self._node] = datetime.now(UTC)
 
     def _add_to_participants(self) -> None:
         msg = (
@@ -747,9 +766,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._keep_alive()
 
         if len(state.participants) == self._settings.min_nodes:
-            state.deadline = (
-                datetime.now(timezone.utc) + self._settings.timeout.last_call
-            )
+            state.deadline = datetime.now(UTC) + self._settings.timeout.last_call
 
         if len(state.participants) == self._settings.max_nodes:
             self._mark_rendezvous_complete()
@@ -835,8 +852,10 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         state.complete = True
         state.deadline = None
 
-        # Assign the ranks.
-        for rank, node in enumerate(sorted(state.participants)):
+        # Assign the ranks in natural order of the node addresses, so that
+        # ranks follow the numeric node order on clusters whose hostnames or
+        # addresses embed unpadded numbers (see gh-191190).
+        for rank, node in enumerate(sorted(state.participants, key=_natural_sort_key)):
             state.participants[node] = rank
 
     def _mark_rendezvous_closed(self) -> None:
@@ -857,9 +876,7 @@ def _should_keep_alive(ctx: _RendezvousContext) -> bool:
     except KeyError:
         return False
 
-    return (
-        last_heartbeat <= datetime.now(timezone.utc) - ctx.settings.keep_alive_interval
-    )
+    return last_heartbeat <= datetime.now(UTC) - ctx.settings.keep_alive_interval
 
 
 class _RendezvousExitOp:
@@ -949,7 +966,7 @@ class _RendezvousJoinOp:
                 and len(state.participants) <= ctx.settings.max_nodes
                 and state.deadline is not None
             ):
-                if state.deadline < datetime.now(timezone.utc):
+                if state.deadline < datetime.now(UTC):
                     msg = (
                         f"The node '{ctx.node}' marking the rendezvous complete, "
                         f"quorum established within deadline"
