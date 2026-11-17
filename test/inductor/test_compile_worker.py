@@ -1372,8 +1372,6 @@ class TestSubprocessEnv(TestCase):
         testcase = self
 
         class Input:
-            use_cpp_fake_tensor = torch._dynamo.config.use_cpp_fake_tensor
-
             def deserialize(self):
                 testcase.assertNotIn(key, os.environ)
                 os.environ[mutated_key] = "child-value"
