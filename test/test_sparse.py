@@ -1,7 +1,6 @@
 # Owner(s): ["module: sparse"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import torch
 import itertools
 import functools
@@ -4880,7 +4879,6 @@ class TestSparseMeta(TestCase):
             self.assertEqual(m.device.type, "meta")
             self.assertEqualMeta(m, t, 0)
 
-    @fake_tensor_test()
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_fake(self, dtype, layout):
@@ -4897,7 +4895,6 @@ class TestSparseMeta(TestCase):
             self.assertTrue(is_fake_tensor(d))
             self.assertEqualMeta(d, t, 0)
 
-    @fake_tensor_test()
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_zeros_like_fake(self, dtype, layout):

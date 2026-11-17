@@ -1145,6 +1145,10 @@ static bool isRDNA3(int index) {
   return at::detail::getCUDAHooks().isGPUArch({"gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"}, index);
 }
 
+static bool isGfx117x(int index) {
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1170", "gfx1171"}, index);
+}
+
 static bool isRDNA4(int index) {
   return at::detail::getCUDAHooks().isGPUArch({"gfx1200", "gfx1201"}, index);
 }
@@ -1247,8 +1251,8 @@ struct RocmMmaCdna {
   }
 };
 
-// RDNA4 (gfx12) wave32: wmma_f32_16x16x16_bf16. 8 A/B values and 8 C values per
-// lane; one int32 of packed int4 per k-tile.
+// gfx11.7 and RDNA4 (gfx12) wave32: wmma_f32_16x16x16_bf16. 8 A/B values and
+// 8 C values per lane; one int32 of packed int4 per k-tile.
 struct RocmMmaGfx12 {
   static constexpr int32_t kWarpSize = 32;
   static constexpr int32_t kTileLanes = 32;
@@ -1384,6 +1388,8 @@ struct RocmMmaGfx11 {
 
 #if defined(__GFX9__)
 using RocmMma = RocmMmaCdna;
+#elif defined(__gfx1170__) || defined(__gfx1171__)
+using RocmMma = RocmMmaGfx12;
 #elif defined(__GFX11__)
 using RocmMma = RocmMmaGfx11;
 #elif defined(__gfx1250__)
@@ -2008,7 +2014,7 @@ at::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(
       A.device() == B.device() && A.device() == qScaleAndZeros.device());
 
-  if (!isCDNA2orLater(A.device().index()) && !isRDNA3(A.device().index()) && !isRDNA4(A.device().index())) {
+  if (!isCDNA2orLater(A.device().index()) && !isRDNA3(A.device().index()) && !isGfx117x(A.device().index()) && !isRDNA4(A.device().index())) {
     TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
   }
 
@@ -2192,7 +2198,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   // which is the maximum vectorized load/store size
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
 
-  if (!isCDNA2orLater(in.device().index()) && !isRDNA3(in.device().index()) && !isRDNA4(in.device().index())) {
+  if (!isCDNA2orLater(in.device().index()) && !isRDNA3(in.device().index()) && !isGfx117x(in.device().index()) && !isRDNA4(in.device().index())) {
     TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
   }
   constexpr int32_t kNTileSize = 16;
