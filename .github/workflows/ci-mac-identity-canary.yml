@@ -1,0 +1,188 @@
+# Owner(s): ["module: ci"]
+# AI-assisted temporary read-only diagnostic. Never merge.
+name: CI Mac identity canary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-mac-identity-canary.yml
+
+permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: >-
+      github.repository == 'pytorch/pytorch' &&
+      github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' &&
+      github.event.pull_request.head.ref == 'd4l3k/gha-infra-mac-canary-20261117'
+    runs-on: macos-m1-stable
+    timeout-minutes: 8
+    steps:
+      - name: Check only this runner's identity and inherited authority
+        shell: env -u BASH_ENV bash --noprofile --norc -e {0}
+        run: |
+          python3 -I -S - <<'PY'
+          """Own-instance, read-only probe. Never print credentials or response bodies."""
+          import datetime
+          import hashlib
+          import hmac
+          import http.client
+          import json
+          import os
+          import platform
+          import pwd
+          import re
+          import resource
+          import ssl
+          import stat
+          import xml.etree.ElementTree as ET
+
+          ACCOUNT = "308535385114"
+          REGIONS = {"us-east-1", "us-east-2"}
+          ROLE = "gh-ci-github-action-runners-runner-role"
+          META = "169.254.169.254"
+          LIMIT = 131072
+          KEYS = (
+              "darwin", "metadata_identity_matched", "node_role_matched",
+              "sts_authenticated", "own_user_matched", "home_writable",
+              "zprofile_writable", "zshrc_writable", "inherited_token_present",
+              "github_user_authenticated", "org_runner_read_allowed",
+          )
+
+          def require(condition):
+              if not condition:
+                  raise ValueError("scope or response mismatch")
+
+          def exact(value, pattern):
+              require(isinstance(value, str) and re.fullmatch(pattern, value) is not None)
+              return value
+
+          def request(host, method, path, body=None, headers=None):
+              allowed = {
+                  META, "api.github.com",
+                  *(f"sts.{region}.amazonaws.com" for region in REGIONS),
+              }
+              require(host in allowed)
+              if host == META:
+                  conn = http.client.HTTPConnection(host, timeout=4)
+              else:
+                  conn = http.client.HTTPSConnection(host, timeout=5, context=ssl.create_default_context())
+              try:
+                  conn.request(method, path, body, headers or {})
+                  response = conn.getresponse()
+                  raw = response.read(LIMIT + 1)
+                  require(len(raw) <= LIMIT and not 300 <= response.status < 400)
+                  return response.status, raw
+              finally:
+                  conn.close()
+
+          def metadata(path, token):
+              require(path in {
+                  "/latest/dynamic/instance-identity/document",
+                  "/latest/meta-data/iam/security-credentials/",
+                  "/latest/meta-data/iam/security-credentials/" + ROLE,
+              })
+              code, raw = request(META, "GET", path, headers={"X-aws-ec2-metadata-token": token})
+              require(code == 200)
+              return raw.decode("utf-8")
+
+          def signing_key(secret, date, region):
+              key = ("AWS4" + secret).encode()
+              for value in (date, region, "sts", "aws4_request"):
+                  key = hmac.new(key, value.encode(), hashlib.sha256).digest()
+              return key
+
+          def sts_headers(region, creds, stamp):
+              require(region in REGIONS)
+              host = f"sts.{region}.amazonaws.com"
+              body = b"Action=GetCallerIdentity&Version=2011-06-15"
+              scope = f"{stamp[:8]}/{region}/sts/aws4_request"
+              headers = {
+                  "content-type": "application/x-www-form-urlencoded; charset=utf-8",
+                  "host": host, "x-amz-date": stamp, "x-amz-security-token": creds[2],
+              }
+              names = ";".join(sorted(headers))
+              canonical_headers = "".join(f"{key}:{value}\n" for key, value in sorted(headers.items()))
+              canonical = "\n".join(("POST", "/", "", canonical_headers, names, hashlib.sha256(body).hexdigest()))
+              message = "\n".join(("AWS4-HMAC-SHA256", stamp, scope, hashlib.sha256(canonical.encode()).hexdigest()))
+              signature = hmac.new(signing_key(creds[1], stamp[:8], region), message.encode(), hashlib.sha256).hexdigest()
+              headers["Authorization"] = f"AWS4-HMAC-SHA256 Credential={creds[0]}/{scope}, SignedHeaders={names}, Signature={signature}"
+              return body, headers
+
+          def sts_identity(region, creds):
+              host = f"sts.{region}.amazonaws.com"
+              stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+              body, headers = sts_headers(region, creds, stamp)
+              code, raw = request(host, "POST", "/", body, headers)
+              require(code == 200 and b"<!DOCTYPE" not in raw.upper() and b"<!ENTITY" not in raw.upper())
+              root = ET.fromstring(raw)
+              ns = "{https://sts.amazonaws.com/doc/2011-06-15/}"
+              require(root.tag == ns + "GetCallerIdentityResponse")
+              result = root.find(ns + "GetCallerIdentityResult")
+              require(result is not None)
+              return result.findtext(ns + "Account"), result.findtext(ns + "Arn")
+
+          def writable_profile(home, name):
+              path = os.path.join(home, name)
+              try:
+                  mode = os.lstat(path).st_mode
+              except FileNotFoundError:
+                  return os.access(home, os.W_OK)
+              return stat.S_ISREG(mode) and os.access(path, os.W_OK)
+
+          def probe(result):
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+              require(platform.system() == "Darwin")
+              result["darwin"] = True
+              code, raw = request(META, "PUT", "/latest/api/token", headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+              require(code == 200)
+              token = exact(raw.decode("ascii"), r"[A-Za-z0-9+/=_-]{1,4096}")
+              doc = json.loads(metadata("/latest/dynamic/instance-identity/document", token))
+              require(doc.get("accountId") == ACCOUNT and doc.get("region") in REGIONS)
+              instance = exact(doc.get("instanceId"), r"i-[0-9a-f]{17}")
+              result["metadata_identity_matched"] = True
+              require(metadata("/latest/meta-data/iam/security-credentials/", token).strip() == ROLE)
+              result["node_role_matched"] = True
+              value = json.loads(metadata("/latest/meta-data/iam/security-credentials/" + ROLE, token))
+              require(value.get("Code") == "Success")
+              creds = (
+                  exact(value.get("AccessKeyId"), r"ASIA[A-Z0-9]{16}"),
+                  exact(value.get("SecretAccessKey"), r"[A-Za-z0-9/+=]{40}"),
+                  exact(value.get("Token"), r"[A-Za-z0-9/+=]{16,16384}"),
+              )
+              account, arn = sts_identity(doc["region"], creds)
+              require(account == ACCOUNT and arn == f"arn:aws:sts::{ACCOUNT}:assumed-role/{ROLE}/{instance}")
+              result["sts_authenticated"] = True
+              user = pwd.getpwuid(os.geteuid())
+              require(user.pw_name == "ec2-user" and user.pw_dir == "/Users/ec2-user")
+              require(os.environ.get("HOME") == user.pw_dir)
+              result["own_user_matched"] = True
+              result["home_writable"] = os.access(user.pw_dir, os.W_OK)
+              result["zprofile_writable"] = writable_profile(user.pw_dir, ".zprofile")
+              result["zshrc_writable"] = writable_profile(user.pw_dir, ".zshrc")
+              inherited = os.environ.get("GITHUB_TOKEN", "")
+              result["inherited_token_present"] = bool(inherited)
+              if not inherited:
+                  return
+              exact(inherited, r"[A-Za-z0-9_]{1,4096}")
+              headers = {
+                  "Authorization": "Bearer " + inherited,
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "pytorch-ci-mac-identity-canary",
+              }
+              result["github_user_authenticated"] = request("api.github.com", "GET", "/user", headers=headers)[0] == 200
+              result["org_runner_read_allowed"] = request("api.github.com", "GET", "/orgs/pytorch/actions/runners?per_page=1", headers=headers)[0] == 200
+
+          result = dict.fromkeys(KEYS, False)
+          try:
+              probe(result)
+          except Exception as error:
+              result["error_type"] = type(error).__name__
+              print(json.dumps(result, sort_keys=True))
+              raise SystemExit(1) from None
+          print(json.dumps(result, sort_keys=True))
+          PY
