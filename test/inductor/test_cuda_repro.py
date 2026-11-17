@@ -2052,27 +2052,19 @@ class CudaReproTests(TestCase):
 
         f1_out, f1_grad, f1_weight_grad, f1_bias_grad = run(f1, True)
         f2_out, f2_grad, f2_weight_grad, f2_bias_grad = run(f2, True)
-        if TEST_XPU:
-            # f1 and f2 lower log_softmax to different reduction layouts on
-            # XPU, so their summation orders can differ by a few fp32 ulps.
-            # The tolerance is much smaller than the error from a missing
-            # low-precision round-trip (at least 9e-2 in local XPU runs).
-            self.assertEqual(f1_out, f2_out, atol=1e-4, rtol=0)
-            # The input and weight gradients include low-precision convolution
-            # backward accumulation, which is not invariant across these graph
-            # partitions. The bias gradient remains a direct fp32 reduction.
-            self.assertEqual(f1_bias_grad, f2_bias_grad, atol=1e-4, rtol=0)
-        else:
+        # Both numeric comparisons need eager to peel the bias the way Inductor
+        # does, which only cuDNN does: oneDNN takes the bias as a post-op and
+        # rounds the lowp conv output once, so on XPU eager never sees the
+        # peeled add's second rounding, and the saved-tensor split also makes
+        # f1 and f2 codegen the fp32 log_softmax epilogue differently there.
+        # The codegen check below is device-generic and still covers XPU.
+        if not TEST_XPU:
             # identical math must agree bit-exactly; this is the invariant
             self.assertEqual(f1_out, f2_out, atol=0, rtol=0)
             self.assertEqual(f1_grad, f2_grad, atol=0, rtol=0)
             self.assertEqual(f1_weight_grad, f2_weight_grad, atol=0, rtol=0)
             self.assertEqual(f1_bias_grad, f2_bias_grad, atol=0, rtol=0)
 
-        # Eager XPU uses oneDNN's fused conv+bias path, while Inductor peels
-        # the bias add; their low-precision rounding differs, so eager is not
-        # a reference for the compiled XPU result.
-        if not TEST_XPU:
             eager_out, _, _, _ = run(f1, False)
             self.assertEqual(f1_out, eager_out, atol=1e-3, rtol=1e-3)
             # grads are not compared against eager: the conv backward kernels
