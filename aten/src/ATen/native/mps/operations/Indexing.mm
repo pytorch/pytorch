@@ -4,6 +4,7 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Indexing.h>
+#include <utility>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
@@ -22,6 +23,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -339,7 +341,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // The block-scan running count is bounded by numel, so it fits uint32 (and can
   // use the fast parallel simd_shuffle scan) whenever numel <= UINT32_MAX. Only
   // genuinely >2^32-element tensors need the 64-bit scan.
-  const bool count_fits_u32 = static_cast<uint64_t>(numel) <= std::numeric_limits<uint32_t>::max();
+  const bool count_fits_u32 = std::in_range<uint32_t>(numel);
   auto pso_step2 =
       lib.getPipelineStateForFunc(fmt::format("prefix_sum_blocks_{}", index_kernel_suffix(count_fits_u32)));
 
@@ -506,7 +508,7 @@ static void flip_kernel_mps(TensorIterator& iter, const bool quantized) {
   }
 
   const auto input = iter.input(0);
-  const auto ndim = safe_downcast<uint32_t, int64_t>(iter.ndim());
+  const auto ndim = c10::safe_conv<uint32_t, int64_t>(iter.ndim(), "uint32_t");
   const bool use_direct_grid = ndim > 0 && ndim <= 3;
   const auto bit_size = getBitSizeString(input);
   const auto kernel_name = use_direct_grid ? fmt::format("flip_direct_{}", bit_size) : fmt::format("flip_{}", bit_size);
@@ -950,13 +952,15 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
               " and self on ",
               self.device());
   TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
-  TORCH_CHECK(self.numel() <= std::numeric_limits<uint32_t>::max(),
+  TORCH_CHECK(std::in_range<uint32_t>(self.numel()),
               "masked_fill not supported for tensors of more than 2**32 elements");
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
   auto stream = getCurrentMPSStream();
   const bool is_dense = self.is_contiguous() && b_mask->is_contiguous();
   const bool is_dense_broadcast = is_dense_broadcastable(mask, self);
   const auto flavor = is_dense ? "dense" : is_dense_broadcast ? "broadcast" : "strided";
+  TORCH_CHECK(is_dense || is_dense_broadcast || offsetsFitIn<int32_t>(self, *b_mask),
+              "masked_fill: non-contiguous tensors whose offsets exceed 2**31 are not supported on MPS");
   auto fillPSO = lib.getPipelineStateForFunc(
       fmt::format("masked_fill_scalar_{}_{}", flavor, getBitSizeString(self.scalar_type())));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1120,6 +1124,13 @@ static void index_fill_mps_kernel(TensorIterator& iter,
   // is where the mask's O(numel) sequential scan beats scatter's growing write-
   // conflict overhead.
   const bool use_mask = (indices_numel * 16 >= dim_size);
+  // The strided kernels index in int32 and the dense mask kernel in uint32; dense scatter uses int64
+  TORCH_CHECK(!is_dense ? offsetsFitIn<int32_t>(self) : !use_mask || std::in_range<uint32_t>(self.numel()),
+              "index_fill: MPS does not support a tensor of size ",
+              self.sizes(),
+              " and strides ",
+              self.strides(),
+              " (too large for 32-bit indexing)");
 
   auto stream = getCurrentMPSStream();
   if (use_mask) {
