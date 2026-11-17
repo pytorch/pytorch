@@ -447,18 +447,19 @@ class HuggingfaceRunner(BenchmarkRunner):
         mode = args.hf_inference_mode
         if args.tp_size < 1:
             raise ValueError(f"--tp-size must be positive, got {args.tp_size}")
-        if args.tp_size > 1 and mode == "generate":
+        if args.tp_size > 1 and mode not in ("prefill", "decode"):
             raise ValueError("--tp-size requires --hf-inference-mode=prefill or decode")
         if mode != "decode" and args.decode_length is not None:
             raise ValueError("--decode-length requires --hf-inference-mode=decode")
+        if mode in ("generate", "encode") and args.prompt_length is not None:
+            raise ValueError(
+                "--prompt-length requires --hf-inference-mode=prefill or decode"
+            )
         if mode == "generate":
-            if args.prompt_length is not None:
-                raise ValueError(
-                    "--prompt-length requires --hf-inference-mode=prefill or decode"
-                )
             return
-        installed = importlib.metadata.version("transformers")
-        if Version(installed) != Version(CACHE_TRANSFORMERS_VERSION):
+        installed = Version(importlib.metadata.version("transformers"))
+        # Encode uses no cache.
+        if mode != "encode" and installed != Version(CACHE_TRANSFORMERS_VERSION):
             raise ValueError(
                 f"--hf-inference-mode={mode} requires "
                 f"transformers=={CACHE_TRANSFORMERS_VERSION}, found {installed}; "
@@ -488,6 +489,17 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"{tp}--hf-inference-mode={mode} does not support {args.only}; "
                 f"supported models: {', '.join(sorted(supported))}"
+            )
+        whisper = HF_LLM_MODELS.get(args.only) is WhisperBenchmark
+        if whisper and args.prompt_length is not None:
+            raise ValueError(
+                f"--prompt-length does not apply to {args.only}, whose prompt is audio"
+            )
+        max_decode_length = WhisperBenchmark.MAX_DECODE_LENGTH
+        if whisper and (args.decode_length or 0) > max_decode_length:
+            raise ValueError(
+                f"--decode-length must be between 1 and {max_decode_length} for "
+                f"{args.only}, got {args.decode_length}"
             )
 
         unsupported = []
@@ -576,13 +588,16 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_workload(self, example_inputs, *, is_performance=False):
         if self.args.hf_inference_mode != "generate":
             phase = INFERENCE_PHASES[self.args.hf_inference_mode]
-            tokens = example_inputs[phase.tokens_input].numel()
+            request_tokens = None
+            if phase.tokens_column is not None:
+                tokens = example_inputs[phase.tokens_input].numel()
+                request_tokens = {phase.tokens_column: tokens}
             return BenchmarkWorkload(
                 phase.iter_fn,
                 setup_fn=phase.setup_fn,
                 compile_forward=True,
                 report_eager_latency=True,
-                request_tokens={phase.tokens_column: tokens},
+                request_tokens=request_tokens,
                 measure_iters=1,
                 stabilization_iters=4,
             )
@@ -600,12 +615,13 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_model_metadata(self, example_inputs):
         if self.args.hf_inference_mode == "generate":
             return {}
-        prompt = example_inputs["input_ids"]
+        prompt = example_inputs.get("input_ids")
         decode = example_inputs.get("decode_ids")
+        inputs = prompt if prompt is not None else example_inputs["input_features"]
         return {
-            "batch_size": prompt.shape[0],
+            "batch_size": inputs.shape[0],
             "phase": self.args.hf_inference_mode,
-            "prompt_length": prompt.shape[1],
+            "prompt_length": prompt.shape[1] if prompt is not None else None,
             "decode_length": decode.shape[1] if decode is not None else 0,
         }
 
@@ -675,9 +691,18 @@ class HuggingfaceRunner(BenchmarkRunner):
         if model_name in HF_LLM_MODELS:
             benchmark_cls = HF_LLM_MODELS[model_name]
             mode = self.args.hf_inference_mode
-            if mode != "generate":
+            decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
+            if benchmark_cls is WhisperBenchmark:
+                model, example_inputs = WhisperBenchmark.get_model_and_inputs(
+                    model_name,
+                    device,
+                    training=is_training,
+                    batch_size=batch_size,
+                    inference_mode=mode,
+                    decode_length=decode_length,
+                )
+            elif mode != "generate":
                 prompt_length = self.args.prompt_length or benchmark_cls.INPUT_LENGTH
-                decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
                 if self.args.prompt_length is not None:
                     config = self._download_config(model_name).get_text_config(
                         decoder=True
@@ -708,10 +733,6 @@ class HuggingfaceRunner(BenchmarkRunner):
                     inference_mode=mode,
                     decode_length=decode_length,
                     **tp_kwargs,
-                )
-            elif benchmark_cls is WhisperBenchmark:
-                model, example_inputs = WhisperBenchmark.get_model_and_inputs(
-                    model_name, device, training=is_training
                 )
             else:
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
@@ -767,6 +788,20 @@ class HuggingfaceRunner(BenchmarkRunner):
             model_names &= INFERENCE_PHASES[args.hf_inference_mode].models
         if args.tp_size > 1:
             model_names &= TP_MODELS
+        if args.hf_inference_mode == "decode":
+            whisper = {
+                name
+                for name, benchmark in HF_LLM_MODELS.items()
+                if benchmark is WhisperBenchmark
+            }
+            reason = None
+            if args.prompt_length is not None:
+                reason = "--prompt-length"
+            elif (args.decode_length or 0) > WhisperBenchmark.MAX_DECODE_LENGTH:
+                reason = f"--decode-length above {WhisperBenchmark.MAX_DECODE_LENGTH}"
+            if reason and (excluded := model_names & whisper):
+                log.warning("Skipping %s: %s", ", ".join(sorted(excluded)), reason)
+                model_names -= whisper
         model_names = sorted(model_names)
 
         start, end = self.get_benchmark_indices(len(model_names))

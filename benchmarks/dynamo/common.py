@@ -3639,19 +3639,22 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--hf-inference-mode",
-        choices=("generate", "prefill", "decode"),
+        choices=("generate", "prefill", "decode", "encode"),
         default="generate",
-        help="Inference workload for registered Hugging Face generation models.",
+        help="Inference workload for registered Hugging Face generation models; "
+        "encode is Whisper-only.",
     )
     parser.add_argument(
         "--prompt-length",
         type=int,
-        help="Uniform prompt length for Hugging Face prefill and decode benchmarks (default: 1000).",
+        help="Uniform prompt length for Hugging Face text prefill and decode "
+        "benchmarks (default: 1000).",
     )
     parser.add_argument(
         "--decode-length",
         type=int,
-        help="Timed decode steps per request for Hugging Face decode benchmarks (default: 128).",
+        help="Timed decode steps per request for Hugging Face decode benchmarks "
+        "(default: 128; at most 1999, or 446 for Whisper).",
     )
     parser.add_argument(
         "--tp-size",

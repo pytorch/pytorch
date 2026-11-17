@@ -90,7 +90,7 @@ As an example, the commands to run first line of the dashboard (performance only
 ./benchmarks/dynamo/timm_models.py --performance --inference --bfloat16 --backend=inductor --output=timm_models_inference.csv
 ```
 
-### Decoder-only generation, prefill, and decode
+### Hugging Face LLM generation, prefill, decode, and encode
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
 by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
@@ -114,13 +114,14 @@ spans the same KV length as in generation; `prompt_length + 2000` must fit the
 model's context length. Cache allocation and reset occur outside the compiled
 and timed forward. Use `--accuracy` to check correctness or
 `--disable-cudagraphs` to measure without CUDA graphs. `--prompt-length`
-(default 1000) and `--batch-size` configure the prefill and decode workloads;
-generation retains its existing `1 x 1000` inputs and rejects `--prompt-length`.
+(default 1000) and `--batch-size` configure the text prefill and decode
+workloads; generation retains its existing `1 x 1000` inputs and rejects
+`--prompt-length`.
 
 Decode is opt-in and supports `meta-llama/Llama-3.2-1B`,
-`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`. The
-Gemma models are excluded because their sliding-window cache recompiles on
-every step.
+`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen3-0.6B`, `Qwen/Qwen3.5-0.8B`, and the
+Whisper models described below. The Gemma models are excluded because their
+sliding-window cache recompiles on every step.
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -129,9 +130,9 @@ every step.
   --output=decode_performance.csv
 ```
 
-Each decode request prefills the prompt eagerly into the static cache outside
-the timed region, then times `--decode-length` (default 128, at most 1999)
-single-token compiled forwards. Decode feeds fixed random tokens rather than
+Each text decode request prefills the prompt eagerly into the static cache
+outside the timed region, then times `--decode-length` (default 128, at most
+1999) single-token compiled forwards. Decode feeds fixed random tokens rather than
 sampled ones and returns the last step's logits. Profiler traces and the
 `eager_peak_mem`, `dynamo_peak_mem`, and `compression_ratio` columns include the
 eager prefill.
@@ -153,6 +154,32 @@ names get a `_prefill` or `_decode` suffix.
 
 With `--log-operator-inputs`, use a separate output directory for each mode and
 input size. Operator logs are named by model, and existing logs are skipped.
+
+#### Whisper encode and decode
+
+`openai/whisper-tiny` and `openai/whisper-large-v3-turbo` support
+`--hf-inference-mode=encode` and `decode`, with the option requirements of text
+prefill and decode. Decode also requires Transformers 5.14.1; encode uses no
+cache and accepts any version. Each batch element is 30 seconds of random audio:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=decode --decode-length=128 \
+  --batch-size=1 --only=openai/whisper-large-v3-turbo
+```
+
+Encode times one compiled encoder forward over the log-mel features. Decode
+allocates static self- and cross-attention caches. Each request runs the encoder
+and prefills the decoder start token eagerly outside the timed region, which
+fills the cross-attention cache, then times `--decode-length` single-token
+compiled decoder forwards. The self-attention cache holds 447 positions, as in
+`generate` with a static cache, so `--decode-length` is at most 446. Explicit
+Whisper requests reject `--prompt-length` and decode lengths above that limit
+before loading weights. Decode sweeps skip Whisper, with a warning, when either
+option is incompatible, keeping the selected workloads valid for every child
+process.
+Encode rows report `eager_latency` but no throughput.
+Default output and profiler trace names get an `_encode` suffix for encode.
 
 #### Tensor-parallel prefill and decode
 
