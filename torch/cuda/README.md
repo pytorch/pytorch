@@ -83,10 +83,9 @@ the same way it handles `torch.nn.Linear`.
 
 ### How it works
 
-The torch.cuda.localize API call searches for supported operations
-(`_LOCALIZABLE_OPS` in the code; `torch.nn.functional.linear` and its exported
-`aten.linear` shape are registered by default). When it finds one, it swaps out
-the parameters feeding that op's localized argument positions -- `weight` and
+The torch.cuda.localize API call walks the module tree for module types registered
+in `_LOCALIZABLE_OPS` (`torch.nn.Linear` by default). For each matching module, it
+swaps out the parameters named by the op's localized argument positions -- `weight` and
 `bias` for a linear -- with a torch.Tensor subclass. That subclass will transform every
 localizable op into a fork/join pattern: it runs the op twice (once per green
 stream), and it pre-splits the weights into localized allocations. It will then
@@ -108,15 +107,12 @@ For every localizable op, we do considerable additional work:
 * The green streams wait for the caller to finish consuming their outputs before
   reusing the branch buffers.
 
-This can add 10--50 microseconds of additional latency per localizable op. If
-the op was already running in ~10us, these overheads will dominate performance.
+This adds latency per localizable op and can dominate performance for small ops.
 There is also additional overhead during torch.cuda.localize as it reallocates
 weights using a slower mechanism than the normal allocator.
 
-The solution to this problem is CUDA graphs. Raw CUDA graphs are best, but
-`torch.compile(..., mode='reduce-overhead')` is the more ergonomic solution.
-There is active but as-yet out-of-tree work to improve the overheads associated
-with `mode='reduce-overhead'`.
+CUDA graphs reduce CPU launch overhead by replaying the captured work.
+Use `torch.compile(..., mode='reduce-overhead')` to enable CUDA graphs.
 
 #### No cost model
 
