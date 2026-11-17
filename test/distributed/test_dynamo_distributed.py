@@ -1834,6 +1834,21 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
+    @patch.object(torch._inductor.config, "force_disable_caches", True)
+    def test_distributed_autotune_foreach_consumer(self):
+        # Regression test for #201884: distributed autotune re-runs
+        # compute_ancestors after foreach grouping. Caches are disabled since a
+        # cached compile skips the scheduler.
+        def f(x, y):
+            a, b = torch._foreach_mul((x, y), 2.0)
+            return torch.cat((a, b), dim=-1)
+
+        x = torch.randn(16, 3, device=self.device)
+        y = torch.randn(16, 5, device=self.device)
+        self.assertEqual(torch.compile(f)(x, y), f(x, y))
+
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
         if not config.optimize_ddp:
