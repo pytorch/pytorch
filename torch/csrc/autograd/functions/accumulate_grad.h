@@ -43,6 +43,10 @@ namespace torch::autograd {
 struct TORCH_API AccumulateGrad : public Node {
   explicit AccumulateGrad(Variable variable_);
 
+  std::string name() const override {
+    return "torch::autograd::AccumulateGrad";
+  }
+
   variable_list apply(variable_list&& grads) override;
 
   void release_resources() override {
