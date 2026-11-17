@@ -9771,6 +9771,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
+    def test_remove_noop_slice_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            a = torch.ops.aten.slice.Tensor(x, 0, -n, n)
+            b = torch.ops.aten.slice.Tensor(x, 0, -n - 1, n)
+            c = torch.ops.aten.slice.Tensor(x, 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
+
+    def test_remove_noop_slice_scatter_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            src = x * 2
+            a = torch.ops.aten.slice_scatter(x, src, 0, -n, n)
+            b = torch.ops.aten.slice_scatter(x, src, 0, -n - 1, n)
+            c = torch.ops.aten.slice_scatter(x, src[1:], 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice_scatter" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151378",
@@ -20304,7 +20341,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(10, device=GPU_TYPE)
         compiled_fn = torch.compile(f, dynamic=True)
         result, code = run_and_get_code(compiled_fn, x)
-        expected = f(x)
+        # Eager f(x) reads the non-blocking copy without syncing, so it can race.
+        expected = torch.clamp(x, 0.0, x.abs().sum().item())
         self.assertEqual(result, expected)
         wrapper_code = code[0]
         self.assertIn("torch.Event()", wrapper_code)
