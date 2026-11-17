@@ -1826,13 +1826,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         d = ReversedDict(d)
 
-        @torch.compile(backend="eager")
         def fn(x, d):
             # Forces side effects attribute reapplication logic
             d.sample = 1
             d["baz"] = 4
             return x * d["foo"] * d["bar"]
 
+        # Replay must resolve builtin operations independently of the frame's globals.
+        fn = types.FunctionType(
+            fn.__code__, {**fn.__globals__, "type": None, "dict": None}
+        )
+        fn = torch.compile(fn, backend="eager")
         fn(torch.randn(4), d)
         # This is intentional because the dict is mutated, so we will have a recompilation.
         fn(torch.randn(4), d)

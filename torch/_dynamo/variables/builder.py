@@ -210,6 +210,7 @@ from ..utils import (
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
+    module_hook_attrs,
     namedtuple_fields,
     odict_keys,
     odict_values,
@@ -1276,7 +1277,7 @@ class VariableBuilder:
 
         if self.source != result.source:
             tracer = self.tx.output.current_tracer
-            if tracer.parent is not None:
+            if tracer.tracks_lexical_sources:
                 record_lexical_alias(tracer.lexical_sources, self.source, result.source)
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
@@ -1285,16 +1286,7 @@ class VariableBuilder:
                 isinstance(result, ConstDictVariable)
                 and any(
                     isinstance(source, AttrSource)
-                    and source.member
-                    in (
-                        "_backward_hooks",
-                        "_backward_pre_hooks",
-                        "_forward_hooks",
-                        "_forward_pre_hooks",
-                        "_forward_hooks_with_kwargs",
-                        "_forward_pre_hooks_with_kwargs",
-                        "_forward_hooks_always_called",
-                    )
+                    and source.member in module_hook_attrs
                     for source in (self.source, result.source)
                 )
                 or is_from_attr_proxy_source(self.source)
