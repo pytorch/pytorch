@@ -7,6 +7,7 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, cast, TYPE_CHECKING
 
 import sympy
@@ -15,10 +16,16 @@ import torch
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
-from torch.nn.attention.flex_attention import _Backend
+from torch.nn.attention.flex_attention import _Backend, _LARGE_SPARSE_BLOCK_SIZE
 from torch.utils._sympy.functions import FloorDiv
 
-from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
+from ...ir import (
+    ComputedBuffer,
+    ExternKernel,
+    FixedLayout,
+    is_dense_contiguous_storage_and_layout,
+    TensorBox,
+)
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
@@ -469,17 +476,54 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
+    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+
+    unrefined_configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
         head_dim,
         seq_len_q,
         dtype,
         query.get_device().type,
         V.graph.sizevars.guard_int(v_head_dim),
     )
+    # Not a top-level import: the heuristics module imports kernel templates,
+    # and importing the kernel package imports this module.
+    from ...heuristics.template.triton import FlexAttentionConfigContext
 
-    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    context = FlexAttentionConfigContext(
+        batch_size=B,
+        kv_batch_size=Bkv,
+        num_heads=Hq,
+        num_kv_heads=Hkv,
+        seq_len_q=seq_len_q,
+        seq_len_kv=seq_len_kv,
+        qk_head_dim=qk_head_dim,
+        v_head_dim=v_head_dim,
+        qk_head_dim_rounded=kernel_options["QK_HEAD_DIM_ROUNDED"],
+        v_head_dim_rounded=kernel_options["V_HEAD_DIM_ROUNDED"],
+        dtype=dtype,
+        key_dtype=key.get_dtype(),
+        value_dtype=value.get_dtype(),
+        device=query.get_device(),
+        inputs_contiguous=all(
+            is_dense_contiguous_storage_and_layout(node) for node in (query, key, value)
+        ),
+        is_noop_block_mask=(
+            not has_full_blocks
+            and SPARSE_Q_BLOCK_SIZE == _LARGE_SPARSE_BLOCK_SIZE
+            and SPARSE_KV_BLOCK_SIZE == _LARGE_SPARSE_BLOCK_SIZE
+            and is_trivial_mask_graph(mask_graph.graph_module)
+        ),
+        score_mod_reads_buffers=bool(score_mod_other_buffers),
+        kernel_options=MappingProxyType(dict(kernel_options)),
+    )
+    configs = V.choices.refine_flex_attention_fwd_configs(unrefined_configs, context)
+    if unrefined_configs and not configs:
+        raise RuntimeError(
+            f"{type(V.choices).__name__}.refine_flex_attention_fwd_configs returned "
+            "no configs for a non-empty pool"
+        )
 
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
@@ -613,7 +657,7 @@ def flex_attention(
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
     choices = V.choices.append_flex_attention_choices(
         choices,
-        configs,
+        unrefined_configs,
         [
             query,
             key,
