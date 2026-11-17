@@ -87,26 +87,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     Tensor& output,
     Tensor const& input,
     IntArrayRef output_size) {
-  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
-
-  for (const auto i : c10::irange(1, input.ndimension())) {
-    TORCH_CHECK(
-        input.size(i) > 0,
-        "adaptive_avg_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
-        "but input has sizes ",
-        input.sizes(),
-        " with dimension ",
-        i,
-        " being "
-        "empty");
-  }
-
-  TORCH_CHECK(
-      (input.ndimension() == 4 || input.ndimension() == 5),
-      "adaptive_avg_pool3d(): Expected 4D or 5D tensor, but got ",
-      input.sizes());
-  TORCH_CHECK(input.dtype() == output.dtype(),
-      "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
+  adaptive_avg_pool_check(input, output, output_size, /*pooling_dims=*/3, "adaptive_avg_pool3d()");
 
   /* sizes */
   int64_t sizeD = input.size(-4);
@@ -234,9 +215,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
-  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
-  TORCH_CHECK(input.dim() == gradOutput_.dim(),
-    __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
+  adaptive_avg_pool_backward_check(
+      gradInput, gradOutput_, input, /*pooling_dims=*/3, "adaptive_avg_pool3d_backward()");
 
   /* sizes */
   int64_t sizeD = input.size(-4);

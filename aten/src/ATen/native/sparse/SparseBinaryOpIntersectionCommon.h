@@ -6,6 +6,7 @@
 #include <ATen/native/sparse/Macros.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -278,7 +279,7 @@ void _sparse_binary_op_intersection_kernel_impl(
             return hash;
           }
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+          for (const auto dim : c10::irange(sparse_dim)) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
@@ -365,7 +366,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           } else if (sparse_dim) {
             // Compute hash value
             const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-            for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+            for (const auto dim : c10::irange(sparse_dim)) {
               const auto dim_hash_coeff = hash_coeffs[dim];
               const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
               hash += dim_index * dim_hash_coeff;

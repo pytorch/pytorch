@@ -277,6 +277,47 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
 
+    @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
+    def test_sdpa_cow_input(self, device, dtype):
+        q = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        k = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        v = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        q_cow = torch._lazy_clone(q)
+        k_cow = torch._lazy_clone(k)
+        v_cow = torch._lazy_clone(v)
+        q_copy, k_copy, v_copy = q_cow.clone(), k_cow.clone(), v_cow.clone()
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            F.scaled_dot_product_attention(q_cow, k_cow, v_cow)
+        self.assertTrue(torch._C._is_cow_tensor(q_cow))
+        self.assertTrue(torch._C._is_cow_tensor(k_cow))
+        self.assertTrue(torch._C._is_cow_tensor(v_cow))
+        self.assertEqual(q_cow, q_copy)
+        self.assertEqual(k_cow, k_copy)
+        self.assertEqual(v_cow, v_copy)
+
+        # With attn_mask
+        mask = torch.zeros(2, 4, 8, 8, device=device, dtype=dtype)
+        mask_cow = torch._lazy_clone(mask)
+        q_cow = torch._lazy_clone(q)
+        k_cow = torch._lazy_clone(k)
+        v_cow = torch._lazy_clone(v)
+        q_copy, k_copy, v_copy, mask_copy = (
+            q_cow.clone(),
+            k_cow.clone(),
+            v_cow.clone(),
+            mask_cow.clone(),
+        )
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            F.scaled_dot_product_attention(q_cow, k_cow, v_cow, attn_mask=mask_cow)
+        self.assertTrue(torch._C._is_cow_tensor(q_cow))
+        self.assertTrue(torch._C._is_cow_tensor(k_cow))
+        self.assertTrue(torch._C._is_cow_tensor(v_cow))
+        self.assertTrue(torch._C._is_cow_tensor(mask_cow))
+        self.assertEqual(q_cow, q_copy)
+        self.assertEqual(k_cow, k_copy)
+        self.assertEqual(v_cow, v_copy)
+        self.assertEqual(mask_cow, mask_copy)
+
 
 instantiate_device_type_tests(
     TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True

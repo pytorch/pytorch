@@ -1893,9 +1893,27 @@ void PythonArgParser::print_error(
     signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
   }
 
+  // Say why each plausible overload did not match with its own parse() error;
+  // format_invalid_args can only guess it from the signature strings (#87514).
+  std::vector<std::string> mismatch_reasons;
+  for (auto& signature : signatures_) {
+    if (signature.hidden) {
+      continue;
+    }
+    std::string& reason = mismatch_reasons.emplace_back();
+    if (num_args >= signature.min_args && num_args <= signature.max_args) {
+      try {
+        std::vector<PyObject*> overloaded_args;
+        signature.parse(self, args, kwargs, parsed_args, overloaded_args, true);
+      } catch (const c10::Error& e) {
+        reason = e.what_without_backtrace();
+      }
+    }
+  }
+
   auto options = get_signatures();
-  auto msg =
-      torch::format_invalid_args(args, kwargs, function_name + "()", options);
+  auto msg = torch::format_invalid_args(
+      args, kwargs, function_name + "()", options, mismatch_reasons);
   TORCH_CHECK_TYPE(false, msg);
 }
 

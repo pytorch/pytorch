@@ -220,7 +220,7 @@ def setup_fake_process_groups(
         group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
     """
     import torch.distributed as dist
-    from torch.testing._internal.distributed.fake_pg import FakeStore
+    from torch.distributed._backends.fake import FakeStore
 
     if not group_info:
         return
@@ -555,7 +555,6 @@ def generate_compiler_repro_string(
         distributed_imports = textwrap.dedent(
             """
 import torch.distributed as dist
-from torch.testing._internal.distributed.fake_pg import FakeStore
         """
         ).strip()
 
@@ -1455,7 +1454,7 @@ def repro_analyze(options: ReproOptions, mod: nn.Module, load_args: Any) -> None
         if new_args:
             raise AssertionError("new_args should be empty after compiled() call")
 
-    def compare_tuples(t1: tuple[Unpack[_Ts]], t2: tuple[Unpack[_Ts]]) -> str | None:
+    def compare_tuples(t1: tuple[*_Ts], t2: tuple[*_Ts]) -> str | None:
         diff_indices = [i for i in range(len(t1)) if t1[i] != t2[i]]
         diff_values = [(t1[i], t2[i]) for i in diff_indices]
 

@@ -874,9 +874,9 @@ if(NOT Python_Interpreter_FOUND)
   message(FATAL_ERROR "Python3 could not be found.")
 endif()
 
-if(${Python_VERSION} VERSION_LESS 3.10)
+if(${Python_VERSION} VERSION_LESS 3.11)
   message(FATAL_ERROR
-    "Found Python libraries version ${Python_VERSION}. Python < 3.10 is no longer supported by PyTorch.")
+    "Found Python libraries version ${Python_VERSION}. Python < 3.11 is no longer supported by PyTorch.")
 endif()
 
 # ---[ Python + Numpy
@@ -1755,13 +1755,7 @@ if(USE_KINETO)
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
 
   # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
-  # The xpu backend is excluded because its tests compile SYCL device code
-  # through an ExternalProject, which does not fit inside this build.
-  if(BUILD_TEST AND NOT KINETO_BACKEND STREQUAL "xpu")
-    set(KINETO_BUILD_TESTS ON CACHE BOOL "" FORCE)
-  else()
-    set(KINETO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  endif()
+  set(KINETO_BUILD_TESTS "${BUILD_TEST}" CACHE BOOL "" FORCE)
   # Install alongside PyTorch's own test binaries, where the Windows CI
   # runner looks for C++ tests.
   set(KINETO_INSTALL_TESTS ${INSTALL_TEST} CACHE BOOL "" FORCE)

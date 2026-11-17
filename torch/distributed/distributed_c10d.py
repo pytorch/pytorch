@@ -23,13 +23,14 @@ from typing import (
     Literal,
     NamedTuple,
     NewType,
+    NotRequired,
     overload,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import deprecated, NotRequired, TypedDict, TypeIs
+from typing_extensions import deprecated, TypedDict, TypeIs
 
 import torch
 from torch._C import _DistStoreError as DistStoreError
@@ -651,6 +652,11 @@ class Backend(str):  # noqa: SLOT000
                 break
 
         if backend_entrypoint is None:
+            # Fake is built in; register it where entry points are unavailable (e.g. Buck).
+            if normalized_name == Backend.FAKE:
+                from torch.distributed._backends.fake import _register_fake_backend
+
+                _register_fake_backend()
             return
 
         try:
@@ -2723,7 +2729,7 @@ def init_process_group(
         # backward compatible API
         if store is None:
             if backend == Backend.FAKE:
-                from torch.testing._internal.distributed.fake_pg import FakeStore
+                from torch.distributed._backends.fake import FakeStore
 
                 store = FakeStore()
             else:

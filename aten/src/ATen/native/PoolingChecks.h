@@ -277,6 +277,48 @@ inline void adaptive_pool_empty_output_check(const Tensor& gradOutput_, const ch
   check_non_empty_dims(gradOutput_, /*first_dim=*/1, fn_name.c_str(), "grad_output");
 }
 
+// AdaptiveAvgPool2d/AdaptiveAvgPool3d (forward), `fn_name` is e.g. "adaptive_avg_pool2d()"
+inline void adaptive_avg_pool_check(
+    const Tensor& input,
+    const Tensor& output,
+    IntArrayRef output_size,
+    int64_t pooling_dims,
+    const char* fn_name) {
+  const int64_t ndim = input.dim();
+  TORCH_CHECK(
+      static_cast<int64_t>(output_size.size()) == pooling_dims, fn_name, ": output_size must be ", pooling_dims);
+  TORCH_CHECK(
+      ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
+      fn_name, ": Expected ", pooling_dims + 1, "D or ", pooling_dims + 2, "D tensor, but got ", input.sizes());
+  check_non_empty_dims(input, /*first_dim=*/ndim - pooling_dims, fn_name, "input");
+  TORCH_CHECK(
+      input.dtype() == output.dtype(),
+      fn_name, ": Expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
+}
+
+// AdaptiveAvgPool2d/AdaptiveAvgPool3d (backward), `fn_name` is e.g. "adaptive_avg_pool2d_backward()"
+inline void adaptive_avg_pool_backward_check(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& input,
+    int64_t pooling_dims,
+    const char* fn_name) {
+  const int64_t ndim = input.dim();
+  check_non_empty_dims(grad_output, /*first_dim=*/1, fn_name, "grad_output");
+  TORCH_CHECK(
+      ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
+      fn_name, ": Expected ", pooling_dims + 1, "D or ", pooling_dims + 2, "D tensor, but got ", input.sizes());
+  TORCH_CHECK(
+      grad_output.dim() == ndim,
+      fn_name, ": Expected dimensions ", ndim, " for `grad_output` but got dimensions ", grad_output.dim());
+  TORCH_CHECK(
+      grad_output.dtype() == input.dtype(),
+      fn_name, ": Expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
+  TORCH_CHECK(
+      grad_input.dtype() == input.dtype(),
+      fn_name, ": Expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
+}
+
 // FractionalMaxPool2d/FractionalMaxPool3d
 template <int64_t ndim>
 inline void fractional_max_pool_check_shape(

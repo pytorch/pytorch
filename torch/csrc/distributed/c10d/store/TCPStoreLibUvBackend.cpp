@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -631,7 +632,7 @@ class ChunkedStream {
         ++buff_idx;
     }
 
-    for (size_t i = 0; i < buff_idx; ++i) {
+    for ([[maybe_unused]] const auto _ : c10::irange(buff_idx)) {
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       free(buffers[0].base);
       capacity -= buffers[0].len;
@@ -960,7 +961,7 @@ class UvClient : public UvTcpSocket {
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
-    for (uint64_t i = 0; i < key_count; ++i) {
+    for (const auto i : c10::irange(key_count)) {
       if (!stream.read_key(keys[i]))
         return false;
     }
@@ -997,7 +998,7 @@ class UvClient : public UvTcpSocket {
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
-    for (uint64_t i = 0; i < key_count; ++i) {
+    for (const auto i : c10::irange(key_count)) {
       if (!stream.read_key(keys[i]))
         return false;
     }

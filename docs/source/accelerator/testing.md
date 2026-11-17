@@ -49,8 +49,10 @@ Dynamic Test Configuration provides a set of configuration options that allow OO
 | Option | What it does | When to use |
 |---|---|---|
 | `op_allowlist` | Operator test allowlist | Early bring-up |
+| `module_allowlist` | `nn.Module` test allowlist | Early bring-up |
 | `test_exclusions` | Exclude class/method/dtype-level variants | Unsupported features |
 | `op_overrides` | Per-operator decorator overrides | Specific ops need special handling |
+| `module_overrides` | Per-module decorator overrides | Specific modules need special handling |
 | `bypass_device_restrictions` | Skip `@onlyCUDA` and similar guards | Temporary workaround |
 
 OOT backends configure all options except `bypass_device_restrictions` through `PrivateUse1TestBase.set_test_configs()` (inherited from [`DeviceTypeTestBase`](https://github.com/pytorch/pytorch/blob/main/torch/testing/_internal/common_device_type.py)).
@@ -70,6 +72,18 @@ PrivateUse1TestBase.set_test_configs(
 ```
 
 Ops not in the allowlist produce no test variants.
+
+#### `module_allowlist`
+
+Limit `@modules`-parametrized tests to supported modules. Values match `ModuleInfo.name` (e.g. `"nn.Linear"`, `"nn.Conv2d"`):
+
+```python
+PrivateUse1TestBase.set_test_configs(
+    module_allowlist=("nn.Linear", "nn.Conv2d")
+)
+```
+
+Modules not in the allowlist produce no test variants. A test whose module list is emptied by the allowlist generates no variants and does not raise.
 
 #### `test_exclusions`
 
@@ -111,6 +125,30 @@ PrivateUse1TestBase.set_test_configs(
 ```
 
 Overrides are applied on top of existing `OpInfo` decorators.
+
+#### `module_overrides`
+
+Customize `@modules` tests per-module. Keys match `ModuleInfo.name`. `module_allowlist` is applied first, so overrides only affect modules that pass the allowlist.
+
+`@modules` tests run over the dtypes in `ModuleInfo.dtypes`. To exclude a dtype your backend does not support, use a dtype-filtered `DecorateInfo`:
+
+```python
+import unittest
+
+import torch
+from torch.testing._internal.common_device_type import PrivateUse1TestBase
+from torch.testing._internal.opinfo.core import DecorateInfo
+
+PrivateUse1TestBase.set_test_configs(
+    module_overrides={
+        "nn.Linear": [
+            DecorateInfo(unittest.expectedFailure, dtypes=(torch.float64,)),
+        ],
+    }
+)
+```
+
+Overrides are applied on top of existing `ModuleInfo` decorators.
 
 #### `bypass_device_restrictions`
 
@@ -256,7 +294,7 @@ PrivateUse1TestBase.set_test_configs(
 
 ### 7. Gradually expand coverage
 
-As support improves, gradually remove entries from `op_allowlist`, `test_exclusions`, and `op_overrides` where they are no longer needed.
+As support improves, gradually remove entries from `op_allowlist`, `module_allowlist`, `test_exclusions`, `op_overrides`, and `module_overrides` where they are no longer needed.
 
 For a complete runnable configuration example, see [test_testing.py](https://github.com/pytorch/pytorch/blob/main/test/cpp_extensions/open_registration_extension/torch_openreg/tests/test_testing.py).
 

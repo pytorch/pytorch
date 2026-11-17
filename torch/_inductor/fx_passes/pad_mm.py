@@ -27,7 +27,7 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.utils._mode_utils import no_dispatch
 
-from ...utils._triton import has_triton
+from ...utils._triton import has_triton_for_device
 from ..pattern_matcher import (
     fwd_only,
     gen_register_replacement,
@@ -79,11 +79,55 @@ def get_alignment_size_dtype(dtype: torch.dtype) -> int:
 
 
 def check_device(a: Tensor, b: Tensor) -> bool:
-    return (a.is_cuda and b.is_cuda) or (a.is_xpu and b.is_xpu)
+    # Any accelerator both operands agree on: cpu and meta can't run the padded
+    # mm, while FakeTensor inputs already report their target device.
+    a_device = a.device.type
+    return a_device == b.device.type and a_device not in ("cpu", "meta")
 
 
 def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
+
+
+def _pad_pass_measured(device: torch.device) -> bool:
+    """Whether pad_mm's benefit has been measured on this device's backend.
+
+    A backend opts in by benchmarking the pass on its hardware and declaring
+    DeviceInterface.supports_pad_mm, not by an entry here. is_triton_capable()
+    alone is not enough: capability with no roofline data would silently turn
+    benchmark-driven padding on for a backend nobody agreed to change.
+    """
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    try:
+        interface = get_interface_for_device(device.type)
+    except NotImplementedError:
+        # No backend registers this device type: nothing was measured on it.
+        return False
+    return interface.supports_pad_mm(device)
+
+
+def _bf16_large_k_needs_pad(device: torch.device) -> bool:
+    """
+    Large-K bf16 matmuls regress without padding on XPU and on NVIDIA GPUs
+    older than Hopper (sm90); other accelerators have not shown the regression.
+
+    device is the device the matmul is compiled for, so that we only ever probe
+    the hardware we are deciding about. New backends: add an entry here only
+    after measuring the regression on that device; absence from this table means
+    no pad-forcing and lets the benchmark decide.
+    """
+    if device.type == "xpu":
+        return True
+    if device.type == "cuda":
+        try:
+            capability = torch.cuda.get_device_capability(device.index)
+        except (AssertionError, IndexError, RuntimeError, ValueError):
+            # The operand names a GPU this host can't resolve; there is no
+            # measured regression to force a pad for, so let the decision go.
+            return False
+        return capability < (9, 0)
+    return False
 
 
 def hint_symbols(
@@ -121,6 +165,13 @@ def can_pad(
         return False
 
     if not check_device(mat1, mat2):
+        return False
+
+    # Only backends whose interface declares supports_pad_mm reach the rest of
+    # the pass: an unmeasured backend is never padded. In deterministic mode it
+    # is rejected here too, so _should_pad never realizes the operands just to
+    # drop them at the autoheuristic gate.
+    if not _pad_pass_measured(mat1.device):
         return False
 
     if not check_dtype(mat1, mat2):
@@ -169,8 +220,10 @@ def can_pad(
     ):
         return False
 
-    # Triton availability check - required for padding to work
-    if not has_triton():
+    # Triton availability check - required for padding to work, gated on the
+    # operand's full device (index included) so another accelerator's Triton, or
+    # another index of this one, does not pad tensors this operand cannot run.
+    if not has_triton_for_device(mat1.device):
         return False
 
     return True
@@ -213,6 +266,8 @@ def _is_statically_expandable_to(shape: torch.Size, desired: Sequence[Any]) -> b
 def should_pad_addmm(match: Match) -> bool:
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     beta = match.kwargs["beta"]
+    # Kept CUDA-scoped: xpu operands already reach this path, and widening
+    # the guard would move their skip decisions -- dedicated follow-up.
     if (
         beta == 0
         and input.is_cuda
@@ -288,7 +343,15 @@ def addmm_replace(
     )
 
 
-def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
+def is_mm_compute_bound(
+    M: int, K: int, N: int, dtype: torch.dtype, device: torch.device
+) -> bool:
+    """Whether an M x K x N matmul of this dtype is compute bound on device.
+
+    Roofline rates are looked up for device explicitly, index included; a
+    device with no roofline info makes this return True and lets the measured
+    benchmark decide about padding.
+    """
     denominator = M * K + N * K + M * N
     if denominator == 0:
         return False
@@ -296,18 +359,18 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
 
     # we have experienced some large perf hits in this case, even in bandwidth bound regimes
     if (
-        dtype is torch.bfloat16
-        and K > M
-        and K > N
-        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
+        dtype is torch.bfloat16 and K > M and K > N and _bf16_large_k_needs_pad(device)
     ):  # doesn't repro on h100s:
         return True
 
     # Fails with AMD
     try:
-        machine_balance = (
-            1000 * utils.get_device_tflops(dtype)
-        ) / utils.get_gpu_dram_gbps()
+        tflops = utils.get_device_tflops(dtype, device)
+        dram_gbps = utils.get_device_dram_gbps(device)
+        if dram_gbps is None:
+            # No device-specific roofline info: let the benchmark decide.
+            return True
+        machine_balance = (1000 * tflops) / dram_gbps
     except Exception:
         return True
 
@@ -342,6 +405,23 @@ def set_cached_base_mm_benchmark_time(key: str, value: float) -> None:
     return get_pad_cache().set_value(key, value=value)
 
 
+def _pad_device_key(device: torch.device) -> str:
+    """Persistent-cache scope for the operand device: type plus hardware name.
+
+    Ranks share cache_dir(), so the rank-local ordinal never enters the key;
+    the hardware name separates GPU models, and an unresolvable name or an
+    interface whose Worker cannot answer scopes the entry by device type.
+    """
+    try:
+        name = utils._get_device_info_key(device)
+    except NotImplementedError:
+        # An interface whose Worker cannot answer is scoped by type alone.
+        name = None
+    if name is None:
+        return device.type
+    return f"{device.type}:{name}"
+
+
 def should_pad_bench_key(
     match: Match,
     mat1: Tensor,
@@ -361,6 +441,7 @@ def should_pad_bench_key(
         return f"exclude_pad:{should_exclude_padding_time(match, name)}"
 
     key = (
+        _pad_device_key(mat1.device),
         tensor_key(mat1),
         tensor_key(mat2),
         fmt_pad("mat1"),
@@ -450,7 +531,9 @@ def is_padded_faster(key: str, ori_time: float, pad_time: float) -> bool:
     return padded_is_faster
 
 
-def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
+def should_pad_mm_bf16(
+    dtype: torch.dtype, M: int, N: int, K: int, device: torch.device
+) -> bool:
     # always force pad for mm with bf16 when the following are satisfied to avoid perf regression
     large_k_threshold_to_pad = torch._inductor.config.post_grad_fusion_options[
         "pad_aten_mm_pass"
@@ -461,7 +544,7 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
         and K > N
         and N % 2 == 1
         and K >= large_k_threshold_to_pad
-        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
+        and _bf16_large_k_needs_pad(device)
     ):  # doesn't repro on h100s:
         return True
     return False
@@ -499,11 +582,18 @@ def should_pad(
     return _should_pad(match, mat1, mat2, op, input)
 
 
-def get_do_bench() -> Callable[[Callable[[], Any]], float]:
+def get_do_bench(device_type: str) -> Callable[[Callable[[], Any]], float]:
+    # A device *type*, not the operand's torch.device: benchmarking's
+    # _normalize_gpu_device_type collapses any torch.device to its type. The
+    # Inductor/TorchProfiler benchmarkers honor it (L2 flush buffer and events);
+    # TritonBenchmarker ignores device_type (not in its triton_do_bench
+    # signature), so Triton timings are taken on the process's active device:
+    # per-index benchmarking stays a caller-side concern here too.
     return functools.partial(
         # pyrefly: ignore [bad-argument-type]
         torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
         warmup=5,
+        device_type=device_type,
     )
 
 
@@ -521,7 +611,7 @@ def _should_pad(
     Determines if an operation SHOULD be padded (performance checks).
     All logic related to whether padding would be performant should be here.
     """
-    do_bench = get_do_bench()
+    do_bench = get_do_bench(mat1.device.type)
 
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
@@ -548,12 +638,16 @@ def _should_pad(
         # Performance heuristic for bf16 large K scenarios
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
-            and should_pad_mm_bf16(mat1.dtype, m_concrete, n_concrete, k_concrete)
+            and should_pad_mm_bf16(
+                mat1.dtype, m_concrete, n_concrete, k_concrete, mat1.device
+            )
         ):
             return True
 
         # Check if operation is compute bound (performance check)
-        if not is_mm_compute_bound(m_concrete, k_concrete, n_concrete, mat1.dtype):
+        if not is_mm_compute_bound(
+            m_concrete, k_concrete, n_concrete, mat1.dtype, mat1.device
+        ):
             return False
 
         # We don't want to look up the cache for cases that are trivially false
@@ -632,7 +726,7 @@ def _should_pad(
 
         if op is torch.ops.aten.addmm:
             input_pad = None
-            if input is not None and (input.is_cuda or input.is_xpu):
+            if input is not None and check_device(input, mat1):
                 input_pad = torch.randn_like(input)
             fns.append(
                 lambda: pad_addmm(
@@ -681,6 +775,10 @@ def _should_pad(
             for fn in fns:
                 fn()
 
+        # AutoHeuristic's metadata comes from process-wide CUDA queries
+        # (get_gpu_shared_memory() and torch.cuda.get_device_capability()):
+        # that is how cuda and xpu operands are judged here, and any backend
+        # that opts in through supports_pad_mm is judged the same way.
         if (
             torch._inductor.config.run_autoheuristic("pad_mm")
             and op is torch.ops.aten.mm

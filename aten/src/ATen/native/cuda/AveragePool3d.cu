@@ -11,6 +11,7 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/macros/Macros.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -367,19 +368,19 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cuda) (
 
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
-  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
-  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
+  const int kT = c10::safe_conv<int>(kernel_size[0], "kernel_size");
+  const int kH = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[1], "kernel_size");
+  const int kW = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[2], "kernel_size");
 
-  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
+  const int dT = stride.empty() ? kT : c10::safe_conv<int>(stride[0], "stride");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[1], "stride");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[2], "stride");
 
-  const int padT = c10::checked_convert<int>(padding[0], "int");
-  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
-  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
+  const int padT = c10::safe_conv<int>(padding[0], "padding");
+  const int padH = padding.size() == 1 ? padT : c10::safe_conv<int>(padding[1], "padding");
+  const int padW = padding.size() == 1 ? padT : c10::safe_conv<int>(padding[2], "padding");
 
   // if divisor==0 then we will ignore it
   int64_t divisor = 0;
@@ -473,19 +474,19 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg});
 
-  const int kT = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
-  const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
+  const int kT = c10::safe_conv<int>(kernel_size[0], "kernel_size");
+  const int kH = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[1], "kernel_size");
+  const int kW = kernel_size.size() == 1 ? kT : c10::safe_conv<int>(kernel_size[2], "kernel_size");
 
-  const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
+  const int dT = stride.empty() ? kT : c10::safe_conv<int>(stride[0], "stride");
   const int dH = stride.empty() ? kH :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[1], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[1], "stride");
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dT : c10::checked_convert<int>(stride[2], "int");
+                 stride.size() == 1 ? dT : c10::safe_conv<int>(stride[2], "stride");
 
-  const int padT = c10::checked_convert<int>(padding[0], "int");
-  const int padH = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[1], "int");
-  const int padW = padding.size() == 1 ? padT : c10::checked_convert<int>(padding[2], "int");
+  const int padT = c10::safe_conv<int>(padding[0], "padding");
+  const int padH = padding.size() == 1 ? padT : c10::safe_conv<int>(padding[1], "padding");
+  const int padW = padding.size() == 1 ? padT : c10::safe_conv<int>(padding[2], "padding");
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for gradOutput");

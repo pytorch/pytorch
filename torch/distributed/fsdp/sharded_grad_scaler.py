@@ -43,6 +43,22 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
         self._per_device_tensors: dict[torch.device, torch.Tensor] = {}
 
 
+def _infer_default_device() -> str:
+    # A half-registered backend (accelerator hooks registered without a
+    # matching Python device module) makes the probe raise; the error is
+    # deliberately propagated instead of papering over a broken
+    # out-of-tree registration with a silently disabled scaler.
+    accel = torch.accelerator.current_accelerator(check_available=True)
+    if accel is None or accel.type == "mps":
+        # Fall back to the historical default. "mps" is deliberately never
+        # inferred: no c10d backend supports MPS tensors, so an inferred
+        # "mps" default would crash the found_inf sync in ``unscale_()``
+        # under distributed training (e.g. FSDP with Gloo on macOS).
+        # Single-device MPS AMP keeps using the base ``torch.amp.GradScaler``.
+        return "cuda"
+    return accel.type
+
+
 class ShardedGradScaler(GradScaler):
     """
     ShardedGradScaler helps perform gradient scaling in a shard aware manner. It extends
@@ -79,6 +95,16 @@ class ShardedGradScaler(GradScaler):
     See :class:`GradScaler` for explanation of scaling/unscaling and more use cases.
 
     Args:
+        device (str, optional, default=None): Device type to use. If ``None``
+            (default), it is inferred from the available accelerator via
+            ``torch.accelerator.current_accelerator``, falling back to ``"cuda"``
+            when no accelerator is available (or when ``enabled=False``).
+            ``"mps"`` is never inferred (no collective backend supports MPS
+            tensors); for single-device MPS AMP, use
+            ``torch.amp.GradScaler(device="mps")``. If a backend is
+            half-registered (accelerator hooks without a matching Python
+            device module), the probe raises ``RuntimeError`` and
+            construction fails.
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
@@ -95,7 +121,7 @@ class ShardedGradScaler(GradScaler):
 
     def __init__(
         self,
-        device: str = "cuda",
+        device: str | None = None,
         init_scale: float = 2.0**16,
         backoff_factor: float = 0.5,
         growth_factor: float = 2.0,
@@ -103,6 +129,11 @@ class ShardedGradScaler(GradScaler):
         enabled: bool = True,
         process_group: ProcessGroup | None = dist.group.WORLD,
     ) -> None:
+        if device is None:
+            # Only probe the accelerator when scaling will actually run;
+            # the availability check may initialize device state (e.g. the
+            # CUDA check poisons fork).
+            device = _infer_default_device() if enabled else "cuda"
         super().__init__(
             device,
             init_scale=init_scale,
@@ -341,8 +372,8 @@ class ShardedGradScaler(GradScaler):
                 self._scale.fill_(new_scale)  # type: ignore[union-attr]
             else:
                 reason = (
-                    "new_scale should be a float or a 1-element torch.cuda.FloatTensor or "
-                    "torch.FloatTensor with requires_grad=False."
+                    "new_scale should be a float or a 1-element floating-point "
+                    f"torch tensor on {self._device} with requires_grad=False."
                 )
                 if new_scale.device.type != self._device:
                     raise AssertionError(reason)

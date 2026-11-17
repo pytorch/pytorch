@@ -221,7 +221,7 @@ def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
 def gen_arguments(
     flat_arguments: Sequence[Argument],
     skipped_args: set[str],
-    resolve_dispatch_flags: bool,
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[list[str], list[str]]:
     types: list[str] = []
     new_names: list[str] = []
@@ -347,7 +347,7 @@ def gen_declaration_and_definition(
     device: str,
     backend_call: str,
     op_metadata: dict[str, str | dict[str, list[str] | str]],
-    resolve_dispatch_flags: bool,
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 

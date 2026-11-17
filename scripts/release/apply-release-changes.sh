@@ -39,11 +39,6 @@ sed -i "s#^        \.github/scripts/generate_ci_workflows.py#        RELEASE_VER
 echo "Triton Changes"
 sed -i -e s#-\ main#"-\ release\/${RELEASE_VERSION}"# .github/workflows/build-triton-wheel.yml
 
-# XLA related changes
-echo "XLA Changes"
-sed -i -e s#--quiet#-b\ r"${RELEASE_VERSION}"# .ci/pytorch/common_utils.sh
-sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
-
 # Regenerate templates
 export RELEASE_VERSION_TAG=${RELEASE_VERSION}
 ./.github/regenerate.sh

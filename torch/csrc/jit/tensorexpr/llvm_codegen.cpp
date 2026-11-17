@@ -618,15 +618,12 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 #undef TYPE_CASE
     case ScalarType::QInt8:
       return CharTy_;
-      break;
 
     case ScalarType::QUInt8:
       return ByteTy_;
-      break;
 
     case ScalarType::BFloat16:
       return ShortTy_;
-      break;
 
     default:
       TORCH_CHECK(false, "UNSUPPORTED DTYPE");
@@ -2148,7 +2145,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
             toVec(llvm::ConstantFP::get(FloatTy_, 1.0), v->dtype().lanes());
         value_ = irb_.CreateFDiv(constant, value_);
         return;
-      } break;
+      }
 
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                  \
@@ -2203,7 +2200,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
 
       default: {
         TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
-      } break;
+      }
     }
 
   } else if (v->dtype().scalar_type() == ScalarType::Double) {
@@ -2248,7 +2245,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
         }
         value_ = irb_.CreateFDiv(constant, value_);
         return;
-      } break;
+      }
 
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                   \
@@ -2272,7 +2269,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
 
       default: {
         TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
-      } break;
+      }
     }
   } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
     // abs is only intrinsic defined for integer inputs in pytorch eager
@@ -2721,7 +2718,11 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
     }
   }
 
-#if LLVM_VERSION_MAJOR > 17
+#if LLVM_VERSION_MAJOR >= 24
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
+  llvm::Instruction* I = irb_.CreateMalloc(LongTy_, size, nullptr, nullptr, "");
+  varToVal_[v->buffer_var()] = I;
+#elif LLVM_VERSION_MAJOR > 17
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Instruction* I = irb_.CreateMalloc(
       LongTy_, dtypeToLLVM(v->dtype()), size, nullptr, nullptr, "");

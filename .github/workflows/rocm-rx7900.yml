@@ -67,7 +67,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_11-build.outputs.test-matrix }}
       tests-to-include: >-
-         test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
+         test_autograd test_transformers inductor/test_torchinductor inductor/test_kernel_benchmark
          inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
          inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
          inductor/test_flex_attention inductor/test_max_autotune

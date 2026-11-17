@@ -250,6 +250,14 @@ struct TORCH_API StringCordView {
       }
     }
 
+    std::string_view contiguous_rest() const {
+      if (const auto* fast = std::get_if<FastRepr>(&repr_)) {
+        const std::string_view piece = fast->str->pieces_[0];
+        return piece.substr(fast->it - piece.begin());
+      }
+      return {};
+    }
+
     size_t pos() const {
       if (const auto* pit = std::get_if<IteratorImpl>(&repr_)) {
         return pit->pos();

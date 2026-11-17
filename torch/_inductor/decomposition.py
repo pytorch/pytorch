@@ -697,7 +697,9 @@ def angle(x: torch.Tensor) -> torch.Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
-    ret = torch.where(x < 0, pi, 0.0)
+    # mps has no integer signbit and integers have no -0
+    is_neg = torch.signbit(x) if x.is_floating_point() else x < 0
+    ret = torch.where(is_neg, pi, 0.0)
     return torch.where(torch.isnan(x), float("nan"), ret)
 
 

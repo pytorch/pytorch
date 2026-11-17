@@ -1,18 +1,96 @@
 # Owner(s): ["oncall: distributed"]
 
 import tempfile
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.distributed._transport import (
-    new_transport_rank,
-    register_transport,
-    Transport,
-)
+from torch.distributed._transport import new_transport, register_transport, Transport
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+class _Transport(Transport):
+    """Records connections; keeps the base ``connect_rank``."""
+
+    def __init__(self, endpoint=b""):
+        super().__init__()
+        self.endpoint = endpoint
+        self.binds = []
+        self.peers = []
+        self.closes = 0
+
+    @staticmethod
+    def supported():
+        return True
+
+    def bind(self, *, timeout=None):
+        self.binds.append(timeout)
+        return self.endpoint
+
+    def connect(self, peer_url, *, timeout=None):
+        self.peers.append((peer_url, timeout))
+        return 0
+
+    def connected(self):
+        return bool(self.peers)
+
+    def register_memory(self, tensor, *, timeout=None):
+        raise NotImplementedError
+
+    def write(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+        raise NotImplementedError
+
+    def read(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+        raise NotImplementedError
+
+    def close(self, *, timeout=None):
+        self.closes += 1
+
+
+class _SubTransport(_Transport):
+    pass
+
+
+_PREFIX = "transport_connect_rank/test"
+
+
+def _hash_store():
+    # Fail fast instead of waiting HashStore's 300 s default timeout.
+    store = dist.HashStore()
+    store.set_timeout(timedelta(seconds=5))
+    return store
+
+
+class _NoDeleteStore(dist.Store):
+    """Store without ``delete_key``."""
+
+    def __init__(self):
+        super().__init__()
+        self.store = _hash_store()
+
+    def set(self, key, value):
+        self.store.set(key, value)
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def add(self, key, value):
+        return self.store.add(key, value)
+
+    def wait(self, keys, timeout):
+        self.store.wait(keys, timeout)
+
+    def compare_set(self, key, expected, desired):
+        return self.store.compare_set(key, expected, desired)
+
+
+class _DeleteStore(_NoDeleteStore):
+    def delete_key(self, key):
+        return self.store.delete_key(key)
 
 
 def _bootstrap_worker(rank, port, path, implicit):
@@ -26,23 +104,17 @@ def _bootstrap_worker(rank, port, path, implicit):
             timeout=timedelta(seconds=30),
         )
     try:
-
-        def factory():
-            transport = Mock(spec=Transport)
-            transport.supported.return_value = True
-            transport.bind.return_value = bytes([rank, 0, 255])
-            return transport
-
-        register_transport("bootstrap-test", factory)
+        register_transport("bootstrap-test", lambda: _Transport(bytes([rank, 0, 255])))
         if rank < 2:
-            transport = new_transport_rank(
-                "bootstrap-test",
+            transport = new_transport("bootstrap-test")
+            transport.connect_rank(
+                1 - rank if implicit else 11 - rank,
                 store=None if implicit else store,
-                peer_rank=1 - rank if implicit else 11 - rank,
                 rank=None if implicit else 10 + rank,
+                tag="test",
             )
-            if transport.connect.call_args.args != (bytes([1 - rank, 0, 255]),):
-                raise AssertionError("incorrect peer endpoint")
+            if transport.peers != [(bytes([1 - rank, 0, 255]), None)]:
+                raise AssertionError(f"incorrect peer endpoint: {transport.peers}")
         if implicit:
             # Rank 2 does not bootstrap, proving there is no collective in it.
             dist.barrier()
@@ -68,125 +140,312 @@ class TestRankBootstrap(TestCase):
             )
 
     def test_pair(self):
-        store = dist.HashStore()
+        store = _hash_store()
         for attempt, timeout in enumerate((2, timedelta(seconds=2))):
             self._connect_pair(store, attempt, timeout)
 
     def _connect_pair(self, store, attempt, timeout):
-        transports = [Mock(spec=Transport), Mock(spec=Transport)]
-        for rank, transport in enumerate(transports):
-            transport.bind.return_value = bytes([rank, attempt, 255])
-        with (
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                side_effect=lambda backend, device, fixture: fixture,
-            ),
-            ThreadPoolExecutor(2) as pool,
-        ):
+        transports = [_Transport(bytes([rank, attempt, 255])) for rank in range(2)]
+        with ThreadPoolExecutor(2) as pool:
             futures = [
                 pool.submit(
-                    new_transport_rank,
-                    "test",
+                    t.connect_rank,
+                    1 - r,
                     store=store,
-                    rank=rank,
-                    peer_rank=1 - rank,
-                    bootstrap_timeout=timeout,
-                    fixture=transport,
+                    rank=r,
+                    tag="test",
+                    timeout=timeout,
                 )
-                for rank, transport in enumerate(transports)
+                for r, t in enumerate(transports)
             ]
-            for future in futures:
-                future.result(timeout=5)
+            self.assertEqual([future.result(timeout=5) for future in futures], [0, 0])
         for rank, transport in enumerate(transports):
-            self.assertEqual(
-                transport.connect.call_args.args, (bytes([1 - rank, attempt, 255]),)
-            )
-            self.assertEqual(transport.connect.call_args.kwargs["timeout"], 2)
-            transport.close.assert_not_called()
+            self.assertEqual(transport.peers, [(bytes([1 - rank, attempt, 255]), 2)])
+            key = f"{_PREFIX}/0/1/{attempt + 1}/{rank}"
+            # Each peer deletes the connection bytes and flag it read.
+            self.assertFalse(store.check([key]))
+            self.assertFalse(store.check([f"{key}/ready"]))
 
-    def test_missing_peer_times_out_and_closes(self):
-        transport = Mock(spec=Transport)
-        transport.bind.return_value = b"endpoint"
+    def test_connect_rank_legacy_tcpstore(self):
+        # Legacy TCPStore's compare_set does not wake waiters; set does.
+        store = dist.TCPStore(
+            "127.0.0.1",
+            0,
+            is_master=True,
+            wait_for_workers=False,
+            timeout=timedelta(seconds=60),
+            use_libuv=False,
+        )
+        transports = [_Transport(bytes([rank])) for rank in range(2)]
+        with ThreadPoolExecutor(2) as pool:
+
+            def submit(rank):
+                return pool.submit(
+                    transports[rank].connect_rank,
+                    1 - rank,
+                    store=store.clone(),
+                    rank=rank,
+                    tag="test",
+                )
+
+            futures = [submit(0)]
+            # Rank 1 likely publishes while rank 0 waits; waiting on the
+            # compare_set key would then stall rank 0 for the 60 s timeout.
+            store.wait([f"{_PREFIX}/0/1/1/0/ready"])
+            futures.append(submit(1))
+            self.assertEqual([future.result(timeout=10) for future in futures], [0, 0])
+        self.assertEqual(transports[0].peers, [(bytes([1]), None)])
+        self.assertEqual(transports[1].peers, [(bytes([0]), None)])
+
+    def test_connect_rank_multiple_peers(self):
+        # Each thread needs its own client; a TCPStore wait blocks its client.
+        store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
+        # Peers pair by tag, not transport class.
+        transports = [
+            _Transport(bytes([0])),
+            _Transport(bytes([1])),
+            _SubTransport(bytes([2])),
+        ]
+        calls = [(0, 1), (0, 2), (1, 0), (2, 0)]
+        with ThreadPoolExecutor(len(calls)) as pool:
+            futures = [
+                pool.submit(
+                    transports[rank].connect_rank,
+                    peer,
+                    store=store.clone(),
+                    rank=rank,
+                    tag="test",
+                    timeout=5.0,
+                )
+                for rank, peer in calls
+            ]
+            self.assertEqual([future.result(timeout=10) for future in futures], [0] * 4)
+        self.assertEqual(
+            sorted(transports[0].peers), [(bytes([1]), 5), (bytes([2]), 5)]
+        )
+        self.assertEqual(transports[1].peers, [(bytes([0]), 5)])
+        self.assertEqual(transports[2].peers, [(bytes([0]), 5)])
+
+    def test_connect_rank_default_store_and_tags(self):
+        # Two transports per rank pair, separated by tag, with timeout=None.
+        transports = {
+            (rank, tag): _Transport(f"{rank}{tag}".encode())
+            for rank in range(2)
+            for tag in "ab"
+        }
+        store = _hash_store()
         with (
             patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                return_value=transport,
+                "torch.distributed.distributed_c10d._get_default_store",
+                return_value=store,
             ),
-            self.assertRaises(dist.DistStoreError),
+            ThreadPoolExecutor(len(transports)) as pool,
         ):
-            new_transport_rank(
-                "test",
-                store=dist.HashStore(),
-                rank=0,
-                peer_rank=1,
-                bootstrap_timeout=0.05,
-            )
-        transport.connect.assert_not_called()
-        transport.close.assert_called_once()
 
-    def test_cleanup_preserves_error(self):
-        transport = Mock(spec=Transport)
-        transport.bind.side_effect = ValueError("bind failed")
-        transport.close.side_effect = RuntimeError("close failed")
-        with (
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                return_value=transport,
-            ),
-            self.assertRaisesRegex(ValueError, "bind failed"),
-            self.assertLogs(
-                "torch.distributed._transport._bootstrap", level="WARNING"
-            ) as logs,
-        ):
-            new_transport_rank(
-                "test",
-                store=dist.HashStore(),
-                rank=0,
-                peer_rank=1,
-                bootstrap_timeout=1,
-            )
-        self.assertIn("close failed", logs.output[0])
+            def submit(rank, tag):
+                transport = transports[rank, tag]
+                return pool.submit(
+                    transport.connect_rank, 1 - rank, rank=rank, tag=tag, timeout=None
+                )
 
-    def test_rank_override_and_attempt_count(self):
+            # Each peer waits under the other tag first, so tags must not pair.
+            futures = [submit(0, "a"), submit(1, "b")]
+            store.wait(["transport_connect_rank/a/0/1/attempts/0"])
+            store.wait(["transport_connect_rank/b/0/1/attempts/1"])
+            futures += [submit(0, "b"), submit(1, "a")]
+            self.assertEqual([future.result(timeout=10) for future in futures], [0] * 4)
+        for (rank, tag), transport in transports.items():
+            self.assertEqual(transport.binds, [None])
+            self.assertEqual(transport.peers, [(f"{1 - rank}{tag}".encode(), None)])
+
+    def test_connect_rank_missing_peer_times_out(self):
+        transport = _Transport(b"endpoint")
         store = dist.HashStore()
+        store.set_timeout(timedelta(seconds=60))
+        start = time.monotonic()
+        with self.assertRaisesRegex(dist.DistStoreError, "Wait timeout"):
+            transport.connect_rank(1, store=store, rank=0, tag="test", timeout=0.05)
+        self.assertLess(time.monotonic() - start, 2)
+        # timeout=None falls back to the Store's timeout.
+        store.set_timeout(timedelta(milliseconds=50))
+        start = time.monotonic()
+        with self.assertRaisesRegex(dist.DistStoreError, "Wait timeout"):
+            transport.connect_rank(1, store=store, rank=0, tag="test", timeout=None)
+        self.assertLess(time.monotonic() - start, 2)
+        self.assertEqual(transport.binds, [0.05, None])
+        self.assertEqual(transport.peers, [])
+        self.assertEqual(transport.closes, 0)
+
+    def test_connect_rank_timeout_fails_late_peer(self):
+        store = _hash_store()
+        late = _Transport(b"late")
+        with self.assertRaisesRegex(dist.DistStoreError, "Wait timeout"):
+            _Transport().connect_rank(1, store=store, rank=0, tag="test", timeout=0.05)
+        # The timed-out call deletes its unread bytes and flag.
+        self.assertFalse(store.check([f"{_PREFIX}/0/1/1/0"]))
+        self.assertFalse(store.check([f"{_PREFIX}/0/1/1/0/ready"]))
+        # The late call pairs with the timed-out one, so it fails too.
+        with self.assertRaisesRegex(RuntimeError, "peer 0 stopped waiting"):
+            late.connect_rank(0, store=store, rank=1, tag="test", timeout=1)
+        self.assertEqual(late.peers, [])
+        self.assertFalse(store.check([f"{_PREFIX}/0/1/1/1"]))
+        # Attempts stay matched.
+        self._connect_pair(store, 1, 2)
+
+    def test_connect_rank_peer_publishes_before_timeout(self):
+        class _LateStore(_DeleteStore):
+            def wait(self, keys, timeout):
+                # The peer publishes its bytes, then stalls before its flag.
+                self.store.set(f"{_PREFIX}/0/1/1/1", b"\x01late")
+                raise dist.DistStoreError("Wait timeout")
+
+        transport = _Transport(b"endpoint")
+        store = _LateStore()
+        self.assertEqual(
+            transport.connect_rank(1, store=store, rank=0, tag="test", timeout=1), 0
+        )
+        self.assertEqual(transport.peers, [(b"late", 1)])
+
+    def test_connect_rank_peer_completes_after_timeout(self):
+        published, returned = threading.Event(), threading.Event()
+
+        class _StallStore(_DeleteStore):
+            def compare_set(self, key, expected, desired):
+                result = super().compare_set(key, expected, desired)
+                if key == f"{_PREFIX}/0/1/1/1":
+                    published.set()
+                return result
+
+            def set(self, key, value):
+                # Rank 1 stalls before its flag until rank 0 has returned.
+                if key == f"{_PREFIX}/0/1/1/1/ready":
+                    returned.wait(timeout=5)
+                super().set(key, value)
+
+            def delete_key(self, key):
+                # Some Stores raise for missing keys, such as rank 1's flag.
+                if not self.store.check([key]):
+                    raise KeyError(key)
+                return super().delete_key(key)
+
+        store = _StallStore()
+        early, late = _Transport(b"early"), _Transport(b"late")
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(
+                late.connect_rank, 0, store=store, rank=1, tag="test", timeout=1
+            )
+            try:
+                self.assertTrue(published.wait(timeout=5))
+                # Rank 0 times out waiting for the flag but finds the bytes.
+                self.assertEqual(
+                    early.connect_rank(
+                        1, store=store, rank=0, tag="test", timeout=0.05
+                    ),
+                    0,
+                )
+            finally:
+                returned.set()
+            self.assertFalse(store.store.check([f"{_PREFIX}/0/1/1/1"]))
+            self.assertEqual(future.result(timeout=5), 0)
+        self.assertEqual(early.peers, [(b"late", 0.05)])
+        self.assertEqual(late.peers, [(b"early", 1)])
+
+    def test_connect_rank_connect_failure_keeps_transport(self):
+        transport = _Transport(b"endpoint")
+        store = _hash_store()
+        store.set(f"{_PREFIX}/0/1/1/1", b"\x01peer")
+        store.set(f"{_PREFIX}/0/1/1/1/ready", b"1")
+        with (
+            patch.object(transport, "connect", side_effect=RuntimeError("refused")),
+            self.assertRaisesRegex(RuntimeError, "refused"),
+        ):
+            transport.connect_rank(1, store=store, rank=0, tag="test", timeout=1)
+        self.assertEqual(transport.closes, 0)
+        self.assertFalse(store.check([f"{_PREFIX}/0/1/1/1"]))
+        self.assertTrue(store.check([f"{_PREFIX}/0/1/1/0"]))
+
+    def test_connect_rank_python_store(self):
+        for cls, kept in ((_NoDeleteStore, True), (_DeleteStore, False)):
+            transport = _Transport(b"endpoint")
+            store = cls()
+            store.set(f"{_PREFIX}/0/1/1/1", b"\x01peer")
+            store.set(f"{_PREFIX}/0/1/1/1/ready", b"1")
+            self.assertEqual(
+                transport.connect_rank(1, store=store, rank=0, tag="test", timeout=1), 0
+            )
+            self.assertEqual(transport.peers, [(b"peer", 1)])
+            self.assertEqual(store.store.check([f"{_PREFIX}/0/1/1/1"]), kept)
+
+    def test_connect_rank_attempt_count(self):
+        store = _hash_store()
+        transport = _Transport()
         with (
             patch(
                 "torch.distributed.get_rank", side_effect=AssertionError("unexpected")
             ),
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                side_effect=RuntimeError("construction stopped"),
-            ) as factory,
+            patch.object(
+                transport, "bind", side_effect=RuntimeError("bind stopped")
+            ) as bind,
         ):
             for _ in range(2):
-                with self.assertRaisesRegex(RuntimeError, "construction stopped"):
-                    new_transport_rank("test", store=store, rank=10, peer_rank=5)
+                with self.assertRaisesRegex(RuntimeError, "bind stopped"):
+                    transport.connect_rank(5, store=store, rank=10, tag="test")
+            # Invalid arguments are rejected before an attempt is taken.
+            keys = store.num_keys()
             for rank, peer in ((-1, 0), (True, 0), (0, -1), (0, True), (0, 0)):
-                with self.assertRaises(ValueError):
-                    new_transport_rank(
-                        "test",
-                        store=store,
-                        rank=rank,
-                        peer_rank=peer,
+                with self.assertRaisesRegex(ValueError, "rank"):
+                    transport.connect_rank(peer, store=store, rank=rank, tag="test")
+            too_long = 2**31 / 1000
+            bad = (0, 0.0005, -1, too_long, float("inf"), float("nan"))
+            for timeout in (*bad, timedelta(microseconds=500)):
+                with self.assertRaisesRegex(ValueError, "timeout"):
+                    transport.connect_rank(
+                        5, store=store, rank=10, tag="test", timeout=timeout
                     )
-            self.assertEqual(factory.call_count, 2)
-        attempts = "transport/test/5/10/attempts/10"
-        self.assertEqual(store.get(attempts), b"2")
+            for timeout in (True, "1"):
+                with self.assertRaisesRegex(TypeError, "timeout"):
+                    transport.connect_rank(
+                        5, store=store, rank=10, tag="test", timeout=timeout
+                    )
+            with self.assertRaisesRegex(TypeError, "tag"):
+                transport.connect_rank(5, store=store, rank=10, tag=1)
+            with self.assertRaisesRegex(TypeError, "tag"):
+                transport.connect_rank(5, store=store, rank=10)
+            transport._default_timeout = 0.0
+            with self.assertRaisesRegex(ValueError, "got 0.0 s"):
+                transport.connect_rank(5, store=store, rank=10, tag="test")
+            transport._default_timeout = None
+            self.assertEqual(store.num_keys(), keys)
+            with self.assertRaisesRegex(RuntimeError, "bind stopped"):
+                transport.connect_rank(5, store=store, rank=10, tag="other")
+            for timeout in (0.001, (2**31 - 1) / 1000, timedelta(seconds=2)):
+                with self.assertRaisesRegex(RuntimeError, "bind stopped"):
+                    transport.connect_rank(
+                        5, store=store, rank=10, tag="bounds", timeout=timeout
+                    )
+            self.assertEqual(bind.call_count, 6)
+            self.assertEqual(bind.call_args.kwargs, {"timeout": 2.0})
+        self.assertEqual(store.get(f"{_PREFIX}/5/10/attempts/10"), b"2")
+        self.assertEqual(
+            store.get("transport_connect_rank/other/5/10/attempts/10"), b"1"
+        )
 
     def test_implicit_rank_lookup(self):
-        store = dist.HashStore()
+        store = _hash_store()
+        transport = _Transport()
+        # timeout=None resolves to the transport's default.
+        transport._default_timeout = 5.0
         with (
             patch("torch.distributed.get_rank", return_value=4) as get_rank,
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                side_effect=RuntimeError("construction stopped"),
-            ),
-            self.assertRaisesRegex(RuntimeError, "construction stopped"),
+            patch.object(
+                transport, "bind", side_effect=RuntimeError("bind stopped")
+            ) as bind,
+            self.assertRaisesRegex(RuntimeError, "bind stopped"),
         ):
-            new_transport_rank("test", store=store, peer_rank=8)
+            transport.connect_rank(8, store=store, tag="test")
+        bind.assert_called_once_with(timeout=5.0)
         get_rank.assert_called_once_with()
-        attempts = "transport/test/4/8/attempts/4"
-        self.assertEqual(store.get(attempts), b"1")
+        self.assertEqual(store.get(f"{_PREFIX}/4/8/attempts/4"), b"1")
 
 
 if __name__ == "__main__":

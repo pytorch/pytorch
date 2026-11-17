@@ -360,13 +360,6 @@ vjp_fail = {
     decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
-# torch-xpu-ops does not implement 5-D bicubic grid_sample yet; only those samples
-# fail. The xfail is op-wide, so it also hides XPU regressions in the 2-D, bilinear
-# and nearest paths. A per-sample xfailIf won't work: it needs the test to call
-# sample_inputs(..., use_subtests=True), and these tests don't.
-# https://github.com/intel/torch-xpu-ops/issues/5542
-xpu_unsupported = {xfail("nn.functional.grid_sample", device_type="xpu")}
-
 aliasing_ops = {
     "T",
     "broadcast_to",
@@ -455,7 +448,7 @@ class TestOperatorsDevice(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(xpu_unsupported).union(
+        vjp_fail.union(
             {
                 xfail(
                     "chalf", "", device_type="cpu"
@@ -635,7 +628,7 @@ class TestOperatorsDevice(TestCase):
                 xfail("as_strided", "partial_views"),
                 xfail("as_strided_scatter"),
             }
-        ).union(xpu_unsupported),
+        ),
     )
     @opsToleranceOverride(
         "TestOperatorsDevice",
@@ -787,7 +780,7 @@ class TestOperatorsDevice(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(xpu_unsupported).union(
+        vjp_fail.union(
             {
                 xfail("sparse.sampled_addmm", ""),
                 xfail("sparse.mm", "reduce"),
@@ -890,7 +883,7 @@ class TestOperatorsDevice(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(xpu_unsupported).union(
+        vjp_fail.union(
             {
                 skip("nn.functional.max_unpool1d"),  # silent incorrectness; Flaky
                 skip("nn.functional.max_unpool2d"),  # silent incorrectness; Flaky
@@ -969,7 +962,7 @@ class TestOperatorsDevice(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps(
-        vjp_fail.union(xpu_unsupported).union(
+        vjp_fail.union(
             {
                 skip("atleast_1d"),  # Takes too long
                 skip("atleast_2d"),  # Takes too long
@@ -1219,7 +1212,7 @@ class TestOperatorsDevice(TestCase):
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
         }
-    ).union(xpu_unsupported)
+    )
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -1365,7 +1358,7 @@ class TestOperatorsDevice(TestCase):
         # TODO: implement batching rule
         xfail("_batch_norm_with_update"),
         # ----------------------------------------------------------------------
-    }.union(xpu_unsupported)
+    }
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -1620,7 +1613,7 @@ class TestOperatorsDevice(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(xpu_unsupported).union(
+        vjp_fail.union(
             {
                 skip("bernoulli", ""),  # vjpvmap testing can't handle randomness
                 skip("normal", ""),  # vjpvmap testing can't handle randomness
@@ -1760,7 +1753,7 @@ class TestOperatorsDevice(TestCase):
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        vjp_fail.union(xpu_unsupported).union(
+        vjp_fail.union(
             {
                 xfail("to_sparse", ""),  # NYI
                 # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
@@ -1935,7 +1928,7 @@ class TestOperatorsDevice(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps(
-        vjp_fail.union(xpu_unsupported).union(
+        vjp_fail.union(
             {
                 # XPU convolution_backward misreads a contiguous grad_output
                 # whose strides look channels-last, which vmap produces here.
@@ -2421,7 +2414,7 @@ class TestOperatorsDevice(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-        }.union(xpu_unsupported),
+        },
     )
     @opsToleranceOverride(
         "TestOperatorsDevice",

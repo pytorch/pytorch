@@ -1406,7 +1406,12 @@ class _NestedReductionBase:
         self.check_fusion()
         # One split of the lane source and one of the per-group scale, which
         # is lifted to the parent tile and split like the data.
-        FileCheck().check_count("tl.split(", 2, exactly=True).run("\n".join(sources))
+        source = "\n".join(sources)
+        FileCheck().check_count("tl.split(", 2, exactly=True).run(source)
+        self.assertEqual(
+            source.count("tl.load("),
+            3 if self.force_persistent_outer_reduction is False else 2,
+        )
 
     def test_producer_consumer_lane_fold_splits_computed_value(self):
         """Lanes split the normalized value once, not the raw x and w loads."""
@@ -2337,8 +2342,9 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_numeric(f, (x,))
-        self.check_no_fusion()
-        self.assertGreater(metrics.generated_kernel_count, 1)
+        # A persistent tile can fuse the fixed-lane side output, but the
+        # incompatible even/odd consumers must retain a separate kernel.
+        self.check_non_leaf_epilogue_fallback()
 
     def test_standalone_sub_parent_rejects_shifted_reduction_output(self):
         B, D = 4, 512
@@ -2682,6 +2688,42 @@ class _NestedReductionBase:
         # A looped kernel has no persistent alternative to offer.
         expected_kernels = 1 if self.force_persistent_outer_reduction is False else 2
         self.check_fusion(expected_kernels)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_half_grouped_reduction_bitcast_epilogue(self, dtype):
+        # The grouped amin over half precision reduces in fp32; a bitcast of its
+        # result must see the half-precision value, not the fp32 tile.
+        group = 8
+
+        def f(x):
+            total = x.sum(-1, keepdim=True)
+            peak = x.abs().amax(-1, keepdim=True)
+            value = (x * x.shape[1] - total) * 2.0**-8 + peak * 0.25
+            value = torch.ops._inductor_test.realize(value.to(dtype))
+            return value.view(x.shape[0], -1, group).amin(-1).view(torch.int16) + 1
+
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).float() / 8
+        self.check_nested_matches_unnested(f, (x,), tol=0)
+        self.check_fusion(expected_kernels=None)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("reduction", ["amin", "sum"])
+    @inductor_config.patch("triton.codegen_upcast_to_fp32", False)
+    def test_half_grouped_reduction_without_fp32_upcast(self, reduction, dtype):
+        # Loaded half-precision values stay half precision, but the grouped
+        # reduction still accumulates in fp32 and hands it back, so it matches
+        # eager exactly.
+        group = 8
+
+        def f(x):
+            total = x.sum(-1, keepdim=True)
+            value = torch.ops._inductor_test.realize((x - total).to(dtype))
+            groups = value.view(x.shape[0], -1, group)
+            return getattr(groups, reduction)(-1).view(torch.int16) + 1
+
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).to(dtype) / 8
+        self.assertEqual(torch.compile(f)(x), f(x), atol=0, rtol=0)
+        self.check_fusion(expected_kernels=None)
 
 
 @inductor_config.patch("force_disable_caches", True)
@@ -3214,6 +3256,7 @@ class _InternalsBase:
 
     def setUp(self):
         super().setUp()
+        self.enterContext(inductor_config.patch("loop_ordering_after_fusion", True))
         metrics.reset()
         torch._dynamo.utils.clear_compilation_metrics()
 

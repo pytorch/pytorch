@@ -369,6 +369,10 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
  *     is excluded because earlier runtimes could crash (release an invalid
  *     queue) when a device-wide wait interleaves with XPUGraph capture; see
  *     https://github.com/pytorch/pytorch/issues/187277.
+ *     The fast path is limited to:
+ *     On Windows, it additionally requires BMG and newer. See
+ *     https://github.com/pytorch/pytorch/issues/197520.
+ *     On Linux, it is unrestricted.
  *  2. Legacy path (otherwise): walk every reserved queue in each priority
  *     pool and `wait()` on it. This only drains queues we own; SYCL queues
  *     outside our pools are unaffected.
@@ -385,8 +389,17 @@ void syncStreamsOnDevice(DeviceIndex device) {
 // TODO: drop the legacy fallback below once a driver supporting
 // `ext_oneapi_device_wait` is widely deployed across all supported platforms.
 #if SYCL_COMPILER_VERSION >= 20260100
-  const bool use_device_wide_wait = c10::xpu::get_raw_device(device).has(
-      sycl::aspect::ext_oneapi_device_wait);
+  const auto& raw_device = c10::xpu::get_raw_device(device);
+  bool use_device_wide_wait =
+      raw_device.has(sycl::aspect::ext_oneapi_device_wait);
+
+#ifdef _WIN32
+  namespace syclex = sycl::ext::oneapi::experimental;
+  use_device_wide_wait &=
+      raw_device.get_info<syclex::info::device::architecture>() >=
+      syclex::architecture::intel_gpu_bmg_g21;
+#endif
+
 #else
   constexpr bool use_device_wide_wait = false;
 #endif

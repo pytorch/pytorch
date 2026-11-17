@@ -62,9 +62,25 @@ PYBIND11_MODULE(_nccl_ep, m) {
       py::arg("out_topk_idx"));
 
   m.def(
+      "_nccl_ep_dispatch_backward",
+      &nccl_ep_dispatch_backward,
+      py::arg("handle"),
+      py::arg("grad_tokens"),
+      py::arg("out_tokens"));
+
+  m.def(
       "_nccl_ep_combine",
       &nccl_ep_combine,
       py::arg("handle"),
       py::arg("expert_tokens"),
       py::arg("out_tokens"));
+
+  m.def(
+      "_nccl_ep_combine_backward",
+      &nccl_ep_combine_backward,
+      py::arg("handle"),
+      py::arg("grad_tokens"),
+      py::arg("grad_topk_weights"),
+      py::arg("out_tokens"),
+      py::arg("out_topk_weights"));
 }

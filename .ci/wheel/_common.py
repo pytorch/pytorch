@@ -50,7 +50,6 @@ _BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # serves the s390x build -- the one Linux arch that does not run this
 # pipeline.
 NUMPY_PINS: dict[str, str] = {
-    "3.10": "2.0.2",
     "3.11": "2.0.2",
     "3.12": "2.0.2",
     "3.13": "2.1.2",
