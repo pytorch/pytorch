@@ -4757,20 +4757,33 @@ class MethodWrapperVariable(VariableTracker):
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return NO_SUCH_SUBOBJ
+        return self._bind_python_constant(obj)
 
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
 
-    def as_python_constant(self) -> types.MethodWrapperType:
-        is_constant, obj_value = self.obj.try_as_python_constant()
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        is_constant, obj = self.obj.try_as_python_constant()
         if not is_constant:
-            raise AsPythonConstantNotImplementedError(self)
+            return False, None
+        try:
+            return True, self._bind_python_constant(obj)
+        except NotImplementedError:
+            return False, None
+
+    def _bind_python_constant(self, obj_value: Any) -> types.MethodWrapperType:
         try:
             return self.descriptor.__get__(obj_value, type(obj_value))
         except TypeError:
             raise AsPythonConstantNotImplementedError(self) from None
+
+    def as_python_constant(self) -> types.MethodWrapperType:
+        obj_value = self.obj.as_python_constant()
+        return self._bind_python_constant(obj_value)
 
     def call_function(
         self,
@@ -4809,10 +4822,13 @@ class MethodWrapperVariable(VariableTracker):
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return super().hash_impl(tx)
         try:
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
-            return hash(self.as_python_constant()), False
+            return hash(self._bind_python_constant(obj)), False
         except NotImplementedError:
             return super().hash_impl(tx)
 
@@ -4992,10 +5008,38 @@ class BoundBuiltinMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return False, None
+        try:
+            return True, self._bind_python_constant(obj)
+        except NotImplementedError:
+            return False, None
+
+    def get_real_python_backed_value(self) -> object:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return NO_SUCH_SUBOBJ
+        try:
+            return self._bind_python_constant(obj)
+        except NotImplementedError:
+            return NO_SUCH_SUBOBJ
+
+    def _bind_python_constant(self, obj: Any) -> Any:
+        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
+            return self.descriptor.__get__(None, obj)
+        if hasattr(self.descriptor, "__get__"):
+            return self.descriptor.__get__(obj)  # type: ignore[union-attr]
+        return getattr(obj, self.descriptor.__name__)
+
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return id(self), True
         try:
-            return hash(self.as_python_constant()), False
+            return hash(self._bind_python_constant(obj)), False
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
@@ -5006,11 +5050,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
-        if isinstance(self.descriptor, types.ClassMethodDescriptorType):
-            return self.descriptor.__get__(None, obj)
-        if hasattr(self.descriptor, "__get__"):
-            return self.descriptor.__get__(obj)  # type: ignore[union-attr]
-        return getattr(obj, self.descriptor.__name__)
+        return self._bind_python_constant(obj)
 
     def call_function(
         self,

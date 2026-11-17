@@ -1546,12 +1546,36 @@ class CallMethodVariable(VariableTracker):
         except (AsPythonConstantNotImplementedError, AttributeError):
             return types.MethodType
 
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return False, None
+        try:
+            return True, self._bind_python_constant(obj)
+        except NotImplementedError:
+            return False, None
+
+    def get_real_python_backed_value(self) -> object:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return NO_SUCH_SUBOBJ
+        try:
+            return self._bind_python_constant(obj)
+        except NotImplementedError:
+            return NO_SUCH_SUBOBJ
+
+    def _bind_python_constant(self, obj: Any) -> Any:
+        return getattr(obj, self.method_name)
+
     def as_python_constant(self) -> Any:
-        return getattr(self.obj.as_python_constant(), self.method_name)
+        return self._bind_python_constant(self.obj.as_python_constant())
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return id(self), True
         try:
-            return hash(self.as_python_constant()), False
+            return hash(self._bind_python_constant(obj)), False
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
