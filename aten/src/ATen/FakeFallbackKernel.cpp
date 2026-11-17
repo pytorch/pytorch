@@ -12,6 +12,7 @@
 #include <torch/library.h>
 
 #include <algorithm>
+#include <atomic>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -269,6 +270,8 @@ bool cpp_meta_supports_symint(
           categories, at::impl::FakeDispatchCategory::CppMetaSupportsSymint);
 }
 
+std::atomic<at::impl::ModelessFakeFallback*> modeless_fake_fallback{nullptr};
+
 void fakeFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatchKeySet,
@@ -279,9 +282,6 @@ void fakeFallback(
   const bool metadata_copy = schema.overload_name().empty() &&
       (schema.name() == "aten::detach" ||
        schema.name() == "aten::shallow_copy_data_");
-  if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
-    unsupported(op, "the Python dispatcher");
-  }
 
   // The active mode, or, as Python's FakeTensor dispatch enters a fake's
   // mode, the mode of the first fake input
@@ -293,6 +293,14 @@ void fakeFallback(
             mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
           }
         });
+  }
+  auto* modeless_fallback = modeless_fake_fallback.load();
+  if (mode == nullptr && modeless_fallback != nullptr) {
+    modeless_fallback(op, dispatchKeySet, stack);
+    return;
+  }
+  if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
+    unsupported(op, "the Python dispatcher");
   }
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
@@ -762,3 +770,11 @@ TORCH_LIBRARY_IMPL(_, Fake, m) {
 }
 
 } // namespace
+
+namespace at::impl {
+
+void setModelessFakeFallback(ModelessFakeFallback* fn) {
+  modeless_fake_fallback.store(fn);
+}
+
+} // namespace at::impl
