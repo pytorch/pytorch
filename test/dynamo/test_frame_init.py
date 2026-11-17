@@ -9,6 +9,7 @@ import torch._dynamo.testing
 from torch._C._dynamo.eval_frame import set_eval_frame
 from torch._dynamo.types import ConvertFrameReturn, GuardedCode, wrap_guarded_code
 from torch._guards import CompileId
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     skipIfFreeThreaded,
@@ -176,6 +177,8 @@ class FrameClearTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(sys.getrefcount(code), before)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

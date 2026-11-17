@@ -12,6 +12,7 @@ from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._functorch._aot_autograd.subclass_codegen import (
     _codegen_subclass_wrapper_source,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -566,6 +567,8 @@ def inner_fn(args):
         self.assertEqual(out[0].a, a * 2)
         self.assertEqual(out[0].b, b * 2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()
