@@ -1,6 +1,7 @@
 # Owner(s): ["module: decompositions"]
 # ruff: noqa: F841
 
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import itertools
 import torch
 import os
@@ -2180,6 +2181,7 @@ class TestMetaCore(TestCase):
         self.assertEqual(nz.stride(), torch.Size([1, 24]))
 
 
+    @fake_tensor_test()
     def test_stride_for_index_Tensor(self):
         from torch._subclasses import FakeTensorMode
         x = torch.randn((24, 16, 32, 32)).to(memory_format=torch.channels_last)
@@ -2345,6 +2347,7 @@ class TestMetaKernelConv(TestCase):
 class TestMetaKernelRegistrations(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @fake_tensor_test()
     @parametrize("tensor_lr", [False, True])
     @parametrize("amsgrad", [False, True])
     @parametrize("fake", [False, True])
@@ -2389,6 +2392,7 @@ class TestMetaKernelRegistrations(TestCase):
         result = torch.arange(256, dtype=dtype, device="meta")
         self.assertEqual(result.shape, (256,))
 
+    @fake_tensor_test()
     @parametrize("dtype", [torch.int64, torch.float32])
     def test_arange_symbolic_fake_tensor(self, dtype):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2407,6 +2411,7 @@ class TestMetaKernelRegistrations(TestCase):
         for result in results:
             self.assertEqual(result.shape, (size,))
 
+    @fake_tensor_test()
     @parametrize("backed", [False, True])
     def test_arange_symbolic_float_arguments(self, backed):
         import math
@@ -2442,6 +2447,7 @@ class TestMetaKernelRegistrations(TestCase):
         for result, expected_size in zip(results, expected_sizes):
             self.assertEqual(result.shape, (expected_size,))
 
+    @fake_tensor_test()
     @parametrize("shift", ["lshift", "rshift"])
     @parametrize("other_kind", ["Scalar", "Tensor"])
     def test_shift_out_symbolic_fake_tensor(self, shift, other_kind):
@@ -2500,6 +2506,7 @@ class TestMetaKernelRegistrations(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected index"):
             torch.ops.aten.scatter_add.out(self_tensor, 0, index, src, out=out)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_scatter_add_out_shape_mismatch_symbolic_index(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2528,6 +2535,7 @@ class TestMetaKernelRegistrations(TestCase):
                 inp, dim=-1, keepdim=False, min=out_min, max=out_max
             )
 
+    @fake_tensor_test()
     def test_grid_sampler_2d_cpu_fallback_meta(self):
         # The meta kernels' whole contract is output metadata, so compare
         # shape/stride/dtype against eager for the forward and both backward
@@ -2597,6 +2605,7 @@ class TestMetaKernelRegistrations(TestCase):
         )
         self.assertEqual(cpp_result, decomp_result)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_linalg_eig_strides_cpu(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2610,6 +2619,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(eigvecs.shape, eigvecs_fake.shape)
         self.assertEqual(eigvecs.dtype, eigvecs_fake.dtype)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_zero_preserves_input_strides(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2699,6 +2709,7 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
+    @fake_tensor_test()
     @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
@@ -2718,6 +2729,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(cpu_result.shape, fake_result.shape)
         self.assertEqual(cpu_result.dtype, fake_result.dtype)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_none(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2874,6 +2886,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(save_mean.dtype, weight.dtype)
         self.assertEqual(save_var.dtype, weight.dtype)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_reflection_pad2d_channels_last(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2901,6 +2914,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(cpu_result.stride(), meta_result.stride())
         self.assertTrue(meta_result.is_contiguous())
 
+    @fake_tensor_test()
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_replication_pad2d_channels_last(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
