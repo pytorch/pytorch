@@ -34,6 +34,11 @@ class Indexable:
         return self.value
 
 
+class BrokenIterable:
+    def __iter__(self):
+        raise ValueError("iter failed")
+
+
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
     """bytearray-specific tests, ported from CPython ByteArrayTest."""
 
@@ -469,6 +474,55 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         for parts in result[1:]:
             for part in parts:
                 self.assertIs(type(part), bytearray)
+
+    @make_dynamo_test
+    def test_join(self):
+        sep = bytearray(b",")
+        self.assertEqual(sep.join([]), b"")
+        self.assertEqual(sep.join([b"a", bytearray(b"b")]), b"a,b")
+        self.assertEqual(sep.join((b"a", b"b")), b"a,b")
+        self.assertEqual(sep.join(item for item in (b"a", b"b")), b"a,b")
+
+    @make_dynamo_test
+    def test_join_errors(self):
+        sep = bytearray(b",")
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            sep.join(0)
+        with self.assertRaisesRegex(
+            TypeError, "sequence item 1: expected a bytes-like object, str found"
+        ):
+            sep.join([b"a", "b"])
+
+        with self.assertRaisesRegex(ValueError, "iter failed"):
+            sep.join(BrokenIterable())
+
+    def test_join_nonconstant_item_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(sep, item, x):
+            x = x + 1
+            return sep.join([item, b"c"]), x * 2
+
+        result = f(bytearray(b"-"), memoryview(b"ab"), torch.ones(1))
+        self.assertEqual(result, (b"ab-c", torch.full((1,), 4.0)))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_join_result_mutated_in_graph(self):
+        def f(sep, ba, x):
+            out = sep.join([ba, b"c"])
+            out += b"!"
+            single = sep.join([ba])
+            single.append(ord("?"))
+            return out, single, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        sep, ba = bytearray(b"-"), bytearray(b"ab")
+        self.assertEqual(
+            compiled(sep, ba, torch.ones(1)),
+            f(bytearray(b"-"), bytearray(b"ab"), torch.ones(1)),
+        )
+        self.assertEqual((sep, ba), (b"-", b"ab"))
 
     @make_dynamo_test
     def test_hex(self):

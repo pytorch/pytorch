@@ -96,15 +96,6 @@ inline bool isExternalTracerState(ProfilerState state) {
       state == ProfilerState::PRIVATEUSE1;
 }
 
-inline bool hasRequestedDeviceActivity(
-    const std::set<torch::profiler::impl::ActivityType>& activities) {
-  return activities.contains(ActivityType::CUDA) ||
-      activities.contains(ActivityType::XPU) ||
-      activities.contains(ActivityType::MTIA) ||
-      activities.contains(ActivityType::HPU) ||
-      activities.contains(ActivityType::PrivateUse1);
-}
-
 struct KinetoThreadLocalState : public ProfilerStateBase {
   explicit KinetoThreadLocalState(
       const ProfilerConfig& config,
@@ -659,7 +650,6 @@ void prepareProfiler(
       isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!hasRequestedDeviceActivity(activities),
       activities,
       config.experimental_config,
       config.trace_id,
@@ -697,23 +687,25 @@ void prepareProfiler(
 static void toggleTorchOpCollectionDynamic(bool enable) {
   std::shared_ptr<ProfilerStateBase> global_state =
       ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  TORCH_CHECK(state);
+  if (!enable) {
+    state->removeCallback();
+    return;
+  }
+  // Only a session that collects CPU has scopes to turn back on.
+  const auto state_info = profilerStateInfo();
+  if (!state_info) {
+    LOG(WARNING)
+        << "Dynamic toggle skipped CPU activity, which this profiler does not collect";
+    return;
+  }
   if (global_state) {
-    if (enable) {
-      auto scopes = profilerStateInfo()->scopes;
-      // Mid-session re-arm on the same RecordQueue: do not bump the generation.
-      pushGlobalProfilingCallbacks(scopes, /*new_session=*/false);
-    } else {
-      global_state->removeCallback();
-    }
+    // Mid-session re-arm on the same RecordQueue: do not bump the generation.
+    pushGlobalProfilingCallbacks(state_info->scopes, /*new_session=*/false);
   } else {
-    ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
-    TORCH_CHECK(tls_state);
-    if (enable) {
-      auto scopes = profilerStateInfo()->scopes;
-      pushTLSProfilingCallbacks(scopes);
-    } else {
-      tls_state->removeCallback();
-    }
+    pushTLSProfilingCallbacks(state_info->scopes);
   }
 }
 
