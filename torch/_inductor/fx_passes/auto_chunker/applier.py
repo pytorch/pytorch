@@ -35,7 +35,7 @@ def fake_tensor_prop(gm: GraphModule) -> None:
         else:
             inputs.append(node)
 
-    fake_mode = detect_fake_mode(inputs)
+    fake_mode = torch._guards.require_python_fake_mode(detect_fake_mode(inputs))
     FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
 
 
