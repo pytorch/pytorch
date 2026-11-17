@@ -152,7 +152,7 @@ void initDeviceStreamState(DeviceIndex device) {
           c10::xpu::asyncHandler,
           properties[p]));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_stream_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(stream.get()));
       }
@@ -212,7 +212,7 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 int XPUStream::priority() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
-  if (C10_UNLIKELY(st == StreamIdType::EXT)) {
+  if (st == StreamIdType::EXT) [[unlikely]] {
     // Query external stream priority
     using namespace sycl::ext::oneapi::property;
     if (queue().has_property<queue::priority_normal>()) {
@@ -237,6 +237,7 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
+    case StreamIdType::LOW:
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -417,7 +418,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
       }
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_device_synchronization(c10::kXPU);
     }
   }
