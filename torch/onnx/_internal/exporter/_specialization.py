@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import warnings
+import weakref
 from typing import TYPE_CHECKING
 
 import sympy
@@ -25,17 +26,27 @@ if TYPE_CHECKING:
     from torch.utils._sympy.value_ranges import ValueRanges
 
 
-@dataclasses.dataclass(frozen=True)
-class _Snapshot:
+@dataclasses.dataclass
+class _Baseline:
     n_guards: int
     deferred_asserts: set[sympy.Expr]
     replacements: set[sympy.Symbol]
     var_to_range: tuple[tuple[sympy.Symbol, ValueRanges], ...]
     input_dims: dict[sympy.Symbol, str]
+    by_op: dict[str, list[sympy.Expr]] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Snapshot:
+    baseline: _Baseline
+    repeated: bool
     candidate_ops: tuple[str, ...]
     candidate_targets: frozenset[torch._ops.OpOverload]
     shape_env: ShapeEnv
-    by_op: dict[str, list[sympy.Expr]] = dataclasses.field(default_factory=dict)
+
+
+# run_decompositions mutates the program's ShapeEnv, so repeated exports keep the first baseline.
+_BASELINES: weakref.WeakKeyDictionary[ShapeEnv, _Baseline] = weakref.WeakKeyDictionary()
 
 
 def _input_dim_names(
@@ -85,16 +96,23 @@ def snapshot(
             ("aten::_assert_scalar", "aten::sym_constrain_range")
         )
     }
+    baseline = _BASELINES.get(shape_env)
+    repeated = baseline is not None
+    if baseline is None:
+        baseline = _BASELINES[shape_env] = _Baseline(
+            n_guards=len(shape_env.guards),
+            deferred_asserts={
+                ra.expr
+                for values in shape_env.deferred_runtime_asserts.values()
+                for ra in values
+            },
+            replacements=set(shape_env.replacements),
+            var_to_range=tuple(shape_env.var_to_range.items()),
+            input_dims=_input_dim_names(exported_program, shape_env),
+        )
     return _Snapshot(
-        n_guards=len(shape_env.guards),
-        deferred_asserts={
-            ra.expr
-            for values in shape_env.deferred_runtime_asserts.values()
-            for ra in values
-        },
-        replacements=set(shape_env.replacements),
-        var_to_range=tuple(shape_env.var_to_range.items()),
-        input_dims=_input_dim_names(exported_program, shape_env),
+        baseline=baseline,
+        repeated=repeated,
         candidate_ops=tuple(sorted(map(str, candidate_ops))),
         candidate_targets=frozenset(candidate_ops),
         shape_env=shape_env,
@@ -107,7 +125,7 @@ def attribution_hook(before: _Snapshot | None) -> Callable[[dict], dict] | None:
         return None
     shape_env = before.shape_env
     candidate_targets = before.candidate_targets
-    by_op = before.by_op
+    by_op = before.baseline.by_op
     depth = 0
 
     def wrap(op, decompose):
@@ -140,7 +158,8 @@ def attribution_hook(before: _Snapshot | None) -> Callable[[dict], dict] | None:
                     if symbol not in replacements
                 )
                 if exprs:
-                    by_op.setdefault(str(op), []).extend(exprs)
+                    recorded = by_op.setdefault(str(op), [])
+                    recorded.extend(expr for expr in exprs if expr not in recorded)
 
         return attributed
 
@@ -182,20 +201,21 @@ def warn_if_specialized(
     shape_env = _get_shape_env(exported_program.graph_module)
     if shape_env is None:
         return
-    new_constraints = {guard.expr for guard in shape_env.guards[before.n_guards :]}
+    baseline = before.baseline
+    new_constraints = {guard.expr for guard in shape_env.guards[baseline.n_guards :]}
     new_constraints.update(
         ra.expr
         for values in shape_env.deferred_runtime_asserts.values()
         for ra in values
-        if ra.expr not in before.deferred_asserts
+        if ra.expr not in baseline.deferred_asserts
     )
     new_constraints.update(
         sympy.Eq(symbol, value)
         for symbol, value in shape_env.replacements.items()
-        if symbol not in before.replacements
+        if symbol not in baseline.replacements
     )
-    input_symbols = set(before.input_dims)
-    ranges = dict(before.var_to_range)
+    input_symbols = set(baseline.input_dims)
+    ranges = dict(baseline.var_to_range)
     constraints = set()
     for expr in new_constraints:
         if not expr.free_symbols <= input_symbols:
@@ -216,7 +236,7 @@ def warn_if_specialized(
     for expr in constraints:
         affected.update(expr.free_symbols)
     dims = ", ".join(
-        f"{before.input_dims[symbol]} ({symbol})"
+        f"{baseline.input_dims[symbol]} ({symbol})"
         for symbol in sorted(affected, key=str)
     )
     consequence = (
@@ -238,7 +258,7 @@ def warn_if_specialized(
     by_op: dict[str, list[str]] = {}
     unattributed = []
     for expr in ordered[:10]:
-        ops = sorted(op for op, exprs in before.by_op.items() if expr in exprs)
+        ops = sorted(op for op, exprs in baseline.by_op.items() if expr in exprs)
         if ops:
             for op in ops:
                 by_op.setdefault(op, []).append(str(expr))
@@ -253,6 +273,12 @@ def warn_if_specialized(
         lines.append(
             "Ops decomposed for ONNX that may be responsible: "
             + ", ".join(before.candidate_ops)
+        )
+    if before.repeated:
+        lines.append(
+            "This ExportedProgram was already decomposed by an earlier ONNX export, "
+            "which shares its shape environment, so constraints from that export "
+            "still apply. Re-run torch.export.export for a clean program."
         )
     lines.append(
         "To fix: provide an ONNX implementation for the op (custom_translation_table), "
