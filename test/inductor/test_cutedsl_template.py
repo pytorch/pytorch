@@ -73,6 +73,45 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
 
+    def test_call_kernel_preserves_ir_views_for_autotuning(self):
+        from types import SimpleNamespace
+
+        from torch._inductor.codegen.common import ArgName
+        from torch._inductor.ir import FixedLayout, InputBuffer, ReinterpretView
+
+        base = InputBuffer(
+            name="base",
+            layout=FixedLayout(torch.device("cuda"), torch.float32, [2, 4]),
+        )
+        view = ReinterpretView(
+            data=base,
+            layout=FixedLayout(torch.device("cuda"), torch.float32, [4, 2], [1, 4]),
+        )
+        kernel = object.__new__(CuteDSLTemplateKernel)
+        kernel._template_input_args = [("input", view)]
+        kernel._seen_input_args = {"input"}
+        kernel._capture_input_nodes = {"capture": view}
+        kernel.args = MagicMock()
+        kernel.args.python_argdefs.return_value = (
+            [ArgName("input"), ArgName("captured"), ArgName("out"), ArgName("size")],
+            ["base", "capture", "output", "s0"],
+            [],
+            [torch.float32] * 3 + [int],
+        )
+        wrapper = MagicMock()
+        wrapper.codegen_reinterpret_view.return_value = "view_expression"
+        graph = SimpleNamespace(
+            wrapper_code=wrapper,
+            get_dtype=lambda _: torch.float32,
+            _cutedsl_capture_nodes={},
+        )
+        with V.set_graph_handler(graph):
+            kernel.call_kernel("view_kernel")
+        call = wrapper.generate_kernel_call.call_args
+        self.assertEqual(call.args[1][:2], ["view_expression"] * 2)
+        self.assertEqual(call.kwargs["raw_args"], [view, view, None, None])
+        self.assertEqual(call.kwargs["raw_keys"], [None] * 4)
+
     # dense_gemm_efc imports cutlass.operators, which ships in a separate
     # package that smoke_b200 cannot install (see TODO(#189590) in test.sh).
     @unittest.skipIf(
@@ -281,6 +320,59 @@ def {{kernel_name}}_kernel():
             # Verify correctness
             expected = x + y
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
+    def test_cutedsl_view_input_autotune_at_compile_time(self):
+        """A ReinterpretView input must reach compile-time autotuning as its IR
+        node; its call-arg string is an expression, not a buffer name."""
+        from torch._inductor import config as inductor_config, ir
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+        from torch._inductor.lowering import lowerings
+
+        template = CuteDSLTemplate(
+            name="test_add_view_input",
+            source=CUTEDSL_ADD_TEMPLATE,
+        )
+
+        def cutedsl_add_lowering(a, b):
+            choices = []
+            layout = ir.FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            error = template.maybe_append_choice(
+                choices, input_nodes=[a, b], layout=layout, THREADS_PER_BLOCK=256
+            )
+            self.assertIsNone(error)
+            return choices[0].output_node()
+
+        def fn(x, y):
+            return x.t() + y
+
+        x = torch.randn(4, 128, device="cuda")
+        y = torch.randn(128, 4, device="cuda")
+        generate_example_arg = PythonWrapperCodegen.generate_example_arg_value
+        with (
+            patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}),
+            inductor_config.patch({"triton.autotune_at_compile_time": True}),
+            patch.object(
+                PythonWrapperCodegen,
+                "generate_example_arg_value",
+                autospec=True,
+                side_effect=generate_example_arg,
+            ) as example_arg,
+        ):
+            result = torch.compile(fn, backend="inductor")(x, y)
+        torch.testing.assert_close(result, fn(x, y))
+        # Compile-time autotuning built the view's example from its IR node.
+        self.assertTrue(
+            any(
+                isinstance(call.args[3], ir.ReinterpretView)
+                for call in example_arg.call_args_list
+                if len(call.args) > 3
+            )
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
