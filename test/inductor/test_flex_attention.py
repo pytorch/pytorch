@@ -71,6 +71,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
+    preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
     skipMPSIf,
@@ -78,6 +79,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
+    decorateIf,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -1310,11 +1312,10 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
-    def setUp(self):
-        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
-        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
-            self.skipTest("skip UT for CPU due to long compilation time found in CI")
-        super().setUp()
+    setUp = preserves_device_selection(InductorTestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
 
     def _check_equal(
         self,
@@ -5281,6 +5282,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         for eager, compiled in zip(eager_grads, compiled_grads):
             torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
 
+    @decorateIf(
+        unittest.skip("paged attention captures the page table; not supported on MPS"),
+        lambda params: params["mode"] == "paged_attention"
+        and _is_mps_device(params["device"]),
+    )
     @supported_platform
     @skip_on_cpu
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
@@ -6947,6 +6953,100 @@ class GraphModule(torch.nn.Module):
             return full_default
 """.replace("GPU_TYPE", torch.device(device).type),
         )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    def test_forward_refine_hook_receives_lowering_context(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.contexts = []
+
+            def refine_flex_attention_fwd_configs(self, configs, context):
+                self.contexts.append(context)
+                return configs
+
+        def lowering_context(query, key, value, **kwargs):
+            choices = RecordingChoices()
+            torch._dynamo.reset()
+            with (
+                config.patch(force_disable_caches=True),
+                V.set_choices_handler(choices),
+            ):
+                torch.compile(flex_attention, fullgraph=True)(
+                    query, key, value, **kwargs
+                )
+            self.assertEqual(len(choices.contexts), 1)
+            return choices.contexts[0]
+
+        # Distinct sizes so that swapped context fields fail.
+        dense = lowering_context(
+            torch.randn(3, 4, 128, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 32, device=device, dtype=torch.float16),
+            enable_gqa=True,
+        )
+        self.assertEqual(
+            (
+                dense.batch_size,
+                dense.num_heads,
+                dense.num_kv_heads,
+                dense.seq_len_q,
+                dense.seq_len_kv,
+                dense.qk_head_dim,
+                dense.v_head_dim,
+                dense.qk_head_dim_rounded,
+                dense.v_head_dim_rounded,
+            ),
+            (3, 4, 2, 128, 256, 64, 32, 64, 32),
+        )
+        self.assertTrue(dense.is_noop_block_mask)
+        self.assertTrue(dense.inputs_contiguous)
+        self.assertFalse(dense.score_mod_reads_buffers)
+        self.assertEqual(
+            (dense.dtype, dense.key_dtype, dense.value_dtype), (torch.float16,) * 3
+        )
+
+        query, key, value = (
+            torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # A block mask with the query's batch also allows broadcasting K/V.
+        block_mask = create_block_mask(causal, 2, 1, 256, 256, device=device)
+        masked = lowering_context(
+            torch.randn(2, 2, 256, 64, device=device, dtype=torch.float16),
+            key,
+            value,
+            block_mask=block_mask,
+        )
+        self.assertFalse(masked.is_noop_block_mask)
+        self.assertEqual((masked.batch_size, masked.kv_batch_size), (2, 1))
+
+        bias = torch.randn(256, device=device, dtype=torch.float16)
+
+        def add_bias(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        self.assertTrue(
+            lowering_context(
+                query, key, value, score_mod=add_bias
+            ).score_mod_reads_buffers
+        )
+
+        transposed = (
+            torch.randn(1, 256, 2, 64, device=device, dtype=torch.float16).transpose(
+                1, 2
+            )
+            for _ in range(3)
+        )
+        self.assertFalse(lowering_context(*transposed).inputs_contiguous)
 
     @supported_platform
     @skip_on_cpu
@@ -8662,6 +8762,11 @@ class GraphModule(torch.nn.Module):
 
 
 class TestBlockMask(InductorTestCase):
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
+
+    @preserves_device_selection
     def setUp(self):
         super().setUp()
 
@@ -10110,12 +10215,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
-    def setUp(self):
-        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
-        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
-            self.skipTest("skip UT for CPU due to long compilation time found in CI")
-        super().setUp()
-
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -10621,13 +10720,28 @@ supports_learnable_bias = unittest.skipUnless(
 )
 
 
+def _skip_rocm_flaky_learnable_bias(test_name):
+    return common_utils.decorateIf(
+        unittest.skip(
+            "Flaky on ROCm: https://github.com/pytorch/pytorch/issues/167271 and https://github.com/pytorch/pytorch/issues/167296"
+        ),
+        lambda p: TEST_WITH_ROCM
+        and (
+            p["params"].batch_size,
+            p["params"].num_heads,
+            p["params"].seq_length,
+            p["params"].head_dim,
+            p["params"].dtype,
+            p["mode"],
+        )
+        in ROCM_FLAKY_LEARNABLE_BIAS_CASES[test_name],
+    )
+
+
 @supports_learnable_bias
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
-        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
-        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
-            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         super().setUp()
         self.dtype = torch.float32
         self.atol = 3e-2
@@ -10711,6 +10825,7 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
+    @_skip_rocm_flaky_learnable_bias("relative_1d_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11029,6 +11144,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @_skip_rocm_flaky_learnable_bias("symmetric_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11102,6 +11218,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @_skip_rocm_flaky_learnable_bias("head_specific_gate")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11818,6 +11935,19 @@ instantiate_device_type_tests(
     allow_xpu=True,
     allow_mps=True,
 )
+
+if LONG_COMPILATION_ON_CPU:
+    for name in (
+        "TestFlexAttentionCPU",
+        "TestPagedAttentionCPU",
+        "TestLearnableBiasesCPU",
+    ):
+        if name in globals() and not getattr(
+            globals()[name], "__unittest_skip__", False
+        ):
+            unittest.skip("skip UT for CPU due to long compilation time found in CI")(
+                globals()[name]
+            )
 
 
 if __name__ == "__main__":
