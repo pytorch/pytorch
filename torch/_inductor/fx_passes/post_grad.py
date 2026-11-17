@@ -1530,7 +1530,10 @@ def _slice_scatter_noop_replacement(node):
     if not isinstance(self, torch.fx.Node) or not isinstance(src, torch.fx.Node):
         return src
     if src.target is aten.slice.Tensor and get_arg_value(src, 0, "self") is self:
-        # slice_scatter(x, x[a:b:c], d, a, b, c), e.g. from x.copy_(x) on a view.
+        # slice_scatter(x, x[a:b], d, a, b), e.g. from x[a:b].copy_(x[a:b]). The
+        # slice_scatter_noop gate only lets step 1 with explicit in-range bounds
+        # (or a full-size src) through, so strided and open-ended partial
+        # slices are kept.
         if _same_slice_range(node, src, self):
             return self
         return src
