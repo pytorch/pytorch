@@ -2,7 +2,6 @@
 
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/IdWrapper.h>
-#include <c10/util/string_view.h>
 #include <cstdint>
 #include <ostream>
 #include <string>
