@@ -1065,6 +1065,12 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     _maybe_infer_fake = _maybe_infer_fake
     _maybe_infer_fake_kernel_from_pytree_out = _maybe_infer_fake_kernel_from_pytree_out
 
+    def can_run_unsafe_fallback(self, func: OpOverload) -> bool:
+        return self.allow_fallback_kernels and (
+            func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
+            or func.name() == "fbgemm::gmm"
+        )
+
     def maybe_run_unsafe_fallback(
         self,
         func: OpOverload,
@@ -1075,11 +1081,7 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     ) -> Any:
         if library_utils.can_generate_trivial_fake_impl(func):
             return library_utils.generate_trivial_fake_impl(func, *args, **kwargs)
-        can_run_unsafe_fallback = self.allow_fallback_kernels and (
-            func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
-            or func.name() == "fbgemm::gmm"
-        )
-        if has_symbolic_sizes or not can_run_unsafe_fallback:
+        if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
             raise UnsupportedOperatorException(func)
         if error is None:
             error = UnsupportedOperatorException(func)
