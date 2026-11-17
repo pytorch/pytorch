@@ -209,6 +209,51 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(actual_input, expected_input)
         self.assertTrue(any(n.target is aten.index_put.default for n in gm.graph.nodes))
 
+    @parametrize("operation", ["copy", "add", "read"])
+    @parametrize("use_view", [False, True])
+    def test_control_deps_preserves_functional_result(self, operation, use_view):
+        def f(x, indices, values, replacement):
+            updated = x.index_put((indices,), values)
+            x.copy_(updated)
+            target = x.view_as(x) if use_view else x
+            if operation == "copy":
+                target.copy_(replacement)
+            elif operation == "add":
+                target.add_(100)
+            else:
+                target.clone()
+            return updated
+
+        inputs = (
+            torch.arange(4, dtype=torch.float32),
+            torch.tensor([1]),
+            torch.tensor([20.0]),
+            torch.full((4,), -1.0),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        copyback = next(n for n in gm.graph.nodes if n.target is aten.copy_.default)
+        target = {
+            "copy": aten.copy_.default,
+            "add": aten.add_.Tensor,
+            "read": aten.clone.default,
+        }[operation]
+        ordered = list(gm.graph.find_nodes(op="call_function", target=target))[-1]
+        preserve_node_ordering(gm.graph, {ordered: OrderedSet([copyback])})
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        expected_inputs = tuple(value.clone() for value in inputs)
+        expected = f(*expected_inputs)
+        actual_inputs = tuple(value.clone() for value in inputs)
+        self.assertEqual(gm(*actual_inputs), expected)
+        self.assertEqual(actual_inputs, expected_inputs)
+        targets = [n.target for n in gm.graph.nodes]
+        self.assertIn(
+            aten.index_put_.default if operation == "read" else aten.index_put.default,
+            targets,
+        )
+
     def test_two_input_updates_preserve_first_result_e2e(self):
         class Model(torch.nn.Module):
             def forward(self, x, indices, first_values, second_values):
