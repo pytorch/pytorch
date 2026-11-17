@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import wraps
 from typing import TypeVar
@@ -12,7 +12,9 @@ from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
+    decomposition_table,
     global_decomposition_table,
+    is_torch_decomp_decomposition,
     meta_table,
 )
 from torch._ops import OpOverload
@@ -25,6 +27,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    is_expandable_to,
     make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
@@ -43,6 +46,11 @@ from torch._prims_common.wrappers import (
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
+from torch.utils._quantize_tensor_validation import (
+    _get_quant_format,
+    _quantize_tensor_dual_validate_inputs,
+    _quantize_tensor_validate_inputs,
+)
 
 
 _T = TypeVar("_T")
@@ -729,6 +737,35 @@ def meta_philox_randint_(self, key, low=None, high=None):
             "(torch.int64 or torch.uint64).",
         )
     _check_philox_gen_args("_philox_randint_", self, key)
+    return self
+
+
+def _check_philox_bound(op_name, name, bound, self):
+    torch._check(
+        bound.device == self.device,
+        lambda: (
+            f"{op_name}: {name} must be on the same device as self, "
+            f"got {bound.device} and {self.device}"
+        ),
+    )
+    torch._check(
+        bound.dtype.is_floating_point,
+        lambda: f"{op_name}: {name} must be a floating point tensor, got {bound.dtype}",
+    )
+    torch._check(
+        is_expandable_to(bound.shape, self.shape),
+        lambda: (
+            f"{op_name}: {name} shape {list(bound.shape)} is not broadcastable "
+            f"to the output shape {list(self.shape)}"
+        ),
+    )
+
+
+@register_meta(aten._philox_uniform_.Tensor)
+def meta_philox_uniform_tensor_(self, key, low, high):
+    _check_philox_distribution_args("_philox_uniform_", self, key)
+    _check_philox_bound("_philox_uniform_", "low", low, self)
+    _check_philox_bound("_philox_uniform_", "high", high, self)
     return self
 
 
@@ -7562,6 +7599,78 @@ def meta_scaled_mm(
     )
 
 
+@register_meta([aten._quantize_tensor.default])
+def meta_quantize_tensor(
+    input: torch.Tensor,
+    dim: list[int],
+    scaling_type: int,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: int,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool = False,
+) -> list[torch.Tensor]:
+    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        _get_quant_block_size,
+        infer_blockscaled_tma_outputs,
+    )
+    from torch.nn.functional import SwizzleType
+
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
+    )
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    quant_block_size = _get_quant_block_size(scaling_type)
+    axes = _quantize_tensor_validate_inputs(
+        quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
+    )
+    return infer_blockscaled_tma_outputs(
+        input,
+        axes,
+        scaling_type_use_square_block_size,
+        swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
+        False,
+        quant_block_size=quant_block_size,
+    )
+
+
+@register_meta([aten._quantize_tensor_dual.default])
+def meta_quantize_tensor_dual(
+    input: torch.Tensor,
+    dim: list[int],
+    scaling_type: int,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: int,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool = False,
+) -> list[torch.Tensor]:
+    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        _get_quant_block_size,
+        infer_blockscaled_tma_outputs,
+    )
+
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
+    )
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    quant_block_size = _get_quant_block_size(scaling_type)
+    axes = _quantize_tensor_dual_validate_inputs(
+        quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
+    )
+    return infer_blockscaled_tma_outputs(
+        input, axes, False, True, True, quant_block_size=quant_block_size
+    )
+
+
 @register_meta([aten._scaled_mm_v2.default])
 def meta_scaled_mm_v2(
     self: torch.Tensor,
@@ -9033,10 +9142,15 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
-            torch._check(
-                offs.stride() == (1,),
-                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
-            )
+            if scaled:
+                torch._check_value(
+                    offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+                )
+            else:
+                torch._check(
+                    offs.stride() == (1,),
+                    lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+                )
     else:
         torch._check(
             offs is None,
@@ -9128,10 +9242,63 @@ def meta_scaled_grouped_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    """Shape inference only, since the structured C++ meta doesn't support
-    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    r"""Infer output shape without requiring concrete dimensions.
+
+    This Python meta overrides the C++ validator under FakeTensor and compile.
+    It checks recipe-specific output dtype and offset contiguity; bias, offset dtype/rank, and
+    dimension alignment are validated by the eager C++ path at execution.
     """
     _out_dtype = out_dtype or torch.bfloat16
+    torch._check_value(
+        _out_dtype in (torch.bfloat16, torch.float16, torch.float32),
+        lambda: "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm",
+    )
+    from torch.nn.functional import ScalingType, SwizzleType
+
+    rowwise = scale_recipe_a == scale_recipe_b == [ScalingType.RowWise.value]
+    tensorwise = [ScalingType.TensorWise.value]
+    vec32 = ScalingType.BlockWise1x32.value
+    vec128 = ScalingType.BlockWise1x128.value
+    block128 = ScalingType.BlockWise128x128.value
+    mnk4 = SwizzleType.SWIZZLE_MN_K4.value
+    has_mnk4 = (
+        (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
+        and not rowwise
+        and (mnk4 in swizzle_a or mnk4 in swizzle_b)
+    )
+    fp8_types = (torch.float8_e4m3fn, torch.float8_e5m2)
+    torch._check_value(
+        not has_mnk4
+        or (
+            scale_recipe_a == scale_recipe_b
+            and scale_recipe_a in ([vec32], [vec128])
+            and swizzle_a == swizzle_b == [mnk4]
+            and mat_a.dtype in fp8_types
+            and mat_b.dtype in fp8_types
+            and torch.float8_e4m3fn in (mat_a.dtype, mat_b.dtype)
+        ),
+        lambda: "Invalid scaling configuration for grouped GEMM: packed MNxK4 requires matching "
+        "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MN_K4 on both inputs, and a valid float8 input pair",
+    )
+    fp32_block = (
+        len(scale_recipe_a) == len(scale_recipe_b) == 1
+        and scale_recipe_a[0] in (vec128, block128)
+        and scale_recipe_b[0] in (vec128, block128)
+        and vec128 in (scale_recipe_a[0], scale_recipe_b[0])
+    )
+    bf16_only = (
+        not fp32_block
+        and not has_mnk4
+        and (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
+    )
+    message = "Grouped scaling configuration requires BFloat16 output"
+    if rowwise:
+        message = "Rowwise grouped GEMM requires BFloat16 output"
+    torch._check_value(not bf16_only or _out_dtype == torch.bfloat16, lambda: message)
+    if offs is not None:
+        torch._check_value(
+            offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+        )
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 
@@ -9568,4 +9735,35 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
+def cpp_meta_supports_symint(op: OpOverload) -> bool:
+    # Whether FakeTensorMode prefers op's C++ Meta kernel to its decomposition.
+    return torch.Tag.view_copy in op.tags or op in cpp_meta_supports_symint_ops
+
+
+def _register_static_shape_decomps(ops: Iterable[torch._ops.OperatorBase]) -> None:
+    # Meta membership and sparse inputs are checked at dispatch time.
+    for op in ops:
+        if (
+            isinstance(op, OpOverload)
+            and is_torch_decomp_decomposition(op)
+            and not cpp_meta_supports_symint(op)
+        ):
+            schema = op._schema
+            torch._C._fake_dispatch_register_static_shape_decomp(
+                schema.name, schema.overload_name
+            )
+
+
+def _register_cpp_meta_supports_symint_ops() -> None:
+    for op in cpp_meta_supports_symint_ops:
+        schema = op._schema
+        torch._C._fake_dispatch_register_cpp_meta_supports_symint(
+            schema.name, schema.overload_name
+        )
+
+
 activate_meta()
+# Initial decorators run before their function names are bound in the module.
+_register_static_shape_decomps(decomposition_table)
+torch._decomp._static_shape_decomps_initialized = True
+_register_cpp_meta_supports_symint_ops()
