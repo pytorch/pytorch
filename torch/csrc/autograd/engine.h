@@ -156,7 +156,8 @@ struct TORCH_API Engine {
       bool keep_graph,
       bool create_graph,
       bool accumulate_grad,
-      const edge_list& outputs = {});
+      const edge_list& outputs = {},
+      bool disallow_implicit_grad_accumulation = false);
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph.
