@@ -1044,10 +1044,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         static_shapes: bool | None = None,
         export: bool = False,
     ) -> None:
-        if not allow_fallback_kernels:
-            raise NotImplementedError(
-                "CppFakeTensorMode does not support allow_fallback_kernels=False yet"
-            )
         if export:
             raise NotImplementedError(
                 "CppFakeTensorMode does not support export=True yet"
@@ -1062,11 +1058,33 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             creation_traceback=CapturedTraceback.extract(),
         )
         self.allow_non_fake_inputs = allow_non_fake_inputs
+        self.allow_fallback_kernels = allow_fallback_kernels
         if static_shapes is not None:
             self.static_shapes = static_shapes
 
     _maybe_infer_fake = _maybe_infer_fake
     _maybe_infer_fake_kernel_from_pytree_out = _maybe_infer_fake_kernel_from_pytree_out
+
+    def maybe_run_unsafe_fallback(
+        self,
+        func: OpOverload,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        has_symbolic_sizes: bool,
+        error: RuntimeError | None = None,
+    ) -> Any:
+        if library_utils.can_generate_trivial_fake_impl(func):
+            return library_utils.generate_trivial_fake_impl(func, *args, **kwargs)
+        can_run_unsafe_fallback = self.allow_fallback_kernels and (
+            func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
+            or func.name() == "fbgemm::gmm"
+        )
+        if has_symbolic_sizes or not can_run_unsafe_fallback:
+            raise UnsupportedOperatorException(func)
+        if error is None:
+            error = UnsupportedOperatorException(func)
+        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+        return run_fallback_kernel(self, func, flat_args, args_spec, error)
 
     # Symbolized on demand, without retaining the creation frame's locals.
     @property
@@ -4217,7 +4235,7 @@ def _validate_symbolic_output_for_caching(
 
 # NB: returns fake tensors
 def run_fallback_kernel(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     func: OpOverload,
     flat_args: Sequence[object],
     args_spec: PyTree,
@@ -4237,8 +4255,8 @@ def run_fallback_kernel(
     with no_dispatch():
 
         def to_real_tensor(e: T) -> T | Tensor:
-            if fake_mode.is_our_fake(e):
-                out = torch.zeros_like(e, device=e.fake_device)
+            if isinstance(e, Tensor) and fake_mode.is_our_fake(e):
+                out = torch.zeros_like(e, device=maybe_get_fake_device(e))
                 if e.is_sparse:
                     out._coalesced_(e.is_coalesced())
                 inp_impls[id(out)] = e
@@ -4262,7 +4280,7 @@ def run_fallback_kernel(
     # not be set up, bc of conversion to device, unless we can reuse an
     # input impl
 
-    def map_out(e: T) -> T | FakeTensor:
+    def map_out(e: T) -> T | Tensor:
         if id(e) not in inp_impls and (
             isinstance(e, Tensor)
             and not is_sparse_any(e)
