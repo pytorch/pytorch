@@ -33,7 +33,7 @@ class C10_API FakeTensorModeTLS {
   // belongs to the thread and is not tied to a mode:
   // - While it is set, every C++ fake on the thread reports meta, whichever
   //   mode owns it, so in_kernel_invocation_manager(mode_a) also affects fakes
-  //   of mode_b. Code that runs with it unset, such as to_meta_tensor in
+  //   of mode_b. Code that runs with it unset, such as from_real_tensor in
   //   torch/csrc/PyInterpreter.cpp, sees the fake device of a fake from
   //   another mode.
   // - at::ThreadLocalState carries it into worker threads, next to the mode.

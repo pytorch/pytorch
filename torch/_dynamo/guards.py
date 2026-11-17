@@ -274,6 +274,8 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 
 
 def _sequence_length(value: object) -> int:
+    if issubclass(type(value), dict):
+        return dict.__len__(cast(dict[Any, Any], value))
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
@@ -1933,17 +1935,17 @@ class GuardBuilder(GuardBuilderBase):
         | None,
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
+        example_type: type[object] = type(example_value)
         if self.requires_key_order_guarding(source):
-            # Fix this if condition
-            if isinstance(example_value, dict_keys):
+            if issubclass(example_type, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-            elif isinstance(example_value, (set, frozenset)):
+            elif issubclass(example_type, (set, frozenset)):
                 # we don't need to guard on key order for set/frozenset
                 # but the if above will be true for these types as set is
                 # implemented using a dict in Dynamo
                 guard_manager_enum = GuardManagerType.GUARD_MANAGER
             else:
-                if not isinstance(example_value, dict):
+                if not issubclass(example_type, dict):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
@@ -3609,12 +3611,14 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not isinstance(value, dict):
+        if not issubclass(type(value), dict):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
-        if isinstance(value, set):
+        if issubclass(type(value), dict):
+            code.append(f"dict.__len__({ref}) == {length}")
+        elif isinstance(value, set):
             code.append(f"set.__len__({ref}) == {length}")
         elif isinstance(value, frozenset):
             code.append(f"frozenset.__len__({ref}) == {length}")
@@ -3624,7 +3628,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
-        if isinstance(value, dict):
+        if issubclass(type(value), dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
                 get_verbose_code_parts(code, guard),
