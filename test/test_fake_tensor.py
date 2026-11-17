@@ -6838,6 +6838,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         names = ["decomp", "python_cia", "native_cia"]
         self.assertEqual(seen, [(n, True, False, mode) for n in names] * 2)
 
+    @fake_tensor_test()
     @parametrize("symbolic", [False, True])
     def test_fake_fallback_static_shape_decomp_registration(self, symbolic):
         if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
