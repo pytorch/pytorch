@@ -412,7 +412,7 @@ def _worker_nvgemm_autotuning_precompile(
 
     _ensure_fp4_dtype_registered()
 
-    with FakeTensorMode(_force_python=True):
+    with FakeTensorMode():
         input_tensors = tuple(
             torch.empty_strided(m.sizes, m.strides, device=m.device, dtype=m.dtype)
             for m in input_tensor_meta
@@ -1244,7 +1244,7 @@ def _nvgemm_precompile(
         return
 
     device = f"cuda:{device_index}"
-    with FakeTensorMode(_force_python=True):
+    with FakeTensorMode():
         tensors = {}
         tensor_names = [*input_param_names]
         if output_scale_param_name is not None:
