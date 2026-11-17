@@ -354,7 +354,7 @@ class TestMaxAutotune(TestCase):
         dynamic: bool,
         dtype: torch.dtype,
     ):
-        from torch.testing._internal.common_xpu import XPUArch
+        from torch.xpu._utils import XPUArch
 
         def mm(a, b):
             if a_transposed:
@@ -375,7 +375,7 @@ class TestMaxAutotune(TestCase):
         # The templates are gated to Xe2 or later; force it so CI on PVC runs them.
         with (
             mock.patch(
-                "torch.testing._internal.common_xpu.get_xpu_arch",
+                "torch.xpu._utils.get_xpu_arch",
                 return_value=XPUArch.Xe2,
             ),
             config.patch(
@@ -400,7 +400,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
     @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
     def test_max_autotune_xpu_persistent_mm_executes_barrier(self):
-        from torch.testing._internal.common_xpu import XPUArch
+        from torch.xpu._utils import XPUArch
 
         M, N, K = 168, 248, 88
         a = torch.randn((M, K), dtype=torch.bfloat16, device=GPU_TYPE)
@@ -410,7 +410,7 @@ class TestMaxAutotune(TestCase):
         # non-empty matrices, exercising the barrier path in the executed kernel.
         with (
             mock.patch(
-                "torch.testing._internal.common_xpu.get_xpu_arch",
+                "torch.xpu._utils.get_xpu_arch",
                 return_value=XPUArch.Xe2,
             ),
             mock.patch.object(
@@ -434,7 +434,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
     @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
     def test_max_autotune_xpu_mm_templates_reject_misaligned_k(self):
-        from torch.testing._internal.common_xpu import XPUArch
+        from torch.xpu._utils import XPUArch
 
         M, N, K = 168, 248, 90
         a = torch.randn((M, K), dtype=torch.bfloat16, device=GPU_TYPE)
@@ -460,7 +460,7 @@ class TestMaxAutotune(TestCase):
                 with (
                     fresh_cache(),
                     mock.patch(
-                        "torch.testing._internal.common_xpu.get_xpu_arch",
+                        "torch.xpu._utils.get_xpu_arch",
                         return_value=XPUArch.Xe2,
                     ),
                     config.patch(
@@ -498,7 +498,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
     @parametrize("dtype", (torch.bfloat16, torch.float16))
     def test_max_autotune_xpu_mm_templates_prune_triton_mm(self, dtype: torch.dtype):
-        from torch.testing._internal.common_xpu import XPUArch
+        from torch.xpu._utils import XPUArch
 
         # Every companion tile fits these sizes, so shape scaling leaves them as is.
         M, N, K = 168, 248, 88
@@ -530,7 +530,7 @@ class TestMaxAutotune(TestCase):
                 with (
                     fresh_cache(),
                     mock.patch(
-                        "torch.testing._internal.common_xpu.get_xpu_arch",
+                        "torch.xpu._utils.get_xpu_arch",
                         return_value=XPUArch.Xe2,
                     ),
                     config.patch(
