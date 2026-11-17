@@ -1,0 +1,58 @@
+# Owner(s): ["module: ci"]
+# Temporary authorized exact-PR replay. Never merge.
+name: CI security release TLS canary
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-security-release-tls-canary.yml
+      - .github/scripts/ci_release_tls_probe.py
+      - .github/scripts/ci_release_tls_marker.c
+      - .github/scripts/test_ci_release_tls_probe.py
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+jobs:
+  check-ci:
+    if: github.event_name == 'pull_request' && github.actor == 'd4l3k' && github.triggering_actor == 'd4l3k' && github.repository == 'pytorch/pytorch' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'd4l3k' && github.event.pull_request.head.repo.full_name == 'pytorch/pytorch' && github.event.pull_request.head.ref == 'gh/d4l3k/0/head'
+    uses: ./.github/workflows/_check-ci.yml
+  exact-replay:
+    needs: check-ci
+    if: github.event_name == 'pull_request' && github.actor == 'd4l3k' && github.triggering_actor == 'd4l3k' && github.repository == 'pytorch/pytorch' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'd4l3k' && github.event.pull_request.head.repo.full_name == 'pytorch/pytorch' && github.event.pull_request.head.ref == 'gh/d4l3k/0/head'
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      GIT_CONFIG_COUNT: '2'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+      GIT_CONFIG_KEY_1: core.eol
+      GIT_CONFIG_VALUE_1: lf
+      CANARY_PR_NUMBER: ${{ github.event.pull_request.number }}
+      CANARY_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      CANARY_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      CANARY_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      CANARY_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout reviewed canary
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: canary
+          sparse-checkout: .github/scripts/
+      - name: Checkout unchanged RC10 installer source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pytorch/pytorch
+          persist-credentials: false
+          ref: d0f2af8b66b20da4baa50644c0cd3f887a2eae2e
+          path: source
+          sparse-checkout: |
+            .ci/wheel/windows/
+            .ci/pytorch/windows/
+      - name: Offline controls
+        run: python -I canary/.github/scripts/test_ci_release_tls_probe.py
+      - name: Replay unchanged native Windows installer stage
+        run: python -I canary/.github/scripts/ci_release_tls_probe.py --source-root source
