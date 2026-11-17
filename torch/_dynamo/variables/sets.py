@@ -298,6 +298,9 @@ class BaseSetVariable(VariableTracker):
             raise_observed_exception(type(exc), tx, args=list(exc.args))
         return VariableTracker.build(tx, res)
 
+    def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
+        return self.items
+
     def _iter_operand_keys(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> "Iterator[HashableTracker]":
@@ -313,11 +316,7 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            storage = (
-                other.materialize_keys()
-                if isinstance(other, ConstDictVariable)
-                else other.items
-            )
+            storage = other.materialize_keys()
             guard_key_collisions(self.items, storage)
             yield from storage
             return
@@ -336,12 +335,7 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            storage = (
-                other.materialize_keys()
-                if isinstance(other, ConstDictVariable)
-                else other.items
-            )
-            keys = list(storage)
+            keys = list(other.materialize_keys())
         else:
             keys = [HashableTracker(x) for x in unpack_iterable(tx, other)]
         guard_key_collisions(self.items, keys)
@@ -1504,10 +1498,7 @@ class DictKeySetVariable(BaseSetVariable):
         if isinstance(vt, ConstDictVariable):
             vt.install_dict_order_guard(tx)
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
-            storage = (
-                vt.materialize_keys() if isinstance(vt, ConstDictVariable) else vt.items
-            )
-            items: list[Any] = list(storage)
+            items: list[Any] = list(vt.materialize_keys())
         else:
             items = unpack_iterable(tx, vt)
         return SetVariable(items, mutation_type=ValueMutationNew())

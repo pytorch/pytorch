@@ -1952,19 +1952,25 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(loaded_unused["bystander"], _Missing)
 
     def test_dictionary_pruning_does_not_call_metaclass_equality(self):
+        class Plain(dict):
+            pass
+
         class Meta(type):
             def __eq__(cls, other):
                 raise AssertionError("Pickle protocol lookup must not compare classes")
 
-            __hash__ = type.__hash__
+            def __hash__(cls):
+                return hash(Plain)
 
         class Mapping(dict, metaclass=Meta):
             pass
 
-        mapping = Mapping()
+        mapping, plain = Mapping(), Plain()
         pickler = GuardsStatePickler({}, {}, {}, {}, io.BytesIO())
-        pickler._prune_dictionary_values([mapping])
+        with mock.patch.dict(copyreg.dispatch_table, {Mapping: tuple}):
+            pickler._prune_dictionary_values([mapping, plain])
         self.assertNotIn(id(mapping), pickler._pruned_dictionary_ids)
+        self.assertIn(id(plain), pickler._pruned_dictionary_ids)
 
     def test_pruned_dictionary_preserves_recursive_and_repeated_references(self):
         value = {"bystander": threading.Lock()}
@@ -3615,6 +3621,31 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    @parametrize("constructor", [False, True])
+    def test_dictionary_snapshot_keeps_constructor_mapping(self, constructor):
+        def fn(x, holder):
+            return x + len(tuple(holder.cfg)) + holder.items[1]
+
+        holder = DictionaryToken()
+        holder.cfg = {"token": DictionaryToken() if constructor else threading.Lock()}
+        helper = ReducedHolder(2, {}) if constructor else DictionaryToken()
+        helper.cfg = holder.cfg
+        holder.items = [helper, 5]
+        inputs = {"x": torch.ones(1), "holder": holder}
+        ref, loaded = self._test_serialization(
+            ("DICT_KEYS_MATCH", "SEQUENCE_LENGTH", "CONSTANT_MATCH"),
+            fn,
+            *inputs.values(),
+        )
+        self._test_check_fn(ref, loaded, inputs, True)
+        saved = load_guards_state(self._cached_guards_state).output_graph.local_scope[
+            "holder"
+        ]
+        self.assertIsInstance(
+            saved.cfg["token"], DictionaryToken if constructor else _Missing
+        )
+        self.assertIs(saved.items[0].cfg["token"], saved.cfg["token"])
+
     def test_dictionary_values_shared_with_a_guarded_key(self):
         def fn(x, keyed, unused):
             return x + len(tuple(keyed)) + len(unused)
@@ -3634,6 +3665,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         state = load_guards_state(self._cached_guards_state).output_graph.local_scope
         self.assertIs(next(iter(state["keyed"])), state["unused"]["alias"])
         self.assertIsInstance(state["unused"]["lock"], _Missing)
+
+    def test_local_dictionary_prunes_nested_bystanders(self):
+        def fn(x, cfg):
+            return x + cfg["inner"]["guarded"] + cfg["opts"][0]
+
+        cfg = {
+            "inner": {"guarded": 3, "lock": threading.Lock()},
+            "opts": [4, threading.Lock()],
+        }
+        inputs = {"x": torch.ones(1), "cfg": cfg}
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, *inputs.values())
+        self._test_check_fn(ref, loaded, inputs, True)
+        saved = load_guards_state(self._cached_guards_state).output_graph.local_scope[
+            "cfg"
+        ]
+        self.assertIsInstance(saved["inner"]["lock"], _Missing)
+        self.assertIsInstance(saved["opts"][1], _Missing)
+        cfg["inner"]["guarded"] += 1
+        self._test_check_fn(ref, loaded, inputs, False)
 
     @parametrize("use_defaultdict", [False, True])
     def test_dictionary_values_do_not_prune_constructor_aliases(self, use_defaultdict):
@@ -3656,6 +3706,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._cached_guards_state
         ).output_graph.local_scope["holder"]
         self.assertIsInstance(restored.items[0].token, DictionaryToken)
+        self.assertIsInstance(restored.cfg["token"], _Missing)
         holder.items[1] += 1
         self._test_check_fn(ref, loaded, inputs, False)
 

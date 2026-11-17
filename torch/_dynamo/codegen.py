@@ -56,7 +56,7 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
-from .variables.lazy import ComputedLazyConstantVariable
+from .variables.lazy import ComputedLazyConstantVariable, LazyConstantVariable
 from .variables.lists import BaseListVariable, SliceVariable, TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
@@ -74,6 +74,7 @@ from .variables.user_defined import UserDefinedClassVariable, UserDefinedObjectV
 if TYPE_CHECKING:
     from torch._dynamo.variables.builder import GraphArg
 
+    from .side_effects import SideEffects
     from .symbolic_convert import InstructionTranslatorBase
 
 
@@ -103,6 +104,23 @@ def _pregraph_marker_enter_template(is_profiler_enabled, utils_module):
 def _pregraph_marker_exit_template(cm, utils_module):
     if cm is not None:
         utils_module.record_pregraph_bytecode_exit(cm)
+
+
+def _contains_unrealized_lazy_constant(
+    value: VariableTracker, side_effects: "SideEffects"
+) -> bool:
+    found = False
+
+    def check(vt: VariableTracker) -> None:
+        nonlocal found
+        if (
+            isinstance(vt, (LazyConstantVariable, ComputedLazyConstantVariable))
+            and not vt.is_realized()
+        ):
+            found = True
+
+    VariableTracker.visit(check, value, side_effects=side_effects)
+    return found
 
 
 @dataclasses.dataclass
@@ -380,6 +398,8 @@ class PyCodegen:
             if (
                 isinstance(value.mutation_type, ValueMutationExisting)
                 or self.value_from_source
+                # Unrealized lazy constants have no graph value for export to capture
+                or (isinstance(value, LazyConstantVariable) and not value.is_realized())
             ):
                 return self(value.source)
 
@@ -403,6 +423,11 @@ class PyCodegen:
         elif (
             # Keep container members out of constant probing.
             not _skip_container_constant_probe(value)
+            # is_python_constant() would realize (and value-guard) lazy constants
+            # that can be reloaded or recomputed instead
+            and not _contains_unrealized_lazy_constant(
+                value, self.tx.output.side_effects
+            )
             # Do not embed trace-time child objects in co_consts. Respect this
             # codegen pass's source-reconstruction policy (export stack restoration
             # disables it, but other export codegen paths can keep it enabled).
