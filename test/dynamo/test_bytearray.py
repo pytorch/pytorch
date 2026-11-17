@@ -2,8 +2,6 @@
 """Tests for ByteArrayVariable: bytearray support in Dynamo.
 
 Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
-Only tests covering operations supported in PR 1 (read-only ops + wiring)
-are included; mutation, methods, and conversions will follow in later PRs.
 """
 
 import sys
@@ -18,6 +16,7 @@ from torch.testing._internal.common_utils import (
     make_dynamo_test,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
 )
 
 
@@ -33,6 +32,11 @@ class Indexable:
 
     def __index__(self):
         return self.value
+
+
+class BrokenIterable:
+    def __iter__(self):
+        raise ValueError("iter failed")
 
 
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
@@ -470,6 +474,55 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         for parts in result[1:]:
             for part in parts:
                 self.assertIs(type(part), bytearray)
+
+    @make_dynamo_test
+    def test_join(self):
+        sep = bytearray(b",")
+        self.assertEqual(sep.join([]), b"")
+        self.assertEqual(sep.join([b"a", bytearray(b"b")]), b"a,b")
+        self.assertEqual(sep.join((b"a", b"b")), b"a,b")
+        self.assertEqual(sep.join(item for item in (b"a", b"b")), b"a,b")
+
+    @make_dynamo_test
+    def test_join_errors(self):
+        sep = bytearray(b",")
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            sep.join(0)
+        with self.assertRaisesRegex(
+            TypeError, "sequence item 1: expected a bytes-like object, str found"
+        ):
+            sep.join([b"a", "b"])
+
+        with self.assertRaisesRegex(ValueError, "iter failed"):
+            sep.join(BrokenIterable())
+
+    def test_join_nonconstant_item_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(sep, item, x):
+            x = x + 1
+            return sep.join([item, b"c"]), x * 2
+
+        result = f(bytearray(b"-"), memoryview(b"ab"), torch.ones(1))
+        self.assertEqual(result, (b"ab-c", torch.full((1,), 4.0)))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_join_result_mutated_in_graph(self):
+        def f(sep, ba, x):
+            out = sep.join([ba, b"c"])
+            out += b"!"
+            single = sep.join([ba])
+            single.append(ord("?"))
+            return out, single, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        sep, ba = bytearray(b"-"), bytearray(b"ab")
+        self.assertEqual(
+            compiled(sep, ba, torch.ones(1)),
+            f(bytearray(b"-"), bytearray(b"ab"), torch.ones(1)),
+        )
+        self.assertEqual((sep, ba), (b"-", b"ab"))
 
     @make_dynamo_test
     def test_hex(self):
@@ -1244,6 +1297,119 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             return len(bytearray(n))
 
         self.assertEqual(fn(), n)
+
+    @make_dynamo_test
+    def test_setitem(self):
+        value = bytearray(b"abc")
+        value[0] = 0
+        value[-1] = 255
+        self.assertEqual(value, b"\x00b\xff")
+
+        with self.assertRaises(IndexError):
+            value[3] = 0
+        with self.assertRaises(ValueError):
+            value[0] = 256
+        with self.assertRaises(ValueError):
+            value[0] = -1
+        with self.assertRaises(TypeError):
+            value[0] = b"x"
+        with self.assertRaises(TypeError):
+            value["0"] = 0
+
+    @make_dynamo_test
+    def test_delitem(self):
+        value = bytearray(b"abc")
+        del value[-1]
+        del value[0]
+        self.assertEqual(value, b"b")
+        with self.assertRaises(IndexError):
+            del value[1]
+
+    @make_dynamo_test
+    def test_setslice(self):
+        value = bytearray(b"abcd")
+        value[1:2] = [ord("X"), ord("Y")]
+        self.assertEqual(value, b"aXYcd")
+        value[::2] = bytearray(b"123")
+        self.assertEqual(value, b"1X2c3")
+
+        with self.assertRaises(ValueError):
+            value[::2] = b"x"
+        with self.assertRaises(ValueError):
+            value[::0] = b""
+        with self.assertRaises(TypeError):
+            value[1:2] = "x"
+
+    @make_dynamo_test
+    def test_delslice(self):
+        value = bytearray(b"abcdef")
+        del value[::2]
+        self.assertEqual(value, b"bdf")
+        del value[1:2]
+        self.assertEqual(value, b"bf")
+        with self.assertRaises(ValueError):
+            del value[::0]
+
+    @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
+    def test_store_to_new_bytearray(self):
+        def f(output, x):
+            value = bytearray(b"abc")
+            output.append(value)
+            value[1:2] = b"XY"
+            del value[-1]
+            return value, x + 1
+
+        counter = CompileCounter()
+        compiled = torch.compile(f, backend=counter, fullgraph=True)
+        output = []
+        value, x = compiled(output, torch.ones(1))
+        self.assertEqual(value, b"aXY")
+        self.assertIs(output[0], value)
+        self.assertEqual(x, torch.full((1,), 2.0))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_delete_from_existing_bytearray(self):
+        def f(value, x):
+            del value[::2]
+            return x + 1
+
+        value = bytearray(b"abcd")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "bytearray store to an existing bytearray"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(value, torch.ones(1))
+        self.assertEqual(value, b"abcd")
+        torch.compile(f, backend="eager")(value, torch.ones(1))
+        self.assertEqual(value, b"bd")
+
+    def test_store_to_existing_bytearray_with_export(self):
+        def f(value, tensor, view, x):
+            value[0] = 9
+            try:
+                value[1:2] = b"XY"
+            except BufferError as e:
+                return tensor.sum(), view[0], str(e), x + 1
+            return tensor.sum(), view[0], None, x + 1
+
+        @torch._dynamo.disable(recursive=False)
+        def run(fn):
+            value = bytearray(b"\x01\x02")
+            tensor = torch.frombuffer(value, dtype=torch.uint8)
+            with memoryview(value) as view:
+                return fn(value, tensor, view, torch.ones(1)), value
+
+        self.assertEqual(run(torch.compile(f, backend="eager")), run(f))
+        reasons = [
+            *torch._dynamo.utils.counters["graph_break"],
+            *torch._dynamo.utils.counters["unimplemented"],
+        ]
+        self.assertTrue(
+            any(
+                "bytearray store to an existing bytearray" in reason
+                for reason in reasons
+            ),
+            reasons,
+        )
 
     # -- reconstruct: force a graph break with a live bytearray --
 

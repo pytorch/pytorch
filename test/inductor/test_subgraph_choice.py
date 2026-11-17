@@ -20,6 +20,7 @@ from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -94,6 +95,11 @@ class TestSubgraphChoice(TestCase):
             layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
         )
 
+    @decorateIf(
+        unittest.skip("MetaWS and partial configs only apply to the Triton backend"),
+        lambda params: params["backend"] == "aten"
+        and (params["meta_ws"] or params["config_index"]),
+    )
     @parametrize("backend", ("aten", "triton"))
     @parametrize("meta_ws", (False, True))
     @parametrize("config_index", (0, 1))
