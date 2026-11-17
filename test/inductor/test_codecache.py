@@ -3881,6 +3881,27 @@ class _TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    def test_hash_aten_c_shim_ops(self):
+        from torch._inductor.codegen.common import get_device_op_overrides
+
+        with mock.patch.object(get_device_op_overrides("cpu"), "get_aten_c_shim_ops") as hook:
+            hook.return_value = {"aten.mul.Tensor": {}, "aten.add.Tensor": {}}
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {"aten.add.Tensor": {}, "aten.mul.Tensor": {}}
+            details2 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {}
+            details3 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {"aten.mul.Tensor": {"v2": {"new_args": []}}}
+            details4 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {"aten.mul.Tensor": {"v3": {"new_args": []}}}
+            details5 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.assertEqual(pickler.dumps(details1), pickler.dumps(details2))
+        self.assertNotEqual(pickler.dumps(details1), pickler.dumps(details3))
+        self.assertNotEqual(pickler.dumps(details4), pickler.dumps(details5))
+
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
         return FxGraphCachePickler(gm).get_key(details)
