@@ -1145,6 +1145,22 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             trace=trace,
         )
 
+    def _make_fake_tensor(
+        self,
+        t: Tensor,
+        device: torch.device,
+        *,
+        pytype: type[Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> Tensor:
+        out = torch._C._from_meta_and_device(t, torch.device(device), self)
+        # Guard metadata belongs to this Python object, like FakeTensor.pytype;
+        # new tensors produced by detach/clone do not inherit it.
+        out._fake_pytype = pytype
+        if dispatch_keys is not None:
+            torch._C._set_fake_dispatch_keys(out, dispatch_keys)
+        return out
+
     def is_our_fake(self, t: object) -> TypeGuard[Tensor]:
         return isinstance(t, Tensor) and torch._C._maybe_get_fake_mode(t) is self
 
@@ -1630,17 +1646,9 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        if isinstance(fake_mode, CppFakeTensorMode):
-            out = torch._C._from_meta_and_device(t, torch.device(device), fake_mode)
-            # Guard metadata belongs to this Python object, like FakeTensor.pytype;
-            # new tensors produced by detach/clone do not inherit it.
-            out._fake_pytype = pytype
-            if dispatch_keys is not None:
-                torch._C._set_fake_dispatch_keys(out, dispatch_keys)
-        else:
-            out = FakeTensor(
-                fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
-            )
+        out = fake_mode._make_fake_tensor(
+            t, device, pytype=pytype, dispatch_keys=dispatch_keys
+        )
         self.set_tensor_memo(t, out)
         return out
 
@@ -4309,6 +4317,16 @@ class FakeTensorMode(TorchDispatchMode):
             symbolic_context=symbolic_context,
             trace=trace,
         )
+
+    def _make_fake_tensor(
+        self,
+        t: Tensor,
+        device: torch.device,
+        *,
+        pytype: type[Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> FakeTensor:
+        return FakeTensor(self, t, device, pytype=pytype, dispatch_keys=dispatch_keys)
 
 
 _StoragePointer = object
