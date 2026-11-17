@@ -994,13 +994,48 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             work = first.write(
                 source.to_view(), remote, async_op=True, notification=b"x"
             )
-            arrived = second.wait_notifications()
-            self.assertFalse(arrived.is_completed())
+            self.assertEqual(second.wait_notifications(timeout=0), [])
         # Nobody waits on the write: the transport's progress thread must check
         # it so that the notification is sent.
-        self.assertTrue(arrived.wait(timedelta(seconds=30)))
-        self.assertEqual(second.poll_notifications(), [(first.peer_id, b"x")])
+        self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
         self.assertTrue(work.wait(timedelta(seconds=30)))
+
+    def test_one_blocked_waiter_polls_and_close_fails_all(self):
+        first, second = self.make_transport_pair()
+        drain = second._drain_notifications
+        drains = []
+        entered = threading.Event()
+        polled = threading.Event()
+
+        def record():
+            drain()
+            drains.append(threading.current_thread())
+            if len(set(drains)) == 4:
+                entered.set()
+            if entered.is_set() and len(drains) >= 40:
+                polled.set()
+
+        errors = []
+
+        def blocked():
+            try:
+                second.wait_notifications(timeout=30)
+            except RuntimeError as error:
+                errors.append(error)
+
+        with patch.object(second, "_drain_notifications", record):
+            waiters = [threading.Thread(target=blocked) for _ in range(4)]
+            for waiter in waiters:
+                waiter.start()
+            self.assertTrue(entered.wait(30))
+            start = len(drains)
+            self.assertTrue(polled.wait(30))
+            self.assertEqual(len(set(drains[start:])), 1)
+            second.close()
+            for waiter in waiters:
+                waiter.join(30)
+                self.assertFalse(waiter.is_alive())
+        self.assertEqual([str(error) for error in errors], ["transport is closed"] * 4)
 
 
 if __name__ == "__main__":

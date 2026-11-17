@@ -59,7 +59,7 @@ PeerId = str
 
 
 class Notification(NamedTuple):
-    """A message from ``peer``, as returned by ``Transport.poll_notifications``."""
+    """A message from ``peer``, as returned by ``Transport.wait_notifications``."""
 
     peer: PeerId
     payload: bytes
@@ -219,8 +219,9 @@ class Transport(ABC):
     peer once the transfer succeeds, so a written range is visible in the
     destination's host memory when its notification arrives. Receivers see
     messages from all senders, including peers they never connected to.
-    Messages are not lost or duplicated while both endpoints are open, but are
-    not ordered with each other or with unrelated transfers. Peer ids are
+    Messages are not duplicated or ordered with each other or with unrelated
+    transfers. A successful send does not guarantee delivery: backends may drop
+    messages a receiver leaves undrained (see each backend). Peer ids are
     asserted by the sender, not authenticated.
     """
 
@@ -397,18 +398,34 @@ class Transport(ABC):
         """
         raise NotImplementedError("transport does not support notifications")
 
-    def poll_notifications(self) -> list[Notification]:
-        """Return received notifications without waiting; each is returned once."""
-        raise NotImplementedError("transport does not support notifications")
+    def wait_notifications(self, *, timeout: float | None = None) -> list[Notification]:
+        """Return received notifications, waiting up to ``timeout`` for one.
 
-    def wait_notifications(self, *, timeout: float | None = None) -> Work:
-        """Return a Work that completes once a notification can be polled.
-
-        The following ``poll_notifications`` may return nothing if another
-        caller drained it first. The Work fails if the transport closes first;
-        ``timeout`` is its default wait timeout.
+        Each notification is returned to exactly one caller. Returns an empty
+        list on timeout; ``timeout=0`` returns without waiting. Raises
+        ``RuntimeError`` if the transport closes.
         """
         raise NotImplementedError("transport does not support notifications")
+
+    async def wait_notifications_async(
+        self, *, timeout: float | None = None
+    ) -> list[Notification]:
+        """Like ``wait_notifications``, yielding to asyncio while waiting.
+
+        Cancellation loses no notifications.
+        """
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        delay = 1e-6
+        while True:
+            received = self.wait_notifications(timeout=0)
+            if received or (deadline is not None and loop.time() >= deadline):
+                return received
+            # Backends cannot signal arrivals to the loop, so poll with backoff.
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 1e-3)
 
     def _check_notification(self, payload: bytes) -> None:
         limit = self.max_notification_size()
@@ -634,8 +651,7 @@ class Transport(ABC):
                 remote_buffer,
                 async_op=True,
                 timeout=timeout,
-                # Omitted when unset so backends without notifications still work.
-                **({} if notification is None else {"notification": notification}),
+                notification=notification,
             ),
         )
         remaining = (
@@ -664,8 +680,7 @@ class Transport(ABC):
                 remote_buffer,
                 async_op=True,
                 timeout=timeout,
-                # Omitted when unset so backends without notifications still work.
-                **({} if notification is None else {"notification": notification}),
+                notification=notification,
             ),
         )
         remaining = (
