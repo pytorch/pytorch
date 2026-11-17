@@ -90,6 +90,7 @@ __all__ = [
     "fuse_checked",
     "inductor",
     "is_available",
+    "load_passes",
     "memory",
     "regions",
     "rewrite",
@@ -278,6 +279,27 @@ def _compilers() -> list[str]:
     places += [f"_dynamo/eval_frame.py::{entry}"]
     root = os.path.dirname(torch.__file__)
     return [os.path.join(root, place) for place in places]
+
+
+def load_passes(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Loads passes written in Rust from a library, by name.
+
+    The library is a ``cdylib`` crate that depends on the crate
+    ``torch-rewrite-pass`` (``torch/csrc/cfg/rust/sdk`` in the source tree),
+    implements its ``Pass`` trait and ends with ``export_passes!``. Such a
+    pass sees a basic block as a Python pass does (the instructions, the
+    kernel each was seen to call, the values they define and use) and can
+    replace a run of them by a call. A library links against neither Python
+    nor PyTorch, so one that was built once keeps working::
+
+        passes = torch.rewrite.load_passes("target/release/libmine.so")
+        fuse = passes["fuse_rmsnorm"].bind(kernel)  # what the pass puts in
+        torch.rewrite(fn, passes=[fuse, *torch.rewrite.canonical])
+
+    ``bind`` returns the pass with an object that is handed to it on every
+    run: the kernel, as a rule, which stays a Python callable.
+    """
+    return _load_runtime().load_passes(os.fspath(path))
 
 
 def is_available() -> bool:

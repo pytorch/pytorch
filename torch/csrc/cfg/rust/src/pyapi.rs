@@ -12,6 +12,8 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyCapsule, PyDict, PyList, PyTuple};
 use std::cell::Cell;
+use std::ffi::c_void;
+use std::os::raw::c_char;
 use std::ptr::null_mut;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -1121,4 +1123,256 @@ pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResu
         r.cx.set(std::ptr::null());
         result?.is_truthy()
     })
+}
+
+// ----------------------------------------------------------------------
+// Passes written in Rust, in a library of the user's (see the crate in
+// ../sdk, which is the other side of what follows)
+// ----------------------------------------------------------------------
+
+const NATIVE_ABI_VERSION: u32 = 1;
+
+type NativeText = unsafe extern "C" fn(*mut c_void, usize, *mut u8, usize) -> usize;
+type NativeRun = unsafe extern "C" fn(*mut c_void, *mut c_void, *const NativeApi, *mut c_void) -> i32;
+
+#[repr(C)]
+pub struct NativeApi {
+    version: u32,
+    len: unsafe extern "C" fn(*mut c_void) -> usize,
+    op: NativeText,
+    kernel: NativeText,
+    dst: unsafe extern "C" fn(*mut c_void, usize) -> u32,
+    uses: unsafe extern "C" fn(*mut c_void, usize, *mut u32, usize) -> usize,
+    replayable: unsafe extern "C" fn(*mut c_void, usize) -> i32,
+    fuse: unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32,
+    swap: unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void, u32) -> i32,
+    error: unsafe extern "C" fn(*const c_char),
+}
+
+#[repr(C)]
+struct NativeRaw {
+    name: *const c_char,
+    run: NativeRun,
+    state: *mut c_void,
+}
+
+/// The region a native pass was called with: the Python object, which the
+/// functions below reach the block through.
+unsafe fn native_region<'py>(region: *mut c_void) -> Bound<'py, Region> {
+    let py = Python::assume_gil_acquired();
+    Bound::from_borrowed_ptr(py, region as Obj).downcast_into_unchecked()
+}
+
+unsafe fn native_inst<T>(region: *mut c_void, index: usize, read: impl FnOnce(&spec::UInst, &PassCx) -> T) -> Option<T> {
+    let region = native_region(region);
+    let region = region.borrow();
+    let (unit, cx) = region.parts().ok()?;
+    unit.insts.get(index).map(|inst| read(inst, cx))
+}
+
+unsafe fn native_text(text: Option<String>, buf: *mut u8, cap: usize) -> usize {
+    let text = text.unwrap_or_default();
+    std::ptr::copy_nonoverlapping(text.as_ptr(), buf, text.len().min(cap));
+    text.len()
+}
+
+unsafe extern "C" fn native_len(region: *mut c_void) -> usize {
+    let region = native_region(region);
+    let region = region.borrow();
+    region.parts().map_or(0, |(unit, _)| unit.insts.len())
+}
+
+unsafe extern "C" fn native_op(region: *mut c_void, index: usize, buf: *mut u8, cap: usize) -> usize {
+    let name = native_inst(region, index, |u, cx| {
+        cx.func().op_repr(&u.inst.op).split_whitespace().next().unwrap_or("").to_string()
+    });
+    native_text(name, buf, cap)
+}
+
+unsafe extern "C" fn native_kernel(region: *mut c_void, index: usize, buf: *mut u8, cap: usize) -> usize {
+    let name = native_inst(region, index, |u, cx| {
+        cx.slots.get(u.origin as usize).and_then(|slot| slot.as_ref()).and_then(|slot| slot.operator())
+    });
+    native_text(name.flatten(), buf, cap)
+}
+
+unsafe extern "C" fn native_dst(region: *mut c_void, index: usize) -> u32 {
+    native_inst(region, index, |u, _| u.inst.dst).unwrap_or(NONE)
+}
+
+unsafe extern "C" fn native_uses(region: *mut c_void, index: usize, buf: *mut u32, cap: usize) -> usize {
+    let uses = native_inst(region, index, |u, _| {
+        let mut uses = Vec::new();
+        u.inst.op.for_each_use(|v| uses.push(v));
+        uses
+    })
+    .unwrap_or_default();
+    std::ptr::copy_nonoverlapping(uses.as_ptr(), buf, uses.len().min(cap));
+    uses.len()
+}
+
+unsafe extern "C" fn native_replayable(region: *mut c_void, index: usize) -> i32 {
+    native_inst(region, index, |u, _| u.origin as usize == index && u.inst.op.is_replayable()).unwrap_or(false) as i32
+}
+
+unsafe fn native_status(py: Python<'_>, result: PyResult<bool>) -> i32 {
+    match result {
+        Ok(changed) => changed as i32,
+        Err(err) => {
+            err.restore(py);
+            -1
+        }
+    }
+}
+
+unsafe extern "C" fn native_fuse(region: *mut c_void, start: usize, end: usize, callable: *mut c_void) -> i32 {
+    let region = native_region(region);
+    let py = region.py();
+    let callable = Bound::from_borrowed_ptr(py, callable as Obj);
+    let result = region.borrow().fuse(start, end, &callable);
+    native_status(py, result)
+}
+
+unsafe extern "C" fn native_swap(
+    region: *mut c_void,
+    start: usize,
+    end: usize,
+    kernel: *mut c_void,
+    checks: u32,
+) -> i32 {
+    let region = native_region(region);
+    let py = region.py();
+    let kernel = Bound::from_borrowed_ptr(py, kernel as Obj);
+    let result = py
+        .import_bound("torch.rewrite._passes")
+        .and_then(|module| module.getattr("fuse_checked"))
+        .and_then(|fuse| fuse.call1((&region, start, end, kernel, checks)))
+        .and_then(|done| done.extract::<bool>());
+    native_status(py, result)
+}
+
+unsafe extern "C" fn native_error(message: *const c_char) {
+    ffi::PyErr_SetString(ffi::PyExc_RuntimeError, message);
+}
+
+static NATIVE_API: NativeApi = NativeApi {
+    version: NATIVE_ABI_VERSION,
+    len: native_len,
+    op: native_op,
+    kernel: native_kernel,
+    dst: native_dst,
+    uses: native_uses,
+    replayable: native_replayable,
+    fuse: native_fuse,
+    swap: native_swap,
+    error: native_error,
+};
+
+/// A pass of a library that `load_passes` loaded. It is an entry for
+/// `passes=` as a Python pass is: called with a region, it runs.
+#[pyclass(module = "torch._cfg_rs", name = "NativePass", frozen)]
+pub struct NativePass {
+    name: String,
+    library: String,
+    run: NativeRun,
+    state: usize,
+    bound: Option<PyObject>,
+}
+
+#[pymethods]
+impl NativePass {
+    #[getter]
+    fn __name__(&self) -> String {
+        self.name.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<torch.rewrite pass {} of {}>", self.name, self.library)
+    }
+
+    /// The pass with `object` handed to it each time it runs: the kernel it
+    /// puts in, as a rule.
+    fn bind(&self, object: PyObject) -> NativePass {
+        NativePass {
+            name: self.name.clone(),
+            library: self.library.clone(),
+            run: self.run,
+            state: self.state,
+            bound: Some(object),
+        }
+    }
+
+    fn __call__(&self, py: Python<'_>, region: &Bound<'_, Region>) -> PyResult<bool> {
+        let bound = self.bound.as_ref().map_or(null_mut(), |b| b.as_ptr());
+        let status = unsafe {
+            (self.run)(self.state as *mut c_void, region.as_ptr() as *mut c_void, &NATIVE_API, bound as *mut c_void)
+        };
+        match status {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(PyErr::take(py)
+                .unwrap_or_else(|| PyRuntimeError::new_err(format!("the pass {} failed", self.name)))),
+        }
+    }
+}
+
+#[cfg(unix)]
+extern "C" {
+    fn dlopen(filename: *const c_char, flag: std::os::raw::c_int) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    fn dlerror() -> *const c_char;
+}
+
+/// Loads a library of passes (a `cdylib` built with the crate in
+/// torch/csrc/cfg/rust/sdk) and returns its passes by name. The library
+/// stays loaded.
+#[pyfunction]
+pub fn load_passes(py: Python<'_>, path: &str) -> PyResult<PyObject> {
+    #[cfg(not(unix))]
+    {
+        let _ = (py, path);
+        return Err(PyRuntimeError::new_err("loading passes is not supported on this platform"));
+    }
+    #[cfg(unix)]
+    unsafe {
+        let name = std::ffi::CString::new(path).map_err(|_| PyValueError::new_err("a path with a NUL in it"))?;
+        // RTLD_NOW: a library that does not resolve fails here, not in a pass.
+        let handle = dlopen(name.as_ptr(), 2);
+        if handle.is_null() {
+            let why = dlerror();
+            let why = if why.is_null() { String::new() } else { std::ffi::CStr::from_ptr(why).to_string_lossy().into_owned() };
+            return Err(PyRuntimeError::new_err(format!("cannot load {path}: {why}")));
+        }
+        let abi = dlsym(handle, c"torch_rewrite_abi".as_ptr());
+        let table = dlsym(handle, c"torch_rewrite_passes".as_ptr());
+        if abi.is_null() || table.is_null() {
+            return Err(PyRuntimeError::new_err(format!(
+                "{path} exports no passes: it needs export_passes! of the torch-rewrite-pass crate"
+            )));
+        }
+        let abi: unsafe extern "C" fn() -> u32 = std::mem::transmute(abi);
+        if abi() != NATIVE_ABI_VERSION {
+            return Err(PyRuntimeError::new_err(format!(
+                "{path} was built for version {} of the pass interface; this runtime has version {}",
+                abi(),
+                NATIVE_ABI_VERSION
+            )));
+        }
+        let table: unsafe extern "C" fn(*mut *const NativeRaw) -> usize = std::mem::transmute(table);
+        let mut first: *const NativeRaw = std::ptr::null();
+        let count = table(&mut first);
+        let out = PyDict::new_bound(py);
+        for raw in std::slice::from_raw_parts(first, count) {
+            let name = std::ffi::CStr::from_ptr(raw.name).to_string_lossy().into_owned();
+            let pass = NativePass {
+                name: name.clone(),
+                library: path.to_string(),
+                run: raw.run,
+                state: raw.state as usize,
+                bound: None,
+            };
+            out.set_item(name, Py::new(py, pass)?)?;
+        }
+        Ok(out.into_any().unbind())
+    }
 }
