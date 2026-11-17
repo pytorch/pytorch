@@ -86,6 +86,9 @@ def gen_registration_headers(
         headers.append("#include <ATen/Functions.h>")
 
     headers.append("#include <c10/macros/Macros.h>")
+    if has_native_aot and backend_index.dispatch_key != DispatchKey.CUDA:
+        headers.append("#include <ATen/NativeAotStubs.h>")
+        headers.append("#include <ATen/Context.h>")
     return headers
 
 
@@ -529,6 +532,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                     )
 
                 device_guard = "// DeviceGuard omitted"  # default
+                device_guarded = False
                 if f.device_guard and self.backend_index.device_guard:
                     has_tensor_options = any(
                         isinstance(a, TensorOptionsArguments)
@@ -569,6 +573,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         )
                         if device_of is not None:
                             device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
+                            device_guarded = True
 
                 aot_consultation = ""
                 aot_manifest = self.native_aot_manifests.get(str(f.func.name))
@@ -579,6 +584,18 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         aot_manifest,
                         ", ".join(a.name for a in sig.arguments()),
                         returns_type=returns_type,
+                        return_arg=(
+                            f.func.arguments.self_arg.argument.name
+                            if f.func.kind() == SchemaKind.inplace
+                            and f.func.arguments.self_arg
+                            else None
+                        ),
+                        tensor_arg=(
+                            f.func.arguments.self_arg.argument.name
+                            if f.func.arguments.self_arg
+                            else None
+                        ),
+                        device_guarded=device_guarded,
                     )
                 return f"""\
 namespace {{
