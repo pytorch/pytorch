@@ -2817,9 +2817,10 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        # upper(), lower() and title() are METH_NOARGS: Method.__call__
-        # enforces arity before this handler runs, so args/kwargs are
-        # always empty here (same no-arg pattern as list_copy).
+        # upper(), lower(), title(), capitalize() and swapcase() are
+        # METH_NOARGS: Method.__call__ enforces arity before this handler
+        # runs, so args/kwargs are always empty here (same no-arg pattern as
+        # list_copy).
         result = getattr(self.data, method_name)()
         return VariableTracker.build(tx, result)
 
@@ -2846,6 +2847,22 @@ class ByteArrayVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         return self._bytearray_case_method(tx, "title", args, kwargs)
+
+    def bytearray_capitalize(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "capitalize", args, kwargs)
+
+    def bytearray_swapcase(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "swapcase", args, kwargs)
 
     def bytearray_replace(
         self,
@@ -2908,6 +2925,8 @@ class ByteArrayVariable(VariableTracker):
         "upper": Method(bytearray_upper),
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),
+        "capitalize": Method(bytearray_capitalize),
+        "swapcase": Method(bytearray_swapcase),
         "replace": Method(bytearray_replace),
         "translate": Method(bytearray_translate),
         "center": Method(bytearray_center),
