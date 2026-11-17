@@ -128,8 +128,8 @@ C10_DIAGNOSTIC_POP()
 #if defined(MKL_HAS_SBGEMM) || defined(MKL_HAS_SHGEMM)
 // Runs a bf16/f16 gemm on MKL, which only writes f32 C, through an f32 copy of C.
 // Returns false when the ATen kernel should handle the problem instead: tiny
-// problems (same bound as mkldnn_gemm, where MKL's call overhead dominates) and
-// skinny transa ones.
+// problems (same bound as mkldnn_gemm, where MKL's call overhead dominates),
+// alpha == 0 (ATen kernel still propagates inf/NaN) and skinny transa ones.
 template <typename scalar_t>
 bool mkl_xf16_gemm(
     TransposeType transa, TransposeType transb,
@@ -148,7 +148,7 @@ bool mkl_xf16_gemm(
   const int64_t min_cols_transa = m * k <= 1024 * 1024 ? 24 : 24 + 6 * threads;
   const bool skinny_transa = transa != TransposeType::NoTranspose &&
       transb == TransposeType::NoTranspose && n < min_cols_transa;
-  if (m * n * k <= 16 * 16 * 16 || skinny_transa ||
+  if (m * n * k <= 16 * 16 * 16 || alpha == 0.0f || skinny_transa ||
       !use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     return false;
   }
