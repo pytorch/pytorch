@@ -78,7 +78,7 @@ def custom_op(
     schema: str | None = None,
     tags: tags_t = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
-    """Wraps a function into custom operator.
+    r"""Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
     - Wrapping a third-party library or custom kernel to work with PyTorch
@@ -241,7 +241,10 @@ def custom_op(
     element types are checked before these implementations run. Lists passed to
     a tuple-annotated input are converted to tuples.
     Backward formulas must return gradients with the same tuple structure as
-    the inputs, including one outer tuple entry per operator argument.
+    the inputs, including one outer tuple entry per operator argument. A whole
+    tuple argument may instead receive a ``None`` gradient. Lists are not valid
+    gradients for tuple arguments. Entries of ``ctx.needs_input_grad`` and vmap
+    ``in_dims`` corresponding to tuple inputs are also tuples.
 
     For example::
 
@@ -266,8 +269,6 @@ def custom_op(
     """
 
     def inner(fn: Callable[..., object]) -> CustomOpDef:
-        import torch
-
         normalized_tags = _normalize_tags(tags)
         tuple_input_specs = None
         if schema is None:
@@ -345,11 +346,12 @@ class CustomOpDef:
         self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
-        self._tuple_input_specs: dict[str, "_TupleInputSpec"] = (
+        self._tuple_input_specs: dict[str, _TupleInputSpec] = (
             {} if tuple_input_specs is None else tuple_input_specs
         )
-        self._tuple_input_positions: tuple[tuple[int, str, "_TupleInputSpec"], ...] = ()
-        self._prepare_inputs_fn: Callable | None = (
+        self._tuple_input_positions: tuple[tuple[int, str, _TupleInputSpec], ...] = ()
+        self._tuple_input_keywords: tuple[tuple[str, _TupleInputSpec], ...] = ()
+        self._prepare_inputs_fn: autograd.PrepareInputs | None = (
             self._prepare_tuple_inputs if self._tuple_input_specs else None
         )
 
@@ -469,9 +471,18 @@ class CustomOpDef:
     def _prepare_tuple_inputs(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        r"""Validate and convert normalized dispatcher arguments without mutation.
+
+        Multiple dispatch layers may call this, so preparation is idempotent.
+        The torch-dispatch wrapper normalizes absent kwargs to an empty dict.
+        """
         prepared = list(args)
         for index, name, spec in self._tuple_input_positions:
             prepared[index] = spec.prepare(args[index], name, self._qualname)
+        if self._tuple_input_keywords:
+            kwargs = dict(kwargs)
+            for name, spec in self._tuple_input_keywords:
+                kwargs[name] = spec.prepare(kwargs[name], name, self._qualname)
         return tuple(prepared), kwargs
 
     def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
@@ -515,10 +526,21 @@ class CustomOpDef:
                         "return its mutable keyword-only arguments."
                     )
             elif not schema._is_view_op():
+                alias_args, alias_kwargs = args, kwargs
+                if self._prepare_inputs_fn is not None:
+                    # The C++ alias checker traverses lists, not tuple inputs.
+                    alias_args = tuple(
+                        list(value) if isinstance(value, tuple) else value
+                        for value in args
+                    )
+                    alias_kwargs = {
+                        name: list(value) if isinstance(value, tuple) else value
+                        for name, value in kwargs.items()
+                    }
                 utils._c_check_aliasing_constraint(
                     self._name,
-                    args,
-                    kwargs,
+                    alias_args,
+                    alias_kwargs,
                     result,
                     get_module,
                 )
@@ -863,7 +885,12 @@ class CustomOpDef:
         self._tuple_input_positions = tuple(
             (index, argument.name, self._tuple_input_specs[argument.name])
             for index, argument in enumerate(self._opoverload._schema.arguments)
-            if argument.name in self._tuple_input_specs
+            if not argument.kwarg_only and argument.name in self._tuple_input_specs
+        )
+        self._tuple_input_keywords = tuple(
+            (argument.name, self._tuple_input_specs[argument.name])
+            for argument in self._opoverload._schema.arguments
+            if argument.kwarg_only and argument.name in self._tuple_input_specs
         )
 
     def _register_fake_dispatcher_impl(self) -> None:

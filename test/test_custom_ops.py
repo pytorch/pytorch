@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import contextlib
 import io
 import itertools
 import os
@@ -50,6 +51,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
+    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -57,6 +59,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    runWithoutCompiledAutograd,
     scoped_load_inline,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -2342,21 +2345,44 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "already has an implementation"):
             custom_ops.impl(qualname, func=foo_impl)
 
-    def test_abstract_impl_on_existing_op(self):
+    @fake_tensor_modes
+    @parametrize("active", [False, True])
+    @parametrize("not_implemented", [False, True])
+    def test_abstract_impl_on_existing_op(self, mode_cls, active, not_implemented):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
         qualname = f"{self.test_ns}::foo"
+        mode = mode_cls()
+        calls = 0
 
         @torch.library.register_fake(qualname, lib=self.lib())
         def foo_impl(x):
+            nonlocal calls
+            calls += 1
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+            self.assertIs(torch.library.get_ctx()._fake_mode, mode)
+            if not_implemented:
+                return NotImplemented
             return x.sin()
 
         op = self.get_op(qualname)
-        with torch._subclasses.FakeTensorMode():
+        with mode:
             x = torch.randn(3)
-            result = op(x)
-            self.assertEqual(result.shape, x.shape)
-            self.assertEqual(result.stride(), x.stride())
+        with mode if active else contextlib.nullcontext():
+            if not_implemented:
+                with self.assertRaisesRegex(RuntimeError, "returned NotImplemented"):
+                    op(x)
+            else:
+                result = op(x)
+                self.assertEqual(result.shape, x.shape)
+                self.assertEqual(result.stride(), x.stride())
+                self.assertEqual(result.dtype, x.dtype)
+                self.assertEqual(result.device, x.device)
+                self.assertIs(
+                    torch._subclasses.fake_tensor.maybe_get_fake_mode(result), mode
+                )
+            self.assertIs(torch._guards.active_fake_mode(), mode if active else None)
+        self.assertEqual(calls, 1)
 
     def test_register_fake_before_define(self):
         qualname = f"{self.test_ns}::foo"
@@ -2770,7 +2796,8 @@ Dynamic shape operator
         lib.impl(op_name, foo_impl2, "CPU")
         self.assertEqual(op(torch.ones(3)), torch.ones(6))
 
-    def test_override_fake(self):
+    @fake_tensor_modes
+    def test_override_fake(self, mode_cls):
         lib = self.lib()
         op_name = f"{self.test_ns}::foo"
         torch.library.define(op_name, "(Tensor x) -> Tensor", lib=lib)
@@ -2782,7 +2809,7 @@ Dynamic shape operator
         # Register fake kernel to foo_impl1
         torch.library.register_fake(op_name, foo_impl1, lib=lib)
 
-        with torch._subclasses.FakeTensorMode():
+        with mode_cls():
             self.assertEqual(op(torch.ones(3)).shape, [3])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
@@ -2796,19 +2823,19 @@ Dynamic shape operator
 
         # Override fake kernel to foo_impl2
         torch.library.register_fake(op_name, foo_impl2, lib=lib)
-        with torch._subclasses.FakeTensorMode():
+        with mode_cls():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Fake kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
             torch.library.register_fake(op_name, foo_impl1, lib=lib2)
-            with torch._subclasses.FakeTensorMode():
+            with mode_cls():
                 self.assertEqual(op(torch.ones(3)).shape, [3])
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
         # Fake kernel should go back to foo_impl2
-        with torch._subclasses.FakeTensorMode():
+        with mode_cls():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
@@ -3147,10 +3174,11 @@ class TestCustomOpAPI(TestCase):
         def fn(xs: annotation) -> Tensor:
             raise NotImplementedError
 
-        op = torch.library.custom_op("_torch_testing::tuple_schema", fn, mutates_args=())
+        name = "_torch_testing::tuple_schema"
+        op = torch.library.custom_op(name, fn, mutates_args=())
         self.assertEqual(
             str(op._opoverload._schema),
-            f"_torch_testing::tuple_schema({schema} xs) -> Tensor",
+            f"{name}({schema} xs) -> Tensor",
         )
 
     @parametrize("api", ("infer_schema", "legacy", "triton"))
@@ -3182,7 +3210,9 @@ class TestCustomOpAPI(TestCase):
             raise NotImplementedError
 
         with self.assertRaisesRegex(ValueError, "unsupported type"):
-            torch.library.custom_op("_torch_testing::tuple_unsupported", fn, mutates_args=())
+            torch.library.custom_op(
+                "_torch_testing::tuple_unsupported", fn, mutates_args=()
+            )
 
     def test_tuple_explicit_schema_retains_list_semantics(self):
         @torch.library.custom_op(
@@ -3245,20 +3275,33 @@ class TestCustomOpAPI(TestCase):
             return xs[0].clone()
 
         with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor"):
-            torch.library.custom_op("_torch_testing::tuple_keyword", fn, mutates_args=())
+            torch.library.custom_op(
+                "_torch_testing::tuple_keyword", fn, mutates_args=()
+            )
 
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @parametrize("frontend", ("custom_op", "opoverload"))
-    def test_tuple_unwrapped_kernel_validation(self, frontend):
-        @torch.library.custom_op("_torch_testing::tuple_keyword", mutates_args=())
+    def test_tuple_unwrapped_kernel_validation(self):
+        @torch.library.custom_op("_torch_testing::tuple_unwrapped", mutates_args=())
         def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
+            raise AssertionError("The overridden default kernel must not run")
+
+        @fn.register_fake
+        def _(xs):
             return xs[0].clone()
 
-        op = fn if frontend == "custom_op" else fn._opoverload
+        calls = []
+
+        def override(xs):
+            calls.append(len(xs))
+            return xs[0].clone()
+
+        x = torch.randn(3)
         with torch.library._scoped_library("_torch_testing", "IMPL") as lib:
-            lib.impl("tuple_keyword", lambda xs: xs[0].clone(), "CPU")
+            lib.impl("tuple_unwrapped", override, "CPU")
+            self.assertEqual(fn((x, x)).shape, x.shape)
+            self.assertEqual(calls, [2])
             with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
-                op((torch.randn(3),))
+                fn._opoverload((x,))
+            self.assertEqual(calls, [2])
 
     @parametrize(
         "mode",
@@ -3314,7 +3357,6 @@ class TestCustomOpAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
             fn((torch.randn(3),))
 
-    @skipIfTorchDynamo("TorchDispatchMode registration is tested directly")
     def test_custom_op_tuple_torch_dispatch(self):
         from torch.utils._python_dispatch import BaseTorchDispatchMode
 
@@ -3343,9 +3385,10 @@ class TestCustomOpAPI(TestCase):
                 fn((x,))
             self.assertFalse(called)
 
-    @skipIfTorchDynamo("vmap registration is tested directly")
     def test_custom_op_tuple_vmap_validation(self):
-        @torch.library.custom_op("_torch_testing::tuple_vmap_validation", mutates_args=())
+        @torch.library.custom_op(
+            "_torch_testing::tuple_vmap_validation", mutates_args=()
+        )
         def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
             return xs[0].clone()
 
@@ -5082,7 +5125,8 @@ with warnings.catch_warnings(record=True) as w:
         self.assertTrue("custom_op_db.py" in source)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_library_register_fake(self):
+    @fake_tensor_modes
+    def test_library_register_fake(self, mode_cls):
         for mode in ["function", "qualname", "opoverload"]:
 
             @torch.library.custom_op("_torch_testing::add", mutates_args=())
@@ -5111,7 +5155,7 @@ with warnings.catch_warnings(record=True) as w:
                 called = True
                 return torch.empty_like(x)
 
-            with torch._subclasses.fake_tensor.FakeTensorMode():
+            with mode_cls():
                 x = torch.randn(3)
                 y = 3.14
                 z = add(x, y)
@@ -6254,7 +6298,7 @@ Please use `add.register_fake` to add an fake impl.""",
                 [torch.zeros(1, requires_grad=True), torch.ones(1, requires_grad=True)]
             )
         )
-        # Tensor-list containers are visited, but nested tensor lists are not.
+        # _C_any_requires_grad supports only List[Tensor] in args, not List[List[Tensor]]
         self.assertFalse(test_fn([[torch.zeros(1, requires_grad=True)]], torch.ones(1)))
         self.assertFalse(test_fn([torch.zeros(1), torch.ones(1)]))
         self.assertTrue(test_fn(torch.zeros(1), a=torch.ones(1, requires_grad=True)))
@@ -6850,6 +6894,8 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         self.assertEqual(len(gradient_asserts), 1)
 
+    # Nested breaks expose a Dynamo wrapper-protocol hasattr bug here (#201908).
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_aot_autograd_copy_does_not_check_pinned_memory_for_wrapper_subclass(
         self,
     ):
@@ -7224,8 +7270,10 @@ class TestTensorTupleDevices(TestCase):
         fn.register_autograd(backward, setup_context=setup_context)
         x = torch.randn(3, device=device, requires_grad=True)
         y = torch.randn(3, device=device, requires_grad=True)
-        xs = (x, y) if layout == "both" else (None, x) if layout == "none_first" else (x, None)
-        op = fn if mode == "eager" else torch.compile(fn, backend="aot_eager", fullgraph=True)
+        xs = {"both": (x, y), "none_first": (None, x), "none_last": (x, None)}[layout]
+        op = fn
+        if mode == "compile":
+            op = torch.compile(fn, backend="aot_eager", fullgraph=True)
         result = op(xs)
         self.assertEqual(result, x + y if layout == "both" else x)
         inputs = (x, y) if layout == "both" else (x,)
@@ -7241,8 +7289,8 @@ class TestTensorTupleDevices(TestCase):
                 "repeated",
                 name="repeated",
                 decorators=[
-                    skipIfTorchDynamo(
-                        "Baseline compiled autograd cannot accumulate multiple None gradients"
+                    runWithoutCompiledAutograd(
+                        "Compiled autograd cannot accumulate repeated None gradients"
                     )
                 ],
             ),
@@ -7260,7 +7308,9 @@ class TestTensorTupleDevices(TestCase):
         ),
     )
     def test_tuple_unused_gradient(self, device, layout, mode):
-        @torch.library.custom_op("_torch_testing::tuple_unused_gradient", mutates_args=())
+        @torch.library.custom_op(
+            "_torch_testing::tuple_unused_gradient", mutates_args=()
+        )
         def fn(x: Tensor, unused: tuple[Optional[Tensor], Optional[Tensor]]) -> Tensor:
             return x.clone()
 
@@ -7272,8 +7322,11 @@ class TestTensorTupleDevices(TestCase):
         x = torch.randn(3, device=device, requires_grad=True)
         y = torch.randn(3, device=device, requires_grad=True)
         z = torch.randn(3, device=device, requires_grad=True)
-        unused = (y, None) if layout == "optional" else (y, y) if layout == "repeated" else (y, z)
-        op = fn if mode == "eager" else torch.compile(fn, backend="aot_eager", fullgraph=True)
+        layouts = {"optional": (y, None), "repeated": (y, y), "distinct": (y, z)}
+        unused = layouts[layout]
+        op = fn
+        if mode == "compile":
+            op = torch.compile(fn, backend="aot_eager", fullgraph=True)
         result = op(x, unused)
         gradients = torch.autograd.grad(result.sum(), (x, y), allow_unused=True)
         self.assertEqual(gradients, (torch.ones_like(x), None))
@@ -7321,10 +7374,6 @@ class TestTensorTupleDevices(TestCase):
             out.copy_(xs[0])
             return out
 
-        @out_op.register_fake
-        def _(xs, *, out):
-            return out
-
         out = torch.empty_like(x)
         result = out_op([x, None], out=out)
         self.assertIs(result, out)
@@ -7334,7 +7383,11 @@ class TestTensorTupleDevices(TestCase):
     @skipIfTorchDynamo("recursive dynamo")
     @requires_compile
     def test_tuple_dynamic_compile(self, device):
-        @torch.library.custom_op("_torch_testing::tuple_dynamic_compile", mutates_args=())
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        @torch.library.custom_op(
+            "_torch_testing::tuple_dynamic_compile", mutates_args=()
+        )
         def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
             return xs[0] + xs[1]
 
@@ -7343,13 +7396,14 @@ class TestTensorTupleDevices(TestCase):
             self.assertIsInstance(xs, tuple)
             return xs[0] + xs[1]
 
-        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         x = torch.randn(3, 4, device=device)
         self.assertEqual(compiled((x, x)), x + x)
         y = torch.randn(5, 6, device=device)
         self.assertEqual(compiled((y, y)), y + y)
+        self.assertEqual(counter.frame_count, 1)
 
-    @skipIfTorchDynamo("vmap registration is tested directly")
     def test_tuple_vmap(self, device):
         @torch.library.custom_op("_torch_testing::tuple_vmap", mutates_args=())
         def fn(xs: tuple[Tensor, Tensor]) -> Tensor:
@@ -7364,9 +7418,69 @@ class TestTensorTupleDevices(TestCase):
         x = torch.randn(4, 3, device=device)
         self.assertEqual(torch.vmap(fn)((x, x)), x + x)
 
+    @parametrize("view", (False, True))
+    @parametrize("requires_grad", (False, True))
+    @parametrize("optional", (False, True))
+    def test_tuple_alias_validation(self, device, view, requires_grad, optional):
+        @torch.library.custom_op("_torch_testing::tuple_alias", mutates_args=())
+        def fn(xs: tuple[Optional[Tensor], Tensor]) -> Tensor:
+            return xs[1].view_as(xs[1]) if view else xs[1]
 
-instantiate_device_type_tests(TestTensorTupleDevices, globals(), allow_xpu=True)
+        @fn.register_fake
+        def _(xs):
+            return xs[1].clone()
+
+        x = torch.randn(3, device=device, requires_grad=requires_grad)
+        with self.assertRaisesRegex(RuntimeError, "may not alias any inputs"):
+            fn((None if optional else x, x))
+
+    @parametrize("optional", (False, True))
+    @parametrize("requires_grad", (False, True))
+    def test_tuple_keyword_out(self, device, optional, requires_grad):
+        @torch.library.custom_op(
+            "_torch_testing::tuple_keyword_out",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def fn(x: Tensor, *, ys: tuple[Tensor | None, Tensor], out: Tensor) -> Tensor:
+            self.assertIsInstance(ys, tuple)
+            value = x + ys[1]
+            if ys[0] is not None:
+                value = value + ys[0]
+            out.copy_(value)
+            return out
+
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, device=device, requires_grad=requires_grad)
+        out = torch.empty_like(x)
+        ys = (None if optional else x, y)
+        if requires_grad:
+            message = "out=.*automatic differentiation"
+            with self.assertRaisesRegex(RuntimeError, message):
+                fn(x, ys=ys, out=out)
+            return
+        self.assertIs(fn(x, ys=ys, out=out), out)
+        self.assertEqual(out, x + y if optional else x + y + x)
+        with self.assertRaisesRegex(RuntimeError, "argument 'ys'.*2 values.*1"):
+            fn(x, ys=(x,), out=out)
+        with self.assertRaisesRegex(RuntimeError, "argument 'ys' at index 1"):
+            fn(x, ys=(x, None), out=out)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            fake_out = torch.empty_like(fake_x)
+            fake_ys = (None if optional else fake_x, fake_x)
+            self.assertIs(fn(fake_x, ys=fake_ys, out=fake_out), fake_out)
+            with self.assertRaisesRegex(RuntimeError, "argument 'ys'.*2 values.*1"):
+                fn(fake_x, ys=(fake_x,), out=fake_out)
+
+
 only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestTensorTupleDevices, globals(), only_for=only_for, allow_xpu=True
+)
 instantiate_device_type_tests(
     TestCustomOpTesting, globals(), only_for=only_for, allow_xpu=True
 )

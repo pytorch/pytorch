@@ -38,7 +38,7 @@ class _TupleInputSpec:
                 f"values, but got {len(value)}."
             )
         for index, element in enumerate(value):
-            expected = self.element_types[0] if self.variadic else self.element_types[index]
+            expected = self.element_types[0 if self.variadic else index]
             if not isinstance(element, expected):
                 types_str = " or ".join(typ.__name__ for typ in expected)
                 raise RuntimeError(
@@ -230,7 +230,10 @@ def _infer_schema(
             if typing.get_origin(annotation_type) is tuple:
                 list_type = tuple_to_list(annotation_type)
                 list_schema_type = SUPPORTED_PARAM_TYPES.get(list_type)
-                if allow_tensor_tuples and list_schema_type in ("Tensor[]", "Tensor?[]"):
+                if allow_tensor_tuples and list_schema_type in (
+                    "Tensor[]",
+                    "Tensor?[]",
+                ):
                     schema_type = list_schema_type
                     tuple_input_specs[name] = _tuple_input_spec(
                         typing.get_args(annotation_type)
@@ -241,9 +244,15 @@ def _infer_schema(
                         if list_type in SUPPORTED_PARAM_TYPES
                         else ""
                     )
+                    tuple_message = (
+                        "Only Tensor and Optional[Tensor] tuple inputs are supported. "
+                        if allow_tensor_tuples
+                        else "We do not support Tuple inputs in schema. "
+                    )
                     error_fn(
                         f"Parameter {name} has unsupported type {param.annotation}. "
-                        "We do not support Tuple inputs in schema. As a workaround, please try to use List instead. "
+                        f"{tuple_message}"
+                        "As a workaround, please try to use List instead. "
                         f"{example_type_str}"
                         f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                     )

@@ -396,7 +396,6 @@ batch_fusion = True
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
 # batch fusion options:
 # batch_linear
-# batch_linear_lhs
 # cat_linear
 # batch_layernorm
 # batch_tanh
@@ -2030,6 +2029,11 @@ class cpp:
     # GCC-only. Changes the rounding of horizontal float sums.
     simd_horizontal_reduction: bool = False
 
+    # Compute vectorized float exp with Vectorized<float>::exp_u20, an inline
+    # polynomial accurate to within 2 ULP. The CPU flash attention kernel uses
+    # exp_u20 for its softmax.
+    vec_exp_u20: bool = False
+
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
@@ -2159,6 +2163,15 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Always inline the Welford helpers in cpp_prefix.h (welford_combine and
+    # welford_vec_reduce_all), which the compiler can otherwise leave as calls in
+    # Welford reduction loops. Code size can grow. The arithmetic is the same, but
+    # with enable_unsafe_math_opt_flag or FP contraction the compiler can optimize
+    # across the inlined code, which can change results in the last bits.
+    force_inline_welford = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_WELFORD", "0") == "1"
     )
 
     # Use static constexpr or static const for int array
@@ -2688,6 +2701,18 @@ class triton:
 
     dynamic_disable_pipelining = True
 
+    # Experimental. Applies only on compute capability 10.0 (B200, GB200), not
+    # on sm103 or sm110. It changes the config of non-persistent OUTER
+    # reductions that have an x size hint of 65536 or more, one dynamic
+    # dimension, and 3 or more loads: XBLOCK=64, R0_BLOCK=8, num_warps=2
+    # instead of R0_BLOCK=1. Without max-autotune this is the only config for
+    # these kernels, so the autotuner cannot fall back to the old one. It stays
+    # off until benchmarks on more models show no regressions; then it becomes
+    # the default or is removed.
+    sm100_outer_reduction_r0_block_8: bool = (
+        os.environ.get("TORCHINDUCTOR_SM100_OUTER_REDUCTION_R0_BLOCK_8", "0") == "1"
+    )
+
 
 class aot_inductor:
     """
@@ -2765,6 +2790,11 @@ class aot_inductor:
 
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
+
+    # Fail the compile unless AOTI's CUDA graph runtime can capture and correctly
+    # replay the whole model, so it can run through
+    # AOTInductorModelContainerRunWithLazyCudaGraphs.
+    cudagraphs: bool = False
 
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
@@ -3166,12 +3196,13 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
-    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    # Enable Origami analytical config selection for Triton templates (ROCm only).
     #
-    # When True, the rocm-origami pip package is consulted at GEMM compile time
-    # to pre-select a top-K of Triton configs from the DEFAULT search space,
-    # reducing autotuning cost while keeping runtime within ~5% of full
-    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI.
+    # When True, the rocm-origami pip package is consulted at compile time to
+    # pre-select Triton configs from the DEFAULT GEMM and FlexAttention search
+    # spaces, reducing autotuning cost while retaining near-exhaustive runtime.
+    # Read once at config import from TORCHINDUCTOR_ORIGAMI; on unless that is
+    # set to something other than "1".
     #
     # config.patch behaviour:
     #   patching to False  -- disables origami at call time (_origami_enabled()).
@@ -3179,14 +3210,19 @@ class rocm:
     #                         heuristics/template/triton.py load time and cannot
     #                         be re-triggered by a runtime patch.
     #
-    # Active only when all of these hold:
+    # The package is loaded only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
     #   - config.max_autotune
     #   - config.rocm.origami (this knob)
-    #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
-    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
-    # one-time warning; the regular config generator runs instead.
+    # Each consumer has additional gates. GEMM requires its DEFAULT search space
+    # and warns when EXHAUSTIVE bypasses it. FlexAttention currently requires its
+    # DEFAULT search space, the stock config lookup, and a static, dense,
+    # contiguous forward problem on a target listed in _ORIGAMI_FLEX_TARGETS
+    # (currently gfx950) within that target's measured shape domain: equal QK/V
+    # head dims, no K/V batch broadcast, Q/K/V sharing one fp16/bf16 dtype, no
+    # user-pinned tuning kernel_options, and a score_mod that reads no captured
+    # buffers. Every other case retains the regular config generator.
     #
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend

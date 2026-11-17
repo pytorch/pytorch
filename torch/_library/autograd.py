@@ -10,17 +10,23 @@ from torch.utils import _pytree
 from . import utils
 
 
+PrepareInputs = Callable[
+    [tuple[Any, ...], dict[str, Any]],
+    tuple[tuple[Any, ...], dict[str, Any]],
+]
+
+
 class InfoProtocol(Protocol):
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
-    _prepare_inputs_fn: Callable | None
+    _prepare_inputs_fn: PrepareInputs | None
 
 
 @dataclasses.dataclass
 class Info:
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
-    _prepare_inputs_fn: Callable | None = None
+    _prepare_inputs_fn: PrepareInputs | None = None
 
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
@@ -136,13 +142,18 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
         grad_args: tuple[Any, ...] | list[Any] = args
+        grad_kwargs = keyword_only_args
         if prepare_inputs is not None:
             args, keyword_only_args = prepare_inputs(args, keyword_only_args)
             if _C.is_grad_enabled():
-                grad_args, _ = _pytree.tree_flatten(args, not_list_of_tensor)
+                inputs = args
+                if is_out_op:
+                    inputs = (args, tuple(keyword_only_args.values()))
+                grad_args, _ = _pytree.tree_flatten(inputs, not_list_of_tensor)
+                grad_kwargs = {}
         if is_out_op:
             if _C.is_grad_enabled() and _C._any_requires_grad(
-                *grad_args, **keyword_only_args
+                *grad_args, **grad_kwargs
             ):
                 raise RuntimeError(
                     f"{op._opname}(): functions with out=... arguments don't "
@@ -161,11 +172,14 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
 
 
 def supports_tensorlist(cls: Any, *, allow_none_tuple_grads: bool = False) -> Any:
-    """Allow an autograd.Function class to support tensor-list inputs and outputs.
+    r"""Allow an autograd.Function class to support tensor-sequence inputs and outputs.
 
     Regular autograd.Function has a constraint that it only directly supports autograd for
     Tensors. Applying @supports_tensorlist enables an autograd.Function to support
-    autograd for List[Tensor] inputs and outputs.
+    autograd for List[Tensor] inputs and outputs and tuple inputs containing
+    tensors and None. With ``allow_none_tuple_grads``, a whole tuple argument
+    may receive a None gradient; otherwise gradients must match its structure.
+    Existing lists containing None remain opaque inputs.
     """
     orig_forward = cls.forward
     orig_backward = cls.backward
