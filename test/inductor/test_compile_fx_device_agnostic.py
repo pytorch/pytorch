@@ -103,43 +103,10 @@ class TestGetDeviceContext(TestCase):
         # CPU interface does not provide a device context manager (base class).
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
 
-    def test_single_cuda_graph_returns_cuda_device_context(self) -> None:
-        gm = _make_graph("cuda:0")
-        ctx = get_device_context(gm)
-        if torch.cuda.is_available():
-            expected = type(torch.cuda.device(torch.device("cuda:0")))
-        else:
-            expected = type(contextlib.nullcontext())
-        self.assertIs(type(ctx), expected)
-
-    def test_single_xpu_graph_returns_xpu_device_context(self) -> None:
-        # Environment-conditional like the cuda case above: the availability
-        # gate keeps hosts without the XPU runtime on the pre-decouple no-op
-        # path instead of handing back a guard that hard-fails when entered.
-        gm = _make_graph("xpu:0")
-        ctx = get_device_context(gm)
-        if torch.xpu.is_available():
-            expected = type(torch.xpu.device(torch.device("xpu:0")))
-        else:
-            expected = type(contextlib.nullcontext())
-        self.assertIs(type(ctx), expected)
-
     def test_two_devices_returns_nullcontext(self) -> None:
         gm = _make_graph("cuda:0", "cuda:1")
         ctx = get_device_context(gm)
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
-
-    def test_mixed_device_types_preserves_cuda_precedence(self) -> None:
-        # A single cuda device activates the CUDA context, even when other
-        # device types are present.  The generalized helper must preserve
-        # this precedence exactly.
-        gm = _make_graph("cuda:0", "xpu:0")
-        ctx = get_device_context(gm)
-        if torch.cuda.is_available():
-            expected = type(torch.cuda.device(torch.device("cuda:0")))
-        else:
-            expected = type(contextlib.nullcontext())
-        self.assertIs(type(ctx), expected)
 
     def test_mixed_non_cuda_device_types_returns_nullcontext(self) -> None:
         gm = _make_graph("xpu:0", "mtia:0")
@@ -258,6 +225,53 @@ class TestGetDeviceContext(TestCase):
         gm = _make_graph("xpu:0")
         ctx = get_device_context(gm)
         self.assertIs(type(ctx), type(contextlib.nullcontext()))
+
+
+class TestGetDeviceContextCuda(TestCase):
+    # These tests construct torch.cuda.device to name the expected context
+    # type, so they exercise accelerator-specific behavior; the availability
+    # guard keeps them CPU-runnable (asserting the no-op fallback there).
+    hw_classification = HardwareClassification.CUDA
+
+    def test_single_cuda_graph_returns_cuda_device_context(self) -> None:
+        gm = _make_graph("cuda:0")
+        ctx = get_device_context(gm)
+        if torch.cuda.is_available():
+            expected = type(torch.cuda.device(torch.device("cuda:0")))
+        else:
+            expected = type(contextlib.nullcontext())
+        self.assertIs(type(ctx), expected)
+
+    def test_mixed_device_types_preserves_cuda_precedence(self) -> None:
+        # A single cuda device activates the CUDA context, even when other
+        # device types are present.  The generalized helper must preserve
+        # this precedence exactly.
+        gm = _make_graph("cuda:0", "xpu:0")
+        ctx = get_device_context(gm)
+        if torch.cuda.is_available():
+            expected = type(torch.cuda.device(torch.device("cuda:0")))
+        else:
+            expected = type(contextlib.nullcontext())
+        self.assertIs(type(ctx), expected)
+
+
+class TestGetDeviceContextXpu(TestCase):
+    # Mirror of the CUDA class for the XPU branch: constructs
+    # torch.xpu.device, so the behavior is accelerator-specific.
+    hw_classification = HardwareClassification.XPU
+
+    def test_single_xpu_graph_returns_xpu_device_context(self) -> None:
+        # Environment-conditional like the cuda case in
+        # TestGetDeviceContextCuda: the availability gate keeps hosts
+        # without the XPU runtime on the pre-decouple no-op path instead of
+        # handing back a guard that hard-fails when entered.
+        gm = _make_graph("xpu:0")
+        ctx = get_device_context(gm)
+        if torch.xpu.is_available():
+            expected = type(torch.xpu.device(torch.device("xpu:0")))
+        else:
+            expected = type(contextlib.nullcontext())
+        self.assertIs(type(ctx), expected)
 
 
 if __name__ == "__main__":
