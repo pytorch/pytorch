@@ -2475,14 +2475,10 @@ def _fake_alias(
 ) -> FakeTensorLike:
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = aten.alias.default(x)
-    if isinstance(fake_mode, CppFakeTensorMode):
-        return fake_mode.fake_tensor_converter.from_meta_and_device(
-            fake_mode, out, x.device, dispatch_keys=maybe_get_fake_dispatch_keys(x)
-        )
     # Real MKLDNN alias is not public API, but compiler-generated alias nodes
     # must preserve fake MKLDNN layout state through tracing.
-    return FakeTensor(
-        fake_mode, out, x.device, dispatch_keys=maybe_get_fake_dispatch_keys(x)
+    return fake_mode._make_fake_tensor(
+        out, x.device, dispatch_keys=maybe_get_fake_dispatch_keys(x)
     )
 
 
@@ -2685,7 +2681,7 @@ def make_fast_binary_impl(
                 device="meta",
                 memory_format=torch.contiguous_format,
             )
-            return FakeTensor(mode, out, device=common_device)
+            return mode._make_fake_tensor(out, common_device)
         if definitely_channels_last:
             count_label("fast channels_last")
             # do channels last
@@ -2695,7 +2691,7 @@ def make_fast_binary_impl(
                 device="meta",
                 memory_format=torch.channels_last,
             )
-            return FakeTensor(mode, out, device=common_device)
+            return mode._make_fake_tensor(out, common_device)
 
         return slow("no contiguity match")
 
@@ -2709,37 +2705,16 @@ def fast_detach(
     x: FakeTensor | torch.Tensor,
     include_real: bool = False,
 ) -> torch.Tensor:
-    if isinstance(fake_mode, CppFakeTensorMode):
-        if not is_fake_tensor(x):
-            raise AssertionError("fast_detach expects a fake tensor")
-        with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
-            out = torch.ops.aten.detach.default(x)
-        out = fake_mode.fake_tensor_converter.from_meta_and_device(
-            fake_mode, out, x.device, dispatch_keys=maybe_get_fake_dispatch_keys(x)
-        )
-        if include_real:
-            maybe_set_real_tensor(out, maybe_get_real_tensor(x))
-        return out
-    if (
-        not isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-        or fake_mode is None
-        or isinstance(fake_mode, CppFakeTensorMode)
-    ):
-        raise AssertionError(
-            "type widening added for cpp faketensor but this is not used yet"
-        )
+    if fake_mode is None or not is_fake_tensor(x):
+        raise AssertionError("fast_detach expects a fake tensor and mode")
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    dispatch_keys = x.dispatch_keys
+    out = fake_mode._make_fake_tensor(
+        out, x.device, dispatch_keys=maybe_get_fake_dispatch_keys(x)
+    )
     if include_real:
-        return FakeTensor(
-            fake_mode,
-            out,
-            x.device,
-            real_tensor=x.real_tensor,
-            dispatch_keys=dispatch_keys,
-        )
-    return FakeTensor(fake_mode, out, x.device, dispatch_keys=dispatch_keys)
+        maybe_set_real_tensor(out, maybe_get_real_tensor(x))
+    return out
 
 
 def fast_alias(
