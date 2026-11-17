@@ -992,6 +992,7 @@ if HAS_CUDA_AND_TRITON:
                 _force_partition_plan(
                     GraphPartitionPlan(
                         GraphPartitionMode.CONFIG,
+                        cudagraphs_top_level=cudagraphs_per_partition,
                         cudagraphs_per_partition=cudagraphs_per_partition,
                     )
                 ),
@@ -1058,6 +1059,7 @@ if HAS_CUDA_AND_TRITON:
                         GraphPartitionMode.CONFIG
                         if split_into_partitions
                         else GraphPartitionMode.NONE,
+                        cudagraphs_top_level=cudagraphs,
                         cudagraphs_per_partition=cudagraphs_per_partition,
                     )
                 ),

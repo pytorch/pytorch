@@ -670,6 +670,10 @@ class GraphPartitionMode(enum.Enum):
     NONE = "none"
     # config.graph_partition=True.
     CONFIG = "config"
+    # Forced on, with graph_partition off, for a compile whose nested region opts
+    # out of CUDA Graphs while the rest is captured: the region gets its own
+    # uncaptured partition.
+    REGION_OPT_OUT = "region_opt_out"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -677,7 +681,9 @@ class GraphPartitionPlan:
     """How one compile is split into partitions, and what the partitions are for.
 
     Decided once before lowering; GraphLowering and CompiledFxGraph carry it
-    instead of reading config.graph_partition. ConstructorMoverPass,
+    instead of reading config.graph_partition. A nested region with its own triton.cudagraphs can
+    force partitioning on for one compile (see the REGION_* modes) without
+    patching the config. ConstructorMoverPass,
     the cpp_wrapper/fx_wrapper setup and compile_fx's override_cudagraphs
     handling still read the config itself, and the scheduler's
     partition-minimizing reorder requires both it and config.triton.cudagraphs,
@@ -685,6 +691,8 @@ class GraphPartitionPlan:
     """
 
     mode: GraphPartitionMode = GraphPartitionMode.NONE
+    # Capture setting outside nested regions, override_cudagraphs included.
+    cudagraphs_top_level: bool = False
     # The partitions are for CUDA Graphs or a customized partition wrapper: the
     # scheduler splits off ops that cannot be captured, call() leaves the input
     # alignment and NaN asserts to the partition functions, and post_compile
@@ -694,17 +702,33 @@ class GraphPartitionPlan:
     def __post_init__(self) -> None:
         if self.cudagraphs_per_partition and not self.split_into_partitions:
             raise ValueError("cudagraphs_per_partition=True requires partitioning")
+        if (
+            self.mode is GraphPartitionMode.REGION_OPT_OUT
+            and not self.cudagraphs_top_level
+        ):
+            raise ValueError("REGION_OPT_OUT requires cudagraphs_top_level=True")
 
     @property
     def split_into_partitions(self) -> bool:
         """Whether codegen emits partition functions and a Runner."""
         return self.mode is not GraphPartitionMode.NONE
 
+    @property
+    def splits_off_unsafe_ops(self) -> bool:
+        """Whether an op that cannot be captured goes to its own uncaptured
+        partition rather than disabling capture for the whole graph. Not under
+        REGION_OPT_OUT: outside the regions it carves out, that compile keeps the
+        whole-graph rules of graph_partition=False."""
+        return (
+            self.cudagraphs_per_partition
+            and self.mode is not GraphPartitionMode.REGION_OPT_OUT
+        )
+
     @staticmethod
     def no_partition() -> GraphPartitionPlan:
         """One callable whatever config.graph_partition says: subgraph bodies
         and benchmark-only lowerings."""
-        return GraphPartitionPlan()
+        return GraphPartitionPlan(cudagraphs_top_level=config.triton.cudagraphs)
 
     @staticmethod
     def from_config() -> GraphPartitionPlan:
@@ -713,6 +737,7 @@ class GraphPartitionPlan:
             return GraphPartitionPlan.no_partition()
         return GraphPartitionPlan(
             GraphPartitionMode.CONFIG,
+            cudagraphs_top_level=config.triton.cudagraphs,
             cudagraphs_per_partition=config.triton.cudagraphs
             or _unstable_customized_partition_wrapper.wrapper is not None,
         )
