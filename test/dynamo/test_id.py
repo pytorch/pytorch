@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -458,6 +459,8 @@ class IdTests(torch._dynamo.test_case.TestCase):
             result = torch.compile(wrapper, backend="eager", fullgraph=True)(x)
             self.assertEqual(result, wrapper(x))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -22,6 +22,7 @@ from torch.distributed.tensor.parallel import parallelize_module, RowwiseParalle
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2854,6 +2855,8 @@ class TestCompileOnOneRankLocalShapeAndChunks(TestCase):
                             dist.destroy_process_group()
                 self.assertEqual(len(graphs), 1)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

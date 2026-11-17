@@ -38,6 +38,7 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off,
     with_tf32_off,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
@@ -4166,6 +4167,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             exact_stride=True,
         )
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

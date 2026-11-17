@@ -3,6 +3,7 @@
 import torch
 import torch._dynamo.test_case
 import torch.nn as nn
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class TestBuffersOverride(torch._dynamo.test_case.TestCase):
@@ -42,6 +43,8 @@ class TestBuffersOverride(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_model.B, torch.ones(3, 3))
         compiled_model()
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

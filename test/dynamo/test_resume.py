@@ -2,6 +2,7 @@
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 def fn_creator():
@@ -34,6 +35,8 @@ class ResumeFunctionTests(torch._dynamo.test_case.TestCase):
         # co_freevars of resume functions, are sorted concatenation of the original function's co_freevars and co_cellvars
         self.assertEqual(code.co_freevars, ("var1", "var2"))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -24,6 +24,7 @@ from torch.fx.passes.regional_inductor_invoke_subgraph import (
     regional_inductor_invoke_subgraph,
 )
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2004,6 +2005,8 @@ class RegionalInductorPartitionTests(torch._inductor.test_case.TestCase):
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
         self.assertEqual(self._scoop_and_count(gm), 1)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

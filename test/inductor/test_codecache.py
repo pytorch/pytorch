@@ -95,6 +95,7 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -6843,6 +6844,8 @@ class TestAutotuneCacheClusterShape(TestCase):
         self.assertEqual(unique_configs(configs), configs)
         self.assertEqual(len({hash_configs([cfg]) for cfg in configs}), 3)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

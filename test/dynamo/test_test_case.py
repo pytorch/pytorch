@@ -3,6 +3,7 @@ from unittest import mock
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class TestCaseTests(torch._dynamo.test_case.TestCase):
@@ -94,6 +95,8 @@ class TestCaseTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch._dynamo.test_case._snapshot_autocast_state(), baseline)
         self.assertEqual(torch.is_grad_enabled(), grad_enabled)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

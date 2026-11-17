@@ -34,6 +34,7 @@ from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -1772,6 +1773,8 @@ class TestUnbackedSymbolDefs(InductorTestCase):
         line.unbacked_bindings = {}
         self.assertIsNone(FxConverter._generate_unbacked_symbol_defs(conv, line))
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

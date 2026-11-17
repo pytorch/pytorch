@@ -5,6 +5,7 @@ import torch._inductor.config as inductor_config
 from torch import Tensor
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_caches, fresh_cache
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 # A minimal opaque op pair modeling fbgemm.dense_to_jagged (fwd) /
@@ -107,6 +108,8 @@ class TestBackwardSymIntGuardBinding(TestCase):
             run(compiled, 7)
             self.assertEqual(run(compiled, 5), run(model, 5))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

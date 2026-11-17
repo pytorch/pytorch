@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MI200_ARCH,
@@ -1179,6 +1180,8 @@ class TestInlineAsmConcat(TestCase):
 # The inline asm strings are PTX or AMDGCN.
 instantiate_device_type_tests(TestInlineAsmConcat, globals(), only_for="cuda")
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

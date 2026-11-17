@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 # flake8: noqa: E221
 
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 import builtins
 import collections
 import contextlib
@@ -6457,6 +6458,8 @@ class TestVisionTracing(JitTestCase):
 
 if HAS_TORCHVISION:
     TestVisionTracing.generate_tests()
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -48,6 +48,7 @@ import torch
 import torch.cuda.tunable
 from torch._inductor import config as inductor_config
 from torch._inductor.kernel_inputs import MMKernelInputs
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 
 
@@ -1950,6 +1951,8 @@ class DynamicDimMaskOperandSelectionTest(TestCase):
                 ki.dynamic_dim_mask("scaled_mm"), (False, False, False, False)
             )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

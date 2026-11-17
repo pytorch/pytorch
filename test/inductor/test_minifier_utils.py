@@ -13,6 +13,7 @@ from torch._dynamo.repro.aoti import (
 )
 from torch._functorch.fx_minifier import MinifierSanityCheckFailed
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -207,6 +208,8 @@ class MinifierUtilsTests(TestCase):
         self.assertEqual(repro(torch.tensor(False), x), gm(torch.tensor(False), x))
         self.assertEqual(repro(torch.tensor(True), x), gm(torch.tensor(True), x))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

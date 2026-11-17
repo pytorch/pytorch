@@ -58,6 +58,7 @@ from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -5613,6 +5614,8 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
             )
             self.assertEqual(captured_key, sc_key)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -7,6 +7,7 @@ import torch._dynamo
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -381,6 +382,8 @@ class TestContextVars(TestCase):
         self.assertEqual(results[0], x + 2)
         self.assertEqual(cnt.frame_count, 2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

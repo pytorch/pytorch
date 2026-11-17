@@ -16,6 +16,7 @@ from torch._native import cutedsl_utils as cu
 from torch._native.ops.linear_cross_entropy import cutedsl_impl
 from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
 from torch.testing._internal.common_cuda import has_device_side_assert, TEST_CUDA
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -322,6 +323,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         self.assertEqual(loss.item(), eager.item(), atol=1e-2, rtol=0)
         self.assertTrue(torch.isfinite(leaves[0].grad).all())
 
+    @fake_tensor_test()
     @unittest.skipIf(
         not TEST_CUDA or not cutedsl_impl._arch_supported(),
         "the gate declines this device first, so the class count never decides",

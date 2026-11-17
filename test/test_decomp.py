@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
@@ -2344,6 +2345,8 @@ class HasDecompTest(TestCase):
             torch.allclose(result_original, result_compiled, rtol=1e-5, atol=1e-5)
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -8,6 +8,7 @@ import torch._export.config
 import torch.nn as nn
 from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.experimental.proxy_tensor import _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -117,6 +118,8 @@ class AOTInductorMemoryTest(TestCase):
             "memory grew across repeated aot_compile calls",
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

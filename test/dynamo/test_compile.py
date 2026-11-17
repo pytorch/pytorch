@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import munge_exc
 
 
@@ -361,6 +362,8 @@ torch.compile with fullgraph=True found no compiled frames. Skipped frames:
         result = exported.module()(x)
         self.assertEqual(result, x + 1)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

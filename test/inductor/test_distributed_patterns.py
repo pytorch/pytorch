@@ -7,6 +7,7 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
@@ -498,6 +499,8 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(inp1, inp2)
         self._assert_same_grad(out1, out2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS:

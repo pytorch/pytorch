@@ -16,6 +16,7 @@ from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 from torch.fx.passes.regional_inductor import regional_inductor
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -218,6 +219,8 @@ def forward(self, arg0_1, arg1_1):
         x = torch.arange(4, dtype=torch.float32)
         self.assertEqual(compiled_gm([x]), _f(x))
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

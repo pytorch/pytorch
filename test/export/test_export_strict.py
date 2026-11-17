@@ -7,6 +7,7 @@ except ImportError:
     import testing  # @manual=fbcode//caffe2/test:test_export-library
 
 from torch.export import export
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 test_classes = {}
@@ -44,6 +45,8 @@ tests = [
 for test in tests:
     make_dynamic_cls(test)
 del test
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -21,6 +21,7 @@ import torch
 import torch._functorch.config
 from functorch.compile import nop
 from torch._functorch.aot_autograd import aot_function
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -545,6 +546,8 @@ class TestCodegenOutputAlias(TestCase):
         self.assertEqual(len(captured), 1)
         self.assertIn("TensorAlias", captured[0])
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

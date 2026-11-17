@@ -19,6 +19,7 @@ import types
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
+from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
@@ -1434,8 +1435,8 @@ def spawn_threads_and_init_comms(
         worker_target = partial(_run_with_nested_graph_breaks, worker)
         for rank in range(world_size):
             t = threading.Thread(
-                target=worker_target,
-                args=(rank, world, global_store),
+                target=copy_context().run,
+                args=(worker_target, rank, world, global_store),
             )
             t.start()
             threads.append(t)
@@ -1552,8 +1553,8 @@ class MultiThreadedTestCase(TestCase):
         worker_target = partial(_run_with_nested_graph_breaks, self.__class__._run)
         for rank in range(self.world_size):
             t = threading.Thread(
-                target=worker_target,
-                args=(test_name, rank, self.world_size),
+                target=copy_context().run,
+                args=(worker_target, test_name, rank, self.world_size),
             )
             t.start()
             self.threads.append(t)

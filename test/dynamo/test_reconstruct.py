@@ -13,6 +13,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import Unsupported
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -1777,6 +1778,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3), obj, holder)
         self.assertIs(holder.obj, obj)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

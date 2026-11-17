@@ -17,6 +17,7 @@ from torch._dynamo.testing import (
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1059,6 +1060,8 @@ class TestHopPrintDTensor(DTensorTestBase):
 
 
 instantiate_device_type_tests(TestHopPrintDTensor, globals())
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

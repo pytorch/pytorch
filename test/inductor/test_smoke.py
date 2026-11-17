@@ -5,6 +5,7 @@ import torch
 import torch._logging
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
@@ -70,6 +71,8 @@ instantiate_device_type_tests(
     SmokeTestDevice, globals(), except_for="cpu", allow_xpu=True
 )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -11,6 +11,7 @@ from torch._dynamo.utils import disable_cache_limit
 from torch.testing._internal import (
     fake_config_module_with_implications as implied_config,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -237,6 +238,8 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn(x), (x + 2, x + 2))
             self.assertEqual(counter.frame_count, 2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

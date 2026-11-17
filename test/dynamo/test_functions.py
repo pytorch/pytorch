@@ -46,6 +46,7 @@ from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -9786,6 +9787,8 @@ def get_function_device_test_classes():
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

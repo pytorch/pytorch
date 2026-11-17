@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
     xfail,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -338,6 +339,8 @@ instantiate_device_type_tests(
     TestExportOnFakeDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()
