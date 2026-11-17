@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import contextlib
 import io
 import itertools
 import os
@@ -26,6 +27,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._library.custom_ops import OPDEFS
 from torch._library.fake_profile import (
     generate_yaml_from_profiles,
     load_op_profiles,
@@ -36,6 +38,7 @@ from torch._library.fake_profile import (
     TensorMetadata,
 )
 from torch._library.infer_schema import tuple_to_list
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -2340,21 +2343,43 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "already has an implementation"):
             custom_ops.impl(qualname, func=foo_impl)
 
-    def test_abstract_impl_on_existing_op(self):
+    @parametrize("active", [False, True])
+    @parametrize("not_implemented", [False, True])
+    def test_abstract_impl_on_existing_op(self, active, not_implemented):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
         qualname = f"{self.test_ns}::foo"
+        mode = FakeTensorMode()
+        calls = 0
 
         @torch.library.register_fake(qualname, lib=self.lib())
         def foo_impl(x):
+            nonlocal calls
+            calls += 1
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+            self.assertIs(torch.library.get_ctx()._fake_mode, mode)
+            if not_implemented:
+                return NotImplemented
             return x.sin()
 
         op = self.get_op(qualname)
-        with torch._subclasses.FakeTensorMode():
+        with mode:
             x = torch.randn(3)
-            result = op(x)
-            self.assertEqual(result.shape, x.shape)
-            self.assertEqual(result.stride(), x.stride())
+        with mode if active else contextlib.nullcontext():
+            if not_implemented:
+                with self.assertRaisesRegex(RuntimeError, "returned NotImplemented"):
+                    op(x)
+            else:
+                result = op(x)
+                self.assertEqual(result.shape, x.shape)
+                self.assertEqual(result.stride(), x.stride())
+                self.assertEqual(result.dtype, x.dtype)
+                self.assertEqual(result.device, x.device)
+                self.assertIs(
+                    torch._subclasses.fake_tensor.maybe_get_fake_mode(result), mode
+                )
+            self.assertIs(torch._guards.active_fake_mode(), mode if active else None)
+        self.assertEqual(calls, 1)
 
     def test_register_fake_before_define(self):
         qualname = f"{self.test_ns}::foo"
@@ -2780,7 +2805,7 @@ Dynamic shape operator
         # Register fake kernel to foo_impl1
         torch.library.register_fake(op_name, foo_impl1, lib=lib)
 
-        with torch._subclasses.FakeTensorMode():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [3])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
@@ -2794,19 +2819,19 @@ Dynamic shape operator
 
         # Override fake kernel to foo_impl2
         torch.library.register_fake(op_name, foo_impl2, lib=lib)
-        with torch._subclasses.FakeTensorMode():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Fake kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
             torch.library.register_fake(op_name, foo_impl1, lib=lib2)
-            with torch._subclasses.FakeTensorMode():
+            with FakeTensorMode():
                 self.assertEqual(op(torch.ones(3)).shape, [3])
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
         # Fake kernel should go back to foo_impl2
-        with torch._subclasses.FakeTensorMode():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
@@ -4878,7 +4903,7 @@ with warnings.catch_warnings(record=True) as w:
                 called = True
                 return torch.empty_like(x)
 
-            with torch._subclasses.fake_tensor.FakeTensorMode():
+            with FakeTensorMode():
                 x = torch.randn(3)
                 y = 3.14
                 z = add(x, y)
@@ -6290,6 +6315,62 @@ except RuntimeError as e:
         # lib1 = torch.library.Library(...) is on line 2 of the script.
         self.assertIn("<string>:2", result.stdout)
 
+    def test_kernel_registration_records_the_calling_module(self):
+        ns = "_test_kernel_callers"
+        ops_source = f"""\
+import torch
+@torch.library.custom_op("{ns}::f", mutates_args=())
+def f(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+@torch.library.custom_op("{ns}::g", mutates_args=(), device_types="cpu")
+def g(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+torch.library.define("{ns}::h", "(Tensor x) -> Tensor", lib=lib)
+"""
+        kernels_source = f"""\
+import torch
+@f.register_kernel("cpu")
+def _(x):
+    return x.clone()
+@torch.library.impl("{ns}::h", "cpu")
+def _(x):
+    return x.clone()
+"""
+        keep_alive = len(torch.library._keep_alive)
+        ops = {"__name__": "kernel_callers_ops"}
+        try:
+            with torch.library._scoped_library(ns, "FRAGMENT") as ops["lib"]:
+                exec(compile(ops_source, "/callers/ops.py", "exec"), ops)
+                kernels = {"__name__": "kernel_callers_kernels", "f": ops["f"]}
+                exec(compile(kernels_source, "/callers/kernels.py", "exec"), kernels)
+                self.assertEqual(
+                    ops["f"]._backend_fn_callers,
+                    {
+                        "CompositeExplicitAutograd": "kernel_callers_ops",
+                        "CPU": "kernel_callers_kernels",
+                    },
+                )
+                self.assertEqual(
+                    ops["g"]._backend_fn_callers, {"CPU": "kernel_callers_ops"}
+                )
+                self.assertEqual(
+                    torch._library.utils.kernel_callers(f"{ns}::h"),
+                    {"CPU": "kernel_callers_kernels"},
+                )
+                # The dispatcher still records torch.library.impl's own Library.
+                dump = torch._C._dispatch_dump(f"{ns}::h")
+                self.assertRegex(
+                    dump, r"CPU: registered at .*torch[/\\]library\.py:\d+ ::"
+                )
+        finally:
+            while len(torch.library._keep_alive) > keep_alive:
+                torch.library._keep_alive.pop()._destroy()
+            for n in ("f", "g"):
+                if n in ops:
+                    ops[n]._lib._destroy()
+                OPDEFS.pop(f"{ns}::{n}", None)
+            torch._library.utils.REGISTRATION_CALLERS.pop((f"{ns}::h", "CPU"), None)
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
@@ -6561,6 +6642,8 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         self.assertEqual(len(gradient_asserts), 1)
 
+    # Nested breaks expose a Dynamo wrapper-protocol hasattr bug here (#201908).
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_aot_autograd_copy_does_not_check_pinned_memory_for_wrapper_subclass(
         self,
     ):
