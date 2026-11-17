@@ -342,7 +342,13 @@ test_timm_perf() {
   echo "timm benchmark on mps device completed"
 }
 
-if [[ $TEST_CONFIG == *"perf_all"* ]]; then
+if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
+  if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_python_shard "${SHARD_NUMBER}"
+  else
+    test_python_all
+  fi
+elif [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
   test_hf_perf
   test_timm_perf
