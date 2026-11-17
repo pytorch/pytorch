@@ -58,6 +58,7 @@ TORCH_API Tensor fake_tensor_data(
 using ModelessFakeFallback =
     c10::BoxedKernel::BoxedKernelFunction_withDispatchKeys;
 TORCH_API void setModelessFakeFallback(ModelessFakeFallback* fn);
+TORCH_API ModelessFakeFallback* getModelessFakeFallback();
 
 } // namespace impl
 
