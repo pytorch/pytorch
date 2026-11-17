@@ -27,7 +27,7 @@ from torch._inductor.ir import (
     Layout,
 )
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.utils import do_bench_using_profiling
+from torch._inductor.utils import do_bench_using_profiling, GraphPartitionPlan
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -200,8 +200,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             is_backward=V.graph.is_backward,
             name=f"benchmark_{safe_name}",
             # Only benchmarked, never captured.
-            split_into_partitions=False,
-            cudagraphs_per_partition=False,
+            partition_plan=GraphPartitionPlan.unsplit(),
         )
         # Donation indices use the parent graph's placeholder ordering, not ours
         # (same as SubgraphLowering).
