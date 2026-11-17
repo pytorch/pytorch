@@ -7404,10 +7404,14 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         gm = torch.fx.symbolic_trace(lambda x: x + 1)
         x = torch.randn(2, 3)
-        mode = FakeTensorMode()
-        self.assertEqual(ShapeProp(gm, fake_mode=mode).propagate(x).shape, x.shape)
+        mode = CppFakeTensorMode()
+        out = ShapeProp(gm, fake_mode=mode).propagate(x)
+        self.assertEqual(out.shape, x.shape)
+        self.assertIs(maybe_get_fake_mode(out), mode)
         with tracing(TracingContext(mode)):
-            self.assertEqual(ShapeProp(gm).propagate(x).shape, x.shape)
+            out = ShapeProp(gm).propagate(x)
+        self.assertEqual(out.shape, x.shape)
+        self.assertIs(maybe_get_fake_mode(out), mode)
 
     @parametrize(
         "callback,propagate_real_tensors",
