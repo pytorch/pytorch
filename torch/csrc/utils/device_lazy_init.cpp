@@ -1,7 +1,9 @@
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/CallOnce.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 
@@ -33,7 +35,7 @@ void device_lazy_init(at::DeviceType device_type) {
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(
       c10::impl::TorchDispatchModeKey::FAKE);
-  if (maybe_mode) {
+  if (maybe_mode || c10::impl::FakeTensorModeTLS::get_state()) {
     return;
   }
 
@@ -78,8 +80,8 @@ void register_fork_handler_for_device_init(at::DeviceType device_type) {
   at_fork_registered[static_cast<int>(device_type)] = true;
   c10::call_once(at_fork_register_once, []() {
     pthread_atfork(nullptr, nullptr, []() {
-      for (int i = 0; i < static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES);
-           ++i) {
+      for (const auto i :
+           c10::irange(static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES))) {
         if (!at_fork_registered[i]) {
           continue;
         }
