@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import traceback
+import types as types_module
 import unittest
 import unittest.mock
 import warnings
@@ -4451,6 +4452,30 @@ class TestCfgDemotion(TestCase):
             self.assertEqual(compiled(300), demote_python(300))
         self.assertTrue(compiled.stats()["demoted"])
 
+    def test_a_measurement_waits_for_the_device(self):
+        # What a graph starts on a GPU is not done when the call returns, so
+        # the time of a call that is measured ends when a builtin that waits
+        # for the device has returned. Here it is one that can be counted.
+        torch.rewrite._load_runtime()
+        waits = list(range(10000))
+        cfg_rs.trial_settles(waits.pop)
+        self.addCleanup(cfg_rs.trial_settles, None)
+        compiled = torch.rewrite(demote_python, fallback=False, demote=True)
+        for _ in range(200):
+            self.assertEqual(compiled(300), demote_python(300))
+        self.assertTrue(compiled.stats()["demoted"])
+        measured = 10000 - len(waits)
+        # Before and after each call that was timed, and not before the ones
+        # that warm up.
+        self.assertGreaterEqual(measured, 8)
+        self.assertEqual(measured % 2, 0)
+        # Once it is decided, nothing waits.
+        for _ in range(20):
+            compiled(300)
+        self.assertEqual(10000 - len(waits), measured)
+        with self.assertRaisesRegex(TypeError, "builtin"):
+            cfg_rs.trial_settles(lambda: None)
+
     def test_measurement_is_reported(self):
         compiled = torch.rewrite(demote_python, fallback=False, demote=True)
         self.assertTrue(compiled.stats()["measuring"])
@@ -4720,6 +4745,53 @@ class RegionLayers(torch.nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+
+
+class RegionMade:
+    """A pytree node whose ``__init__`` counts how often it ran."""
+
+    made = 0
+
+    def __init__(self, loc, scale):
+        type(self).made += 1
+        self.loc = loc
+        self.scale = scale
+        self.both = loc + scale
+
+
+torch.utils._pytree.register_pytree_node(
+    RegionMade,
+    lambda made: ([made.loc, made.scale], None),
+    lambda values, context: RegionMade(*values),
+    serialized_type_name="test_rewrite.RegionMade",
+)
+
+
+class RegionCached:
+    """An object that says of its copies that they come without its cache."""
+
+    def __init__(self, value):
+        self.value = value
+        self.cache = None
+
+    def __getstate__(self):
+        return {"value": self.value}
+
+
+class RegionItems(collections.OrderedDict):
+    """What a model returns: a dict that has its items as attributes too."""
+
+    made = 0
+
+    def __init__(self, **items):
+        type(self).made += 1
+        super().__init__()
+        for key, value in items.items():
+            self[key] = value
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        super().__setattr__(key, value)
 
 
 def region_infer(model, x):
@@ -6149,10 +6221,11 @@ class TestCfgRegions(TestCase):
         with torch.no_grad():
             for _ in range(10):
                 compiled(model, x)
-            # The key of a call is made of its input: what the module holds
-            # is what an earlier call found, and so is what the graph has
-            # built in.
-            self.assertEqual(self.looks(compiled, model, x), ([1, 1, 1], []))
+            # A call that is like the one before is told so in the runtime,
+            # which makes its key of the input: what the module holds is
+            # what an earlier call found, and so is what the graph has built
+            # in.
+            self.assertEqual(self.looks(compiled, model, x), ([], []))
             # A weight that is written to, replaced, or of another size is
             # found out all the same.
             model.fc.weight.mul_(2)
@@ -6190,8 +6263,8 @@ class TestCfgRegions(TestCase):
                     self.assertEqual(compiled(*args), f(*args))
                 self.assertEqual(len(self.compiled_regions(compiled)), 1)
                 # One module inside the other, and a weight that both layers
-                # have: every tensor is still looked at once.
-                self.assertEqual(self.looks(compiled, *args), ([1, 1, 1], []))
+                # have: a call is still told to be like the one before.
+                self.assertEqual(self.looks(compiled, *args), ([], []))
                 first.weight.add_(1)
                 self.assertEqual(compiled(*args), f(*args))
                 second.bias = torch.nn.Parameter(torch.ones(4))
@@ -6221,6 +6294,417 @@ class TestCfgRegions(TestCase):
             # not run what takes from it.
             for _ in range(8):
                 self.assertEqual(compiled([1, 2], x), fn([1, 2], x))
+
+    def fake_inputs(self, seen):
+        """A backend that notes whether it is given tensors of a trace that
+        has a ShapeEnv, and runs the graph as it is."""
+        from torch._guards import detect_fake_mode
+
+        def backend(graph, inputs):
+            mode = detect_fake_mode(inputs)
+            seen.append(mode is not None and mode.shape_env is not None)
+            return graph
+
+        return backend
+
+    def test_a_size_that_depends_on_data_stays_in_the_graph(self):
+        def positive(x, y):
+            kept = x[x > 0]
+            return (kept * 2).sum() + y.sum(), kept.shape[0]
+
+        def between(x, y):
+            kept = x[x > 0] * 2 + 1
+            first = kept.sum() + y.sum()
+            time.perf_counter()
+            more = y[y > 0] * 3 + 1
+            return first + more.sum()
+
+        torch.manual_seed(0)
+        for fn, regions in ((positive, 1), (between, 2)):
+            seen = []
+            passes = with_graphs(self.fake_inputs(seen), min_ops=1)
+            compiled = torch.rewrite(fn, passes=passes, fallback=False)
+            # How many elements are positive is another number on every
+            # call: one graph is for all of them.
+            for _ in range(8):
+                x, y = torch.randn(64), torch.randn(64)
+                self.assertEqual(compiled(x, y), fn(x, y))
+            self.assertEqual(len(self.compiled_regions(compiled)), regions)
+            # The size of what a mask picks is a symbol of the trace. The
+            # backend is handed the tensors of that trace, so that the
+            # symbol is one of a ShapeEnv it has too.
+            self.assertEqual(seen, [True] * regions)
+
+    @slowTest
+    def test_inductor_compiles_a_size_that_depends_on_data(self):
+        def positive(x, y):
+            kept = x[x > 0]
+            return (kept * 2).sum() + y.sum(), kept.shape[0]
+
+        torch.manual_seed(0)
+        compiled = torch.rewrite(positive, passes=with_graphs("inductor", min_ops=1))
+        for _ in range(8):
+            x, y = torch.randn(64), torch.randn(64)
+            self.assertEqual(compiled(x, y), positive(x, y))
+        self.assertEqual(self.left_to_vm(compiled, "positive"), [])
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+
+    def test_an_object_the_region_made_is_made_again_from_its_attributes(self):
+        def made(x):
+            one = RegionMade(x * 2, x + 1)
+            one.extra = one.both.sum()
+            return one
+
+        def cached(x):
+            return RegionCached(x * 2 + 1)
+
+        def output(x):
+            return RegionItems(logits=x * 2 + 1, loss=None)
+
+        x = torch.arange(4.0)
+        passes = with_graphs("aot_eager", min_ops=1)
+        compiled = torch.rewrite(made, passes=passes, fallback=False)
+        for _ in range(8):
+            compiled(x)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        # A pytree node is not made from what it flattens to: that would run
+        # its __init__ on every call, and lose what was set afterwards.
+        before = RegionMade.made
+        for _ in range(3):
+            got = compiled(x)
+        self.assertEqual(RegionMade.made, before)
+        self.assertIs(type(got), RegionMade)
+        self.assertEqual(vars(got), vars(made(x)))
+
+        # What a class says of its copies is not about the object it made.
+        compiled = torch.rewrite(cached, passes=passes, fallback=False)
+        for _ in range(8):
+            got = compiled(x)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        self.assertIs(type(got), RegionCached)
+        self.assertEqual(vars(got), vars(cached(x)))
+
+        # A dict of a class of its own: its items, in their order, and its
+        # attributes.
+        compiled = torch.rewrite(output, passes=passes, fallback=False)
+        for _ in range(8):
+            compiled(x)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        before = RegionItems.made
+        for _ in range(3):
+            got = compiled(x)
+        self.assertEqual(RegionItems.made, before)
+        expected = output(x)
+        self.assertIs(type(got), RegionItems)
+        self.assertEqual(list(got.items()), list(expected.items()))
+        self.assertEqual(vars(got), vars(expected))
+
+    def test_the_dicts_of_a_module_are_walked_when_one_changed(self):
+        torch.rewrite._load_runtime()
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        types = (torch.Tensor, torch.nn.Parameter)
+        stamp, epoch = cfg_rs.module_look(model, types, True)
+        self.assertEqual(stamp, cfg_rs.module_stamp(model, types))
+        self.assertEqual(cfg_rs.module_epoch(), epoch)
+        # What is written to a tensor is in no dict.
+        with torch.no_grad():
+            model.fc.weight.mul_(2)
+        self.assertEqual(cfg_rs.module_epoch(), epoch)
+        changes = [
+            lambda: setattr(model, "note", 1),
+            lambda: model.bn.train(),
+            lambda: model.register_buffer("more", torch.ones(1)),
+            lambda: setattr(model.fc, "bias", torch.nn.Parameter(torch.ones(5))),
+            lambda: model.fc.register_forward_hook(lambda *args: None),
+            lambda: delattr(model, "note"),
+            lambda: model.add_module("extra", torch.nn.ReLU()),
+        ]
+        for change in changes:
+            before = cfg_rs.module_epoch()
+            change()
+            self.assertNotEqual(cfg_rs.module_epoch(), before)
+            # The dicts that are new are watched from the next walk on.
+            self.assertEqual(
+                cfg_rs.module_look(model, types, True)[1], cfg_rs.module_epoch()
+            )
+        # Nothing is promised for dicts that are not watched, nor for a
+        # module that keeps tensors in a list, which nothing watches.
+        self.assertIsNone(cfg_rs.module_look(torch.nn.Linear(2, 2), types, False)[1])
+        self.assertIsNone(cfg_rs.module_look(torch.nn.LSTM(2, 2), types, True)[1])
+
+        # A region walks the dicts of the module it is handed again when
+        # one of them changed, and not on the calls in between.
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        walks = []
+        real = cfg_rs.module_look
+
+        def module_look(*args):
+            walks.append(args[0])
+            return real(*args)
+
+        with unittest.mock.patch.object(cfg_rs, "module_look", module_look):
+            with torch.no_grad():
+                for _ in range(10):
+                    compiled(model, x)
+                del walks[:]
+                for _ in range(3):
+                    self.assertEqual(compiled(model, x), region_infer(model, x))
+                self.assertEqual(walks, [])
+                model.note = 1
+                for _ in range(3):
+                    self.assertEqual(compiled(model, x), region_infer(model, x))
+                self.assertEqual(walks, [model])
+
+    def test_a_snapshot_holds_in_place(self):
+        torch.rewrite._load_runtime()
+        model = torch.nn.Linear(3, 2)
+        places = [(model._parameters, "weight"), (model._parameters, "bias")]
+        tensors = [model.weight, model.bias]
+        snapshot = cfg_rs.snapshot(places, tensors)
+        # What holds says, for tensors that are known to be at their places.
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (2, 2))
+        with torch.no_grad():
+            model.weight.mul_(2)
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (1, 1))
+        model.bias.requires_grad_(False)
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (0, 0))
+        # That a place holds another tensor is what only a look at it finds.
+        snapshot = cfg_rs.snapshot(places, tensors)
+        model.bias = torch.nn.Parameter(torch.zeros(2))
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (0, 2))
+
+    def test_usual_tells_a_call_that_is_like_another(self):
+        torch.rewrite._load_runtime()
+        types = (torch.Tensor, torch.nn.Parameter)
+        a, b = torch.ones(2, 3), torch.zeros(4)
+        hooks = {}
+        spec = [
+            ("tensor", 0),
+            ("int",),
+            ("value", "sum"),
+            ("tuple", [("tensor", 1), ("tensor", 0)]),
+            ("list", [("int",)]),
+            ("dict", ("k",), [("value", None)]),
+            ("object", len),
+        ]
+        with torch.no_grad():
+            usual = cfg_rs.Usual(
+                list(range(7)),
+                spec,
+                ("parts",),
+                ("modes",),
+                [],
+                types,
+                1 << 62,
+                (hooks,),
+            )
+            args = (a, 7, "sum", (b, a), [3], {"k": None}, len)
+            key, flat, held, ints, offsets, known, unwritten = usual.look(args)
+            # What describing the call the long way gives.
+            kinds, numbers, expected = cfg_rs.tensor_key([a, b], [7, 3])
+            self.assertEqual(key, (("parts",), kinds, numbers, ("modes",)))
+            self.assertTrue(flat[0] is a and flat[1] is b and len(flat) == 2)
+            self.assertTrue(
+                held[0] is args[4] and held[1] is args[5] and len(held) == 2
+            )
+            self.assertEqual(
+                (ints, offsets, known, unwritten), ([7, 3], expected, [], True)
+            )
+            # Other numbers, and tensors of another kind, are like it: they
+            # are what the key is made of.
+            again = (b, 8, "sum", (a.double(), b), [3], {"k": None}, len)
+            kinds, numbers, _ = cfg_rs.tensor_key([b, again[3][0]], [8, 3])
+            self.assertEqual(
+                usual.look(again)[0], (("parts",), kinds, numbers, ("modes",))
+            )
+            unlike = [
+                (a, 7.0, "sum", (b, a), [3], {"k": None}, len),
+                (a, True, "sum", (b, a), [3], {"k": None}, len),
+                (a, 7, "max", (b, a), [3], {"k": None}, len),
+                (a, 7, "sum", (b, b), [3], {"k": None}, len),
+                (a, 7, "sum", (a, a), [3], {"k": None}, len),
+                (a, 7, "sum", (b, a, a), [3], {"k": None}, len),
+                (a, 7, "sum", [b, a], [3], {"k": None}, len),
+                (a, 7, "sum", (b, a), [3, 4], {"k": None}, len),
+                (a, 7, "sum", (b, a), [3], {"j": None}, len),
+                (a, 7, "sum", (b, a), [3], {"k": 0}, len),
+                (a, 7, "sum", (b, a), [3], {"k": None}, max),
+                (a, 1 << 62, "sum", (b, a), [3], {"k": None}, len),
+                (a, 7, "sum", (b, a), [3], {"k": None}),
+            ]
+            for other in unlike:
+                self.assertIsNone(usual.look(other))
+            # Nor is one that comes with a hook for every module,
+            hooks[0] = len
+            self.assertIsNone(usual.look(args))
+            del hooks[0]
+            self.assertIsNotNone(usual.look(args))
+        # in other modes of the thread,
+        self.assertIsNone(usual.look(args))
+        # or after a dict of a module has changed.
+        model = torch.nn.Linear(3, 2)
+        cfg_rs.module_look(model, types, True)
+        with torch.no_grad():
+            usual = cfg_rs.Usual([0], [("int",)], (int,), (), [], types, 1 << 62, ())
+            self.assertIsNotNone(usual.look((1,)))
+            model.note = 1
+            self.assertIsNone(usual.look((1,)))
+
+    def test_usual_takes_a_module_as_a_look_found_it(self):
+        # A module comes with the tensors a look found it to hold, for as
+        # long as they are what they were.
+        torch.rewrite._load_runtime()
+        types = (torch.Tensor, torch.nn.Parameter)
+        a = torch.ones(2, 3)
+        model = torch.nn.Linear(3, 2)
+        places = [(model._parameters, "weight"), (model._parameters, "bias")]
+        tensors = [model.weight, model.bias]
+        kinds, numbers, offsets = cfg_rs.tensor_key(tensors, [])
+        found = types_module.SimpleNamespace(
+            snapshot=cfg_rs.snapshot(places, tensors),
+            tensors=tensors,
+            kinds=kinds,
+            numbers=numbers,
+            offsets=offsets,
+        )
+        state = types_module.SimpleNamespace(known=found)
+        with torch.no_grad():
+            cfg_rs.module_look(model, types, True)
+            known = [(1, found)]
+            spec = [("tensor", 0), ("module", model, state, found, 1), ("tensor", 1)]
+            usual = cfg_rs.Usual(
+                [0, 1, 2], spec, ("parts",), (), known, types, 1 << 62, ()
+            )
+            key, flat, _, _, _, same, unwritten = usual.look((a, model, model.weight))
+            self.assertTrue(all(x is y for x, y in zip(flat, [a, *tensors])))
+            self.assertEqual(key[1:3], cfg_rs.tensor_key([a, *tensors], [])[:2])
+            self.assertTrue(same is known and unwritten)
+            # One of them written to: still like it, and said so.
+            model.weight.mul_(2)
+            self.assertFalse(usual.look((a, model, model.weight))[6])
+            # A tensor of its own that comes before it, another look than
+            # the one that was taken, a tensor of another kind: not like it.
+            self.assertIsNone(usual.look((model.bias, model, model.weight)))
+            state.known = None
+            self.assertIsNone(usual.look((a, model, model.weight)))
+            state.known = found
+            model.bias.requires_grad_(False)
+            self.assertIsNone(usual.look((a, model, model.weight)))
+
+        # A variable of a nested function and a pytree node are what they
+        # hold.
+        cell = types_module.CellType(a)
+        made = RegionMade(a, 2)
+        flatten = torch.utils._pytree.SUPPORTED_NODES[RegionMade].flatten_fn
+        spec = [
+            ("cell", ("tensor", 0)),
+            ("node", RegionMade, flatten, "None", [("tensor", 0), ("int",)]),
+        ]
+        with torch.no_grad():
+            usual = cfg_rs.Usual([0, 1], spec, ("parts",), (), [], types, 1 << 62, ())
+            key, flat, held, ints, _, _, _ = usual.look((cell, made))
+            self.assertTrue(flat[0] is a and held[0] is cell and len(flat) == 1)
+            self.assertEqual(ints, [2])
+            self.assertIsNone(usual.look((cell, RegionMade(a + 1, 2))))
+            self.assertIsNone(usual.look((cell, RegionMade(a, 2.5))))
+            self.assertIsNone(usual.look((types_module.CellType(3), made)))
+            self.assertIsNone(usual.look((cell, cell)))
+
+    def test_a_call_like_the_one_before_is_told_so_in_the_runtime(self):
+        def mixed(model, x, options, more, scale, bias=None):
+            y = model(x) * scale
+            if options["double"]:
+                y = y * 2
+            for t in more:
+                y = y + t.sum()
+            if bias is not None:
+                y = y + bias.sum()
+            return y
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x, a, b = torch.randn(2, 3, 6, 6), torch.randn(3), torch.randn(4)
+        compiled = torch.rewrite(mixed, passes=with_graphs("aot_eager"), fallback=False)
+        usual = (model, x, {"double": True}, [a, b], 3)
+        with torch.no_grad():
+            for _ in range(10):
+                self.assertEqual(compiled(*usual), mixed(*usual))
+            self.assertEqual(self.looks(compiled, *usual), ([], []))
+            # A call that is not like it is described the long way, whatever
+            # it is that differs: a value, a number, how a list or a dict is
+            # built, a tensor of another size or kind or one that comes
+            # twice, the modes of the thread, what the module holds.
+            unusual = [
+                (model, x, {"double": False}, [a, b], 3),
+                (model, x, {"double": True}, [a], 3),
+                (model, x, {"double": True}, [a, b, a], 3),
+                (model, x, {"double": True}, [a, b], 5),
+                (model, x, {"double": True}, [a, b], 2.5),
+                (model, x, {"double": True, "more": 1}, [a, b], 3),
+                (model, x, {"double": True}, [a, x], 3),
+                (model, x, {"double": True}, [a, b], 3, b),
+                (model, x.clone().requires_grad_(), {"double": True}, [a, b], 3),
+                (model, torch.randn(5, 3, 6, 6), {"double": True}, [a, b], 3),
+            ]
+            for args in unusual:
+                for _ in range(2):
+                    self.assertEqual(compiled(*args), mixed(*args))
+                self.assertEqual(compiled(*usual), mixed(*usual))
+        for _ in range(2):
+            self.assertEqual(compiled(*usual), mixed(*usual))
+        with torch.no_grad():
+            model.fc.weight.mul_(2)
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.fc.weight.requires_grad_(False)
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.fc.bias = torch.nn.Parameter(torch.ones(5))
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.bn.train()
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.bn.eval()
+            handle = torch.nn.modules.module.register_module_forward_hook(
+                lambda *args: None
+            )
+            try:
+                self.assertEqual(compiled(*usual), mixed(*usual))
+            finally:
+                handle.remove()
+            # And a call is like the one before again once it is.
+            for _ in range(6):
+                self.assertEqual(compiled(*usual), mixed(*usual))
+            self.assertEqual(self.looks(compiled, *usual), ([], []))
+
+    def test_weights_that_moved_are_looked_at_anew(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in(), torch.no_grad():
+            for _ in range(10):
+                compiled(model, x)
+            self.assertEqual(self.looks(compiled, model, x)[1], [])
+            # Asked for a pointer it could be written through, a weight that
+            # a graph has built in gets memory of its own: it has moved.
+            address = torch._C._data_address
+            tensors = [*model.parameters(), *model.buffers()]
+            before = [address(tensor) for tensor in tensors]
+            for tensor in tensors:
+                tensor.data_ptr()
+            self.assertNotEqual([address(tensor) for tensor in tensors], before)
+            self.assertEqual(compiled(model, x), region_infer(model, x))
+            # What the graph has built in is checked on the calls that find
+            # the weight moved, and not on the ones after.
+            for _ in range(6):
+                compiled(model, x)
+            self.assertEqual(self.looks(compiled, model, x)[1], [])
+            self.assertEqual(compiled(model, x), region_infer(model, x))
 
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):

@@ -184,6 +184,67 @@ unsafe fn watch_dict(dict: Obj) -> u64 {
     WATCHED_VERSION.load(Relaxed)
 }
 
+// The dicts of the modules a region is handed are watched as well, on every
+// version of Python and by a watcher of their own: one number then says
+// that none of them has changed since a walk over all of them
+// (`module_look`), whatever the globals that `dict_version` is asked about
+// do in the meantime.
+static MODULES_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+/// The bit of that watcher in a dict's watcher tag; 0 until there is one.
+static MODULES_BIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(not(Py_3_14))]
+extern "C" {
+    fn PyDict_AddWatcher(callback: unsafe extern "C" fn(c_int, Obj, Obj, Obj) -> c_int) -> c_int;
+}
+
+unsafe extern "C" fn module_dict_changed(_event: c_int, _dict: Obj, _key: Obj, _value: Obj) -> c_int {
+    MODULES_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    0
+}
+
+/// What every change to a dict that `watch_module_dict` was given bumps.
+#[inline(always)]
+pub fn modules_version() -> u64 {
+    MODULES_VERSION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Has every change to `dict` bump `modules_version`. False if the
+/// interpreter has no watcher left to give.
+#[inline(always)]
+pub unsafe fn watch_module_dict(dict: Obj) -> bool {
+    // The start of PyDictObject; the watchers of a dict are the low bits of
+    // the word that is, or before 3.14 was, its version.
+    #[repr(C)]
+    struct Head {
+        ob_base: ffi::PyObject,
+        ma_used: ffi::Py_ssize_t,
+        watcher_tag: u64,
+    }
+    let bit = MODULES_BIT.load(std::sync::atomic::Ordering::Relaxed);
+    (bit != 0 && (*(dict as *const Head)).watcher_tag & bit != 0) || watch_module_dict_slow(dict)
+}
+
+#[cold]
+unsafe fn watch_module_dict_slow(dict: Obj) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    static WATCHER: std::sync::OnceLock<c_int> = std::sync::OnceLock::new();
+    let id = *WATCHER.get_or_init(|| {
+        let id = PyDict_AddWatcher(module_dict_changed);
+        if id >= 0 {
+            MODULES_BIT.store(1 << id, Relaxed);
+        } else {
+            ffi::PyErr_Clear();
+        }
+        id
+    });
+    if id < 0 || ffi::PyDict_Watch(id, dict) < 0 {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    true
+}
+
 /// How the interpreter names a callable in the errors of a call: `f()` or
 /// `module.f()`.
 pub unsafe fn function_str(func: Obj) -> String {
