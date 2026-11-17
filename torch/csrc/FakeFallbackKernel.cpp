@@ -30,6 +30,10 @@
 #include <unordered_set>
 #include <utility>
 
+namespace torch::fake_tensor {
+std::atomic<bool> custom_op_profiles_ever_enabled{false};
+}
+
 // Note [C++ fake fallback]
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
 // runs an op whose tensor inputs are fakes of one mode, or a
@@ -655,6 +659,10 @@ bool try_custom_op_profile(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  if (!fake_tensor::custom_op_profiles_ever_enabled.load(
+          std::memory_order_relaxed)) {
+    return false;
+  }
   py::gil_scoped_acquire gil;
   py::object profiles = get_dynamo_config().attr("_custom_ops_profile");
   if (profiles.is_none()) {
