@@ -4,8 +4,10 @@ import importlib
 import pkgutil
 
 import torch
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -27,6 +29,7 @@ def do_imports():
 do_imports()
 
 
+@instantiate_parametrized_tests
 @skipIfTorchDynamo("not applicable")
 class TestHOPInfra(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -125,6 +128,7 @@ class TestHOPInfra(TestCase):
             )
             self.assertEqual(id(hop), id(copied_hop))
 
+    @fake_tensor_test()
     def test_triton_kernel_wrapper_functional_fake_tensor_nested_kwargs(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional,
@@ -156,6 +160,7 @@ class TestHOPInfra(TestCase):
         self.assertEqual(out["out_ptr"].size(), fake_output.size())
         self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
 
+    @fake_tensor_test()
     def test_triton_kernel_wrapper_mutation_fake_tensor_nested_kwargs(self):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
