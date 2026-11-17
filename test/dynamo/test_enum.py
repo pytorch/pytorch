@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
-import sys
 import unittest
 
 import torch
@@ -20,8 +19,7 @@ _MIXIN_ENUM_CASES = [
     ((enum.IntFlag,), int, (1, 2)),
     ((float, enum.Enum), float, (0.5, 1.5)),
 ]
-if sys.version_info >= (3, 11):
-    _MIXIN_ENUM_CASES.append(((enum.StrEnum,), str, ("a", "b")))
+_MIXIN_ENUM_CASES.append(((enum.StrEnum,), str, ("a", "b")))
 
 
 class EnumTests(torch._dynamo.test_case.TestCase):

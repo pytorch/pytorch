@@ -3,8 +3,7 @@
 from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
-from typing_extensions import Self
+from typing import Any, overload, Self
 
 import torch
 from torch import Tensor
@@ -298,6 +297,7 @@ class HookOpName(Enum):
     REDUCE_SCATTER_BASE = ...
     REDUCE_SCATTER_TENSOR_COALESCED = ...
     ALLTOALL_BASE = ...
+    RECONFIGURE = ...
     UNKNOWN = ...
 
 class PreHookArgs:
@@ -307,12 +307,15 @@ class PreHookArgs:
     output_tensors: list[Tensor]
     root: int
     op_id: int
+    device: torch.device | None
 
 class PostHookArgs:
     name: HookOpName
     async_op: bool
     work: Work | None
     op_id: int
+    group: ProcessGroup | None
+    window: Window | None
 
 class Store:
     def set(self, key: str, value: str) -> None: ...
@@ -360,6 +363,12 @@ class TCPStore(Store):
         multi_tenant: bool = ...,
         master_listen_fd: int | None = ...,
         use_libuv: bool | None = ...,
+        *,
+        tls_cert: str | None = ...,
+        tls_key: str | None = ...,
+        tls_ca: str | None = ...,
+        tls_psk: str | None = ...,
+        tls_psk_file: str | None = ...,
     ) -> None: ...
     @property
     def host(self) -> str: ...
@@ -402,6 +411,12 @@ class _DistributedBackendOptions:
     split_from: Backend | None
     enable_reconfigure: bool
 
+class WorkResult(Enum):
+    SUCCESS = 0
+    TIMEOUT = 1
+    COMM_ERROR = 2
+    UNKNOWN = 100
+
 class Work:
     def is_completed(self) -> bool: ...
     def is_success(self) -> bool: ...
@@ -409,6 +424,7 @@ class Work:
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def block_current_stream(self) -> None: ...
     def get_future(self) -> Future: ...
+    def get_future_result(self) -> Future: ...
     def source_rank(self) -> int: ...
     def _source_rank(self) -> int: ...
     def result(self) -> list[Tensor]: ...
@@ -919,6 +935,7 @@ class ProcessGroupNCCL(Backend):
         split_from: ProcessGroupNCCL
         split_color: int
         lazy_init: bool
+        encryption_psk: str | None
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
