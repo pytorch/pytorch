@@ -2429,6 +2429,12 @@ class BenchmarkRunner:
                             )
                     else:
                         optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        if self.args.rewrite and not self.args.training:
+                            # Its first calls run before any graph is made:
+                            # what is compared is a call once it has settled.
+                            settle_rewritten(
+                                optimized_model_iter_fn, model_copy, example_inputs
+                            )
                         new_result = self.run_n_iterations(
                             model_copy, example_inputs, optimized_model_iter_fn
                         )
@@ -3874,7 +3880,7 @@ def parse_args(args=None):
         "--rewrite",
         action="store_true",
         help="Measure speedup with torch.rewrite and TorchInductor behind it "
-        "(--performance only)",
+        "(--performance, and --accuracy for inference)",
     )
     group.add_argument(
         "--optimus",
