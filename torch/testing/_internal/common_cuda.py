@@ -87,7 +87,7 @@ def _rocm_major_minor():
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
 # Cuspy needs both the cupti-python bindings and the build-generated
-# _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
+# _cupti_stubs catalogs (emitted only on CUPTI >= 13.5 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
@@ -106,7 +106,11 @@ def _cupti_version():
         return 0
 
 
-TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
+# Also gate on the build's CUDA: the cupti-python wheel pulls in its own (newer) libcupti,
+# so a CUDA 13.2 runner can still load a libcupti >= 13.5.
+TEST_CUPTI_V13_5 = LazyVal(
+    lambda: TEST_CUPTI and _get_torch_cuda_version() >= (13, 5) and _cupti_version() >= 130500
+)
 
 
 def _cuda_graph_tools_id_available():
@@ -146,6 +150,9 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is no
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
                    (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
+# A MIG slice reports its profile in the device name, e.g. "NVIDIA A100-SXM4-40GB MIG 1g.5gb".
+IS_MIG = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
+                 "MIG" in torch.cuda.get_device_name().split())
 # These exact-match SM predicates identify specific NVIDIA architectures and must
 # be False on ROCm, where torch.cuda.get_device_capability() returns the gfx-arch
 # version and collides with NVIDIA capability tuples (e.g. gfx90a reads as (9, 0)).
@@ -228,14 +235,11 @@ def gfx_arch_supports_opportunistic_fastatomics():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it.
-        # The AOTriton path needs the gfx1250 GPU image from AOTriton 0.12.1b,
-        # which is wired up by PR #188242 (which also adds gfx1250 to this list);
-        # this gate-only PR leaves it out so the two changes do not conflict
-        # (see cmake/External/aotriton.cmake). The CK FAv3/AITER codegen is
-        # separately not yet wired for gfx1250
+        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
+        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -267,12 +271,11 @@ def evaluate_platform_sdpa_supports_hdim512():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
-        # for it. The AOTriton gfx1250 image (from AOTriton 0.12.1b) is wired up
-        # by PR #188242, which also adds gfx1250 here; this gate-only PR leaves
-        # it out to avoid conflicting with that change. The CK FAv3/AITER codegen
-        # is separately not yet wired for gfx1250.
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
+        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # The CK FAv3/AITER codegen is not wired for gfx1250
+        # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -401,6 +404,21 @@ def evaluate_platform_supports_mx_gemm():
         return True
     return False
 
+def evaluate_platform_supports_mxfp8_cast():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            # TODO(future PR): add ROCm support for hardware natively supporting
+            # mxfp8 gemm. While technically the casts can be added on any
+            # hardware with emulation, we have no plans to do so.
+            return False
+        else:
+            # On NVIDIA, we have implementations for CUDA capability 10.0+
+            return SM100OrLater
+    # TODO(future PR): XPU, only on hardware which natively supports mxfp8
+    # gemm. While technically the casts can be added on any hardware
+    # with emulation, we have no plans to do so.
+    return False
+
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
@@ -420,6 +438,24 @@ def hipsparselt_supported_archs():
 def evaluate_platform_supports_hipsparselt():
     return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
 
+def evaluate_platform_supports_cublaslt_grouped_gemm(min_cuda_version=(13, 3)):
+    return (
+        TEST_CUDA
+        and not TEST_WITH_ROCM
+        and SM90OrLater
+        and not SM120OrLater
+        and _get_torch_cuda_version() >= min_cuda_version
+    )
+
+def evaluate_platform_supports_cublaslt_mnk4():
+    return (
+        TEST_CUDA
+        and not TEST_WITH_ROCM
+        and torch.cuda.get_device_capability()[0] in (10, 11)
+        and _get_torch_cuda_version() >= (13, 4)
+        and int(dict(torch.cuda.tunable.get_validators())["CUBLASLT_VERSION"]) >= 130801
+    )
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -433,10 +469,17 @@ def evaluate_platform_supports_fp8_sparse():
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_MXFP8_CAST: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_cast())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm((13, 4)))
+PLATFORM_SUPPORTS_CUBLASLT_FP32_BLOCK_GROUPED_GEMM: bool = LazyVal(
+    lambda: bool(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and IS_SM90)
+)
+PLATFORM_SUPPORTS_CUBLASLT_MNK4: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_mnk4())
 
 if TEST_NUMBA:
     try:
@@ -619,6 +662,7 @@ def with_tf32_off(f):
         with tf32_off():
             return f(*args, **kwargs)
 
+    wrapped._preserves_device_arguments = wrapped
     return wrapped
 
 def _get_magma_version():
