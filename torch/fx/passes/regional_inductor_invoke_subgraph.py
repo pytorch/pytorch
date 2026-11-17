@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import dataclasses
 import logging
@@ -7,6 +8,7 @@ from typing import Any
 
 import torch
 from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_inductor_compile
+from torch._inductor import config as inductor_config
 from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx._compatibility import compatibility
@@ -23,8 +25,7 @@ __all__ = ["regional_inductor_invoke_subgraph"]
 
 # Identity shared by one graph's forward and backward compile: the compile id
 # (the lazy backward re-enters the forward's CompileContext) plus the AOT graph
-# scope (which keeps graphs a single compile splits, e.g. DDPOptimizer, apart),
-# followed by the pairing names of the uncompiled regions enclosing a region.
+# scope (which keeps graphs a single compile splits, e.g. DDPOptimizer, apart).
 _RegionalScopeKey = tuple[object, ...]
 
 
@@ -41,6 +42,10 @@ class _RegionCompileContext:
     # The graph's direction from AOTAutograd's graph name; None when unknown,
     # in which case each node's partitioner tag decides.
     direction: str | None
+    # Inside the body of a region this backend does not compile. A region there
+    # is compiled on its own but never captured: only first-level regions get
+    # CUDA Graphs.
+    in_region: bool = False
 
 
 def _get_aot_graph_scope_and_direction() -> tuple[tuple[str, ...] | None, str | None]:
@@ -86,17 +91,10 @@ def _get_cudagraph_pairing_name(identifier: object, is_backward: bool) -> str | 
     forward call recomputed in the backward.
     """
     # A first-level region is partitioned into partitioned_fw<X> and
-    # partitioned_bw<X>. A region nested in an uncompiled one is not partitioned
-    # and keeps InvokeSubgraphAutogradOp's identifiers, fw_<id> and bw_<id>_<n>,
-    # where <n> numbers the backward variants of one forward.
-    if not isinstance(identifier, str):
-        return None
-    prefixes = ("partitioned_bw", "bw_") if is_backward else ("partitioned_fw", "fw_")
-    if identifier.startswith(prefixes[0]):
-        return identifier.removeprefix(prefixes[0])
-    if identifier.startswith(prefixes[1]):
-        name = identifier.removeprefix(prefixes[1])
-        return name.rpartition("_")[0] if is_backward else name
+    # partitioned_bw<X>.
+    prefix = "partitioned_bw" if is_backward else "partitioned_fw"
+    if isinstance(identifier, str) and identifier.startswith(prefix):
+        return identifier.removeprefix(prefix)
     return None
 
 
@@ -135,7 +133,9 @@ def _compile_submod(
     # backward traced into a forward or inference graph by torch.autograd.grad.
     pairing_name = (
         _get_cudagraph_pairing_name(sub_node.args[1], uses_backward_config)
-        if uses_backward_config == compiles_as_backward and not is_inference
+        if uses_backward_config == compiles_as_backward
+        and not is_inference
+        and not region_ctx.in_region
         else None
     )
     cudagraph_state_key = (
@@ -189,8 +189,14 @@ def _compile_submod(
             # compile_fx can mutate gm
             gm = copy.deepcopy(submod)
 
-            compiled_fn = compile_fn(gm, fake_inputs, **region_kwargs)
-            return compiled_fn
+            # A nested region cannot set triton.cudagraphs (see
+            # _reject_nested_region_cudagraphs), so this keeps it uncaptured.
+            with (
+                inductor_config.patch("triton.cudagraphs", False)
+                if region_ctx.in_region
+                else contextlib.nullcontext()
+            ):
+                return compile_fn(gm, fake_inputs, **region_kwargs)
 
     compiled_fn = get_compiled_fn()
     if not isinstance(compiled_fn, AOTCompiledArtifact):
@@ -283,17 +289,11 @@ def _recursive_compile_invoke_subgraph_nodes(
             continue
         submod = getattr(gm, node.target)
         if isinstance(submod, torch.fx.GraphModule):
-            # A region nested in several uncompiled regions compiles once per
-            # enclosing body under one identifier, so the enclosing region is
-            # part of its pairing key.
-            identifier = regions[0].args[1] if regions else None
-            enclosing_name = _get_cudagraph_pairing_name(
-                identifier, _is_backward_identifier(identifier)
+            nested_ctx = (
+                dataclasses.replace(region_ctx, in_region=True)
+                if regions
+                else region_ctx
             )
-            nested_ctx = region_ctx
-            if region_ctx.scope_key is not None and enclosing_name is not None:
-                scope_key = (*region_ctx.scope_key, enclosing_name)
-                nested_ctx = dataclasses.replace(region_ctx, scope_key=scope_key)
             _recursive_compile_invoke_subgraph_nodes(submod, nested_ctx)
 
     return _compile_invoke_subgraph_nodes_with_inductor(gm, region_ctx)
@@ -307,8 +307,7 @@ def regional_inductor_invoke_subgraph(
     Compile invoke_subgraph nodes if they have custom compiler specified
     in node.meta["custom"]["nested_region_config"].fw_compiler or bw_compiler
     """
-    from torch._inductor import config
-    from torch._inductor.compile_fx import _validate_nested_region_cudagraphs
+    from torch._inductor.compile_fx import _reject_nested_region_cudagraphs
 
     # AOTAutograd names the graph with its direction. Fall back to the node tags
     # when it did not.
@@ -316,16 +315,7 @@ def regional_inductor_invoke_subgraph(
     is_backward = (
         _has_backward_tagged_node(gm) if direction is None else direction == "backward"
     )
-    # A region nested in an uncompiled one is compiled on its own here, so only
-    # compiled regions enclose the regions inside them.
-    _validate_nested_region_cudagraphs(
-        gm,
-        enclosing_forward=config.triton.cudagraphs,
-        enclosing_backward=config.triton.cudagraphs,
-        validate_forward=not is_backward,
-        validate_backward=is_backward,
-        region_encloses=lambda node: _get_region_compiler(node, direction) is not None,
-    )
+    _reject_nested_region_cudagraphs(gm, forward=not is_backward, backward=is_backward)
     region_ctx = _RegionCompileContext(
         scope_key=_get_regional_scope_key(), direction=direction
     )
