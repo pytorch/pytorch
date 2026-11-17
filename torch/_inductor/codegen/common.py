@@ -14,7 +14,6 @@ import re
 import tempfile
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
 from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
@@ -65,7 +64,7 @@ from ..virtualized import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, MutableMapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
 
     from torch.fx import GraphModule
 

@@ -10,10 +10,7 @@ import sympy
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor import ir
-from torch._inductor.codegen.common import (
-    get_device_op_overrides,
-    get_aten_c_shim_ops,
-)
+from torch._inductor.codegen.common import get_aten_c_shim_ops, get_device_op_overrides
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
 from torch._inductor.codegen.wrapper import (
@@ -52,7 +49,9 @@ class TestPythonWrapperCodegen(TestCase):
         with mock.patch.object(overrides, "get_aten_c_shim_ops", return_value=ops):
             effective = defaults if ops is None else ops
             self.assertEqual(get_aten_c_shim_ops(device), effective)
-            self.assertIs(get_aten_c_shim_ops(torch.device("cuda")), inductor_fallback_ops)
+            self.assertIs(
+                get_aten_c_shim_ops(torch.device("cuda")), inductor_fallback_ops
+            )
             with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
                 for op in (torch.ops.aten.mul.Tensor, torch.ops.aten.sin.default):
                     self.assertEqual(
@@ -94,8 +93,8 @@ class TestPythonWrapperCodegen(TestCase):
             mock.patch.object(overrides, "get_aten_c_shim_ops", return_value=ops),
             V.set_graph_handler(graph),
         ):
-            args, kwargs, materialized = ir.FallbackKernel._materialize_scalar_tensor_args(
-                op, (x, 2), {}
+            args, kwargs, materialized = (
+                ir.FallbackKernel._materialize_scalar_tensor_args(op, (x, 2), {})
             )
             self.assertEqual(materialized, not has_shim)
             self.assertEqual(kwargs, {})
