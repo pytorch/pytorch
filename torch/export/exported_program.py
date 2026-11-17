@@ -403,9 +403,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
-            fake_mode = FakeTensorMode(
-                _force_python=True, shape_env=ShapeEnv(), export=True
-            )
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec

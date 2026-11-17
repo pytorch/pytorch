@@ -15,6 +15,7 @@ Other key classes include:
 These classes work together to track tensor operations and properties during Dynamo's tracing process.
 """
 
+import enum
 import functools
 import logging
 import operator
@@ -95,7 +96,7 @@ from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .object_protocol import python_constant_repr_impl
 from .script_object import CustomClassObjectVariable
-from .user_defined import UserDefinedClassVariable
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 try:
@@ -212,6 +213,21 @@ def _is_sym_arith_operand(vt: VariableTracker) -> bool:
 
     # mirror sym_node.py::binary_magic_impl
     return isinstance(vt, ConstantVariable) and isinstance(vt.value, (float, int, bool))
+
+
+def _richcompare_operand(vt: VariableTracker) -> Any:
+    """FX argument for the other operand of a Tensor/SymNode comparison, or
+    NotImplemented if it is not one Dynamo can compare against."""
+    if isinstance(vt, (SymNodeVariable, ConstantVariable, TensorVariable)):
+        return vt.as_proxy()
+    # Numeric enum members (IntEnum, IntFlag, float mixins) compare as plain
+    # numbers in eager. The member itself is ID_MATCH guarded by the builder.
+    if isinstance(vt, UserDefinedObjectVariable) and issubclass(
+        vt.value_type, enum.Enum
+    ):
+        if isinstance(vt.as_python_constant(), (int, float)):
+            return vt.as_proxy()
+    return NotImplemented
 
 
 def _tensor_debug_repr(value: torch.Tensor, type_name: str = "Tensor") -> str:
@@ -552,11 +568,12 @@ class TensorVariable(VariableTracker):
         """Tensor tp_richcompare: element-wise comparison producing an FX proxy."""
         from .builder import wrap_fx_proxy_cls
 
-        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
+        other_arg = _richcompare_operand(other)
+        if other_arg is NotImplemented:
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(
-            "call_function", op_fn, (self.as_proxy(), other.as_proxy()), {}
+            "call_function", op_fn, (self.as_proxy(), other_arg), {}
         )
         # Getting here means no __torch_function__ intercepted the comparison, so the
         # result is a plain tensor even when self models a subclass.
@@ -3115,14 +3132,15 @@ class SymNodeVariable(VariableTracker):
         op: str,
     ) -> VariableTracker:
         """SymNode tp_richcompare: symbolic numeric comparison."""
-        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
+        other_arg = _richcompare_operand(other)
+        if other_arg is NotImplemented:
             if op in ("__eq__", "__ne__"):
                 op_fn = cmp_name_to_op_mapping[op]
                 return VariableTracker.build(tx, op_fn(object(), None))
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(
-            "call_function", op_fn, (self.as_proxy(), other.as_proxy()), {}
+            "call_function", op_fn, (self.as_proxy(), other_arg), {}
         )
         return SymNodeVariable.create(tx, proxy, sym_num=None)
 

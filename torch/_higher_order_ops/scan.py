@@ -97,9 +97,7 @@ def _build_empty_output_for_length_zero(
 ) -> pytree.PyTree:
     """Probe combine_fn(init, None) to learn the output structure for length==0."""
     leaves = pytree.tree_leaves(init)
-    fake_mode = require_python_fake_mode(detect_fake_mode(leaves)) or FakeTensorMode(
-        _force_python=True
-    )
+    fake_mode = require_python_fake_mode(detect_fake_mode(leaves)) or FakeTensorMode()
     with fake_mode:
         fake_init = pytree.tree_map(
             lambda t: fake_mode.from_tensor(t)

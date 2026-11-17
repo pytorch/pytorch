@@ -37,7 +37,7 @@ class FakeTensorProp(torch.fx.Interpreter):
     ) -> None:
         super().__init__(module)
         if mode is None:
-            mode = FakeTensorMode(_force_python=True)
+            mode = FakeTensorMode()
         self._mode = mode
         mode.epoch += 1
         mode.reset_nt_tensor_id_counter()

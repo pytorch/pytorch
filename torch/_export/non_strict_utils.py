@@ -633,7 +633,6 @@ def make_fake_inputs(
         }
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             fake_mode = FakeTensorMode(
-                _force_python=True,
                 shape_env=ShapeEnv(
                     tracked_fakes=[],
                     co_fields=co_fields,
