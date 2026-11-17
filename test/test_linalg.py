@@ -1,6 +1,7 @@
 # Owner(s): ["module: linear algebra"]
 # ruff: noqa: F841
 
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
@@ -3068,6 +3069,7 @@ class TestLinalg(TestCase):
         self.assertFalse([w.message for w in caught if "ignored on ROCm" in str(w.message)])
         return result
 
+    @fake_tensor_test()
     @onlyNativeDeviceTypes
     @parametrize("mode", ("real", "fake"))
     @parametrize("op", ("svd", "svd_out", "svdvals", "svdvals_out"))
@@ -3080,6 +3082,7 @@ class TestLinalg(TestCase):
                         with self.assertRaisesRegex(RuntimeError, "torch.linalg.svd: unknown svd driver"):
                             dict(self._svd_driver_calls(A, driver))[op]()
 
+    @fake_tensor_test()
     @onlyCPU
     @parametrize("mode", ("fake", "meta"))
     @dtypes(torch.float32, torch.complex64)
