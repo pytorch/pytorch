@@ -518,9 +518,7 @@ def generate_wheels_matrix(
                 "windows",
                 "windows-arm64",
                 "macos-arm64",
-            ] and (
-                python_version == "3.15" or python_version == "3.15t"
-            ):
+            ] and (python_version == "3.15" or python_version == "3.15t"):
                 continue
 
             # CUDA wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS
