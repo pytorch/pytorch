@@ -40,9 +40,11 @@ class Benchmark:
 class WhisperBenchmark(Benchmark):
     SAMPLE_RATE = 16000
     DURATION = 30.0  # seconds
+    # Roughly the token count of a transcript of DURATION seconds of speech.
+    LABEL_LENGTH = 128
 
     @staticmethod
-    def get_model_and_inputs(model_name, device):
+    def get_model_and_inputs(model_name, device, training=False):
         processor = WhisperProcessor.from_pretrained(model_name)
         model = WhisperForConditionalGeneration.from_pretrained(model_name).to(device)
         model.config.forced_decoder_ids = None
@@ -58,6 +60,17 @@ class WhisperBenchmark(Benchmark):
             )
         )
         inputs["input_features"] = inputs["input_features"].to(device)
+
+        if training:
+            # As in fine-tuning, the model derives decoder inputs by shifting labels
+            # right; without labels it returns no loss to backpropagate.
+            model.config.use_cache = False
+            inputs["labels"] = torch.randint(
+                model.config.vocab_size,
+                (inputs["input_features"].shape[0], WhisperBenchmark.LABEL_LENGTH),
+                device=device,
+            )
+            return model, inputs
 
         decoder_start_token = model.config.decoder_start_token_id
         inputs["decoder_input_ids"] = torch.tensor(
