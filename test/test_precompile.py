@@ -52,6 +52,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
@@ -60,6 +61,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
@@ -176,6 +178,8 @@ class _GraphBreakingChild(torch.nn.Module):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_guard_fact_pickle_and_hash(self):
         from torch.compiler._precompile_types import GuardFact
 
@@ -1144,12 +1148,21 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
 
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
-    def test_artifact_with_module_level_kernels_runs_from_its_file(self):
+    @parametrize("device", ("cuda", "xpu"))
+    def test_artifact_with_module_level_kernels_runs_from_its_file(self, device):
+        if not HAS_TRITON:
+            self.skipTest("requires Triton")
+        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
+            self.skipTest(f"requires {device.upper()}")
+
         # A module-level Triton kernel reads its source back from the module's file,
         # which both the header's runpy.run_path recipe and the inlined load provide.
-        m = torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU()).eval().cuda()
-        x = torch.randn(3, 8, device="cuda")
+        m = (
+            torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU())
+            .eval()
+            .to(device)
+        )
+        x = torch.randn(3, 8, device=device)
         code, cache = _precompile_pair(lambda model, x: model(x), m, x)
         self.assertRegex(code, r"(?m)^def triton_\w+\(")
         self.assertIn(
@@ -1197,8 +1210,13 @@ class TestPrecompile(TestCase):
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
 
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA for Triton autotuning")
-    def test_cache_bundles_autotune_artifacts(self):
+    @parametrize("device", ("cuda", "xpu"))
+    def test_cache_bundles_autotune_artifacts(self, device):
+        if not HAS_TRITON:
+            self.skipTest("requires Triton")
+        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
+            self.skipTest(f"requires {device.upper()}")
+
         from torch._inductor.utils import fresh_cache
 
         class M(torch.nn.Module):
@@ -1210,8 +1228,8 @@ class TestPrecompile(TestCase):
             def forward(self, x):
                 return torch.softmax(self.l2(torch.relu(self.l1(x))), dim=-1)
 
-        m = M().cuda().eval()
-        x = torch.randn(128, 512, device="cuda")
+        m = M().to(device).eval()
+        x = torch.randn(128, 512, device=device)
         code, cache = _precompile_pair(lambda model, x: model(x), m, x)
         with fresh_cache():
             f_c = _load_pair(code, cache)
@@ -2199,11 +2217,13 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
-    @unittest.skipUnless(TEST_CUDA, "needs CUDA for a cpu-vs-cuda device mismatch")
+    @parametrize("device", ("cuda", "xpu"))
     @parametrize("path", ("cached", "inlined"))
-    def test_device_mismatch_rejected(self, path):
+    def test_device_mismatch_rejected(self, device, path):
+        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
+            self.skipTest(f"requires {device.upper()}")
         # Each dense input's device is baked at capture (invariant 6); a cpu-traced
-        # artifact rejects a cuda input up front on BOTH load paths.
+        # artifact rejects an accelerator input up front on BOTH load paths.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)  # cpu example
         code, cache = _precompile_pair(lambda model, t: model(t), m, x)
@@ -2211,7 +2231,7 @@ class TestPrecompile(TestCase):
             cache = _strip_artifact(cache)
         f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "device"):
-            f_c(m, x.cuda())
+            f_c(m, x.to(device))
 
     def test_mark_dynamic_backed_rejected(self):
         # Backed dynamic marks (mark_dynamic) have no analogue in the static/unbacked
@@ -2585,16 +2605,19 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
-    @unittest.skipUnless(TEST_CUDA, "needs CUDA for a cpu-vs-cuda device mismatch")
-    def test_eager_device_mismatch_rejected(self):
+    @parametrize("device", ("cuda", "xpu"))
+    def test_eager_device_mismatch_rejected(self, device):
+        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
+            self.skipTest(f"requires {device.upper()}")
+
         # The eager driver bakes each input's device (invariant 6): a cpu-traced eager
-        # artifact rejects a cuda input up front, like the inductor backend.
+        # artifact rejects an accelerator input up front, like the inductor backend.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)  # cpu example
         code, cache = _precompile_pair(lambda mm, t: mm(t), m, x, backend="eager")
         f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "device"):
-            f_c(m, x.cuda())
+            f_c(m, x.to(device))
 
     def test_unserializable_in_spec_accepts_distinct_structures(self):
         # When IN_SPEC degrades to None (the input pytree spec was not serializable) the
@@ -3359,6 +3382,8 @@ def _files_fn(model, x):
 class TestPrecompileCaptureFiles(TestCase):
     """The on-disk artifact pair writer, through its failure shapes."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         tmp = tempfile.TemporaryDirectory()
@@ -3750,6 +3775,7 @@ class TestPrecompileCaptureFiles(TestCase):
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the accelerator lowering, not just CPU.
 
@@ -4311,6 +4337,8 @@ print("served")
 class TestPrecompileLoad(TestCase):
     """load() over the on-disk pair a capture writes."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         tmp = tempfile.TemporaryDirectory()
@@ -4410,6 +4438,8 @@ class TestPrecompileLoad(TestCase):
 @instantiate_parametrized_tests
 class TestPrecompileCapture(TestCase):
     """capture() and load() over the on-disk pair, with the MakeFxTracer."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -4906,6 +4936,8 @@ class _NoOpPostGradPass(CustomGraphPass):
 @instantiate_parametrized_tests
 class TestPrecompileDynamoCapture(TestCase):
     """capture() with the DynamoTracer: the multi-graph standalone artifact."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -6612,6 +6644,7 @@ print("transport phase ok:", phase)
 @unittest.skipUnless(has_triton_package(), "requires Triton")
 @instantiate_parametrized_tests
 class TestTritonRuntimeCacheTransport(TestCase):
+    hw_classification = HardwareClassification.CUDA
     CONTEXT = {"build": "test"}
 
     def _bundle(self, directory, **kwargs):
@@ -7204,6 +7237,8 @@ class TestTritonRuntimeCacheTransport(TestCase):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileNoCompilation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("damage", ("corrupt", "format", "version"))
     def test_strict_load_rejects_bad_envelope_before_execution(self, damage):
         artifact, cache = _capture_files(
@@ -7897,6 +7932,8 @@ def _user_stream_fn(x):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # Restores the Triton settings a serving-side import turns on for the
@@ -9936,6 +9973,8 @@ print("custom op phase ok:", phase)
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileCustomOpModules(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfCrossRef
     @parametrize(
         "tracer,backend,entry,mode",
@@ -10382,6 +10421,8 @@ def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileCustomOpRecording(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _op(self, name):
         from torch._library.custom_ops import OPDEFS
 
