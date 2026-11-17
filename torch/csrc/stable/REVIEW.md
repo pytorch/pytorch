@@ -57,8 +57,9 @@ a new one is added, the difference should be documented.
 Public declarations must use stable or header-only types and headers. They must
 not expose ATen or other unstable implementation types. Route C shim failures
 through `STABLE_TORCH_ERROR_CODE_CHECK` NOT the outdated `TORCH_ERROR_CODE_CHECK`.
-Reuse the stable IValue `from`/`to` helpers for boxing and unboxing. Prefer direct
-code over extra conversion layers added solely to avoid a few duplicated lines.
+Reuse the stable IValue `from`/`to` helpers for boxing and unboxing as much as
+you can. However, prefer direct code over extra conversion layers--for example if
+you find yourself converting something back to c10::IValue, that is bad.
 
 For handles and callbacks, verify the ownership contract explicitly: borrowed
 versus owned handles, shared value semantics, who releases the resource, and
@@ -69,10 +70,7 @@ lifetime is handled by existing stable IValues.
 Document ownership at the declarations of C shims, constructors, and conversion
 helpers. State whether inputs and outputs are borrowed or owned, which calls
 acquire or release references, and which transfer an existing reference without
-changing its count. Describe the source object's state after a transfer and
-whether plain inline values require any reference management. Distinguish
-numeric inputs from encoded owning words; copying a word's bits does not acquire
-a reference.
+changing its count.
 
 Keep the patch limited to the wrapper, its required ABI plumbing, and focused
 tests. Unrelated refactors and speculative convenience APIs make compatibility
@@ -85,15 +83,10 @@ the `TORCH_FEATURE_VERSION` guard on the oldest runtime whose shim or dispatcher
 contract can support the wrapper, not simply on the version in which the C++
 wrapper is added.
 
-Document both the build time minimum version and the minimum compatible runtime
-on public APIs, following the `view.dtype` example in [`ops.h`](ops.h).
-
 Verify that the unstable declaration or dispatcher schema has not changed over
 the runtime range the wrapper promises to support. New C shims must be recorded
 and guarded according to the stable shim versioning rules. Put the test in the
 lowest `libtorch_agn` version target that the wrapper claims to support.
-When changing dispatcher encodings, check existing callers against the new
-runtime for both arguments and returns, including list and optional elements.
 
 ## Test the wrapper boundary
 

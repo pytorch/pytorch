@@ -4,6 +4,7 @@
 Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
 """
 
+import operator
 import sys
 
 import torch
@@ -1495,6 +1496,34 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 for reason in reasons
             ),
             reasons,
+        )
+
+    def test_iterator_length_hint(self):
+        def f(x):
+            value = bytearray(b"abc")
+            iterator = iter(value)
+            hints = [operator.length_hint(iterator)]
+            next(iterator)
+            hints.append(iterator.__length_hint__())
+            value.append(100)
+            hints.append(operator.length_hint(iterator))
+            del value[:]
+            hints.append(operator.length_hint(iterator))
+            value.extend(b"abc")
+            hints.append(operator.length_hint(iterator))
+            list(iterator)
+            hints.append(operator.length_hint(iterator))
+            value.append(100)
+            hints.append(operator.length_hint(iterator))
+            return hints, x + 1
+
+        @torch._dynamo.disable
+        def eager(x):
+            return f(x)
+
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(1)),
+            eager(torch.ones(1)),
         )
 
     # -- reconstruct: force a graph break with a live bytearray --
