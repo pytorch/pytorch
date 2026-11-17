@@ -622,7 +622,10 @@ void initModule(PyObject* module) {
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
   });
-  m.def("_mps_sleep", [](int64_t cycles) { at::mps::sleep(cycles); });
+  m.def("_mps_sleep", [](int64_t cycles) {
+    pybind11::gil_scoped_release no_gil;
+    at::mps::sleep(cycles);
+  });
   m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
     PyObject* obj = py_storage.ptr();
     TORCH_CHECK_TYPE(

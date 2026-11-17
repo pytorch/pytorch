@@ -87,9 +87,6 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
     cb.willCommitAndContinue = [this] { addErrorHandler(); };
     _commandBuffer = cb;
   }
-  // Assume that work will be enqueued by the caller
-  _hasWorkSinceQuerySignal = true;
-
   return _commandBuffer;
 }
 
@@ -102,6 +99,7 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
   ++_kernelsSinceCommit;
+  markWorkEncoded();
 
   return _commandEncoder;
 }
@@ -252,30 +250,33 @@ bool MPSStream::query() {
   // we know that all enqueued work has finished.
 
   __block bool done;
-  dispatch_sync(_serialQueue, ^() {
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
     @autoreleasepool {
-      //  Any time `MPSStream::commandBuffer()` is called,
-      //  `_hasWorkSinceQuerySignal = true` is set, conservatively assuming that
-      //  the caller will enqueue work. So if `_hasWorkSinceQuerySignal ==
-      //  false`, then we know that no new work has been enqueued.
-      if (_hasWorkSinceQuerySignal) {
-        endKernelCoalescing();
-        // New work has been enqueued, so enqueue the query event.
-        [commandBuffer() encodeSignalEvent:_queryEvent value:++_querySignalCounter];
+      if (encodeQuerySignalIfNeeded()) {
         // Commit now because `query` must be able to be called in a loop that
         // eventually finishes.
         synchronize(SyncType::COMMIT);
-        // Reset this flag since the newly encoded event marks the end of all
-        // previously encoded work. Flag should only be reset after the event is
-        // committed, because the commit itself sets the flag to true.
-        _hasWorkSinceQuerySignal = false;
       }
       // If all the enqueued query events have signaled then all the work
-      // enqueued before the event is finished.
+      // enqueued before the event has finished.
       done = _queryEvent.signaledValue >= _querySignalCounter;
     }
   });
   return done;
+}
+
+bool MPSStream::encodeQuerySignalIfNeeded() {
+  // `_hasWorkSinceQuerySignal` is set wherever work is encoded (see
+  // `markWorkEncoded`). So if it is false, no new work has been enqueued.
+  if (!_hasWorkSinceQuerySignal) {
+    return false;
+  }
+  endKernelCoalescing();
+  [commandBuffer() encodeSignalEvent:_queryEvent value:++_querySignalCounter];
+  // Reset this flag since the newly encoded event marks the end of all
+  // previously encoded work.
+  _hasWorkSinceQuerySignal = false;
+  return true;
 }
 
 void MPSStream::copy(id<MTLBuffer> srcBuffer,
@@ -289,6 +290,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
     @autoreleasepool {
       endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
+      markWorkEncoded();
 
       // For some reason copyFromBuffer for 4Gb fails without returning an error
       // See https://github.com/pytorch/pytorch/issues/124335
@@ -351,6 +353,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
                    targetOperations:nil
                   resultsDictionary:results
                 executionDescriptor:_executionDescriptor];
+    markWorkEncoded();
 
     SyncType _syncType = syncType;
     // if commitAndContinue is disabled, we need to always commit manually after encoding
