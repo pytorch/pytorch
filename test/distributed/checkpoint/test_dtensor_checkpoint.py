@@ -75,7 +75,7 @@ class DTensorPlanner(DTensorTestBase):
         tensor_to_replicate: torch.tensor,
     ) -> torch.nn.Module:
         mesh = DeviceMesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh=range(dist.get_world_size()),
         )
         sharded_dt = distribute_tensor(tensor_to_shard, mesh, placements=[Shard(0)])
@@ -85,7 +85,7 @@ class DTensorPlanner(DTensorTestBase):
 
         # Only even rank will be part of the mesh.
         submesh = DeviceMesh(
-            device_type=self.device_type,
+            device_type=self._device_type,
             mesh=[i for i in range(dist.get_world_size()) if i % 2 == 0],
         )
         submesh_tensor_size = [SUBMESH_TENSOR_SIZE]
@@ -103,7 +103,7 @@ class DTensorPlanner(DTensorTestBase):
             replicated_dt,
             submesh_sharded_dt,
             submesh_replicated_dt,
-        ).to(self.device_type)
+        ).to(self._device_type)
 
         return (
             model,
@@ -132,7 +132,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'rdt',
                         DTensor(
-                            local_tensor=tensor([4., 5., 6., 7.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([4., 5., 6., 7.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Replicate()]
                         )
@@ -140,7 +140,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'sdt',
                         DTensor(
-                            local_tensor=tensor([0.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([0.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Shard(dim=0)])
                         ),
@@ -148,7 +148,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'submesh_sdt',
                         DTensor(
-                            local_tensor=tensor([8., 9.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([8., 9.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Shard(dim=0)]
                         ),
@@ -156,7 +156,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'submesh_rdt',
                         DTensor(
-                            local_tensor=tensor([12., 13., 14., 15.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([12., 13., 14., 15.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Replicate()]
                         )
@@ -186,7 +186,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'rdt',
                         DTensor(
-                            local_tensor=tensor([40., 50., 60., 70.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([40., 50., 60., 70.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Replicate()],
                         )
@@ -194,7 +194,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'sdt',
                         DTensor(
-                            local_tensor=tensor([0.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([0.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Shard(dim=0)],
                         )
@@ -202,14 +202,14 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'submesh_sdt',
                         DTensor(
-                            local_tensor=tensor([80., 90.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([80., 90.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Shard(dim=0)]
                         )
                     ),
                     ('submesh_rdt',
                         DTensor(
-                            local_tensor=tensor([120., 130., 140., 150.], device=f'{self.device_type}:0'),
+                            local_tensor=tensor([120., 130., 140., 150.], device=f'{self._device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Replicate()]
                         )

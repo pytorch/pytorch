@@ -935,9 +935,9 @@ class TestDTensorStateDictStager(DTensorTestBase):
         """
         # Create a DTensor
         device_mesh = dist.DeviceMesh(
-            self.device_type, list(range(dist.get_world_size()))
+            self._device_type, list(range(dist.get_world_size()))
         )
-        tensor = torch.randn(3, 3, device=self.device_type)
+        tensor = torch.randn(3, 3, device=self._device_type)
         dtensor = DTensor.from_local(tensor, device_mesh, [Shard(0)])
 
         dtensor = dtensor + 1

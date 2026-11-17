@@ -89,8 +89,8 @@ class TestFormatUtils(DTensorTestBase):
         dist.barrier()
 
         # Load into a sharded model
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model = SimpleModelUneven().to(self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        model = SimpleModelUneven().to(self._device_type)
         model = FSDP(
             model,
             device_mesh=device_mesh,

@@ -156,23 +156,23 @@ def _train(model, optim, train_steps=1):
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @property
     def backend(self):
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"cpu:gloo,{self.device_type}:{curr_backend}"
+        curr_backend = dist.get_default_backend_for_device(self._device_type)
+        return f"cpu:gloo,{self._device_type}:{curr_backend}"
 
     def _create_model(self, compile, model_type, state_dict_options=None):
-        dummy_model = TestDummyModel().to(self.device_type)
+        dummy_model = TestDummyModel().to(self._device_type)
 
         if model_type not in ModelType:
             raise AssertionError(f"{model_type} is not supported.")
         if model_type == ModelType.FSDP:
-            device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+            device_mesh = init_device_mesh(self._device_type, (self.world_size,))
             model = FSDP(
                 dummy_model,
                 device_mesh=device_mesh,
                 use_orig_params=True,
             )
         elif model_type == ModelType.HSDP:
-            device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+            device_mesh = init_device_mesh(self._device_type, (2, self.world_size // 2))
             model = FSDP(
                 dummy_model,
                 device_mesh=device_mesh,
@@ -181,7 +181,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             )
         elif model_type == ModelType.FSDP_TP:
             mesh_2d = init_device_mesh(
-                self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+                self._device_type,
+                (2, self.world_size // 2),
+                mesh_dim_names=("dp", "tp"),
             )
             tp_mesh = mesh_2d["tp"]
             dp_mesh = mesh_2d["dp"]
@@ -520,7 +522,7 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
 class TestNoCPU(DTensorTestBase):
     @property
     def backend(self):
-        return dist.get_default_backend_for_device(self.device_type)
+        return dist.get_default_backend_for_device(self._device_type)
 
     @skip_if_lt_x_gpu(NUM_DEVICES)
     @with_comms

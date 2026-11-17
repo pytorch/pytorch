@@ -58,7 +58,9 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     def _get_mesh_2d(self) -> DeviceMesh:
         cls = type(self)
         if cls._mesh_2d is None:
-            cls._mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+            cls._mesh_2d = init_device_mesh(
+                self._device_type, (2, self.world_size // 2)
+            )
         return cls._mesh_2d
 
     def _create_model(self, device, device_mesh=None):
@@ -315,7 +317,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
         model = FakeMPModel(device_mesh=mesh_2d).to(device_id)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
-        batch = torch.rand(5, 8, device=self.device_type)
+        batch = torch.rand(5, 8, device=self._device_type)
         model(batch).sum().backward()
         optim.step()
         osd = optim.state_dict()
