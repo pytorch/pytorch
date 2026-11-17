@@ -17,6 +17,7 @@
 #include <vector>
 #include <mutex>
 #include <shared_mutex>
+#include <c10/util/irange.h>
 
 namespace at {
 
@@ -42,6 +43,10 @@ struct HostBlock {
   // getSegments reads it under block->mutex_; all other accesses hold
   // block->mutex_.  Relaxed ordering suffices: it is an independent flag.
   std::atomic<bool> allocated_{false}; // in-use flag
+  // Unrounded size of the current (or, once cached, the last) allocation.
+  // Atomic for the same reason as allocated_: written outside block->mutex_
+  // while getSegments may read it.
+  std::atomic<size_t> requested_size_{0};
   size_t event_count_{0}; // number of related events
   ska::flat_hash_set<S> streams_; // streams on which the block was used
   c10::MempoolId_t owning_pool_{0,0}; // never changes after construction, so we don't need a mutex to guard this
@@ -354,7 +359,8 @@ struct CachingHostAllocatorImpl {
     auto* block = get_free_block(roundSize, pool);
     if (block) {
       block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
-      if (C10_UNLIKELY(record_history_.load(std::memory_order_relaxed))) {
+      block->requested_size_.store(size, std::memory_order_relaxed);
+      if (record_history_.load(std::memory_order_relaxed)) [[unlikely]] {
         // getSegments can read context_when_allocated_ concurrently; hold the
         // block mutex to write it (see maybe_cache_block).
         std::lock_guard<std::mutex> g(block->mutex_);
@@ -362,7 +368,7 @@ struct CachingHostAllocatorImpl {
         record_trace(
             TraceEntry::ALLOC,
             reinterpret_cast<size_t>(block->ptr_),
-            block->size_,
+            size,
             nullptr,
             mempool_id,
             block->context_when_allocated_);
@@ -413,6 +419,7 @@ struct CachingHostAllocatorImpl {
     // Then, create a new block.
     block = new B(roundSize, ptr);
     block->allocated_.store(true, std::memory_order_relaxed);
+    block->requested_size_.store(size, std::memory_order_relaxed);
     block->owning_pool_ = mempool_id;
     block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
     block->context_when_allocated_ = std::move(context);
@@ -421,7 +428,7 @@ struct CachingHostAllocatorImpl {
     record_trace(
         TraceEntry::ALLOC,
         reinterpret_cast<size_t>(block->ptr_),
-        block->size_,
+        size,
         nullptr,
         mempool_id,
         block->context_when_allocated_);
@@ -443,7 +450,7 @@ struct CachingHostAllocatorImpl {
     record_trace(
         TraceEntry::FREE_REQUESTED,
         reinterpret_cast<size_t>(block->ptr_),
-        block->size_,
+        block->requested_size_.load(std::memory_order_relaxed),
         nullptr,
         block->owning_pool_,
         context ? context : block->context_when_allocated_);
@@ -574,7 +581,7 @@ struct CachingHostAllocatorImpl {
           // leaves the totals reported by getStats() unchanged.
           auto& pool = it->second->blocks;
           auto& dst = default_pool_;
-          for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+          for (const auto i : c10::irange(pool.free_list_.size())) {
             std::scoped_lock lock(pool.free_list_[i].mutex_, dst.free_list_[i].mutex_);
             add_stats(dst.active_bucket_stats[i], pool.active_bucket_stats[i]);
             add_stats(dst.active_bytes_bucket_stats[i], pool.active_bytes_bucket_stats[i]);
@@ -698,7 +705,7 @@ struct CachingHostAllocatorImpl {
   void for_each_bucket(const F& fn) {
     std::shared_lock<std::shared_mutex> lg(instance_mutex_);
     auto visit = [&](BlockPool& pool) {
-      for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+      for (const auto i : c10::irange(pool.free_list_.size())) {
         std::lock_guard<std::mutex> g(pool.free_list_[i].mutex_);
         fn(pool, i);
       }
@@ -859,7 +866,7 @@ struct CachingHostAllocatorImpl {
 
   void maybe_cache_block(B* block, BlockPool& pool,
                          const std::shared_ptr<c10::GatheredContext>& context) {
-    if (C10_UNLIKELY(record_history_.load(std::memory_order_relaxed))) {
+    if (record_history_.load(std::memory_order_relaxed)) [[unlikely]] {
       // Unlike other record_trace call sites (where the block is exclusively
       // owned by the calling thread, e.g., just allocated or being freed by
       // sole owner), here the block is transitioning from event-pending to
@@ -871,7 +878,7 @@ struct CachingHostAllocatorImpl {
       record_trace(
           TraceEntry::FREE_COMPLETED,
           reinterpret_cast<size_t>(block->ptr_),
-          block->size_,
+          block->requested_size_.load(std::memory_order_relaxed),
           nullptr,
           block->owning_pool_,
           context ? context : block->context_when_allocated_);
@@ -986,7 +993,7 @@ struct CachingHostAllocatorImpl {
 
  private:
   std::tuple<c10::MempoolId_t, BlockPool&> get_allocation_pool_for_current_stream() {
-    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
+    if (captures_underway_empty_.load(std::memory_order_relaxed)) [[likely]] {
       return {c10::MempoolId_t{0, 0}, default_pool_};
     }
 
@@ -997,7 +1004,7 @@ struct CachingHostAllocatorImpl {
         auto it = graph_pools_.find(entry.first);
         TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
         auto id = entry.first;
-        if (C10_UNLIKELY(!stream_is_capturing(stream))) {
+        if (!stream_is_capturing(stream)) [[unlikely]] {
           TORCH_WARN_ONCE("CachingHostAllocator is allocating to private pool (",
                           id.first, ",", id.second,
                           ") but the current stream is not capturing. Private "
@@ -1030,7 +1037,7 @@ struct CachingHostAllocatorImpl {
         return default_pool_.ptr_to_block_.at(ptr);
       }
     }
-    if (C10_LIKELY(graph_pools_.empty())) {
+    if (graph_pools_.empty()) [[likely]] {
       return nullptr;
     } else {
       for (auto &&[_, private_pool]: graph_pools_) {
@@ -1053,7 +1060,7 @@ struct CachingHostAllocatorImpl {
         return true;
       }
     }
-    if (C10_LIKELY(graph_pools_.empty())) {
+    if (graph_pools_.empty()) [[likely]] {
       return false;
     } else {
       for (auto &&[_, private_pool]: graph_pools_) {
@@ -1078,7 +1085,7 @@ protected:
     // Stream capture can allocate only to private pools. If there
     // are no private pools for which capture is currently underway,
     // then by modus tollens the current stream is not capturing.
-    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
+    if (captures_underway_empty_.load(std::memory_order_relaxed)) [[likely]] {
       return false;
     }
     return stream_is_capturing(get_current_stream());
@@ -1131,7 +1138,7 @@ private:
       void* stream_ptr,
       c10::MempoolId_t mempool_id,
       std::shared_ptr<c10::GatheredContext> context) {
-    if (C10_LIKELY(!record_history_.load(std::memory_order_relaxed))) {
+    if (!record_history_.load(std::memory_order_relaxed)) [[likely]] {
       return;
     }
     TraceEntry te(
@@ -1195,6 +1202,8 @@ private:
         HostSegmentInfo seg;
         seg.address = reinterpret_cast<size_t>(block->ptr_);
         seg.size = block->size_;
+        seg.requested_size =
+            block->requested_size_.load(std::memory_order_relaxed);
         seg.owner_private_pool_id = block->owning_pool_;
         {
           std::lock_guard<std::mutex> gb(block->mutex_);
@@ -1218,6 +1227,7 @@ private:
         HostSegmentInfo seg;
         seg.address = reinterpret_cast<size_t>(ptr);
         seg.size = reg.size;
+        seg.requested_size = reg.size;
         seg.allocated = true;
         seg.active = true;
         seg.owner_private_pool_id = c10::MempoolId_t{0, 0};
