@@ -3089,6 +3089,10 @@ class TestImports(TestCase):
                            'torch._native.ops.pointwise.kernel',
                            'torch._native.ops.pointwise.ops',
                            'torch._native.ops.pointwise.tma',
+                           'torch._native.ops.pointwise.transpose_copy',
+                           'torch._native.ops.pointwise.transpose_tma',
+                           'torch._native.ops.pointwise._packing',
+                           'torch._native.ops.pointwise._transpose',
                            'torch._native.ops.rng.cutedsl_kernels',
                            "torch._native.ops.reductions.traits",  # depends on cutlass
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton

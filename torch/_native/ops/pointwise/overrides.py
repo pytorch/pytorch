@@ -9,8 +9,9 @@ import torch
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND as PromotionKind,
     is_non_overlapping_and_dense_or_false,
+    make_contiguous_strides_for,
 )
-from torch._tensor_iterator import nullary_op
+from torch._tensor_iterator import nullary_op, TensorIterator
 
 from ... import cutedsl_utils as cu
 from ...utils import capability as cap
@@ -31,19 +32,26 @@ from .table import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from ._types import Number, OperatorResult, PromotionOperands
+    from ._types import (
+        CacheKey,
+        Number,
+        OperatorResult,
+        PromotionOperands,
+        TransposeSpec,
+    )
     from .signature import Functor, Signature
 
 
 if TYPE_CHECKING:
     from ...cutedsl import dtypes as dt, launch as _L
-    from . import kernel as K, ops
+    from . import kernel as K, ops, transpose_copy as TC
 else:
     # Keep cutlass and kernel imports lazy during `import torch`.
     dt = LazyModule("torch._native.cutedsl.dtypes")
     _L = LazyModule("torch._native.cutedsl.launch")
     K = LazyModule("torch._native.ops.pointwise.kernel")
     ops = LazyModule("torch._native.ops.pointwise.ops")
+    TC = LazyModule("torch._native.ops.pointwise.transpose_copy")
 
 
 _ARCH_MAJORS = cu.POINTWISE_ARCH_MAJORS
@@ -578,6 +586,197 @@ def _to_copy_impl(
     return _run_conversion("_to_copy", x, out)
 
 
+def _transpose_source_serveable(
+    src: torch.Tensor, quantized: bool, *, check_dense: bool = True
+) -> bool:
+    if not (
+        src.layout is torch.strided
+        and src.is_quantized == quantized
+        and src.ndim >= 2
+        and not src.is_contiguous()
+        and (not check_dense or is_non_overlapping_and_dense_or_false(src))
+        and src.numel() > 0
+        and not src.is_neg()
+        and not src.is_conj()
+        and not src._is_zerotensor()
+        and not cap.is_traced(src)
+        and cap.device_ok(src, _ARCH_MAJORS)
+        and cap.on_current_device(src)
+    ):
+        return False
+    if quantized and (
+        src.dtype
+        not in (
+            torch.qint8,
+            torch.quint8,
+            torch.qint32,
+            torch.quint4x2,
+            torch.quint2x4,
+        )
+        or src.qscheme() not in (torch.per_tensor_affine, torch.per_tensor_symmetric)
+    ):
+        return False
+    if src.dtype in (torch.quint4x2, torch.quint2x4):
+        pack = 2 if src.dtype is torch.quint4x2 else 4
+        if src.storage_offset() % pack:
+            return False
+    return True
+
+
+def _transpose_source_spec(
+    src: torch.Tensor, *, quantized: bool = False
+) -> TransposeSpec | None:
+    if not _transpose_source_serveable(src, quantized):
+        return None
+    itemsize = src.element_size()
+    lanes = max(1, itemsize // 8)
+    if itemsize not in (1, 2, 4, 8, 16) or src.numel() * lanes > 2**31 - 1:
+        return None
+
+    shape = tuple(src.shape)
+    for dim0 in range(src.ndim):
+        for dim1 in range(dim0 + 1, src.ndim):
+            base_shape = list(shape)
+            base_shape[dim0], base_shape[dim1] = (
+                base_shape[dim1],
+                base_shape[dim0],
+            )
+            expected = list(make_contiguous_strides_for(base_shape))
+            expected[dim0], expected[dim1] = expected[dim1], expected[dim0]
+            if tuple(expected) != src.stride():
+                continue
+            outer = math.prod(shape[:dim0])
+            b = shape[dim0]
+            middle = math.prod(shape[dim0 + 1 : dim1])
+            a = shape[dim1]
+            inner = math.prod(shape[dim1 + 1 :])
+            tile = 64 if itemsize <= 4 else 32
+            packed = src.dtype in (torch.quint4x2, torch.quint2x4)
+            if (
+                inner == 1
+                and not packed
+                and (
+                    outer * middle > 65535
+                    or (a + tile - 1) // tile > 65535
+                    or (b + tile - 1) // tile > 65535
+                )
+            ):
+                return None
+            return outer, b, middle, a, inner, itemsize
+    return None
+
+
+_TRANSPOSE_SPECS: dict[CacheKey, TransposeSpec | None] = {}
+
+
+def _transpose_iterator_spec(
+    out: torch.Tensor, src: torch.Tensor
+) -> TransposeSpec | None:
+    key = (src.dtype, tuple(src.shape), src.stride(), out.stride())
+    if key not in _TRANSPOSE_SPECS:
+        _TRANSPOSE_SPECS[key] = _build_transpose_iterator_spec(out, src)
+    return _TRANSPOSE_SPECS[key]
+
+
+def _build_transpose_iterator_spec(
+    out: torch.Tensor, src: torch.Tensor
+) -> TransposeSpec | None:
+    try:
+        iterator = TensorIterator(
+            outputs=[out],
+            const_inputs=[src],
+            resize_outputs=False,
+            check_all_same_dtype=False,
+            check_all_same_device=False,
+        )
+    except RuntimeError:
+        return None
+    if iterator.ndim < 2:
+        return None
+
+    # Fastest-first groups are (inner, a, middle, b, outer); source swaps a and b.
+    shape = iterator.shape
+    out_strides = iterator.strides(0)
+    src_strides = iterator.strides(1)
+    stride = src.element_size()
+    for dim in range(iterator.ndim):
+        if out_strides[dim] != stride:
+            return None
+        stride *= shape[dim]
+
+    order = sorted(range(iterator.ndim), key=src_strides.__getitem__)
+    stride = src.element_size()
+    for dim in order:
+        if src_strides[dim] != stride:
+            return None
+        stride *= shape[dim]
+    moved = [dim for dim, source_dim in enumerate(order) if dim != source_dim]
+    if len(moved) != 2:
+        return None
+    dim0, dim1 = moved
+    if order[dim0] != dim1 or order[dim1] != dim0:
+        return None
+
+    inner = math.prod(shape[:dim0])
+    a = shape[dim0]
+    middle = math.prod(shape[dim0 + 1 : dim1])
+    b = shape[dim1]
+    outer = math.prod(shape[dim1 + 1 :])
+    return outer, b, middle, a, inner, src.element_size()
+
+
+def _transpose_copy_spec(
+    out: torch.Tensor, src: torch.Tensor, *, quantized: bool = False
+) -> TransposeSpec | None:
+    if not _transpose_source_serveable(src, quantized, check_dense=False) or not (
+        out.layout is torch.strided
+        and out.is_quantized == quantized
+        and out.ndim == src.ndim
+        and out.shape == src.shape
+        and out.dtype == src.dtype
+        and out.device == src.device
+        and out.is_contiguous()
+        and not out.is_neg()
+        and not out.is_conj()
+        and not cap.is_traced(out)
+        and not torch._C._is_alias_of(out, src)
+    ):
+        return None
+    if quantized and (
+        out.qscheme() != src.qscheme()
+        or out.q_scale() != src.q_scale()
+        or out.q_zero_point() != src.q_zero_point()
+    ):
+        return None
+    if out.dtype in (torch.quint4x2, torch.quint2x4):
+        pack = 2 if out.dtype is torch.quint4x2 else 4
+        if out.storage_offset() % pack:
+            return None
+    if src.ndim == 2 and src.stride() == (1, src.shape[0]):
+        spec = (1, src.shape[0], 1, src.shape[1], 1, src.element_size())
+    else:
+        spec = _transpose_iterator_spec(out, src)
+        if spec is None:
+            return None
+    outer, b, middle, a, inner, itemsize = spec
+    lanes = max(1, itemsize // 8)
+    if itemsize not in (1, 2, 4, 8, 16) or src.numel() * lanes > 2**31 - 1:
+        return None
+    tile = 64 if itemsize <= 4 else 32
+    packed = src.dtype in (torch.quint4x2, torch.quint2x4)
+    if (
+        inner == 1
+        and not packed
+        and (
+            outer * middle > 65535
+            or (a + tile - 1) // tile > 65535
+            or (b + tile - 1) // tile > 65535
+        )
+    ):
+        return None
+    return spec
+
+
 def _copy_cond(
     self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
 ) -> bool:
@@ -588,6 +787,8 @@ def _copy_cond(
         and can_use_32bit_indexing(self)
     ):
         return False
+    if _transpose_copy_spec(self, src) is not None:
+        return True
     if not (_conv_serveable(src, self.dtype) and self.is_contiguous()):
         return False
     if cap.is_traced(self) or self.is_neg() or self.is_conj():
@@ -608,7 +809,48 @@ def _copy_cond(
 def _copy_impl(
     self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
 ) -> torch.Tensor:
+    spec = _transpose_copy_spec(self, src)
+    if spec is not None:
+        return TC.run(src, self, spec)
     return _run_conversion("copy_", src, self)
+
+
+def _quantized_copy_cond(
+    self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
+) -> bool:
+    return (
+        isinstance(src, torch.Tensor)
+        and src.device == self.device
+        and _transpose_copy_spec(self, src, quantized=True) is not None
+    )
+
+
+def _quantized_copy_impl(
+    self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
+) -> torch.Tensor:
+    spec = _transpose_copy_spec(self, src, quantized=True)
+    if spec is None:
+        raise AssertionError("quantized transpose copy no longer matches")
+    return TC.run(src, self, spec)
+
+
+def _quantized_clone_cond(
+    self: torch.Tensor, *, memory_format: torch.memory_format | None = None
+) -> bool:
+    return (
+        memory_format is torch.contiguous_format
+        and _transpose_source_spec(self, quantized=True) is not None
+    )
+
+
+def _quantized_clone_impl(
+    self: torch.Tensor, *, memory_format: torch.memory_format | None = None
+) -> torch.Tensor:
+    out = torch.empty_like(self, memory_format=torch.contiguous_format)
+    spec = _transpose_copy_spec(out, self, quantized=True)
+    if spec is None:
+        raise AssertionError("quantized transpose clone no longer matches")
+    return TC.run(self, out, spec)
 
 
 _FILL_DTYPES = _SUPPORTED + _INT_DTYPES
@@ -863,6 +1105,20 @@ def register_pointwise_overrides() -> None:
         "aten", "_to_copy", "CUDA", cond=_to_copy_cond, impl=_to_copy_impl
     )
     cu.register_op_override("aten", "copy_", "CUDA", cond=_copy_cond, impl=_copy_impl)
+    cu.register_op_override(
+        "aten",
+        "copy_",
+        "QuantizedCUDA",
+        cond=_quantized_copy_cond,
+        impl=_quantized_copy_impl,
+    )
+    cu.register_op_override(
+        "aten",
+        "clone",
+        "QuantizedCUDA",
+        cond=_quantized_clone_cond,
+        impl=_quantized_clone_impl,
+    )
     cu.register_op_override(
         "aten", "fill_.Scalar", "CUDA", cond=_fill_cond, impl=_fill_impl
     )
