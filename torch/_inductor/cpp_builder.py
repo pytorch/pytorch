@@ -1821,6 +1821,13 @@ def get_caching_allocator_macro() -> list[str]:
     return macros
 
 
+def get_force_inline_welford_macro() -> list[str]:
+    # Read by the Welford helpers in torch/csrc/inductor/cpp_prefix.h.
+    if config.cpp.force_inline_welford:
+        return ["TORCH_INDUCTOR_FORCE_INLINE_WELFORD"]
+    return []
+
+
 def get_cpp_torch_options(
     cpp_compiler: str,
     vec_isa: VecISA,
@@ -1881,6 +1888,7 @@ def get_cpp_torch_options(
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights, use_mmap_weights_external)
     caching_allocator_macros = get_caching_allocator_macro()
+    force_inline_welford_macros = get_force_inline_welford_macro()
 
     definitions = (
         torch_cpp_wrapper_definitions
@@ -1889,6 +1897,7 @@ def get_cpp_torch_options(
         + fb_macro_passthrough_args
         + mmap_self_macros
         + caching_allocator_macros
+        + force_inline_welford_macros
     )
     include_dirs = (
         sys_libs_include_dirs
@@ -2361,6 +2370,9 @@ def get_cpp_torch_device_options(
         # referenced, because a static initializer in it registers something.
         if _IS_MACOS and aot_mode and not link_libtorch:
             ldflags.append("Wl,-dead_strip_dylibs")
+
+    if device_type == "mtia":
+        definitions.append(" USE_MTIA")
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
