@@ -12,6 +12,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -89,7 +90,7 @@ std::vector<std::optional<Tensor>> batchIndices(
   int64_t maxLogicalRank = get_max_index_logical_dim(indices, indices_bdims);
   bool indices_batched = any_has_value(indices_bdims);
 
-  for (size_t i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto const & index = indices[i];
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
@@ -355,14 +356,14 @@ namespace {
   {
     int64_t dims_before = 0, dims_indexed = 0;
     SymIntArrayRef replacement_shape;
-    for (const auto dim : c10::irange(indices_list.size())) {
-      if (!indices_list[dim].defined()) {
+    for (const auto& indices_list_elem : indices_list) {
+      if (!indices_list_elem.defined()) {
         if (dims_indexed == 0) {
           dims_before++;
         }
       } else {
         dims_indexed++;
-        replacement_shape = indices_list[dim].sym_sizes();
+        replacement_shape = indices_list_elem.sym_sizes();
       }
     }
 
@@ -631,7 +632,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
     batch_size = get_bdim_size2_symint(self, self_bdim, values, values_bdim);
   } else {
     // one or more of the indices is batched.
-    for (size_t i = 0; i < indices.size(); i++) {
+    for (const auto i : c10::irange(indices.size())) {
       if (indices_bdims[i] && indices[i].has_value()) {
         batch_size = indices[i].value().sym_size(*indices_bdims[i]);
         break;
