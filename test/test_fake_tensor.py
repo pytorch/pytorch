@@ -1609,7 +1609,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             with self.assertRaisesRegex(RuntimeError, error):
                 torch.as_strided(x, (17, 18), (-80, 1), 1)
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     def test_recursive_invocation(self):
         mode = FakeTensorMode()
         with mode:
@@ -3361,6 +3360,7 @@ class TestFakeTensorMoveModule(TestCase):
         self.assertEqual(out.device, gpu_device)
 
 
+@instantiate_parametrized_tests
 class TestFakeTensorConstHandling(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -3376,6 +3376,26 @@ class TestFakeTensorConstHandling(TestCase):
         with FakeTensorMode():
             x = torch.tensor(4.0)
             self.assertEqual(x.item(), 4.0)
+
+    @parametrize(
+        "data",
+        [
+            subtest(4.0, name="scalar"),
+            subtest([], name="empty"),
+            subtest([4.0], name="one"),
+            subtest([4.0, 5.0], name="two"),
+        ],
+    )
+    def test_initial_constants(self, data):
+        expected = torch.tensor(data)
+        with FakeTensorMode() as mode:
+            x = torch.tensor(data)
+        prims.utils.compare_tensor_meta(x, expected, check_strides=True)
+        self.assertIs(maybe_get_fake_mode(x), mode)
+        if expected.numel() <= 1:
+            self.assertEqual(maybe_get_fake_constant(x), expected)
+        else:
+            self.assertNotConst(x)
 
     def test_inplace_add(self):
         with FakeTensorMode():
@@ -6873,8 +6893,8 @@ class TestCppFakeTensorModeBindings(TestCase):
             if kind == "tensor_subclass":
                 if torch._dynamo.config.use_cpp_fake_tensor:
                     error, msg = (
-                        RuntimeError,
-                        "does not support converting tensor subclass TensorSubclass",
+                        NotImplementedError,
+                        "tensor subclass inputs",
                     )
                 else:
                     error, msg = TypeError, "Multiple dispatch failed"
