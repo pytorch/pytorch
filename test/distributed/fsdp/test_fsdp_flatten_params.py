@@ -84,7 +84,7 @@ class TestFlattenParams(FlattenParamsTestBase):
 
     def _get_default_config(self, device):
         return {
-            "device": torch.device(device).type,
+            "device": torch.device(device),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,
