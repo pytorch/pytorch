@@ -1276,9 +1276,11 @@ class TestBlackwellAutoWSConfigs(TestCase):
         # Triton's Meta WS knob rewrites every WS kernel, so configs with
         # use_meta_ws=False must not be flattened either.
         mat1, mat2 = mock.Mock(), mock.Mock()
+        mat1.get_dtype.return_value = torch.bfloat16
         mat2.get_dtype.return_value = torch.bfloat16
         kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
         base = {
+            "A_ROW_MAJOR": True,
             "BLOCK_M": 128,
             "BLOCK_N": 128,
             "BLOCK_K": 64,
@@ -1298,6 +1300,11 @@ class TestBlackwellAutoWSConfigs(TestCase):
                 TMATemplateConfigMixin,
                 "_get_template_configs_impl",
                 return_value=iter([base]),
+            ),
+            mock.patch.object(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                "_allow_tf32",
+                return_value=False,
             ),
         ):
             heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
