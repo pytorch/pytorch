@@ -138,7 +138,7 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
                 layout=layout,
                 make_fx_graph=fn,
                 description=description,
-                inline_after_autotune=bmm_backend == "triton",
+                can_inline_after_autotune=bmm_backend == "triton",
             )
 
 
