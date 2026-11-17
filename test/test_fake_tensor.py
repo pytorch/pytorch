@@ -1512,7 +1512,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         self.check_function_with_fake(foo)
 
-    @fake_tensor_test()
     def test_fake_mode_error(self):
         x = torch.rand([4, 4])
 
