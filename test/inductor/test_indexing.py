@@ -1521,6 +1521,230 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
 @instantiate_parametrized_tests
 class ReductionInvariantIndexingTests(InductorTestCase):
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.cta_uniform_outer_reduction_loads": True,
+            "triton.max_tiles": 1,
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+        }
+    )
+    def test_cta_uniform_outer_load_short_and_long_reductions(self):
+        def fn(value, scale):
+            return (value * scale[:, :, None]).sum(dim=0)
+
+        for reduction_rows, output_rows in (
+            (33, 31),
+            (4095, 32),
+            (4096, 32),
+            (4097, 31),
+            (4097, 32),
+        ):
+            with self.subTest(reduction_rows=reduction_rows, output_rows=output_rows):
+                inputs = (
+                    torch.randn(reduction_rows, output_rows, 128, device=GPU_TYPE),
+                    torch.randn(reduction_rows, output_rows, device=GPU_TYPE),
+                )
+                with config.patch({"triton.cta_uniform_outer_reduction_loads": False}):
+                    reference, native = run_and_get_kernels(
+                        torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+                    )
+                actual, narrowed = run_and_get_kernels(
+                    torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+                )
+                self.assertTrue(torch.equal(reference, actual))
+                self.assertEqual(1, len(native))
+                self.assertEqual(1, len(narrowed))
+                if reduction_rows < 4096 or output_rows == 31:
+                    self.assertEqual(native[0], narrowed[0])
+                else:
+                    self.assertNotEqual(native, narrowed)
+                    self.assertTrue(
+                        any("_cta_uniform" in kernel for kernel in narrowed)
+                    )
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.cta_uniform_outer_reduction_loads": True,
+            "triton.max_tiles": 1,
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+        }
+    )
+    def test_cta_uniform_outer_load_rejects_lane_varying_and_pointwise(self):
+        def lane_varying(value, scale):
+            return (value * scale.T[None, :, :]).sum(dim=0)
+
+        def pointwise(value, scale):
+            return value * scale[:, :, None]
+
+        value = torch.randn(4097, 32, 128, device=GPU_TYPE)
+        for fn, scale in (
+            (lane_varying, torch.randn(128, 32, device=GPU_TYPE)),
+            (pointwise, torch.randn(4097, 32, device=GPU_TYPE)),
+        ):
+            with self.subTest(fn=fn.__name__):
+                with config.patch({"triton.cta_uniform_outer_reduction_loads": False}):
+                    reference, native = run_and_get_kernels(
+                        torch.compile(fn, fullgraph=True), value, scale, remove_quote=True
+                    )
+                actual, narrowed = run_and_get_kernels(
+                    torch.compile(fn, fullgraph=True), value, scale, remove_quote=True
+                )
+                self.assertTrue(torch.equal(reference, actual))
+                self.assertEqual(native, narrowed)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.cta_uniform_outer_reduction_loads": True,
+            "triton.max_tiles": 1,
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+        }
+    )
+    def test_cta_uniform_outer_load_row_independent_and_predicated(self):
+        def row_independent(value, scale):
+            return (value * scale[None, :, None]).sum(dim=0)
+
+        def masked(value, scale, predicate):
+            return torch.where(predicate[:, :, None], value * scale[:, :, None], 0).sum(
+                dim=0
+            )
+
+        value = torch.randn(4097, 32, 128, device=GPU_TYPE)
+        inputs = (
+            (row_independent, (value, torch.randn(32, device=GPU_TYPE))),
+            (
+                masked,
+                (
+                    value,
+                    torch.randn(4097, 32, device=GPU_TYPE),
+                    torch.rand(4097, 32, device=GPU_TYPE) > 0.5,
+                ),
+            ),
+        )
+        for fn, args in inputs:
+            with self.subTest(fn=fn.__name__):
+                with config.patch({"triton.cta_uniform_outer_reduction_loads": False}):
+                    reference, native = run_and_get_kernels(
+                        torch.compile(fn, fullgraph=True), *args, remove_quote=True
+                    )
+                actual, narrowed = run_and_get_kernels(
+                    torch.compile(fn, fullgraph=True), *args, remove_quote=True
+                )
+                self.assertTrue(torch.equal(reference, actual))
+                if fn is row_independent:
+                    self.assertEqual(native, narrowed)
+                else:
+                    self.assertNotEqual(native, narrowed)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.cta_uniform_outer_reduction_loads": True,
+            "triton.max_tiles": 1,
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+        }
+    )
+    def test_cta_uniform_outer_load_dynamic_recompile_emits(self):
+        def fn(value, scale):
+            return (value * scale[:, :, None]).sum(dim=0)
+
+        for reduction_rows in (33, 4096, 4097):
+            with self.subTest(reduction_rows=reduction_rows):
+                inputs = (
+                    torch.randn(reduction_rows, 32, 128, device=GPU_TYPE),
+                    torch.randn(reduction_rows, 32, device=GPU_TYPE),
+                )
+                torch._dynamo.mark_dynamic(inputs[0], 0)
+                torch._dynamo.mark_dynamic(inputs[1], 0)
+                with config.patch({"triton.cta_uniform_outer_reduction_loads": False}):
+                    reference, native = run_and_get_kernels(
+                        torch.compile(fn, fullgraph=True),
+                        *inputs,
+                        remove_quote=True,
+                    )
+                actual, narrowed = run_and_get_kernels(
+                    torch.compile(fn, fullgraph=True),
+                    *inputs,
+                    remove_quote=True,
+                )
+                self.assertTrue(torch.equal(reference, actual))
+                if reduction_rows < 4096:
+                    self.assertEqual(native, narrowed)
+                else:
+                    self.assertNotEqual(native, narrowed)
+                    self.assertTrue(any("_cta_uniform" in code for code in narrowed))
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.cta_uniform_outer_reduction_loads": True,
+            "triton.max_tiles": 1,
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+        }
+    )
+    def test_cta_uniform_outer_load_unproved_divisor_stays_native(self):
+        def fn(value, scale):
+            return (value * scale[:, :, None]).sum(dim=0)
+
+        inputs = (
+            torch.randn(4097, 32, 128, device=GPU_TYPE),
+            torch.randn(4097, 32, device=GPU_TYPE),
+        )
+        with config.patch({"triton.cta_uniform_outer_reduction_loads": False}):
+            reference, native = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True, dynamic=True),
+                *inputs,
+                remove_quote=True,
+            )
+        actual, narrowed = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True, dynamic=True),
+            *inputs,
+            remove_quote=True,
+        )
+        self.assertTrue(torch.equal(reference, actual))
+        self.assertEqual(native, narrowed)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.cta_uniform_outer_reduction_loads": True,
+            "triton.max_tiles": 2,
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+        }
+    )
+    def test_cta_uniform_outer_load_requires_single_tile(self):
+        def fn(value, scale):
+            return (value * scale[:, :, None]).sum(dim=0)
+
+        inputs = (
+            torch.randn(4097, 32, 128, device=GPU_TYPE),
+            torch.randn(4097, 32, device=GPU_TYPE),
+        )
+        with config.patch({"triton.cta_uniform_outer_reduction_loads": False}):
+            reference, native = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+            )
+        actual, narrowed = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
+
+        self.assertTrue(torch.equal(reference, actual))
+        self.assertEqual(native, narrowed)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @parametrize("persistent_reductions", [False, True])
     def test_reduction_invariant_masked_index_load(self, persistent_reductions):
         def fn(index, source0, source1, value0, value1):

@@ -178,6 +178,17 @@ schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
+_CTA_UNIFORM_OUTER_REDUCTION_MIN_NUMEL = 4096
+
+
+class _SkipEmptyDelayReplaceLine(DelayReplaceLine):
+    def __call__(self) -> str | None:
+        replacement = self.value_fn()
+        return self.line.replace(self.key, replacement) if replacement else None
+
+    def _new_line(self, line: str) -> _SkipEmptyDelayReplaceLine:
+        return _SkipEmptyDelayReplaceLine(self.key, self.value_fn, line)
+
 
 def get_triton_reduction_function(reduction_type):
     use_helper = reduction_type in ("any", "max", "min", "prod", "fmax")
@@ -404,6 +415,7 @@ class IndexingOptions:
     index: sympy.Expr
     expand_shape: Sequence[int | str] | None
     reduction_axes_omitted: bool = False
+    cta_uniform_broadcast_shape: BlockShapeType = None
 
     def has_mask(self) -> bool:
         return bool(self.mask_vars)
@@ -3724,6 +3736,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._device_tma_buffers: OrderedSet[str] = OrderedSet()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
+        self._cta_uniform_index_aliases: dict[
+            IterationRangesEntry, sympy.Symbol
+        ] = {}
         self._pdl_load_index = 0
         self._pdl_has_wait = False
         self.op_trace: list[TritonOpTraceEntry] = []
@@ -4289,6 +4304,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
         allow_reduction_invariant_indexing=False,
+        allow_cta_uniform_indexing=False,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store().
@@ -4643,6 +4659,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             options = match_block_expr()
             if options is not None:
                 return options
+
         expand_str = None
         expand_shape: BlockShapeType = None
         index_str = self.index_to_str(index)
@@ -4794,6 +4811,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self.filter_masks(mask_vars)
 
+        cta_uniform_broadcast_shape: BlockShapeType = None
+        if allow_cta_uniform_indexing:
+            original_index = index
+            projected_index = self._cta_uniform_index(index, mask_vars)
+            if projected_index != index:
+                index = projected_index
+                index_str = self.index_to_str(index)
+                if self._cta_uniform_projection_drops_dimension(index):
+                    cta_uniform_broadcast_shape = TritonSymbols.get_block_shape(
+                        original_index
+                    )
+
         return IndexingOptions(
             index_str,
             mask_vars,
@@ -4802,6 +4831,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             index,
             expand_shape=expand_shape,
             reduction_axes_omitted=reduction_axes_omitted,
+            cta_uniform_broadcast_shape=cta_uniform_broadcast_shape,
         )
 
     def codegen_block_ptr(
@@ -5082,6 +5112,154 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             result_shape = get_broadcasted_shape(result_shape, tuple(mask_shape))
 
         return result_shape
+
+    @staticmethod
+    def _cta_uniform_floor_div_rewrite(
+        entry: IterationRangesEntry,
+    ) -> tuple[sympy.Expr, sympy.Integer] | None:
+        expr = entry.expr
+        if not isinstance(expr, FloorDiv):
+            return None
+        dividend, divisor = expr.args
+        if (
+            dividend != entry.root.index_sym()
+            or not isinstance(divisor, sympy.Integer)
+            or divisor <= 0
+        ):
+            return None
+        return FloorDiv(entry.root.block_offset(), divisor), divisor
+
+    def _cta_uniform_alias_rewrite(
+        self, entry: IterationRangesEntry
+    ) -> tuple[sympy.Expr, sympy.Integer] | None:
+        rewrite = self._cta_uniform_floor_div_rewrite(entry)
+        root = entry.root
+        if (
+            rewrite is None
+            or entry.is_reduction
+            or root.is_loop
+            or root.grid_dim is None
+            or root.tensor_dim is None
+            or self.mix_order_reduction
+            or self.is_combo_kernel
+        ):
+            return None
+        return rewrite
+
+    def _cta_uniform_index(
+        self,
+        index: sympy.Expr,
+        mask_vars: OrderedSet[str],
+    ) -> sympy.Expr:
+        """Project eligible load coordinates to a CTA-uniform alias.
+
+        For ``index = offset + lane``, ``index // divisor`` equals
+        ``offset // divisor`` whenever ``XBLOCK`` divides ``divisor``. The
+        original coordinate remains the constexpr fallback.
+        """
+        if (
+            not config.triton.cta_uniform_outer_reduction_loads
+            or config.triton.max_tiles != 1
+        ):
+            return index
+
+        if (
+            not self.inside_reduction
+            or self.persistent_reduction
+            or self._get_grid_type() is not triton_heuristics.Grid1D
+            or V.graph.sizevars.optimization_hint(
+                self.features.reduction_numel,
+                fallback=_CTA_UNIFORM_OUTER_REDUCTION_MIN_NUMEL - 1,
+            )
+            < _CTA_UNIFORM_OUTER_REDUCTION_MIN_NUMEL
+        ):
+            return index
+
+        mask_shape = self._broadcast_shape_with_masks(
+            ("1",) * self.triton_tensor_ndim(), mask_vars
+        )
+        if mask_shape is None and not self.inside_reduction:
+            return index
+
+        replacements: dict[sympy.Symbol, sympy.Symbol] = {}
+        for symbol in sorted(index.free_symbols, key=str):
+            entry = self.range_tree_nodes.get(symbol)
+            if not isinstance(entry, IterationRangesEntry):
+                continue
+            rewrite = self._cta_uniform_alias_rewrite(entry)
+            root = entry.root
+            dim = root.tensor_dim
+            retains_lane = self.inside_reduction and any(
+                other_symbol != symbol
+                and isinstance(
+                    (other_entry := self.range_tree_nodes.get(other_symbol)),
+                    IterationRangesEntry,
+                )
+                and other_entry.root is root
+                and other_entry.expr != entry.expr
+                for other_symbol in index.free_symbols
+            )
+            scalar_reduction_load = (
+                self.inside_reduction
+                and not retains_lane
+                and index.coeff(symbol) == 1
+                and any(
+                    isinstance(
+                        (other_entry := self.range_tree_nodes.get(other_symbol)),
+                        IterationRangesEntry,
+                    )
+                    and other_entry.is_reduction
+                    for other_symbol in index.free_symbols
+                    if other_symbol != symbol
+                )
+            )
+            if not scalar_reduction_load:
+                continue
+            if (
+                rewrite is None
+                or dim is None
+                or not isinstance(dim, int)
+                or not 0 <= dim < self.triton_tensor_ndim()
+                or (not retains_lane and not self._has_constant_mask(root))
+                or (
+                    self.inside_reduction
+                    and not (retains_lane or scalar_reduction_load)
+                )
+                or (
+                    not retains_lane
+                    and (mask_shape is None or str(mask_shape[dim]) != "1")
+                )
+            ):
+                continue
+
+            alias_symbol = self._cta_uniform_index_aliases.get(entry)
+            if alias_symbol is None:
+                alias = f"{entry.name}_cta_uniform"
+                alias_symbol = sympy.Symbol(alias, integer=True)
+                self._cta_uniform_index_aliases[entry] = alias_symbol
+                self.range_tree_nodes[alias_symbol] = entry
+            replacements[symbol] = alias_symbol
+
+        if not replacements:
+            return index
+        return sympy_subs(index, replacements)
+
+    def _cta_uniform_projection_drops_dimension(self, index: sympy.Expr) -> bool:
+        alias_symbols = OrderedSet(self._cta_uniform_index_aliases.values())
+        for entry, alias_symbol in self._cta_uniform_index_aliases.items():
+            if alias_symbol not in index.free_symbols:
+                continue
+            if not any(
+                symbol not in alias_symbols
+                and isinstance(
+                    (other_entry := self.range_tree_nodes.get(symbol)),
+                    IterationRangesEntry,
+                )
+                and other_entry.root is entry.root
+                for symbol in index.free_symbols
+            ):
+                return True
+        return False
 
     def _reduction_invariant_indexing_shape(
         self,
@@ -5508,6 +5686,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             block_ptr=True,
             tma_compatibility_checker=tma_checker,
             allow_reduction_invariant_indexing=True,
+            allow_cta_uniform_indexing=True,
         )
 
         if isinstance(indexing, IndexingOptions):
@@ -5637,6 +5816,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else:
                     shape = TritonSymbols.get_block_shape(indexing.index)
 
+                if indexing.cta_uniform_broadcast_shape:
+                    append_broadcast = "[" + ", ".join(
+                        map(str, indexing.cta_uniform_broadcast_shape)
+                    ) + "]"
+
             if (
                 dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
@@ -5679,7 +5863,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             line = f"tl.broadcast_to({bcast_operand}, {append_broadcast})"
             result_var = self.cse.generate(
-                load_buffer, line, dtype=dtype, shape=indexing.expand_shape
+                load_buffer,
+                line,
+                dtype=dtype,
+                shape=(
+                    indexing.cta_uniform_broadcast_shape or indexing.expand_shape
+                ),
             )
             if indexing.mask_vars:
                 if dtype.is_floating_point:
@@ -8760,10 +8949,43 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # mix order reduction introduces an extra loop across the x
         # dimension
         if entry.root.is_loop or (self.mix_order_reduction and entry.prefix == "x"):
-            self.indexing_code.writeline(line)
+            code = self.indexing_code
         else:
             # lift non-reduction stores outside loop
-            self.body.writeline(line)
+            code = self.body
+        code.writeline(line)
+        self._codegen_cta_uniform_index_alias(entry, code)
+
+    def _codegen_cta_uniform_index_alias(self, entry, code) -> None:
+        if not config.triton.cta_uniform_outer_reduction_loads:
+            return
+        rewrite = self._cta_uniform_alias_rewrite(entry)
+        if rewrite is None:
+            return
+
+        scalar_expr, divisor = rewrite
+        root = entry.root
+        alias = f"{entry.name}_cta_uniform"
+        block = root.block_size_str()
+
+        def deferred(line: str) -> DelayReplaceLine:
+            key = f"<CTA_UNIFORM_{entry.name}>"
+            return _SkipEmptyDelayReplaceLine(
+                key,
+                lambda: line if entry in self._cta_uniform_index_aliases else "",
+                key,
+            )
+
+        code.writeline(deferred(f"if {divisor} % {block} == 0:"))
+        with code.indent():
+            code.writeline(
+                deferred(
+                    f"{alias} = {self.kexpr(self.rename_indexing(scalar_expr))}"
+                )
+            )
+        code.writeline(deferred("else:"))
+        with code.indent():
+            code.writeline(deferred(f"{alias} = {entry.name}"))
 
     def iteration_ranges_ranges_code(self, entry: IterationRangesRoot) -> str:
         if entry.tensor_dim is None:
