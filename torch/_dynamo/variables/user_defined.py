@@ -3743,12 +3743,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or hasattr(type(descriptor), "__delete__")
         ):
             if self.cls_source is not None and is_constant_source(self.cls_source):
-                # Constant sources cannot guard a changed MRO or descriptor between calls.
                 unimplemented(
                     gb_type="Descriptor mutation on a constant-source object",
                     context=f"name={name_str}, class_source={self.cls_source.name}",
-                    explanation="Dynamo cannot guard the class metadata used to resolve "
-                    "a descriptor mutation on an object returned by a constant-result function.",
+                    explanation="Dynamo does not track descriptor mutations on an object "
+                    "returned by a constant-result function.",
                     hints=[
                         "Pass the object as an input instead of returning it from a function "
                         "marked with `torch._dynamo.assume_constant_result`.",
@@ -5854,12 +5853,7 @@ class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable)
             if init_args:
                 arg = init_args[0]
                 if isinstance(arg, (SetVariable, ConstDictVariable)):
-                    storage = (
-                        arg.materialize_keys()
-                        if isinstance(arg, ConstDictVariable)
-                        else arg.items
-                    )
-                    items = list(storage)
+                    items = list(arg.materialize_keys())
                 else:
                     items = unpack_iterable(tx, arg)
             else:
