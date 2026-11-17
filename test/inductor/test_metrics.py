@@ -9,7 +9,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
 )
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils._triton import has_triton
 
 
@@ -55,37 +54,43 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tmp5 = tmp4 + tmp2
     tl.debug_barrier()
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
-""".replace("GPU_TYPE", GPU_TYPE)
+"""
 
 
-class TestMetricsGeneric(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def test_parse_proper_kernel_fn_code(self):
-        proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
-        if not proper_kernel_fn_code.startswith("def "):
-            raise AssertionError
-
-    def test_count_args(self):
-        proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
-        self.assertEqual(6, metrics._count_args(proper_kernel_fn_code))
-
-    def test_count_pattern(self):
-        proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
-        self.assertEqual(2, metrics._count_pattern(proper_kernel_fn_code, "tl.load"))
-        self.assertEqual(1, metrics._count_pattern(proper_kernel_fn_code, "tl.store"))
-        self.assertEqual(1, metrics._count_pattern(proper_kernel_fn_code, "for "))
-
-    def test_parse_reduction_hint(self):
-        kernel_category = get_kernel_category_by_source_code(example_kernel)
-        self.assertEqual("reduction", kernel_category)
-        self.assertEqual(
-            "INNER", metrics._parse_reduction_hint(kernel_category, example_kernel)
-        )
+def get_new_kernel(device):
+    device_type = torch.device(device).type
+    new_kernel = example_kernel.replace("GPU_TYPE", device_type)
+    return new_kernel
 
 
 class TestMetrics(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_parse_proper_kernel_fn_code(self, device):
+        new_kernel = get_new_kernel(device)
+        proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(new_kernel)
+        if not proper_kernel_fn_code.startswith("def "):
+            raise AssertionError
+
+    def test_count_args(self, device):
+        new_kernel = get_new_kernel(device)
+        proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(new_kernel)
+        self.assertEqual(6, metrics._count_args(proper_kernel_fn_code))
+
+    def test_count_pattern(self, device):
+        new_kernel = get_new_kernel(device)
+        proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(new_kernel)
+        self.assertEqual(2, metrics._count_pattern(proper_kernel_fn_code, "tl.load"))
+        self.assertEqual(1, metrics._count_pattern(proper_kernel_fn_code, "tl.store"))
+        self.assertEqual(1, metrics._count_pattern(proper_kernel_fn_code, "for "))
+
+    def test_parse_reduction_hint(self, device):
+        new_kernel = get_new_kernel(device)
+        kernel_category = get_kernel_category_by_source_code(new_kernel)
+        self.assertEqual("reduction", kernel_category)
+        self.assertEqual(
+            "INNER", metrics._parse_reduction_hint(kernel_category, new_kernel)
+        )
 
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("partitioned_scatter_enabled", False)
