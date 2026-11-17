@@ -4,7 +4,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast
+from typing import Any, cast, Protocol
 
 import sympy
 from sympy import Expr
@@ -35,7 +35,7 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
 from . import config
 from .runtime.runtime_utils import is_power_of_2
@@ -53,6 +53,15 @@ log = logging.getLogger(__name__)
 
 
 Width = int | IntInfinity
+
+
+class SimplifyWithRanges(Protocol):
+    def __call__(
+        self,
+        expr: Expr,
+        var_ranges: VarRanges,
+        extra_axioms: tuple[sympy.Expr, ...] = (),
+    ) -> Expr: ...
 
 
 _RANGE_BOUND_OPS = (
@@ -322,26 +331,30 @@ class SizeVarAllocator:
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
 
-    def make_simplify_with_ranges_cache(self) -> Callable[[Expr, VarRanges], Expr]:
+    def make_simplify_with_ranges_cache(self) -> SimplifyWithRanges:
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
         cache: dict[tuple[Any, ...], Expr] = {}
         replacement_count = len(self.replacements)
 
-        def simplify_with_ranges(expr: Expr, var_ranges: VarRanges) -> Expr:
+        def simplify_with_ranges(
+            expr: Expr,
+            var_ranges: VarRanges,
+            extra_axioms: tuple[sympy.Expr, ...] = (),
+        ) -> Expr:
             nonlocal replacement_count
             if replacement_count != len(self.replacements):
                 # new replacements invalidates cached results
                 cache.clear()
                 replacement_count = len(self.replacements)
-            key = (expr, *var_ranges.items())
+            key = (expr, *var_ranges.items(), extra_axioms)
             result = cache.get(key)
             if result is None:
-                result = self._simplify_with_ranges(expr, var_ranges)
+                result = self._simplify_with_ranges(expr, var_ranges, extra_axioms)
                 cache[key] = result
                 if result != expr:
-                    cache[(result, *var_ranges.items())] = result
+                    cache[(result, *var_ranges.items(), extra_axioms)] = result
             return result
 
         return simplify_with_ranges
@@ -368,7 +381,12 @@ class SizeVarAllocator:
 
         return simplify_loops
 
-    def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges) -> Expr:
+    def _simplify_with_ranges(
+        self,
+        expr: Expr,
+        var_ranges: VarRanges,
+        extra_axioms: tuple[sympy.Expr, ...] = (),
+    ) -> Expr:
         """
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
@@ -399,7 +417,7 @@ class SizeVarAllocator:
         for var, upper_bound in var_ranges.items():
             axioms.append(0 <= var)
             axioms.append(var < upper_bound)
-        axioms = tuple(axioms) + self.shape_env.get_axioms()
+        axioms = tuple(axioms) + self.shape_env.get_axioms() + extra_axioms
 
         def statically_known(expr):
             evaluated = self.shape_env._maybe_evaluate_static(
@@ -410,9 +428,26 @@ class SizeVarAllocator:
             )
             return bool(evaluated)
 
+        def statically_known_nonnegative(expr):
+            if statically_known(expr >= 0):
+                return True
+            # Keep the default path bit-identical. Mask-aware simplification
+            # may use value ranges when ShapeEnv cannot prove nonnegativity.
+            if not extra_axioms:
+                return False
+            try:
+                lower = bound_sympy(expr, var_to_range).lower
+            except (
+                NotImplementedError,
+                TypeError,
+                ValueError,
+            ):
+                return False
+            return sympy.Ge(lower, 0) is sympy.true
+
         def remove_zero_terms(base, divisor):
             """Symbols smaller than the divisor are zero"""
-            if not statically_known(base >= 0):
+            if not statically_known_nonnegative(base):
                 return base
 
             for v in base.free_symbols:
@@ -427,7 +462,7 @@ class SizeVarAllocator:
 
         def visit_indexing_div(base, divisor):
             base = remove_zero_terms(base, divisor)
-            if statically_known(base >= 0) and statically_known(base < divisor):
+            if statically_known_nonnegative(base) and statically_known(base < divisor):
                 return sympy.S.Zero
             # FloorDiv(ModularIndexing(b, d1, m), d2) = ModularIndexing(b, d1*d2, m//d2)
             if isinstance(base, ModularIndexing) and isinstance(divisor, sympy.Integer):
@@ -437,6 +472,14 @@ class SizeVarAllocator:
             return FloorDiv(base, divisor)
 
         def visit_modular_indexing(base, divisor, modulus):
+            can_remove_mod_with_axioms = (
+                bool(extra_axioms)
+                and statically_known_nonnegative(base)
+                and statically_known(base < modulus * divisor)
+            )
+            if can_remove_mod_with_axioms:
+                return FloorDiv(base, divisor)
+
             base = remove_zero_terms(base, divisor)
 
             if isinstance(base, ModularIndexing):
@@ -449,12 +492,12 @@ class SizeVarAllocator:
                 ) and self.statically_known_multiple_of(inner_modulus, period):
                     return ModularIndexing(inner_base, inner_divisor * divisor, modulus)
 
-            can_remove_mod = statically_known(base >= 0) and statically_known(
+            can_remove_mod = statically_known_nonnegative(base) and statically_known(
                 base < modulus * divisor
             )
-
             if can_remove_mod:
                 return FloorDiv(base, divisor)
+
             return ModularIndexing(base, divisor, modulus)
 
         if expr.has(ModularIndexing):
@@ -477,7 +520,7 @@ class SizeVarAllocator:
             )
 
         if expr != original_expr:
-            return self._simplify_with_ranges(expr, var_ranges)
+            return self._simplify_with_ranges(expr, var_ranges, extra_axioms)
         return expr
 
     def _simplify_loops_impl(

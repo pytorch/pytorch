@@ -1263,6 +1263,10 @@ class TritonCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
+        # Symbolic index represented by this value, when casts preserve it.
+        self.index_expr: sympy.Expr | None = None
+        # Conjunction of facts that holds on every lane where this mask is true.
+        self.mask_axioms: tuple[sympy.Expr, ...] = ()
         # Whether this value is zero when the compile-time autotune block runs the
         # kernel (see TritonKernel.load).
         self.zero_in_autotune_block = False
@@ -1291,6 +1295,48 @@ class TritonCSEVariable(CSEVariable):
                     )
                 ) is not None:
                     self.mask_vars.add(mask_name)
+
+        if not config.triton.mask_aware_index_simplification:
+            return
+
+        if name in ("and_", "logical_and"):
+            self.mask_axioms = tuple(
+                axiom
+                for arg in args
+                if isinstance(arg, TritonCSEVariable)
+                for axiom in arg.mask_axioms
+            )
+            return
+
+        relations = {
+            "lt": sympy.Lt,
+            "le": sympy.Le,
+            "gt": sympy.Gt,
+            "ge": sympy.Ge,
+        }
+        relation = relations.get(name)
+        if relation is None or len(args) != 2:
+            return
+
+        def as_index_expr(arg: Any) -> sympy.Expr | None:
+            if isinstance(arg, TritonCSEVariable):
+                if arg.dtype not in (torch.int32, torch.int64):
+                    return None
+                return arg.index_expr
+            if isinstance(arg, int | sympy.Integer):
+                return sympy.Integer(arg)
+            if isinstance(arg, sympy.Expr):
+                if arg.is_integer is not True:
+                    return None
+                return arg
+            return None
+
+        lhs = as_index_expr(args[0])
+        rhs = as_index_expr(args[1])
+        if lhs is not None and rhs is not None:
+            axiom = relation(lhs, rhs)
+            if axiom is not sympy.true:
+                self.mask_axioms = (axiom,)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2593,6 +2639,8 @@ class TritonKernelOverrides(TritonOverrides):
         )
 
         var.mask_vars = indexing.mask_vars
+        if config.triton.mask_aware_index_simplification:
+            var.index_expr = indexing.index
         return var
 
     @classmethod
@@ -2611,23 +2659,49 @@ class TritonKernelOverrides(TritonOverrides):
         finally:
             V.kernel._index_dtype = real_index_dtype
         if real_index_dtype != dtype or var.dtype != dtype:
-            var = V.kernel.cse.generate(
+            converted = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
                 dtype=dtype,
                 shape=var.shape,
             )
+            if config.triton.mask_aware_index_simplification:
+                converted.index_expr = var.index_expr
+            var = converted
+        if (
+            config.triton.mask_aware_index_simplification
+            and dtype == torch.int32
+            and real_index_dtype == torch.int64
+            and not (
+                V.graph.sizevars.statically_known_geq(
+                    expr, torch.iinfo(torch.int32).min
+                )
+                and V.graph.sizevars.statically_known_leq(
+                    expr, torch.iinfo(torch.int32).max
+                )
+            )
+        ):
+            # Preserve a symbolic index through int64-to-int32 narrowing only
+            # when the cast is statically lossless.
+            var.index_expr = None
         return var
 
     @staticmethod
     def masked(mask, body, other):
         if mask is not None and torch.version.hip is not None:
+            original_mask = mask
             mask = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"{mask}.to(tl.int1)",
                 dtype=torch.bool,
                 shape=mask.shape,
             )
+            if (
+                config.triton.mask_aware_index_simplification
+                and isinstance(original_mask, TritonCSEVariable)
+                and isinstance(mask, TritonCSEVariable)
+            ):
+                mask.mask_axioms = original_mask.mask_axioms
 
         nodes = body.graph.find_nodes(op="output")
         if not nodes:
@@ -5363,6 +5437,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             PartialAccumulate(name, reduction_type, val)
         )
 
+    @staticmethod
+    def _simplify_index_with_mask_axioms(
+        sizevars,
+        index: sympy.Expr,
+        var_ranges,
+        mask_axioms: tuple[sympy.Expr, ...],
+    ) -> sympy.Expr:
+        if not mask_axioms or sympy.false in mask_axioms:
+            return index
+        simplified_index = sizevars.simplify_with_ranges(
+            index, var_ranges, mask_axioms
+        )
+        # A constant derived from a mask is valid only on masked lanes. Keep
+        # the original expression out of the unmasked constant-load path.
+        if is_sympy_integer_like(simplified_index):
+            return index
+        return simplified_index
+
     def load(self, name: str, index: sympy.Expr):
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
@@ -5371,6 +5463,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         load_counts = self._load_counts
         load_counts[name] += 1
         make_line: Callable[[str], str | DelayReplaceLine] = identity
+        if (
+            config.triton.mask_aware_index_simplification
+            and isinstance(self._load_mask, TritonCSEVariable)
+            and self._load_mask.mask_axioms
+        ):
+            index = self._simplify_index_with_mask_axioms(
+                V.graph.sizevars,
+                index,
+                self.var_ranges(),
+                self._load_mask.mask_axioms,
+            )
+
         # Align a flat epilogue load with split coordinates already used in the body.
         index = self._reuse_load_index_basis(name, index)
         indirect_indexing = self.is_indirect_indexing(index)
