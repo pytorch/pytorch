@@ -2908,6 +2908,60 @@ except RuntimeError as e:
 
         self.assertEqual(collated, [torch.tensor([0, 0]), torch.tensor([1, 1])])
 
+    def test_default_convert_counter_no_accumulation(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/205236
+        # default_convert must not accumulate Counter values via .update()
+        import collections
+
+        data = collections.Counter(a=1, b=5)
+        converted = dataloader.default_convert(data)
+
+        self.assertIsInstance(converted, collections.Counter)
+        self.assertEqual(converted, collections.Counter(a=1, b=5))
+
+    def test_default_collate_counter_no_accumulation(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/205236
+        # default_collate must not accumulate Counter values via .update()
+        import collections
+
+        batch = [collections.Counter(a=1, b=2), collections.Counter(a=3, b=4)]
+        collated = dataloader.default_collate(batch)
+
+        self.assertIsInstance(collated, collections.Counter)
+        self.assertTrue(torch.equal(collated["a"], torch.tensor([1, 3])))
+        self.assertTrue(torch.equal(collated["b"], torch.tensor([2, 4])))
+
+    def test_default_collate_dict_still_works(self):
+        # Ensure plain dict, OrderedDict, and defaultdict are unaffected
+        import collections
+
+        # dict
+        batch_dict = [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+        collated_dict = dataloader.default_collate(batch_dict)
+        self.assertTrue(torch.equal(collated_dict["x"], torch.tensor([1, 3])))
+        self.assertTrue(torch.equal(collated_dict["y"], torch.tensor([2, 4])))
+
+        # OrderedDict
+        batch_od = [
+            collections.OrderedDict([("x", 1)]),
+            collections.OrderedDict([("x", 2)]),
+        ]
+        collated_od = dataloader.default_collate(batch_od)
+        self.assertIsInstance(collated_od, collections.OrderedDict)
+        self.assertTrue(torch.equal(collated_od["x"], torch.tensor([1, 2])))
+
+        # defaultdict
+        def int_factory():
+            return 0
+
+        batch_dd = [
+            collections.defaultdict(int_factory, {"x": 1}),
+            collections.defaultdict(int_factory, {"x": 2}),
+        ]
+        collated_dd = dataloader.default_collate(batch_dd)
+        self.assertIsInstance(collated_dd, collections.defaultdict)
+        self.assertTrue(torch.equal(collated_dd["x"], torch.tensor([1, 2])))
+
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_bad_numpy_types(self):
         import numpy as np

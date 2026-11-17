@@ -75,7 +75,8 @@ def default_convert(data):
                 # use `type(data)(...)` to create the new mapping.
                 # Create a clone and update it if the mapping type is mutable.
                 clone = copy.copy(data)
-                clone.update({key: default_convert(data[key]) for key in data})
+                for key in data:
+                    clone[key] = default_convert(data[key])
                 return clone
             else:
                 return elem_type({key: default_convert(data[key]) for key in data})
@@ -167,14 +168,10 @@ def collate(
                 # use `type(data)(...)` to create the new mapping.
                 # Create a clone and update it if the mapping type is mutable.
                 clone = copy.copy(elem)
-                clone.update(
-                    {
-                        key: collate(
-                            [d[key] for d in batch], collate_fn_map=collate_fn_map
-                        )
-                        for key in elem
-                    }
-                )
+                for key in elem:
+                    clone[key] = collate(
+                        [d[key] for d in batch], collate_fn_map=collate_fn_map
+                    )
                 return clone
             else:
                 return elem_type(
