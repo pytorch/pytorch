@@ -1322,6 +1322,7 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
             """\
 
 
+
 def forward(self, x_a_1, x_b_1, y_1):
     mul = torch.ops.aten.mul.Tensor(x_a_1, y_1);  x_a_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(x_b_1, y_1);  x_b_1 = None
