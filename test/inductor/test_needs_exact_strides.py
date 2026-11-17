@@ -8,7 +8,6 @@ from torch._inductor.pattern_matcher import (
     register_graph_pattern,
 )
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -155,7 +154,6 @@ class TestNeedsExactStrides(InductorTestCase):
 
 instantiate_parametrized_tests(TestNeedsExactStrides)
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:

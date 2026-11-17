@@ -22,7 +22,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -289,8 +288,6 @@ class TestFullyShardCompile(FSDPTest):
         inp = torch.randn(32, 784, device=device_type)
         m(inp)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     preserves_device_selection,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
@@ -1586,8 +1585,6 @@ class TestFunctorchConfigParsingForLogging(TestCase):
         self.assertIsNone(result)
         mocked_jk.assert_called_once_with("pytorch/dynamo:log_functorch_config")
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -7,7 +7,6 @@ from torch._dynamo.utils import same
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -401,8 +400,6 @@ class AutoChunkerTest(TestCase):
         mod(x, y).backward()
         self.assertEqual(metrics.num_auto_chunking, 1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

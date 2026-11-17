@@ -2,7 +2,6 @@
 
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.export.dynamic_shapes import _DimHint, _DimHintType, Dim
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -39,8 +38,6 @@ class TestDimHint(TestCase):
         with self.assertRaises(AssertionError):
             factory(min=-1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

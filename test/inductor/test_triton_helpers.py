@@ -33,7 +33,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_dtype import floating_types
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
@@ -612,8 +611,6 @@ if HAS_GPU:
     )
     instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_GPU:

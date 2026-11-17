@@ -20,7 +20,6 @@ from common_utils import capture_codegen_source
 import torch
 import torch._dynamo
 import torch._functorch.config as functorch_config
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -536,8 +535,6 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn(".requires_grad", source)
         self.assertIn(".copy_(", source)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

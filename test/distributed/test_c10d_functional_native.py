@@ -27,7 +27,6 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_LINUX,
     run_tests,
@@ -1760,8 +1759,6 @@ class ACTCompileTest(TestCase):
         self.assertEqual(r3, elem * 2)
         self.assertEqual(cnt.frame_count, 2)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

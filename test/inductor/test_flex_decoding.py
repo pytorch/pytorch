@@ -45,7 +45,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfMIG,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._triton import has_triton_tma_device
@@ -2565,7 +2564,6 @@ if LONG_COMPILATION_ON_CPU and "TestFlexDecodingCPU" in globals():
         globals()["TestFlexDecodingCPU"]
     )
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

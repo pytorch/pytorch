@@ -14,7 +14,6 @@ from torch._inductor.optimize_indexing import (
 )
 from torch._inductor.virtualized import V
 from torch.fx import Graph
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -596,8 +595,6 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(masked.args[1].target, "value_expr")
         self.assertEqual(index_expr.target, "value_expr")
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

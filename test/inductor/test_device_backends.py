@@ -13,7 +13,6 @@ from torch._inductor.codegen.common import (
     register_backend_for_device,
 )
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class DeviceBackendInitTest(TestCase):
@@ -386,8 +385,6 @@ class DeviceBackendInitTest(TestCase):
         self.assertEqual(calls["n"], 1)
         self.assertIsNotNone(get_scheduling_for_device(self.device))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -19,7 +19,6 @@ from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class _TensorNode:
@@ -225,8 +224,6 @@ class TestAllowTf32ExtraKwargs(TestCase):
             _MutableAllowTf32Interface.enabled = False
             register_interface_for_device("cpu", previous)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

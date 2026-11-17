@@ -17,7 +17,6 @@ from torch._inductor.utils import (
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -1956,7 +1955,6 @@ instantiate_device_type_tests(
     TestDynamicPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
 instantiate_parametrized_tests(TestPatternMatcher)
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and (HAS_CPU) and torch.backends.mkldnn.is_available():

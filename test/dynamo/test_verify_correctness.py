@@ -7,7 +7,6 @@ import torch._dynamo.config as config
 import torch._dynamo.test_case
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class Seq(torch.nn.Module):
@@ -137,8 +136,6 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         r2 = opt_toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

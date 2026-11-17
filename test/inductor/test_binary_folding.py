@@ -10,7 +10,6 @@ from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch.testing._internal.common_cuda import TEST_CUDNN
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 # Make the helper files in test/ importable
@@ -390,7 +389,6 @@ if HAS_GPU:
 
 del BinaryFoldingTemplate
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

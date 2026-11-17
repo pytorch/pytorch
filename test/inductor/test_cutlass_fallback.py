@@ -12,7 +12,6 @@ from torch._inductor.select_algorithm import AlgorithmSelectorCache, ExternKerne
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_caches
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
@@ -414,8 +413,6 @@ class TestCutlassSubprocessRouting(TestCase):
 
         self.assertEqual(result, [])
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

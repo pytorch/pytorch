@@ -28,7 +28,6 @@ from torch.fx.experimental.dynamic_spec import (
     TensorSpec as T,
 )
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     add_skip_condition,
     HardwareClassification,
@@ -1592,7 +1591,6 @@ class TestContainerSpecNonStrict(_TestContainerSpecBase):
 
 
 del _TestContainerSpecBase
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

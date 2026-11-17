@@ -8,7 +8,6 @@ from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
 from torch._functorch.fx_minifier import dump_state, MinifierSanityCheckFailed
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -162,8 +161,6 @@ class TestMinifier(TestCase):
         repro = buf.getvalue()
         self.assertIn("'cuda:7'", repro)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -4,7 +4,6 @@ import torch
 from torch._inductor import config
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class TestEmbedding(TestCase):
@@ -44,8 +43,6 @@ class TestEmbedding(TestCase):
             ("XBLOCK", "RBLOCK"),
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

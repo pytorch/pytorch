@@ -5,7 +5,6 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -931,7 +930,6 @@ instantiate_device_type_tests(
     only_for="cuda",
 )
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

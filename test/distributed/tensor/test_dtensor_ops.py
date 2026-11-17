@@ -29,7 +29,6 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import (
@@ -655,7 +654,6 @@ class DTensorOpsMixin:
             else:
                 self.assertTrue("S(0)->R" in debug_mode.debug_string())
 
-    @fake_tensor_test()
     def test_embedding_error_msg(self):
         self.mesh_2d = init_device_mesh(
             DEVICE_TYPE, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
@@ -683,7 +681,6 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
-    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -692,11 +689,9 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op, sample_lock=self.__class__._op_db_sample_lock)
 
-    @fake_tensor_test()
     def test_mean(self):
         self.run_mean()
 
-    @fake_tensor_test()
     def test_one_hot(self):
         self.run_one_hot()
 
@@ -721,7 +716,6 @@ class TestLocalDTensorOps(DTensorOpsMixin, TestCase):
         except AssertionError:
             pass
 
-    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -730,12 +724,10 @@ class TestLocalDTensorOps(DTensorOpsMixin, TestCase):
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)
 
-    @fake_tensor_test()
     def test_mean(self):
         with LocalTensorMode(frozenset(range(self.world_size))):
             self.run_mean()
 
-    @fake_tensor_test()
     def test_one_hot(self):
         self.run_one_hot()
 
@@ -967,7 +959,6 @@ class TestUnbackedDTensorOps(DTensorOpsMixin, TestCase):
                     ) from e
         return rs
 
-    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -1004,7 +995,6 @@ class TestSingleDimStrategies(DTensorOpTestBase):
 
         self.skipTest(f"Op {torch_op} failed to extract aten op")
 
-    @fake_tensor_test()
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
@@ -1195,7 +1185,6 @@ class TestCompiledDTensorOps(DTensorOpsMixin, TestCase):
                         continue
                 raise
 
-    @fake_tensor_test()
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(

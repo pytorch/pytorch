@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -14442,7 +14441,6 @@ instantiate_device_type_tests(
 
 instantiate_parametrized_tests(TestControlFlowAndRNGCUDA)
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

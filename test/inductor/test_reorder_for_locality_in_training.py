@@ -13,7 +13,6 @@ import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.fx_passes import post_grad
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
@@ -160,8 +159,6 @@ class TestReorderForLocalityInTraining(TestCase):
 
 instantiate_device_type_tests(TestReorderForLocalityInTraining, globals())
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

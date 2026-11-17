@@ -19,7 +19,6 @@ from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -1081,8 +1080,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

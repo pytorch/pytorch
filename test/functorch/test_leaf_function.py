@@ -17,7 +17,6 @@ from torch._dynamo.decorators import leaf_function
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2891,8 +2890,6 @@ class TestLeafFunctionGradDtype(TestCase):
 
 instantiate_parametrized_tests(TestLeafFunctionGradDtype)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

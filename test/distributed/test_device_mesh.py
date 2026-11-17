@@ -32,7 +32,6 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -1406,7 +1405,6 @@ class TestMeshEnv(DTensorTestBase):
             all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
         )
 
-    @fake_tensor_test()
     @with_comms
     def test_mesh_slice_fake_tensor_mode(self):
         mesh_shape = (2, self.world_size // 2)

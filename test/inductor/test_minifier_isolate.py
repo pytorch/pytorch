@@ -3,7 +3,6 @@ import unittest
 
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
@@ -59,8 +58,6 @@ inner(torch.randn(2, 2).to("{device}"))
         )
         self._test_after_aot_runtime_error(GPU_TYPE, expected_error)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     import sys

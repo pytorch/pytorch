@@ -14,7 +14,6 @@ from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads, run_and_get_code
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._triton import has_triton
@@ -317,7 +316,6 @@ if (
     make_halide(test_torchinductor.SweepInputsGPUTest)
     make_halide(test_torchinductor.GPUTests)
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS and HAS_HALIDE:

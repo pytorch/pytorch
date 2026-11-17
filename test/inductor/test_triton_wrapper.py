@@ -10,7 +10,6 @@ import torch
 import torch._inductor.async_compile
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -133,8 +132,6 @@ class TestTritonWrapper(TestCase):
         )
         self.assertEqual(len(args), 4)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     if HAS_GPU:

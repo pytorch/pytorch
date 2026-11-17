@@ -5,7 +5,6 @@ import subprocess
 import sys
 
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 _TEST_SCRIPT = """\
@@ -127,8 +126,6 @@ class CodegenHeuristicsRegistryLazyImportsTest(TestCase):
             f"stderr:\n{result.stderr}",
         )
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

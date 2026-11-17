@@ -16,7 +16,6 @@ from torch._dynamo.variables.base import (
     AttributeMutationNew,
     VariableTracker,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class SideEffectReplayRegistryTests(TestCase):
@@ -93,8 +92,6 @@ class SideEffectReplayRegistryTests(TestCase):
         self.assertIsNotNone(handler)
         self.assertEqual(handler.name, "cell_mutation")
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

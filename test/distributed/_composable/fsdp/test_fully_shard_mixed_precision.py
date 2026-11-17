@@ -28,7 +28,6 @@ from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DISTRIBUTED_BACKEND,
@@ -1796,8 +1795,6 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         with self.assertRaisesRegex(ValueError, "grad_dtype=None requires"):
             model(inp).sum().backward()
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

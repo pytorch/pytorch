@@ -6,7 +6,6 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.convert_frame import fullgraph_capture
 from torch._dynamo.utils import get_metrics_context
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -155,8 +154,6 @@ __ret = __stack0""",
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()
