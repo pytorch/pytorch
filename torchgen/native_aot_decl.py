@@ -35,22 +35,34 @@ class AotDeclaration(Protocol):
     # an f target when coverage is equal; gen_aot_lib gates on shipped artifacts.
     ARCHS: tuple[str, ...]
 
-    def kernel_precompile_grid(self) -> list[dict]: ...
-    def covered_axes(self, *args: Any, **kwargs: Any) -> dict: ...
-    def cpp_dispatch(self, spec: dict) -> str: ...
-    def cpp_launch(self, spec: dict, launch_fn: str) -> str: ...
+    def kernel_precompile_grid(self) -> list[dict[str, Any]]: ...
+    def covered_axes(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
+    def cpp_dispatch(self, spec: dict[str, Any]) -> str: ...
+    def cpp_launch(self, spec: dict[str, Any], launch_fn: str) -> str: ...
+
+
+class NativeCoverage:
+    ATEN_OP: str
+
+    def covered_axes(self, *args: Any, **kwargs: Any) -> dict[str, bool]:
+        r"""Use the generated native predicate; unembedded operators stay uncovered."""
+        import torch
+
+        try:
+            predicate = getattr(
+                torch.ops._native_aot, f"covers_{decl_id_for_op(self.ATEN_OP)}"
+            )
+        except (AttributeError, RuntimeError):
+            return {"eligible": False}
+        return {"eligible": predicate(*args, **kwargs)}
 
 
 def decl_id_for_op(aten_op: str) -> str:
-    """C-identifier for an op name: overload dots become underscores
-    ("gt.Tensor" -> "gt_Tensor"). Names the DispatchStub, the generated
-    kernel fn, the artifact directory and the covers op.
-
-    One rule, one home: the runtime resolving covers_<id>, the C++
-    generator emitting its schema, and torchgen naming the stub must
-    agree exactly or the coverage fast path silently misses.
+    r"""Return the shared stub, artifact and coverage identifier for an ATen name.
+    Overload dots become underscores; an inplace suffix becomes ``_inplace``.
     """
-    return aten_op.replace(".", "_")
+    name = aten_op.replace(".", "_")
+    return name.removesuffix("_") + "_inplace" if name.endswith("_") else name
 
 
 def decl_id(d: AotDeclaration) -> str:
@@ -72,6 +84,7 @@ _OPTIONAL_FNS = {
     "cpp_dispatch_prelude": 0,
     "cpp_helpers": 0,
     "cpp_covers": 0,
+    "cpp_includes": 0,
 }
 
 # Documented device capabilities understood by selection and generated routing.
