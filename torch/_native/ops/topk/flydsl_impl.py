@@ -10,12 +10,14 @@ Two kernels, picked by (K, N) - see ``flydsl_kernels.py``:
   * radix: (K, N) in a row of ``_RADIX_GATE_RANGES``, K padded up to a
     power of 2 for the bitonic network. Deterministic mode gathers threshold
     ties in input order; default mode uses atomics, so selected tied indices
-    can vary across runs. ATen index parity is not guaranteed for
-    ``64 <= K <= 128``: ATen treats ``-0 == +0`` and preserves their index
-    order, while FlyDSL ranks ``+0`` above ``-0``. Both ATen and FlyDSL map
-    every NaN, either sign, to one maximum ordinal, so NaNs sort above
-    ``+inf``. That collapse is not injective, so which NaN's payload and
-    index are returned can differ.
+    can vary across runs. ATen index parity is not guaranteed for two current
+    implementation-specific cases: for ``64 <= K <= 128``, ATen treats
+    ``-0 == +0`` and preserves their index order, while FlyDSL ranks ``+0``
+    above ``-0``; for ``129 <= K <= 1024``, ATen can place negative-sign NaNs
+    differently, while FlyDSL collapses every NaN to one ordinal. NaN payload
+    and index choices can therefore differ as well. In that range the NaN
+    positions in ``values`` also differ: ATen's follow-up sort places a
+    sign-set NaN after ``-inf``, while FlyDSL places every NaN above ``+inf``.
 
 ``_cond`` also requires a supported dtype on ``_SUPPORTED_ARCHES``, sorted
 output, a contiguous last-axis reduction, enough rows for the kernel/dtype
