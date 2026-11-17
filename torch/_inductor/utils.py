@@ -58,6 +58,11 @@ import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+from torch._inductor.runtime.tiling import (
+    get_axis_prefix,
+    is_reduction_prefix,
+    is_z_prefix,
+)
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -1687,11 +1692,12 @@ def get_bounds_index_expr(index: sympy.Expr) -> ValueRanges[Any]:
 
 
 def prefix_is_reduction(prefix: str) -> bool:
-    return prefix[0] == "r"
+    return is_reduction_prefix(get_axis_prefix(prefix) or "")
 
 
 def prefix_is_pointwise(prefix: str) -> bool:
-    return prefix[0] in ("x", "y", "z")
+    axis = get_axis_prefix(prefix)
+    return axis in ("x", "y") or is_z_prefix(axis or "")
 
 
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
