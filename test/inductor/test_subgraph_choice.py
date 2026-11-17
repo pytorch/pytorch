@@ -262,8 +262,11 @@ class TestSubgraphChoice(TestCase):
         one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
         two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
 
+        # Geometry only: the per-split K bound is covered separately below.
         def splits(m, n, k, partial_config):
-            return get_blackwell_decompose_k_splits(m, n, k, 148, partial_config)
+            return get_blackwell_decompose_k_splits(
+                m, n, k, 148, partial_config, max_k_per_split=0
+            )
 
         production_ks = (
             10_879_109,
@@ -285,6 +288,32 @@ class TestSubgraphChoice(TestCase):
         self.assertEqual(splits(256, 424, 973_248, two_cta_wide), [37, 74])
         self.assertEqual(splits(256, 128, 8_193, one_cta), [])
         self.assertEqual(splits(128, 424, 11_047_127, two_cta_wide), [])
+
+    def test_blackwell_split_candidates_bound_k_per_split(self):
+        # The tile-wave generator never calls get_k_splits, so it applies
+        # decompose_k_max_k_per_split itself. g027-like shape: unbounded, split
+        # 10 gives 27456-long fp32 partial accumulations.
+        one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
+        two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
+
+        def k_parts(k, ks, partial_config):
+            block_k = partial_config.block_k
+            return [math.ceil(math.ceil(k / s) / block_k) * block_k for s in ks]
+
+        with config.patch({"triton.decompose_k_max_k_per_split": 16384}):
+            ks = get_blackwell_decompose_k_splits(512, 896, 274_456, 148, two_cta_wide)
+            self.assertEqual(ks, [17, 19])
+            self.assertTrue(all(p <= 16384 for p in k_parts(274_456, ks, two_cta_wide)))
+            # A K so long that every wave-sized split exceeds the bound starts
+            # the search at the smallest split that fits it.
+            ks = get_blackwell_decompose_k_splits(256, 128, 11_047_127, 148, one_cta)
+            self.assertEqual(ks, [675])
+            self.assertEqual(k_parts(11_047_127, ks, one_cta), [16384])
+        with config.patch({"triton.decompose_k_max_k_per_split": 0}):
+            self.assertEqual(
+                get_blackwell_decompose_k_splits(512, 896, 274_456, 148, two_cta_wide),
+                [10, 19],
+            )
 
     @unittest.skipUnless(
         has_datacenter_blackwell_tma_device(),
