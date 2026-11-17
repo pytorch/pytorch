@@ -2233,8 +2233,8 @@ class NCCLLazyP2PInitializationTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl-lazy"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property

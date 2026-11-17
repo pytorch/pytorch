@@ -463,8 +463,8 @@ class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTes
     def backend_str(cls):
         return "gloo"
 
-    @classmethod
-    def device_type(cls):
+    @property
+    def _device_type(self) -> str:
         return "cpu"
 
     @property

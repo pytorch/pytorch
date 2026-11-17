@@ -32,7 +32,7 @@ class DTensorContinuousTestBaseTest(TestCase):
                     patch.object(common_dtensor, "DEVICE_COUNT", count, create=True),
                 ):
                     expected = "cpu" if count < Fixture.world_size else "cuda"
-                    self.assertEqual(Fixture().device_type, expected)
+                    self.assertEqual(Fixture()._device_type, expected)
                     self.assertEqual(
                         Fixture.backend_str(), "gloo" if expected == "cpu" else "nccl"
                     )
@@ -71,7 +71,7 @@ class DTensorTestBaseUtilCPUTest(DTensorTestBase):
         return "gloo"
 
     @property
-    def device_type(self) -> str:
+    def _device_type(self) -> str:
         return "cpu"
 
     @property
@@ -85,7 +85,7 @@ class DTensorTestBaseUtilCPUTest(DTensorTestBase):
 
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(
-            self.device_type,
+            self._device_type,
             mesh_shape=tuple(self.mesh_dim_sizes.values()),
             mesh_dim_names=tuple(self.mesh_dim_sizes.keys()),
         )

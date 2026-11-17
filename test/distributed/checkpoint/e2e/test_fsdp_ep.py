@@ -67,16 +67,16 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(8)
     @with_temp_dir
     def test_e2e(self):
-        model = TopModel(self.rank).to(self.device_type)
+        model = TopModel(self.rank).to(self._device_type)
 
         mesh_fsdp_tp = init_device_mesh(
-            self.device_type, (2, 4), mesh_dim_names=("dp", "tp")
+            self._device_type, (2, 4), mesh_dim_names=("dp", "tp")
         )
         # TODO: we are using an internal API atm. Change to a public API once it is ready.
         mesh_fsdp_ep = mesh_fsdp_tp["dp"]
         mesh_fsdp_ep._root_mesh = None
 
-        mesh_fsdp = init_device_mesh(self.device_type, (8,))
+        mesh_fsdp = init_device_mesh(self._device_type, (8,))
         for i, l in enumerate(model.second.ep_layers):
             model.second.ep_layers[i] = FSDP(
                 l, use_orig_params=True, device_mesh=mesh_fsdp_ep

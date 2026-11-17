@@ -47,10 +47,10 @@ class TestTpCheckpoint(DTensorContinuousTestBase):
     def test_tp_checkpoint(self):
         CHECKPOINT_DIR = self.temp_dir
         mesh_shpe = (self.world_size,)
-        tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
+        tp_mesh = init_device_mesh(self._device_type, mesh_shpe)
 
         # create model and move it to GPU with id rank
-        model = MLPModule(self.device_type).to(self.rank)
+        model = MLPModule(self._device_type).to(self.rank)
         # Parallelize the module based on the given Parallel Style.
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -94,10 +94,10 @@ class TestTpCheckpoint(DTensorContinuousTestBase):
     def test_tp_checkpoint_load_on_meta_device(self):
         CHECKPOINT_DIR = self.temp_dir
         mesh_shpe = (self.world_size,)
-        tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
+        tp_mesh = init_device_mesh(self._device_type, mesh_shpe)
 
         # create model and move it to GPU with id rank
-        model = UnevenShardedModel(self.device_type).to(self.rank)
+        model = UnevenShardedModel(self._device_type).to(self.rank)
         # Parallelize the module based on the given Parallel Style.
         parallelize_plan = {
             "net1": ColwiseParallel(),

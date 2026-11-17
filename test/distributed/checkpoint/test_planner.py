@@ -111,7 +111,7 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
         return 4
 
     @property
-    def device_type(self) -> str:
+    def _device_type(self) -> str:
         return "cpu"
 
     @with_comms

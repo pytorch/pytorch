@@ -2892,9 +2892,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("use_ca", [True, False])
     def test_tp_compile_fullgraph(self, is_seq_parallel, use_ca):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(self._device_type)
 
         colwise_style = (
             ColwiseParallel(input_layouts=Shard(0))
@@ -2940,7 +2940,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         rng_seed = self.rank if is_seq_parallel else 0
         torch.manual_seed(rng_seed)
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=self._device_type)
         out = model(inp)
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_mod = torch.compile(model, backend=cnt, fullgraph=True)
@@ -2955,17 +2955,17 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @parametrize("use_ca", [True, False])
     def test_2d_fsdp_tp_compile(self, use_ca):
         data_parallel_size = 2
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(self._device_type)
         model_copy = copy.deepcopy(model)
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            self.device_type,
+            self._device_type,
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=self._device_type)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -3008,17 +3008,17 @@ class TestDTensorCompileE2E(DTensorTestBase):
     def test_2d_fsdp_tp_ac_compile(self, use_ca):
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(self._device_type)
         model_copy = copy.deepcopy(model)
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            self.device_type,
+            self._device_type,
             mesh_shape=(dp_degree, tp_degree),
             mesh_dim_names=("dp", "tp"),
         )
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=self._device_type)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -3062,7 +3062,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @parametrize("use_ca", [True, False])
     def test_compile_dtensor_redistribute_backward(self, use_ca):
         mesh = DeviceMesh(
-            device_type=self.device_type, mesh=torch.arange(self.world_size)
+            device_type=self._device_type, mesh=torch.arange(self.world_size)
         )
 
         def fn(x, y):
@@ -3107,8 +3107,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 x = x.redistribute(self.mesh, [Shard(1)])
                 return x
 
-        embedding = torch.nn.Embedding(10, 20, device=self.device_type)
-        inp = torch.randint(0, 10, (8,), device=self.device_type)
+        embedding = torch.nn.Embedding(10, 20, device=self._device_type)
+        inp = torch.randint(0, 10, (8,), device=self._device_type)
         ref_out = embedding(inp)
         sharded_net = torch.compile(Network(embedding, mesh))
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
@@ -3164,7 +3164,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         mesh = self.build_device_mesh()
         placements = [Replicate()]
 
-        global_tensor = torch.randn(8, 8, device=self.device_type)
+        global_tensor = torch.randn(8, 8, device=self._device_type)
         input_dt = distribute_tensor(global_tensor, mesh, placements)
 
         def split_fn(x, split_size):
@@ -3192,7 +3192,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
     )
     def test_unbind_with_symint_size(self, input_placement, expected_output_placement):
         mesh = self.build_device_mesh()
-        global_tensor = torch.randn(8, 8, device=self.device_type)
+        global_tensor = torch.randn(8, 8, device=self._device_type)
         input_dt = distribute_tensor(global_tensor, mesh, [input_placement])
 
         def unbind_fn(x):
@@ -3219,7 +3219,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     def test_unbind_with_unbacked_sharded_size(self):
         mesh = self.build_device_mesh()
-        global_tensor = torch.randn(8, 8, device=self.device_type)
+        global_tensor = torch.randn(8, 8, device=self._device_type)
         input_dt = distribute_tensor(global_tensor, mesh, [Shard(1)])
         torch._dynamo.decorators.mark_unbacked(input_dt, 1)
 
@@ -3247,7 +3247,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 return out.sum()
 
             local_tensor = torch.randn(
-                4, 8, device=self.device_type, requires_grad=True
+                4, 8, device=self._device_type, requires_grad=True
             )
             dt_input = DTensor.from_local(
                 local_tensor, mesh, [Shard(0)], run_check=False
@@ -3303,7 +3303,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
             def fn(dt):
                 return dt.redistribute(mesh, [Replicate()])
 
-            local_tensor = torch.randn(4, 8, device=self.device_type)
+            local_tensor = torch.randn(4, 8, device=self._device_type)
             dt_input = DTensor.from_local(
                 local_tensor, mesh, [Shard(0)], run_check=False
             )
@@ -3354,8 +3354,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 out2 = dt2.redistribute(mesh, [Replicate()])
                 return out1 + out2
 
-            local1 = torch.randn(4, 8, device=self.device_type)
-            local2 = torch.randn(4, 8, device=self.device_type)
+            local1 = torch.randn(4, 8, device=self._device_type)
+            local2 = torch.randn(4, 8, device=self._device_type)
             dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
             dt2 = DTensor.from_local(local2, mesh, [Shard(0)], run_check=False)
 
@@ -3411,7 +3411,7 @@ class TestDTensorACCompile(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_tp_ac_compile_dtensor_inner_symbol(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(self._device_type, torch.arange(self.world_size))
 
         # Embedding produces a DTensor whose inner/outer sizes get
         # independent symbols (outer = global seq_len, inner = local
@@ -3425,7 +3425,7 @@ class TestDTensorACCompile(DTensorTestBase):
             def forward(self, ids):
                 return self.block(self.embed(ids))
 
-        model = EmbedBlock(32, 10, self.device_type)
+        model = EmbedBlock(32, 10, self._device_type)
 
         parallelize_module(
             model,
@@ -3450,14 +3450,14 @@ class TestDTensorACCompile(DTensorTestBase):
 
         model.block.compile(backend="aot_eager", fullgraph=True)
 
-        ids1 = torch.randint(0, 32, (4, 20), device=self.device_type)
+        ids1 = torch.randint(0, 32, (4, 20), device=self._device_type)
         out1 = model(ids1)
         out1.sum().backward()
         model.zero_grad()
 
         # Different seq_len triggers dynamic-shape recompilation where
         # the DTensor inner symbol gets lifted through the AC HOP.
-        ids2 = torch.randint(0, 32, (4, 25), device=self.device_type)
+        ids2 = torch.randint(0, 32, (4, 25), device=self._device_type)
         out2 = model(ids2)
         out2.sum().backward()
 

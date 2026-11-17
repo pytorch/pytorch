@@ -591,10 +591,10 @@ class TestCompressedTensorsMXFP4ShardedLoad(DTensorTestBase):
             )
         dist.barrier()
 
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh = init_device_mesh(self._device_type, (self.world_size,))
         state_dict = {
             fqn: distribute_tensor(
-                torch.zeros(rows, cols, device=self.device_type), mesh, [Shard(1)]
+                torch.zeros(rows, cols, device=self._device_type), mesh, [Shard(1)]
             )
         }
         dist_cp.load(
@@ -617,7 +617,7 @@ class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
 
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
         mesh_shape = (self.world_size,)
-        mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+        mesh_1d = init_device_mesh(self._device_type, mesh_shape)
 
         # Create local tensor with row-wise sharding
         rows_per_rank = global_tensor.shape[0] // self.world_size
@@ -703,7 +703,7 @@ class TestDTensorReshardPlacementChange(DTensorContinuousTestBase):
 
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (self.world_size,)
-            device_mesh = init_device_mesh(self.device_type, mesh_shape)
+            device_mesh = init_device_mesh(self._device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor, device_mesh, placements=original_placement
             )
@@ -760,7 +760,7 @@ class TestDTensorReshardPlacementChange(DTensorContinuousTestBase):
 
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (2, self.world_size // 2)
-            mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+            mesh_2d = init_device_mesh(self._device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor,
                 mesh_2d,
@@ -819,7 +819,7 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
         for placements_1d in ONE_D_PLACEMENTS:
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (self.world_size,)
-            mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+            mesh_1d = init_device_mesh(self._device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor, mesh_1d, placements=placements_1d
             )
@@ -834,7 +834,7 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
 
             for placements_2d in TWO_D_PLACEMENTS:
                 mesh_shape = (2, self.world_size // 2)
-                mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+                mesh_2d = init_device_mesh(self._device_type, mesh_shape)
 
                 zero_dtensor = zeros(
                     [4, 4], device_mesh=mesh_2d, placements=placements_2d
@@ -870,7 +870,7 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
         for placements_2d in TWO_D_PLACEMENTS:
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (2, self.world_size // 2)
-            mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+            mesh_2d = init_device_mesh(self._device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor, mesh_2d, placements=placements_2d
             )
@@ -886,7 +886,7 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
 
             for placements_1d in ONE_D_PLACEMENTS:
                 mesh_shape = (self.world_size,)
-                mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+                mesh_1d = init_device_mesh(self._device_type, mesh_shape)
 
                 zero_dtensor = zeros(
                     [4, 4], device_mesh=mesh_1d, placements=placements_1d
@@ -921,8 +921,8 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
             print("safetensors not installed")
             return
 
-        tensor = torch.rand(1).to(self.device_type)
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        tensor = torch.rand(1).to(self._device_type)
+        mesh = init_device_mesh(self._device_type, (self.world_size,))
         dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
         ref_state_dict = {"dtensor": dtensor}
 
@@ -933,8 +933,8 @@ class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
             ),
         )
 
-        tensor = torch.rand(1).to(self.device_type)
-        mesh_2 = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        tensor = torch.rand(1).to(self._device_type)
+        mesh_2 = init_device_mesh(self._device_type, (2, self.world_size // 2))
         dtensor = distribute_tensor(tensor, mesh_2, [Shard(0), Shard(0)])
         state_dict = {"dtensor": dtensor}
         dist_cp.load(

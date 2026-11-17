@@ -51,7 +51,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
             def get_input(self):
                 return torch.rand(8, 8, device=self.device_type)
 
-        model = TestDummyModel(self.device_type).to(self.device_type)
+        model = TestDummyModel(self._device_type).to(self._device_type)
         return model
 
     @classmethod
