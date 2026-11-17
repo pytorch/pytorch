@@ -193,7 +193,7 @@ at::Tensor multimem_all_reduce_(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_reduce_: multicast support is required.");
-  GroupStreamGuard stream_guard(group_name, pg);
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment =
       get_and_verify_alignment(input, "multimem_all_reduce_");
@@ -293,7 +293,7 @@ at::Tensor multimem_one_shot_reduce_out(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_one_shot_reduce: requires multicast support.");
-  GroupStreamGuard stream_guard(group_name, pg);
+  GroupStreamGuard stream_guard(group_name);
 
   int rank = symm_mem->get_rank();
   int world_size = symm_mem->get_world_size();
@@ -415,7 +415,7 @@ at::Tensor multimem_all_gather_out(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_gather_out: output must have multicast support.");
-  GroupStreamGuard stream_guard(group_name, pg);
+  GroupStreamGuard stream_guard(group_name);
 
   TORCH_CHECK(
       input.is_contiguous(),
@@ -562,6 +562,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
       Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
       at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
     }
+    // Finish staging before signaling peers.
+    __syncthreads();
   }
   // TODO make it sync with one block for no-copy case
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
@@ -626,7 +628,7 @@ at::Tensor one_shot_all_reduce_out_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "one_shot_all_reduce: input must be allocated with empty_strided_p2p().");
-  GroupStreamGuard stream_guard(group_name, pg);
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment =
       get_and_verify_alignment(input, "one_shot_all_reduce");
@@ -824,7 +826,8 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
+  // Publish input writes before peer access.
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
@@ -879,7 +882,7 @@ at::Tensor two_shot_all_reduce_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "two_shot_all_reduce: input must be allocated with empty_strided_p2p().");
-  GroupStreamGuard stream_guard(group_name, pg);
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment =
       get_and_verify_alignment(input, "two_shot_all_reduce");
@@ -1017,7 +1020,7 @@ at::Tensor reduce_scatter_out(
   TORCH_CHECK(
       symm_mem != nullptr,
       "reduce_scatter: input must be allocated with empty_strided_p2p().");
-  GroupStreamGuard stream_guard(group_name, pg);
+  GroupStreamGuard stream_guard(group_name);
 
   const size_t alignment = get_and_verify_alignment(input, "reduce_scatter");
 
