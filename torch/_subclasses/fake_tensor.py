@@ -519,8 +519,10 @@ def maybe_get_fake_constant(x: object) -> Tensor | None:
 
 def maybe_set_fake_constant(x: Any, constant: Tensor) -> None:
     fake_mode = maybe_get_fake_mode(x)
-    if isinstance(fake_mode, FakeTensorMode):
-        # Python wrapper subclasses also carry an outer constant attribute.
+    if isinstance(fake_mode, FakeTensorMode) or (
+        isinstance(fake_mode, CppFakeTensorMode) and not is_fake_tensor(x)
+    ):
+        # Wrapper subclasses carry the constant on the outer object.
         x.constant = constant
     elif isinstance(fake_mode, CppFakeTensorMode):
         real_constant = (
