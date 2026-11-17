@@ -2581,13 +2581,13 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        _, pycode = _cached_guard_function(tuple(code_parts), make_guard_fn_args)
+        pycode, code = _compile_guard(tuple(code_parts), make_guard_fn_args)
         out: dict[str, Any] = {}
         # The dict the C++ globals tree is rooted at, so a G['NAME'] in a lambda
         # guard and in an accessor guard read the same scope on a loaded artifact.
         globals_for_guard_fn = {"G": self.runtime_global_scope}
         guards_log.debug("Python shape guard function:\n%s", pycode)
-        exec(pycode, globals_for_guard_fn, out)
+        exec(code, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
@@ -3864,8 +3864,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    # Multi-source guard (two inputs aliasing) — not expressible as a
-    # single source → value check.
+    # Alias checks compare both source values, including during nested region reuse.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, values: values[0] is values[1],
@@ -6593,6 +6592,10 @@ class CheckFunctionManager:
                 if k in used_local_vars or k in self.additional_used_local_vars
             },
             global_scope=global_scope_state,
+            constant_result_names=(
+                output_graph_guards_state.constant_result_names
+                & global_scope_state.keys()
+            ),
             _guards=torch._guards.GuardsSet(
                 OrderedSet(
                     dataclasses.replace(
@@ -7027,8 +7030,9 @@ def build_guard_function(code_parts: list[str], closure_args: str) -> tuple[str,
 
 
 @functools.lru_cache(32)
-def _cached_guard_function(parts: tuple[str, ...], args: str) -> tuple[str, str]:
-    return build_guard_function(list(parts), args)
+def _compile_guard(parts: tuple[str, ...], args: str) -> tuple[str, types.CodeType]:
+    _, source = build_guard_function(list(parts), args)
+    return source, compile(source, "<string>", "exec")
 
 
 def is_recompiles_enabled() -> bool:

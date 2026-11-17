@@ -1193,6 +1193,17 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
         else:
             return output
 
+    def make_col_diagonally_dominant(A):
+        # Unpivoted LU is only stable for special inputs. Column diagonal dominance
+        # gives |L| <= 1 and growth factor <= 2, as in
+        # test_linalg_batched_lu_stability_large_inputs. The 1.25 margin makes it
+        # strict, otherwise small matrices can be exactly singular.
+        k = min(A.shape[-2:])
+        with torch.no_grad():
+            diag = A.diagonal(dim1=-2, dim2=-1).zero_()
+            diag.copy_(1.25 * A.abs().sum(-2)[..., :k])
+        return A
+
     batch_shapes = ((), (3,), (3, 3), (0,))
     # pivot=False only supported in CUDA
     pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
@@ -1201,6 +1212,8 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
         shape = batch_shape + (S + delta, S)
         # Insanely annoying that make_fullrank_blablabla accepts a *shape and not a tuple!
         A = make_arg(shape) if not full_rank else make_arg(*shape)
+        if not pivot:
+            A = make_col_diagonally_dominant(A)
         yield SampleInput(A, kwargs={"pivot": pivot}, output_process_fn_grad=out_fn)
 
 
@@ -1353,8 +1366,6 @@ op_db: list[OpInfo] = [
         # autogen .out exists but is not exercised here (mirrors linalg.matrix_exp).
         supports_out=False,
         decorators=[
-            # torch-xpu-ops/issues/4169
-            skipXPU,
             skipCPUIfNoLapack,
             with_tf32_off,
         ],

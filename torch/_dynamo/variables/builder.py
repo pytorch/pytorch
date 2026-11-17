@@ -1273,7 +1273,7 @@ class VariableBuilder:
 
         if self.source != result.source:
             tracer = self.tx.output.current_tracer
-            if tracer.parent is not None:
+            if tracer.tracks_lexical_sources:
                 record_lexical_alias(tracer.lexical_sources, self.source, result.source)
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
