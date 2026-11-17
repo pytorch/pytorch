@@ -51,7 +51,7 @@ class Stream(torch._C._MPSStreamBase):
         r"""Make all future work submitted to the stream wait for an event.
 
         Args:
-            event (Event, torch.Event): an event to wait for.
+            event (torch.mps.Event, torch.Event): an event to wait for.
 
         .. note:: This function returns without waiting for :attr:`event`:. Only
            future operations are affected.
@@ -76,8 +76,8 @@ class Stream(torch._C._MPSStreamBase):
         r"""Record an event.
 
         Args:
-            event (Event, torch.Event, optional): event to record. If not given,
-                a new one will be allocated.
+            event (torch.mps.Event, torch.Event, optional): event to record. If
+                not given, a new one will be allocated.
 
         Returns:
             Recorded event.
