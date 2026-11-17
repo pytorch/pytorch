@@ -37,7 +37,9 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
+    isRocmArchAnyOf,
     MI350_ARCH,
+    NAVI4_ARCH,
     skipIfRocm,
     skipIfRocmArch,
     skipIfTorchDynamo,
@@ -6062,7 +6064,7 @@ class TestSDPAAccelerator(NNTestCase):
                 fudge_factors['grad_query'] = 670.0
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
-            if "gfx95" in torch.cuda.get_device_properties(0).gcnArchName:
+            if isRocmArchAnyOf(MI350_ARCH + NAVI4_ARCH):
                 fudge_factors['grad_value'] = 16.0
 
         check_out_and_grad(
@@ -6194,7 +6196,7 @@ class TestSDPAAccelerator(NNTestCase):
                 fudge_factors['grad_query'] = 670.0  # gfx90a
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
-                if "gfx95" in torch.cuda.get_device_properties(0).gcnArchName:
+                if isRocmArchAnyOf(MI350_ARCH):
                     fudge_factors['grad_value'] = 16.0
 
         check_out_and_grad(
