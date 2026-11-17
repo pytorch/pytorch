@@ -946,6 +946,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_->enable_reconfigure,
       "ProcessGroupNCCL does not support enable_reconfigure "
       "(reconfigure-based fault tolerance).");
+  TORCH_CHECK(
+      !options_->encryption_psk.has_value(),
+      "ProcessGroupNCCL does not support encryption_psk; use the nccl2 "
+      "backend.");
 
   // An empty global_ranks_in_group means "this group spans the whole world, in
   // rank order"; see groupRanks(). Materialize that mapping here rather than
@@ -6199,6 +6203,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     auto nccl_opts =
         c10::static_intrusive_pointer_cast<ProcessGroupNCCL::Options>(
             opts_override);
+    TORCH_CHECK(
+        !nccl_opts->encryption_psk.has_value(),
+        "ProcessGroupNCCL does not support encryption_psk; use the nccl2 "
+        "backend.");
     config = &nccl_opts->config;
     // If user provided override options, honor is_high_priority_stream as well
     high_priority_stream = nccl_opts->is_high_priority_stream;
