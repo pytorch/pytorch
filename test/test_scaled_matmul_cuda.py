@@ -1,5 +1,6 @@
 # Owner(s): ["module: linear algebra"]
 
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import contextlib
 import json
 import math
@@ -878,6 +879,7 @@ class TestFP8MatmulGeneric(TestCase):
             scaled_mm(a, b, scale_a, recipe, scale_b, recipe_b, swizzle_a=swizzle_a, swizzle_b=swizzle_b)
 
 
+    @fake_tensor_test()
     @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
     @parametrize("out_dtype", [torch.float16, torch.float32])
     def test_mnk4_output_dtype_fake(self, recipe, out_dtype):
@@ -893,6 +895,7 @@ class TestFP8MatmulGeneric(TestCase):
             self.assertEqual(result.dtype, out_dtype)
 
 
+    @fake_tensor_test()
     @parametrize("case", ["block_block", "tensor_row", "mixed_block", "one_swizzle", "extra_swizzle",
                           "e5m2_mnk4", "fp4_mnk4"])
     @parametrize("out_dtype", [torch.float16, torch.float32])
@@ -930,6 +933,7 @@ class TestFP8MatmulGeneric(TestCase):
                 )
 
 
+    @fake_tensor_test()
     @parametrize("wrap_v2", [False, True])
     @parametrize("groups", [1, 2])
     def test_scaled_grouped_mm_offsets_fake(self, wrap_v2, groups):
@@ -1501,6 +1505,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         self.assertEqual(op(input.clone(), *args, beta=2), input * 2)
 
+    @fake_tensor_test()
     @onlyAccelerator
     @skipMPS
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5775")
@@ -1537,6 +1542,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                         result, scaled_addmm(input, *args), atol=5e-2, rtol=5e-2
                     )
 
+    @fake_tensor_test()
     @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
@@ -1751,6 +1757,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             self.assertIs(compiled, compiled_input)
             self.assertEqual(compiled, actual, atol=5e-2, rtol=5e-2)
 
+    @fake_tensor_test()
     @onlyAccelerator
     @skipMPS
     @skipIfRocm
@@ -3666,6 +3673,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(result, torch.full_like(result, 32))
 
 
+    @fake_tensor_test()
     @parametrize("case,fake", [
         (case, False) for case in (
             "empty_scales", "empty_recipes", "extra_recipes", "scale_dtype",
@@ -3810,6 +3818,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(C, C_ref, atol=5e-2, rtol=5e-4)
 
 
+    @fake_tensor_test()
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
         cublaslt_grouped_mm_skip_msg,
@@ -3959,6 +3968,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
             else:
                 scaled_grouped_mm_wrap(a, a.t(), **kwargs)
 
+    @fake_tensor_test()
     @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
     @parametrize("out_dtype", [torch.float16, torch.float32])
     @parametrize("fake", [False, True])

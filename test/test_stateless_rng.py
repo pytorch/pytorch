@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_dtype import floating_types_and
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     IS_S390X,
     parametrize,
@@ -720,6 +721,7 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(actual, random.uniform(key, (4, 3)), atol=0, rtol=0)
 
+    @fake_tensor_test()
     def test_uniform_tensor_bounds_errors(self, device):
         for mode in (contextlib.nullcontext(), FakeTensorMode()):
             with mode:
