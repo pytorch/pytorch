@@ -23,8 +23,10 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
 )
 from torch._higher_order_ops.user_kernel_hop import (
     _snapshot,
+    constant_contents,
     constant_key,
     KernelSideTable,
+    map_constant,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -627,10 +629,31 @@ class TestCuteDSLHOPHelpers(TestCase):
             (Cfg(2.0, weight=t), r" at \.weight"),
             (with_extra, r" at \.extra"),
             (types.SimpleNamespace(w=t), r" at \.w"),
-            (t, ""),
         ):
             with self.assertRaisesRegex(TypeError, msg.format(where)):
                 table.add_constant_args({"cfg": value})
+        msg = "^a constant kernel argument is a tensor: pass each tensor as its own "
+        with self.assertRaisesRegex(TypeError, msg + "argument$"):
+            table.add_constant_args({"cfg": t})
+
+    def test_tensors_are_never_containers(self):
+        # A tensor, of a subclass that does not hash too, keeps its data in a built-in
+        # base (torch._C.TensorBase, see _has_hidden_state), so constant_contents
+        # never takes it for a plain object, and _snapshot keeps it as itself instead
+        # of copying it. (constant_key and map_constant refuse every tensor before
+        # they ask.)
+        class UnhashableTensor(torch.Tensor):
+            __hash__ = None
+
+        @dataclasses.dataclass
+        class Cfg:
+            alpha: float
+            weight: object = None
+
+        t = torch.randn(4).as_subclass(UnhashableTensor)
+        rules = CUTEDSL_CONSTANT_RULES
+        self.assertIsNone(constant_contents(t, rules))
+        self.assertIs(_snapshot(Cfg(2.0, weight=[t]), rules).weight[0], t)
 
     def test_container_subclasses_are_refused(self):
         # Only an exact list, tuple or dict, an OrderedDict (rebuilt in its order), a
@@ -663,6 +686,15 @@ class TestCuteDSLHOPHelpers(TestCase):
         self.assertIs(type(snapshot), collections.OrderedDict)
         self.assertEqual(list(snapshot.items()), [("b", [1]), ("a", 2)])
         self.assertIsNot(snapshot["b"], ordered["b"])
+        doubled = map_constant(ordered, rules, lambda leaf: 2 * leaf)
+        self.assertIs(type(doubled), collections.OrderedDict)
+        self.assertEqual(list(doubled.items()), [("bb", [2]), ("aa", 4)])
+        # map_constant hands any other subclass to fn whole, for the side table to
+        # refuse, instead of rebuilding it from its items (a list subclass as a list).
+        leaves = []
+        value = [Scales([1.0]), collections.Counter(a=3)]
+        map_constant(value, rules, lambda leaf: leaves.append(leaf) or leaf)
+        self.assertEqual([type(leaf) for leaf in leaves], [Scales, collections.Counter])
         size = torch.Size([4, 2])
         self.assertIs(_snapshot(size, rules), size)
         self.assertNotEqual(constant_key(size, rules), constant_key((4, 2), rules))
