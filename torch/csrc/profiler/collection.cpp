@@ -299,7 +299,6 @@ auto InputOutputEncoder::getInputDecoder() {
         case Tag::ScalarList: {
           c10::impl::GenericList list(*scalar_list_types_it++);
           const auto n = (*ivals_it++).toInt();
-          list.reserve(n);
           for ([[maybe_unused]] const auto _ : c10::irange(n)) {
             list.push_back(*ivals_it++);
           }
