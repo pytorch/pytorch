@@ -255,8 +255,25 @@ def _load_runtime() -> Any:
                 "(requires cargo)."
             ) from e
         _cfg_rs.init(torch._C._cfg_c_api())
+        _cfg_rs.leave_to_interpreter(_compilers())
         _runtime = _cfg_rs
     return _runtime
+
+
+def _compilers() -> list[str]:
+    """Where the code is that compiles, and that runs what was compiled.
+
+    A rewritten function reaches it when it calls a function that
+    ``torch.compile`` made, or when autograd runs the backward of a compiled
+    graph. It is not rewritten: the interpreter runs it, with all it calls.
+    """
+    places = ["_inductor/", "_functorch/_aot_autograd/", "rewrite/"]
+    places += ["_functorch/aot_autograd.py", "_functorch/compilers.py"]
+    # What enters Dynamo: the function torch.compile returns.
+    entry = "_TorchDynamoContext.__call__.<locals>.compile_wrapper"
+    places += [f"_dynamo/eval_frame.py::{entry}"]
+    root = os.path.dirname(torch.__file__)
+    return [os.path.join(root, place) for place in places]
 
 
 def is_available() -> bool:

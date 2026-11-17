@@ -339,6 +339,9 @@ pub struct Callees {
     /// Code objects the frontend does not support, by address: their
     /// functions run in the interpreter.
     interpreted: Shared<HashMap<usize, PyObj>>,
+    /// Code objects that are left to the interpreter for where they are
+    /// from (see `leave_to_interpreter`), by address.
+    left: Shared<HashMap<usize, PyObj>>,
     call_name: PyObj,
 }
 
@@ -347,8 +350,12 @@ unsafe impl Sync for Callees {}
 
 const MAX_CALLEES: usize = 4096;
 const RECENT_CALLEES: usize = 256;
-/// Stands for "runs in the interpreter" in the recent-callee slots.
+/// Stands for "runs in the interpreter" in the recent-callee slots: the
+/// frontend turned the function down.
 const INTERPRETED: *const Compiled = 1 as *const Compiled;
+/// The same for a function that is left to the interpreter with all it
+/// calls: it was measured to run faster there, or is one of the compilers'.
+const DEMOTED: *const Compiled = 2 as *const Compiled;
 
 impl Callees {
     pub fn new(table: OpcodeTable) -> Callees {
@@ -357,6 +364,7 @@ impl Callees {
             entries: Shared::new(HashMap::new()),
             recent: (0..RECENT_CALLEES).map(|_| std::cell::Cell::new((0, 0, std::ptr::null()))).collect(),
             interpreted: Shared::new(HashMap::new()),
+            left: Shared::new(HashMap::new()),
             call_name: unsafe {
                 PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__call__".as_ptr()))
             },
@@ -417,7 +425,57 @@ impl Callees {
         let dropped = std::mem::take(&mut *self.entries.borrow_mut());
         drop(dropped);
         self.interpreted.borrow_mut().clear();
+        self.left.borrow_mut().clear();
     }
+}
+
+/// Where the code is that is not compiled: a file, a directory (with a
+/// trailing separator), or one function of a file (`file::qualname`). It is
+/// what compiles and what was compiled: the graph compilers and the wrappers
+/// they put around their graphs, which are reached from a compiled function
+/// when it calls a function that Dynamo compiled, or when autograd runs the
+/// backward of a compiled graph.
+static LEFT: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+/// Leaves the functions whose code is in one of `places` to the
+/// interpreter, with all they call.
+pub fn leave_to_interpreter(places: Vec<String>) {
+    let mut left = LEFT.write().unwrap();
+    for place in places {
+        if !left.contains(&place) {
+            left.push(place);
+        }
+    }
+}
+
+unsafe fn is_left(code: Obj) -> bool {
+    let left = LEFT.read().unwrap();
+    if left.is_empty() {
+        return false;
+    }
+    let filename = ffi::PyObject_GetAttrString(code, c"co_filename".as_ptr());
+    if filename.is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    let name = pyffi::str_to_string(filename);
+    ffi::Py_DECREF(filename);
+    left.iter().any(|place| match place.split_once("::") {
+        Some((file, function)) => {
+            name == file && {
+                let qualname = ffi::PyObject_GetAttrString(code, c"co_qualname".as_ptr());
+                if qualname.is_null() {
+                    ffi::PyErr_Clear();
+                    return false;
+                }
+                let found = pyffi::str_to_string(qualname);
+                ffi::Py_DECREF(qualname);
+                found == function
+            }
+        }
+        None if place.ends_with('/') => name.starts_with(place.as_str()),
+        None => name == *place,
+    })
 }
 
 /// The positional arguments of a call, wherever the caller has them: the
@@ -1729,32 +1787,51 @@ impl Compiled {
         self.compiled_function(func).map(|compiled| (compiled, func, receiver))
     }
 
+    #[inline(always)]
     unsafe fn compiled_function(&self, func: Obj) -> Option<*const Compiled> {
+        let form = self.function_form(func);
+        if form == INTERPRETED || form == DEMOTED {
+            None
+        } else {
+            Some(form)
+        }
+    }
+
+    /// What a Python function runs as: its compiled form, or one of
+    /// INTERPRETED and DEMOTED.
+    #[inline(always)]
+    unsafe fn function_form(&self, func: Obj) -> *const Compiled {
         let callees = &self.callees;
         let code = ffi::PyFunction_GetCode(func);
         let globals = ffi::PyFunction_GetGlobals(func);
         let slot = callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
         let (recent_code, recent_globals, recent) = slot.get();
         if recent_code == code as usize && recent_globals == globals as usize {
-            return if recent == INTERPRETED { None } else { Some(recent) };
+            return recent;
         }
-        let found = self
-            .compiled_function_slow(func, code, globals)
-            .filter(|compiled| (**compiled).settled.trial.get().phase != TRIAL_DEMOTED);
-        slot.set((code as usize, globals as usize, found.unwrap_or(INTERPRETED)));
-        found
+        let form = self.function_form_slow(func, code, globals);
+        slot.set((code as usize, globals as usize, form));
+        form
     }
 
-    unsafe fn compiled_function_slow(&self, func: Obj, code: Obj, globals: Obj) -> Option<*const Compiled> {
+    unsafe fn function_form_slow(&self, func: Obj, code: Obj, globals: Obj) -> *const Compiled {
         let callees = &self.callees;
         let key = (code as usize, globals as usize);
         if let Some(c) = callees.entries.borrow().get(&key) {
-            return Some(Arc::as_ptr(&c.compiled));
+            let compiled = Arc::as_ptr(&c.compiled);
+            return if (*compiled).settled.trial.get().phase == TRIAL_DEMOTED { DEMOTED } else { compiled };
+        }
+        if callees.left.borrow().contains_key(&(code as usize)) {
+            return DEMOTED;
         }
         if callees.interpreted.borrow().contains_key(&(code as usize))
             || callees.entries.borrow().len() >= MAX_CALLEES
         {
-            return None;
+            return INTERPRETED;
+        }
+        if is_left(code) {
+            callees.left.borrow_mut().insert(code as usize, PyObj::from_borrowed(code));
+            return DEMOTED;
         }
         let py = pyo3::Python::assume_gil_acquired();
         let bound = pyo3::Bound::from_borrowed_ptr(py, func);
@@ -1775,12 +1852,12 @@ impl Compiled {
                         compiled,
                     },
                 );
-                Some(pointer)
+                pointer
             }
             // Unsupported by the frontend: the interpreter runs it.
             Err(_) => {
                 callees.interpreted.borrow_mut().insert(code as usize, PyObj::from_borrowed(code));
-                None
+                INTERPRETED
             }
         }
     }
@@ -2256,7 +2333,7 @@ impl Compiled {
                 let globals = ffi::PyFunction_GetGlobals(func);
                 let recent =
                     self.callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
-                recent.set((code as usize, globals as usize, INTERPRETED));
+                recent.set((code as usize, globals as usize, DEMOTED));
             }
         } else if trial.calls >= TRIAL_MAX_CALLS {
             trial.phase = TRIAL_COMPILED;
