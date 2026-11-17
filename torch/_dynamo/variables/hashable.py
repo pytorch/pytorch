@@ -147,9 +147,7 @@ class HashableTracker:
 
         items = []
         for item in vt.items:
-            is_constant, value = False, None
-            if item.is_python_constant():
-                is_constant, value = item.try_as_python_constant()
+            is_constant, value = item.try_as_python_constant()
             if is_constant:
                 items.append(value)
                 continue

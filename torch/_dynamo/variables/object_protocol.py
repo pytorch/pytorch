@@ -844,14 +844,6 @@ def pynumber_float(
     )
 
 
-def pyfloat_as_double_macro(obj: VariableTracker) -> float:
-    """Mirrors PyFloat_AS_DOUBLE without redispatching __float__.
-
-    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/cpython/floatobject.h#L15-L18
-    """
-    return float.__float__(obj.as_python_constant())
-
-
 def pyfloat_as_double(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
@@ -992,7 +984,8 @@ def pynumber_index(
     # exact int. A SymInt is not constant: nb_index is where it specializes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
-    if pylong_check(obj.python_type()) and (const := obj.try_as_python_constant())[0]:
+    obj_type = maybe_get_python_type(obj)
+    if pylong_check(obj_type) and (const := obj.try_as_python_constant())[0]:
         return ConstantVariable.create(operator.index(const[1]))
 
     if obj.tp_as_number.nb_index is None:

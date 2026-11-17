@@ -1455,12 +1455,12 @@ class TensorVariable(VariableTracker):
                 )
         elif (
             dtype is not None
-            and fqn(type(dtype.as_python_constant())) == "torch.tensortype"
+            and fqn(type(tensor_type := dtype.as_python_constant()))
+            == "torch.tensortype"
         ):
             # torch.FloatTensor, etc. are all of type "torch.tensortype".
             # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
             # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
-            tensor_type = dtype.as_python_constant()
             tensor_type_const = VariableTracker.build(tx, fqn(tensor_type))
 
             from .builder import wrap_fx_proxy

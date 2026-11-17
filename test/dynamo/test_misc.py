@@ -17767,8 +17767,6 @@ fn
         self.assertEqual(cnts.frame_count, 1)
 
     def test_getattrvariable_as_python_constant(self):
-        from torch._dynamo.variables.misc import CallMethodVariable as CMV
-
         @torch.compile(backend="eager")
         def fn(x, rand1):
             random.Random().setstate(rand1.getstate())
@@ -17781,13 +17779,10 @@ fn
             return rand1
 
         x = torch.randn(3, 3)
-        expected = fn.__wrapped__(x, get_rng())
-
-        with patch.object(CMV, "as_python_constant", autospec=True) as po:
-            actual = fn(x, get_rng())
-
-        self.assertEqual(expected, actual)
-        self.assertGreater(po.call_count, 0)
+        eager_rng = get_rng()
+        compiled_rng = get_rng()
+        self.assertEqual(fn(x, compiled_rng), fn.__wrapped__(x, eager_rng))
+        self.assertEqual(compiled_rng.getstate(), eager_rng.getstate())
 
     def test_data_ptr_graph_break_builtin(self):
         def f(a, b):

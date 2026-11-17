@@ -762,8 +762,8 @@ class NNModuleVariable(VariableTracker):
             # enabled for export.
             if tx.output.export:
                 result = []
-                keys = list(range(len(module)))[key.as_python_constant()]  # type: ignore[arg-type]
-                for idx, submod in enumerate(module[key.as_python_constant()]):  # type: ignore[arg-type]
+                keys = list(range(len(module)))[key_slice := key.as_python_constant()]  # type: ignore[arg-type]
+                for idx, submod in enumerate(module[key_slice]):  # type: ignore[arg-type]
                     k = keys[idx]
                     src = NNModuleSource(GetItemSource(self.source, k))
                     result.append(
@@ -774,13 +774,11 @@ class NNModuleVariable(VariableTracker):
                         )
                     )
 
-                new_module = module[key.as_python_constant()]  # type: ignore[index]
+                new_module = module[key_slice]  # type: ignore[index]
                 new_module_variable = tx.output.register_attr_or_module(
                     new_module,
                     f"{self}.__getitem__(slice)",
-                    source=NNModuleSource(
-                        GetItemSource(self.source, key.as_python_constant())
-                    ),
+                    source=NNModuleSource(GetItemSource(self.source, key_slice)),
                 )
                 return new_module_variable
             else:

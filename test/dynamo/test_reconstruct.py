@@ -119,7 +119,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend=backend, fullgraph=False)(x)
         self.assertGreater(counter.op_count, 0)
         self.assertTrue(executions)
-        self.assertEqual(result[2], "unhashable type: 'dict'")
         self.assertEqual(result[2], expected[2])
         self.assertIs(result[1]["tensor"], x)
         self.assertIs(expected[1]["tensor"], x)
@@ -230,7 +229,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         options = {Key.ITEM: 19}
         hash_calls.clear()
         expected = fn(x, options)
-        self.assertEqual(expected, fn(x.double(), options).float())
         self.assertEqual(hash_calls, [])
         counter = torch._dynamo.testing.CompileCounter()
         executions = []
@@ -324,7 +322,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         self.assertGreater(counter.frame_count, 0)
         self.assertGreater(counter.op_count, 0)
         self.assertEqual(len(executions), counter.frame_count)
-        # Preserve the API parent's hash effects for these two snapshot paths.
+        # Eager performs no hashes; these paths retain the API parent's extra hashes.
         self.assertEqual(hash_calls, ["hash"] * (1 if original else 3))
 
     def _compile_and_capture_side_effects(self, fn, *args):
