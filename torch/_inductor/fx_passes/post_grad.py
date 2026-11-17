@@ -691,7 +691,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if introduced_mutation:
             fake_tensor_updater.incremental_update()
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+        functools.partial(
+            reinplace_inplaceable_ops,
+            fake_tensor_updater,
+            rewire_auto_functionalized_outputs=True,
+        ),
     )
 
     # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs
