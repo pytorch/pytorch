@@ -8117,7 +8117,12 @@ class TestPrecompileRuntimeCache(TestCase):
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_keeps_incremental_candidates(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotunerPlugin
         from torch.compiler._runtime_cache import _freeze_triton_kernel
+
+        class Holding(CachingAutotunerPlugin):
+            def holds_candidates(self, autotuner):
+                return True
 
         kernel = _static_runtime_kernel(32)
         kernel.compile_results = [
@@ -8125,8 +8130,8 @@ class TestPrecompileRuntimeCache(TestCase):
         ]
         kernel.launchers = []
         kernel._cached_launcher = None
-        # The incremental plugin holds the candidates while it is still timing them.
-        kernel._plugins = [types.SimpleNamespace(_state=object())]
+        # As incremental autotuning does while it is still timing the candidates.
+        kernel._plugins = [Holding()]
         kernel.inductor_meta["coordinate_descent_tuning"] = True
         kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
         # A sibling that finished tuning, recorded later and never fast-path cached.
@@ -8146,38 +8151,40 @@ class TestPrecompileRuntimeCache(TestCase):
         results = pickle.loads(sibling).kernel.compile_results
         self.assertEqual([result.config.kwargs["XBLOCK"] for result in results], [256])
         self.assertFalse(sibling_tuning)
-        kernel._plugins = [types.SimpleNamespace(_state=None)]
+        kernel._plugins = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("incremental", (True, False))
     def test_static_load_serves_incremental_candidates(self, incremental):
+        from torch._inductor.runtime import triton_heuristics
         from torch._inductor.runtime.triton_heuristics import (
             CachingAutotuner,
             StaticTritonCompileResult,
         )
+        from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
         from torch.compiler import _runtime_cache
+
+        class Tuning(triton_heuristics.CachingAutotunerPlugin):
+            def tunes_prebuilt_launchers(self, autotuner):
+                return True
 
         kernel = _static_runtime_kernel(32)
         kernel.compile_results = [
             _static_runtime_kernel(block).compile_results[0] for block in (32, 64)
         ]
-        kernel.launchers = []
-        kernel._cached_launcher = None
-        kernel._plugins = [types.SimpleNamespace(_state=object())]
-        kernel.inductor_meta["incremental_autotune"] = incremental
-        payload, _ = _runtime_cache._freeze_triton_kernel("source", [kernel])
-        serves = mock.patch.object(
-            _runtime_cache, "_serves_incremental_autotune", return_value=True
-        )
+        kernel.prepare_for_pickle()
+        record = StaticallyLaunchedAutotuner("source", "runtime_kernel", kernel)
+        frozen = {"source": pickle.dumps(record)}
+        plugins = [Tuning()] if incremental else []
         with (
-            mock.patch.object(
-                _runtime_cache, "_frozen_triton_kernels", {"source": payload}
-            ),
+            mock.patch.object(_runtime_cache, "_frozen_triton_kernels", frozen),
             mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
-            # Unmocked, the real check finds no incremental plugin on the kernel.
-            serves if incremental else contextlib.nullcontext(),
+            # The plugins unpickling gives the kernel in the serving process.
+            mock.patch.object(
+                triton_heuristics, "get_caching_autotuner_plugins", return_value=plugins
+            ),
             mock.patch.object(StaticTritonCompileResult, "reload_cubin_path") as reload,
             mock.patch.object(CachingAutotuner, "_make_launchers") as make_launchers,
         ):

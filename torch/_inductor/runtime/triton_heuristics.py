@@ -633,6 +633,25 @@ class CachingAutotunerPlugin:
         """
         return DEFER
 
+    def holds_candidates(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin emptied ``autotuner.launchers`` and is still choosing
+        among its ``compile_results`` on real launches.
+
+        ``torch.compiler.precompile`` freezes every candidate of such a kernel,
+        which it would otherwise refuse for having no single launcher.
+        """
+        return False
+
+    def tunes_prebuilt_launchers(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin chooses among the launchers ``autotuner`` already
+        built, on real launches and without compiling.
+
+        A kernel ``torch.compiler.precompile`` froze with several candidates
+        keeps them all when it loads under such a plugin, and only the first
+        otherwise.
+        """
+        return False
+
 
 def get_caching_autotuner_plugins(
     autotuner: CachingAutotuner,

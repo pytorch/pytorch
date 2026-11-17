@@ -343,12 +343,13 @@ def _load_frozen_triton_kernel(key: str, payload: bytes) -> CachingAutotuner:
             "Inductor Triton runtime artifact has a kernel that is not static"
         )
     kernel.restore_after_unpickle(old_values=None)
-    if len(kernel.compile_results) > 1 and not _serves_incremental_autotune(kernel):
-        # Without incremental autotuning nothing in this process chooses between
-        # the candidates, so keep the first.
+    tunes = any(plugin.tunes_prebuilt_launchers(kernel) for plugin in kernel._plugins)
+    if len(kernel.compile_results) > 1 and not tunes:
+        # No plugin in this process chooses between the candidates, so keep the
+        # first.
         log.warning(
             "precompile serves %s with the first of its %d frozen candidate configs: "
-            "this process does not run incremental autotuning",
+            "no autotuner plugin in this process tunes prebuilt launchers",
             record.kernel_name,
             len(kernel.compile_results),
         )
@@ -374,7 +375,8 @@ class _UnresolvedTritonExport(RuntimeError):
 
 
 def _incrementally_tuning(kernel: CachingAutotuner) -> bool:
-    """Whether incremental autotuning still holds this kernel's candidates.
+    """Whether a plugin, such as incremental autotuning, still holds this
+    kernel's candidates.
 
     The plugin empties ``launchers`` while it times candidates on real
     launches, so such a kernel has every static candidate but no launcher.
@@ -382,20 +384,8 @@ def _incrementally_tuning(kernel: CachingAutotuner) -> bool:
     return (
         not kernel.launchers
         and kernel.is_statically_launchable()
-        and any(
-            getattr(plugin, "_state", None) is not None for plugin in kernel._plugins
-        )
+        and any(plugin.holds_candidates(kernel) for plugin in kernel._plugins)
     )
-
-
-def _serves_incremental_autotune(kernel: CachingAutotuner) -> bool:
-    try:
-        from torch._inductor.runtime.fb.incremental import IncrementalAutotunePlugin
-    except ImportError:
-        return False
-    return any(
-        isinstance(plugin, IncrementalAutotunePlugin) for plugin in kernel._plugins
-    ) and IncrementalAutotunePlugin._should_apply(kernel)
 
 
 def _triton_export_rejection(kernel: CachingAutotuner) -> str | None:
@@ -714,8 +704,8 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
         raise error
     if tuning:
         log.warning(
-            "precompile froze %d of %d Triton kernels mid incremental autotuning, with "
-            "every candidate config; serving that runs it finishes the tuning",
+            "precompile froze %d of %d Triton kernels mid tuning, with every candidate "
+            "config; a plugin that tunes prebuilt launchers finishes it in serving",
             tuning,
             len(kernels),
         )
