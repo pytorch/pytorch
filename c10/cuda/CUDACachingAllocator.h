@@ -3,6 +3,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAGraphMemory.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -124,6 +125,8 @@ struct StreamSegmentSize {
   size_t total_size;
 };
 
+// A new virtual method must also be forwarded by the graph allocator layer
+// (LayeredAllocator in torch/csrc/cuda/CUDAPluggableAllocator.cpp).
 class CUDAAllocator : public DeviceAllocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
@@ -161,6 +164,19 @@ class CUDAAllocator : public DeviceAllocator {
   // registration, or inductor cudagraph_trees warmup).
   virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
   virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
+  // Registration-aware versions (see CUDAGraphMemory.h). Allocators that do
+  // not track capture registrations get the legacy hooks above.
+  virtual void markCaptureBegin(
+      c10::DeviceIndex device,
+      const CUDAGraphMemory::CaptureRegistration& /*registration*/) {
+    markCaptureBegin(device);
+  }
+  virtual size_t markCaptureEnd(
+      c10::DeviceIndex device,
+      CaptureId_t /*capture_id*/) {
+    markCaptureEnd(device);
+    return 0;
+  }
   // Whether the current stream on `device` is inside a CUDA graph capture.
   // The native allocator answers from the capture count kept by
   // markCaptureBegin/markCaptureEnd and only queries the driver while a
@@ -174,6 +190,39 @@ class CUDAAllocator : public DeviceAllocator {
         CaptureStatus::None;
   }
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
+  // For an allocator layered over this one (graph allocators, see
+  // torch.cuda.memory._enable_graph_allocators): the private pool that the open
+  // beginAllocateToPool scopes of `device` route an allocation on `stream`
+  // from the calling thread to, or {0, 0}.
+  virtual MempoolId_t getAllocationPool(
+      c10::DeviceIndex /*device*/,
+      cudaStream_t /*stream*/) {
+    return {0, 0};
+  }
+  // Graph allocators (CUDAGraph::capture_begin(..., allocator), installed by
+  // torch.cuda.memory._enable_graph_allocators): while the capture
+  // `capture_id` into `mempool_id` is in progress, what this allocator would
+  // place into that pool is allocated by `allocator` instead, until the
+  // capture's markCaptureEnd. capture_begin calls it once the capture has
+  // begun. Only an allocator layered over the caching allocator supports it.
+  virtual void setPoolCaptureAllocator(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      CaptureId_t /*capture_id*/,
+      std::shared_ptr<CUDAAllocator> /*allocator*/) {
+    TORCH_CHECK(
+        false,
+        "A CUDA graph capture allocator requires graph allocators, which "
+        "torch.cuda.graph(..., allocator=...) enables (the current allocator is ",
+        name(),
+        ")");
+  }
+  // Ends it early, for a capture abandoned without capture_end. Must not
+  // throw.
+  virtual void clearPoolCaptureAllocator(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      CaptureId_t /*capture_id*/) {}
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
       MempoolId_t /*mempool_id*/) {
