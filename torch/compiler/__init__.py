@@ -332,7 +332,8 @@ def assume_constant_result(fn):
 
     .. warning::
         `assume_constant_result` can, if invalid, cause safety and soundness issues, :func:`torch.compile`
-        will not attempt to validate whether the constant assumption is true or not
+        does not call the function again to validate its result. Dynamo can still guard
+        class metadata read from the result, such as an inherited attribute.
 
     """
     import torch._dynamo

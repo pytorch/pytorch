@@ -2305,13 +2305,15 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
 
 
 def guardable_mro_source(source: Source) -> Source:
-    # A constant result is installed as a global. Its class metadata can still change.
+    # A ConstantSource suppresses the builder's class identity guard.
     if is_constant_source(source):
-        return source.clone(
+        source = source.clone(
             lambda s: GlobalSource(s.source_name)
             if isinstance(s, ConstantSource)
             else s
         )
+        # A class reached through an attribute of the result can be replaced by a non-type.
+        install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
     return source
 
 
@@ -2376,25 +2378,24 @@ def mro_attr_source(
         # A custom ancestor MRO can replace even an object tail at constant length.
         for index in range(first, len(mro)):
             install_guard(
-                GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
+                GetItemSource(mro_source, index).make_guard(GuardBuilder.CLASS_MATCH)
             )
         tx.output.guarded_mro_type_ids.add(id(klass))
     for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
-        if not is_constant_source(klass_source):
-            direct = not idx and base is klass
-            attr = None
-            if has_custom_metaclass_accessor(base, "__dict__"):
-                attr = "__dict__"
-            elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
-                attr = "__mro__"
-            if attr is not None:
-                unimplemented(
-                    gb_type="Custom metaclass metadata access",
-                    context=f"metadata={attr}, name={name}",
-                    explanation="Dynamo cannot safely construct a class metadata source "
-                    "through custom metaclass accessors.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+        direct = not idx and base is klass
+        attr = None
+        if has_custom_metaclass_accessor(base, "__dict__"):
+            attr = "__dict__"
+        elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
+            attr = "__mro__"
+        if attr is not None:
+            unimplemented(
+                gb_type="Custom metaclass metadata access",
+                context=f"metadata={attr}, name={name}",
+                explanation="Dynamo cannot safely construct a class metadata source "
+                "through custom metaclass accessors.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if name not in namespace:
             continue
 

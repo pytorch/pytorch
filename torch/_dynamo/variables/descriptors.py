@@ -52,7 +52,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import python_constant_repr_impl
+from .object_protocol import guardable_mro_source, python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -1504,7 +1504,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
             if static_desc is not self.descriptor:
                 result_source = None
             elif attr_name == "__mro__":
-                result_source = TypeMROSource(obj.source)
+                result_source = TypeMROSource(guardable_mro_source(obj.source))
         return VariableTracker.build(tx, resolved, result_source)
 
 
