@@ -453,6 +453,20 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
 AOTI_TORCH_EXPORT AOTITorchError
 torch_cpublas_could_pack(int32_t dtype, bool* ret);
 
+struct InferenceModeGuardOpaque;
+using InferenceModeGuardHandle = InferenceModeGuardOpaque*;
+
+// Enables or disables inference mode on the current thread until the guard is
+// deleted. Delete the guard on the same thread, in reverse creation order.
+AOTI_TORCH_EXPORT AOTITorchError torch_new_inference_mode_guard(
+    bool enabled,
+    InferenceModeGuardHandle* ret_guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_inference_mode_guard(InferenceModeGuardHandle guard);
+
+AOTI_TORCH_EXPORT bool torch_is_inference_mode_enabled();
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
