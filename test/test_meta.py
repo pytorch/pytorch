@@ -2810,10 +2810,14 @@ class TestMetaKernelRegistrations(TestCase):
     def test_adaptive_avg_pool2d_backward_mismatched_ranks(self, input_size, grad_size):
         x = torch.empty(input_size)
         grad_output = torch.empty(grad_size)
-        error = f"Expected dimensions {len(input_size)}"
-        with self.assertRaisesRegex(RuntimeError, error):
+        error = (
+            f"Expected dimensions {len(input_size)}"
+            if len(input_size) in (3, 4)
+            else "Expected 3D or 4D tensor"
+        )
+        with self.assertRaisesRegex(ValueError, error):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
-        with self.assertRaisesRegex(RuntimeError, error):
+        with self.assertRaisesRegex(ValueError, error):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad_output.to("meta"), x.to("meta"))
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
