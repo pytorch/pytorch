@@ -1840,6 +1840,8 @@ class BenchmarkWorkload:
 
 
 class BenchmarkRunner:
+    suite_name: str | None = None
+
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
