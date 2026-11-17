@@ -2016,7 +2016,12 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
 static std::optional<Tensor> matmul_fold_broadcast_batch(
     const Tensor& tensor1,
     const Tensor& tensor2) {
-  if (isTensorSubclassLike(tensor1) || isTensorSubclassLike(tensor2) ||
+  // Not isTensorSubclassLike, which is true under any mode, so that the ops do not
+  // depend on whether a mode is active
+  const auto subclass_like = [](const Tensor& t) {
+    return !(t.key_set() & kTensorSubclassLike).empty();
+  };
+  if (subclass_like(tensor1) || subclass_like(tensor2) ||
       TORCH_GUARD_OR_FALSE(tensor1.sym_numel().sym_eq(0))) {
     return std::nullopt;
   }
@@ -2053,6 +2058,11 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
   const auto& n = sizes1[nb];
   const auto& m = sizes2[tensor2.dim() - 2];
   const auto& p = sizes2.back();
+  // BLAS takes the folded rows as an int
+  if (!TORCH_GUARD_OR_FALSE(
+          (fold_numel * n).sym_le(std::numeric_limits<int>::max()))) {
+    return std::nullopt;
+  }
   // If expanding tensor2 does not copy it, keep the existing path
   c10::SymDimVector expanded_sizes2(sizes1.begin(), sizes1.end() - 2);
   expanded_sizes2.append({m, p});

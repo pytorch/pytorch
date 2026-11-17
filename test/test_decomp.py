@@ -1304,6 +1304,14 @@ class DecompOneOffTests(TestCase):
         self.assertIn(torch.ops.aten.expand.default, targets)
         self.assertEqual(gm(x, y), x.contiguous() @ y)
 
+        # Not folded either when the folded rows do not fit in an int
+        x = torch.empty(2, 2**16, 2**15 + 1, 1, device="meta")
+        y = torch.empty(2, 1, 1, 2, device="meta")
+        with enable_python_dispatcher():
+            gm = make_fx(torch.matmul)(x, y)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(torch.ops.aten.expand.default, targets)
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_softshrink_backward_lambd_range(self, device):

@@ -5,6 +5,7 @@ import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.utils._python_dispatch import TorchDispatchMode
 import numpy as np
 
 import os
@@ -5416,6 +5417,19 @@ class TestLinalg(TestCase):
         self.assertIn("aten::expand", matmul_ops(torch.randn(6, 4, 1, 5, device=device), y.expand(4, 5, 3)))
         self.assertIn("aten::expand", matmul_ops(torch.randn(1, 1, 5, device=device).expand(6, 1, 5), y))
         self.assertIn("aten::expand", matmul_ops(torch.randn(1, 4, 8, 16, device=device), torch.randn(1, 1, 16, 8, device=device)))
+
+        # Folded under a dispatch mode too
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.add(func)
+                return func(*args, **(kwargs or {}))
+
+        ops = set()
+        x, y = torch.randn(2, 3, 4, 5, 6, device=device), torch.randn(2, 3, 1, 6, 7, device=device)
+        with RecordOps():
+            torch.matmul(x, y)
+        self.assertIn(torch.ops.aten.bmm.default, ops)
+        self.assertNotIn(torch.ops.aten.expand.default, ops)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
