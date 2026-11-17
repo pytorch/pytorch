@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
 
 # using tools/ to optimize test run.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+CPP_FAKETENSOR_TESTS = REPO_ROOT / ".ci/pytorch/cpp_faketensor_tests.json"
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
@@ -597,10 +598,9 @@ def _torchci_report_args(
 
 def _torchci_reports_default() -> str | None:
     # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
-    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
-    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    # uploads this folder.
     in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
-    if not in_pytorch_ci or torch.version.xpu:
+    if not in_pytorch_ci:
         return None
     return str(REPO_ROOT / "test/torchci-reports")
 
@@ -633,6 +633,10 @@ def run_test(
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
     is_cpp_test = _is_cpp_test(test_file)
+    if os.getenv("CPP_FAKETENSOR") == "1" and CPP_FAKETENSOR_TESTS.exists():
+        if not options.pytest:
+            raise RuntimeError("Staged C++ FakeTensor tests require pytest")
+        unittest_args.extend(["--cpp-faketensor-tests", str(CPP_FAKETENSOR_TESTS)])
     # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
@@ -1871,7 +1875,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
@@ -2708,6 +2712,12 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    if os.getenv("CPP_FAKETENSOR") == "1" and CPP_FAKETENSOR_TESTS.exists():
+        selectors = json.loads(CPP_FAKETENSOR_TESTS.read_text())["tests"]
+        files = {selector.split("::")[0].removesuffix(".py") for selector in selectors}
+        if unknown := files - set(TESTS):
+            raise RuntimeError(f"Unknown C++ FakeTensor test files: {sorted(unknown)}")
+        selected_tests = [test for test in selected_tests if test in files]
 
     test_prioritizations = import_results()
     if len(test_prioritizations.get_all_tests()) == 0:
