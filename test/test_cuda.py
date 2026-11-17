@@ -16449,6 +16449,76 @@ class TestCudaArchList(TestCase):
             self.assertEqual(torch.cuda.get_arch_list(), expected)
 
 
+# Once enabled, graph allocators stay enabled for the rest of the process:
+# their tests run in subprocesses (TestGraphAllocatorsSubprocess).
+_GRAPH_ALLOCATORS_TEST = os.environ.get("_PYTORCH_TEST_GRAPH_ALLOCATORS") == "1"
+
+
+@unittest.skipIf(not TEST_CUDA or _GRAPH_ALLOCATORS_TEST, "runs subprocesses")
+@unittest.skipIf(TEST_WITH_ROCM, "graph allocators are not tested on ROCm")
+class TestGraphAllocatorsSubprocess(TestCase):
+    @staticmethod
+    def _run(code, alloc_conf=None, env=None):
+        env = {**os.environ, **(env or {})}
+        env.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+        env.pop("PYTORCH_ALLOC_CONF", None)
+        if alloc_conf is not None:
+            env["PYTORCH_CUDA_ALLOC_CONF"] = alloc_conf
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+
+    def test_pass_through(self):
+        # on its own, the layer forwards every call to the caching allocator
+        code = """
+import torch
+old = torch.empty(0, device="cuda").untyped_storage()  # created before the layer
+x = torch.ones(1024, device="cuda")
+torch.cuda.memory._enable_graph_allocators()
+torch.cuda.memory._enable_graph_allocators()  # again: a no-op
+print("backend", torch.cuda.memory.get_allocator_backend())
+base = torch.cuda.memory_allocated()
+y = x + 1
+p = torch.cuda.caching_allocator_alloc(1024)
+old.resize_(4096)
+print("allocated", torch.cuda.memory_allocated() - base)
+torch.cuda.caching_allocator_delete(p)
+del y
+old.resize_(0)
+print("freed", torch.cuda.memory_allocated() - base)
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g):
+    z = x * 2
+g.replay()
+torch.cuda.synchronize()
+print("z", z.sum().item())
+try:
+    torch.cuda.memory.change_current_allocator(
+        torch.cuda.memory._get_current_allocator())
+except RuntimeError as e:
+    print("ERROR", e)
+"""
+        proc = self._run(code)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("backend native", proc.stdout)
+        self.assertIn(f"allocated {4096 + 1024 + 4096}", proc.stdout)
+        self.assertIn("freed 0", proc.stdout)
+        self.assertIn("z 2048.0", proc.stdout)
+        self.assertIn(
+            "cannot be used once CUDA graph allocators are enabled", proc.stdout
+        )
+        proc = self._run(
+            "import torch; torch.cuda.memory._enable_graph_allocators()",
+            "backend:cudaMallocAsync",
+        )
+        self.assertIn("requires the native CUDA caching allocator", proc.stderr)
+
+
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaAllocator)
 instantiate_parametrized_tests(TestMemPool)

@@ -22,6 +22,10 @@ createCustomAllocator(
 TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
+// torch.cuda.memory._enable_graph_allocators: makes a layer over the native
+// caching allocator the current allocator, for the rest of the process. Can be
+// called at any time.
+TORCH_CUDA_CPP_API void enableGraphAllocators();
 
 struct _AllocationMetadata {
   _AllocationMetadata();
