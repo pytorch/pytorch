@@ -225,6 +225,18 @@ def is_floating(x):
     return promote_to_tensor(x).dtype.is_floating()
 
 
+@triton.jit
+def trunc_to_float(x, float_dtype: tl.constexpr):
+    x = tl.to_tensor(x)
+    # libdevice.trunc only accepts floating-point inputs.
+    if x.dtype.is_int():
+        return x.to(float_dtype)
+    else:
+        # Adding zero preserves large results while canonicalizing
+        # libdevice.trunc(-0.0) to Python's +0.0 materialization behavior.
+        return libdevice.trunc(x) + tl.zeros_like(x)
+
+
 # libdevice.ceil, libdevice.floor, and libdevice.trunc accept only floating-point
 # inputs. Conservatively canonicalized symbolic expressions can still be integer
 # at Triton compile time, so bypass libdevice for those inputs.

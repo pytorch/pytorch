@@ -652,7 +652,7 @@ class ExprPrinterTests(InductorTestCase):
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
                 self.assertExpectedInline(
                     texpr(expr),
-                    """triton_helpers.rounding_to_int((1/2)*s1, tl.int64, "floor")""",
+                    """triton_helpers.rounding_to_int((1/2)*s1, tl.int64, 'floor')""",
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 

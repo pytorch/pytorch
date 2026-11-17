@@ -13,8 +13,6 @@ Covers:
   integer type before the final bitcast, preventing size mismatch errors.
 """
 
-import unittest
-
 import torch
 from torch._inductor.runtime.triton_helpers import (
     exclusive_scan_decoupled_lookback_64,
@@ -43,11 +41,10 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
     requires_gpu,
-    TRITON_HAS_CPU,
 )
 
 
-if HAS_GPU or TRITON_HAS_CPU:
+if HAS_GPU:
     import triton  # @manual
     from triton import language as tl
 
@@ -226,8 +223,7 @@ if HAS_GPU or TRITON_HAS_CPU:
 
 
 class RoundingToIntTest(TestCase):
-    @unittest.skipUnless(HAS_GPU or TRITON_HAS_CPU, "requires a Triton device")
-    @parametrize("dtype", [torch.int32, torch.int64, torch.float32, torch.float64])
+    @dtypes(torch.int32, torch.int64, torch.float32, torch.float64)
     @parametrize("rounding_type", ["ceil", "floor", "trunc"])
     def test_integer_and_float_inputs(self, device, dtype, rounding_type) -> None:
         rounding_fn = getattr(torch, rounding_type)
@@ -647,16 +643,14 @@ if HAS_GPU:
         OnlineSoftmaxCombineTest, globals(), only_for=GPU_TYPE, allow_xpu=True
     )
     instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
-
-if HAS_GPU or TRITON_HAS_CPU:
     instantiate_device_type_tests(
         RoundingToIntTest,
         globals(),
-        only_for=GPU_TYPE if HAS_GPU else "cpu",
+        only_for=GPU_TYPE,
         allow_xpu=True,
     )
 
 
 if __name__ == "__main__":
-    if HAS_GPU or TRITON_HAS_CPU:
+    if HAS_GPU:
         run_tests()

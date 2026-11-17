@@ -938,7 +938,8 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
-        return f"triton_helpers.rounding_to_int({self._print(expr.args[0])}, {V.kernel.index_dtype}, '{rounding}')"
+        value = self._print(expr.args[0])
+        return f"triton_helpers.rounding_to_int({value}, {V.kernel.index_dtype}, '{rounding}')"
 
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         return self._print_rounding_to_int(expr, "trunc")
@@ -948,10 +949,7 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
         value = self._print(expr.args[0])
-        # Adding +0.0 preserves large floating results while canonicalizing
-        # libdevice.trunc(-0.0) back to Python's +0.0 materialization behavior.
-        # pyrefly: ignore [missing-attribute]
-        return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
+        return f"triton_helpers.trunc_to_float({value}, {self._get_scalar_float_type()})"
 
     @staticmethod
     def _get_scalar_float_type() -> str:

@@ -106,16 +106,18 @@ __all__ = [
 ]
 
 
-def is_integer_check_safe(expr: sympy.Basic) -> bool:
-    """Trust only PyTorch functions that statically declare an integer result.
+def _is_integer_check_safe(expr: sympy.Basic) -> bool:
+    """Trust integer literals, symbols, and integer-valued PyTorch functions.
 
     SymPy's inferred ``expr.is_integer`` can be incorrect for composite
     expressions, so it is not safe to use for correctness-preserving
     canonicalization.
     """
 
-    return isinstance(expr, sympy.Integer) or (
-        expr.func.__module__ == __name__ and expr.func.is_integer is True
+    return (
+        isinstance(expr, sympy.Integer)
+        or (isinstance(expr, sympy.Symbol) and expr.is_integer is True)
+        or (expr.func.__module__ == __name__ and expr.func.is_integer is True)
     )
 
 
@@ -576,7 +578,7 @@ class CeilToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if is_integer_check_safe(number):
+        if _is_integer_check_safe(number):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
@@ -596,7 +598,7 @@ class FloorToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if is_integer_check_safe(number):
+        if _is_integer_check_safe(number):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))

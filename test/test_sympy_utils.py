@@ -1163,9 +1163,7 @@ class TestSympyFunctions(TestCase):
         integer_symbol = sympy.Symbol("integer_symbol", integer=True)
         for rounding in (CeilToInt, FloorToInt, TruncToInt):
             with self.subTest(rounding=rounding):
-                result = rounding(integer_symbol)
-                self.assertIs(result.func, rounding)
-                self.assertEqual(result.args, (integer_symbol,))
+                self.assertIs(rounding(integer_symbol), integer_symbol)
 
     def test_rounding_to_int_does_not_canonicalise_expressions_with_incorrect_assumptions(
         self,
