@@ -38,6 +38,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     MI350_ARCH,
+    skipIfCppFakeTensor,
     skipIfRocm,
     skipIfRocmArch,
     skipIfTorchDynamo,
@@ -510,6 +511,11 @@ class TestTransformersGeneric(NNTestCase):
                 for call_args, _ in fastpath_mock.call_args_list:
                     self.assertEqual(call_args[0].is_nested, nested_tensors)
 
+        @skipIfCppFakeTensor("no nested tensor support")
+        def _test_nested_fastpath(model, key_padding_mask):
+            nt = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
+            _test_fastpath(model, key_padding_mask, nt, nested_tensors=True)
+
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
 
         model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=True)
@@ -518,11 +524,11 @@ class TestTransformersGeneric(NNTestCase):
         aligned_key_padding_mask = torch.Tensor([[0, 0, 1]]).to(torch.bool)
         not_aligned_key_padding_mask = torch.Tensor([[1, 0, 1]]).to(torch.bool)
         attn_mask = torch.Tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]]).to(torch.bool)
-        nested_tensor_return_value = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
         tensor_return_value = torch.ones((1, 3, 2), dtype=torch.float)
 
         # Left aligned mask results in sparsity fastpath
-        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+        with self.subTest(nested_tensor=True, mask_check=True):
+            _test_nested_fastpath(model, aligned_key_padding_mask)
 
         # Not aligned mask results in fastpath
         _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
@@ -540,8 +546,9 @@ class TestTransformersGeneric(NNTestCase):
         model.eval()
 
         # Mask check disabled results in sparisty fastpath, independently of the mask
-        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
-        _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+        with self.subTest(nested_tensor=True, mask_check=False):
+            _test_nested_fastpath(model, aligned_key_padding_mask)
+            _test_nested_fastpath(model, not_aligned_key_padding_mask)
 
     # Test failing MHA when bias was NoneType
     def test_bias_is_none(self):
@@ -850,6 +857,12 @@ class TestTransformersAccelerator(NNTestCase):
 
         maybe_autocast = torch.autocast("cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
         with maybe_autocast:
+            if (
+                torch._dynamo.config.use_cpp_fake_tensor
+                and enable_nested_tensor
+                and not torch.is_autocast_enabled()
+            ):
+                self.skipTest("no nested tensor support")
             for input, src_key_padding_mask in input_mask_pairs:
                 with torch.no_grad():
                     fastpath_output = model(input, src_key_padding_mask=src_key_padding_mask)
@@ -995,9 +1008,17 @@ class TestTransformersAccelerator(NNTestCase):
 
             # all 0
             mask = torch.zeros([2, 5]).to(device) == 1
-            result = model(encoder_input, src_key_padding_mask=mask)
-            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            with self.subTest(mask="all_false"):
+                if (
+                    torch._dynamo.config.use_cpp_fake_tensor
+                    and enable_nested_tensor
+                    and batch_first
+                    and not training
+                ):
+                    self.skipTest("no nested tensor support")
+                result = model(encoder_input, src_key_padding_mask=mask)
+                self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+                torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
             mask[0, 1] = 1
             mask[1, 3] = 1
@@ -1285,6 +1306,7 @@ class TestTransformersAccelerator(NNTestCase):
 
     # CPU unit test has_torch_functions in test environment,
     #   preventing successful completion
+    @skipIfCppFakeTensor("no nested tensor support")
     @onlyAccelerator
     def test_with_nested_tensor_input(self, device):
         encoder_layer = nn.TransformerEncoderLayer(
@@ -2211,6 +2233,7 @@ class TestSDPAFailureModes(NNTestCase):
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_error_cases(self, device):
@@ -2233,6 +2256,7 @@ class TestSDPAFailureModes(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
@@ -2275,6 +2299,7 @@ class TestSDPAFailureModes(NNTestCase):
 
         self.assertFalse(torch.isnan(out).any(), "Output should not contain NaNs!")
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
@@ -2303,6 +2328,7 @@ class TestSDPAFailureModes(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
@@ -3122,6 +3148,10 @@ class TestSDPACPU(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
     hw_classification = HardwareClassification.CPU
 
+    @decorateIf(
+        skipIfCppFakeTensor("no nested tensor support"),
+        lambda p: p["type"] == "nested",
+    )
     @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
@@ -5545,6 +5575,10 @@ class TestSDPAAccelerator(NNTestCase):
         with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
             scaled_dot_product_attention(query, key, value)
 
+    @decorateIf(
+        skipIfCppFakeTensor("no nested tensor support"),
+        lambda p: p["type"] == "nested",
+    )
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
@@ -5583,6 +5617,7 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED" not in os.environ, "cuDNN Nested Tensor support not enabled")
     @parametrize("type", ["nested"])
@@ -5615,6 +5650,10 @@ class TestSDPAAccelerator(NNTestCase):
                 attn_mask=None, dropout_p=0.0, is_causal=False)
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
+    @decorateIf(
+        skipIfCppFakeTensor("no nested tensor support"),
+        lambda p: p["type"] == "nested",
+    )
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense",] if TEST_XPU else ["dense", "nested"])  # https://github.com/intel/torch-xpu-ops/issues/3132
@@ -5783,6 +5822,10 @@ class TestSDPAAccelerator(NNTestCase):
             atol = 9e-4 if dtype == torch.float16 else 9e-3
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
+    @decorateIf(
+        skipIfCppFakeTensor("no nested tensor support"),
+        lambda p: p["type"] == "nested",
+    )
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
     @skipIfXpu(msg="XPU backend choice / NestedTensorXPU dispatch not aligned; tracked in torch-xpu-ops")
     @parametrize("type", ["dense", "nested"])
@@ -6993,6 +7036,7 @@ class TestSDPAAccelerator(NNTestCase):
         g_bwd.replay()
         self.assertEqual(grads[:3], grads_ref[:3])
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
@@ -7028,6 +7072,7 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
@@ -7118,6 +7163,7 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1.5e-3, rtol=1e-2)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @skipIfXpu(msg="XPU SDPA dispatch lacks nested broadcasting kernels; tracked in torch-xpu-ops")
     def test_fused_kernels_nested_broadcasting_query_dense(self, device):
@@ -7153,6 +7199,7 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [8, 32])
