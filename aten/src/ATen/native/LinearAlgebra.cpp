@@ -2029,8 +2029,8 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
   const auto sizes2 = tensor2.sym_sizes();
   const int64_t nb = tensor1.dim() - 2;
   const int64_t offset = tensor1.dim() - tensor2.dim();
-  std::vector<int64_t> keep;
-  std::vector<int64_t> fold;
+  DimVector keep;
+  DimVector fold;
   bool broadcasts = false;
   for (const auto i : c10::irange(nb)) {
     const auto size2 = i < offset ? c10::SymInt(1) : sizes2[i - offset];
@@ -2077,8 +2077,8 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     return std::nullopt;
   }
 
-  std::vector<int64_t> perm(keep);
-  perm.insert(perm.end(), fold.begin(), fold.end());
+  DimVector perm(keep);
+  perm.append(fold.begin(), fold.end());
   perm.push_back(nb);
   perm.push_back(nb + 1);
   bool in_order = true;
@@ -2105,10 +2105,16 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     }
   }
 
-  const auto t1 = tensor1.permute(perm);
+  const auto strides1 = tensor1.sym_strides();
+  c10::SymDimVector perm_sizes;
+  c10::SymDimVector perm_strides;
+  for (const auto i : perm) {
+    perm_sizes.push_back(sizes1[i]);
+    perm_strides.push_back(strides1[i]);
+  }
   const c10::SymDimVector t1_shape{keep_numel, fold_numel * n, sizes1.back()};
   const auto t1_strides =
-      at::detail::computeStride(t1.sym_sizes(), t1.sym_strides(), t1_shape);
+      at::detail::computeStride(perm_sizes, perm_strides, t1_shape);
   // Folding must not copy tensor1, or give it a layout that bmm would copy
   if (!t1_strides.has_value() ||
       !TORCH_GUARD_OR_FALSE((*t1_strides)[2].sym_eq(1)) ||
@@ -2116,7 +2122,7 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     return std::nullopt;
   }
 
-  const auto out = t1.view_symint(t1_shape).bmm(
+  const auto out = tensor1.permute(perm).view_symint(t1_shape).bmm(
       tensor2.reshape_symint({keep_numel, m, p}));
   if (in_order) {
     c10::SymDimVector output_shape(sizes1.begin(), sizes1.end() - 1);
@@ -2124,7 +2130,7 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     return at::_unsafe_view_symint(out, output_shape);
   }
   c10::SymDimVector perm_shape;
-  std::vector<int64_t> inv_perm(perm.size());
+  DimVector inv_perm(perm.size());
   for (const auto j : c10::irange(perm.size())) {
     perm_shape.push_back(perm[j] == nb + 1 ? p : sizes1[perm[j]]);
     inv_perm[perm[j]] = static_cast<int64_t>(j);

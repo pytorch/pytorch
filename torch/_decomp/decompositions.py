@@ -5392,16 +5392,17 @@ def _matmul_fold_broadcast_batch(
         ):
             return None
 
-    t1 = tensor1.permute(perm)
     t1_shape = [prod(keep_sizes), prod(fold_sizes) * n, m1]
-    t1_stride = _compute_stride(t1.shape, t1.stride(), t1_shape, size_oblivious=True)
+    perm_sizes = [sizes1[i] for i in perm]
+    perm_strides = [tensor1.stride(i) for i in perm]
+    t1_stride = _compute_stride(perm_sizes, perm_strides, t1_shape, size_oblivious=True)
     # Folding must not copy tensor1, or give it a layout that bmm would copy
     if t1_stride is None or not (
         guard_or_false(t1_stride[2] == 1) and guard_or_false(t1_stride[1] >= m1)
     ):
         return None
 
-    out = t1.view(t1_shape).bmm(tensor2.reshape(t1_shape[0], m2, p))
+    out = tensor1.permute(perm).view(t1_shape).bmm(tensor2.reshape(t1_shape[0], m2, p))
     if in_order:
         return torch.ops.aten._unsafe_view(out, [*sizes1[:-1], p])
     out = torch.ops.aten._unsafe_view(out, keep_sizes + fold_sizes + [n, p])
