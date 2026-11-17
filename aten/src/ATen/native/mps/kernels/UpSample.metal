@@ -566,6 +566,7 @@ kernel void upsample_nearest2d(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],
+    constant long2& origin [[buffer(4)]],
     uint3 thread_index [[thread_position_in_grid]],
     uint3 grid_size [[threads_per_grid]]) {
   const auto input_strides = vec<index_t, 4>(to_vec(params.input_strides));
@@ -575,17 +576,16 @@ kernel void upsample_nearest2d(
       static_cast<uint>(params.output_sizes[0]) * channels.divisor;
   const NearestSource<exact, index_t> source_x(params.scales[0], false);
   const NearestSource<exact, index_t> source_y(params.scales[1], false);
-  const uint x = thread_index.x;
-  const uint y = thread_index.y;
+  const index_t x = static_cast<index_t>(origin.x) + thread_index.x;
+  const index_t y = static_cast<index_t>(origin.y) + thread_index.y;
   const auto src_x =
       min(source_x(x), static_cast<index_t>(params.input_sizes[3]) - 1);
   const auto src_y =
       min(source_y(y), static_cast<index_t>(params.input_sizes[2]) - 1);
   device const auto* input =
       inputData + src_y * input_strides.z + src_x * input_strides.w;
-  device auto* output = outputData +
-      static_cast<index_t>(y) * output_strides.z +
-      static_cast<index_t>(x) * output_strides.w;
+  device auto* output =
+      outputData + y * output_strides.z + x * output_strides.w;
   for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
     const auto nc = channels.divmod(plane);
     const auto n = nc.div;
@@ -603,6 +603,7 @@ kernel void upsample_bilinear2d(
     device T* outputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],
+    constant long2& origin [[buffer(4)]],
     uint3 thread_index [[thread_position_in_grid]],
     uint3 grid_size [[threads_per_grid]]) {
   const auto input_strides = vec<index_t, 4>(to_vec(params.input_strides));
@@ -610,8 +611,8 @@ kernel void upsample_bilinear2d(
   const ::c10::IntDivider<uint> channels = channels_div;
   const auto planes =
       static_cast<uint>(params.output_sizes[0]) * channels.divisor;
-  const uint x = thread_index.x;
-  const uint y = thread_index.y;
+  const index_t x = static_cast<index_t>(origin.x) + thread_index.x;
+  const index_t y = static_cast<index_t>(origin.y) + thread_index.y;
   const auto real_x = area_pixel_compute_source_index(
       params.scales[0], x, params.align_corners, /*cubic=*/false);
   const auto real_y = area_pixel_compute_source_index(
@@ -628,9 +629,8 @@ kernel void upsample_bilinear2d(
       inputData + clamp(y0, index_t(0), max_y) * input_strides.z;
   device const T* row1 =
       inputData + clamp(y0 + 1, index_t(0), max_y) * input_strides.z;
-  device auto* output = outputData +
-      static_cast<index_t>(y) * output_strides.z +
-      static_cast<index_t>(x) * output_strides.w;
+  device auto* output =
+      outputData + y * output_strides.z + x * output_strides.w;
   for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
     const auto nc = channels.divmod(plane);
     const index_t in_off = nc.div * input_strides.x + nc.mod * input_strides.y;
@@ -651,14 +651,15 @@ kernel void upsample_gather_backward(
     device const T* gradOutputData [[buffer(1)]],
     constant UpsampleParams<4>& params [[buffer(2)]],
     constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],
+    constant long2& origin [[buffer(4)]],
     uint3 thread_index [[thread_position_in_grid]],
     uint3 grid_size [[threads_per_grid]]) {
   const auto input_strides = vec<index_t, 4>(to_vec(params.input_strides));
   const auto output_strides = vec<index_t, 4>(to_vec(params.output_strides));
   const auto input_sizes = to_vec(params.input_sizes);
   const auto output_sizes = to_vec(params.output_sizes);
-  const int input_x = thread_index.x;
-  const int input_y = thread_index.y;
+  const int input_x = static_cast<int>(origin.x) + thread_index.x;
+  const int input_y = static_cast<int>(origin.y) + thread_index.y;
   const ::c10::IntDivider<uint> channels = channels_div;
   const auto planes = static_cast<uint>(input_sizes.x) * channels.divisor;
   const Source source_x(params.scales[0], params.align_corners);
@@ -1032,6 +1033,7 @@ kernel void upsample_backward(
       device const DTYPE* gradOutputData [[buffer(1)]],             \
       constant UpsampleParams<4>& params [[buffer(2)]],             \
       constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]], \
+      constant long2& origin [[buffer(4)]],                         \
       uint3 thread_index [[thread_position_in_grid]],               \
       uint3 grid_size [[threads_per_grid]])
 
@@ -1058,6 +1060,7 @@ kernel void upsample_backward(
       device DTYPE* outputData [[buffer(1)]],                             \
       constant UpsampleParams<4>& params [[buffer(2)]],                   \
       constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],       \
+      constant long2& origin [[buffer(4)]],                               \
       uint3 thread_index [[thread_position_in_grid]],                     \
       uint3 grid_size [[threads_per_grid]])
 
@@ -1069,6 +1072,7 @@ kernel void upsample_backward(
           device DTYPE* outputData [[buffer(1)]],                          \
           constant UpsampleParams<4>& params [[buffer(2)]],                \
           constant ::c10::IntDivider<uint>& channels_div [[buffer(3)]],    \
+          constant long2& origin [[buffer(4)]],                            \
           uint3 thread_index [[thread_position_in_grid]],                  \
           uint3 grid_size [[threads_per_grid]])
 

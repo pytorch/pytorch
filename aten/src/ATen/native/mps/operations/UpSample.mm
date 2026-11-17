@@ -161,12 +161,6 @@ static void dispatch_plane_grid(const std::string& name,
     return;
   }
   const auto& owner = grid_over_a ? a : b;
-  constexpr int64_t max_grid_dim = std::numeric_limits<uint32_t>::max();
-  TORCH_CHECK(owner.size(2) <= max_grid_dim && owner.size(3) <= max_grid_dim,
-              "upsample_",
-              name,
-              ": spatial sizes must not exceed UINT32_MAX, got ",
-              owner.sizes());
   const UpsampleParams<4> params(a, b, align_corners, scales);
   const bool channels_last = owner.suggest_memory_format() == MemoryFormat::ChannelsLast;
   const auto height = static_cast<NSUInteger>(owner.size(2));
@@ -194,8 +188,16 @@ static void dispatch_plane_grid(const std::string& name,
       const auto threadgroup = MTLSizeMake(tg_width, 1, std::min(tg_planes, max_threads / tg_width));
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, a, b, params, channels);
-      [encoder dispatchThreads:MTLSizeMake(width, height, planes) threadsPerThreadgroup:threadgroup];
+      // Metal truncates grid sizes to 32 bits: tile larger H or W and pass each tile's origin.
+      const NSUInteger max_tile = std::numeric_limits<int32_t>::max();
+      for (NSUInteger y = 0; y < height; y += max_tile) {
+        for (NSUInteger x = 0; x < width; x += max_tile) {
+          const std::array<int64_t, 2> origin{static_cast<int64_t>(x), static_cast<int64_t>(y)};
+          mtl_setArgs(encoder, a, b, params, channels, origin);
+          [encoder dispatchThreads:MTLSizeMake(std::min(width - x, max_tile), std::min(height - y, max_tile), planes)
+              threadsPerThreadgroup:threadgroup];
+        }
+      }
     }
   });
 }
@@ -204,7 +206,15 @@ static void upsample_plane_grid_out_template(const Tensor& input,
                                              const Tensor& output,
                                              bool align_corners,
                                              std::initializer_list<std::optional<double>> scales,
-                                             const std::string& name) {
+                                             const std::string& name,
+                                             std::string_view op_name) {
+  // Matches the kernel instantiations: bilinear is float and uint8; nearest adds bool and signed ints.
+  const auto dtype = input.scalar_type();
+  const bool float_type = dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
+  const bool supported = name == "bilinear2d"
+      ? float_type || dtype == kByte
+      : float_type || (isIntegralType(dtype, /*includeBool=*/true) && !isBarebonesUnsignedType(dtype));
+  TORCH_CHECK_NOT_IMPLEMENTED(supported, op_name, " not implemented for ", dtype, " on MPS");
   if (output.numel() == 0) {
     return;
   }
@@ -240,7 +250,8 @@ static void upsample_gather_backward_out_template(const Tensor& grad_input,
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  upsample_plane_grid_out_template(input.unsqueeze(2), output.unsqueeze(2), false, {scale, std::nullopt}, "nearest2d");
+  upsample_plane_grid_out_template(
+      input.unsqueeze(2), output.unsqueeze(2), false, {scale, std::nullopt}, "nearest2d", "upsample_nearest1d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
@@ -255,8 +266,12 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
-  upsample_plane_grid_out_template(
-      input.unsqueeze(2), output.unsqueeze(2), false, {scale, std::nullopt}, "nearest_exact2d");
+  upsample_plane_grid_out_template(input.unsqueeze(2),
+                                   output.unsqueeze(2),
+                                   false,
+                                   {scale, std::nullopt},
+                                   "nearest_exact2d",
+                                   "_upsample_nearest_exact1d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_backward_out_mps)
@@ -275,7 +290,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_plane_grid_out_template(input, output, false, {scales_w, scales_h}, "nearest2d");
+  upsample_plane_grid_out_template(input, output, false, {scales_w, scales_h}, "nearest2d", "upsample_nearest2d");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_mps)
@@ -294,7 +309,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_plane_grid_out_template(input, output, false, {scales_w, scales_h}, "nearest_exact2d");
+  upsample_plane_grid_out_template(
+      input, output, false, {scales_w, scales_h}, "nearest_exact2d", "_upsample_nearest_exact2d");
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
@@ -330,7 +346,8 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_plane_grid_out_template(input, output, align_corners, {scales_w, scales_h}, "bilinear2d");
+  upsample_plane_grid_out_template(
+      input, output, align_corners, {scales_w, scales_h}, "bilinear2d", "upsample_bilinear2d");
 }
 
 TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_mps)
