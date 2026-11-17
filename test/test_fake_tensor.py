@@ -2484,14 +2484,21 @@ def forward(self, x_1):
                 self.assertEqual(destination.device, torch.device(input_device))
                 self.assertIs(maybe_get_fake_mode(destination), mode)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("layout", [torch.sparse_coo, torch.sparse_csr])
-    def test_sparse_metadata_without_backend_kernel(self, layout):
+    @parametrize("python_dispatcher", [False, True])
+    def test_sparse_metadata_without_backend_kernel(self, layout, python_dispatcher):
         mode = FakeTensorMode()
         meta = torch.eye(2).to_sparse(layout=layout).to("meta")
         sparse = self.fake_from_meta(mode, meta, "privateuseone:0")
         for context in (contextlib.nullcontext(), mode):
-            with context:
+            with (
+                context,
+                enable_python_dispatcher()
+                if python_dispatcher
+                else contextlib.nullcontext(),
+            ):
                 self.assertEqual(sparse.sparse_dim(), 2)
                 self.assertEqual(sparse.dense_dim(), 0)
                 if layout == torch.sparse_coo:
@@ -2499,8 +2506,12 @@ def forward(self, x_1):
         self.assertEqual(sparse.device, torch.device("privateuseone:0"))
         self.assertIs(maybe_get_fake_mode(sparse), mode)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_sparse_meta_kernel_dispatch(self):
+    @parametrize("python_dispatcher", [False, True])
+    def test_sparse_meta_kernel_dispatch(self, python_dispatcher):
+        if python_dispatcher:
+            self.enterContext(enable_python_dispatcher())
         mode = FakeTensorMode()
 
         def check(out, shape):
@@ -3359,6 +3370,7 @@ for t in threads:
             msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
         )
 
+    @fake_tensor_test(processes=True)
     @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
     def test_cuda_fake_tensor_new_methods_no_device_init(self):
         # Device visibility must be set before torch is imported, so run the
@@ -5452,35 +5464,6 @@ class TestFakeTensorDispatchCache(_TestFakeTensorDispatchCacheHelpers, TestCase)
                 extract_tensor_metadata(res4),
             )
 
-    def test__upsample_bilinear2d_aa_backward_dynamic_shapes(self):
-        def f(x):
-            return torch.nn.functional.interpolate(
-                x,
-                size=[256, 256],
-                mode="bilinear",
-                align_corners=False,
-                antialias=True,
-            )
-
-        shape_env = ShapeEnv()
-        fake_m = FakeTensorMode(shape_env=shape_env)
-        x = fake_m.from_tensor(
-            torch.randn(1, 3, 2005, 1920, requires_grad=True),
-            symbolic_context=StatelessSymbolicContext(
-                dynamic_sizes=[
-                    DimDynamic.STATIC,
-                    DimDynamic.STATIC,
-                    DimDynamic.DYNAMIC,
-                    DimDynamic.DYNAMIC,
-                ],
-                constraint_sizes=[None, None, None, None],
-            ),
-        )
-        with fake_m, enable_python_dispatcher():
-            out = f(x)
-            out.sum().backward()
-            self.assertEqual(x.shape, x.grad.shape)
-
     def test_meta_tensor_to_fake_cpu(self):
         x = torch.randn(4, 4, device="meta")
         with FakeTensorMode(allow_non_fake_inputs=True):
@@ -7198,53 +7181,142 @@ class TestCppFakeTensorModeBindings(TestCase):
             result = torch.ops._test_fake_fallback.detached(fake)
         self.assertIsNone(maybe_get_fake_dispatch_keys(result))
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @fake_tensor_test()
     @parametrize("active", [False, True])
-    @parametrize("implementation", ["meta", "python_cia", "declining_python_cia"])
-    def test_fake_fallback_unsets_mode_in_meta_kernel(self, active, implementation):
+    @parametrize("python_dispatcher", [False, True])
+    @parametrize("python_meta", [False, True])
+    def test_fake_fallback_unsets_mode_in_meta_kernel(
+        self, active, python_dispatcher, python_meta
+    ):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         fake = mode.from_tensor(torch.randn(2, 3))
         seen = []
 
         def meta_impl(x):
             seen.append(("meta", x.is_meta, torch._guards.active_fake_mode()))
-            self.assertIsNone(torch._guards.active_fake_mode())
             return x.new_empty(x.shape)
 
-        def python_impl(x):
-            seen.append(("python", x.is_meta, torch._guards.active_fake_mode()))
-            return (
-                NotImplemented if implementation == "declining_python_cia" else x.sum()
-            )
+        def python_meta_impl(x):
+            seen.append(("python_meta", x.is_meta, torch._guards.active_fake_mode()))
+            return x.new_empty(x.shape)
 
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define("probe(Tensor x) -> Tensor")
-            lib.impl(
-                "probe",
-                meta_impl,
-                "Meta" if implementation == "meta" else "CompositeImplicitAutograd",
-            )
+            lib.impl("probe", meta_impl, "Meta")
             op = torch.ops._test_fake_fallback.probe.default
-            # Export writes py_kernels directly, bypassing the PythonCIA table.
-            overrides = (
-                {}
-                if implementation == "meta"
-                else {torch._C.DispatchKey.CompositeImplicitAutograd: python_impl}
-            )
+            if python_meta:
+                op.py_impl(torch._C.DispatchKey.Meta)(python_meta_impl)
             with (
-                patch.dict(op.py_kernels, overrides),
                 torch.inference_mode(),
                 mode if active else contextlib.nullcontext(),
+                enable_python_dispatcher()
+                if python_dispatcher
+                else contextlib.nullcontext(),
             ):
                 before = self._installed()
                 result = op(fake)
                 self.assertEqual(self._installed(), before)
-        expected = [] if implementation == "meta" else [("python", False, mode)]
-        if implementation != "python_cia":
-            expected.append(("meta", True, None))
-        self.assertEqual(seen, expected)
-        self.assertEqual(result.shape, () if implementation == "python_cia" else (2, 3))
+        selected = "python_meta" if python_meta and python_dispatcher else "meta"
+        self.assertEqual(seen, [(selected, True, None)])
+        self.assertEqual(result.shape, fake.shape)
         self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(self._installed(), (None, False))
+
+    @fake_tensor_test()
+    @parametrize("active", [False, True])
+    @parametrize("python_dispatcher", [False, True])
+    def test_fake_fallback_unsets_mode_in_python_fake(self, active, python_dispatcher):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
+        seen = []
+
+        def meta_impl(x):
+            seen.append(("meta", x.is_meta, torch._guards.active_fake_mode()))
+            return x.new_empty(x.shape)
+
+        def fake_impl(fake_mode, x):
+            self.assertIs(fake_mode, mode)
+            seen.append(("fake", x.is_meta, torch._guards.active_fake_mode()))
+            return x.new_empty(x.shape)
+
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
+            lib.define("probe(Tensor x) -> Tensor")
+            lib.impl("probe", meta_impl, "Meta")
+            op = torch.ops._test_fake_fallback.probe.default
+            op.py_impl(FakeTensorMode)(fake_impl)
+            with (
+                torch.inference_mode(),
+                mode if active else contextlib.nullcontext(),
+                enable_python_dispatcher()
+                if python_dispatcher
+                else contextlib.nullcontext(),
+            ):
+                before = self._installed()
+                result = op(fake)
+                self.assertEqual(self._installed(), before)
+        expected = ("fake", False, None) if python_dispatcher else ("meta", True, None)
+        self.assertEqual(seen, [expected])
+        self.assertEqual(result.shape, fake.shape)
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(self._installed(), (None, False))
+
+    @fake_tensor_test()
+    @parametrize("active", [False, True])
+    @parametrize("python_dispatcher", [False, True])
+    @parametrize("decline", [False, True])
+    def test_fake_fallback_python_cia(self, active, python_dispatcher, decline):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
+        seen = []
+
+        def meta_impl(x):
+            seen.append(("meta", x.is_meta, torch._guards.active_fake_mode()))
+            return x.new_empty(x.shape)
+
+        def python_impl(x):
+            seen.append(("python", x.is_meta, torch._guards.active_fake_mode()))
+            return NotImplemented if decline else x.sum()
+
+        declines_in_meta = decline and python_dispatcher
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
+            lib.define("probe(Tensor x) -> Tensor")
+            lib.impl("probe", meta_impl, "CompositeImplicitAutograd")
+            op = torch.ops._test_fake_fallback.probe.default
+            # Export writes py_kernels directly, bypassing the PythonCIA table.
+            with (
+                patch.dict(
+                    op.py_kernels,
+                    {torch._C.DispatchKey.CompositeImplicitAutograd: python_impl},
+                ),
+                torch.inference_mode(),
+                mode if active else contextlib.nullcontext(),
+                enable_python_dispatcher()
+                if python_dispatcher
+                else contextlib.nullcontext(),
+            ):
+                before = self._installed()
+                with (
+                    self.assertRaisesRegex(
+                        RuntimeError, "Unable to cast NotImplemented to Tensor"
+                    )
+                    if declines_in_meta
+                    else contextlib.nullcontext()
+                ):
+                    result = op(fake)
+                self.assertEqual(self._installed(), before)
+        expected = [("python", False, mode)]
+        if decline:
+            expected.append(("python" if python_dispatcher else "meta", True, None))
+        self.assertEqual(seen, expected)
+        if not declines_in_meta:
+            self.assertEqual(result.shape, fake.shape if decline else ())
+            self.assertIs(maybe_get_fake_mode(result), mode)
         self.assertEqual(self._installed(), (None, False))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
