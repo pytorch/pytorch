@@ -2350,7 +2350,7 @@ from user code:
 
         expected = """\
 RuntimeError when making fake tensor call
-  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1')
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
 
   Developer debug context:
@@ -3174,29 +3174,21 @@ class ErrorMessagesAcceleratorTest(LoggingTestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
 
         msg = str(cm.exception)
-        self.assertIn(
-            expectedIfCppFakeTensor(
-                "RuntimeError when making fake tensor call", "Tensor device mismatch"
-            ),
-            msg,
-        )
+        self.assertIn("Tensor device mismatch", msg)
         self.assertIn("Expected all tensors to be on the same device", msg)
         self.assertIn("cpu", msg)
         self.assertIn(self.device_type, msg)
-        unexpected_messages = expectedIfCppFakeTensor(
-            ("Unhandled FakeTensor Device Propagation",),
-            (
-                "Dynamo failed to run FX node with fake tensors",
-                "Unhandled FakeTensor Device Propagation",
-            ),
-        )
-        for unexpected in unexpected_messages:
+        for unexpected in (
+            "Dynamo failed to run FX node with fake tensors",
+            "Unhandled FakeTensor Device Propagation",
+        ):
             self.assertNotIn(unexpected, msg)
 
 
 instantiate_device_type_tests(
     ErrorMessagesAcceleratorTest, globals(), except_for="cpu", allow_xpu=True
 )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

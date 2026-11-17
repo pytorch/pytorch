@@ -2512,5 +2512,6 @@ if TEST_Z3:
 instantiate_parametrized_tests(TestFXExperimental)
 instantiate_device_type_tests(TestNormalizeOperators, globals(), only_for="cpu")
 
+
 if __name__ == "__main__":
     run_tests()
