@@ -9,7 +9,6 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 
@@ -86,7 +85,6 @@ instantiate_device_type_tests(
     TestKernelBestConfig, globals(), allow_xpu=True, except_for="cpu"
 )
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_TRITON:

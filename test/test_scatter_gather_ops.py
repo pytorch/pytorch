@@ -1,6 +1,5 @@
 # Owner(s): ["module: scatter & gather ops"]
 
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import itertools
 import random
 import unittest
@@ -905,7 +904,6 @@ class TestScatterGatherDevice(TestCase):
             self.assertEqual(res, ref)
 
 
-
 # ---------------------------------------------------------------------------
 # CuTeDSL scatter_add override tests. Two surfaces:
 #   (a) dispatch conds: call the eligibility predicates directly to verify
@@ -1564,7 +1562,6 @@ class TestScatterAddOverrideCorrectness(TestCase):
                 self.assertEqual(cutedsl_impl._scatter_add_eligibility(self_t, 0, idx, src), (N, 50))
                 self.assertLessEqual(len(cutedsl_impl._ELIGIBILITY_CACHE), 2)
 
-    @fake_tensor_test()
     def test_symbolic_sizes_are_not_cached(self):
         from torch._native.ops.scatter_add import cutedsl_impl
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1582,7 +1579,6 @@ class TestScatterAddOverrideCorrectness(TestCase):
         with mode:
             cutedsl_impl._scatter_add_eligibility(fake_self, 0, fake_idx, fake_src)
         self.assertEqual(len(cutedsl_impl._ELIGIBILITY_CACHE), 0)
-
 
 
 instantiate_parametrized_tests(TestScatterAddOverrideConds)

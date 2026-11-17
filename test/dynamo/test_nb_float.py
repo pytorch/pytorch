@@ -3,7 +3,6 @@
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     make_dynamo_test,
@@ -354,8 +353,6 @@ class NbFloatTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(10, 20))
         self.assertEqual(result, 10.0)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

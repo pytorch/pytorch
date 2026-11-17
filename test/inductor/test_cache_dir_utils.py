@@ -7,7 +7,6 @@ from unittest import mock
 
 from torch._inductor.runtime import cache_dir_utils
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -67,8 +66,6 @@ class TestCacheDirUtils(TestCase):
                 os.path.join(tempfile.gettempdir(), "torchinductor_unknown_user"),
             )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

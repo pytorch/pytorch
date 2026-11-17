@@ -5,9 +5,9 @@
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
 #include <ATen/core/ivalue.h>
-#include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <iterator>
 #include <thread>
@@ -521,16 +521,21 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
   future_ = c10::make_intrusive<c10::ivalue::Future>(
       c10::ListType::create(c10::TensorType::get()), devices);
 
-  // Order the current stream after the collective before completing the future
-  // so consumers observing the future see correct results.
-  synchronize();
-
-  if (!outputs_.empty() && !devices.empty()) {
-    c10::OptionalDeviceGuard guard(outputs_[0].device());
+  // Without a device the future records no CUDA event, so order the current
+  // stream here instead (this includes barriers, which have no outputs).
+  if (devices.empty()) {
+    synchronize();
     future_->markCompleted(c10::IValue(outputs_));
-  } else {
-    future_->markCompleted(c10::IValue(outputs_));
+    return future_;
   }
+
+  // Complete on the stream that last wrote the outputs (the collective's
+  // stream unless the backend copied them on another), so the future's events
+  // come after those writes: consumers are ordered after them when they wait
+  // on the future, and the caller's stream is not blocked here (DDP calls
+  // getFuture() right after launching each bucket's allreduce).
+  at::cuda::CUDAStreamGuard guard(outputsStream_.value_or(state_->stream));
+  future_->markCompleted(c10::IValue(outputs_));
   return future_;
 }
 

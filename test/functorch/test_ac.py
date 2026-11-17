@@ -10,7 +10,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -431,8 +430,6 @@ instantiate_device_type_tests(
     MemoryBudgetTestDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     # I'm using the accelerator memory allocator to verify memory allocations

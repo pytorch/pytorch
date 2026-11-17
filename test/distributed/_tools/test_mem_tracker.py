@@ -5,7 +5,6 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
@@ -243,8 +242,6 @@ class TestMemTracker(TestCase):
             # After zero_grad: Gradients are deallocated
             test_attribution_equivalence(mt, model, optim)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

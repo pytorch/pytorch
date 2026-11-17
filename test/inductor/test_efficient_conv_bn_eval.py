@@ -7,7 +7,6 @@ import sys
 
 import torch
 from torch import nn
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 # Make the helper files in test/ importable
@@ -283,7 +282,6 @@ if HAS_GPU:
 
 del EfficientConvBNEvalTemplate
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

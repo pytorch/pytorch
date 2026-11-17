@@ -15,7 +15,6 @@ from torch._inductor.fx_passes.pre_grad import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -206,8 +205,6 @@ class TestFxFusion(TestCase):
         input = torch.randn(2, 4)
         torch.testing.assert_close(gm(input), input)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

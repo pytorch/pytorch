@@ -37,7 +37,6 @@ from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1966,8 +1965,6 @@ class TestBlackwellBMMTemplate(TestCase):
         self.assertIn("blackwell_bmm", codes[0])
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

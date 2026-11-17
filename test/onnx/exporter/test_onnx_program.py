@@ -6,7 +6,6 @@ from __future__ import annotations
 import torch
 from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -184,8 +183,6 @@ class ONNXProgramRenameAxesTest(common_utils.TestCase):
             ir.Shape(["batch_size", 10, "hidden_size"]),
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

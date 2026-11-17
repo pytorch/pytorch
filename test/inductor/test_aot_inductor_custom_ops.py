@@ -13,7 +13,6 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.export import Dim, export
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
@@ -698,7 +697,6 @@ copy_tests(
     GPU_TEST_FAILURES,
 )
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

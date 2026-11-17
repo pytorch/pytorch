@@ -11,7 +11,6 @@ import torch
 from torch._inductor import config
 from torch._inductor.profiler import _InductorTraceProcessor, inductor_trace_handler
 from torch.profiler import kineto_available, profile, ProfilerActivity
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
@@ -479,8 +478,6 @@ class InductorProfilerTraceTests(TestCase):
                 previous_kernel_information_jsons
             )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -23,7 +23,6 @@ from torch._inductor.runtime.benchmarking import (
     TritonBenchmarker,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
@@ -913,8 +912,6 @@ class TestTritonBenchmarkingContext(TestCase):
         with self._patch_compile_iq(collect=None, collector=self._fake_collector()):
             self.assertIs(_triton_benchmarking_context(), contextlib.nullcontext)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

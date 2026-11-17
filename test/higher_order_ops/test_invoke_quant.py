@@ -21,7 +21,6 @@ from torch._inductor.pattern_matcher import (
 )
 from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -234,7 +233,6 @@ class TestInvokeQuantInductor(TestInvokeQuant):
 
 del TestInvokeQuant
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

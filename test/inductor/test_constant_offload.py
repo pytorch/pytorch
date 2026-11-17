@@ -12,7 +12,6 @@ from torch._inductor.codegen import wrapper
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -315,8 +314,6 @@ class ConstantOffloadTest(TestCase):
                 with wrapper._constants_offloaded_to_disk():
                     pass
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

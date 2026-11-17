@@ -32,7 +32,6 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
@@ -1602,6 +1601,19 @@ class DecompOneOffTests(TestCase):
 
     @onlyAccelerator
     @skipIfCrossRef
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_native_dropout_backward_opmath(self, device, dtype):
+        grad = torch.tensor([7 / 2048, -7 / 2048, 7 / 2048], device=device, dtype=dtype)
+        mask = torch.tensor([True, True, False], device=device)
+        scale = 1.0 / 0.9
+        expected = aten.native_dropout_backward.default(grad, mask, scale)
+        actual = decomposition_table[aten.native_dropout_backward.default](
+            grad, mask, scale
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyAccelerator
+    @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
 
@@ -2345,8 +2357,6 @@ class HasDecompTest(TestCase):
             torch.allclose(result_original, result_compiled, rtol=1e-5, atol=1e-5)
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

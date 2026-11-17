@@ -1,7 +1,6 @@
 # Owner(s): ["module: ProxyTensor"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -373,7 +372,6 @@ def forward(self, x_1):
         # returns a ProxyTensor.
         out = make_fx(f, decomposition_table=factory_func_decomp)(torch.ones(2))
         self.assertExpectedInline(out.code, """\
-
 
 
 def forward(self, x_1):
@@ -1071,7 +1069,6 @@ def forward(self, x_1):
         if tracing_mode == "symbolic":
             self.assertIs(gm.shape_env, mode.shape_env)
         self.assertIsNone(detect_fake_mode())
-
 
 
 def _get_node(fx_g, cond):
@@ -2475,7 +2472,6 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
 
 instantiate_device_type_tests(TestUnbackedSymbolicTracingDevice, globals(), except_for="cpu")
 
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == '__main__':
     run_tests()

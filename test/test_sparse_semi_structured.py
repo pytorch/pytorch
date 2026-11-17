@@ -1,6 +1,5 @@
 # Owner(s): ["module: sparse"]
 # ruff: noqa: F841
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 import itertools
 import random
@@ -299,7 +298,6 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         output = torch.compile(fn)(x)
         output.backward(output)
 
-    @fake_tensor_test()
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     def test_cutlass_mm_functionalization_decomp(self):

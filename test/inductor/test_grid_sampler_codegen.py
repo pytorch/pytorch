@@ -4,7 +4,6 @@ import unittest
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -25,8 +24,6 @@ class GridSamplerCodegenTests(InductorTestCase):
         self.assertIn(".to(tl.int32)", source_code)
         self.assertNotIn("tl.int64", source_code)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

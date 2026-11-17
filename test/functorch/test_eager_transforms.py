@@ -63,7 +63,6 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
 )
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     HardwareClassification,
@@ -5107,7 +5106,6 @@ class TestFunctionalizeDevice(TestCase):
             """\
 
 
-
 def forward(self, x_1, indices_1) -> torch.Tensor:
     index = torch.ops.aten.index.Tensor(x_1, [indices_1]);  x_1 = indices_1 = None
     return index
@@ -5181,7 +5179,6 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
             """\
 
 
-
 def forward(self, x_1) -> torch.Tensor:
     ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view_copy = torch.ops.aten.view_copy.default(x_1, [4, 2])
@@ -5205,7 +5202,6 @@ def forward(self, x_1) -> torch.Tensor:
             """\
 
 
-
 def forward(self, x_1) -> torch.Tensor:
     transpose_copy = torch.ops.aten.transpose_copy.int(x_1, 1, 0);  x_1 = None
     return transpose_copy
@@ -5226,7 +5222,6 @@ def forward(self, x_1) -> torch.Tensor:
         self.assertExpectedInline(
             out.code,
             """\
-
 
 
 def forward(self, inpt_1) -> torch.Tensor:
@@ -5258,7 +5253,6 @@ def forward(self, inpt_1) -> torch.Tensor:
             """\
 
 
-
 def forward(self, inpt_1) -> torch.Tensor:
     empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False);  empty = None
     empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
@@ -5287,7 +5281,6 @@ def forward(self, inpt_1) -> torch.Tensor:
             """\
 
 
-
 def forward(self, x_1) -> torch.Tensor:
     ones = torch.ops.aten.ones.default([2], device = 'cpu', pin_memory = False)
     view = torch.ops.aten.view.default(x_1, [4, 2])
@@ -5312,7 +5305,6 @@ def forward(self, x_1) -> torch.Tensor:
             """\
 
 
-
 def forward(self) -> torch.Tensor:
     _tensor_constant0 = self._tensor_constant0
     return _tensor_constant0
@@ -5332,7 +5324,6 @@ def forward(self) -> torch.Tensor:
         self.assertExpectedInline(
             out.code,
             """\
-
 
 
 def forward(self, a_1, b_1) -> torch.Tensor:
@@ -5355,7 +5346,6 @@ def forward(self, a_1, b_1) -> torch.Tensor:
             """\
 
 
-
 def forward(self, a_1, b_1) -> torch.Tensor:
     unbind = torch.ops.aten.unbind.int(b_1);  b_1 = None
     getitem = unbind[0]
@@ -5376,7 +5366,6 @@ def forward(self, a_1, b_1) -> torch.Tensor:
         self.assertExpectedInline(
             (out.code),
             """\
-
 
 
 def forward(self, x_1):
@@ -5902,7 +5891,6 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

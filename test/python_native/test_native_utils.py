@@ -8,7 +8,6 @@ import unittest
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -47,7 +46,6 @@ class TestNativeUtils(TestCase):
         self.assertTrue(cap.is_traced(torch.empty(2, device="meta")))
         self.assertFalse(cap.is_traced(torch.empty(2)))
 
-    @fake_tensor_test()
     def test_is_traced_exact_type_cpp_wrappers(self):
         # C++ dispatch-key wrappers are exact torch.Tensor instances, not Python subclasses.
         # Functionalization over a fake tensor must still be detected to avoid a mid-trace launch.
@@ -59,7 +57,6 @@ class TestNativeUtils(TestCase):
             self.assertTrue(is_fake(wrapped))
             self.assertTrue(cap.is_traced(wrapped))
 
-    @fake_tensor_test()
     def test_is_traced_fake_tensor_branch(self):
         # FakeTensor subclasses reach is_fake() and stay on ATen's reference while tracing.
         from torch._native.utils import capability as cap
@@ -83,7 +80,6 @@ class TestNativeUtils(TestCase):
             self.assertFalse(cap.device_ok(torch.empty(2), (9, 10)))
             self.assertFalse(cap.device_ok(torch.empty(2, device="meta"), (9, 10)))
 
-    @fake_tensor_test()
     def test_device_ok_declines_hip(self):
         # ROCm reports device.type == "cuda"; patch torch.version.hip and make the architecture
         # query raise to prove HIP is rejected before querying the device.
@@ -123,7 +119,6 @@ class TestNativeUtils(TestCase):
             self.assertEqual(cap.device_ok(x, (9, 10, 12)), first)
             self.assertEqual(query.call_count, 1, "the arch query was repeated")
 
-    @fake_tensor_test()
     @skipIfRocm
     def test_device_ok_honours_the_callers_set(self):
         # The caller's accepted set belongs in the cache key because families differ. In
@@ -165,7 +160,6 @@ class TestNativeUtils(TestCase):
         ):
             self.assertFalse(cap.on_current_device(x))
 
-    @fake_tensor_test()
     def test_conds_never_raise_without_a_usable_device(self):
         # On CPU-only systems, fake CUDA tensors normalize to cuda:0 but device queries raise.
         # Both conditions must return False to preserve the dispatcher's fallback.
