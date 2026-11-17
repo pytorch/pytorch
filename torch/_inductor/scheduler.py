@@ -9008,7 +9008,9 @@ class Scheduler:
         graph_outputs = OrderedSet(V.graph.get_output_names())
 
         name_to_freeable = get_freeable_input_buf(self.nodes, graph_inputs)
-        assign_memory_planning_info_for_scheduler_buffers(self.nodes, self.name_to_buf)
+        assign_memory_planning_info_for_scheduler_buffers(
+            self.nodes, self.name_to_buf, name_to_freeable
+        )
         assign_memory_planning_info_for_scheduler_nodes(
             self.nodes,
             self.name_to_fused_node,
