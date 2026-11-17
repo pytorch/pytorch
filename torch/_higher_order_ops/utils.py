@@ -54,6 +54,7 @@ def _fake_mode_handler(handler):
     Restore an active mode when the handler returns or raises.
     """
 
+    @torch._disable_dynamo
     @functools.wraps(handler)
     def impl(*args, **kwargs):
         with unset_fake_temporarily() as mode:
