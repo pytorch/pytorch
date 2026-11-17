@@ -6,9 +6,11 @@ import csv
 import dataclasses
 import functools
 import importlib.metadata
+import io
 import itertools
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -45,8 +47,8 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# Skips before setUp spawns workers. The inductor_benchmark_runner CI config sets
-# PYTORCH_TEST_WITH_SLOW=1.
+# Skips before setUp spawns workers. The inductor_benchmark_runner and
+# inductor_huggingface_tp CI configs set PYTORCH_TEST_WITH_SLOW=1.
 launches_processes = unittest.skipIf(
     not TEST_WITH_SLOW, "launches processes; set PYTORCH_TEST_WITH_SLOW=1"
 )
@@ -1244,6 +1246,26 @@ class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
             identity = common.tensor_parallel_identity(runner.args)[1]
         self.assertEqual(identity, [mode, 2, 7, 3 if mode == "decode" else 0])
 
+    @parametrize("mode", ("prefill", "decode"))
+    def test_tp_selection_matches_ci_expected_models(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args(mode=mode)
+        args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
+        runner.args = args
+        selected = set(runner.iter_model_names(args))
+        expected_file = (
+            REPO_ROOT
+            / "benchmarks/dynamo/ci_expected_accuracy"
+            / f"inductor_huggingface_tp_{mode}.csv"
+        )
+        with expected_file.open() as f:
+            expected = {row["name"] for row in csv.DictReader(f)}
+        self.assertEqual(selected, expected)
+        self.assertEqual(selected, self.huggingface.TP_MODELS)
+        args.only = "google/gemma-2-2b"
+        with self.assertRaisesRegex(ValueError, "does not support google/gemma-2-2b"):
+            runner.validate_args(args)
+
     def test_tp_requires_divisible_heads(self):
         from benchmarks.dynamo import huggingface_llm_models as llm
 
@@ -2014,6 +2036,57 @@ class TestTensorParallelResults(TestCase):
         self.assertEqual(row["name"], "model")
         self.assertEqual(signpost.call_args.kwargs["error"], "performance_failed")
 
+    @parametrize("report_dir", ("test/test-reports", "test-reports"))
+    def test_update_expected_reads_tp_artifacts(self, report_dir):
+        import runpy
+        from zipfile import ZipFile
+
+        import pandas as pd
+
+        archive = io.BytesIO()
+        with ZipFile(archive, "w") as zipped:
+            for phase, status in (("prefill", "pass"), ("decode", "fail_accuracy")):
+                zipped.writestr(
+                    f"{report_dir}/{phase}_huggingface.csv",
+                    f"name,accuracy,graph_breaks,batch_size,phase,tp_size\nmodel,{status},0,1,{phase},2\n",
+                )
+        job = {
+            "workflowName": "inductor-periodic",
+            "jobName": "periodic-dynamo-benchmarks-test / test (inductor_huggingface_tp, 1, 1, a10g-4)",
+            "workflowId": "1",
+            "id": "2",
+            "runAttempt": 1,
+        }
+        script = REPO_ROOT / "benchmarks/dynamo/ci_expected_accuracy/update_expected.py"
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(os.environ, {"CH_KEY_ID": "test", "CH_KEY_SECRET": "test"}),
+            mock.patch("requests.post") as query,
+            mock.patch(
+                "urllib.request.urlopen", return_value=io.BytesIO(archive.getvalue())
+            ),
+            mock.patch("subprocess.check_output", return_value=b"{}"),
+            mock.patch.object(sys, "argv", [str(script), "test-sha"]),
+        ):
+            query.return_value.json.return_value = {"data": [job]}
+            root = Path(tmp) / "benchmarks/dynamo/ci_expected_accuracy"
+            (root / "rocm").mkdir(parents=True)
+            original_dir = os.getcwd()
+            try:
+                os.chdir(tmp)
+                runpy.run_path(str(script), run_name="__main__")
+            finally:
+                os.chdir(original_dir)
+            for phase, status in (("prefill", "pass"), ("decode", "fail_accuracy")):
+                result = pd.read_csv(root / f"inductor_huggingface_tp_{phase}.csv")
+                self.assertEqual(
+                    list(result.columns), ["name", "accuracy", "graph_breaks"]
+                )
+                self.assertEqual(
+                    result.to_dict("records"),
+                    [{"name": "model", "accuracy": status, "graph_breaks": 0}],
+                )
+
     @parametrize("tp", (False, True))
     @parametrize("accuracy", (False, True))
     @parametrize("failure_first", (False, True))
@@ -2261,6 +2334,322 @@ class TestTensorParallelResults(TestCase):
                 self.assertEqual(info["world_size"], 2)
                 self.assertEqual(info["only"], row["name"])
                 self.assertEqual(info["batch_size"], int(row["batch_size"]))
+
+    @parametrize("case", ("complete", "missing", "duplicate", "unexpected", "empty"))
+    def test_accuracy_requires_complete_model_set(self, case):
+        import pandas as pd
+
+        from benchmarks.dynamo.check_accuracy import check_accuracy
+
+        expected = pd.DataFrame(
+            {"name": ["first", "second"], "accuracy": ["pass", "pass"]}
+        )
+        names = {
+            "complete": ["first", "second"],
+            "missing": ["first"],
+            "duplicate": ["first", "first", "second"],
+            "unexpected": ["first", "second", "extra"],
+            "empty": [],
+        }[case]
+        actual = pd.DataFrame({"name": names, "accuracy": ["pass"] * len(names)})
+        failed, _ = check_accuracy(
+            actual, expected, "expected.csv", require_complete=True
+        )
+        self.assertEqual(bool(failed), case != "complete")
+        if case in ("missing", "empty"):
+            failed, _ = check_accuracy(actual, expected, "expected.csv")
+            self.assertFalse(failed)
+        with self.assertRaisesRegex(ValueError, "at least one model"):
+            check_accuracy(
+                actual, expected.iloc[:0], "expected.csv", require_complete=True
+            )
+
+
+@skipIfTorchDynamo("checks benchmark reporting")
+class TestTensorParallelPerfCli(TestCase):
+    def setUp(self):
+        super().setUp()
+        from benchmarks.dynamo import perf_cli
+
+        self.perf_cli = perf_cli
+
+    def _job(
+        self,
+        runner="a10g-4",
+        shard=1,
+        job_id=1,
+        conclusion="success",
+        config="inductor_huggingface_tp_perf",
+        attempt=1,
+        started_at=None,
+    ):
+        return {
+            "name": f"periodic-dynamo-benchmarks-test / test ({config}, {shard}, 2, {runner})",
+            "id": job_id,
+            "run_attempt": attempt,
+            "conclusion": conclusion,
+            "started_at": started_at,
+        }
+
+    @parametrize("attempt", (None, 1))
+    def test_jobs_resolve_to_the_execution_that_ran_them(self, attempt):
+        perf = self.perf_cli
+        # Shard 1 passed in attempt 1 and was copied into attempt 2 under a new ID;
+        # shard 2 failed in attempt 1 and was re-run in attempt 2.
+        jobs = [
+            self._job(shard=1, job_id=1, started_at="t1"),
+            self._job(shard=2, job_id=2, started_at="t1", conclusion="failure"),
+            self._job(shard=1, job_id=3, started_at="t1", attempt=2),
+            self._job(shard=2, job_id=4, started_at="t2", attempt=2),
+        ]
+        output = "\n".join(map(json.dumps, jobs))
+        with mock.patch.object(perf, "gh", return_value=output):
+            selected = perf.get_perf_jobs(perf.get_run_jobs(5, attempt))
+        resolved = [(job["attempt"], job["job_id"]) for job in selected]
+        self.assertEqual(resolved, [(1, 1), (2, 4)] if attempt is None else [(1, 1)])
+        url = perf.s3_artifact_url(5, selected[0])
+        self.assertIn("/5/1/artifact/", url)
+        self.assertTrue(url.endswith("_1.zip"))
+
+    def test_periodic_baseline_matches_tp_hardware(self):
+        perf = self.perf_cli
+        runs = [{"databaseId": i, "createdAt": "2026-10-15"} for i in (5, 4, 3, 2)]
+        jobs = {
+            5: [self._job()],
+            4: [self._job(conclusion="failure")],
+            3: [self._job(runner="h100")],
+            2: [self._job()],
+        }
+        with (
+            mock.patch.object(
+                perf,
+                "gh",
+                side_effect=[
+                    {"workflowName": "inductor-periodic", "workflowDatabaseId": 123},
+                    runs,
+                ],
+            ) as gh,
+            mock.patch.object(perf, "get_run_jobs", side_effect=jobs.__getitem__),
+        ):
+            self.assertEqual(perf.resolve_baseline(5), 2)
+        args = gh.call_args.args
+        self.assertEqual(args[args.index("--workflow") + 1], "123")
+        self.assertEqual(args[args.index("--status") + 1], "completed")
+        self.assertEqual(args[args.index("--limit") + 1], "50")
+
+    @parametrize("accuracy_status", ("success", "failure"))
+    @parametrize("performance_status", ("success", "failure"))
+    def test_tp_performance_status_is_independent(
+        self, accuracy_status, performance_status
+    ):
+        jobs = [
+            self._job(config="inductor_huggingface_tp", conclusion=accuracy_status),
+            self._job(job_id=2, conclusion=performance_status),
+        ]
+        selected = self.perf_cli.get_perf_jobs(jobs)
+        self.assertEqual(
+            [job["job_id"] for job in selected],
+            [2] if performance_status == "success" else [],
+        )
+
+    def test_summary_reads_latest_baseline_attempt(self):
+        perf = self.perf_cli
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
+        csvs = [(f"{config}_performance.csv", "name,speedup,abs_latency\nmodel,1,2\n")]
+        jobs = [self._job()]
+        args = types.SimpleNamespace(
+            attempt=1,
+            metric="speedup",
+            baseline="latest",
+            no_cache=False,
+            device=None,
+            top=5,
+            _run_ids=[5],
+        )
+        with (
+            mock.patch.object(perf, "_resolve_head_runs", return_value={"a10g-4": 5}),
+            mock.patch.object(perf, "resolve_baseline", return_value=2),
+            mock.patch.object(perf, "get_run_jobs", return_value=jobs) as get_jobs,
+            mock.patch.object(perf, "download_and_extract_csvs", return_value=csvs),
+            mock.patch.object(perf, "fetch_run_meta"),
+            mock.patch.object(
+                perf, "filter_perf", side_effect=lambda results, args: results
+            ),
+            mock.patch.object(perf, "print_run_header"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            perf.cmd_summary(args)
+        # --attempt applies to the head run; the baseline uses its latest attempt.
+        calls = [call.args for call in get_jobs.call_args_list]
+        self.assertEqual(calls, [(5, 1), (2, None)])
+
+    def test_compare_keeps_nightly_baseline(self):
+        perf = self.perf_cli
+        with mock.patch.object(
+            perf,
+            "gh",
+            side_effect=[
+                {
+                    "workflowName": "inductor-A100-perf-compare",
+                    "workflowDatabaseId": 50531883,
+                },
+                [{"databaseId": 2, "createdAt": "2026-10-15"}],
+            ],
+        ) as gh:
+            self.assertEqual(perf.resolve_baseline(5), 2)
+        args = gh.call_args.args
+        self.assertEqual(args[args.index("--workflow") + 1], "42513231")
+        self.assertEqual(args[args.index("--status") + 1], "success")
+
+    def test_tp_shards_group_by_hardware(self):
+        perf = self.perf_cli
+        jobs = [
+            self._job(),
+            self._job(shard=2, job_id=2),
+            self._job(runner="h100", job_id=3),
+        ]
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
+
+        def download(run_id, selected, *args, **kwargs):
+            return [
+                (
+                    config + "_performance.csv",
+                    f"name,speedup,abs_latency\nmodel{job['job_id']},1,2\n",
+                )
+                for job in selected
+            ]
+
+        with (
+            mock.patch.object(perf, "get_run_jobs", return_value=jobs),
+            mock.patch.object(perf, "download_and_extract_csvs", side_effect=download),
+        ):
+            results = perf.fetch_run_perf(5, 1, False)
+        self.assertEqual(
+            {data.device: len(data.models) for data in results},
+            {"a10g-4": 2, "h100": 1},
+        )
+
+    @parametrize(
+        "device,degree,matched",
+        (("a10g-4", 2, True), ("h100", 2, False), ("a10g-4", 4, False)),
+    )
+    def test_tp_comparison_identity(self, device, degree, matched):
+        perf = self.perf_cli
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp{}_performance.csv"
+        content = "name,speedup,abs_latency\nmodel,1,2\n"
+        head = perf.parse_csvs([(config.format(2), content)], device="a10g-4")
+        base = perf.parse_csvs([(config.format(degree), content)], device=device)
+        deltas, _ = perf.compute_deltas(head, base, perf.METRICS["speedup"])
+        self.assertEqual(bool(deltas), matched)
+
+    @parametrize(
+        "dimensions,matched",
+        (("2,64,8", True), ("1,64,8", False), ("2,32,8", False), ("2,64,4", False)),
+    )
+    def test_tp_comparison_requires_same_workload(self, dimensions, matched):
+        perf = self.perf_cli
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
+        header = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\n"
+        head = perf.parse_csvs([(config, header + "model,2,1,2,64,8\n")])
+        base = perf.parse_csvs([(config, header + f"model,1,2,{dimensions}\n")])
+        deltas, aggregates = perf.compute_deltas(head, base, perf.METRICS["speedup"])
+        self.assertEqual(bool(deltas), matched)
+        self.assertEqual(aggregates[config].paired_count, int(matched))
+
+    def _repro(self, data, model=None):
+        perf = self.perf_cli
+        args = types.SimpleNamespace(device=None, attempt=1, model=model)
+        with (
+            mock.patch.object(perf, "_resolve_head_runs", return_value={"a10g-4": 5}),
+            mock.patch.object(perf, "fetch_run_meta"),
+            mock.patch.object(perf, "fetch_run_perf", return_value=data),
+            mock.patch.object(
+                perf, "filter_perf", side_effect=lambda results, args: results
+            ),
+            mock.patch.object(perf, "print_run_header"),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            perf.cmd_repro(args)
+        return output.getvalue()
+
+    @parametrize("phase", ("prefill", "decode"))
+    @parametrize("selected_model", (None, "model"))
+    def test_tp_repro_preserves_workload(self, phase, selected_model):
+        config = (
+            f"inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_{phase}_tp2"
+        )
+        content = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\nmodel,1,2,2,64,8\nother,1,2,4,32,5\n"
+        output = self._repro(
+            self.perf_cli.parse_csvs([(config, content)]), selected_model
+        )
+        commands = [
+            shlex.split(line)
+            for line in output.splitlines()
+            if line.startswith("python")
+        ]
+        expected = {"model": (2, 64, 8), "other": (4, 32, 5)}
+        if selected_model:
+            expected = {selected_model: expected[selected_model]}
+        self.assertEqual(len(commands), len(expected))
+        self.assertEqual(
+            {cmd[cmd.index("--only") + 1] for cmd in commands}, set(expected)
+        )
+        for cmd in commands:
+            name = cmd[cmd.index("--only") + 1]
+            batch_size, prompt_length, decode_length = expected[name]
+            for flag in (
+                "--tp-size=2",
+                f"--hf-inference-mode={phase}",
+                "--disable-cudagraphs",
+                "--nopython",
+                f"--batch-size={batch_size}",
+                f"--prompt-length={prompt_length}",
+            ):
+                self.assertIn(flag, cmd)
+            if phase == "decode":
+                self.assertIn(f"--decode-length={decode_length}", cmd)
+            else:
+                self.assertFalse(any(arg.startswith("--decode-length") for arg in cmd))
+
+    @parametrize("model", ("name with spaces", "name; echo x", "name'$(id)`id`"))
+    def test_tp_repro_quotes_model_name(self, model):
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
+        content = f"name,speedup,abs_latency\n{model},1,2\n"
+        output = self._repro(self.perf_cli.parse_csvs([(config, content)]))
+        commands = [line for line in output.splitlines() if line.startswith("python")]
+        self.assertEqual(len(commands), 1)
+        args = shlex.split(commands[0])
+        self.assertEqual(args[args.index("--only") + 1], model)
+        self.assertEqual(args[-2:], ["--output", f"{config}_performance.csv"])
+
+    def test_tp_repro_omits_failure_batch_size(self):
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
+        content = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\nmodel,0.0,0.0,0,64,8\n"
+        command = self._repro(self.perf_cli.parse_csvs([(config, content)]))
+        self.assertIn("--only model", command)
+        self.assertIn("--prompt-length=64", command)
+        self.assertNotIn("--batch-size", command)
+
+    def test_non_tp_repro_dedups_and_sorts_commands(self):
+        configs = (
+            "inductor_with_cudagraphs_torchbench_amp_training_cuda",
+            "inductor_no_cudagraphs_huggingface_amp_training_cuda",
+            "inductor_no_cudagraphs_huggingface_amp_training_cuda",
+        )
+        content = "name,speedup,abs_latency\nmodel,1,2\n"
+        data = [
+            result
+            for i, config in enumerate(configs)
+            for result in self.perf_cli.parse_csvs(
+                [(config, content)], device=f"gpu{i}"
+            )
+        ]
+        output = self._repro(data)
+        self.assertIn("(2 commands)", output)
+        commands = [line for line in output.splitlines() if line.startswith("python")]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands, sorted(commands))
+        self.assertIn("huggingface.py", commands[0])
 
 
 @skipIfTorchDynamo("launches benchmark processes")
@@ -2642,6 +3031,7 @@ instantiate_device_type_tests(
 )
 instantiate_parametrized_tests(TestTensorParallelResults)
 instantiate_parametrized_tests(TestTensorParallelLaunch)
+instantiate_parametrized_tests(TestTensorParallelPerfCli)
 instantiate_device_type_tests(
     TestHuggingFaceLLMPhasesDevice, globals(), only_for=("cpu", "cuda")
 )
