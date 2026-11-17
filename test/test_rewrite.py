@@ -1195,6 +1195,27 @@ class TestCfgCompile(TestCase):
             torch.accelerator.synchronize()
             self.assertEqual(torch.accelerator.memory_allocated(), baseline)
 
+    def test_matrix_of_a_product_is_built_in_on_a_gpu(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def uses(weight, bias, table, ids, x):
+            h = torch.nn.functional.linear(x, weight, bias)
+            return h + torch.nn.functional.embedding(ids, table)
+
+        example = (
+            torch.randn(8, 8),
+            torch.randn(8),
+            torch.randn(5, 8),
+            torch.tensor([0, 1, 2, 3]),
+            torch.randn(4, 8),
+        )
+        graph = make_fx(uses)(*(t.to(device) for t in example))
+        worth = torch.rewrite._regions._worth_building_in
+        # With constant matrices Inductor makes one product of the products
+        # of an input on a GPU. A table is looked up in the same anywhere.
+        on_gpu = torch.device(device).type != "cpu"
+        self.assertEqual(worth(graph, [0, 1, 2]), [0, 1] if on_gpu else [1])
+
     def test_first_call_is_the_trace(self, device):
         calls = []
 
