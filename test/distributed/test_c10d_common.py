@@ -37,11 +37,13 @@ from torch.nn.parallel.distributed import _MixedPrecision
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
+    MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     _restore_fp32_precision,
     _snapshot_fp32_precision,
+    add_skip_condition,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -49,6 +51,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     retry_on_connect_failures,
     run_tests,
+    skip_reason_at_collection,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
     TestCase,
@@ -89,6 +92,168 @@ def tearDownModule():
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+@instantiate_parametrized_tests
+class TestDistributedSkipPruning(TestCase):
+    @parametrize(
+        "harness",
+        [MultiProcessTestCase, MultiThreadedTestCase, MultiProcContinuousTest],
+        name_fn=lambda cls: cls.__name__,
+    )
+    @parametrize("class_mark", [False, True])
+    @parametrize("skip", [False, True])
+    def test_static_marks(self, harness, class_mark, skip):
+        calls = []
+
+        class Harness(harness):
+            def setUp(self):
+                raise AssertionError(
+                    "a statically skipped test must not launch workers"
+                )
+
+            def test_probe(self):
+                calls.append("body")
+
+        if class_mark:
+            Harness = unittest.skipIf(skip, "existing class skip")(Harness)
+        else:
+            Harness.test_probe = unittest.skipIf(skip, "existing method skip")(
+                Harness.test_probe
+            )
+        fn = Harness.test_probe
+        reason = "existing class skip" if class_mark else "existing method skip"
+        self.assertEqual(
+            skip_reason_at_collection(Harness, fn, "test_probe"),
+            reason if skip else None,
+        )
+        case = Harness("test_probe")
+        if skip:
+            result = unittest.TestResult()
+            unittest.TestCase.run(case, result)
+            self.assertEqual([message for _, message in result.skipped], [reason])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+            self.assertEqual(calls, [])
+        else:
+            fn(case)
+            self.assertEqual(calls, ["body"])
+
+    @parametrize(
+        "harness",
+        [MultiProcessTestCase, MultiThreadedTestCase, MultiProcContinuousTest],
+        name_fn=lambda cls: cls.__name__,
+    )
+    def test_worker_conditions_remain_at_runtime(self, harness):
+        calls = []
+
+        class Harness(harness):
+            def test_probe(self):
+                raise unittest.SkipTest("worker condition")
+
+        def condition(cls):
+            calls.append("predicate")
+            return True
+
+        add_skip_condition(Harness.test_probe, condition, "worker condition")
+        self.assertIsNone(
+            skip_reason_at_collection(Harness, Harness.test_probe, "test_probe")
+        )
+        self.assertEqual(calls, [])
+
+    @parametrize(
+        "harness",
+        [MultiProcessTestCase, MultiThreadedTestCase, MultiProcContinuousTest],
+        name_fn=lambda cls: cls.__name__,
+    )
+    @parametrize(
+        "override",
+        [
+            "constructor",
+            "cooperative_constructor",
+            "binder",
+            "wrapped_binder",
+            "policy",
+            "runner",
+            "dispatch",
+            "id",
+            "equality",
+        ],
+    )
+    def test_custom_execution_remains_unpruned(self, harness, override):
+        class Harness(harness):
+            @unittest.skip("original skip")
+            def test_probe(self):
+                pass
+
+        class Initializer(TestCase):
+            def __init__(self, methodName="runTest"):
+                super().__init__(methodName)
+                self.test_probe = lambda: None
+
+        if override == "cooperative_constructor":
+
+            class Dynamic(Harness, Initializer):
+                pass
+        else:
+
+            class Dynamic(Harness):
+                pass
+
+            if override == "constructor":
+
+                def initialize(self, methodName="runTest"):
+                    harness.__init__(self, methodName)
+                    self.test_probe = lambda: None
+
+                Dynamic.__init__ = initialize
+            elif override == "id":
+
+                def identifier(self):
+                    self.test_probe = lambda: None
+                    return "changed test"
+
+                Dynamic.id = identifier
+            elif override == "equality":
+
+                def equality(self, *args):
+                    self.test_probe = lambda: None
+
+                Dynamic.addTypeEqualityFunc = equality
+            elif override in ("runner", "dispatch"):
+
+                def run(self, result):
+                    result.startTest(self)
+                    result.addSuccess(self)
+                    result.stopTest(self)
+
+                if override == "runner":
+                    Dynamic.run = run
+                else:
+                    Dynamic._run_custom = run
+            else:
+                binder_name = (
+                    "wrap_method_with_policy"
+                    if override == "policy"
+                    else (
+                        "_worker_run_main_wait"
+                        if harness is MultiProcContinuousTest
+                        else "join_or_run"
+                    )
+                )
+
+                def binder(self, fn):
+                    return lambda: None
+
+                if override == "wrapped_binder":
+                    from functools import wraps
+
+                    binder = wraps(getattr(harness, binder_name))(binder)
+                setattr(Dynamic, binder_name, binder)
+
+        self.assertIsNone(
+            skip_reason_at_collection(Dynamic, Dynamic.test_probe, "test_probe")
+        )
 
 
 class MultiProcContinuousSkipTest(MultiProcContinuousTest):
