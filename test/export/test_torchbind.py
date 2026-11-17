@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import copy
+import unittest
 
 import torch
 import torch.utils._pytree as pytree
@@ -16,6 +17,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    IS_MACOS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -59,6 +61,7 @@ def _assertEqualScriptObject(
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestExportTorchbind(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1125,6 +1128,7 @@ graph():
         self.assertEqual(foo.add(1), 7)
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestCompileTorchbind(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1575,6 +1579,7 @@ def forward(self, token, obj, x):
         )
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestCompileTorchbindDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -1640,6 +1645,7 @@ class TestCompileTorchbindDevice(TestCase):
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestRegisterFakeClass(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
