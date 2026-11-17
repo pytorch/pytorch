@@ -55,7 +55,6 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
-    AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
@@ -200,17 +199,34 @@ class ConstDictVariable(VariableTracker):
         finally:
             self._checking_python_constant = False
 
-    def as_python_constant(self) -> dict[Any, Any]:
-        items = {}
+    def _try_as_python_constant_dict(self) -> tuple[bool, Any]:
+        items = []
         for k, v in self.items.items():
             is_constant, key = k.vt.try_as_python_constant()
             if not is_constant:
-                raise AsPythonConstantNotImplementedError(self)
+                return False, None
             is_constant, value = v.try_as_python_constant()
             if not is_constant:
-                raise AsPythonConstantNotImplementedError(self)
-            items[key] = value
-        return items
+                return False, None
+            items.append((key, value))
+        return True, dict(items)
+
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        if self._checking_python_constant:
+            return False, None
+        self._checking_python_constant = True
+        try:
+            return self._try_as_python_constant_dict()
+        except NotImplementedError:
+            return False, None
+        finally:
+            self._checking_python_constant = False
+
+    def as_python_constant(self) -> dict[Any, Any]:
+        return {
+            k.vt.as_python_constant(): v.as_python_constant()
+            for k, v in self.items.items()
+        }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = [
@@ -953,6 +969,15 @@ class OrderedDictVariable(ConstDictVariable):
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
+
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        try:
+            is_constant, value = super().try_as_python_constant()
+            if not is_constant:
+                return False, None
+            return True, collections.OrderedDict(value)
+        except NotImplementedError:
+            return False, None
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())

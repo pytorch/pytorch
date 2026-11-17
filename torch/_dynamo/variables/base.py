@@ -1996,8 +1996,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def try_as_python_constant(self) -> tuple[bool, Any]:
         r"""try_as_python_constant() -> tuple[bool, Any]
 
-        Call :meth:`as_python_constant` once, returning ``(True, value)`` on
-        success or ``(False, None)`` for ``NotImplementedError``.
+        The default implementation calls :meth:`as_python_constant` once,
+        returning ``(True, value)`` on success or ``(False, None)`` for
+        ``NotImplementedError``. Overrides may refuse otherwise extractable values.
         """
         try:
             return True, self.as_python_constant()

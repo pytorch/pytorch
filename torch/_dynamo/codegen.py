@@ -326,6 +326,7 @@ class PyCodegen:
             ):
                 return self(value.source)
 
+        const = (False, None)
         if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
             # Recompute from the operands at runtime instead of burning in the value
             self.uses[value] += 1
@@ -403,7 +404,7 @@ class PyCodegen:
                 output.extend(create_call_function(0, False))
             elif isinstance(value, CustomClassObjectVariable):
                 try:
-                    py_value = value.as_python_constant()
+                    py_value = const[1] if const[0] else value.as_python_constant()
                 except NotImplementedError:
                     py_value = None
 

@@ -801,8 +801,8 @@ class RangeVariable(BaseListVariable):
 
     def debug_repr(self) -> str:
         repr = f"range({self.start()}, {self.stop()}"
-        if self.step() != 1:
-            repr += f", {self.step()}"
+        if (step := self.step()) != 1:
+            repr += f", {step}"
         repr += ")"
         return repr
 
@@ -895,7 +895,8 @@ class RangeVariable(BaseListVariable):
     def apply_index(
         self, tx: "InstructionTranslatorBase", index: int
     ) -> VariableTracker:
-        length = self.range_length()
+        start, stop, step = self.start(), self.stop(), self.step()
+        length = self.range_length(bounds=(start, stop, step))
         if index < 0:
             index = length + index
 
@@ -906,17 +907,18 @@ class RangeVariable(BaseListVariable):
                 args=["range object index out of range"],
             )
 
-        return VariableTracker.build(tx, self.start() + (index * self.step()))
+        return VariableTracker.build(tx, start + (index * step))
 
     def apply_slice(self, slice: slice) -> "RangeVariable":
+        start, stop, step = self.start(), self.stop(), self.step()
         (slice_start, slice_stop, slice_step) = self._get_slice_indices(
-            self.range_length(), slice
+            self.range_length(bounds=(start, stop, step)), slice
         )
 
         def compute_item(index: int) -> int:
-            return self.start() + (index * self.step())
+            return start + (index * step)
 
-        sub_step = self.step() * slice_step
+        sub_step = step * slice_step
         sub_start = compute_item(slice_start)
         sub_stop = compute_item(slice_stop)
 
@@ -987,15 +989,18 @@ class RangeVariable(BaseListVariable):
         r0, r1 = self, other
         if r0 is r1:
             return True
-        if r0.range_length() != r1.range_length():
+        r0_bounds = r0.start(), r0.stop(), r0.step()
+        length = r0.range_length(bounds=r0_bounds)
+        r1_bounds = r1.start(), r1.stop(), r1.step()
+        if length != r1.range_length(bounds=r1_bounds):
             return False
-        if r0.range_length() == 0:
+        if length == 0:
             return True
-        if r0.start() != r1.start():
+        if r0_bounds[0] != r1_bounds[0]:
             return False
-        if r0.range_length() == 1:
+        if length == 1:
             return True
-        return r0.step() == r1.step()
+        return r0_bounds[2] == r1_bounds[2]
 
     def range_count(self, x: VariableTracker) -> int:
         # Based on CPython
@@ -1134,9 +1139,8 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         # range.__reversed__: range_iterator with reversed bounds.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_reverse)
-        length = self.range_length()
-        start = self.start()
-        step = self.step()
+        start, stop, step = self.start(), self.stop(), self.step()
+        length = self.range_length(bounds=(start, stop, step))
         new_start = start + (length - 1) * step
         new_step = -step
         return RangeIteratorVariable(new_start, 0, new_step, length)

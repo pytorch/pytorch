@@ -39,14 +39,7 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import (
-    AsPythonConstantNotImplementedError,
-    Member,
-    Method,
-    readonly_setter,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -104,6 +97,8 @@ class BaseSetVariable(VariableTracker):
     one implementation.
     """
 
+    _nonvar_fields = {"_checking_python_constant", *VariableTracker._nonvar_fields}
+
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
 
@@ -117,8 +112,11 @@ class BaseSetVariable(VariableTracker):
             kwargs.pop("original_items")
         if "should_reconstruct_all" in kwargs:
             kwargs.pop("should_reconstruct_all")
+        if "_checking_python_constant" in kwargs:
+            kwargs.pop("_checking_python_constant")
 
         super().__init__(**kwargs)
+        self._checking_python_constant = False
 
         # Items can be either VariableTrackers or HashableTrackers (from set ops).
         # For VariableTrackers, realize them to ensure aliasing guards are installed
@@ -154,11 +152,34 @@ class BaseSetVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
 
+    def _try_as_python_constant_items(
+        self, items: Iterable[HashableTracker]
+    ) -> tuple[bool, list[Any]]:
+        if self._checking_python_constant:
+            return False, []
+        self._checking_python_constant = True
+        try:
+            values = []
+            for item in items:
+                is_constant, value = item.vt.try_as_python_constant()
+                if not is_constant:
+                    return False, []
+                values.append(value)
+            return True, values
+        finally:
+            self._checking_python_constant = False
+
     def is_python_constant(self) -> bool:
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real set, re-hashing the elements (wrong for elements
         # with a side-effecting __hash__).  Check element constness directly.
-        return all(k.vt.is_python_constant() for k in self.set_items)
+        if self._checking_python_constant:
+            return False
+        self._checking_python_constant = True
+        try:
+            return all(k.vt.is_python_constant() for k in self.set_items)
+        finally:
+            self._checking_python_constant = False
 
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
@@ -237,10 +258,14 @@ class BaseSetVariable(VariableTracker):
         fn: Any,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> "VariableTracker | None":
         try:
+            is_constant, value = self.try_as_python_constant()
+            if not is_constant:
+                return None
             res = fn(
-                *[x.as_python_constant() for x in [self, *args]],
+                value,
+                *[x.as_python_constant() for x in args],
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
         except Exception as exc:
@@ -590,14 +615,17 @@ class SetVariable(BaseSetVariable):
     def python_type(self) -> type:
         return set
 
-    def as_python_constant(self) -> Any:
-        items = set()
-        for item in self.set_items:
-            is_constant, value = item.vt.try_as_python_constant()
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        try:
+            is_constant, items = self._try_as_python_constant_items(self.set_items)
             if not is_constant:
-                raise AsPythonConstantNotImplementedError(self)
-            items.add(value)
-        return items
+                return False, None
+            return True, set(items)
+        except NotImplementedError:
+            return False, None
+
+    def as_python_constant(self) -> Any:
+        return {k.vt.as_python_constant() for k in self.set_items}
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
@@ -957,14 +985,17 @@ class OrderedSetVariable(BaseSetVariable):
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.items)
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
-    def as_python_constant(self) -> OrderedSet[Any]:
-        items = []
-        for item in self.items:
-            is_constant, value = item.vt.try_as_python_constant()
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        try:
+            is_constant, items = self._try_as_python_constant_items(self.items)
             if not is_constant:
-                raise AsPythonConstantNotImplementedError(self)
-            items.append(value)
-        return OrderedSet(items)
+                return False, None
+            return True, OrderedSet(items)
+        except NotImplementedError:
+            return False, None
+
+    def as_python_constant(self) -> OrderedSet[Any]:
+        return OrderedSet([k.vt.as_python_constant() for k in self.items])
 
     def python_type(self) -> type[OrderedSet[Any]]:
         return OrderedSet
@@ -1182,14 +1213,17 @@ class FrozensetVariable(BaseSetVariable):
     def python_type(self) -> type:
         return frozenset
 
-    def as_python_constant(self) -> Any:
-        items = set()
-        for item in self.set_items:
-            is_constant, value = item.vt.try_as_python_constant()
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        try:
+            is_constant, items = self._try_as_python_constant_items(self.set_items)
             if not is_constant:
-                raise AsPythonConstantNotImplementedError(self)
-            items.add(value)
-        return frozenset(items)
+                return False, None
+            return True, frozenset(set(items))
+        except NotImplementedError:
+            return False, None
+
+    def as_python_constant(self) -> Any:
+        return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
@@ -1330,14 +1364,19 @@ class DictKeySetVariable(BaseSetVariable):
 
         return dict_keys
 
-    def as_python_constant(self) -> Any:
-        items = set()
-        for item in self.set_items:
-            is_constant, value = item.vt.try_as_python_constant()
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        try:
+            is_constant, items = self._try_as_python_constant_items(self.set_items)
             if not is_constant:
-                raise AsPythonConstantNotImplementedError(self)
-            items.add(value)
-        return dict.fromkeys(items, None).keys()
+                return False, None
+            return True, dict.fromkeys(set(items), None).keys()
+        except NotImplementedError:
+            return False, None
+
+    def as_python_constant(self) -> Any:
+        return dict.fromkeys(
+            {k.vt.as_python_constant() for k in self.set_items}, None
+        ).keys()
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # dictview_repr in Objects/dictobject.c: the type name around a list repr.
