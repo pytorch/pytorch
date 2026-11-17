@@ -180,7 +180,6 @@ for case in xfails:
 
 del case, xfails
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
