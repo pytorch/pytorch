@@ -9,21 +9,6 @@ _IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
 # The header location is src/rccl.h versus rccl/rccl.h, respectively.
 _RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
 
-# std:: math functions rewritten to their global-namespace versions. The rewrite applies to
-# whole .cu/.cuh files, host code included, so std::max/std::min are deliberately absent:
-# on the host HIP only defines ::max(int, int)/::min(int, int), silently narrowing 64-bit arguments.
-MATH_TRANSPILATIONS = collections.OrderedDict([
-    ("std::ceil", ("::ceil")),
-    ("std::floor", ("::floor")),
-    ("std::exp", ("::exp")),
-    ("std::log", ("::log")),
-    ("std::pow", ("::pow")),
-    ("std::fabs", ("::fabs")),
-    ("std::fmod", ("::fmod")),
-    ("std::remainder", ("::remainder")),
-    ("std::frexp", ("::frexp")),
-])
-
 CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUresult", "hipError_t"),
     ("cudaError_t", "hipError_t"),
@@ -2740,6 +2725,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("nvmlGpuP2PCapsIndex_t", "uint32_t"),
     ("cuFileRead", "hipFileRead"),
     ("cuFileWrite", "hipFileWrite"),
+    ("cuFileReadAsync", "hipFileReadAsync"),
+    ("cuFileWriteAsync", "hipFileWriteAsync"),
     ("cuFileBufRegister", "hipFileBufRegister"),
     ("cuFileBufDeregister", "hipFileBufDeregister"),
     ("cuFileHandleRegister", "hipFileHandleRegister"),
@@ -3466,6 +3453,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDADeviceAssertionHost.h", "c10/hip/HIPDeviceAssertionHost.h"),
     ("c10/cuda/CUDAException.h", "c10/hip/HIPException.h"),
     ("c10/cuda/CUDAFunctions.h", "c10/hip/HIPFunctions.h"),
+    ("c10/cuda/CUDAGraphMemory.h", "c10/hip/HIPGraphMemory.h"),
     ("c10/cuda/impl/CUDAGraphMemory.h", "c10/hip/impl/HIPGraphMemory.h"),
     ("c10/cuda/CUDAGraphsC10Utils.h", "c10/hip/HIPGraphsC10Utils.h"),
     ("c10/cuda/CUDAGuard.h", "c10/hip/HIPGuard.h"),
