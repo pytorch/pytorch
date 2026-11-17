@@ -845,7 +845,6 @@ class OutputGraph(OutputGraphCommon):
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             fake_mode = torch._subclasses.FakeTensorMode(
-                _force_python=True,
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=bool(self.export),
@@ -3289,7 +3288,6 @@ class OutputGraph(OutputGraphCommon):
                     # Dynamo made decisions about what is dynamic or not / guards from the user code
                     # that is not in graph.
                     backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        _force_python=True,
                         shape_env=old_fake_mode.shape_env,
                     )
                 # TODO(voz): Ostensibly, this should be scoped and
