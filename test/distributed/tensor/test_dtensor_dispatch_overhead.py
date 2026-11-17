@@ -70,7 +70,7 @@ class DistOpDispatchOverHead(DTensorTestBase):
     @with_comms
     def test_dtensor_add_op_dispatch_overhead(self):
         if torch.accelerator.is_available():
-            device_props = torch.get_device_module(self.device_type).get_device_name(0)
+            device_props = torch.get_device_module(self._device_type).get_device_name(0)
             gpu_name = device_props
             logger.info("running on %s", gpu_name)
             # TODO: adjust `expected_propagate_time` and `expected_dispatch_time` to target different hardware
@@ -80,8 +80,8 @@ class DistOpDispatchOverHead(DTensorTestBase):
         expected_dispatch_time = 90  # noqa: F841
         diff_percent_threshold = 0.20  # noqa: F841
         propagator = DTensor._op_dispatcher.sharding_propagator
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        input_data = torch.rand(512, 512, device=self.device_type)
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
+        input_data = torch.rand(512, 512, device=self._device_type)
         a = distribute_tensor(input_data, device_mesh, [Shard(0)])
         # warm up
         with TimeCaptureMode() as tcm:

@@ -657,11 +657,16 @@ class DTensorTestMixin:
         return False
 
     @property
-    def device_type(self) -> str:
+    def _device_type(self) -> str:
+        # Under instantiate_device_type_tests, `device_type` is a class
+        # attribute; in the legacy flow, derive it from the world size.
+        device_type = getattr(self, "device_type", None)
+        if isinstance(device_type, str):
+            return device_type
         return _get_device_type(self.world_size)
 
     def build_device_mesh(self) -> DeviceMesh:
-        return init_device_mesh(self.device_type, (self.world_size,))
+        return init_device_mesh(self._device_type, (self.world_size,))
 
     def init_manual_seed_for_rank(self) -> None:
         torch.manual_seed(self.rank)
@@ -801,7 +806,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = dist.get_default_backend_for_device(self.device_type)
+        backend = dist.get_default_backend_for_device(self._device_type)
         return backend
 
     def init_pg(self, eager_init, backend: str | None = None) -> None:
@@ -814,14 +819,14 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         if requires_gpu and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        curr_backend = dist.get_default_backend_for_device(self._device_type)
 
         if backend not in [
             "nccl",
             "nccl-legacy",
             "gloo",
             "mpi",
-            f"cpu:gloo,{self.device_type}:{curr_backend}",
+            f"cpu:gloo,{self._device_type}:{curr_backend}",
             "cpu:gloo,cuda:ncclx",
             "cuda:ncclx",
             "hccl",
@@ -839,7 +844,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = (
-                torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
+                torch.device(f"{self._device_type}:{self.rank}") if eager_init else None
             )
 
         # For nccl backend, bind the device to the process if device_id is not None
@@ -861,15 +866,17 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
         if device_id is None:
             device_id = (
-                torch.cuda.current_device() if self.device_type == "cuda" else self.rank
+                torch.cuda.current_device()
+                if self._device_type == "cuda"
+                else self.rank
             )
 
-        if self.device_type == "cpu":
+        if self._device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
             # of the most priority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
-            # To avoid this and better respect `self.device_type`, we add this branch to
-            # enforce barrier() to use CPU when `self.device_type` is CPU and other
+            # To avoid this and better respect `self._device_type`, we add this branch to
+            # enforce barrier() to use CPU when `self._device_type` is CPU and other
             # accelerator is also available.
             dist.barrier()
         else:
@@ -928,11 +935,16 @@ class DTensorOpTestBase(MultiThreadedTestCase):
         return NUM_DEVICES
 
     @property
-    def device_type(self) -> str:
+    def _device_type(self) -> str:
+        # Under instantiate_device_type_tests, `device_type` is a class
+        # attribute; in the legacy flow, fall back to the module default.
+        device_type = getattr(self, "device_type", None)
+        if device_type is not None:
+            return device_type
         return DEVICE_TYPE
 
     def build_device_mesh(self):
-        return init_device_mesh(self.device_type, (self.world_size,))
+        return init_device_mesh(self._device_type, (self.world_size,))
 
     def setUp(self) -> None:
         super().setUp()

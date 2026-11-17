@@ -243,7 +243,7 @@ class TestDistWrapper(DTensorContinuousTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_gather_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = dist.init_device_mesh(self._device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -264,7 +264,7 @@ class TestDistWrapper(DTensorContinuousTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_scatter_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = dist.init_device_mesh(self._device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -310,7 +310,7 @@ class TestDistWrapper(DTensorContinuousTestBase):
     def test_broadcast_object_global_local_mismatch(self):
         # reproduces issue 152310
 
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = dist.init_device_mesh(self._device_type, (2, self.world_size // 2))
         dist_wrapper = _DistWrapper(
             group=mesh_2d.get_group(1),
             use_dist=True,
@@ -333,7 +333,7 @@ class TestDistWrapper(DTensorContinuousTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_barrier(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = dist.init_device_mesh(self._device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(

@@ -44,7 +44,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
         dp_size = 2
         tp_size = self.world_size // dp_size
         mesh_2d = init_device_mesh(
-            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+            self._device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
         )
         dp_mesh = mesh_2d["dp"]
         tp_mesh = mesh_2d["tp"]
@@ -69,7 +69,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             # in the following way:
             #   - within a tensor parallel group, the RNG is set with the same seed
             #   - across data parallel groups, the RNG is set with different seeds
-            torch.get_device_module(self.device_type).manual_seed(0)
+            torch.get_device_module(self._device_type).manual_seed(0)
 
             # disable/enable parallel RNG feature
             if random._rng_tracker:
@@ -77,7 +77,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
             self.assertTrue(model_tp.net1.weight.is_meta)
             # initialize the model's local shard
-            model_tp.to_empty(device=self.device_type)
+            model_tp.to_empty(device=self._device_type)
             model_tp.reset_parameters()
             # examine that the weights are initialized adhere to DP/TP
             for dtensor in [model_tp.net1.weight, model_tp.net2.weight]:

@@ -1225,20 +1225,17 @@ class FSDPTestMixin:
 
     @property
     def _device_type(self) -> str:
+        # Under instantiate_device_type_tests, `device_type` is a class
+        # attribute; in the legacy flow, fall back to the current accelerator.
         device_type = getattr(self, "device_type", None)
-        if not isinstance(
-            device_type, str
-        ):  # TODO: fix when FSDPTestContinuous is refactored (legacy classmethod)
-            device_type = None
-        if device_type is None:
-            if (
-                not torch.accelerator.is_available()
-                or torch.accelerator.current_accelerator().type == "mps"
-            ):
-                device_type = "cpu"
-            else:
-                device_type = torch.accelerator.current_accelerator().type
-        return device_type
+        if device_type is not None:
+            return device_type
+        if (
+            not torch.accelerator.is_available()
+            or torch.accelerator.current_accelerator().type == "mps"
+        ):
+            return "cpu"
+        return torch.accelerator.current_accelerator().type
 
     def _train_for_several_steps(
         self,
@@ -1607,10 +1604,6 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         return DISTRIBUTED_BACKEND
-
-    @classmethod
-    def device_type(cls) -> str:
-        return DEVICE_TYPE
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):

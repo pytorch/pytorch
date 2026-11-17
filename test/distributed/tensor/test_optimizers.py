@@ -142,7 +142,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in adam_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.Adam(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -152,7 +152,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -218,7 +218,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in adamw_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.AdamW(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -228,7 +228,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -258,7 +258,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in sgd_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.SGD(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -268,7 +268,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -314,7 +314,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in adagrad_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.Adagrad(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -324,7 +324,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -381,7 +381,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in RMSprop_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.RMSprop(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -391,7 +391,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -425,7 +425,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in adadelta_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.Adadelta(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -435,7 +435,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -462,7 +462,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in nadam_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.NAdam(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -472,7 +472,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -502,7 +502,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in radam_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.RAdam(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -512,7 +512,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -546,7 +546,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in adamax_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.Adamax(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -556,7 +556,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
@@ -596,7 +596,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         ]
 
         for config in asgd_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.ASGD(mod.parameters(), **config)
 
             dist_mod = distribute_module(
@@ -606,7 +606,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
 
             # TODO: We want to keep a unit test for ASGD optimizer for the time being, but we need to look into why
             # when using ASGD we need higher atol and rtol when comparing model parameters.
@@ -620,7 +620,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
     def test_admaw_fused_across_meshes(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
-            self.device_type, mesh_shape, mesh_dim_names=("x", "y")
+            self._device_type, mesh_shape, mesh_dim_names=("x", "y")
         )
         mesh_flatten = mesh_2d[("x", "y")]._flatten(mesh_dim_name="mesh_flatten")
 
@@ -706,7 +706,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
             return dist_inp
 
         for config in adamw_configs:
-            mod = MLPModule(self.device_type)
+            mod = MLPModule(self._device_type)
             opt = torch.optim.AdamW(mod.parameters(), **config)
 
             mod_copy = deepcopy(mod)
@@ -722,7 +722,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
             # use ones to make sure the single machine model have the same input
             # on different ranks
-            inp = torch.ones(8, 10, device=self.device_type)
+            inp = torch.ones(8, 10, device=self._device_type)
             self._assert_optimizer(None, mod, opt, mod_copy, dist_opt, inp)
 
     @with_comms
@@ -734,8 +734,8 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
         foreach=True exercises the ScalarList-in-list path (_foreach_addcdiv_),
         foreach=False exercises the scalar-kwarg path (addcdiv_ value=...).
         """
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model = MLPModule(self.device_type)
+        mesh = init_device_mesh(self._device_type, (self.world_size,))
+        model = MLPModule(self._device_type)
         for name, param in model.named_parameters():
             dist_param = nn.Parameter(distribute_tensor(param, mesh, [Shard(0)]))
             dist_param.register_hook(
@@ -752,7 +752,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 
         def run_step():
             inp = distribute_tensor(
-                torch.randn(8, 10, device=self.device_type), mesh, [Shard(0)]
+                torch.randn(8, 10, device=self._device_type), mesh, [Shard(0)]
             )
             out = model(inp)
             out.sum().backward()

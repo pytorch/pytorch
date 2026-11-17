@@ -130,7 +130,9 @@ class TestEinsumStrategies(DTensorOpTestBase):
         self.assertEqual(len(all_strats.strategies), 4)
 
     def test_mm_2d_mesh(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        mesh = DeviceMesh(
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
 
         all_strats = gen_einsum_strategies("mk,kn->mn", mesh)
         self.assertEqual(len(all_strats.strategies), 16)
@@ -142,17 +144,23 @@ class TestEinsumStrategies(DTensorOpTestBase):
         self.assertEqual(len(all_strats.strategies), 5)
 
     def test_bmm_diffinndim_2d_mesh(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        mesh = DeviceMesh(
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
         all_strats = gen_einsum_strategies("bmk,kn->bmn", mesh)
         self.assertEqual(len(all_strats.strategies), 25)
 
     def test_bmm_diffoutndim_2d_mesh(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        mesh = DeviceMesh(
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
         all_strats = gen_einsum_strategies("bmk,k->bm", mesh)
         self.assertEqual(len(all_strats.strategies), 16)
 
     def test_bmm_2d_mesh(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        mesh = DeviceMesh(
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
 
         all_strats = gen_einsum_strategies("bmk,bkn->bmn", mesh)
         self.assertEqual(len(all_strats.strategies), 25)
@@ -261,7 +269,7 @@ class TestCostModel(DTensorOpTestBase):
 
     def test_redistribute_cost_mesh_2d(self):
         mesh_2d = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
         )
         shard_placement = (Shard(0), Shard(0))
         replica_placement = (Replicate(), Replicate())
@@ -419,7 +427,7 @@ class TestCostModel(DTensorOpTestBase):
 
     def test_redistribute_cost_with_order(self):
         mesh_2d = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+            self._device_type, torch.arange(self.world_size).reshape(2, 2)
         )
 
         # Source: Shard on dim 0 across all three mesh dimensions
@@ -625,11 +633,11 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorContinuousTestBase):
             return strategy.strategies[op_spec_costs.index(min(op_spec_costs))]
 
         mock_select_strategy.side_effect = mock_select_func
-        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh = init_device_mesh(self._device_type, (2, self.world_size // 2))
         comm_mode = CommDebugMode()
         test_op = torch.ops.mylib.numpy_sin
-        input_x = torch.randn([8, 16, 32], device=self.device_type)
-        input_y = torch.randn([8, 16, 32], device=self.device_type)
+        input_x = torch.randn([8, 16, 32], device=self._device_type)
+        input_y = torch.randn([8, 16, 32], device=self._device_type)
         output = test_op(input_x, input_y)
         input_x_dt = distribute_tensor(input_x, mesh, [Shard(0), Shard(1)])
         input_y_dt = distribute_tensor(input_y, mesh, [Shard(0), Shard(1)])
@@ -669,18 +677,18 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorContinuousTestBase):
 
     @with_comms
     def test_tuple_replicate_strategy_placement(self):
-        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh = init_device_mesh(self._device_type, (2, self.world_size // 2))
         test_op = torch.ops.mylib.numpy_tuple_sin
         with op_strategy_context(
             test_op.default,
             replicate_op_strategy,
             schema_info=RuntimeSchemaInfo(needs_pytree=True),
         ):
-            input_x = torch.randn([8, 16, 8], device=self.device_type)
+            input_x = torch.randn([8, 16, 8], device=self._device_type)
             input_y = [
-                torch.randn([8, 16, 8], device=self.device_type) for _ in range(3)
+                torch.randn([8, 16, 8], device=self._device_type) for _ in range(3)
             ]
-            input_z = torch.randn([8, 16, 8], device=self.device_type)
+            input_z = torch.randn([8, 16, 8], device=self._device_type)
             output = test_op(input_x, input_y, input_z)
             input_x_dt = distribute_tensor(input_x, mesh, [Shard(0), Shard(1)])
             input_y_dt = [
@@ -724,8 +732,8 @@ class TestStrategyOperation(DTensorTestBase):
     def test_cache_clean(self):
         mesh = self.build_device_mesh()
         test_op = torch.ops.mylib.numpy_sin
-        x = torch.randn(2, device=self.device_type)
-        y = torch.randn(2, device=self.device_type)
+        x = torch.randn(2, device=self._device_type)
+        y = torch.randn(2, device=self._device_type)
         x_dt = distribute_tensor(x, mesh, [Shard(0)])
         y_dt = distribute_tensor(y, mesh, [Shard(0)])
         with op_strategy_context(test_op.default, replicate_op_strategy):

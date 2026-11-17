@@ -1839,6 +1839,16 @@ def _device_type_at_collection(cls):
     return device_type if type(device_type) is str else None
 
 
+def _device_type_of_test(test_instance):
+    # instantiate_device_type_tests provides `device_type` as a class
+    # attribute; legacy (not yet instantiated) test bases provide
+    # `_device_type` instead. Returns None when neither is present.
+    device_type = getattr(test_instance, "_device_type", None)
+    if device_type is None:
+        device_type = getattr(test_instance, "device_type", None)
+    return device_type
+
+
 def _static_device_selection(devices):
     return type(devices) is str or (
         type(devices) in (tuple, frozenset) and all(type(d) is str for d in devices)
@@ -1885,7 +1895,9 @@ class skipIf:
         def dep_fn(slf, *args, **kwargs):
             # Plain TestCases have no device_type; only read it when the
             # decorator is device-specific.
-            if self.device_type is None or self._matches_device(slf.device_type):
+            if self.device_type is None or self._matches_device(
+                _device_type_of_test(slf)
+            ):
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (
                     isinstance(self.dep, bool) and self.dep
                 ):
@@ -2191,14 +2203,13 @@ class expectedFailure:
     def __call__(self, fn):
         @wraps(fn)
         def efail_fn(slf, *args, **kwargs):
+            target_device_type = _device_type_of_test(slf)
             if (
-                not hasattr(slf, "device_type")
+                target_device_type is None
                 and hasattr(slf, "device")
                 and isinstance(slf.device, str)
             ):
                 target_device_type = slf.device
-            else:
-                target_device_type = slf.device_type
 
             target_dtype = kwargs.get("dtype", getattr(slf, "dtype", None))
             device_matches = (
