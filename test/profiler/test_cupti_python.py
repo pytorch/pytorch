@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -26,7 +27,9 @@ if TEST_CUPTI:
 
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
 @instantiate_parametrized_tests
-class TestPyLibCupti(TestCase):
+class TestPyLibCuptiCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_get_version(self):
         self.assertGreaterEqual(pylibcupti().get_version(), 130300)
 

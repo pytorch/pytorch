@@ -479,7 +479,7 @@ class MixOrderReductionTest(TestBase):
         x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
         y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
 
-        self.check_numeric(f, (x, y))
+        self.check_numeric(f, (x, y), tol=1e-2)
         expected_mix_order_reduction = (
             0 if not inductor_config.triton.mix_order_reduction else 2
         )

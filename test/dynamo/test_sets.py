@@ -72,6 +72,64 @@ class CustomSetTests(_BaseSetTests):
         self.assertTrue(s.contains(3))
 
 
+class CustomNewSetTests(_BaseSetTests):
+    # No class between the leaf and set/frozenset overrides __new__ at all
+    # -- tp_new must resolve the owner by walking the MRO, not by checking
+    # self.value.__new__ identity for a fixed list of known base types.
+    class PlainSet(set):
+        pass
+
+    class GrandchildPlainSet(PlainSet):
+        pass
+
+    class PlainFrozenset(frozenset):
+        pass
+
+    class GrandchildPlainFrozenset(PlainFrozenset):
+        pass
+
+    @make_dynamo_test
+    def test_set_new_exact_type(self):
+        s = set.__new__(set)
+        s.add(1)
+        self.assertTrue(s == {1})
+
+    @make_dynamo_test
+    def test_frozenset_new_exact_type(self):
+        s = frozenset.__new__(frozenset)
+        self.assertTrue(s == frozenset())
+
+    @make_dynamo_test
+    def test_set_new_ignores_kwargs(self):
+        # set.__new__ (tp_new) silently ignores extra args/kwargs -- only
+        # set.__init__ (called separately) actually populates the set.
+        s = set.__new__(set, [1, 2], extra="ignored")
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_frozenset_new_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError, lambda: frozenset.__new__(frozenset, [1, 2], extra=1)
+        )
+
+    @make_dynamo_test
+    def test_set_new_multilevel_no_override_ignores_extra_args(self):
+        s = self.GrandchildPlainSet.__new__(
+            self.GrandchildPlainSet, [1, 2], extra="ignored"
+        )
+        self.assertTrue(type(s) is self.GrandchildPlainSet)
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_frozenset_new_multilevel_no_override_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError,
+            lambda: self.GrandchildPlainFrozenset.__new__(
+                self.GrandchildPlainFrozenset, [1, 2], extra=1
+            ),
+        )
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_isdisjoint_with_generator(self):
         n = 0
@@ -1718,9 +1776,10 @@ class OrderedSetHierarchyTests(torch._dynamo.test_case.TestCase):
 class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
     """`dict_keys` is not a `set`.
 
-    A `dict_keys` passed into the compiled region is traced by
-    `DictKeySetVariable`. Its CPython surface is the `collections.abc.Set` one,
-    `isdisjoint` plus the operator slots, not `set`'s named methods.
+    A `dict_keys` passed into the compiled region is traced as a
+    `DictKeysVariable` over its owning dict. Its CPython surface is the
+    `collections.abc.Set` one, `isdisjoint` plus the operator slots, not
+    `set`'s named methods.
     """
 
     # dir(set) - dir(dict.keys()), i.e. everything a dict_keys must not have.
@@ -1846,10 +1905,7 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(compiled(self.keys()), fn(self.keys()))
 
     def test_dict_view_operands_match_eager(self):
-        """A view built inside the region is a DictKeysVariable, not this VT.
-
-        Comparing against one must fall through to the reflected operation.
-        """
+        """Operands that are dict views built inside the region."""
         ops = {
             "eq_keys": lambda k: k == {1: 9, 2: 9}.keys(),
             "le_keys": lambda k: k <= {1: 9, 2: 9, 3: 0}.keys(),
@@ -1864,6 +1920,32 @@ class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.reset()
                 compiled = torch.compile(fn, backend="eager", fullgraph=True)
                 self.assertEqual(compiled(self.keys()), fn(self.keys()))
+
+    def test_owning_dict_mutation_is_visible(self):
+        d = {1: 0}
+        k = d.keys()
+
+        def fn(x):
+            d[2] = 0
+            return x + 1, list(k)
+
+        x = torch.ones(1)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        del d[2]
+        self.assertEqual(got, fn(x))
+
+    def test_identity_of_distinct_dict_keys(self):
+        ops = {
+            "is": lambda x, a, b: (x + 1, a is b),
+            "is_not": lambda x, a, b: (x + 1, a is not b),
+        }
+        d = {1: 0}
+        a, b = d.keys(), d.keys()
+        x = torch.ones(1)
+        for name, fn in ops.items():
+            with self.subTest(op=name):
+                compiled = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(compiled(x, a, b), fn(x, a, b))
 
     def test_dict_keys_is_not_a_set_variable(self):
         """Structural guard against the classes being merged again."""

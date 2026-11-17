@@ -17,6 +17,7 @@ from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -79,6 +80,8 @@ def less_match_verbose_code_parts(expected):
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cpp_shape_guard_missing_windows_compiler_falls_back(self):
         from torch._inductor.codecache import CppCodeCache
         from torch._inductor.cpp_builder import check_compiler_exist_windows
@@ -336,12 +339,8 @@ user_stack=None)
         guard = guards.DEFAULT_DEVICE(root, ["cpu device"], None)
         self.assertTrue(guard(foo))
 
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
         try:
-            device = torch.accelerator.current_accelerator()
-            torch.set_default_device(device)
+            torch.set_default_device("meta")
             self.assertFalse(guard(foo))
         finally:
             torch.set_default_device(None)
@@ -652,17 +651,12 @@ user_stack=None)
         self.assertFalse(guard(weakref_x()))
 
     def test_call_function_no_args_guard(self):
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
         root = RootGuardManager()
-        device = torch.accelerator.current_accelerator()
-        # Use device.index which is device-agnostic (works on all accelerators)
-        x = device.index if device.index is not None else 0
+        x = 0
         guard = guards.EQUALS_MATCH(root, x, [0], None)
-        self.assertTrue(guard(0))
-        self.assertFalse(guard(1))
-        self.assertFalse(guard(2))
+        self.assertTrue(guard(x))
+        self.assertFalse(guard(x + 1))
+        self.assertFalse(guard(x + 2))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
@@ -938,9 +932,11 @@ user_stack=None)
         ).getitem_manager("global_pair", "", global_pair, default_mgr_enum)
 
         gpair_mgr.add_lambda_guard(
-            lambda x: isinstance(x, Pair)
-            and isinstance(x.x, torch.Tensor)
-            and isinstance(x.y, int),
+            lambda x: (
+                isinstance(x, Pair)
+                and isinstance(x.x, torch.Tensor)
+                and isinstance(x.y, int)
+            ),
             "global guard fail",
             None,
         )
@@ -1268,6 +1264,8 @@ user_stack=None)
 
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(skip_tensor_guards_with_matching_dict_tags=True)
     def test_basic_types(self):
         class Foo:
@@ -1329,6 +1327,8 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
 
 
 class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_duplicate_guard(self):
         class Foo:
             def __init__(self):
@@ -1375,6 +1375,8 @@ class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
@@ -1794,8 +1796,54 @@ class TagSafetyChecks(RecursiveDictTagTests):
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
 
+    def test_nn_module_tag_safe_with_method_code_guard(self):
+        # forward and helper get a __code__ guard via type(mod).__dict__; that
+        # must not cost the module its tag-safe root.
+        class Mod(torch.nn.Module):
+            def helper(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return self.helper(x)
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+
+        from torch._dynamo.testing import CompileCounter
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4, 4)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(x)
+
+        # The tag-safe root must not hide the guards: rebinding either class
+        # function still recompiles.
+        Mod.helper = lambda self, x: x * 9
+        self.assertEqual(opt_fn(x), x * 9)
+        self.assertEqual(cnt.frame_count, 2)
+        Mod.forward = lambda self, x: self.helper(x) + 1
+        self.assertEqual(opt_fn(x), x * 9 + 1)
+        self.assertEqual(cnt.frame_count, 3)
+
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_disabling(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -1911,6 +1959,8 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
 
 
 class SourceCloneTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_clone_identity_transform(self):
         """Identity transform should produce a source with the same name."""
         from torch._dynamo.source import AttrSource, GetItemSource, LocalSource
@@ -2025,6 +2075,8 @@ class SourceCloneTests(torch._dynamo.test_case.TestCase):
 
 class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
     """Tests for the GuardCheckSpec get_metadata_fn/eval_fn handlers on GuardBuilder."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _get_handler(self, name):
         from torch._dynamo.guards import GUARD_VALUE_DISPATCH

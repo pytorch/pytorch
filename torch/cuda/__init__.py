@@ -1136,13 +1136,23 @@ def _raw_device_uuid_amdsmi() -> list[str] | None:
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get amd device handler", stacklevel=2)
             return None
+        # HIP and rocminfo identify a GPU by its KFD unique_id, which is not
+        # always the ASIC serial. Newer amdsmi reports it as hip_uuid.
         try:
-            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
-                2:
-            ]  # Removes 0x prefix from serial
-        except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device", stacklevel=2)
-            return None
+            info = amdsmi.amdsmi_get_gpu_enumeration_info(handler)
+            hip_uuid = str(info.get("hip_uuid", ""))
+        except (AttributeError, amdsmi.AmdSmiException):
+            hip_uuid = ""
+        if hip_uuid.startswith("GPU-"):
+            uuid = hip_uuid.removeprefix("GPU-")
+        else:
+            try:
+                uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                    2:
+                ]  # Removes 0x prefix from serial
+            except amdsmi.AmdSmiException:
+                warnings.warn("Cannot get uuid for amd device", stacklevel=2)
+                return None
         uuids.append(
             str(uuid).lower()
         )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input

@@ -161,6 +161,14 @@ if(NOT __AOTRITON_INCLUDED)
         COMMAND ${GIT_EXECUTABLE} apply ${__AOTRITON_WIN32_PATCHES})
     endif()
     message(STATUS "PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}")
+    set(__AOTRITON_ROCM_ARGS "")
+    if(EXISTS "${ROCM_PATH}/lib/cmake/hip")
+      list(APPEND __AOTRITON_ROCM_ARGS "-Dhip_DIR=${ROCM_PATH}/lib/cmake/hip")
+    endif()
+    # TheRock vendors liblzma; its prefix lets pkg_search_module find liblzma.pc.
+    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib/pkgconfig")
+      list(APPEND __AOTRITON_ROCM_ARGS "-DCMAKE_PREFIX_PATH=${ROCM_PATH}/lib/rocm_sysdeps")
+    endif()
 
     ExternalProject_Add(${project}
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
@@ -177,6 +185,7 @@ if(NOT __AOTRITON_INCLUDED)
       -DAOTRITON_NO_PYTHON=ON
       -DAOTRITON_NOIMAGE_MODE=${noimage}
       -DHIP_PLATFORM=amd
+      ${__AOTRITON_ROCM_ARGS}
       $<$<BOOL:${WIN32}>:-Ddlfcn-win32_DIR=${dlfcn-win32_DIR}>
       $<$<BOOL:${WIN32}>:-Dliblzma_DIR=${liblzma_DIR}>
       BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}"

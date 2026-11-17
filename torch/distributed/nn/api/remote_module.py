@@ -5,8 +5,7 @@ import io
 import sys
 import types
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, TypeVar
-from typing_extensions import Self
+from typing import Any, Self, TypeVar
 
 import torch
 import torch.distributed.rpc as rpc

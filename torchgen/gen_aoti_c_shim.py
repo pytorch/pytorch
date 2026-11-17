@@ -81,12 +81,6 @@ base_type_to_callsite_expr = {
 
 
 # convert args to C types, names in declarations, and expressions in function bodies
-#
-# resolve_dispatch_flags: whether to manually materialize conj/neg input tensors
-# before the call. Device-specific shims call kernels directly and need this.
-# Device-generic (aten) shims go through the dispatcher, which already handles these
-# flags, so one must pass tensors through as-is so that view ops called on complex
-# Tensors keep aliasing their inputs instead of operating on a temporary copy.
 def convert_arg_type_and_name(
     typ: Type,
     name: str,
@@ -221,7 +215,7 @@ def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
 def gen_arguments(
     flat_arguments: Sequence[Argument],
     skipped_args: set[str],
-    resolve_dispatch_flags: bool,
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[list[str], list[str]]:
     types: list[str] = []
     new_names: list[str] = []
@@ -347,7 +341,7 @@ def gen_declaration_and_definition(
     device: str,
     backend_call: str,
     op_metadata: dict[str, str | dict[str, list[str] | str]],
-    resolve_dispatch_flags: bool,
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 
@@ -589,10 +583,13 @@ def gen_c_shim(
         func,
         backend_index,
     )
-    # CompositeImplicitAutograd kernels re-dispatch through at:: ops.
+    # ATen shims and CompositeImplicitAutograd kernels already handle conj/neg.
+    # Views need the original tensors to preserve aliasing and checks on math bits.
+    # Other direct kernel calls need materialized inputs.
     resolve_dispatch_flags = (
         backend_index is not None
         and backend_index.dispatch_key != DispatchKey.CompositeImplicitAutograd
+        and not func.is_view_op
     )
 
     try:

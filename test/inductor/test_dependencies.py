@@ -1,5 +1,9 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import itertools
+from unittest.mock import patch
+
+import sympy
 
 import torch
 from torch._inductor.codegen.cpp_utils import CppCSEVariable
@@ -17,6 +21,7 @@ from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -121,6 +126,64 @@ class TestDependencies(InductorTestCase):
 
         reads = {dep.name for dep in extern.get_read_writes().reads}
         self.assertEqual(reads, {"data", "index", "value"})
+
+    def test_non_overlapping_addresses(self):
+        # Check accepted maps independently, by enumerating their addresses.
+        for rank in (1, 2, 3):
+            variables = tuple(sympy_index_symbol(f"d{i}") for i in range(rank))
+            accepted = 0
+            for sizes in itertools.product((2, 3), repeat=rank):
+                for strides in itertools.product((1, 2, 3, 6), repeat=rank):
+                    index = 7 + sum(s * v for s, v in zip(strides, variables))
+                    dep = MemoryDep("buf", index, variables, sizes)
+                    if dep.is_non_overlapping():
+                        addresses = [
+                            7 + sum(s * x for s, x in zip(strides, point))
+                            for point in itertools.product(*(range(n) for n in sizes))
+                        ]
+                        self.assertEqual(len(set(addresses)), len(addresses))
+                        accepted += 1
+            self.assertGreater(accepted, 0)
+
+    def test_non_overlapping_pitched_and_symbolic(self):
+        row, col = sympy_index_symbol("row"), sympy_index_symbol("col")
+        batch = sympy.Symbol("batch", integer=True, positive=True)
+        for pitch, width in ((1088, 1056), (24, 20)):
+            for rows in (7, batch):
+                for variables, sizes in (
+                    ((row, col), (rows, width)),
+                    ((col, row), (width, rows)),
+                ):
+                    dep = MemoryDep("buf", pitch * row + col + 13, variables, sizes)
+                    self.assertTrue(dep.is_non_overlapping())
+        unknown_pitch = sympy.Symbol("pitch", integer=True, positive=True)
+        dep = MemoryDep("buf", unknown_pitch * row + col, (row, col), (3, 12))
+        # A favorable hint cannot substitute for a proven stride bound.
+        with patch.object(
+            self._graph.sizevars,
+            "optimization_hint",
+            side_effect=lambda expr, fallback=None: 4096
+            if expr == unknown_pitch
+            else int(expr),
+        ):
+            self.assertFalse(dep.is_non_overlapping())
+
+    def test_non_overlapping_rejects_unproved_maps(self):
+        row, col = sympy_index_symbol("row"), sympy_index_symbol("col")
+        for index in (
+            8 * row + col,  # overlapping rows
+            col,  # omitted axis
+            16 * row - col,
+            16 * row + ModularIndexing(col, 1, 4),
+            16 * row + FloorDiv(col, 2),
+            row * col,
+            16 * row + col**2,
+            16 * row + col + make_symbol(SymT.TMP, 0),  # per-iteration offset
+        ):
+            with self.subTest(index=index):
+                self.assertFalse(
+                    MemoryDep("buf", index, (row, col), (3, 12)).is_non_overlapping()
+                )
 
     def test_get_offset(self):
         x = sympy_index_symbol("x")

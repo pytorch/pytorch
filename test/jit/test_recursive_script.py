@@ -269,6 +269,10 @@ class TestRecursiveScript(JitTestCase):
             dir_scripted = set(dir(scripted_mod))
             # set not currently copied over
             ignore_set = [
+                # Since Python 3.14, dir() lists __annotations__ only for classes
+                # compiled with `from __future__ import annotations` (like the
+                # torch.nn containers), so the eager and scripted dirs can differ.
+                "__annotations__",
                 "training",
                 "__delitem__",
                 "__setitem__",

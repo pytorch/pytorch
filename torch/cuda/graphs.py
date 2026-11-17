@@ -8,8 +8,8 @@ import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Any, overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import Any, overload, Self, TYPE_CHECKING, TypeAlias, TypeGuard, Union
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor

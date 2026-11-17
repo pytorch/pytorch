@@ -2,6 +2,8 @@
 #include <fmt/ostream.h>
 #include <torch/nativert/graph/Serialization.h>
 #include <limits>
+
+#include <c10/util/irange.h>
 namespace torch::nativert {
 
 namespace {
@@ -154,7 +156,7 @@ enforceInputOrder(
       torch::_export::InputSpec::Tag::CUSTOM_OBJ};
 
   auto reorder = [&](auto condition) {
-    for (size_t i = 0; i < inputSpecs.size(); ++i) {
+    for (const auto i : c10::irange(inputSpecs.size())) {
       if (condition(inputSpecs[i])) {
         reorderedInputSpecs.push_back(inputSpecs[i]);
         reorderedGraphInputs.push_back(graphInputs[i]);

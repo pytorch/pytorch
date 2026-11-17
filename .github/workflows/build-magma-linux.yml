@@ -53,10 +53,8 @@ jobs:
         include:
           - { cuda_version: "134", desired_cuda: "13.4" }
           - { cuda_version: "132", desired_cuda: "13.2" }
-          - { cuda_version: "130", desired_cuda: "13.0" }
           - { cuda_version: "129", desired_cuda: "12.9" }
           - { cuda_version: "128", desired_cuda: "12.8" }
-          - { cuda_version: "126", desired_cuda: "12.6" }
     steps:
       # The workspace is created as uid 1001 and the image runs as root, so git
       # refuses to read it without this.
