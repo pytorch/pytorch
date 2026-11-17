@@ -18,6 +18,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -90,7 +91,14 @@ JOB_RE = re.compile(
     r"(?P<job_name>test(?:-osdc)?) \((?P<config>[^,]+),\s*(?P<shard>\d+),\s*(?P<num_shards>\d+),\s*(?P<runner>[^)]+)\)"
 )
 
-PERF_CONFIGS = re.compile(r"inductor_(huggingface|timm|torchbench)_perf")
+TP_PERF_CONFIG = "inductor_huggingface_tp_perf"
+PERF_CONFIGS = re.compile(
+    rf"inductor_(huggingface|timm|torchbench)_perf|{TP_PERF_CONFIG}"
+)
+
+# Tensor-parallel Hugging Face CSVs append the phase and TP degree to the config,
+# e.g. inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2.
+TP_CONFIG_SUFFIX = re.compile(r"_(?P<phase>prefill|decode)_tp(?P<tp_size>\d+)$")
 
 SUITE_ALIASES = {
     "hf": "huggingface",
@@ -177,6 +185,8 @@ def _short_config(config: str, device: str = "") -> str:
             suite = s
             break
     parts = [p for p in (device, backend, suite, mode) if p]
+    if tp := TP_CONFIG_SUFFIX.search(c):
+        parts.append(f"{tp['phase']} tp{tp['tp_size']}")
     return " ".join(parts)
 
 
@@ -191,6 +201,13 @@ class ModelResult:
     dynamo_peak_mem: float = 0.0
     config: str = ""
     device: str = ""
+    batch_size: int | None = None
+    prompt_length: int | None = None
+    decode_length: int | None = None
+
+    @property
+    def workload(self) -> tuple[int | None, ...]:
+        return self.batch_size, self.prompt_length, self.decode_length
 
     @property
     def short_config(self) -> str:
@@ -243,7 +260,7 @@ class PerfData:
     @property
     def runtime(self) -> str:
         # Last token in config: e.g. "..._training_cuda" → "cuda"
-        parts = self.config.rsplit("_", 1)
+        parts = TP_CONFIG_SUFFIX.sub("", self.config).rsplit("_", 1)
         if len(parts) == 2:
             return parts[1]
         return "unknown"
@@ -276,18 +293,31 @@ class PerfData:
 # ---------------------------------------------------------------------------
 
 
-def get_run_jobs(run_id: int) -> list[dict]:
-    data = gh(
-        "run",
-        "view",
-        str(run_id),
-        "--repo",
-        REPO,
-        "--json",
-        "jobs",
-        json_output=True,
+def get_run_jobs(run_id: int, attempt: int | None = None) -> list[dict]:
+    """Return the jobs of a run attempt, by default the latest.
+
+    Re-running failed jobs copies the other jobs into the new attempt under new
+    IDs, but their artifacts stay under the attempt and ID they ran with, so a
+    copied job is returned as the execution it was copied from.
+    """
+    output = gh(
+        "api",
+        "--paginate",
+        f"repos/{REPO}/actions/runs/{run_id}/jobs?filter=all&per_page=100",
+        "--jq",
+        ".jobs[] | {id, run_attempt, name, conclusion, started_at}",
     )
-    return data["jobs"]
+    jobs = sorted(map(json.loads, output.splitlines()), key=lambda j: j["run_attempt"])
+    # A copied job keeps the start time of the execution it was copied from.
+    executions = {}
+    for job in jobs:
+        executions.setdefault((job["name"], job["started_at"]), job)
+    attempt = attempt or max((job["run_attempt"] for job in jobs), default=1)
+    return [
+        executions[job["name"], job["started_at"]]
+        for job in jobs
+        if job["run_attempt"] == attempt
+    ]
 
 
 def get_perf_jobs(jobs: list[dict]) -> list[dict]:
@@ -307,7 +337,8 @@ def get_perf_jobs(jobs: list[dict]) -> list[dict]:
                 "shard": m.group("shard"),
                 "num_shards": m.group("num_shards"),
                 "runner": m.group("runner"),
-                "job_id": job["databaseId"],
+                "job_id": job["id"],
+                "attempt": job["run_attempt"],
                 "name": job["name"],
                 "job_prefix": m.group("job_name"),
             }
@@ -315,7 +346,8 @@ def get_perf_jobs(jobs: list[dict]) -> list[dict]:
     return perf_jobs
 
 
-def s3_artifact_url(run_id: int, attempt: int, job: dict) -> str:
+def s3_artifact_url(run_id: int, job: dict) -> str:
+    attempt = job["attempt"]
     config = job["config"]
     shard = job["shard"]
     num_shards = job["num_shards"]
@@ -331,8 +363,8 @@ def s3_artifact_url(run_id: int, attempt: int, job: dict) -> str:
 CACHE_DIR = Path.home() / ".cache" / "perf_cli"
 
 
-def get_cache_dir(run_id: int, attempt: int) -> Path:
-    d = CACHE_DIR / f"{run_id}" / f"{attempt}"
+def get_cache_dir(run_id: int) -> Path:
+    d = CACHE_DIR / f"{run_id}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -340,11 +372,10 @@ def get_cache_dir(run_id: int, attempt: int) -> Path:
 def download_and_extract_csvs(
     run_id: int,
     jobs: list[dict],
-    attempt: int = 1,
     no_cache: bool = False,
 ) -> list[tuple[str, str]]:
     """Download artifacts and return list of (csv_filename, csv_content) pairs."""
-    cache = get_cache_dir(run_id, attempt)
+    cache = get_cache_dir(run_id)
     results = []
     fetched = 0
 
@@ -362,7 +393,7 @@ def download_and_extract_csvs(
                 results.append((csv_name, csv_file.read_text()))
             continue
 
-        url = s3_artifact_url(run_id, attempt, job)
+        url = s3_artifact_url(run_id, job)
         zip_path = cache / f"{cache_key}.zip"
         try:
             urllib.request.urlretrieve(url, str(zip_path))
@@ -403,12 +434,17 @@ def parse_csvs(csv_pairs: list[tuple[str, str]], device: str = "") -> list[PerfD
     for csv_name, content in csv_pairs:
         # csv_name like: inductor_with_cudagraphs_huggingface_amp_training_cuda_performance.csv
         config = csv_name.replace("_performance.csv", "")
+        # TP comparisons pair rows with the same workload dimensions.
+        dimensions = ("batch_size", "prompt_length", "decode_length")
+        if not TP_CONFIG_SUFFIX.search(config):
+            dimensions = ()
         reader = csv.DictReader(io.StringIO(content))
         for row in reader:
             try:
                 speedup = float(row.get("speedup", 0))
             except (ValueError, TypeError):
                 continue
+            workload = {key: int(row[key]) for key in dimensions if row.get(key)}
             grouped[config].append(
                 ModelResult(
                     name=row.get("name", "?"),
@@ -420,6 +456,7 @@ def parse_csvs(csv_pairs: list[tuple[str, str]], device: str = "") -> list[PerfD
                     dynamo_peak_mem=float(row.get("dynamo_peak_mem", 0) or 0),
                     config=config,
                     device=device,
+                    **workload,
                 )
             )
 
@@ -706,7 +743,7 @@ def cmd_launch(args):
                 suite=None,
                 mode=None,
                 group_by=None,
-                attempt=1,
+                attempt=None,
                 no_cache=False,
             )
             print(f"\n{'=' * 70}")
@@ -875,7 +912,7 @@ def resolve_runs(branch: str, devices: list[str]) -> dict[str, int]:
 
 
 def resolve_baseline(head_run_id: int) -> int:
-    """Find the latest successful nightly on main, skipping the head run itself."""
+    """Find a main run with successful matching perf jobs, skipping the head."""
     run_data = gh(
         "run",
         "view",
@@ -883,11 +920,20 @@ def resolve_baseline(head_run_id: int) -> int:
         "--repo",
         REPO,
         "--json",
-        "workflowName",
+        "workflowName,workflowDatabaseId",
         json_output=True,
     )
     wf_name = run_data.get("workflowName", "")
     nightly_id = WORKFLOW_NAME_TO_NIGHTLY_ID.get(wf_name)
+    tp_jobs = set()
+    periodic = wf_name == "inductor-periodic"
+    if periodic:
+        nightly_id = run_data["workflowDatabaseId"]
+        tp_jobs = {
+            (job["config"], job["runner"])
+            for job in get_perf_jobs(get_run_jobs(head_run_id))
+            if job["config"] == TP_PERF_CONFIG
+        }
     if nightly_id is None:
         print(
             f"Don't know which nightly corresponds to workflow '{wf_name}'",
@@ -905,9 +951,9 @@ def resolve_baseline(head_run_id: int) -> int:
         "--branch",
         "main",
         "--status",
-        "success",
+        "completed" if periodic else "success",
         "--limit",
-        "5",
+        "50" if periodic else "5",
         "--json",
         "databaseId,createdAt,headBranch",
         json_output=True,
@@ -916,11 +962,21 @@ def resolve_baseline(head_run_id: int) -> int:
     for run in runs:
         if run["databaseId"] != head_run_id:
             baseline_id = run["databaseId"]
+            if tp_jobs:
+                baseline_jobs = {
+                    (job["config"], job["runner"])
+                    for job in get_perf_jobs(get_run_jobs(baseline_id))
+                }
+                if not tp_jobs.issubset(baseline_jobs):
+                    continue
             created = run["createdAt"][:10]
             print(f"Baseline: run {baseline_id} (main, {created})")
             return baseline_id
 
-    print("No suitable baseline nightly found on main.", file=sys.stderr)
+    print(
+        "No suitable baseline run found on main; use --baseline RUN_ID.",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -993,13 +1049,13 @@ def print_run_header(
 
 def fetch_run_perf(
     run_id: int,
-    attempt: int,
+    attempt: int | None,
     no_cache: bool,
     device: str = "",
     allow_empty: bool = False,
 ) -> list[PerfData]:
-    """Fetch and parse perf data for a run."""
-    jobs = get_run_jobs(run_id)
+    """Fetch and parse perf data for a run attempt, by default the latest."""
+    jobs = get_run_jobs(run_id, attempt)
     perf_jobs = get_perf_jobs(jobs)
     if not perf_jobs:
         if allow_empty:
@@ -1007,14 +1063,21 @@ def fetch_run_perf(
             return []
         print(f"No successful perf jobs in run {run_id}.", file=sys.stderr)
         sys.exit(1)
-    csv_pairs = download_and_extract_csvs(run_id, perf_jobs, attempt, no_cache=no_cache)
-    if not csv_pairs:
+    jobs_by_device = defaultdict(list)
+    for job in perf_jobs:
+        identity = job["runner"] if job["config"] == TP_PERF_CONFIG else device
+        jobs_by_device[identity].append(job)
+    results = []
+    for identity, device_jobs in jobs_by_device.items():
+        csv_pairs = download_and_extract_csvs(run_id, device_jobs, no_cache=no_cache)
+        results.extend(parse_csvs(csv_pairs, device=identity))
+    if not results:
         if allow_empty:
             print(f"  no CSVs in run {run_id}, skipping", file=sys.stderr)
             return []
         print(f"No performance CSVs in run {run_id}.", file=sys.stderr)
         sys.exit(1)
-    return parse_csvs(csv_pairs, device=device)
+    return results
 
 
 @dataclass
@@ -1049,18 +1112,17 @@ class ConfigAgg:
 def compute_deltas(
     head_perf: list[PerfData], base_perf: list[PerfData], metric: Metric
 ) -> tuple[list[ModelDelta], dict[str, ConfigAgg]]:
-    """Join head and base on (device, config, model_name) and compute deltas.
+    """Join matching hardware, configs, models and TP workloads to compute deltas.
 
     Returns (per_model_deltas, per_config_aggregates).
     per_config_aggregates maps qualified_config -> ConfigAgg.
     """
-    # Build base lookup: (device, config, model_name) -> metric value
-    base_lookup: dict[tuple[str, str, str], float] = {}
+    base_lookup: dict[tuple[str, str, str, tuple[int | None, ...]], float] = {}
     for perf in base_perf:
         for m in perf.models:
             v = getattr(m, metric.field)
             if v > 0:
-                base_lookup[(perf.device, perf.config, m.name)] = v
+                base_lookup[(perf.device, perf.config, m.name, m.workload)] = v
 
     deltas = []
     for perf in head_perf:
@@ -1068,7 +1130,7 @@ def compute_deltas(
             head_val = getattr(m, metric.field)
             if head_val <= 0:
                 continue
-            key = (perf.device, perf.config, m.name)
+            key = (perf.device, perf.config, m.name, m.workload)
             if key not in base_lookup:
                 continue
             base_val = base_lookup[key]
@@ -1317,8 +1379,8 @@ def cmd_summary(args):
             print(f"Fetching baseline run {baseline_id} ({device})...")
             base_data = fetch_run_perf(
                 baseline_id,
-                attempt,
-                args.no_cache,
+                attempt=None,
+                no_cache=args.no_cache,
                 device=device,
                 allow_empty=auto_discovered,
             )
@@ -1370,9 +1432,12 @@ def config_to_command(
     config: str,
     suite: str,
     model: str | None = None,
+    *,
+    result: ModelResult | None = None,
 ) -> str | None:
     """Turn a config name into a runnable benchmark command."""
-    m = CONFIG_RE.match(config)
+    tp = TP_CONFIG_SUFFIX.search(config)
+    m = CONFIG_RE.match(TP_CONFIG_SUFFIX.sub("", config))
     if not m:
         return None
 
@@ -1410,6 +1475,27 @@ def config_to_command(
         cmd_parts.append("--export-aot-inductor")
         cmd_parts.append("--disable-cudagraphs")
 
+    if tp:
+        # huggingface.py launches the torchrun worker group itself.
+        cmd_parts.extend(
+            [
+                f"--hf-inference-mode={tp['phase']}",
+                f"--tp-size={tp['tp_size']}",
+                "--nopython",
+            ]
+        )
+        if result is not None:
+            dimensions = {
+                "batch-size": result.batch_size,
+                "prompt-length": result.prompt_length,
+            }
+            if tp["phase"] == "decode":
+                dimensions["decode-length"] = result.decode_length
+            # Failure rows record batch size 0; let the benchmark pick its default.
+            cmd_parts.extend(
+                f"--{key}={value}" for key, value in dimensions.items() if value
+            )
+
     cmd_parts.extend(["--performance", "--cold-start-latency"])
 
     if model:
@@ -1417,7 +1503,7 @@ def config_to_command(
 
     cmd_parts.extend(["--output", f"{config}_performance.csv"])
 
-    return " ".join(cmd_parts)
+    return shlex.join(cmd_parts)
 
 
 def cmd_repro(args):
@@ -1446,23 +1532,25 @@ def cmd_repro(args):
 
     print_run_header("REPRO", metas)
 
-    configs_seen: dict[str, str] = {}  # config_name → suite
+    commands: dict[str, str] = {}
     for perf in all_perf:
-        configs_seen[perf.config] = perf.suite
+        if TP_CONFIG_SUFFIX.search(perf.config):
+            for model in perf.models:
+                if args.model and model.name != args.model:
+                    continue
+                cmd = config_to_command(
+                    perf.config, perf.suite, model.name, result=model
+                )
+                if cmd:
+                    commands[cmd] = perf.config
+        else:
+            cmd = config_to_command(perf.config, perf.suite, args.model)
+            if cmd:
+                commands[cmd] = perf.config
 
-    count = 0
-    commands: list[str] = []
-    for config in sorted(configs_seen):
-        suite = configs_seen[config]
-        cmd = config_to_command(config, suite, args.model)
-        if not cmd:
-            continue
-        commands.append(f"# {config}\n{cmd}")
-        count += 1
-
-    print(f"\nReproducible commands ({count} configs):\n")
-    for cmd in commands:
-        print(f"{cmd}\n")
+    print(f"\nReproducible commands ({len(commands)} commands):\n")
+    for cmd, config in sorted(commands.items()):
+        print(f"# {config}\n{cmd}\n")
 
 
 PIN_DIR = Path(".ci/docker/ci_commit_pins")
@@ -1722,7 +1810,7 @@ Examples:
         "--baseline",
         type=str,
         default="latest",
-        help="Baseline run ID, 'latest' for most recent main nightly (default), or 'none' to disable",
+        help="Baseline run ID, 'latest' for a matching main run (default), or 'none' to disable",
     )
     p_summary.add_argument(
         "--metric",
@@ -1783,7 +1871,7 @@ Examples:
         help=f"Group S-curves by key(s) (default: single combined). Choices: {', '.join(GROUP_CHOICES)}",
     )
     p_summary.add_argument(
-        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+        "--attempt", type=int, help="Head run attempt to read (default: latest)"
     )
     p_summary.add_argument(
         "--no-cache",
@@ -1835,7 +1923,7 @@ Examples:
         "--runtime", type=str, default=None, help="Filter to runtime (e.g. cuda, cpu)"
     )
     p_repro.add_argument(
-        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+        "--attempt", type=int, help="Run attempt to read (default: latest)"
     )
 
     # -- prepare-repro --
@@ -1880,7 +1968,7 @@ Examples:
         help="Only show setup, skip benchmark commands",
     )
     p_prep.add_argument(
-        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+        "--attempt", type=int, help="Run attempt to read (default: latest)"
     )
 
     args = parser.parse_args()

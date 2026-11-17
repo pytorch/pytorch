@@ -1474,6 +1474,51 @@ test_dynamo_benchmark() {
   fi
 }
 
+test_huggingface_tp_benchmark() {
+  # Hugging Face tensor-parallel prefill and decode on two GPUs. Without --only,
+  # huggingface.py launches one torchrun worker group per model.
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local validation_status=0
+  local mode="${1:-accuracy}"
+  local tp_size=2
+  local phase
+  for phase in prefill decode; do
+    local tp_args=(
+      --ci --inference --bfloat16 --inductor --disable-cudagraphs --device cuda --nopython
+      --tp-size="$tp_size" --batch-size=1 --hf-inference-mode="$phase"
+    )
+    if [[ "$mode" == "performance" ]]; then
+      local csv="$TEST_REPORTS_DIR/inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_${phase}_tp${tp_size}_performance.csv"
+      # As in the other perf jobs, a failing model leaves a CSV row without failing
+      # the job; perf_cli ignores every result of a failed job.
+      python benchmarks/dynamo/huggingface.py --performance "${tp_args[@]}" \
+        --output "$csv" || true
+      [[ -s "$csv" ]] || validation_status=1
+      continue
+    fi
+    python benchmarks/dynamo/huggingface.py --accuracy --timing --explain \
+      "${tp_args[@]}" --output "$TEST_REPORTS_DIR/${phase}_huggingface.csv" \
+      || validation_status=$?
+    python benchmarks/dynamo/check_accuracy.py \
+      --require-complete \
+      --actual "$TEST_REPORTS_DIR/${phase}_huggingface.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${phase}.csv" \
+      || validation_status=$?
+    python benchmarks/dynamo/check_graph_breaks.py \
+      --actual "$TEST_REPORTS_DIR/${phase}_huggingface.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${phase}.csv" \
+      || validation_status=$?
+  done
+  # The process-launching TP tests only run with PYTORCH_TEST_WITH_SLOW=1.
+  if [[ "$mode" == "accuracy" ]]; then
+    PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --include dynamo/test_benchmark_runner \
+      -k TensorParallel --verbose || validation_status=$?
+  fi
+  return "$validation_status"
+}
+
 test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -2713,6 +2758,10 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   setup_torch_trace
   if [[ "${TEST_CONFIG}" == *unbacked_parity* ]]; then
     test_unbacked_parity_smoketest
+  elif [[ "${TEST_CONFIG}" == "inductor_huggingface_tp_perf" ]]; then
+    test_huggingface_tp_benchmark performance
+  elif [[ "${TEST_CONFIG}" == "inductor_huggingface_tp" ]]; then
+    test_huggingface_tp_benchmark
   else
     test_dynamo_benchmark huggingface "$id"
   fi

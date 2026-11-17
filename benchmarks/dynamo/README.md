@@ -231,3 +231,21 @@ Multi-node runs, several TP groups, and other parallelism styles are
 unsupported. Inductor TP requires CUDA/NCCL. With a CPU-only PyTorch build,
 `-dcpu` supports TP diagnostics with `--backend=eager` or
 `--backend=aot_eager`.
+
+The periodic `inductor_huggingface_tp` CI job checks accuracy and runs the TP
+tests on GPUs. A separate `inductor_huggingface_tp_perf` job measures
+performance, so accuracy or test failures do not hide successful performance
+results; per-model failures are recorded in its CSVs without failing the job.
+Both use `--tp-size=2` and full-graph compilation on multi-GPU A10G runners.
+Accuracy checks require exactly one result matching the baseline for each
+supported model. Update both phase baselines with
+`python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <commit-sha>`,
+using a SHA with completed `inductor-periodic` accuracy artifacts.
+Performance CSV names end in `_<phase>_tp2_performance.csv`.
+Use the numeric periodic run ID with `perf_cli.py summary` or `repro`; branch
+discovery and `launch` still select the nightly workflows. Automatic baseline
+selection requires a successful TP performance job on the same runner hardware;
+unrelated failures elsewhere in the periodic workflow do not exclude that run.
+Comparisons pair the same hardware, phase, TP degree, model, batch size, prompt
+length, and decode length. Reproduction commands preserve those workload
+dimensions.
