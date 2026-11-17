@@ -34,6 +34,7 @@ aspects of contributing to PyTorch.
   - [Skip CI while iterating](#skip-ci-while-iterating)
   - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
+  - [Continue a GitHub-native stack after part of it lands](#continue-a-github-native-stack-after-part-of-it-lands)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
   - [Docstring type formatting](#docstring-type-formatting)
@@ -132,10 +133,7 @@ flowchart TD
     ai -- fails pre-conditions --> closed[Closed]
     ai -- success --> triaged["Triaged PR<br/>“triaged”, one reviewer per module"]
     ai -- "fails, or “no automated triage”" --> htriage(Manual triage) --> triaged
-    triaged --> pre(Pre-review)
-    pre -- any assigned reviewer rejects --> closed
-    pre -- needs clarification --> draft
-    pre -- every assigned reviewer accepts --> dev["In development by author<br/>“in progress”"]
+    triaged --> dev["In development by author<br/>“in progress”"]
     dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>“ready for review”"]
     auto -- changes needed --> dev
     dev -- "“no automated review”" --> rfr
@@ -150,7 +148,7 @@ flowchart TD
     classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
     class draft,ready,closed,triaged,dev,rfr,accepted,merged state
     class ai,auto,gl aiproc
-    class htriage,pre,review humanproc
+    class htriage,review humanproc
 ```
 
 Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
@@ -159,7 +157,7 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 |---|---|---|---|
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
-| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
+| Triaged | `triaged` | Bot | The bot adds `in progress`, even if the PR is already approved. This starts the automated review, unless the PR has `no automated review`. |
 | In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. Adding that label also withdraws the automated review's change requests. |
 | Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
@@ -178,6 +176,10 @@ If a maintainer requests changes and your PR returns to `in progress`, please ad
 
 With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. Adding the label withdraws any change requests from the automated review; a maintainer still needs to approve the PR. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
 
+**Address the automated review first**: maintainers are not expected to start reviewing your PR until it is `ready for review`. Put in the time to address the automated review's feedback before then.
+
+**Passing the automated review does not guarantee your PR lands**: a reviewer can still reject a PR that is moving in the wrong direction, for example because it needs a design discussion first or does not solve an important problem. If a PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
+
 **Pre-conditions**:
 
 - the PR is linked to an issue labeled `actionable` OR
@@ -185,24 +187,6 @@ With the `no automated review` label, your PR skips these checks and moves direc
 - the author names the maintainer who pre-approved the change (see the "Supported by" line of the [PR template](.github/PULL_REQUEST_TEMPLATE.md))
 
 The PR must follow the [AI policy](AI_POLICY.md).
-
-**Pre-review** is a quick review of the direction of the PR, to ensure it is worth the author's time to get it through automated review and finalize it.
-It is the author's responsibility to give the reviewers all the information they'd need to make a quick (<1m) decision for faster turnaround.
-It is always ok for a reviewer to reject a PR at pre-review, including on the basis that the description is not clear enough and the assessment would be too time consuming.
-If the PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
-
-To assess a PR:
-
-- Is the PR description clear, concise and reflective of the change?
-- Is this PR solving a problem that is important?
-- Is the approach of the PR clear and in line with the discussion on the issue and the PR description?
-- Is this PR modular and simple enough to review, or does it need a design discussion first?
-
-Based on that:
-
-- If a design discussion is needed: the PR is closed and the discussion moves to the issue.
-- If the description lacks the justification needed for a quick decision: the PR is closed or moved back to draft.
-- If only a minor clarification is needed: the PR is moved back to draft.
 
 **GreenLight**: PRs from authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml) can also be approved directly by [GreenLight](#greenlight).
 
@@ -688,6 +672,23 @@ The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot m
 
 A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to the same checks as the commented PR: it waits for their checks, ciflow runs included, and a failure on any of them stops the merge unless Dr. CI classifies it as unrelated to that PR. `@pytorchbot merge -i` ignores the failures already present on any of them when the merge starts.
 
+### Continue a GitHub-native stack after part of it lands
+
+The bot lands a PR by pushing its commit to `main` and closing the PR, so GitHub shows the PR as closed, not merged. The landed PRs stay at the bottom of the GitHub stack, and keeping them there matters: when a PR above them lands, its commit lists them as stack dependencies, and that link is what makes `@pytorchbot revert` on a landed PR also revert the PRs that landed on top of it.
+
+[`gh stack`](https://github.com/github/gh-stack) skips only branches whose PR GitHub marks as merged, so it treats the landed branches as active branches with no PR: `gh stack submit` opens new PRs for them, `gh stack rebase`, `sync` and `push` rebase and force-push them, and `gh stack unstack` takes them out of the GitHub stack. Do not run `gh stack` on a stack until all of it has landed. Keep the rest of it up to date with plain git instead: give the topmost landed branch the exact content of `main` with a merge commit, then merge each branch into the one above it, bottom to top. For a stack `A <- B <- C` whose bottom PR `A` has landed:
+
+```bash
+git fetch origin
+git checkout A && git merge --ff-only origin/A
+git merge --ff-only "$(git commit-tree -p HEAD -p origin/main -m 'Merge main into A' 'origin/main^{tree}')"
+git push origin A
+git checkout B && git merge --ff-only origin/B && git merge A && git push origin B
+git checkout C && git merge --ff-only origin/C && git merge B && git push origin C
+```
+
+A plain `git merge origin/main` is not enough for `A`: `main` holds `A`'s changes as a different commit, so later `main` changes to those lines conflict, and a file `A` added that `main` later deleted would stay on `A` and reach the PRs above. Every push is a fast-forward, and each open PR still shows only its own changes. You only need this to pick up a newer `main` or to resolve conflicts with it; `@pytorchbot rebase -b main` on the top PR does the same update on GitHub. New work goes the same way: commit on its branch, merge it into the branches above, and `git push`. Never add commits other than merges of `main` to a landed branch: the bot refuses to land the PRs above a closed PR whose branch has commits that never landed.
+
 ## GreenLight
 
 GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
@@ -963,7 +964,6 @@ On the initial build, you can also speed things up by disabling the features you
 - `USE_CUDA=0` will disable compiling CUDA.
 - `BUILD_TEST=0` will disable building C++ test binaries.
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
-- `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_XNNPACK=0` will disable compiling with XNNPACK.
 - `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively.
 - `BUILD_LAZY_TS_BACKEND=0` will disable the lazy TorchScript backend (Lazy Tensor Core).
@@ -982,7 +982,7 @@ documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwardi
 
 For example, a good default for the most minimal build is to add to your bashrc is:
 ```bash
-alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
+alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
 ```
 
 You can then re-enable features selectively
