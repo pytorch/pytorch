@@ -6,7 +6,6 @@ import pkgutil
 import torch
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -28,7 +27,6 @@ def do_imports():
 do_imports()
 
 
-@instantiate_parametrized_tests
 @skipIfTorchDynamo("not applicable")
 class TestHOPInfra(TestCase):
     hw_classification = HardwareClassification.GENERIC
