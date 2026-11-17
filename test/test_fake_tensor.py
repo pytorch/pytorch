@@ -1621,7 +1621,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             with self.assertRaisesRegex(RuntimeError, error):
                 torch.as_strided(x, (17, 18), (-80, 1), 1)
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     def test_recursive_invocation(self):
         mode = FakeTensorMode()
         with mode:
@@ -1934,11 +1933,6 @@ def forward(self, x_1):
         name_fn=lambda op: op.__name__,
     )
     def test_scalar_inputs(self, op):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         expected = op(3, 2)
         with FakeTensorMode() as mode:
             out = op(3, 2)
@@ -2065,12 +2059,6 @@ def forward(self, x_1):
     @parametrize("channels", [1, 2])
     def test_mixed_real_and_fake_inputs(self, allow, override, channels):
         from torch._subclasses.fake_tensor import fake_tensor_tls
-
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
 
         class _TestPattern(torch.nn.Module):
             def __init__(self) -> None:
@@ -3450,6 +3438,11 @@ class TestFakeTensorConstHandling(TestCase):
         for arg in args:
             self.assertTrue(maybe_get_fake_constant(arg) is None)
 
+    def test_simple(self):
+        with FakeTensorMode():
+            x = torch.tensor(4.0)
+            self.assertEqual(x.item(), 4.0)
+
     @parametrize(
         "data",
         [
@@ -3459,17 +3452,10 @@ class TestFakeTensorConstHandling(TestCase):
             subtest([4.0, 5.0], name="two"),
         ],
     )
-    def test_simple(self, data):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+    def test_initial_constants(self, data):
         expected = torch.tensor(data)
         with FakeTensorMode() as mode:
             x = torch.tensor(data)
-            if expected.ndim == 0:
-                self.assertEqual(x.item(), 4.0)
         prims.utils.compare_tensor_meta(x, expected, check_strides=True)
         self.assertIs(maybe_get_fake_mode(x), mode)
         if expected.numel() <= 1:
