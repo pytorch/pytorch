@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
+C10_DECLARE_bool(torch_jit_release_simple_executor_graph);
+
 namespace torch::jit {
 
 struct TORCH_API SimpleGraphExecutorImpl : public GraphExecutorImplBase {
@@ -19,6 +21,7 @@ struct TORCH_API SimpleGraphExecutorImpl : public GraphExecutorImplBase {
 
  private:
   const ExecutionPlan& getInputIndependentPlanImpl();
+  const ExecutionPlan& buildPlan();
 
   std::optional<ExecutionPlan> execution_plan_;
 };
