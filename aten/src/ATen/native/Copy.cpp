@@ -66,18 +66,10 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       self.numel() >= MIN_SZ;
 }
 
-#if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
         AT_DISPATCH_V2(                             \
             TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, \
             AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
-#else
-#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(    \
-            kComplexHalf, kBComplex32, kHalf,      \
-            kBool, kBFloat16, TYPE, NAME,          \
-            __VA_ARGS__)
-#endif
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
