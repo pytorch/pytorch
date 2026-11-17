@@ -106,7 +106,7 @@ def _use_bmm_shared_a(mat1, mat2, layout) -> bool:
     return True
 
 
-def _bmm_shared_a_configs(dtype):
+def _bmm_shared_a_configs(dtype, allow_tf32):
     """Hand-tuned config space for the shared-A template.
 
     BLOCK_Q batches share one A tile and are laid side by side in the dot, so
@@ -114,7 +114,6 @@ def _bmm_shared_a_configs(dtype):
     BLOCK_M x BLOCK_N x BLOCK_Q floats; the bound below keeps that in registers.
     """
     acc = acc_type(dtype)
-    allow_tf32 = torch.backends.cuda.matmul.allow_tf32
 
     for block_m, block_n, block_k, block_q, warps, stages in itertools.product(
         (64, 128), (32, 64), (32, 64), (2, 4, 8), (4, 8), (1, 2, 3)
@@ -414,7 +413,13 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             n,
             k,
         )
-        for config in _bmm_shared_a_configs(mat1.get_dtype()):
+        # Imported here: the heuristics package imports this module's templates.
+        from ..heuristics.template.triton import mm_allow_tf32
+
+        allow_tf32 = mm_allow_tf32(
+            m, n, k, mat1.get_device().type, mat1.get_dtype(), batched=True
+        )
+        for config in _bmm_shared_a_configs(mat1.get_dtype(), allow_tf32):
             bmm_shared_a_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
