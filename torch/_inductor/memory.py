@@ -12,7 +12,7 @@ from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
-from .ir import MultiOutputLayout, NoneLayout
+from .ir import MultiOutputLayout, NoneLayout, NonOwningLayout
 from .utils import get_dtype_size, is_nonfreeable_buffers
 from .virtualized import V
 
@@ -40,7 +40,8 @@ class PeakMemoryResult:
 class MemoryPlanningInfoForBuffer:
     size_alloc: int = 0
     size_free: int = 0
-    # succ_nodes used for buffer lifetime/freeing (excludes is_fake WeakDeps)
+    # succ_nodes used for buffer lifetime/freeing (excludes is_fake WeakDeps); may
+    # include consumers of NonOwningLayout aliases that aren't ordering successors.
     succ_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
     )
@@ -48,13 +49,6 @@ class MemoryPlanningInfoForBuffer:
     succ_nodes_for_ordering: OrderedSet[BaseSchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
     )
-
-    def __post_init__(self) -> None:
-        torch._check(
-            len(self.succ_nodes) <= len(self.succ_nodes_for_ordering),
-            lambda: f"succ_nodes must be a subset of succ_nodes_for_ordering. "
-            f"len(succ_nodes)={len(self.succ_nodes)}, len(succ_nodes_for_ordering)={len(self.succ_nodes_for_ordering)}",
-        )
 
 
 @dataclasses.dataclass
@@ -193,7 +187,11 @@ def compute_size_for_scheduler_buffer(
         if sched_buf.get_name() in V.graph.scheduler.mutation_real_name:
             sched_buf_to_size[sched_buf.get_name()] = (0, 0)
             return 0
-        elif isinstance(sched_buf.node.layout, NoneLayout):
+        if isinstance(sched_buf.node.layout, NonOwningLayout):
+            # A view into storage owned elsewhere; its uses extend the owner below.
+            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            return 0
+        if isinstance(sched_buf.node.layout, NoneLayout):
             sched_buf_to_size[sched_buf.get_name()] = (0, 0)
             return 0
         elif isinstance(sched_buf.node.layout, MultiOutputLayout):
@@ -228,9 +226,64 @@ def compute_size_for_scheduler_buffer(
     return sched_buf_to_size
 
 
+def _get_storage_owner_name(
+    buf_name: str, name_to_buf: dict[str, SchedulerBuffer]
+) -> str:
+    """Resolve a chain of NonOwningLayout buffers to its storage owner."""
+    seen = OrderedSet[str]()
+    while (
+        buf_name in name_to_buf
+        and isinstance(name_to_buf[buf_name].node.layout, NonOwningLayout)
+    ):
+        if buf_name in seen:
+            raise AssertionError(f"Cycle in NonOwningLayout aliases: {seen}")
+        seen.add(buf_name)
+        owners = name_to_buf[buf_name].get_aliases()
+        if len(owners) != 1:
+            raise AssertionError(
+                f"NonOwningLayout buffer {buf_name} must have one owner, got {owners}"
+            )
+        buf_name = owners[0]
+    return buf_name
+
+
+def _normalize_graph_outputs(
+    graph_outputs: OrderedSet[str],
+    name_to_buf: dict[str, SchedulerBuffer],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer] | None = None,
+) -> OrderedSet[str]:
+    """Keep the storage owners of output aliases live through graph completion."""
+    result = graph_outputs.copy()
+    freeable_inputs = name_to_freeable_input_buf or {}
+    for buf_name in graph_outputs:
+        owner_name = _get_storage_owner_name(buf_name, name_to_buf)
+        if owner_name in name_to_buf or owner_name in freeable_inputs:
+            result.add(owner_name)
+    return result
+
+
+def _normalize_graph_outputs_from_nodes(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    graph_outputs: OrderedSet[str],
+) -> OrderedSet[str]:
+    """Add storage owners for output aliases discoverable from ``nodes``, in place:
+    later local estimators (e.g. combo-kernel regions) reuse the caller's set."""
+    name_to_buf = {
+        buf.get_name(): buf for node in nodes for buf in node.get_outputs()
+    }
+    graph_outputs.update(
+        _normalize_graph_outputs(
+            graph_outputs, name_to_buf, name_to_freeable_input_buf
+        )
+    )
+    return graph_outputs
+
+
 def assign_memory_planning_info_for_scheduler_buffers(
     nodes: list[BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer] | None = None,
 ) -> None:
     """
     For each SchedulerBuffer, assign its size info and successor nodes.
@@ -254,6 +307,22 @@ def assign_memory_planning_info_for_scheduler_buffers(
             dep_name_to_succ_nodes_for_ordering[dep.name].add(node)
             if not (isinstance(dep, WeakDep) and dep.is_fake):
                 dep_name_to_succ_nodes[dep.name].add(node)
+
+    # Uses of a NonOwningLayout alias (e.g. a ConcatKernel slice) extend its owner's
+    # lifetime. Liveness only: adding them to succ_nodes_for_ordering can create cycles.
+    freeable_inputs = name_to_freeable_input_buf or {}
+    for alias_name, sched_buf in name_to_buf.items():
+        if not isinstance(sched_buf.node.layout, NonOwningLayout):
+            continue
+        owner_name = _get_storage_owner_name(alias_name, name_to_buf)
+        if owner_name in name_to_buf:
+            owner_mpi_succ_nodes = dep_name_to_succ_nodes[owner_name]
+        elif owner_name in freeable_inputs:
+            owner_mpi_succ_nodes = freeable_inputs[owner_name].mpi_buffer.succ_nodes
+        else:
+            # Nonfreeable external inputs remain part of the static baseline.
+            continue
+        owner_mpi_succ_nodes |= dep_name_to_succ_nodes[alias_name]
 
     # iterate in reverse, so dependencies are picked up transitively.
     for mutating_buf_name, real_buf_name in reversed(
@@ -361,6 +430,12 @@ def compute_memory_timeline(
     Compute buffer allocation and deallocation sizes and map their
     lifetime to the node schedule
     """
+
+    # Keep the storage owners of output aliases live; done here so direct
+    # estimators that skip reorder_for_peak_memory() are covered too.
+    graph_outputs = _normalize_graph_outputs_from_nodes(
+        nodes, name_to_freeable_input_buf, graph_outputs
+    )
 
     # get the execution step of each node, this will be used to determine
     # the end_step of buffers
@@ -806,6 +881,96 @@ def topological_sort_lpmf(
     return schedule
 
 
+def topological_sort_eager_free(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    name_to_buf: dict[str, SchedulerBuffer],
+    graph_outputs: OrderedSet[str],
+) -> list[BaseSchedulerNode]:
+    """Stably pull ready nodes that reduce live memory ahead of baseline order.
+    More conservative than LPMF: with no such node ready, keep the original order.
+    """
+
+    class NodeInfo(TypedDict):
+        indegree: int
+        memory_to_free: int
+
+    node_info: dict[BaseSchedulerNode, NodeInfo] = {
+        node: {
+            "indegree": len(node.mpi_node.pred_nodes),
+            "memory_to_free": 0,
+        }
+        for node in nodes
+    }
+    buf_outdegree = {
+        buf: len(buf.mpi_buffer.succ_nodes)
+        + (1 if buf.get_name() in graph_outputs else 0)
+        for buf in list(name_to_buf.values())
+        + list(name_to_freeable_input_buf.values())
+    }
+    nodes_to_schedule = OrderedSet(
+        node for node in nodes if node_info[node]["indegree"] == 0
+    )
+
+    for node in nodes:
+        for buf in node.mpi_node.pred_buffers:
+            if buf_outdegree[buf] == 1:
+                node_info[node]["memory_to_free"] += buf.mpi_buffer.size_free
+        for buf in node.get_outputs():
+            if buf_outdegree[buf] == 0:
+                node_info[node]["memory_to_free"] += buf.mpi_buffer.size_free
+
+    schedule: list[BaseSchedulerNode] = []
+    while nodes_to_schedule:
+        eager_nodes = [
+            node
+            for node in nodes_to_schedule
+            if node.mpi_node.size - node_info[node]["memory_to_free"] < 0
+        ]
+        if eager_nodes:
+            selected_node = min(
+                eager_nodes,
+                key=lambda node: (
+                    node.mpi_node.size - node_info[node]["memory_to_free"],
+                    node.mpi_node.index,
+                ),
+            )
+        else:
+            selected_node = min(
+                nodes_to_schedule, key=lambda node: node.mpi_node.index
+            )
+
+        nodes_to_schedule.remove(selected_node)
+        schedule.append(selected_node)
+
+        for succ_node in selected_node.mpi_node.succ_nodes:
+            if node_info[succ_node]["indegree"] <= 0:
+                raise AssertionError(
+                    f"expected positive indegree, got {node_info[succ_node]['indegree']}"
+                )
+            node_info[succ_node]["indegree"] -= 1
+            if node_info[succ_node]["indegree"] == 0:
+                nodes_to_schedule.add(succ_node)
+
+        for buf in selected_node.mpi_node.pred_buffers:
+            if buf_outdegree[buf] <= 0:
+                raise AssertionError(
+                    f"expected positive outdegree, got {buf_outdegree[buf]}"
+                )
+            buf_outdegree[buf] -= 1
+            if buf_outdegree[buf] == 1:
+                for succ_node in buf.mpi_buffer.succ_nodes:
+                    node_info[succ_node]["memory_to_free"] += (
+                        buf.mpi_buffer.size_free
+                    )
+
+    if len(schedule) != len(nodes):
+        raise RuntimeError(
+            f"Failed to schedule, scheduled {len(schedule)} of {len(nodes)} nodes"
+        )
+    return schedule
+
+
 def topological_sort_bfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     A BFS topological sort that selects nodes whose dependencies are executed the
@@ -1030,7 +1195,9 @@ def prepare_planning_info(
         dict[str, FreeableInputBuffer]: name to freeable input buffer
     """
     name_to_freeable_input_buf = get_freeable_input_buf(nodes, graph_inputs)
-    assign_memory_planning_info_for_scheduler_buffers(nodes, name_to_buf)
+    assign_memory_planning_info_for_scheduler_buffers(
+        nodes, name_to_buf, name_to_freeable_input_buf
+    )
     assign_memory_planning_info_for_scheduler_nodes(
         nodes, name_to_fused_node, name_to_buf, name_to_freeable_input_buf
     )
@@ -1051,6 +1218,7 @@ def reorder_for_peak_memory(
     graph_outputs: OrderedSet[str],
     methods: list[Callable[..., list[BaseSchedulerNode]]] = [  # noqa: B006
         topological_sort_lpmf,
+        topological_sort_eager_free,
         topological_sort_bfs,
         topological_sort_dfs,
     ],
@@ -1099,7 +1267,7 @@ def reorder_for_peak_memory(
     # other methods
     for method in methods:
         try:
-            if method is topological_sort_lpmf:
+            if method in (topological_sort_lpmf, topological_sort_eager_free):
                 order = method(
                     nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
                 )
