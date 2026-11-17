@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 from unittest import mock
 
 import torch
@@ -11,7 +10,15 @@ from torch.distributed._hooks.collective_annotations import (
     unregister_collective_annotation_hooks,
 )
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_device_type import (
+    expectedFailureXPU,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
@@ -20,13 +27,7 @@ _PGS_TO_ANNOTATE = "torch.distributed._hooks.collective_annotations._pgs_to_anno
 
 
 class _HooksFireForAllCollectives:
-    hw_classification = HardwareClassification.GENERIC
-
-    def _hook_device(self):
-        return torch.device("cpu")
-
-    def test_hooks_fire_for_all_collectives(self):
-        device = self._hook_device()
+    def _check_hooks_fire_for_all_collectives(self, device):
         pg = _get_default_group()
         # The pre-hook fires before the op is issued, the post-hook after, with
         # a matching op_id correlating the two.
@@ -158,6 +159,9 @@ class TestProcessGroupHooks(_HooksFireForAllCollectives, MultiProcContinuousTest
     @classmethod
     def backend_str(cls):
         return "gloo"
+
+    def test_hooks_fire_for_all_collectives(self):
+        self._check_hooks_fire_for_all_collectives(torch.device("cpu"))
 
     def test_hooks_fire_on_captured_graph_replay(self):
         # make_fx traces at the dispatcher (op) level and records the raw
@@ -308,24 +312,34 @@ class TestProcessGroupHooks(_HooksFireForAllCollectives, MultiProcContinuousTest
         dist.barrier()
 
 
-@unittest.skipIf(
-    not dist.is_xccl_available() or torch.xpu.device_count() < 2,
-    "XCCL with 2+ XPUs required",
-)
-class TestProcessGroupHooksXCCL(_HooksFireForAllCollectives, MultiProcContinuousTest):
-    """Hooks also fire for XPU collectives, which dispatch to Ops.cpp's XPU kernels."""
+class TestProcessGroupHooksAccelerator(
+    _HooksFireForAllCollectives, MultiProcContinuousTest
+):
+    """Hooks also fire for accelerator collectives dispatched through Ops.cpp."""
 
-    hw_classification = HardwareClassification.XPU
+    hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 2
 
     @classmethod
     def backend_str(cls):
-        return "xccl"
+        return dist.get_default_backend_for_device(cls.device_type)
 
-    def _hook_device(self):
+    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    # The pinned torch-xpu-ops registers its own XPU c10d kernels without hooks;
+    # remove once the pin includes intel/torch-xpu-ops#6129.
+    @expectedFailureXPU
+    def test_hooks_fire_for_all_collectives(self, device):
         torch.accelerator.set_device_index(self.rank)
-        return torch.device("xpu", self.rank)
+        self._check_hooks_fire_for_all_collectives(
+            torch.device(self.device_type, self.rank)
+        )
+
+
+instantiate_device_type_tests(
+    TestProcessGroupHooksAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
