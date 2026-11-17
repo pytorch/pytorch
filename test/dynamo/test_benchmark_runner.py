@@ -178,6 +178,7 @@ def _tiny_whisper():
         decoder_ffn_dim=32,
         # Half of the 100 frames that a 1-second feature extractor chunk produces.
         max_source_positions=50,
+        max_target_positions=448,
         pad_token_id=0,
         bos_token_id=1,
         eos_token_id=0,
@@ -266,6 +267,7 @@ class BenchmarkRunnerTests(TestCase):
         (
             "--hf-inference-mode=prefill",
             "--hf-inference-mode=decode",
+            "--hf-inference-mode=encode",
             "--prompt-length=8",
             "--decode-length=8",
             "--tp-size=2",
@@ -713,9 +715,11 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
             ("--iterations-per-run=0", "--iterations-per-run must be positive"),
         ],
     )
-    @parametrize("mode", ("prefill", "decode"))
+    @parametrize("mode", ("prefill", "decode", "encode"))
     def test_invalid_phase_options(self, extra, message, mode):
         runner = self.huggingface.HuggingfaceRunner()
+        if mode == "encode" and extra.startswith("--prompt-length"):
+            message = "--prompt-length requires --hf-inference-mode=prefill or decode"
         with self.assertRaisesRegex(ValueError, message):
             runner.validate_args(self._runner_args(extra, mode=mode))
 
@@ -783,6 +787,15 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                 ["--hf-inference-mode=prefill", "--optimus=all"],
                 "does not support --optimus",
             ),
+            (
+                [
+                    "--hf-inference-mode=encode",
+                    "--only=openai/whisper-tiny",
+                    "--multiprocess",
+                    "--backend=eager",
+                ],
+                "does not support --multiprocess",
+            ),
         ],
     )
     def test_invalid_options_rejected_before_launch(self, extra, message):
@@ -809,7 +822,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         self.assertIn("openai/whisper-large-v3-turbo", skipped)
         self.assertNotIn("openai/whisper-tiny", skipped)
 
-    @parametrize("mode", ("prefill", "decode"))
+    @parametrize("mode", ("prefill", "decode", "encode"))
     def test_phase_requires_inference_backend(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
         args = self._runner_args(mode=mode)
@@ -838,8 +851,8 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
             self.assertEqual(list(runner.iter_model_names(args)), [name])
         args.only = name
         runner.validate_args(args)
-        args.only = "openai/whisper-tiny"
-        with self.assertRaisesRegex(ValueError, "does not support openai/whisper-tiny"):
+        args.only = "openai/gpt-oss-20b"
+        with self.assertRaisesRegex(ValueError, "does not support openai/gpt-oss-20b"):
             runner.validate_args(args)
 
     @parametrize("name", ("google/gemma-2-2b", "google/gemma-3-1b-it"))
@@ -997,11 +1010,15 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
         self.assertEqual(download.call_count, 2)
         sleep.assert_called_once_with(30)
 
-    @parametrize("mode", ("prefill", "decode"))
     @parametrize("sweep", (False, True))
-    def test_config_download_failure_records_result(self, mode, sweep):
-        name = "Qwen/Qwen3-0.6B"
-
+    @parametrize(
+        "name, mode, extra",
+        (
+            ("Qwen/Qwen3-0.6B", "prefill", "--prompt-length=7"),
+            ("Qwen/Qwen3-0.6B", "decode", "--prompt-length=7"),
+        ),
+    )
+    def test_config_download_failure_records_result(self, name, mode, extra, sweep):
         def child(cmd, **kwargs):
             with mock.patch.dict(vars(common)):
                 try:
@@ -1024,9 +1041,11 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                 side_effect=OSError("config unavailable"),
             ),
             mock.patch.object(
-                self.huggingface.HF_LLM_MODELS["Qwen/Qwen3-0.6B"],
-                "get_model_and_inputs",
+                self.huggingface.TextGenerationBenchmark, "get_model_and_inputs"
             ) as text_load,
+            mock.patch.object(
+                self.huggingface.WhisperBenchmark, "get_model_and_inputs"
+            ) as whisper_load,
             mock.patch.object(subprocess, "check_call", side_effect=child),
         ):
             output = os.path.join(tmp, "results.csv")
@@ -1038,7 +1057,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                 "-dcpu",
                 "--no-skip",
                 f"--hf-inference-mode={mode}",
-                "--prompt-length=7",
+                extra,
                 f"--output={output}",
                 f"--filter=^{name}$" if sweep else f"--only={name}",
             ]
@@ -1048,6 +1067,7 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
             with open(output) as f:
                 (row,) = csv.DictReader(f)
             text_load.assert_not_called()
+            whisper_load.assert_not_called()
         self.assertEqual(row["name"], name)
         self.assertEqual(row["accuracy"], "eager_fail_to_run")
 
@@ -1143,6 +1163,184 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
             self.assertEqual(setup.call_count, run_forward.call_count)
             log = Path(tmp) / "Qwen_Qwen3-0.6B_eval.txt"
             self.assertIn("aten.", log.read_text())
+
+    @parametrize(
+        "mode, extra, message",
+        [
+            ("encode", "--prompt-length=8", "requires --hf-inference-mode=prefill"),
+            ("encode", "--decode-length=8", "requires --hf-inference-mode=decode"),
+            ("encode", "--tp-size=2", "--tp-size requires"),
+            ("encode", "--only=Qwen/Qwen3-0.6B", "does not support Qwen/Qwen3-0.6B"),
+            ("prefill", "--only=openai/whisper-tiny", "does not support openai/"),
+            ("decode", "--only=openai/whisper-tiny --prompt-length=8", "whose prompt"),
+            (
+                "decode",
+                "--only=openai/whisper-large-v3-turbo --decode-length=447",
+                "--decode-length must be between 1 and 446",
+            ),
+        ],
+    )
+    def test_invalid_whisper_options(self, mode, extra, message):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args(*extra.split(), mode=mode)
+        with self.assertRaisesRegex(ValueError, message):
+            runner.validate_args(args)
+
+    @parametrize("mode", ("prefill", "encode", "decode"))
+    def test_whisper_model_selection(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args(mode=mode)
+        args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
+        runner.args = args
+        names = {"Qwen/Qwen3-0.6B": 8, "google/gemma-3-1b-it": 8}
+        names |= {"openai/whisper-large-v3-turbo": 8, "openai/whisper-tiny": 8}
+        with mock.patch.dict(
+            self.huggingface.BATCH_SIZE_KNOWN_MODELS, names, clear=True
+        ):
+            selected = list(runner.iter_model_names(args))
+        whisper = ["openai/whisper-large-v3-turbo", "openai/whisper-tiny"]
+        expected = {
+            "prefill": ["Qwen/Qwen3-0.6B", "google/gemma-3-1b-it"],
+            "encode": whisper,
+            "decode": ["Qwen/Qwen3-0.6B", *whisper],
+        }
+        self.assertEqual(selected, expected[mode])
+
+    @parametrize("extra", ("--prompt-length=7", "--decode-length=447"))
+    def test_whisper_decode_sweep_warns_on_exclusion(self, extra):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args(extra, mode="decode")
+        args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
+        runner.args = args
+        names = {"Qwen/Qwen3-0.6B": 8, "openai/whisper-tiny": 8}
+        with (
+            mock.patch.dict(
+                self.huggingface.BATCH_SIZE_KNOWN_MODELS, names, clear=True
+            ),
+            self.assertLogs(self.huggingface.log, "WARNING") as logs,
+        ):
+            selected = list(runner.iter_model_names(args))
+        self.assertEqual(selected, ["Qwen/Qwen3-0.6B"])
+        (message,) = logs.output
+        self.assertIn("openai/whisper-tiny", message)
+        self.assertIn(extra.partition("=")[0], message)
+
+    def test_whisper_decode_fits_static_cache(self):
+        whisper = self.huggingface.WhisperBenchmark
+        tiny = _tiny_whisper()
+        # As in both registered checkpoints.
+        self.assertEqual(tiny.config.max_target_positions, 448)
+        with self._mock_whisper(tiny):
+            whisper.get_model_and_inputs(
+                "openai/whisper-tiny",
+                "cpu",
+                inference_mode="decode",
+                decode_length=whisper.MAX_DECODE_LENGTH,
+            )
+            with self.assertRaisesRegex(ValueError, "447-position static cache"):
+                whisper.get_model_and_inputs(
+                    "openai/whisper-tiny",
+                    "cpu",
+                    inference_mode="decode",
+                    decode_length=whisper.MAX_DECODE_LENGTH + 1,
+                )
+
+    @torch._dynamo.config.patch(repro_tolerance=1e-4)
+    @parametrize(
+        "extra, include_whisper",
+        (
+            ((), True),
+            (("--prompt-length=7",), False),
+            (("--decode-length=446",), True),
+            (("--decode-length=447",), False),
+        ),
+    )
+    def test_whisper_decode_sweep_dispatch(self, extra, include_whisper):
+        runner = self.huggingface.HuggingfaceRunner()
+        text = "Qwen/Qwen3-0.6B"
+        whisper = "openai/whisper-tiny"
+        argv = [
+            "benchmarks/dynamo/huggingface.py",
+            "--performance",
+            "--inference",
+            "--backend=eager",
+            "-dcpu",
+            "--no-skip",
+            "--hf-inference-mode=decode",
+            *extra,
+        ]
+        selected = []
+
+        def check_child(cmd, **kwargs):
+            args = common.parse_args(cmd[2:])
+            child = self.huggingface.HuggingfaceRunner()
+            child.args = args
+            child.validate_args(args)
+            child.load_model("cpu", args.only, batch_size=1)
+            selected.append(args.only)
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            torch._dynamo.config.patch(base_dir=tmp),
+            mock.patch.dict(vars(common)),
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.dict(
+                self.huggingface.BATCH_SIZE_KNOWN_MODELS,
+                {text: 8, whisper: 8},
+                clear=True,
+            ),
+            mock.patch.object(subprocess, "check_call", side_effect=check_child),
+            self._mock_pretrained(),
+            self._mock_whisper(_tiny_whisper()),
+            mock.patch.object(self.huggingface.HuggingfaceRunner, "validate_model"),
+        ):
+            common.run(runner, common.parse_args(argv[1:]))
+        self.assertEqual(selected, [text, whisper] if include_whisper else [text])
+
+    @torch._dynamo.config.patch(repro_tolerance=1e-4)
+    @parametrize("mode", ("encode", "decode"))
+    def test_whisper_performance_run(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            torch._dynamo.config.patch(base_dir=tmp),
+            # run() rebinds module globals such as output_filename and current_name.
+            mock.patch.dict(vars(common)),
+            self._mock_whisper(_tiny_whisper()),
+        ):
+            extra = ("--decode-length=3",) if mode == "decode" else ()
+            args = self._runner_args(
+                "--only=openai/whisper-tiny",
+                "--batch-size=2",
+                "--repeat=1",
+                "--iterations-per-run=2",
+                *extra,
+                mode=mode,
+            )
+            common.run(runner, args)
+            with open(os.path.join(tmp, f"speedup_eager_{mode}.csv")) as f:
+                (row,) = csv.DictReader(f)
+            with open(os.path.join(tmp, f"speedup_eager_{mode}.json")) as f:
+                records = [json.loads(line) for line in f]
+        self.assertEqual(row["name"], "openai/whisper-tiny")
+        self.assertEqual(int(row["batch_size"]), 2)
+        for record in records:
+            info = record["benchmark"]["extra_info"]
+            self.assertEqual(info["batch_size"], 2)
+            self.assertEqual(info["phase"], mode)
+            self.assertIsNone(info["prompt_length"])
+            self.assertEqual(info["decode_length"], 3 if mode == "decode" else 0)
+        self.assertGreater(float(row["eager_latency"]), 0)
+        if mode == "decode":
+            tokens_per_second = 2 * 2 * 3 / (float(row["abs_latency"]) / 1000)
+            self.assertEqual(
+                float(row["output_tokens_per_second"]),
+                tokens_per_second,
+                rtol=1e-3,
+                atol=0,
+            )
+        else:
+            self.assertNotIn("output_tokens_per_second", row)
 
 
 class TestHuggingFaceTensorParallelOptions(HuggingFaceLLMPhaseTestCase):
@@ -1820,6 +2018,124 @@ class TestHuggingFaceWhisperDevice(HuggingFaceLLMPhaseTestCase):
         self.assertEqual(status, "pass")
         self.assertFalse(runner.args.cosine)
         self.assertTrue(backend.bw_graphs)
+
+    def _load_whisper(self, device, mode, *extra, tiny=None):
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = self._runner_args("--iterations=2", *extra, mode=mode)
+        with self._mock_whisper(_tiny_whisper() if tiny is None else tiny):
+            _, _, model, inputs, _ = runner.load_model(
+                device, "openai/whisper-tiny", batch_size=2
+            )
+        return runner, model, inputs
+
+    def test_encode_matches_encoder(self, device):
+        tiny = _tiny_whisper()
+        runner, model, inputs = self._load_whisper(device, "encode", tiny=tiny)
+        self.assertEqual(set(inputs), {"input_features"})
+        self.assertEqual(inputs["input_features"].shape, (2, 8, 100))
+        workload = runner.get_workload(inputs)
+        self.assertIsNone(workload.setup_fn)
+        output = runner.run_n_iterations(model, inputs, workload.iter_fn)
+        with torch.no_grad():
+            expected = tiny.get_encoder()(**inputs).last_hidden_state
+        self.assertEqual(output, expected)
+
+    def test_decode_matches_full_forward(self, device):
+        _, model, inputs = self._load_whisper(device, "decode", "--decode-length=5")
+        self.assertEqual(inputs["decoder_input_ids"].shape, (2, 1))
+        self.assertEqual(inputs["decode_ids"].shape, (2, 5))
+        decoder_ids = torch.cat([inputs["decoder_input_ids"], inputs["decode_ids"]], 1)
+        with self._record_cache_lengths("decode") as cache_lengths:
+            for _ in range(2):
+                inputs["input_features"] = torch.randn_like(inputs["input_features"])
+                output = _run_phase("decode", model, inputs)
+                with torch.no_grad():
+                    expected = model.model(
+                        input_features=inputs["input_features"],
+                        decoder_input_ids=decoder_ids,
+                        use_cache=False,
+                    )
+                self.assertEqual(output, expected.logits[:, -1, :])
+        self.assertEqual(cache_lengths, [(1, 6)] * 2)
+
+    def test_decode_compiles_once(self, device):
+        _, model, inputs = self._load_whisper(device, "decode", "--decode-length=3")
+        torch._dynamo.reset()
+        counter = CompileCounter()
+        model.forward = torch.compile(model.forward, backend=counter, fullgraph=True)
+        first_step = {**inputs, "decode_ids": inputs["decode_ids"][:, :1]}
+        _run_phase("decode", model, first_step)
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for _ in range(2):
+                inputs["input_features"] = torch.randn_like(inputs["input_features"])
+                _run_phase("decode", model, inputs)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("mode", ("encode", "decode"))
+    def test_accuracy_compilation_boundary(self, device, mode):
+        extra = ("--decode-length=3",) if mode == "decode" else ()
+        runner, model, inputs = self._load_whisper(device, mode, *extra)
+        runner.args.performance, runner.args.accuracy = False, True
+        compiled_functions = []
+
+        def optimize(fn):
+            compiled_functions.append(fn.__name__)
+            return torch._dynamo.optimize("eager", nopython=True)(fn)
+
+        with (
+            mock.patch.object(common, "current_name", "openai/whisper-tiny"),
+            mock.patch.object(common, "current_device", device),
+            mock.patch.object(common, "write_outputs"),
+            mock.patch.object(common, "output_signpost", return_value=0),
+        ):
+            status = runner.check_accuracy(
+                "openai/whisper-tiny", model, inputs, optimize, None, None
+            )
+        self.assertEqual(status, "pass")
+        self.assertFalse(runner.args.cosine)
+        self.assertEqual(compiled_functions, ["forward"])
+
+    @onlyCUDA
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
+    def test_inductor_decode_cudagraphs(self, device):
+        from torch._dynamo.utils import counters
+        from torch._inductor.cudagraph_trees import get_manager
+
+        _, model, inputs = self._load_whisper(device, "decode", "--decode-length=3")
+        # Fresh audio per request: replays must not reuse stale encoder state.
+        requests = []
+        for _ in range(3):
+            features = torch.randn_like(inputs["input_features"])
+            request = {**inputs, "input_features": features}
+            requests.append((request, _run_phase("decode", model, request)))
+
+        def cache_pointers():
+            caches = (
+                model.cache.self_attention_cache,
+                model.cache.cross_attention_cache,
+            )
+            return [
+                (layer.keys.data_ptr(), layer.values.data_ptr())
+                for cache in caches
+                for layer in cache.layers
+            ]
+
+        pointers = cache_pointers()
+        # Also resets the cudagraph trees, so the manager only holds this test's graphs.
+        torch._dynamo.reset()
+        skips_before = counters["inductor"]["cudagraph_skips"]
+        model.forward = torch.compile(model.forward, backend="inductor", fullgraph=True)
+        with torch._inductor.config.patch(
+            {"triton.cudagraphs": True, "triton.cudagraph_trees": True}
+        ):
+            for request, expected in requests:
+                self.assertEqual(_run_phase("decode", model, request), expected)
+                self.assertEqual(cache_pointers(), pointers)
+        manager = get_manager(torch.device(device).index, create_if_none_exists=False)
+        roots = [node for nodes in manager.roots.values() for node in nodes]
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0].num_descendants(), 0)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
 
 
 def _tp_device():
