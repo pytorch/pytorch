@@ -13,6 +13,7 @@ from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
 
+from .. import config as inductor_config
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
 from .bmm import (
@@ -142,6 +143,78 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
 decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
 
+def _aligned_k_part(k: int, k_split: int, block_k: int) -> int:
+    return math.ceil(math.ceil(k / k_split) / block_k) * block_k
+
+
+def get_blackwell_decompose_k_splits(
+    m: int,
+    n: int,
+    k: int,
+    num_sms: int,
+    config: BlackwellBMMConfig,
+    max_workspace_bytes: int = 128 * 1024**2,
+    max_k_per_split: int | None = None,
+) -> list[int]:
+    """Return at most one- and two-wave splits for one Triton schedule.
+
+    Splits whose aligned K chunk exceeds ``max_k_per_split`` (default
+    ``config.triton.decompose_k_max_k_per_split``; 0 disables) are skipped, as
+    in ``get_k_splits``: each partial accumulates its chunk in fp32, so long
+    chunks lose accuracy.
+    """
+    if min(m, n, k, num_sms) <= 0:
+        return []
+    if max_k_per_split is None:
+        max_k_per_split = inductor_config.triton.decompose_k_max_k_per_split
+    # Smallest split whose (unaligned) chunk fits the bound. Searching from here
+    # skips every shorter split, which would all exceed it.
+    min_bounded_split = math.ceil(k / max_k_per_split) if max_k_per_split > 0 else 0
+
+    m_tiles = math.ceil(m / config.block_m)
+    if config.two_ctas:
+        if m_tiles < 2:
+            return []
+        m_tiles = math.ceil(m_tiles / 2) * 2
+
+    output_ctas_per_split = m_tiles * math.ceil(n / config.block_n)
+    if config.two_ctas:
+        clusters_per_split = output_ctas_per_split // 2
+        wave_numerator = num_sms // 2
+        wave_denominator = clusters_per_split
+    else:
+        wave_numerator = num_sms
+        wave_denominator = output_ctas_per_split
+
+    m_pad = m_tiles * config.block_m
+    workspace_bytes_per_split = m_pad * n * torch.float32.itemsize
+    max_workspace_split = max_workspace_bytes // workspace_bytes_per_split
+    max_nonempty_split = math.ceil(k / config.block_k)
+    max_split = min(max_workspace_split, max_nonempty_split)
+
+    candidates: list[int] = []
+    for waves in (1, 2):
+        target = max(
+            2,
+            math.ceil(waves * wave_numerator / wave_denominator),
+            min_bounded_split,
+        )
+        search_span = math.ceil(wave_numerator / wave_denominator)
+        search_end = min(max_split, target + search_span)
+        for k_split in range(target, search_end + 1):
+            k_part = _aligned_k_part(k, k_split, config.block_k)
+            if k_part < 8 * config.block_k:
+                break
+            # Block-K alignment can push the chunk just past the bound.
+            if 0 < max_k_per_split < k_part:
+                continue
+            if (k_split - 1) * k_part < k:
+                if k_split not in candidates:
+                    candidates.append(k_split)
+                break
+    return candidates
+
+
 def _blackwell_decompose_k_partial_kwargs(
     mat1,
     mat2,
@@ -259,10 +332,7 @@ def lower_blackwell_decompose_k_partial(
         m_tiles = math.ceil(m_tiles / 2) * 2
 
     expected_m_pad = m_tiles * partial_config.block_m
-    expected_k_part = (
-        math.ceil(math.ceil(k / int(k_split)) / partial_config.block_k)
-        * partial_config.block_k
-    )
+    expected_k_part = _aligned_k_part(k, int(k_split), partial_config.block_k)
     if int(m_pad) != expected_m_pad or int(k_part) != expected_k_part:
         raise AssertionError("decompose-K plan geometry does not match its config")
 
@@ -310,11 +380,7 @@ def blackwell_decompose_k_partial(a, b, k_split, config_index):
         m_tiles = (m_tiles + 1) // 2 * 2
 
     m_pad = m_tiles * config.block_m
-    k_part = (
-        ((k + k_split - 1) // k_split + config.block_k - 1)
-        // config.block_k
-        * config.block_k
-    )
+    k_part = _aligned_k_part(k, k_split, config.block_k)
     partial_flat = inductor_prims.blackwell_decompose_k_partial(
         a,
         b,
