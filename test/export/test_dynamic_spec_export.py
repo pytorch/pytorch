@@ -1591,6 +1591,5 @@ class TestContainerSpecNonStrict(_TestContainerSpecBase):
 
 
 del _TestContainerSpecBase
-
 if __name__ == "__main__":
     run_tests()
