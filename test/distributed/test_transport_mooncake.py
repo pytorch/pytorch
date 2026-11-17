@@ -367,6 +367,37 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             work.wait(timedelta(seconds=5))
         self.assertEqual(first._batches, {})
 
+    def test_poller_checks_batches_beyond_window(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        check = _Engine.transfer_check_status
+        stuck = {1, 2, 3}
+
+        def check_unless_stuck(engine, batch_id):
+            return 0 if batch_id in stuck else check(engine, batch_id)
+
+        with (
+            patch.object(_mooncake, "_POLL_WINDOW", 2),
+            patch.object(_Engine, "transfer_check_status", check_unless_stuck),
+        ):
+            # Submit under the poll lock so the poller sees all five at once.
+            with first._poll_cv:
+                works = [
+                    first.write(source.to_view(), remote, async_op=True)
+                    for _ in range(5)
+                ]
+                self.assertEqual(list(first._batches), [1, 2, 3, 4, 5])
+            for work in works[3:]:
+                work.wait(timedelta(seconds=5))
+            self.assertFalse(any(w.is_completed() for w in works[:3]))
+            stuck.clear()
+            for work in works[:3]:
+                work.wait(timedelta(seconds=5))
+        self.assertEqual(first._batches, {})
+
     def test_close_async_after_handled_failure_does_not_reraise(self):
         first, second = self.make_transport_pair()
         source = first.register_memory(torch.ones(8, dtype=torch.uint8))

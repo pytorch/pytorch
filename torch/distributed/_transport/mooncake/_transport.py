@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import socket
 import time
+from collections import OrderedDict
 from concurrent.futures import Future as _ThreadFuture
 from contextlib import contextmanager
 from datetime import timedelta
@@ -26,6 +28,8 @@ from ._work import _live_transports, _MooncakeWork
 
 
 _pinned_registrations: list[tuple[Any, _Registration]] = []
+# Most batches checked per poller sweep.
+_POLL_WINDOW = 256
 
 
 if TYPE_CHECKING:
@@ -71,12 +75,13 @@ class MooncakeTransport(Transport):
 
     Mooncake has no completion callback or fd yet, so transfers are submitted
     with ``batch_transfer_async`` and a single poller thread per transport checks
-    them with ``transfer_check_status``, backing off while nothing completes and
-    sleeping while nothing is in flight. The poller settles each Work, which
-    wakes ``write_async``/``read_async``/``close_async`` through the asyncio
-    future bridge without blocking the loop. The short lock-guarded
-    submit/cleanup sections are offloaded with ``asyncio.to_thread`` rather than
-    spinning on the lock.
+    a rotating window of them per sweep with ``transfer_check_status``, backing
+    off while nothing completes and sleeping while nothing is in flight. The
+    poller settles each Work, which wakes
+    ``write_async``/``read_async``/``close_async`` through the asyncio future
+    bridge without blocking the loop. The short lock-guarded submit/cleanup
+    sections are offloaded with ``asyncio.to_thread`` rather than spinning on
+    the lock.
 
     """
 
@@ -113,7 +118,10 @@ class MooncakeTransport(Transport):
         # In-flight transfers; each entry is pruned by a done callback when its
         # transfer settles (see _submit), so a completed work is never revisited.
         self._pending: dict[int, _MooncakeWork] = {}
-        self._batches: dict[int, tuple[_ThreadFuture[None], _Registration]] = {}
+        # Insertion order is poll order; pending batches move to the end.
+        self._batches: OrderedDict[int, tuple[_ThreadFuture[None], _Registration]] = (
+            OrderedDict()
+        )
         self._poll_cv = Condition()
         self._poller: Thread | None = None
         self._poller_stopped = False
@@ -330,11 +338,14 @@ class MooncakeTransport(Transport):
         future.add_done_callback(lambda _: self._prune(id(work)))
         _live_transports.add(self)
         with self._poll_cv:
+            # A busy poller reaches new batches as its window rotates; waking
+            # it on every submit would make it rescan while the caller submits.
+            if not self._batches:
+                self._poll_cv.notify()
             self._batches[batch_id] = (future, registration)
             if self._poller is None:
                 self._poller = Thread(target=self._poll, name="mooncake", daemon=True)
                 self._poller.start()
-            self._poll_cv.notify()
         return work
 
     def _poll(self) -> None:
@@ -349,8 +360,14 @@ class MooncakeTransport(Transport):
                     delay = 0.0
                 if self._poller_stopped:
                     return
-                batches = list(self._batches.items())
+                # Check a bounded window per sweep so a sweep's cost does not
+                # grow with the number of in-flight batches; pending ones
+                # rotate to the back so every batch is eventually checked. A
+                # finished batch behind N pending ones may wait up to about
+                # N / _POLL_WINDOW backoff intervals.
+                batches = list(itertools.islice(self._batches.items(), _POLL_WINDOW))
             settled = []
+            pending = []
             for batch_id, (future, registration) in batches:
                 # Every non-zero status is final: Mooncake frees the batch, so it
                 # must not be polled again. 1 and -1 mean every slice of the one
@@ -358,9 +375,13 @@ class MooncakeTransport(Transport):
                 # MC_SLICE_TIMEOUT) or an unknown status may leave slices in
                 # flight, so the local memory stays pinned.
                 status = engine.transfer_check_status(batch_id)
-                if status != 0:
+                if status == 0:
+                    pending.append(batch_id)
+                else:
                     settled.append((batch_id, future, registration, status))
             with self._poll_cv:
+                for batch_id in pending:
+                    self._batches.move_to_end(batch_id)
                 for batch_id, future, *_ in settled:
                     # A batch id is a BatchDesc address that Mooncake freed in
                     # the status check, so a concurrent submit may reuse it.
