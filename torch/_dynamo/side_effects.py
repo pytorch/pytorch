@@ -172,16 +172,12 @@ def register_side_effect_replay_handler(
 
 
 def _manual_dict_setitem(
-    dict_from: dict[Any, Any], dict_to: dict[Any, Any], mro_index: int
+    dict_from: dict[Any, Any], dict_to: dict[Any, Any], dict_class: type[dict[Any, Any]]
 ) -> None:
-    # Carefully calls the dict or OrderedDict `clear` or `__setitem__`. We have
-    # to be careful because we don't want to trigger the user defined object
-    # setitem or clear. The mro_index is used to find the dict/OrderedDict from
-    # the class mro.
-    dict_class = type(dict_to).__mro__[mro_index]
-    dict_class.clear(dict_to)  # type: ignore[attr-defined]
+    # Replay the underlying storage without invoking subclass overrides.
+    dict_class.clear(dict_to)
     for k, v in dict_from.items():
-        dict_class.__setitem__(dict_to, k, v)  # type: ignore[index]
+        dict_class.__setitem__(dict_to, k, v)
 
 
 def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
@@ -1902,17 +1898,8 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
     for name in _manual_dict_setitem.__code__.co_varnames:
         varname_map[name] = cg.tx.output.new_var()
 
-    try:
-        mro_index = type(var.value).__mro__.index(collections.OrderedDict)
-    except ValueError:
-        mro_index = type(var.value).__mro__.index(dict)
-
-    cg.extend_output(
-        [
-            create_instruction("LOAD_CONST", argval=mro_index),
-            create_instruction("STORE_FAST", argval=varname_map["mro_index"]),
-        ]
-    )
+    cg.load_import_from("builtins", "dict")
+    cg.append_output(create_instruction("STORE_FAST", argval=varname_map["dict_class"]))
 
     cg(var.source)  # type: ignore[attr-defined]
     cg.extend_output(

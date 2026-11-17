@@ -840,6 +840,25 @@ class _KinetoProfile:
             return
         self.profiler.toggle_collection_dynamic(enable, activities)
 
+    def _toggle_stack_collection(self, enable: bool) -> None:
+        """Toggle Python stack collection (``with_stack``) in the current profiling session.
+
+        .. warning::
+            This is a private, experimental API. It may change or be removed
+            without notice.
+
+        CPU op and device activity collection are unaffected. Frames still open when
+        collection stops end at that point. Only stopping (``enable=False``) is
+        supported so far.
+        """
+        _warn_once(
+            "profile._toggle_stack_collection() is a private, experimental API and "
+            "may change or be removed without notice."
+        )
+        if self.profiler is None:
+            return
+        torch._C._autograd._toggle_python_collection_dynamic(enable)
+
     def key_averages(
         self,
         group_by_input_shape: bool = False,
