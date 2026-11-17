@@ -3,6 +3,7 @@
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -329,6 +330,7 @@ inline torch::stable::Tensor transpose(
 /// tensor method version (t.zero_()), this is called as a function: zero_(t).
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.9.
 ///
 /// @param self The tensor to fill with zeros.
 /// @return The input tensor, now filled with zeros.
@@ -344,6 +346,7 @@ inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
 /// broadcastable.
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The destination tensor (modified in-place).
 /// @param src The source tensor to copy from.
@@ -365,6 +368,7 @@ inline torch::stable::Tensor copy_(
 /// and type as the input, but is stored in a new memory location.
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @note Optional memory_format kwarg support
 ///
@@ -908,6 +912,7 @@ inline torch::stable::Tensor contiguous(
 /// a simpler overload that only takes dtype is available.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -924,6 +929,18 @@ inline torch::stable::Tensor new_empty(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
+  if (device) {
+    STD_TORCH_CHECK(
+        device->index() >= std::numeric_limits<int8_t>::min() &&
+            device->index() <= std::numeric_limits<int8_t>::max(),
+        "Device index ",
+        device->index(),
+        " is out of range for int8_t [",
+        static_cast<int>(std::numeric_limits<int8_t>::min()),
+        ", ",
+        static_cast<int>(std::numeric_limits<int8_t>::max()),
+        "]");
+  }
   int32_t dtype_val = dtype ? detail::to<int32_t>(detail::from(*dtype)) : 0;
   int32_t layout_val = layout ? detail::to<int32_t>(detail::from(*layout)) : 0;
   int32_t device_type_val =
@@ -950,6 +967,7 @@ inline torch::stable::Tensor new_empty(
 /// a simpler overload that only takes dtype is available.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -966,6 +984,18 @@ inline torch::stable::Tensor new_zeros(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
+  if (device) {
+    STD_TORCH_CHECK(
+        device->index() >= std::numeric_limits<int8_t>::min() &&
+            device->index() <= std::numeric_limits<int8_t>::max(),
+        "Device index ",
+        device->index(),
+        " is out of range for int8_t [",
+        static_cast<int>(std::numeric_limits<int8_t>::min()),
+        ", ",
+        static_cast<int>(std::numeric_limits<int8_t>::max()),
+        "]");
+  }
   int32_t dtype_val = dtype ? detail::to<int32_t>(detail::from(*dtype)) : 0;
   int32_t layout_val = layout ? detail::to<int32_t>(detail::from(*layout)) : 0;
   int32_t device_type_val =
