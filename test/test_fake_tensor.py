@@ -4826,7 +4826,6 @@ instantiate_device_type_tests(
 )
 
 
-@instantiate_parametrized_tests
 class TestFakeTensorSerialization(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

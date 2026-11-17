@@ -26,15 +26,10 @@ from torch.fx.experimental.symbolic_shapes import (
     optimization_hint,
     ShapeEnv,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 # Basic functionality test for Placement types.
-@instantiate_parametrized_tests
 class PlacementTypesTestCase(TestCase):
     def test_zero_pad_and_unpad_eager_identity(self):
         tensor = torch.randn(2, 8)
