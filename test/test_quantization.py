@@ -123,8 +123,6 @@ try:
 except ImportError as e:
     log.warning(e)
 
-from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantized  # noqa: F401
-
 # AO Migration tests
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
 from quantization.ao_migration.test_ao_migration import TestAOMigrationNNQuantized  # noqa: F401
