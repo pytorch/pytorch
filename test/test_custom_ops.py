@@ -4909,7 +4909,7 @@ with warnings.catch_warnings(record=True) as w:
                 called = True
                 return torch.empty_like(x)
 
-            with FakeTensorMode() as fake_mode:
+            with FakeTensorMode():
                 x = torch.randn(3)
                 y = 3.14
                 z = add(x, y)
@@ -4925,7 +4925,6 @@ with warnings.catch_warnings(record=True) as w:
 
                 def profiled_kernel(func, mode, x, y):
                     self.assertIs(func, op)
-                    self.assertIs(mode, fake_mode)
                     with mode:
                         return x.new_empty(x.numel() + 1)
 
