@@ -13,13 +13,14 @@ from ...ir import get_free_symbols
 from ...kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decompose_k_subgraph_template,
-    get_blackwell_decompose_k_config_indices,
+    effective_two_ctas,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import get_k_splits, use_triton_blackwell_tma_template
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
+from .triton import BaseConfig, CUDAConfigHeuristic
 
 
 if TYPE_CHECKING:
@@ -89,19 +90,17 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             for k_split in exact_k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
 
-        if "TRITON" not in bmm_backends:
+        # Return before the TMA checks below, which install guards.
+        if "TRITON" not in bmm_backends or not exact_k_splits:
             return
 
         mat1, mat2 = kernel_inputs.mat1mat2()
         layout = kernel_inputs.output_layout()
-        if not (
-            config.triton.enable_blackwell_decompose_k
-            and use_triton_blackwell_tma_template(
-                mat1,
-                mat2,
-                output_layout=layout,
-                add_guards=True,
-            )
+        if not use_triton_blackwell_tma_template(
+            mat1,
+            mat2,
+            output_layout=layout,
+            add_guards=True,
         ):
             return
 
@@ -109,13 +108,33 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # dynamic dimensions must be specialized explicitly. Unbacked symbols
         # were rejected above.
         m_hint, n_hint, k_hint = V.graph.sizevars.guard_int_seq((m, n, k))
-        config_indices = get_blackwell_decompose_k_config_indices(m_hint, n_hint)
+        config_indices = [0, 3]
+        if m_hint > 128:
+            config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
+        # Same opt-in shared-memory pruning as the mm heuristics.
+        exceeds_smem = None
+        if config.max_autotune_prune_choices_based_on_shared_mem:
+            exceeds_smem = CUDAConfigHeuristic()._get_exceeding_shared_memory_checker(
+                has_sm_layout_conversion=False, layout_conversion_byte_size=0
+            )
+        dtype_size = mat1.get_dtype().itemsize
 
         for k_split in exact_k_splits:
             for config_index in config_indices:
                 partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+                if exceeds_smem is not None and exceeds_smem(
+                    BaseConfig(
+                        partial_config.block_m,
+                        partial_config.block_n,
+                        partial_config.block_k,
+                        partial_config.num_stages,
+                        partial_config.num_warps,
+                    ),
+                    dtype_size,
+                ):
+                    continue
                 m_tiles = math.ceil(m_hint / partial_config.block_m)
-                if partial_config.two_ctas:
+                if effective_two_ctas(partial_config):
                     m_tiles = math.ceil(m_tiles / 2) * 2
                 k_part = (
                     math.ceil(math.ceil(k_hint / k_split) / partial_config.block_k)

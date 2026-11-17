@@ -253,6 +253,15 @@ class CustomMmaMultistage : public CustomMmaBase<Shape_, Policy_, Stages> {
     zero_outside_bounds_ = value;
   }
 
+  CUTLASS_DEVICE
+  static void drain_cp_asyncs() {
+    // commit and drain all pending and predicated cp.async pnz from the GEMM
+    // mainloop
+    cutlass::arch::cp_async_fence();
+    cutlass::arch::cp_async_wait<0>();
+    __syncthreads();
+  }
+
   template <bool kLoadA = true, bool kLoadB = true>
   CUTLASS_DEVICE static void prologue(
       typename Base::SharedStorage& shared_storage,
