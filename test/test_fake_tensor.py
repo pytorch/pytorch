@@ -5996,7 +5996,6 @@ instantiate_device_type_tests(
 )
 
 
-@instantiate_parametrized_tests
 class TestFakeTensorViewCopy(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
