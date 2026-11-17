@@ -1,9 +1,14 @@
 import logging
+import operator
 from collections.abc import Callable
 from typing import Any
 
 import torch
-from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
+from torch._higher_order_ops.utils import (
+    _maybe_run_with_interpreter,
+    create_bw_fn,
+    materialize_as_graph,
+)
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -265,15 +270,48 @@ class HopJointGraph:
                 continue
             val = n.meta["val"]
             if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
-                if n.meta.get("recompute", None) is not None:
-                    raise AssertionError(
-                        f"node {n} with complex SymInt expression should not have recompute policy set"
+                # The body may already tag this node (e.g. a pass that tags a
+                # whole region). Recomputing is scalar math on the input sizes,
+                # so override any tag, except an explicit request to save it.
+                tag = n.meta.get("recompute", None)
+                if tag == CheckpointPolicy.MUST_SAVE:
+                    raise RuntimeError(
+                        f"Node {n.name} computes the SymInt expression "
+                        f"{val.node.expr} and is tagged {tag}. Inside a "
+                        "control flow operator such as scan, a SymInt expression "
+                        "can't be saved across the forward/backward boundary, so "
+                        "it is always recomputed. Remove the MUST_SAVE tag from "
+                        "this node, e.g. by tagging only tensor ops."
                     )
-
                 n.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
 
         self.joint_gm.graph.lint()
         self.joint_gm.recompile()
+
+    def _mark_rng_ops_as_must_save(self) -> None:
+        """
+        Save the output of random ops that checkpoint marked for recompute.
+
+        Recomputing one needs the forward's RNG state in the backward body, and
+        the HOP has no way to pass it per step. Saving the output keeps the
+        backward on the forward's sample, e.g. the same dropout mask.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            is_rng_op,
+            must_recompute,
+        )
+
+        def mark(n: torch.fx.Node) -> None:
+            n.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            # A multi-output op (e.g. native_dropout) is saved through its getitems.
+            for user in n.users:
+                if user.target is operator.getitem:
+                    mark(user)
+
+        for n in self.joint_gm.graph.nodes:
+            if n.op == "call_function" and must_recompute(n) and is_rng_op(n):
+                mark(n)
 
     def partition(
         self, partition_fn: Callable, always_recompute_complex_exprs: bool
@@ -286,6 +324,7 @@ class HopJointGraph:
 
         if always_recompute_complex_exprs:
             self._mark_complex_exprs_as_must_recompute()
+        self._mark_rng_ops_as_must_save()
 
         fw_gm, bw_gm = partition_fn(
             self.joint_gm, None, num_fwd_outputs=self.n_fw_outputs
@@ -329,7 +368,12 @@ def create_hop_joint_graph(
         )
     example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
 
-    joint_fn = create_bw_fn(fw_fn, fw_args, return_fw_outputs=True)
+    # Interpret graph modules so re-traced nodes keep their meta (e.g. recompute
+    # tags). A plain fw_fn sets its meta again when re-run. fw_gm can't replace
+    # fw_fn: it dropped the body's no_grad regions.
+    joint_fn = create_bw_fn(
+        _maybe_run_with_interpreter(fw_fn), fw_args, return_fw_outputs=True
+    )
     joint_gm = materialize_as_graph(
         joint_fn, fw_args + example_grads, force_enable_grad=True
     )
@@ -337,8 +381,11 @@ def create_hop_joint_graph(
         # Need to first trace out the joint_fn with autograd info on
         # then functionalize the graph otherwise the grad information is lost
         joint_gm = materialize_as_graph(
-            # pyrefly: ignore [bad-argument-type]
-            torch.func.functionalize(joint_gm, remove="mutations_and_views"),
+            torch.func.functionalize(
+                # pyrefly: ignore [bad-argument-type]
+                _maybe_run_with_interpreter(joint_gm),
+                remove="mutations_and_views",
+            ),
             fw_args + example_grads,
         )
 
