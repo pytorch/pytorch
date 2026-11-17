@@ -3189,7 +3189,6 @@ instantiate_device_type_tests(
     ErrorMessagesAcceleratorTest, globals(), except_for="cpu", allow_xpu=True
 )
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

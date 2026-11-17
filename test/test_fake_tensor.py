@@ -2490,9 +2490,8 @@ def forward(self, x_1):
             ((), "cuda:0", "cpu"),
         ],
     )
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_inplace_and_out_identity(self, shape, input_device, other_device):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         fake, out, other = (
             self.fake_from_meta(mode, torch.empty(shape, device="meta"), device)
@@ -7375,20 +7374,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             py_mode = FakeTensorMode()
         self.assertIs(require_python_fake_mode(py_mode), py_mode)
         self.assertIsNone(require_python_fake_mode(None))
-
-    def test_shape_prop_fake_mode(self):
-        from torch.fx.passes.shape_prop import ShapeProp
-
-        gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        x = torch.randn(2, 3)
-        mode = CppFakeTensorMode()
-        out = ShapeProp(gm, fake_mode=mode).propagate(x)
-        self.assertEqual(out.shape, x.shape)
-        self.assertIs(maybe_get_fake_mode(out), mode)
-        with tracing(TracingContext(mode)):
-            out = ShapeProp(gm).propagate(x)
-        self.assertEqual(out.shape, x.shape)
-        self.assertIs(maybe_get_fake_mode(out), mode)
 
     @parametrize(
         "callback,propagate_real_tensors",

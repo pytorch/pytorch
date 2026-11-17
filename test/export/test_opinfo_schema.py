@@ -111,7 +111,6 @@ class TestOpInfo(TestCase):
 
 instantiate_device_type_tests(TestOpInfo, globals())
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
