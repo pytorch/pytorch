@@ -29,9 +29,7 @@ from .bytecode_transformation import (
     add_push_null_call_function_ex,
     bytecode_from_template,
     create_binary_subscr,
-    create_build_tuple,
     create_call_function,
-    create_call_function_ex,
     create_call_method,
     create_dup_top,
     create_instruction,
@@ -42,13 +40,13 @@ from .bytecode_transformation import (
 )
 from .exc import unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
-from .utils import is_safe_constant, rot_n_helper
+from .utils import is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
-from .variables.lazy import ComputedLazyConstantVariable
+from .variables.lazy import ComputedLazyConstantVariable, LazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
@@ -63,6 +61,7 @@ from .variables.torch_function import TensorWithTFOverrideVariable
 if TYPE_CHECKING:
     from torch._dynamo.variables.builder import GraphArg
 
+    from .side_effects import SideEffects
     from .symbolic_convert import InstructionTranslatorBase
 
 
@@ -83,6 +82,23 @@ def _pregraph_marker_enter_template(is_profiler_enabled, utils_module):
 def _pregraph_marker_exit_template(cm, utils_module):
     if cm is not None:
         utils_module.record_pregraph_bytecode_exit(cm)
+
+
+def _contains_unrealized_lazy_constant(
+    value: VariableTracker, side_effects: "SideEffects"
+) -> bool:
+    found = False
+
+    def check(vt: VariableTracker) -> None:
+        nonlocal found
+        if (
+            isinstance(vt, (LazyConstantVariable, ComputedLazyConstantVariable))
+            and not vt.is_realized()
+        ):
+            found = True
+
+    VariableTracker.visit(check, value, side_effects=side_effects)
+    return found
 
 
 @dataclasses.dataclass
@@ -323,19 +339,34 @@ class PyCodegen:
             if (
                 isinstance(value.mutation_type, ValueMutationExisting)
                 or self.value_from_source
+                # Unrealized lazy constants have no graph value for export to capture
+                or (isinstance(value, LazyConstantVariable) and not value.is_realized())
             ):
                 return self(value.source)
 
         const = (False, None)
-        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
-            # Recompute from the operands at runtime instead of burning in the value
+        if isinstance(value, ComputedLazyConstantVariable) and (
+            not value.is_realized()
+            or (
+                self.graph_output_var is None
+                and isinstance(value.realize(), SymNodeVariable)
+            )
+        ):
+            # The common case is an unrealized ComputedLazyConstant which we want to recompute from its operands.
+            # However there's a special case where a cycle can form and a (realized) ComputedLazyConstant becomes both a
+            # graph output and an indirect graph input.  There's probably a more general fix, but for now we handle it
+            # by detecting when no graph outputs are available and the value is symbolic (which is needed for the cycle
+            # to form)
             self.uses[value] += 1
             self.call_reconstruct(value)
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
         elif (
-            value.is_python_constant()
+            # is_python_constant() would realize (and value-guard) lazy constants
+            # that can be reloaded or recomputed instead
+            not _contains_unrealized_lazy_constant(value, self.tx.output.side_effects)
+            and value.is_python_constant()
             and (const := value.try_as_python_constant())[0]
             and is_safe_constant(const[1])
         ):
@@ -603,7 +634,7 @@ class PyCodegen:
     ) -> list[Instruction]:
         """Load the global fn_name on the stack num_on_stack down"""
         output = []
-        if push_null and sys.version_info >= (3, 11):
+        if push_null:
             output.extend(add_push_null(self.create_load_global(fn_name, add=True)))
             if num_on_stack > 0:
                 output.extend(
@@ -622,23 +653,11 @@ class PyCodegen:
         return output
 
     def rot_n(self, n: int) -> list[Instruction]:
-        try:
-            return create_rot_n(n)
-        except AttributeError:
-            # desired rotate bytecode doesn't exist, generate equivalent bytecode
-            return [
-                create_build_tuple(n),
-                self.create_load_const_unchecked(rot_n_helper(n)),
-                *create_rot_n(2),
-                *create_call_function_ex(False, False),
-                create_instruction("UNPACK_SEQUENCE", arg=n),
-            ]
+        return create_rot_n(n)
 
     def pop_null(self) -> list[Instruction]:
         # POP_TOP doesn't work for null, so we pop nulls by pushing in a
         # nop function, calling it (which consumes the null), and popping the result.
-        if sys.version_info < (3, 11):
-            raise AssertionError("pop_null requires Python 3.11+")
         return [
             self.create_load_const_unchecked(lambda: None),
             # 3.13 swapped NULL and callable
@@ -683,8 +702,6 @@ class PyCodegen:
         output = self._output
 
         output.append(self.create_load_const(code))
-        if sys.version_info < (3, 11):
-            output.append(self.create_load_const(fn_name))
         if sys.version_info >= (3, 13):
             output.extend(
                 [
@@ -868,26 +885,21 @@ class PyCodegen:
             output.insert(-1, self.create_load_const(kw_names))
             output[-1] = create_instruction("CALL_KW", arg=nargs)
             return output
-        elif sys.version_info >= (3, 11):
-            output = create_call_function(nargs, push_null)
-            if sys.version_info >= (3, 12):
-                idx = -1
-                expected_inst = "CALL"
-            else:
-                idx = -2
-                expected_inst = "PRECALL"
-            if output[idx].opname != expected_inst:
-                raise AssertionError(
-                    f"expected instruction at index {idx} to be {expected_inst}, "
-                    f"got {output[idx].opname}"
-                )
-            kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
-            output.insert(idx, kw_names_inst)
-            return output
-        return [
-            self.create_load_const(kw_names),
-            create_instruction("CALL_FUNCTION_KW", arg=nargs),
-        ]
+        output = create_call_function(nargs, push_null)
+        if sys.version_info >= (3, 12):
+            idx = -1
+            expected_inst = "CALL"
+        else:
+            idx = -2
+            expected_inst = "PRECALL"
+        if output[idx].opname != expected_inst:
+            raise AssertionError(
+                f"expected instruction at index {idx} to be {expected_inst}, "
+                f"got {output[idx].opname}"
+            )
+        kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
+        output.insert(idx, kw_names_inst)
+        return output
 
     def create_delete(self, value: object) -> Instruction:
         return create_instruction("DELETE_FAST", argval=value)
