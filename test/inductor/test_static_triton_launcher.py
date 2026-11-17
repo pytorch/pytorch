@@ -10,6 +10,7 @@ import unittest
 import weakref
 from contextlib import nullcontext
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -1051,9 +1052,14 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
             lambda: self._make_launcher(compiled_kernel),
         )
 
+    @unittest.skipIf(not has_triton(), "requires triton")
     @skipIfRocm
     @skipIfXpu(msg="Oversized shared memory is a CUDA feature")
     def test_oversized_shared_mem(self, device):
+        # _oversized_shared_mem_limits() reads CUDA device properties, so only
+        # the CUDA instantiation can run this test.
+        if torch.device(device).type != "cuda":
+            raise unittest.SkipTest("Oversized shared memory is a CUDA feature")
         # Triton compiles against the oversized limit, so the static launcher
         # must load kernels between the opt-in and oversized limits too.
         opt_in, _ = _oversized_shared_mem_limits()
@@ -1068,17 +1074,22 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         arg1 = 5
         compiled_kernel = simple_kernel[(1,)](arg0, arg1)
         compiled_kernel.shared = opt_in + 16384
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         new_arg0 = torch.zeros(1, dtype=torch.int32, device=device)
-        device_interface = get_interface_for_device(device)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
 
+    @unittest.skipIf(not has_triton(), "requires triton")
     @skipIfRocm
     @skipIfXpu(msg="Oversized shared memory is a CUDA feature")
     def test_too_high_oversized_shared_mem(self, device):
+        # _oversized_shared_mem_limits() reads CUDA device properties, so only
+        # the CUDA instantiation can run this test.
+        if torch.device(device).type != "cuda":
+            raise unittest.SkipTest("Oversized shared memory is a CUDA feature")
         # Above the oversized limit the static launcher must still refuse the
         # kernel. This is a separate test because Triton returns the cached
         # CompiledKernel on a second launch, and _make_launcher cannot reuse it.
@@ -1252,7 +1263,7 @@ def kernel_many_args(out_tensor, {decl}):
 )
 
 
-class TestStaticTritonLauncherXpuOnly(TestCase):
+class TestStaticTritonLauncherXpuOnly(StaticLauncherTestMixin, TestCase):
     hw_classification = HardwareClassification.XPU
 
     @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
@@ -1394,6 +1405,55 @@ class TestStaticTritonLauncherXpuOnly(TestCase):
         ):
             _StaticXpuLauncher._load_kernel(
                 cubin_file, "simple_kernel", limit + 1, device
+            )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_non_default_warp_size(self):
+        # The work-group size is num_warps times the kernel's compiled SIMD
+        # width; the kernel also declares its required work-group size, so
+        # launching a SIMD16 kernel at the default width of 32 fails.
+        @triton.jit
+        def arange_kernel(out, BLOCK: tl.constexpr):
+            off = tl.arange(0, BLOCK)
+            tl.store(out + off, off)
+
+        num_warps, warp_size = 4, 16
+        BLOCK = num_warps * warp_size
+        out = torch.zeros(BLOCK, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = arange_kernel[(1,)](
+            out, BLOCK=BLOCK, num_warps=num_warps, warp_size=warp_size
+        )
+        self.assertEqual(compiled_kernel.metadata.threads_per_warp, warp_size)
+        launcher = self._make_launcher(compiled_kernel)
+        new_out = torch.zeros_like(out)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_out)
+        self.assertEqual(new_out, out)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_launch_rejects_non_kernel_capsule(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        with self.assertRaisesRegex(ValueError, "PyCapsule"):
+            launcher.C_impl._launch_kernel(
+                None,
+                1,
+                1,
+                1,
+                launcher.num_warps,
+                launcher.shared,
+                launcher.arg_tys,
+                (arg0,),
+                stream,
             )
 
 
