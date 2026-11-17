@@ -51,8 +51,8 @@ from torch.testing._internal.common_device_type import (
     ops,
     PYTORCH_CUDA_MEMCHECK,
 )
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -4874,6 +4874,7 @@ with warnings.catch_warnings(record=True) as w:
             raise AssertionError("expected source to be not None")
         self.assertTrue("custom_op_db.py" in source)
 
+    @fake_tensor_test()
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @torch._dynamo.config.patch(fake_tensor_cache_enabled=False)
     @parametrize("profile_op", ["custom", "aten"])
@@ -6826,6 +6827,7 @@ class TestTypeConversion(TestCase):
         self.assertEqual(result_type, list[int | float | str])
 
 
+@instantiate_parametrized_tests
 class TestOpProfiles(TestCase):
     def get_sample_op_profile(self, opname) -> dict[str, set[OpProfile]]:
         return {
@@ -6855,20 +6857,13 @@ class TestOpProfiles(TestCase):
             }
         }
 
+    @fake_tensor_test()
     def test_fake_registration(self):
         fm = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(allow_dynamic_output_shape_ops=True)
         )
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
-        unsupported_error, unsupported_message = expectedIfCppFakeTensor(
-            (RuntimeError, "mylib::foo2"),
-            (
-                torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                "mylib.foo2.default",
-            ),
-        )
-
         op_profiles = self.get_sample_op_profile("mylib.foo2.default")
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -6885,8 +6880,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    unsupported_error,
-                    unsupported_message,
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
@@ -6903,8 +6898,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    unsupported_error,
-                    unsupported_message,
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
