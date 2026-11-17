@@ -293,6 +293,7 @@ class DeviceMeshTest(DTensorTestBase):
             if self.rank in ranks:
                 self.assertEqual(global_ranks, sorted(ranks.tolist()))
 
+    @skip_if_lt_x_gpu(4)
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup_backend_without_split_support(self):
         """
@@ -339,6 +340,7 @@ class DeviceMeshTest(DTensorTestBase):
             dist.all_reduce(tensor, group=dim_group)
             self.assertEqual(tensor.item(), len(expected_ranks))
 
+    @skip_if_lt_x_gpu(4)
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup_uses_split_when_supported(self):
         """
