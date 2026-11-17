@@ -7,12 +7,15 @@ if not exist "%DOWNLOADS_DIR%" mkdir %DOWNLOADS_DIR%
 if not exist "%DEPENDENCIES_DIR%" mkdir %DEPENDENCIES_DIR%
 
 :: activate visual studio
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
+for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -find VC\Auxiliary\Build\vcvarsall.bat`) do call "%%i" arm64
 where cl.exe
 
 :: Clone OpenBLAS
 cd %DEPENDENCIES_DIR%
-git clone https://github.com/OpenMathLib/OpenBLAS.git -b v0.3.29
+:: v0.3.29
+git init -q OpenBLAS || exit /b 1
+git -C OpenBLAS fetch -q --depth 1 https://github.com/OpenMathLib/OpenBLAS.git 8795fc7985635de1ecf674b87e2008a15097ffab || exit /b 1
+git -C OpenBLAS checkout -q FETCH_HEAD || exit /b 1
 
 echo Configuring OpenBLAS...
 mkdir OpenBLAS\build
