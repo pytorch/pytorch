@@ -2865,6 +2865,30 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "translate")
 
+    def bytearray_center(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "center")
+
+    def bytearray_ljust(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "ljust")
+
+    def bytearray_rjust(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "rjust")
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
@@ -2888,6 +2912,9 @@ class ByteArrayVariable(VariableTracker):
         "title": Method(bytearray_title),
         "replace": Method(bytearray_replace),
         "translate": Method(bytearray_translate),
+        "center": Method(bytearray_center),
+        "ljust": Method(bytearray_ljust),
+        "rjust": Method(bytearray_rjust),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -3472,6 +3499,18 @@ class ByteArrayIteratorVariable(IteratorVariable):
         value = ConstantVariable.create(data[self.index])
         self.index += 1
         return value
+
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.parent.data) - self.index, 0))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def python_type(self) -> type:
         return type(iter(bytearray()))

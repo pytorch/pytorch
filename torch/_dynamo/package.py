@@ -127,9 +127,7 @@ class _Missing:
 
 
 # The C pickler bypasses reducer_override for exact builtin containers.
-# Guard state uses this persistent id for a discarded container and a dict
-# snapshot for a dictionary with pruned values. SystemInfo's compatibility
-# check requires guard artifacts to be loaded by the torch that wrote them.
+# This persistent id represents a discarded container.
 _PRUNED_VALUE_PID = "pruned"
 
 
@@ -512,7 +510,7 @@ class _GuardsStateUnpickler(pickle.Unpickler):
 
     def persistent_load(self, pid: str | dict[Any, Any]) -> _Missing | dict[Any, Any]:
         if type(pid) is dict:
-            return pid
+            return pid  # pickle has already rebuilt the dictionary snapshot
         if pid != _PRUNED_VALUE_PID:
             raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
         return self._pruned
@@ -520,6 +518,8 @@ class _GuardsStateUnpickler(pickle.Unpickler):
 
 def load_guards_state(guards_state: bytes) -> Any:
     from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+    from .guards import GuardsState
 
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -531,7 +531,13 @@ def load_guards_state(guards_state: bytes) -> Any:
     # tensors; from_meta_and_device rejects fakes. Other active dispatch modes
     # still apply.
     with ctx, unset_fake_temporarily():
-        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
+        state = _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
+        # Earlier artifacts recorded no constant-result globals to restore.
+        if isinstance(state, GuardsState) and not hasattr(
+            state.output_graph, "constant_result_names"
+        ):
+            state.output_graph.constant_result_names = set()
+        return state
 
 
 def load_guard_manager(
@@ -1688,6 +1694,13 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    for name in guards_state.output_graph.constant_result_names:
+                        if name not in runtime_global_scope:
+                            self._install_global(
+                                module,
+                                name,
+                                guards_state.output_graph.global_scope[name],
+                            )
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
                     if (
