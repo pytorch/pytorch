@@ -15,7 +15,6 @@ from torch.export.exported_program import _get_shape_env
 from torch.export.graph_signature import InputKind
 from torch.onnx._internal.exporter import _decomp, _errors
 from torch.utils._sympy.functions import Mod, PythonMod
-from torch.utils._sympy.value_ranges import bound_sympy
 
 
 if TYPE_CHECKING:
@@ -23,7 +22,6 @@ if TYPE_CHECKING:
 
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.onnx._internal.exporter import _registration
-    from torch.utils._sympy.value_ranges import ValueRanges
 
 
 @dataclasses.dataclass
@@ -31,7 +29,6 @@ class _Baseline:
     n_guards: int
     deferred_asserts: set[sympy.Expr]
     replacements: set[sympy.Symbol]
-    var_to_range: tuple[tuple[sympy.Symbol, ValueRanges], ...]
     input_dims: dict[sympy.Symbol, str]
     by_op: dict[str, list[sympy.Expr]] = dataclasses.field(default_factory=dict)
 
@@ -40,7 +37,6 @@ class _Baseline:
 class _Snapshot:
     baseline: _Baseline
     repeated: bool
-    candidate_ops: tuple[str, ...]
     candidate_targets: frozenset[torch._ops.OpOverload]
     shape_env: ShapeEnv
 
@@ -109,13 +105,11 @@ def snapshot(
                 for ra in values
             },
             replacements=set(shape_env.replacements),
-            var_to_range=tuple(shape_env.var_to_range.items()),
             input_dims=_input_dim_names(exported_program, shape_env),
         )
     return _Snapshot(
         baseline=baseline,
         repeated=repeated,
-        candidate_ops=tuple(sorted(map(str, candidate_ops))),
         candidate_targets=frozenset(candidate_ops),
         shape_env=shape_env,
     )
@@ -219,20 +213,11 @@ def warn_if_specialized(
         if symbol not in baseline.replacements
     )
     input_symbols = set(baseline.input_dims)
-    ranges = dict(baseline.var_to_range)
-    constraints = set()
-    for expr in new_constraints:
-        if not expr.free_symbols <= input_symbols:
-            continue
-        if expr.free_symbols <= ranges.keys():
-            # Evaluate against the pre-decomposition ranges only: the ShapeEnv now
-            # treats the new asserts and replacements as facts, so its own evaluation
-            # would report every new constraint as implied.
-            vr = bound_sympy(expr, ranges)
-            if vr.is_singleton() and vr.lower is sympy.true:
-                continue
-        if _constraint_kind(expr) != "bound":
-            constraints.add(expr)
+    constraints = {
+        expr
+        for expr in new_constraints
+        if expr.free_symbols <= input_symbols and _constraint_kind(expr) != "bound"
+    }
     if not constraints:
         return
 
@@ -273,10 +258,10 @@ def warn_if_specialized(
         lines.append("  " + "; ".join(unattributed))
     if len(ordered) > 10:
         lines.append(f"  ... and {len(ordered) - 10} more")
-    if unattributed and before.candidate_ops:
+    if unattributed and before.candidate_targets:
         lines.append(
             "Ops decomposed for ONNX that may be responsible: "
-            + ", ".join(before.candidate_ops)
+            + ", ".join(sorted(map(str, before.candidate_targets)))
         )
     if before.repeated:
         lines.append(

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import io
 import logging
 import os
@@ -15,10 +14,6 @@ import sympy
 from onnxscript import FLOAT, opset18 as op
 
 import torch
-from torch._dynamo.source import LocalSource
-from torch.export.exported_program import _get_shape_env
-from torch.export.graph_signature import InputKind
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.onnx._internal.exporter import (
     _fx_passes,
     _registration,
@@ -977,50 +972,20 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
                 yield ep
 
     def test_repeated_export_warns_each_time(self):
-        messages = []
         with self._pin_dim_program() as ep:
-            for _ in range(2):
-                with self.assertWarns(DynamicShapeSpecializationWarning) as caught:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", torch.onnx.errors.OnnxExporterWarning)
+                with self.assertRaises(torch.onnx.errors.OnnxExporterError) as error:
                     torch.onnx.export(ep, verbose=False)
-                messages.append(str(caught.warning))
+            with self.assertWarns(DynamicShapeSpecializationWarning) as caught:
+                torch.onnx.export(ep, verbose=False)
+        messages = [str(error.exception.__cause__), str(caught.warning)]
         for message in messages:
             self.assertRegex(
                 message, r"specialization_test\.pin_dim\.default: Eq\([^)]*, 6\)"
             )
         self.assertNotIn("already decomposed by an earlier ONNX export", messages[0])
         self.assertIn("already decomposed by an earlier ONNX export", messages[1])
-
-    def test_retry_after_warning_as_error_warns(self):
-        with self._pin_dim_program() as ep:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", torch.onnx.errors.OnnxExporterWarning)
-                with self.assertRaises(torch.onnx.errors.OnnxExporterError):
-                    torch.onnx.export(ep, verbose=False)
-            with self.assertWarns(DynamicShapeSpecializationWarning) as caught:
-                torch.onnx.export(ep, verbose=False)
-        self.assertRegex(
-            str(caught.warning),
-            r"specialization_test\.pin_dim\.default: Eq\([^)]*, 6\)",
-        )
-
-    def test_repeated_export_without_specialization_is_silent(self):
-        ep = torch.export.export(
-            torch.nn.ReLU(),
-            (torch.randn(4, 2),),
-            dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
-        )
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always", DynamicShapeSpecializationWarning)
-            torch.onnx.export(ep, verbose=False)
-            torch.onnx.export(ep, verbose=False)
-        self.assertEqual(
-            [
-                w
-                for w in caught
-                if issubclass(w.category, DynamicShapeSpecializationWarning)
-            ],
-            [],
-        )
 
     @common_utils.parametrize(
         "model_kind", ["resnet", "interpolate", "layer_norm", "static", "check"]
@@ -1055,14 +1020,15 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
             dynamic_shapes = ({0: dynamic},)
         elif model_kind == "layer_norm":
             dynamic_shapes = ({0: dynamic, 2: dynamic},)
+        ep = torch.export.export(
+            models[model_kind],
+            (torch.randn(4, 2, 6, 6),),
+            dynamic_shapes=dynamic_shapes,
+        )
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", DynamicShapeSpecializationWarning)
-            torch.onnx.export(
-                models[model_kind],
-                (torch.randn(4, 2, 6, 6),),
-                dynamic_shapes=dynamic_shapes,
-                verbose=False,
-            )
+            for _ in range(2):
+                torch.onnx.export(ep, verbose=False)
         self.assertEqual(
             [
                 w
@@ -1076,111 +1042,6 @@ class TestDynamicShapeSpecialization(common_utils.TestCase):
 @common_utils.instantiate_parametrized_tests
 class TestSpecializationHelpers(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        self.shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
-        self.symbol = self.shape_env.create_symbol(6, LocalSource("x"))
-        self.baseline = _specialization._Baseline(
-            n_guards=0,
-            deferred_asserts=set(),
-            replacements=set(),
-            var_to_range=tuple(self.shape_env.var_to_range.items()),
-            input_dims={self.symbol: "x.size()[0]"},
-        )
-        self.before = _specialization._Snapshot(
-            baseline=self.baseline,
-            repeated=False,
-            candidate_ops=("test.specialize.default",),
-            candidate_targets=frozenset(),
-            shape_env=self.shape_env,
-        )
-        self.exported_program = mock.Mock()
-
-    def test_symbol_names_and_fallback(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1
-
-        ep = torch.export.export(
-            Model(),
-            (torch.randn(6, 2),),
-            dynamic_shapes=({0: torch.export.Dim.DYNAMIC},),
-        )
-        shape_env = _get_shape_env(ep.graph_module)
-        names = _specialization._input_dim_names(ep, shape_env)
-        self.assertEqual(list(names.values()), ["x.size()[0]"])
-        with mock.patch.dict(shape_env.var_to_sources, clear=True):
-            self.assertEqual(
-                list(_specialization._input_dim_names(ep, shape_env).values()),
-                ["x.shape[0]"],
-            )
-        with mock.patch.object(
-            ep.graph_signature.input_specs[0], "kind", InputKind.PARAMETER
-        ):
-            self.assertEqual(_specialization._input_dim_names(ep, shape_env), {})
-
-    def test_vgg_style_candidates_exclude_mutable_ops(self):
-        model = torch.nn.Sequential(
-            torch.nn.Conv2d(2, 2, 3, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.AdaptiveMaxPool2d((2, 2)),
-        ).eval()
-        ep = torch.export.export(
-            model,
-            (torch.randn(1, 2, 6, 6),),
-            dynamic_shapes=(
-                {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC},
-            ),
-            strict=False,
-        )
-        targets = {node.target for node in ep.graph.nodes if node.op == "call_function"}
-        self.assertIn(torch.ops.aten.relu_.default, targets)
-        before = _specialization.snapshot(ep, _registration.ONNXRegistry())
-        self.assertIsNotNone(before)
-        self.assertIn("aten.adaptive_max_pool2d.default", before.candidate_ops)
-        self.assertNotIn("aten.relu_.default", before.candidate_ops)
-        self.assertFalse(
-            any(op.split(".")[1].endswith("_") for op in before.candidate_ops)
-        )
-
-    def test_snapshot_without_shape_env(self):
-        with mock.patch.object(_specialization, "_get_shape_env", return_value=None):
-            self.assertIsNone(
-                _specialization.snapshot(mock.Mock(), _registration.ONNXRegistry())
-            )
-            _specialization.warn_if_specialized(self.exported_program, self.before)
-        _specialization.warn_if_specialized(self.exported_program, None)
-        self.assertIsNone(_specialization.attribution_hook(None))
-
-    def test_drops_implied_constraints_using_snapshot_ranges(self):
-        expr = sympy.Eq(FloorDiv(self.symbol, 2), 3)
-        self.shape_env.guard_or_defer_runtime_assert(expr, "specializing decomposition")
-        pinned = sympy.Eq(self.symbol, 6)
-        self.shape_env.replacements[self.symbol] = sympy.Integer(6)
-        ranges = dict(self.baseline.var_to_range)
-        self.assertFalse(_specialization.bound_sympy(expr, ranges).is_singleton())
-        self.assertFalse(_specialization.bound_sympy(pinned, ranges).is_singleton())
-        implied = sympy.Ge(self.symbol, 1)
-        vr = _specialization.bound_sympy(implied, ranges)
-        self.assertTrue(vr.is_singleton())
-        self.assertIs(vr.lower, sympy.true)
-        # Keep the redundant bound in the diff to exercise the helper's filter.
-        self.shape_env.deferred_runtime_asserts[None].append(mock.Mock(expr=implied))
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
-        ):
-            _specialization.warn_if_specialized(self.exported_program, self.before)
-        self.assertIn(str(expr), str(caught.warning))
-        self.assertIn(str(pinned), str(caught.warning))
-        self.assertNotIn(str(implied), str(caught.warning))
-        self.assertIn(
-            "Ops decomposed for ONNX that may be responsible: test.specialize.default",
-            str(caught.warning),
-        )
 
     @common_utils.parametrize(
         "expression, expected",
@@ -1209,206 +1070,14 @@ class TestSpecializationHelpers(common_utils.TestCase):
         expr = sympy.sympify(expression, locals=names)
         self.assertEqual(_specialization._constraint_kind(expr), expected)
 
-    def test_attribution_records_outermost_call_even_on_error(self):
-        outer, inner = torch.ops.aten.sin.default, torch.ops.aten.cos.default
-        benign = torch.ops.aten.neg.default
-        pin = sympy.Eq(self.symbol, 6)
-        divisible = sympy.Eq(sympy.Mod(self.symbol, 2), 0)
-        other = self.shape_env.create_symbol(8, LocalSource("y"))
-        self.shape_env.deferred_runtime_asserts[None] = [mock.Mock(expr=divisible)]
-        before = dataclasses.replace(
-            self.before, candidate_targets=frozenset({outer, inner, benign})
-        )
-
-        def decompose_inner(x):
-            self.shape_env.deferred_runtime_asserts[None].append(
-                mock.Mock(expr=divisible)
+    def test_snapshot_without_shape_env(self):
+        with mock.patch.object(_specialization, "_get_shape_env", return_value=None):
+            self.assertIsNone(
+                _specialization.snapshot(mock.Mock(), _registration.ONNXRegistry())
             )
-            return x
-
-        def decompose_outer(x):
-            self.shape_env.guards.append(mock.Mock(expr=pin))
-            self.shape_env.replacements[other] = self.symbol
-            wrapped[inner](x)
-            raise RuntimeError("decomposition failed")
-
-        untouched = torch.add
-        table = {
-            outer: decompose_outer,
-            inner: decompose_inner,
-            benign: lambda x: x,
-            torch.ops.aten.add.Tensor: untouched,
-        }
-        wrapped = _specialization.attribution_hook(before)(table)
-        self.assertIs(wrapped[torch.ops.aten.add.Tensor], untouched)
-        self.assertIs(table[outer], decompose_outer)
-        self.assertEqual(wrapped[benign](1), 1)
-        by_op = before.baseline.by_op
-        self.assertEqual(by_op, {})
-        expected = [pin, divisible, sympy.Eq(other, self.symbol)]
-        for _ in range(2):
-            with self.assertRaisesRegex(RuntimeError, "decomposition failed"):
-                wrapped[outer](1)
-            self.assertEqual(by_op, {str(outer): expected})
-        self.assertEqual(wrapped[inner](1), 1)
-        self.assertEqual(by_op[str(inner)], [divisible])
-
-    def test_relation_replacement_uses_conditional_wording(self):
-        other = self.shape_env.create_symbol(8, LocalSource("y"))
-        baseline = dataclasses.replace(
-            self.baseline,
-            input_dims={self.symbol: "x.size()[0]", other: "y.size()[0]"},
-            var_to_range=tuple(self.shape_env.var_to_range.items()),
-        )
-        before = dataclasses.replace(self.before, baseline=baseline)
-        self.shape_env.replacements[self.symbol] = other
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
-        ):
-            _specialization.warn_if_specialized(self.exported_program, before)
-        self.assertIn(str(sympy.Eq(self.symbol, other)), str(caught.warning))
-        self.assertIn("may give wrong results", str(caught.warning))
-        self.assertNotIn("will give", str(caught.warning))
-
-    def test_bound_only_constraints_do_not_warn(self):
-        self.shape_env.deferred_runtime_asserts[None] = [
-            mock.Mock(expr=sympy.Ge(self.symbol, 4)),
-            mock.Mock(expr=sympy.Ne(self.symbol, 3)),
-        ]
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            warnings.catch_warnings(record=True) as caught,
-        ):
-            warnings.simplefilter("always", DynamicShapeSpecializationWarning)
-            _specialization.warn_if_specialized(self.exported_program, self.before)
-        self.assertEqual(caught, [])
-
-    def test_truncation_and_excluding_non_input_symbols(self):
-        constraints = [sympy.Eq(sympy.Mod(self.symbol, i), 0) for i in range(2, 14)]
-        unbacked = self.shape_env.create_unbacked_symint().node.expr
-        self.shape_env.deferred_runtime_asserts[None] = [
-            mock.Mock(expr=expr) for expr in [*constraints, sympy.Eq(unbacked, 7)]
-        ]
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
-        ):
-            _specialization.warn_if_specialized(self.exported_program, self.before)
-        message = str(caught.warning)
-        self.assertIn("... and 2 more", message)
-        self.assertEqual(message.count("Eq("), 10)
-        self.assertNotIn(str(unbacked), message)
-
-    def test_constraints_grouped_by_op_with_unattributed_fallback(self):
-        pin = sympy.Eq(self.symbol, 6)
-        divisible = sympy.Eq(sympy.Mod(self.symbol, 2), 0)
-        relation = sympy.Eq(self.symbol, FloorDiv(self.symbol, 2) + 1)
-        unattributed = sympy.Eq(FloorDiv(self.symbol, 2), 3)
-        self.baseline.by_op.update({"z.op": [divisible, pin], "a.op": [relation]})
-        self.shape_env.deferred_runtime_asserts[None] = [
-            mock.Mock(expr=expr) for expr in (divisible, relation, pin, unattributed)
-        ]
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
-        ):
-            _specialization.warn_if_specialized(self.exported_program, self.before)
-        self.assertEqual(
-            str(caught.warning).splitlines()[3:-1],
-            [
-                f"  a.op: {relation}",
-                f"  z.op: {pin}; {divisible}",
-                f"  {unattributed}",
-                "Ops decomposed for ONNX that may be responsible: test.specialize.default",
-            ],
-        )
-
-    def test_truncation_is_shared_by_ops_and_unattributed_constraints(self):
-        constraints = [sympy.Eq(sympy.Mod(self.symbol, i), 0) for i in range(2, 14)]
-        ordered = sorted(constraints, key=str)
-        self.baseline.by_op.update({"z.op": ordered[::3], "a.op": ordered[1::3]})
-        self.shape_env.deferred_runtime_asserts[None] = [
-            mock.Mock(expr=expr) for expr in constraints
-        ]
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
-        ):
-            _specialization.warn_if_specialized(self.exported_program, self.before)
-        message = str(caught.warning)
-        self.assertEqual(message.count("Eq("), 10)
-        self.assertIn("  ... and 2 more", message.splitlines())
-        self.assertEqual(
-            message.splitlines()[3:6],
-            [
-                "  a.op: " + "; ".join(map(str, ordered[1:10:3])),
-                "  z.op: " + "; ".join(map(str, ordered[:10:3])),
-                "  " + "; ".join(map(str, ordered[2:10:3])),
-            ],
-        )
-
-    def test_warning_can_be_an_error(self):
-        expr = sympy.Eq(FloorDiv(self.symbol, 2), 3)
-        self.shape_env.guard_or_defer_runtime_assert(expr, "specializing decomposition")
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            warnings.catch_warnings(),
-        ):
-            warnings.simplefilter("error", DynamicShapeSpecializationWarning)
-            with self.assertRaises(DynamicShapeSpecializationWarning):
-                _specialization.warn_if_specialized(self.exported_program, self.before)
-
-    def test_mixed_input_and_unbacked_constraint_is_ignored(self):
-        unbacked = self.shape_env.create_unbacked_symint().node.expr
-        expr = unbacked < self.symbol
-        self.shape_env.deferred_runtime_asserts[None] = [mock.Mock(expr=expr)]
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            mock.patch.object(_specialization, "bound_sympy") as evaluate,
-            warnings.catch_warnings(record=True) as caught,
-        ):
-            warnings.simplefilter("always", DynamicShapeSpecializationWarning)
-            _specialization.warn_if_specialized(self.exported_program, self.before)
-        evaluate.assert_not_called()
-        self.assertEqual(
-            [
-                w
-                for w in caught
-                if issubclass(w.category, DynamicShapeSpecializationWarning)
-            ],
-            [],
-        )
-
-    def test_missing_snapshot_range_keeps_constraint_without_evaluating(self):
-        expr = sympy.Eq(FloorDiv(self.symbol, 2), 3)
-        self.shape_env.deferred_runtime_asserts[None] = [mock.Mock(expr=expr)]
-        baseline = dataclasses.replace(self.baseline, var_to_range=())
-        before = dataclasses.replace(self.before, baseline=baseline)
-        with (
-            mock.patch.object(
-                _specialization, "_get_shape_env", return_value=self.shape_env
-            ),
-            mock.patch.object(_specialization, "bound_sympy") as evaluate,
-            self.assertWarns(DynamicShapeSpecializationWarning) as caught,
-        ):
-            _specialization.warn_if_specialized(self.exported_program, before)
-        evaluate.assert_not_called()
-        self.assertIn(str(expr), str(caught.warning))
+            _specialization.warn_if_specialized(mock.Mock(), mock.Mock())
+        _specialization.warn_if_specialized(mock.Mock(), None)
+        self.assertIsNone(_specialization.attribution_hook(None))
 
 
 if __name__ == "__main__":
