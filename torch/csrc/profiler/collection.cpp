@@ -64,9 +64,12 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
       t.strides().size());
 }
 
-RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t, bool with_weak_ref)
     : RawTensorMetadataBase(t),
-      weak_self_{WeakTensor(t)},
+      impl_{t.unsafeGetTensorImpl()},
+      weak_self_{
+          with_weak_ref ? std::optional<WeakTensor>(WeakTensor(t))
+                        : std::nullopt},
       device_type_{t.device().type()},
       device_index_{t.device().index()} {}
 
@@ -76,12 +79,11 @@ TensorMetadata::TensorMetadata(
     std::vector<int64_t> strides)
     // NOLINTNEXTLINE(cppcoreguidelines-slicing)
     : RawTensorMetadataBase(r),
-      weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
+      impl_{r.impl_},
+      weak_self_{r.weak_self_},
       device_{r.device_type_, r.device_index_},
       sizes_{std::move(sizes)},
-      strides_{std::move(strides)} {
-  SOFT_ASSERT(r.weak_self_.has_value());
-}
+      strides_{std::move(strides)} {}
 
 OpArgData parseArgData(const DecodedInputs& inputs) {
   const auto& input_shapes = inputs.shapes;
@@ -150,10 +152,12 @@ OpArgData parseArgData(const DecodedInputs& inputs) {
 // ----------------------------
 // |  Input / Output encoder  |
 // ----------------------------
-void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
+void InputOutputEncoder::push(
+    c10::ArrayRef<const c10::IValue> values,
+    bool with_weak_refs) {
   for (const auto& value : values) {
     if (value.isTensor()) {
-      push(value.toTensor());
+      push(value.toTensor(), with_weak_refs);
     } else if (value.isScalar()) {
       tags_.emplace_back(Tag::Scalar);
       // Scalars are small enough that they are stored in ivalues without an
@@ -164,12 +168,18 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
       for (const auto& t : value.toTensorList()) {
-        push(t);
+        push(t, with_weak_refs);
       }
       tags_.emplace_back(Tag::TERMINATOR);
     } else if (isSupportedScalarList(value)) {
+      // Storing the elements lets the boxed list be freed when the op returns.
       tags_.emplace_back(Tag::ScalarList);
-      ivalues_.emplace_back(value);
+      scalar_list_types_.emplace_back(value.toList().elementType());
+      const auto elements = value.toListRef();
+      ivalues_.emplace_back(static_cast<int64_t>(elements.size()));
+      for (const auto& element : elements) {
+        ivalues_.emplace_back(element);
+      }
     } else {
       tags_.emplace_back(Tag::Other);
     }
@@ -177,12 +187,12 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   tags_.emplace_back(Tag::TERMINATOR);
 }
 
-void InputOutputEncoder::push(const at::Tensor& t) {
+void InputOutputEncoder::push(const at::Tensor& t, bool with_weak_ref) {
   // TODO fix nested and symbolic sizes
   if (t.defined() && !t.is_nested() &&
       !t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     tags_.emplace_back(Tag::Tensor);
-    tensor_metadata_.emplace_back(t);
+    tensor_metadata_.emplace_back(t, with_weak_ref);
     tensor_sizes_strides_.copy(t.sizes());
     if (t.layout() == at::kStrided) {
       // Only Strided layout tensors have strides
@@ -224,7 +234,8 @@ auto InputOutputEncoder::getInputDecoder() {
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
-          ivals_it = ivalues_.begin()]() mutable {
+          ivals_it = ivalues_.begin(),
+          scalar_list_types_it = scalar_list_types_.begin()]() mutable {
     auto decode_tensor = [&]() -> TensorMetadata {
       std::vector<int64_t> sizes;
       std::vector<int64_t> strides;
@@ -289,9 +300,14 @@ auto InputOutputEncoder::getInputDecoder() {
           }
         } break;
 
-        case Tag::ScalarList:
-          push_value(std::nullopt, *ivals_it++);
-          break;
+        case Tag::ScalarList: {
+          c10::impl::GenericList list(*scalar_list_types_it++);
+          const auto n = (*ivals_it++).toInt();
+          for ([[maybe_unused]] const auto _ : c10::irange(n)) {
+            list.push_back(*ivals_it++);
+          }
+          push_value(std::nullopt, c10::IValue(list));
+        } break;
 
         case Tag::Scalar:
           push_value(*ivals_it++, std::nullopt);
@@ -321,6 +337,7 @@ void InputOutputEncoder::clear() {
   tensor_metadata_.clear();
   tensor_sizes_strides_.clear();
   ivalues_.clear();
+  scalar_list_types_.clear();
 }
 
 // ---------------------------------------------------
@@ -372,7 +389,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.name(),
           overload_name});
   if (config_.report_input_shapes) {
-    torch_ops_.inputs_outputs_.push(fn.inputs());
+    torch_ops_.inputs_outputs_.push(fn.inputs(), config_.profile_memory);
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
   bool pushed_correlation_id = false;
@@ -428,10 +445,6 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = c10::getApproximateTime();
-  event->allow_tf32_cublas_ =
-      at::globalContext().float32Precision(
-          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-      at::Float32Precision::TF32;
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
@@ -525,7 +538,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         collective_meta(),
         kwinputs(),
         gpu_fallback(),
-        event->allow_tf32_cublas_,
+        allow_tf32_cublas_,
         std::move(event->counters_)};
 
     out.emplace_back(Result::create(
