@@ -73,9 +73,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph& operator=(CUDAGraph&& other) = delete;
 
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
+  // allocator: if set, the capture's allocations into its pool are made by
+  // `allocator` instead of the caching allocator (graph allocators, see
+  // CUDAAllocator::setPoolCaptureAllocator).
   void capture_begin(
       MempoolId_t pool = {0, 0},
-      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
+      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal,
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+          allocator = nullptr);
   void capture_end();
   // Split capture_end: capture_end_pre ends capture leaving graph_ live (both
   // keep_graph modes); capture_end_post finalizes (instantiate + destroy for
@@ -150,6 +155,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // leaks the pool: its use_count never returns to zero, so empty_cache can
   // never reclaim its segments for the rest of the process.
   bool allocated_pool_ = false;
+  // Set in capture_begin when the capture was given an allocator.
+  bool has_capture_allocator_ = false;
   // Set to true in capture_begin after beginAllocateToPool and cleared in
   // capture_end after endAllocateToPool. Tells reset() whether the allocator is
   // still routing allocations to the pool (capture abandoned before capture_end
