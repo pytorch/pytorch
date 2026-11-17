@@ -1063,6 +1063,10 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
+        if use_triton_xpu_template(mat1, mat2, layout=layout):
+            templates_to_use.append(xpu_persistent_mm_template)
+            templates_to_use.append(xpu_non_persistent_mm_template)
+
         if use_triton_blackwell_tma_template(
             mat1, mat2, output_layout=layout, add_guards=True
         ):

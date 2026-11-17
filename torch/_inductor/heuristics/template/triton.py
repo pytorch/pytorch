@@ -65,6 +65,7 @@ from ...utils import (
     use_triton_xpu_template,
     using_b200,
     using_rocm_rdna3,
+    xpu_descriptor_store_compatible,
 )
 from ...virtualized import V
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -464,6 +465,14 @@ class GemmConfig(BaseConfig):
 
 
 ConvConfig = BaseConfig
+
+
+@dataclasses.dataclass
+class XPUGemmConfig(GemmConfig):
+    """Gemm configuration for the XPU descriptor templates."""
+
+    # K-slices per output tile, reduced in-kernel through a workspace; 1 = off.
+    split_k: int = dataclasses.field(kw_only=True, default=1)
 
 
 @dataclasses.dataclass
@@ -2735,6 +2744,16 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             GemmConfig(32, 128, 64, 3, 16),
             GemmConfig(32, 256, 64, 1, 8),
             GemmConfig(32, 512, 128, 1, 16),
+            GemmConfig(64, 64, 64, 2, 16),
+        ]
+        # For small M*N with a long K, where the tiles alone cannot fill the Xe cores.
+        # Only the mm/addmm templates implement split-K (not bmm).
+        self.xpu_non_persistent_split_k_configs: list[BaseConfig] = [
+            XPUGemmConfig(16, 128, 64, 2, 8, split_k=2),
+            XPUGemmConfig(64, 64, 32, 2, 8, split_k=4),
+            XPUGemmConfig(64, 128, 64, 2, 8, split_k=4),
+            XPUGemmConfig(128, 64, 64, 2, 8, split_k=4),
+            XPUGemmConfig(128, 64, 64, 2, 16, split_k=2),
         ]
         self.xpu_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 1, 16),
@@ -4701,6 +4720,9 @@ class XPUDescriptorMMTemplateConfigMixin(MMTemplateConfigMixin):
     """Shared logic for the XPU mm templates, which drive the persistent descriptor
     template (stable descriptor API, no workspace) with their own Xe2-tuned pools."""
 
+    # Store the output tile through a tensor descriptor when its layout allows it.
+    descriptor_store = False
+
     def __init__(self) -> None:
         super().__init__()
         # Configs were tuned as exact tiles; do not rescale them per shape.
@@ -4708,6 +4730,40 @@ class XPUDescriptorMMTemplateConfigMixin(MMTemplateConfigMixin):
 
     def _num_sms(self) -> int:
         return get_num_sms()
+
+    def _get_extra_config_key_and_kwargs(
+        self, conf: BaseConfig
+    ) -> tuple[tuple[int | None, ...], dict[str, Any]]:
+        # Configs that differ only in split_k must not be deduplicated.
+        split_k = getattr(conf, "split_k", 1)
+        return (split_k,), {"SPLIT_K": split_k}
+
+    def _split_k_kwargs(
+        self, kernel_inputs: KernelInputs, template_kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
+        from torch.utils._sympy.functions import CeilDiv
+
+        from ...codegen.common import WorkspaceArg, WorkspaceZeroMode
+
+        split_k = template_kwargs["SPLIT_K"]
+        if split_k <= 1:
+            return {}
+        m, n, _ = kernel_inputs.mnk_symbolic()
+        bm, bn = template_kwargs["BLOCK_M"], template_kwargs["BLOCK_N"]
+        num_tiles = CeilDiv(m, bm) * CeilDiv(n, bn)
+        # int32 counters padded to 64 entries, then split_k fp32 tiles per output tile.
+        count = CeilDiv(num_tiles, 64) * 64 + num_tiles * split_k * bm * bn
+        # The counters must start at zero; the kernel re-zeroes them, so one zero_()
+        # per graph call covers every split-K kernel sharing this workspace.
+        return {
+            "workspace_arg": WorkspaceArg(
+                count=count,
+                zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
+                device=kernel_inputs.device(),
+                outer_name=WorkspaceArg.unique_name(),
+                dtype=torch.int32,
+            ),
+        }
 
     def _get_template_configs_impl(
         self,
@@ -4719,6 +4775,10 @@ class XPUDescriptorMMTemplateConfigMixin(MMTemplateConfigMixin):
         if flags is None:
             return
         dtype_size = kernel_inputs.dtype().itemsize
+        store_through_descriptor = (
+            self.descriptor_store
+            and xpu_descriptor_store_compatible(kernel_inputs.output_layout())
+        )
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
         ):
@@ -4738,6 +4798,9 @@ class XPUDescriptorMMTemplateConfigMixin(MMTemplateConfigMixin):
                 "NUM_SMS": self._num_sms(),
                 "TMA_EXPERIMENTAL_API": False,
                 "K_LOOP_OVER_TILES": True,
+                # A pointer store of an addmm epilogue goes through an SLM layout conversion.
+                "tma_store": store_through_descriptor,
+                **self._split_k_kwargs(kernel_inputs, template_kwargs),
             }
 
 
@@ -4746,6 +4809,8 @@ class XPUPersistentMMTemplateConfigHeuristic(
     XPUDescriptorMMTemplateConfigMixin, XPUConfigHeuristic
 ):
     """Persistent MM template heuristic for XPU; configs are tuned on Xe2 (BMG)."""
+
+    descriptor_store = True
 
     def __init__(self) -> None:
         super().__init__()
@@ -4776,14 +4841,36 @@ class XPUNonPersistentMMTemplateConfigHeuristic(
 ):
     """Non-persistent MM template heuristic for XPU (small M); configs are tuned on Xe2 (BMG)."""
 
+    # TODO: enable descriptor_store once Triton loads the [1, N] addmm bias that it
+    # implies as one row instead of one 2D block load per row; until then it slows
+    # small addmm down: https://github.com/intel/intel-xpu-backend-for-triton/issues/8829
+
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = list(self.xpu_non_persistent_configs)
+        self.mm_configs = list(self.xpu_non_persistent_configs) + list(
+            self.xpu_non_persistent_split_k_configs
+        )
         self.exhaustive_configs = self.mm_configs
 
     def _num_sms(self) -> int:
         # Above any reachable tile count, so the grid has one work-group per tile.
         return 2**30
+
+
+@register_template_heuristic(xpu_persistent_mm_template.uid, "xpu", op_name="addmm")
+class XPUAddmmPersistentMMTemplateConfigHeuristic(
+    AddMMConfigMixin, XPUPersistentMMTemplateConfigHeuristic
+):
+    """Addmm specific mixin for the XPU persistent mm template"""
+
+
+@register_template_heuristic(
+    xpu_non_persistent_mm_template.uid, "xpu", op_name="addmm"
+)
+class XPUAddmmNonPersistentMMTemplateConfigHeuristic(
+    AddMMConfigMixin, XPUNonPersistentMMTemplateConfigHeuristic
+):
+    """Addmm specific mixin for the XPU non-persistent mm template"""
 
 
 def _xpu_bmm_descriptor_row_major(
@@ -4805,7 +4892,10 @@ def _xpu_bmm_descriptor_row_major(
 
 
 class XPUDescriptorBMMTemplateConfigMixin(MMTemplateConfigMixin):
-    """Kwargs shared by the XPU bmm descriptor templates; subclasses set NUM_SMS."""
+    """Kwargs shared by the XPU bmm descriptor templates; subclasses set NUM_SMS.
+
+    Unlike the mm templates there is no K tail, split-K or descriptor store yet.
+    """
 
     def __init__(self) -> None:
         super().__init__()

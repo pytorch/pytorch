@@ -3135,6 +3135,36 @@ def use_triton_xpu_bmm_template(mat1: IRNode, mat2: IRNode, *, layout: Layout) -
     return _xpu_bmm_descriptor_operands_compatible((mat1, mat2))
 
 
+def xpu_descriptor_store_compatible(layout: Layout) -> bool:
+    """Whether the XPU mm templates can write this 2D output through a tensor
+    descriptor (unit inner stride, 16-byte aligned row stride and offset).
+
+    Operand admission does not imply this: with a column-major mat2 nothing
+    constrains N, so the output row pitch can be unaligned.
+    """
+    from .virtualized import V
+
+    sizevars = V.graph.sizevars
+    strides = layout.stride
+    if (
+        len(strides) != 2
+        or sizevars.replace_backed_symbols_with_hints(strides[1]) != 1
+    ):
+        return False
+    itemsize = layout.dtype.itemsize
+    conditions = [sympy.Eq(strides[1], 1)]
+    for nbytes in (strides[0] * itemsize, layout.offset * itemsize):
+        if not _bytes_aligned(sizevars.replace_backed_symbols_with_hints(nbytes)):
+            return False
+        conditions.append(sympy.Eq(Mod(nbytes, TMA_ALIGNMENT), 0))
+    if not _descriptor_shapes_fit_in_int32([layout.size], add_guards=True):
+        return False
+    condition = sympy.And(*conditions)
+    return sizevars.statically_known_true(condition) or sizevars.guard_or_false(
+        condition
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
