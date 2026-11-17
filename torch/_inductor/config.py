@@ -2257,6 +2257,10 @@ class triton:
     # heuristics/template/tlx.py fails cleanly otherwise).
     tlx_mode: Literal["allow", "force"] | None = tlx_mode_default()
 
+    # Use integer comparison facts from load masks to simplify load indices.
+    # This experimental path is limited to facts tracked by Triton codegen.
+    mask_aware_index_simplification = False
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
