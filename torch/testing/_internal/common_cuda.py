@@ -212,6 +212,8 @@ _CDNA3_ARCHS = ["gfx942", "gfx950"]
 _CDNA5_ARCHS = ["gfx1250"]
 # GFX11 (RDNA 3 and RDNA 3.5)
 _RDNA3_ARCHS = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"]
+# GFX11.7 uses the GFX12-style 128-bit WMMA interface.
+_GFX117X_ARCHS = ["gfx1170", "gfx1171"]
 # GFX12 (RDNA 4)
 _RDNA4_ARCHS = ["gfx1200", "gfx1201"]
 
@@ -225,7 +227,7 @@ def CDNA2OrLater():
     return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
 
 def RDNA3OrLater():
-    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _RDNA4_ARCHS)
+    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _GFX117X_ARCHS + _RDNA4_ARCHS)
 
 # Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
 # lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
@@ -686,11 +688,39 @@ def _get_torch_rocm_version():
     return tuple(int(x) for x in rocm_version.split("."))
 
 def rocm_mx_swizzle(mat_dtype):
-    """Whether this device takes MX block scales for `mat_dtype` in the swizzled layout."""
-    if not torch.version.hip or not evaluate_gfx_arch_within(["gfx950"]):
+    """Whether this device takes MX block scales for `mat_dtype` pre-swizzled.
+
+    gfx950 requests SWIZZLE_32_8, a 32x8 tile. gfx1250 requests SWIZZLE_128.
+    `mx_scale_swizzle` builds the matching bytes.
+    """
+    if not torch.version.hip:
         return False
-    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
-    return _get_torch_rocm_version() >= min_version
+    version = _get_torch_rocm_version()
+    if evaluate_gfx_arch_within(["gfx950"]):
+        min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+        return version >= min_version
+    if evaluate_gfx_arch_within(["gfx1250"]):
+        return version >= (7, 14)
+    return False
+
+
+def mx_scale_swizzle(scale, mat_dtype, block_size=32):
+    """Flatten block scales into the layout this device's scaled_mm expects.
+
+    gfx950 uses a 32x8 tile. gfx1250 uses its own order. block_size is 32 for
+    MX and 16 for NVFP4. Other ROCm archs and XPU are returned unchanged.
+    """
+    from torch.testing._internal.common_quantized import to_blocked, to_mx_swizzled_gfx1250
+
+    if torch.version.hip:
+        if not rocm_mx_swizzle(mat_dtype):
+            return scale
+        if evaluate_gfx_arch_within(["gfx1250"]):
+            return to_mx_swizzled_gfx1250(scale, block_size)
+        return to_blocked(scale, swizzle_32_8=True)
+    if scale.device.type == "xpu":
+        return scale
+    return to_blocked(scale)
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:
