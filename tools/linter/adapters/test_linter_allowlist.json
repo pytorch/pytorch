@@ -490,7 +490,6 @@
   "test/inductor/test_triton_syntax.py",
   "test/inductor/test_triton_wrapper.py",
   "test/inductor/test_unbacked_symints.py",
-  "test/inductor/test_user_streams.py",
   "test/inductor/test_utils.py",
   "test/inductor/test_warnings.py",
   "test/inductor/test_wrapper_codegen.py",
