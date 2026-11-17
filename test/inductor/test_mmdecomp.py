@@ -446,7 +446,7 @@ class TestDecomp(NNTestCase):
 
     @parametrize("m,k", [(1, 4), (4, 1)])
     @parametrize("op", [torch.addmm, torch.baddbmm])
-    def test_zero_alpha_ignores_nan_matrix(self, device, m, k, op):
+    def test_zero_alpha_nan_matrix_matches_eager(self, device, m, k, op):
         def fn(x, a, b):
             return op(x, a, b, alpha=0).relu()
 
