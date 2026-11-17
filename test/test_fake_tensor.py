@@ -225,6 +225,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertTrue(is_fake_tensor(z))
             self.assertIs(maybe_get_fake_mode(z), mode)
 
+    @fake_tensor_test()
     def test_sparse_compressed_tensor_creation(self):
         def csr():
             crow = torch.tensor([0, 2, 4])
@@ -261,6 +262,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 self.assertEqual(d.shape, ref.shape)
                 self.assertEqual(d.layout, torch.strided)
 
+    @fake_tensor_test()
     @skipIfPropagateRealTensors("real pin_memory needs an accelerator")
     def test_sparse_compressed_tensor_creation_pin_memory(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
@@ -340,6 +342,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             out = torch.mm(c, d, out_dtype=torch.float32)
             self.assertEqual(out.dtype, torch.float32)
 
+    @fake_tensor_test()
     def test_sparse_spdiags(self):
         with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
             out = torch.sparse.spdiags(torch.randn(2, 3), torch.tensor([0, -1]), (2, 3))
@@ -348,6 +351,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(out.layout, torch.sparse_coo)
         self.assertEqual(out.shape, (2, 3))
 
+    @fake_tensor_test()
     @skipIfPropagateRealTensors(
         "propagate_real_tensors does not support sparse strides"
     )
@@ -399,6 +403,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             dynamic_csc_out.row_indices().shape, dynamic_csc_out.values().shape
         )
 
+    @fake_tensor_test()
     @skipIfPropagateRealTensors("propagate_real_tensors resolves the real nnz")
     def test_sparse_spdiags_dynamic_nnz_bound(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
@@ -414,6 +419,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(nnz_range.lower, 0)
         self.assertEqual(nnz_range.upper, 200)
 
+    @fake_tensor_test()
     def test_sparse_spdiags_coalesced_metadata(self):
         zero_nnz_offsets = torch.tensor([3])
         one_nnz_offsets = torch.tensor([0])
@@ -432,6 +438,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(one_nnz.is_coalesced())
         self.assertFalse(two_nnz.is_coalesced())
 
+    @fake_tensor_test()
     def test_sparse_spdiags_zero_dim_static_offsets(self):
         duplicate_offsets = torch.tensor([0, 0])
         out_of_range_offsets = torch.tensor([4])
@@ -454,6 +461,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(out.shape, (0, 3))
         self.assertTrue(out.is_coalesced())
 
+    @fake_tensor_test()
     def test_sparse_spdiags_static_offset_errors(self):
         duplicate_offsets = torch.tensor([0, 0])
         out_of_range_offsets = torch.tensor([4])
@@ -472,6 +480,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             with self.assertRaisesRegex(RuntimeError, "negative dimension"):
                 torch.sparse.spdiags(torch.randn(1, 3), out_of_range_offsets, (3, 3))
 
+    @fake_tensor_test()
     def test_sparse_spdiags_cuda_not_supported(self):
         diagonals_meta = torch.empty(2, 3, device="meta")
         offsets_meta = torch.empty(2, dtype=torch.long, device="meta")
@@ -3303,6 +3312,7 @@ class TestFakeTensorCUDA(TestCase):
                             self.assertTrue(is_fake_tensor(ten))
                         self.assertEqual(ten.device.type, "cuda")
 
+    @fake_tensor_test()
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
     def test_sparse_compressed_tensor_creation_device(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors and not RUN_CUDA:
@@ -3318,6 +3328,7 @@ class TestFakeTensorCUDA(TestCase):
             self.assertEqual(t.crow_indices().device, cuda0)
             self.assertEqual(t.to_dense().device, cuda0)
 
+    @fake_tensor_test()
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
     @skipIfPropagateRealTensors("runs the real op, which reports its own device errors")
     def test_sparse_compressed_tensor_creation_device_mismatch(self):
@@ -3665,18 +3676,58 @@ class TestFakeTensorConverter(TestCase):
 
     @fake_tensor_test()
     @parametrize("active", [False, True])
-    def test_memoized_conversion_to_meta(self, active):
-        x = torch.rand(2, 2, 2)
+    @parametrize(
+        "layout",
+        [
+            torch.strided,
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ],
+    )
+    @parametrize("requires_grad", [False, True])
+    @parametrize("leaf", [False, True])
+    def test_memoized_conversion_to_meta(self, active, layout, requires_grad, leaf):
+        x = torch.rand(2, 4, 4)
+        if layout != torch.strided:
+            kwargs = (
+                {"blocksize": (2, 2)}
+                if layout in (torch.sparse_bsr, torch.sparse_bsc)
+                else {}
+            )
+            x = x.to_sparse(layout=layout, **kwargs)
+        x.requires_grad_(requires_grad)
+        if not leaf:
+            x = x.clone()
         mode = FakeTensorMode()
+        if active and layout not in (torch.strided, torch.sparse_coo):
+            # Describing real compressed-sparse components dispatches their
+            # accessors. Both modes reject those real inputs while active.
+            with mode, self.assertRaisesRegex(AssertionError, "Please convert"):
+                mode.from_tensor(x)
+            return
         with mode if active else contextlib.nullcontext():
             fake = mode.from_tensor(x)
         self.assertIs(mode.from_tensor(x), fake)
         self.assertIs(mode.from_tensor(fake), fake)
         self.assertIs(maybe_get_fake_mode(fake), mode)
         self.assertEqual(fake.shape, x.shape)
-        self.assertEqual(fake.stride(), x.stride())
+        self.assertEqual(fake.layout, x.layout)
+        if layout == torch.strided:
+            self.assertEqual(fake.stride(), x.stride())
+        else:
+            self.assertEqual(fake.sparse_dim(), x.sparse_dim())
+            self.assertEqual(fake.dense_dim(), x.dense_dim())
+            with in_kernel_invocation_manager(mode):
+                self.assertEqual(fake._nnz(), 0)
+            if layout == torch.sparse_coo:
+                self.assertEqual(fake.is_coalesced(), x.is_coalesced())
         self.assertEqual(fake.dtype, x.dtype)
         self.assertEqual(fake.device, x.device)
+        self.assertEqual(fake.requires_grad, x.requires_grad)
+        self.assertEqual(fake.is_leaf, x.is_leaf)
 
     @fake_tensor_test()
     @parametrize("pytype", [None, torch.Tensor, torch.nn.Parameter])
@@ -4133,6 +4184,7 @@ class TestFakeTensorOperatorInvariants(TestCase):
                 has_kwarg_device or op == torch.ops.aten._list_to_tensor.default
             )
 
+    @fake_tensor_test()
     @unittest.expectedFailure
     def test_sparse_new(self):
         with FakeTensorMode():
