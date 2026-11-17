@@ -390,7 +390,10 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           overload_name});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs(), config_.profile_memory);
-    torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
+    auto kwinputs = fn.kwinputs();
+    if (!kwinputs.empty()) {
+      event->kwinputs_ = torch_ops_.kwinputs_.emplace_back(std::move(kwinputs));
+    }
   }
   bool pushed_correlation_id = false;
   if (!config_.experimental_config.disable_external_correlation) {
@@ -426,8 +429,6 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
         true, true, true, false};
     out->event_->collective_meta_ = torch_ops_.collective_meta_.emplace_back(
         torch::profiler::impl::saveNcclMetaTyped(fn, nccl_meta_config));
-  } else {
-    out->event_->collective_meta_ = torch_ops_.collective_meta_.emplace_back();
   }
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
@@ -522,8 +523,6 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto jit_stack = StealOrDefault(jit_stack_);
   auto jit_module = StealOrDefault(jit_modules_);
   auto extra_args = StealOrDefault(extra_args_);
-  auto collective_meta = StealOrDefault(collective_meta_);
-  auto kwinputs = StealOrDefault(kwinputs_);
   auto gpu_fallback = StealOrDefault(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
@@ -535,8 +534,9 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_stack(),
         jit_module(),
         extra_args(),
-        collective_meta(),
-        kwinputs(),
+        event->collective_meta_ ? std::move(*event->collective_meta_)
+                                : collective_meta_t{},
+        event->kwinputs_ ? std::move(*event->kwinputs_) : kwinputs_t{},
         gpu_fallback(),
         allow_tf32_cublas_,
         std::move(event->counters_)};
@@ -547,6 +547,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 
   op_events_.clear();
   inputs_outputs_.clear();
+  collective_meta_.clear();
+  kwinputs_.clear();
 }
 
 template <size_t BlockSize>

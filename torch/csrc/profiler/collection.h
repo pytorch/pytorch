@@ -465,6 +465,7 @@ struct KinetoObserverContext : public at::ObserverContext {
 
     std::unique_ptr<perf_counters_t> counters_;
     collective_meta_t* collective_meta_{};
+    kwinputs_t* kwinputs_{};
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
