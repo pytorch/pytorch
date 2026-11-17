@@ -904,6 +904,7 @@ class TestScatterGatherDevice(TestCase):
             self.assertEqual(res, ref)
 
 
+
 # ---------------------------------------------------------------------------
 # CuTeDSL scatter_add override tests. Two surfaces:
 #   (a) dispatch conds: call the eligibility predicates directly to verify
@@ -1579,6 +1580,7 @@ class TestScatterAddOverrideCorrectness(TestCase):
         with mode:
             cutedsl_impl._scatter_add_eligibility(fake_self, 0, fake_idx, fake_src)
         self.assertEqual(len(cutedsl_impl._ELIGIBILITY_CACHE), 0)
+
 
 
 instantiate_parametrized_tests(TestScatterAddOverrideConds)
