@@ -15,7 +15,7 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import cast
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
@@ -35,6 +35,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _Action,
     _BackendRendezvousStateHolder,
     _DistributedRendezvousOpExecutor,
+    _natural_sort_key,
     _NodeDesc,
     _NodeDescGenerator,
     _RendezvousCloseOp,
@@ -119,6 +120,64 @@ class NodeDescTest(TestCase):
         self.assertIn(desc2, descs)
 
 
+class NodeDescNaturalSortKeyTest(TestCase):
+    def test_ranks_follow_numeric_host_order(self) -> None:
+        addrs = ["node66", "node7", "node70", "node8"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            [node.addr for node in ordered], ["node7", "node8", "node66", "node70"]
+        )
+
+    def test_zero_padded_hostnames_keep_lexicographic_order(self) -> None:
+        addrs = ["node070", "node007", "node066", "node008"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        self.assertEqual(sorted(nodes, key=_natural_sort_key), sorted(nodes))
+
+    def test_heterogeneous_addresses_do_not_raise(self) -> None:
+        addrs = ["10.0.0.7", "10.0.0.66", "gpu-a", "gpu-10", "gpu-2", "ip-10-0-1-5"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(
+            ordered,
+            ["10.0.0.7", "10.0.0.66", "gpu-2", "gpu-10", "gpu-a", "ip-10-0-1-5"],
+        )
+
+    def test_non_decimal_digit_characters_do_not_raise(self) -> None:
+        # str.isdigit() is True for characters such as superscripts that int()
+        # rejects, hence the key checks str.isdecimal().
+        nodes = [_NodeDesc("node1²2", 1, 1), _NodeDesc("node3", 1, 1)]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(ordered, ["node1²2", "node3"])
+
+    def test_processes_on_same_host_stay_grouped_and_ordered(self) -> None:
+        nodes = [
+            _NodeDesc("node9", 7, 1),
+            _NodeDesc("node10", 3, 1),
+            _NodeDesc("node9", 3, 2),
+            _NodeDesc("node9", 3, 1),
+        ]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            ordered,
+            [
+                _NodeDesc("node9", 3, 1),
+                _NodeDesc("node9", 3, 2),
+                _NodeDesc("node9", 7, 1),
+                _NodeDesc("node10", 3, 1),
+            ],
+        )
+
+
 class NodeDescGeneratorTest(TestCase):
     def test_generate(self) -> None:
         desc_generator = _NodeDescGenerator()
@@ -139,7 +198,7 @@ class RendezvousStateTest(TestCase):
         state = _RendezvousState()
         state.round = 1
         state.complete = True
-        state.deadline = datetime.now(timezone.utc)
+        state.deadline = datetime.now(UTC)
         state.closed = True
 
         # fmt: off
@@ -165,8 +224,8 @@ class RendezvousStateTest(TestCase):
 
                     state.wait_list.add(node_waiting)
 
-                    state.last_heartbeats[node_running] = datetime.now(timezone.utc)
-                    state.last_heartbeats[node_waiting] = datetime.now(timezone.utc)
+                    state.last_heartbeats[node_running] = datetime.now(UTC)
+                    state.last_heartbeats[node_waiting] = datetime.now(UTC)
 
                 bits = pickle.dumps(state)
 
@@ -743,6 +802,36 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
 
                     self._mock_state_holder.reset_mock()
 
+    def test_run_assigns_ranks_in_natural_host_order(self) -> None:
+        # Hostnames whose lexicographic order differs from their numeric order.
+        # With a plain sort the ranks would be node10=0, node2=1, node9=2, i.e.
+        # they would not follow the node numbering (see gh-191190).
+        self._node = _NodeDesc("node2", 1, 1)
+
+        self._state = _RendezvousState()
+
+        for addr in ["node10", "node9"]:
+            node = _NodeDesc(addr, 1, 1)
+
+            self._state.participants[node] = 0
+            self._state.last_heartbeats[node] = self._now
+
+        self._state.wait_list.add(self._node)
+
+        self._state.deadline = self._now + self._timeout.last_call
+
+        self._min_nodes = 3
+        self._max_nodes = 3
+
+        self._run_action(_Action.ADD_TO_PARTICIPANTS)
+
+        self.assertTrue(self._state.complete)
+
+        self.assertEqual(
+            {node.addr: rank for node, rank in self._state.participants.items()},
+            {"node2": 0, "node9": 1, "node10": 2},
+        )
+
     def test_run_adds_to_waitlist(self) -> None:
         expected_state = _RendezvousState()
 
@@ -1282,7 +1371,7 @@ class DynamicRendezvousHandlerTest(TestCase):
         self._max_nodes = 2
         other_node = _NodeDesc("aaa_node", 1, 1)
         self._state.participants[other_node] = 0
-        self._state.last_heartbeats[other_node] = datetime.now(timezone.utc)
+        self._state.last_heartbeats[other_node] = datetime.now(UTC)
 
         handler = self._create_handler()
 
@@ -1485,9 +1574,7 @@ class DynamicRendezvousHandlerTest(TestCase):
         self.assertEqual(self._state.last_heartbeats[self._node], now)
 
     def _assert_keep_alive_swallows_rendezvous_errors(self) -> None:
-        last_heartbeat_time = datetime.now(timezone.utc) - (
-            self._keep_alive_interval * 2
-        )
+        last_heartbeat_time = datetime.now(UTC) - (self._keep_alive_interval * 2)
 
         self._state.last_heartbeats[self._node] = last_heartbeat_time
 

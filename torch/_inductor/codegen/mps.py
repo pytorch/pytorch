@@ -13,13 +13,16 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch._utils_internal import get_file_path
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
+from ..codecache import code_hash, get_path
+from ..scheduler import WhyNoFuse
+from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata, Placeholder
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
@@ -29,12 +32,15 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
+from .cpp_wrapper_gpu import cpp_string_literal
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ops_handler import ReductionType, StoreMode
-    from ..scheduler import Scheduler, SchedulerNode
+    from ..scheduler import BaseSchedulerNode, Scheduler, SchedulerNode
     from .common import OpVarT
 
 log = logging.getLogger(__name__)
@@ -212,6 +218,8 @@ class MetalOverrides(OpOverrides):
                 "float64 cast requested, probably from tensorify_python_scalars"
             )
             return f"static_cast<float>({x})"
+        if use_compute_types and dtype in (torch.float16, torch.bfloat16):
+            return f"static_cast<float>(static_cast<{DTYPE_TO_METAL[dtype]}>({x}))"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
@@ -276,7 +284,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
+        typecast_b = f"static_cast<decltype({b}+{c})>({b})"
+        typecast_c = f"static_cast<decltype({b}+{c})>({c})"
+        return f"{a} ? {typecast_b} : {typecast_c}"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
@@ -328,8 +338,23 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def log1p(x: CSEVariable) -> str:
+        return f"c10::metal::log1p({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
         return f"metal::precise::exp({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def expm1(x: CSEVariable) -> str:
+        # same form as expm1_functor in UnaryKernel.metal
+        V.kernel.headers.add("special_math")
+        return (
+            f"(metal::fabs({x}) < 0.1f ? c10::metal::expm1f({x})"
+            f" : metal::precise::exp({x}) - 1.0f)"
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -439,6 +464,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sign(x: CSEVariable) -> str:
+        # metal::sign has no integer overloads
+        if x.dtype is not None and not x.dtype.is_floating_point:
+            return f"static_cast<decltype({x})>(({x} > 0) - ({x} < 0))"
         return f"metal::sign({x})"
 
     @staticmethod
@@ -556,6 +584,7 @@ class MetalOverrides(OpOverrides):
 
         # Unary special ops with forward in method name
         for name in [
+            "airy_ai",
             "bessel_j0",
             "bessel_j1",
             "bessel_y0",
@@ -591,6 +620,7 @@ class MetalOverrides(OpOverrides):
             "hermite_polynomial_h",
             "hermite_polynomial_he",
             "laguerre_polynomial_l",
+            "legendre_polynomial_p",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
@@ -626,7 +656,7 @@ class MetalKernel(SIMDKernel):
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
-    headers: OrderedSet[str] = OrderedSet(["utils"])
+    headers: OrderedSet[str]
     multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
@@ -635,6 +665,7 @@ class MetalKernel(SIMDKernel):
         **kwargs: Any,
     ) -> None:
         super().__init__(tiling, **kwargs)
+        self.headers = OrderedSet(["utils"])
         self.acc_var_ids = itertools.count()
         # Reductions shorter than a simdgroup run serially, in one thread per output
         rnumel = self.features.reduction_numel
@@ -672,6 +703,10 @@ class MetalKernel(SIMDKernel):
             atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
             cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
             line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
+            # Past the reduction every thread holds the same value, so only one may accumulate it
+            if self.features.is_reduction() and not self.inside_reduction:
+                reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+                line = f"if ({reduction_dim.name} == 0) {line}"
         else:
             raise RuntimeError(f"Unimplemented store mode {mode}")
         if self.inside_reduction:
@@ -692,19 +727,18 @@ class MetalKernel(SIMDKernel):
 
     def _new_idxvar(
         self,
-        dtype: str | torch.dtype,
+        dtype: torch.dtype,
         elem_count: int | None = None,
         default_value: Any | None = None,
         is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        metal_type: str | None = None,
     ) -> CSEVariable:
-        if isinstance(dtype, torch.dtype):
-            dtype = self.dtype_to_str(dtype)
         is_threadgroup &= self.max_threadgroup_size > 1
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         var_def = "threadgroup " if is_threadgroup else ""
-        var_def += f"{dtype} {var_name}"
+        var_def += f"{metal_type or self.dtype_to_str(dtype)} {var_name}"
         if elem_count:
             var_def += f"[{self.sexpr(elem_count)}]"
         if default_value is not None:
@@ -889,7 +923,9 @@ class MetalKernel(SIMDKernel):
             )
         if reduction_type == "welford_reduce":
             if not self.multistage_reduction_entry:
-                acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+                acc_buf = self._new_idxvar(
+                    torch.float32, acc_buf_alloc_size, metal_type="float3"
+                )
                 self.compute.splice(
                     f"{acc_buf}[{reduction_idx}] = float3({value}, 0.0, 1.0);"
                 )
@@ -899,7 +935,9 @@ class MetalKernel(SIMDKernel):
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
-            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+            acc_buf = self._new_idxvar(
+                torch.float32, acc_buf_alloc_size, metal_type="float3"
+            )
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
             self.compute.writeline(
@@ -916,7 +954,9 @@ class MetalKernel(SIMDKernel):
         if reduction_type == "welford_combine":
             if not isinstance(value, tuple):
                 raise AssertionError("Input to welford combine must be tuple")
-            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+            acc_buf = self._new_idxvar(
+                torch.float32, acc_buf_alloc_size, metal_type="float3"
+            )
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -1073,7 +1113,7 @@ class MetalKernel(SIMDKernel):
                 ]
                 header_contents = _embed_headers(
                     headers,
-                    [Path(__file__).parent.parent.parent / "include"],
+                    [Path(get_file_path("torch")) / "include"],
                     OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)
@@ -1259,7 +1299,7 @@ class MetalKernel(SIMDKernel):
             self.compute.writelines(
                 [
                     f"if (!{cond}) {{",
-                    f"    TORCH_REPORT_ERROR(error_buf, {repr(msg)});",
+                    f"    TORCH_REPORT_ERROR(error_buf, {cpp_string_literal(msg)});",
                     "    return;",
                     "}",
                 ]
@@ -1303,17 +1343,82 @@ class MetalKernel(SIMDKernel):
 
 
 class MetalScheduling(SIMDScheduling):
+    """Scheduling for MPS: emits Metal kernels, plus external template kernels
+    (e.g. Helion) that render and emit their own Python source."""
+
     kernel_type = MetalKernel  # type: ignore[assignment]
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
 
+    def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        # MPS has no Metal templates, so every template here is an external one
+        # (e.g. Helion), whose fusion hooks generate Triton code; fusing other
+        # nodes into it gives wrong results or breaks MPS wrapper codegen. Helion
+        # turns template fusion off on Metal; this covers templates that leave it
+        # on. A multi-output template still absorbs its MultiOutput children: the
+        # scheduler fuses those before asking the backend.
+        if node1.is_template() or node2.is_template():
+            WhyNoFuse(node1, node2)("MPS does not fuse into external templates")
+            return False
+        return super().can_fuse(node1, node2)
+
+    can_fuse_vertical = can_fuse
+    can_fuse_horizontal = can_fuse
+
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
+        *,
+        only_gen_src_code: bool = False,
+        hint_override: int | None = None,
+    ) -> str | None:
+        # Checked before rendering, since rendering is where Helion autotunes.
+        if V.graph.cpp_wrapper:
+            raise NotImplementedError(
+                "External template kernels (e.g. Helion) are not supported on MPS "
+                "with cpp_wrapper or AOTInductor; use torch.compile with the default "
+                "Python wrapper"
+            )
+        return super().codegen_template(
+            template_node,
+            epilogue_nodes,
+            prologue_nodes,
+            only_gen_src_code=only_gen_src_code,
+            hint_override=hint_override,
+        )
+
     def define_kernel(
-        self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
+        self, src_code: str, node_schedule: list[SchedulerNode], kernel: SIMDKernel
     ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
+
+        if not isinstance(kernel, MetalKernel):
+            # External template kernels (e.g. Helion) render their own Python source
+            # and emit it themselves, as with TritonScheduling.
+            fn_name = f"generated_kernel_{wrapper.next_kernel_suffix()}"
+            named_src = src_code.replace(
+                str(Placeholder.DESCRIPTIVE_NAME), fn_name
+            ).replace(str(Placeholder.KERNEL_NAME), fn_name)
+            _, _, kernel_path = get_path(code_hash(named_src.strip()), "py")
+            if not kernel.emit_kernel_override(
+                wrapper,
+                named_src,
+                fn_name,
+                node_schedule,
+                kernel_path,
+                get_kernel_metadata,
+            ):
+                raise NotImplementedError(
+                    f"MPS cannot emit {type(kernel).__name__}: only Metal kernels and "
+                    "kernels whose emit_kernel_override emits their source are supported"
+                )
+            wrapper.src_to_kernel[src_code] = fn_name
+            return fn_name
 
         if V.graph.cpp_wrapper:
             # C++ path: one library per kernel (each has a single "generated_kernel" function)
@@ -1350,7 +1455,7 @@ class MetalScheduling(SIMDScheduling):
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
         for line in body_lines:
-            wrapper.header.writeline(line)
+            wrapper.header.writeline(line.replace("\\", "\\\\").replace("'", "\\'"))
         wrapper.header.writeline(f"''', {headers_repr})")
 
         return fn_name

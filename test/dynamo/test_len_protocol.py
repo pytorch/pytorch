@@ -18,7 +18,10 @@ import types
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 class _BaseSequenceLen:
@@ -84,11 +87,15 @@ class _BaseSequenceLen:
 class TestListLen(_BaseSequenceLen, torch._dynamo.test_case.TestCase):
     """Tests for len() on list objects"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = list
 
 
 class TestTupleLen(_BaseSequenceLen, torch._dynamo.test_case.TestCase):
     """Tests for len() on tuple objects"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     thetype = tuple
 
@@ -157,9 +164,13 @@ class _BaseMappingLen:
 class TestDictLen(_BaseMappingLen, torch._dynamo.test_case.TestCase):
     """Tests for len() on dict objects"""
 
+    hw_classification = HardwareClassification.GENERIC
+
 
 class TestOrderedDictLen(_BaseMappingLen, torch._dynamo.test_case.TestCase):
     """Tests for len() on OrderedDict objects"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def get_mapping(self, items):
         return collections.OrderedDict(items)
@@ -167,6 +178,8 @@ class TestOrderedDictLen(_BaseMappingLen, torch._dynamo.test_case.TestCase):
 
 class TestDefaultDictLen(_BaseMappingLen, torch._dynamo.test_case.TestCase):
     """Tests for len() on defaultdict objects"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def get_mapping(self, items):
         d = collections.defaultdict(int)
@@ -234,6 +247,8 @@ class _BaseSetLen:
 class TestSetLen(_BaseSetLen, torch._dynamo.test_case.TestCase):
     """Tests for len() on set objects"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def get_set(self, items):
         return set(items)
 
@@ -241,12 +256,16 @@ class TestSetLen(_BaseSetLen, torch._dynamo.test_case.TestCase):
 class TestFrozenSetLen(_BaseSetLen, torch._dynamo.test_case.TestCase):
     """Tests for len() on frozenset objects"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def get_set(self, items):
         return frozenset(items)
 
 
 class TestRangeLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on range objects"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -296,6 +315,8 @@ class TestRangeLen(torch._dynamo.test_case.TestCase):
 class TestStringLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on string objects"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -336,6 +357,8 @@ class TestStringLen(torch._dynamo.test_case.TestCase):
 
 class TestTensorLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on torch.Tensor objects"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -388,9 +411,43 @@ class TestTensorLen(torch._dynamo.test_case.TestCase):
         self.assertEqual(t.__len__(), 3)
         self.assertEqual(torch.Tensor.__len__(t), 3)
 
+    @make_dynamo_test
+    def test_len_0d_raises_type_error(self):
+        t = torch.tensor(3.0)
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            len(t)
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            t.__len__()
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            torch.Tensor.__len__(t)
+
+    def test_len_0d_caught_in_compiled_fn(self):
+        def f(x):
+            try:
+                return len(x)
+            except TypeError:
+                return -1
+
+        x = torch.tensor(3.0)
+        self.assertEqual(f(x), -1)
+        for fullgraph in (False, True):
+            torch._dynamo.reset()
+            compiled = torch.compile(f, backend="eager", fullgraph=fullgraph)
+            self.assertEqual(compiled(x), -1)
+
+    def test_len_0d_uncaught_matches_eager(self):
+        def f(x):
+            return len(x)
+
+        compiled = torch.compile(f, backend="eager")
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            compiled(torch.tensor(3.0))
+
 
 class TestNNModuleLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on torch.nn module containers"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -463,6 +520,8 @@ class TestNNModuleLen(torch._dynamo.test_case.TestCase):
 
 class TestDictViewLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on dict view objects (keys, values, items)"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -688,6 +747,8 @@ class SetSubclassCustomLen(set):
 class TestUserDefinedLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on user-defined classes with __len__"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -735,6 +796,8 @@ class TestUserDefinedLen(torch._dynamo.test_case.TestCase):
 
 class TestSubclassOverloadedLen(torch._dynamo.test_case.TestCase):
     """Tests for custom classes that inherit from builtins and overload __len__"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -828,6 +891,8 @@ class CustomDescriptorLenClass:
 class TestUserDefinedMappingLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on user-defined mapping (dict-like) classes"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -907,6 +972,8 @@ class TestUserDefinedMappingLen(torch._dynamo.test_case.TestCase):
 class TestDescriptorLenImpl(torch._dynamo.test_case.TestCase):
     """Test that len_impl handles descriptor-based __len__ correctly"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -976,6 +1043,8 @@ class TestDescriptorLenImpl(torch._dynamo.test_case.TestCase):
 class TestRaisesTypeError(torch._dynamo.test_case.TestCase):
     """Tests for types that don't support len() - should raise TypeError like Python"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -1039,6 +1108,8 @@ class TestRaisesTypeError(torch._dynamo.test_case.TestCase):
 class TestDequeLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on collections.deque objects"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -1087,6 +1158,8 @@ class TestDequeLen(torch._dynamo.test_case.TestCase):
 
 class TestMappingProxyLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on types.MappingProxyType objects"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -1164,6 +1237,8 @@ class SimpleMetaclassClass(metaclass=MetaclassWithLen):
 class TestMetaclassLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on metaclasses, classmethods, staticmethods, and properties"""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -1231,6 +1306,8 @@ class FrozenData:
 class TestMutableMappingLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on mutable mapping types."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -1256,6 +1333,8 @@ class TestMutableMappingLen(torch._dynamo.test_case.TestCase):
 
 class TestFrozenDataclassLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on frozen dataclasses."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest

@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import gc
+import weakref
 from collections import deque
 from unittest.mock import patch
 
@@ -6,6 +8,7 @@ import torch
 import torch._dynamo.guards
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.fx.traceback as fx_traceback
 from torch._dynamo import config as dc
 from torch._dynamo.source import (
     AttrSource,
@@ -20,7 +23,11 @@ from torch._dynamo.source import (
     ListGetItemSource,
     LocalSource,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
@@ -990,6 +997,149 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
             self.assertEqual(count_recompiles(out_fn), 2)
 
+    def test_cache_entry_invalidated_during_its_own_guard_eval(self):
+        # The FX_ANNOTATION lambda guard compares annotations with ==, which runs
+        # Tag.__eq__ in the middle of guard evaluation, with `other` being the
+        # annotation of the entry being evaluated. Freeing the class that entry
+        # ID_MATCHes fires the weakref finalizer that invalidates the same entry
+        # while its guards are still being walked. The other entry still matches.
+        class Tag:
+            def __init__(self, name=None, on_eq=None):
+                self.name = name
+                self.on_eq = on_eq
+
+            def __eq__(self, other):
+                if self.on_eq is not None:
+                    on_eq, self.on_eq = self.on_eq, None
+                    on_eq(other.name)
+                return isinstance(other, Tag)
+
+        def fn(x, box):
+            return x + box["cls"].bias
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+        classes = {"A": type("A", (), {"bias": 1}), "B": type("B", (), {"bias": 2})}
+        box = {}
+        for name in classes:
+            box["cls"] = classes[name]
+            with fx_traceback.annotate({"tag": Tag(name)}):
+                opt_fn(x, box)
+        self.assertEqual(cnt.frame_count, 2)
+
+        freed_during_guard_eval = []
+
+        def free_evaluated_entry_cls(name):
+            cls_ref = weakref.ref(classes.pop(name))
+            (box["cls"],) = classes.values()
+            gc.collect()
+            freed_during_guard_eval.append(cls_ref() is None)
+
+        with fx_traceback.annotate({"tag": Tag(on_eq=free_evaluated_entry_cls)}):
+            result = opt_fn(x, box)
+
+        self.assertEqual(freed_during_guard_eval, [True])
+        self.assertEqual(result, x + box["cls"].bias)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("mutation", ("code", "rebind"))
+    @parametrize("inherited", (False, True))
+    def test_class_function_attr_mutation_recompiles(self, inherited, mutation):
+        # A function living on the class (not the instance __dict__) resolves to
+        # a bound method. Both replacing its code object in place and rebinding
+        # the class attribute change what eager runs, so both must invalidate
+        # the compiled code. `inherited` moves the function off mro[0], which
+        # sources it through type.__mro__[1].__dict__ instead.
+        def two(self, x):
+            return x * 2.0
+
+        def nine(self, x):
+            return x * 9.0
+
+        class Base:
+            m = two
+
+        class Derived(Base):
+            pass
+
+        model = Derived() if inherited else Base()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(lambda x: model.m(x), backend=cnt, fullgraph=True)
+
+        x = torch.arange(1.0, 4.0)
+        self.assertEqual(opt_fn(x), x * 2.0)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Always mutate Base, the class the function actually lives on;
+        # rebinding on Derived would instead be caught by the MRO shadowing
+        # guards rather than by the code guard under test.
+        if mutation == "code":
+            Base.m.__code__ = nine.__code__
+        else:
+            Base.m = nine
+
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("method", ("forward", "helper", "__call__"))
+    @parametrize("mutation", ("code", "rebind"))
+    def test_nn_module_method_mutation_recompiles(self, mutation, method):
+        # forward is short-circuited past _call_impl, a user __call__ is inlined
+        # directly, and helper goes through resolve_type_attr; all must guard
+        # the class function's __code__.
+        def two(self, x):
+            return x * 2.0
+
+        def nine(self, x):
+            return x * 9.0
+
+        class Mod(torch.nn.Module):
+            helper = two
+
+            def forward(self, x):
+                return self.helper(x)
+
+        if method in ("forward", "__call__"):
+            setattr(Mod, method, two)
+        mod = Mod()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(lambda x: mod(x), backend=cnt, fullgraph=True)
+
+        x = torch.arange(1.0, 4.0)
+        self.assertEqual(opt_fn(x), x * 2.0)
+        self.assertEqual(cnt.frame_count, 1)
+
+        if mutation == "code":
+            getattr(Mod, method).__code__ = nine.__code__
+        else:
+            setattr(Mod, method, nine)
+
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_unmutated_method_does_not_recompile(self):
+        # The code guard must not fire on unrelated calls: a second instance of
+        # the same class shares one code object and must hit the same entry.
+        class Model:
+            def m(self, x):
+                return x * 2.0
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(obj, x):
+            return obj.m(x)
+
+        x = torch.arange(1.0, 4.0)
+        fn(Model(), x)
+        fn(Model(), x)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
     # Float constant guards must be value-identity (bitwise), not IEEE eq:
@@ -1065,6 +1215,8 @@ class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
         f(x, complex(7.0, float("nan")))
         self.assertEqual(cnt.frame_count, 2)
 
+
+instantiate_parametrized_tests(RecompileTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
