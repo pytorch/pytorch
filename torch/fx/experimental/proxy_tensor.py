@@ -715,7 +715,7 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # have no storage and outlive their level. Record a view of the fake tensor
     # they wrap, with the sizes, strides and storage offset the wrapper reports,
     # so passes still see which storage it aliases. Functorch is disabled so
-    # that an outer jvp does not wrap the view again. Non-strided tensors and
+    # that an outer jvp does not wrap the view again. Sparse tensors and
     # wrapped subclasses such as DTensor keep their wrapper.
     inner = _unwrap_functorch(val)
     # The view below is built from a Python FakeTensor's fields, as fast_detach
@@ -727,7 +727,7 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # at each functorch level, while the view below uses the fake one.
     if (
         fake is not None
-        and inner.layout == torch.strided
+        and not is_sparse_any(inner)
         and not (include_real and fake.real_tensor is not None)
     ):
         # The view is made on the meta tensor inside the fake tensor, as
