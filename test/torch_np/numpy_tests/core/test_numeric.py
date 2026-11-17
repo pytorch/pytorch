@@ -22,6 +22,7 @@ from hypothesis.extra import numpy as hynp
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -1400,6 +1401,10 @@ class TestClip(TestCase):
         assert_equal(actual, expected)
 
     @parametrize("dtype", "eFD")
+    @decorateIf(
+        skip(reason="torch.clamp not implemented for complex types"),
+        lambda p: p["dtype"] in "FD",
+    )
     def test_ones_pathological_2(self, dtype):
         if dtype in "FD":
             # FIXME: make xfail
