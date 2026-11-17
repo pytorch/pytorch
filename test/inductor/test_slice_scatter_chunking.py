@@ -20,7 +20,12 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     preserves_device_selection,
 )
-from torch.testing._internal.common_utils import IS_MACOS, parametrize, subtest
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_MACOS,
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import requires_gpu
 from torch.utils._ordered_set import OrderedSet
 
@@ -29,6 +34,8 @@ aten = torch.ops.aten
 
 
 class TestSliceScatterChunking(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     setUp = preserves_device_selection(TestCase.setUp)
     setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
@@ -669,35 +676,6 @@ class TestSliceScatterChunking(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual.stride(), expected.stride())
 
-    @onlyCPU
-    @requires_gpu()
-    @skipIf(IS_MACOS, "pinned memory is not available on macOS")
-    @inductor_config.patch(force_disable_caches=True)
-    def test_rejects_pinned_functionalized_copy_base(self, device):
-        def fn(head, tail):
-            out = torch.empty_strided((4, 4), (1, 4), device="cpu", pin_memory=True)
-            first = aten.copy.default(out[:2], head)
-            out = aten.slice_scatter.default(out, first, 0, 0, 2)
-            last = aten.copy.default(out[2:4], tail)
-            return aten.slice_scatter.default(out, last, 0, 2, 4)
-
-        head = torch.randn(2, 4, device=device)
-        tail = torch.randn(2, 4, device=device)
-        expected = fn(head, tail)
-        gm = make_fx(fn, tracing_mode="fake")(head, tail)
-        with mock.patch.object(
-            slice_scatter_chunking,
-            "_replace_with_inplace_copies",
-            wraps=slice_scatter_chunking._replace_with_inplace_copies,
-        ) as replace:
-            compiled = compile_fx(gm, [head, tail])
-
-        self.assertEqual(replace.call_count, 0)
-        actual = compiled(head, tail)
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual.stride(), expected.stride())
-        self.assertEqual(actual.is_pinned(), expected.is_pinned())
-
     def test_mutation_regions_computed_once_after_rewrites(self, device):
         def fn(*chunks):
             states = []
@@ -1055,11 +1033,52 @@ class TestSliceScatterChunking(TestCase):
         self.assertEqual(code.count(".run("), 1)
 
 
+class TestSliceScatterChunkingPinnedCopyBase(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
+
+    @onlyCPU
+    @requires_gpu()
+    @skipIf(IS_MACOS, "pinned memory is not available on macOS")
+    @inductor_config.patch(force_disable_caches=True)
+    def test_rejects_pinned_functionalized_copy_base(self, device):
+        def fn(head, tail):
+            out = torch.empty_strided((4, 4), (1, 4), device="cpu", pin_memory=True)
+            first = aten.copy.default(out[:2], head)
+            out = aten.slice_scatter.default(out, first, 0, 0, 2)
+            last = aten.copy.default(out[2:4], tail)
+            return aten.slice_scatter.default(out, last, 0, 2, 4)
+
+        head = torch.randn(2, 4, device=device)
+        tail = torch.randn(2, 4, device=device)
+        expected = fn(head, tail)
+        gm = make_fx(fn, tracing_mode="fake")(head, tail)
+        with mock.patch.object(
+            slice_scatter_chunking,
+            "_replace_with_inplace_copies",
+            wraps=slice_scatter_chunking._replace_with_inplace_copies,
+        ) as replace:
+            compiled = compile_fx(gm, [head, tail])
+
+        self.assertEqual(replace.call_count, 0)
+        actual = compiled(head, tail)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+        self.assertEqual(actual.is_pinned(), expected.is_pinned())
+
+
 instantiate_device_type_tests(
     TestSliceScatterChunking,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    allow_mps=True,
     allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestSliceScatterChunkingPinnedCopyBase,
+    globals(),
+    only_for="cpu",
 )
 
 
