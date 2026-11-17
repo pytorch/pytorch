@@ -2486,37 +2486,40 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         }
     )
     @parametrize(
-        "outer_fw,outer_bw,inner_fw,inner_bw,direction",
+        "outer_fw,inner_fw,inner_bw",
         (
-            # The forwards conflict, with each backward reusing its forward config.
-            (True, None, False, None, "forward"),
-            # The forwards agree and only the backwards conflict.
-            (True, True, True, False, "backward"),
-            # As above, with the inner backward inheriting its forward config.
-            (True, False, True, None, "backward"),
-            # A plain region encloses its regions with the top-level setting.
-            (None, None, True, None, "forward"),
+            # The inner region differs from the enclosing one.
+            (True, False, None),
+            # The inner region restates the enclosing one.
+            (True, True, None),
+            # The inner region sets only its backward.
+            (True, None, False),
+            # A plain region encloses its regions too.
+            (None, True, None),
         ),
     )
-    # Activation checkpointing doesn't open a scope of its own.
+    # Activation checkpointing doesn't open a region.
     @parametrize("checkpoint", (False, True))
-    def test_nested_region_rejects_conflicting_cudagraph_configs(
-        self, outer_fw, outer_bw, inner_fw, inner_bw, direction, checkpoint
+    def test_nested_region_rejects_cudagraph_config(
+        self, outer_fw, inner_fw, inner_bw, checkpoint
     ):
-        def options(fw, bw):
-            if fw is None:
+        def options(fw, bw=None):
+            if fw is None and bw is None:
                 return None
-            bw_patches = None if bw is None else {"triton.cudagraphs": bw}
             return get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"triton.cudagraphs": fw},
-                bw_inductor_config_patches=bw_patches,
+                fw_inductor_config_patches=(
+                    None if fw is None else {"triton.cudagraphs": fw}
+                ),
+                bw_inductor_config_patches=(
+                    None if bw is None else {"triton.cudagraphs": bw}
+                ),
             )
 
         @torch.compiler.nested_compile_region(options=options(inner_fw, inner_bw))
         def inner_region(x):
             return torch.sin(x)
 
-        @torch.compiler.nested_compile_region(options=options(outer_fw, outer_bw))
+        @torch.compiler.nested_compile_region(options=options(outer_fw))
         def outer_region(x):
             return torch.cos(inner_region(x))
 
@@ -2527,19 +2530,11 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 )
             return outer_region(x) + 1
 
-        inherited = direction == "backward" and inner_bw is None
-        inner_value = inner_fw if direction == "forward" or inherited else inner_bw
-        if inherited:
-            direction += re.escape(
-                " (inherited from its forward; set triton.cudagraphs in "
-                "bw_inductor_config_patches to override)"
-            )
         with self.assertRaisesRegex(
             BackendCompilerFailed,
-            f"(?s)ValueError: nested compile region '.*' sets "
-            f"triton.cudagraphs={inner_value} for its {direction}, but the region "
-            f"enclosing it resolves to {not inner_value}.*Called from:.*"
-            r"return torch\.cos\(inner_region\(x\)\)",
+            "(?s)ValueError: nested compile region '.*' sets triton.cudagraphs "
+            "inside another region; only first-level regions can set "
+            r"triton.cudagraphs.*Called from:.*return torch\.cos\(inner_region\(x\)\)",
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(
                 torch.randn(4, requires_grad=True)
@@ -2564,7 +2559,6 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             bw_inductor_config_patches={"triton.cudagraphs": True},
         )
         inner_options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
             bw_inductor_config_patches={"triton.cudagraphs": False},
         )
 
@@ -2640,47 +2634,9 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         else:
             with self.assertRaisesRegex(
                 BackendCompilerFailed,
-                "only first-level regions can set their own cudagraphs",
+                "only first-level regions can set triton.cudagraphs",
             ):
                 compiled_fn(x)
-
-    @requires_cuda_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    @torch._inductor.config.patch(
-        {
-            "fx_graph_cache": False,
-            "fx_graph_remote_cache": False,
-            "graph_partition": False,
-            "triton.cudagraphs": False,
-        }
-    )
-    def test_nested_region_restating_enclosing_cudagraphs_is_allowed(self):
-        options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True}
-        )
-
-        @torch.compiler.nested_compile_region(options=options)
-        def inner_region(x):
-            return torch.sin(x)
-
-        @torch.compiler.nested_compile_region(options=options)
-        def outer_region(x):
-            return torch.cos(inner_region(x))
-
-        def fn(x):
-            return outer_region(x) + 1
-
-        x = torch.randn(16, 16, device=GPU_TYPE)
-        with self._record_captures() as captures:
-            result, (code,) = run_and_get_code(
-                torch.compile(fn, backend="inductor", fullgraph=True), x
-            )
-
-        self.assertEqual(result, fn(x))
-        self.assertEqual(len(captures), 1)
-        (partition,) = self._partition_bodies(code)
-        self.assertIn("repeated_subgraph", partition)
-        self.assertNotIn(".run(", partition)
 
     @torch._inductor.config.patch(
         {

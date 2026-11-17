@@ -741,97 +741,57 @@ def _iter_subgraph_cudagraph_overrides(
                 yield override
 
 
-def _validate_nested_region_cudagraphs(
-    gm: GraphModule,
-    *,
-    enclosing_forward: bool,
-    enclosing_backward: bool,
-    validate_forward: bool = True,
-    validate_backward: bool = True,
-    region_encloses: Callable[[torch.fx.Node], bool] | None = None,
+def _reject_nested_region_cudagraphs(
+    gm: GraphModule, *, forward: bool = True, backward: bool = True
 ) -> None:
-    """Reject a nested region whose triton.cudagraphs differs from its scope.
+    """Reject triton.cudagraphs on a region nested inside another region.
 
-    Partitioning isolates only first-level regions, so a nested region cannot
-    get its own setting. region_encloses says whether a region opens a scope
-    (default: every region does), for a caller that compiles the regions inside
-    some regions on their own.
+    Partitioning splits only the outer graph and never a region's body, so only
+    first-level regions can have their own setting. Other subgraphs, such as
+    control flow bodies, do not count as regions.
     """
     from torch._higher_order_ops.invoke_subgraph import (
         get_backward_nested_region_config,
     )
 
-    visited: OrderedSet[tuple[int, bool, bool, bool]] = OrderedSet()
+    visited: OrderedSet[tuple[int, bool]] = OrderedSet()
 
-    def visit(
-        current_gm: GraphModule,
-        enclosing_forward: bool,
-        enclosing_backward: bool,
-        first_level: bool,
-    ) -> None:
-        key = (id(current_gm), enclosing_forward, enclosing_backward, first_level)
-        if key in visited:
+    def sets_cudagraphs(nested_config: Any) -> bool:
+        return (forward and _region_cudagraphs_override(nested_config) is not None) or (
+            backward
+            and _region_cudagraphs_override(
+                get_backward_nested_region_config(nested_config)
+            )
+            is not None
+        )
+
+    def visit(module: GraphModule, in_region: bool) -> None:
+        if (id(module), in_region) in visited:
             return
-        visited.add(key)
-        invoke_subgraph_module_ids: OrderedSet[int] = OrderedSet()
-        for node in current_gm.graph.find_nodes(
+        visited.add((id(module), in_region))
+        region_bodies: OrderedSet[int] = OrderedSet()
+        for node in module.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.invoke_subgraph
         ):
-            custom = node.meta.get("custom", {})
-            nested_config = custom.get("nested_region_config")
-            backward_config = get_backward_nested_region_config(nested_config)
-            forward_override = _region_cudagraphs_override(nested_config)
-            backward_override = _region_cudagraphs_override(backward_config)
-            if not first_level:
+            nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            if in_region and sets_cudagraphs(nested_config):
                 region_name = node.args[1] if len(node.args) > 1 else node.name
-                # A backward graph's regions already carry their backward config;
-                # see _specialize_nested_region_configs_for_backward.
-                inherited = (
-                    " (inherited from its forward; set triton.cudagraphs in "
-                    "bw_inductor_config_patches to override)"
-                    if backward_config is nested_config
-                    and not custom.get("nested_region_config_from_bw_patches")
-                    else ""
+                stack_trace = node.meta.get("stack_trace")
+                raise ValueError(
+                    f"nested compile region {region_name!r} sets triton.cudagraphs "
+                    "inside another region; only first-level regions can set "
+                    "triton.cudagraphs"
+                    + (f". Called from:\n{stack_trace}" if stack_trace else "")
                 )
-                for direction, validate, value, enclosing in (
-                    ("forward", validate_forward, forward_override, enclosing_forward),
-                    (
-                        f"backward{inherited}",
-                        validate_backward,
-                        backward_override,
-                        enclosing_backward,
-                    ),
-                ):
-                    if validate and value is not None and value != enclosing:
-                        stack_trace = node.meta.get("stack_trace")
-                        raise ValueError(
-                            f"nested compile region {region_name!r} sets "
-                            f"triton.cudagraphs={value} for its {direction}, but the "
-                            f"region enclosing it resolves to {enclosing}; only "
-                            "first-level regions can set their own cudagraphs"
-                            + (f". Called from:\n{stack_trace}" if stack_trace else "")
-                        )
-
-            subgraph = _get_invoke_subgraph_graph_module(current_gm, node)
+            subgraph = _get_invoke_subgraph_graph_module(module, node)
             if subgraph is not None:
-                invoke_subgraph_module_ids.add(id(subgraph))
-                opens_scope = region_encloses is None or region_encloses(node)
-                visit(
-                    subgraph,
-                    enclosing_forward if forward_override is None else forward_override,
-                    (
-                        enclosing_backward
-                        if backward_override is None
-                        else backward_override
-                    ),
-                    first_level and not opens_scope,
-                )
+                region_bodies.add(id(subgraph))
+                visit(subgraph, True)
+        for child in _iter_graph_referenced_submodules(module):
+            if id(child) not in region_bodies:
+                visit(child, in_region)
 
-        for child in _iter_graph_referenced_submodules(current_gm):
-            if id(child) not in invoke_subgraph_module_ids:
-                visit(child, enclosing_forward, enclosing_backward, first_level)
-
-    visit(gm, enclosing_forward, enclosing_backward, True)
+    visit(gm, False)
 
 
 def _any_subgraph_cudagraphs_preference_differs(
@@ -3195,13 +3155,7 @@ def create_compiler_config_extra(
             f"(forward: {top_level_cudagraphs}, backward: "
             f"{backward_top_level_cudagraphs})"
         )
-    if forward.regions_differ or backward.regions_differ:
-        _validate_nested_region_cudagraphs(
-            pre_aot_graph,
-            enclosing_forward=top_level_cudagraphs,
-            enclosing_backward=backward_top_level_cudagraphs,
-            validate_backward=may_have_backward,
-        )
+    _reject_nested_region_cudagraphs(pre_aot_graph, backward=may_have_backward)
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
