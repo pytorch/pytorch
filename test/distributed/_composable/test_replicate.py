@@ -88,8 +88,8 @@ class ReplicateTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "gloo"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cpu"
 
     def _compare_module(self, mod, replicate_mod):

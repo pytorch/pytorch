@@ -1873,9 +1873,15 @@ class MultiProcContinuousTest(TestCase):
         """
         return None
 
-    # Please override if you intend to test on specific device type
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
+        # Test bases may override this property to correct the device. The
+        # default returns the `device_type` class attribute set by
+        # instantiate_device_type_tests, or falls back to the current
+        # accelerator in the legacy flow.
+        device_type = getattr(self, "device_type", None)
+        if device_type is not None:
+            return device_type
         curr_device = torch.accelerator.current_accelerator()
         if curr_device is None:
             return "cpu"
@@ -2103,21 +2109,9 @@ class MultiProcContinuousTest(TestCase):
         if cls.__dict__.get("_processes_spawned", False):
             return
 
-        # Handle method, property, and string attribute for device_type
-        # (instantiate_device_type_tests sets device_type as a string attribute,
-        # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
-        if isinstance(device_type_attr, classmethod):
-            device_type = device_type_attr.__func__(cls)
-        elif isinstance(device_type_attr, property):
-            # Note: fget expects an instance but we pass cls since no instance
-            # exists yet. This works because DTensorTestMixin.device_type only
-            # accesses class-level attributes (world_size, module constants).
-            device_type = device_type_attr.fget(cls)
-        elif callable(device_type_attr):
-            device_type = device_type_attr()
-        else:
-            device_type = device_type_attr
+        # `_device_type` properties only read class-level state, so their fget
+        # works with cls passed as self.
+        device_type = cls._device_type.fget(cls)
 
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
@@ -2286,10 +2280,7 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        device_type = cls.device_type
-        if callable(device_type):
-            device_type = device_type()
-        return cls.backend(device_type)
+        return cls.backend(cls._device_type.fget(cls))
 
     def _skip_if_backend_unavailable(self, device: str) -> None:
         backend_name = self.backend(device)
@@ -2321,11 +2312,9 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
                 )
 
     def setUp(self) -> None:
-        device_type = self.__class__.device_type
+        device_type = self._device_type
         logger.debug("Setting up test: %s on device type: %s", self.id(), device_type)
-        if callable(device_type):
-            device_type = device_type()
-        self._skip_if_backend_unavailable(str(device_type))
+        self._skip_if_backend_unavailable(device_type)
         super().setUp()
 
     def rank_to_device(self, device):
