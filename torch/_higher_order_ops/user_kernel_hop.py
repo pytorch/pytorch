@@ -9,15 +9,16 @@ the kernel object: how to launch it, how to find its write set, and how to captu
 call to it (the HOPifier).
 """
 
+import dataclasses
 import threading
-from collections.abc import Callable
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from collections.abc import Callable, Mapping
+from typing import Any, Generic, Literal, Never, TYPE_CHECKING, TypeVar
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _dispatch_keys, DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
@@ -333,6 +334,179 @@ def register_user_kernel_hop_dispatch(
     # Adds SAC support for user kernels
     redirect_to_mode(mutation_hop, _CachingTorchDispatchMode)
     redirect_to_mode(mutation_hop, _CachedTorchDispatchMode)
+
+
+###############################################################################
+# Registry: what the DSL-agnostic passes need to know about each DSL's HOP pair
+
+
+UserKernelLayoutConstraint = Literal["needs_fixed_stride_order", "flexible_layout"]
+
+
+# eq=False: infos compare and hash by identity, as register_user_kernel_hop compares
+# them, so a DSL's callables need not be hashable.
+@dataclasses.dataclass(frozen=True, eq=False)
+class UserKernelHOPInfo:
+    """One DSL's user-kernel HOP pair, as seen by the passes that handle every DSL
+    the same way (reinplacing, the functional decomposition, Inductor's layout
+    constraint and mutation propagation, CSE, partitioning, ...).
+
+    Each DSL module registers one at import time; a pass looks a node's target up
+    with get_user_kernel_hop_info instead of comparing it with a DSL's HOP.
+
+    Those passes read the HOP nodes' kwargs by name, so a registered pair must be
+    traced with keyword arguments only, in this form:
+
+    - ``kwargs``: the kernel's arguments by parameter name. The mutation HOP writes
+      the tensors among them that ``get_mutated_tensors`` names.
+    - The functional HOP takes the mutation HOP's arguments plus
+      ``tensors_to_clone``, the names in ``kwargs`` whose tensors it clones and
+      writes instead, and, if any of those is a view, ``tensor_bases``: their
+      bases by name. It returns ``{name: written clone}`` for each name in
+      ``tensors_to_clone``. Reinplacing removes the names whose tensors the kernel
+      may write in place.
+    - Any other argument is the DSL's own; the passes only hand it on.
+
+    The functional HOP's CompositeExplicitAutograd py_impl, which eager runs, must
+    call the mutation HOP once, on clones of the tensors named in
+    ``tensors_to_clone`` (functional_hop_dense does this). The post-grad
+    decomposition traces that impl, so a pair without one cannot be registered.
+
+    The FX graph cache keys user kernels by source for Triton only
+    (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
+    it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
+    not cacheable by default, and the cache bypasses every graph that contains an
+    uncacheable HOP.
+    """
+
+    dsl: str
+    mutation: UserKernelWrapperHOP
+    functional: UserKernelWrapperHOP
+    # (hop_kwargs, kernel_kwargs) -> names of the kernel kwargs the kernel writes.
+    # It may name a kwarg that the kernel only reads, but must not omit one that it
+    # writes: Inductor's layout constraints would let that kwarg share a buffer with
+    # another argument. Inductor (propagate_mutation and the layout constraints)
+    # passes the mutation HOP's kwargs as lowered (each FX node replaced by its
+    # lowered value, e.g. an IR node for a tensor, in "kwargs" too) and that node's
+    # "kwargs" with each FX node replaced by its fake value (from its meta value, or
+    # its eager_input_vals). Read only the DSL's own arguments (e.g. kernel_idx) from
+    # hop_kwargs, and the kernel's arguments from kernel_kwargs.
+    get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
+    # HOP kwargs -> kernel name, for the reinplacing pass's log.
+    get_kernel_name: Callable[[Mapping[str, Any]], str]
+    # () -> the layout constraint Inductor gives the mutation HOP's tensor arguments:
+    # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
+    # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
+    # one of this DSL's mutation HOP nodes.
+    get_layout_constraint: Callable[[], UserKernelLayoutConstraint]
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS,
+    # which DSLs share, or a member of the DSL's own, the one TRIGGER_DSLS names for
+    # it, which register_user_kernel_hop refuses to a DSL of another name.
+    # auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2 are refused too; the
+    # reinplacing pass also reads AUTO_FUNC_V2 as a switch that stops it from
+    # rewriting getitem users.
+    reinplace_trigger: ReInplaceTrigger
+    # torch.export's serializer can write this DSL's nodes.
+    serializable: bool
+
+
+_user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
+# DSL modules may register from different threads (import locks only serialize the
+# imports of one module), so a registration holds this lock across its ownership
+# checks and both writes, and every read of the registry takes it too: no reader
+# sees half of a pair, and two conflicting registrations cannot both pass the checks.
+_user_kernel_hops_lock = threading.Lock()
+
+
+def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
+    """Register a DSL's HOP pair with the passes that handle every DSL. Each DSL
+    module calls it once, at import time.
+
+    Everything is checked before the registry is written, so a refused registration
+    leaves it as it was. Raises:
+
+    - TypeError if the trigger is not a ReInplaceTrigger member (its name, for
+      example), if either HOP is not a UserKernelWrapperHOP, or if the functional HOP
+      has no CompositeExplicitAutograd py_impl for the decomposition to trace.
+    - ValueError if the trigger is auto_functionalize's AUTO_FUNC_V1 or AUTO_FUNC_V2,
+      or a member other than USER_KERNEL_OPS that TRIGGER_DSLS does not name for this
+      DSL (another DSL's member, whether or not that DSL has registered yet, or a
+      member without an entry), or if the mutation and functional HOPs are the same
+      HOP.
+    - RuntimeError if either HOP is registered already, with another info. Infos
+      compare by identity: registering the same object again is accepted and changes
+      nothing, but an equal copy of it is refused.
+    """
+    trigger = info.reinplace_trigger
+    if not isinstance(trigger, ReInplaceTrigger):
+        raise TypeError(f"{trigger!r} is not a ReInplaceTrigger")
+    if trigger in (ReInplaceTrigger.AUTO_FUNC_V1, ReInplaceTrigger.AUTO_FUNC_V2):
+        raise ValueError(
+            f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    trigger_dsl = TRIGGER_DSLS.get(trigger)
+    if trigger is not ReInplaceTrigger.USER_KERNEL_OPS and trigger_dsl != info.dsl:
+        if trigger_dsl is None:
+            raise ValueError(
+                f"{trigger} has no entry in TRIGGER_DSLS; add one naming the DSL it "
+                "belongs to"
+            )
+        raise ValueError(
+            f"{trigger} belongs to the {trigger_dsl} DSL; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    if info.mutation is info.functional:
+        raise ValueError(
+            f"{info.mutation} cannot be both the mutation and the functional HOP of "
+            f"the {info.dsl} DSL"
+        )
+    hops = (info.mutation, info.functional)
+    with _user_kernel_hops_lock:
+        for hop in hops:
+            if not isinstance(hop, UserKernelWrapperHOP):
+                raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
+            owner = _user_kernel_hops.get(hop, info)
+            if owner is not info:
+                raise RuntimeError(
+                    f"{hop} is already registered by the {owner.dsl} DSL with another "
+                    "UserKernelHOPInfo object; only that object can be registered again"
+                )
+        if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
+            raise TypeError(
+                f"{info.functional} has no CompositeExplicitAutograd py_impl"
+            )
+        for hop in hops:
+            _user_kernel_hops[hop] = info
+
+
+def get_user_kernel_hop_info(
+    target: object, role: Literal["mutation", "functional"] | None = None
+) -> UserKernelHOPInfo | None:
+    """The registry entry whose mutation or functional HOP is ``target``; given a
+    ``role``, only if ``target`` is the HOP of its pair with that role."""
+    if not isinstance(target, UserKernelWrapperHOP):
+        return None
+    with _user_kernel_hops_lock:
+        info = _user_kernel_hops.get(target)
+    if info is None or role is None:
+        return info
+    hop = info.mutation if role == "mutation" else info.functional
+    return info if target is hop else None
+
+
+def is_user_kernel_mutation_hop(target: object) -> bool:
+    return get_user_kernel_hop_info(target, "mutation") is not None
+
+
+def is_user_kernel_functional_hop(target: object) -> bool:
+    return get_user_kernel_hop_info(target, "functional") is not None
+
+
+def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
+    """Every registered DSL, in registration order."""
+    with _user_kernel_hops_lock:
+        return list(dict.fromkeys(_user_kernel_hops.values()))
 
 
 ###############################################################################

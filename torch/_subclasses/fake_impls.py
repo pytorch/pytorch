@@ -38,6 +38,7 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
@@ -47,8 +48,10 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_device,
     maybe_get_item_memo,
     maybe_get_real_tensor,
+    maybe_get_sym_memo,
     maybe_set_fake_device,
     maybe_set_item_memo,
+    maybe_set_sym_memo,
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
@@ -269,7 +272,10 @@ def _deregister_op_impl(op: OpOverload) -> None:
 
 @register_op_impl(op_implementations_dict.__contains__)
 def dispatch_to_op_implementations_dict(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
 ) -> Any:
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
 
@@ -277,8 +283,11 @@ def dispatch_to_op_implementations_dict(
 @register_op_impl(_is_tensor_constructor)
 @register_op_impl([*_like_tensor_constructors])
 def constructors(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> torch.Tensor:
     if func in _non_kwarg_device_constructors:
         raise AssertionError(
             f"func must not be in _non_kwarg_device_constructors, got {func}"
@@ -305,6 +314,9 @@ def constructors(
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     if r.device.type == "meta":
+        # An out overload returns its out argument, which may be a meta fake
+        if fake_mode.is_our_fake(r):
+            return r
         return fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode, r, out_device
         )
@@ -330,20 +342,24 @@ def non_kwarg_is_pinned(
 # They take string arguments and should not have device/dtype parameters added
 @register_op_impl(torch.ops.profiler._record_function_enter.default)
 def _record_function_enter(
-    fake_mode: FakeTensorMode, func: OpOverload, name: str, args: object | None = None
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    name: str,
+    args: object | None = None,
+) -> torch.Tensor:
     # Call the real implementation to get a real handle tensor
     with in_kernel_invocation_manager(fake_mode):
         real_handle = func(name, args)
     # Create a meta tensor with the same properties as the real handle
     meta_handle = torch.empty_like(real_handle, device="meta")
-    # Wrap it as a FakeTensor
-    return FakeTensor(fake_mode, meta_handle, torch.device("cpu"))
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, meta_handle, torch.device("cpu")
+    )
 
 
 @register_op_impl(torch.ops.profiler._record_function_exit.default)
 def _record_function_exit(
-    fake_mode: FakeTensorMode, func: OpOverload, handle: Any
+    fake_mode: FakeTensorMode | CppFakeTensorMode, func: OpOverload, handle: Any
 ) -> None:
     # Exit doesn't return anything and doesn't need to do anything for fake tensors
     # Just return None (the actual return type is void)
@@ -491,8 +507,11 @@ def foreach_pointwise_tensor(
 
 @register_op_impl(aten._sparse_coo_tensor_with_dims_and_tensors.default)
 def _sparse_coo_tensor_with_dims_and_tensors(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> torch.Tensor:
     return constructors(fake_mode, func, *args, **kwargs)
 
 
@@ -666,8 +685,11 @@ def _spdiags(
     ]
 )
 def sparse_compressed_constructors(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> torch.Tensor:
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -723,7 +745,9 @@ def _to_dense(
                 dtype=self.dtype,
                 device="meta",
             )
-        return FakeTensor(fake_mode, out, self_device)
+        return fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode, out, self_device
+        )
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(self, dtype=dtype, masked_grad=masked_grad)
@@ -747,14 +771,14 @@ def dyn_shape(
 def _unique(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     dim: int | None,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
     *,
     unique_consecutive: bool = False,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -762,7 +786,8 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+    memo_name = "unique_consecutive_memo" if unique_consecutive else "unique_memo"
+    nnz = maybe_get_sym_memo(arg, memo_name)
 
     # Do not use a memo for unique_dim
     if dim is not None or nnz is None:
@@ -794,10 +819,7 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            if unique_consecutive:
-                arg.unique_consecutive_memo = nnz  # pyrefly: ignore[bad-assignment]
-            else:
-                arg.unique_memo = nnz  # pyrefly: ignore[bad-assignment]
+            maybe_set_sym_memo(arg, memo_name, nnz)
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -824,18 +846,18 @@ def _unique(
         counts = arg.new_empty(0, dtype=torch.int64)
     ret.append(counts)
 
-    return tuple(ret)
+    return ret[0], ret[1], ret[2]
 
 
 @register_op_impl(aten._unique2.default)
 def unique2(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
 
 
@@ -843,10 +865,10 @@ def unique2(
 def unique(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     sorted: bool = True,
     return_inverse: bool = False,
-) -> tuple[FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     uniques, inverse, _counts = _unique(
         fake_mode, func, arg, None, sorted, return_inverse, False
     )
@@ -914,12 +936,12 @@ def meta_select(
 def unique_dim(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     dim: int,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return _unique(
         fake_mode,
         func,
@@ -936,11 +958,11 @@ def unique_dim(
 def unique_consecutive(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: FakeTensor,
+    arg: torch.Tensor,
     return_inverse: bool = False,
     return_counts: bool = False,
     dim: int | None = None,
-) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return _unique(
         fake_mode,
         func,
@@ -1334,7 +1356,7 @@ def _reshape_copy(
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     func: OpOverload,
     a: FakeTensor,
     *shape: Any,
@@ -1426,15 +1448,17 @@ def local_scalar_dense(
 
 @register_op_impl(torch.ops.aten.nonzero_numpy.default)
 def nonzero_numpy(
-    fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
-) -> list[FakeTensor]:
+    fake_mode: FakeTensorMode, func: OpOverload, arg: torch.Tensor
+) -> list[torch.Tensor]:
     # Match eager, which returns a 1-tuple for a 0-dim input like numpy does.
     nonzero_arg = arg.unsqueeze(0) if arg.dim() == 0 else arg
     return torch.ops.aten.nonzero.default(nonzero_arg).unbind(1)
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
-def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> FakeTensor:
+def nonzero(
+    fake_mode: FakeTensorMode, func: OpOverload, arg: torch.Tensor
+) -> torch.Tensor:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -1442,7 +1466,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.nonzero_memo) is None:
+    if (nnz := maybe_get_sym_memo(arg, "nonzero_memo")) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -1480,7 +1504,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
+        maybe_set_sym_memo(arg, "nonzero_memo", nnz)
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
@@ -1724,11 +1748,11 @@ def check_no_bool_index_tensors(
 
 
 def run_and_return_new_tensor_of_input_device(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     func: OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-) -> FakeTensor:
+) -> torch.Tensor:
     # TODO: ref
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1741,7 +1765,9 @@ def run_and_return_new_tensor_of_input_device(
 
     if out is new_kwargs["input"]:
         return out  # copy_
-    return FakeTensor(fake_mode, out, out_device)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, out_device
+    )
 
 
 _is_builtin_namespaces = ordered_set("aten", "prims", "prim")
@@ -1951,6 +1977,11 @@ def to_mkldnn(
     dtype: torch.dtype | None = None,
 ) -> object:
     if not isinstance(a, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        if is_fake_tensor(a):
+            raise NotImplementedError(
+                "The C++ fake tensor fallback does not support mkldnn tensors yet, "
+                f"found in {func.name()}"
+            )
         return NotImplemented
 
     fake_device = maybe_get_fake_device(a)
@@ -1996,8 +2027,11 @@ def to_mkldnn(
     and has_meta(func)
 )
 def foreach_run_and_map_input_device(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> list[FakeTensor] | None:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> list[torch.Tensor] | None:
     tensor_lists = [
         arg
         for arg in itertools.chain(args, kwargs.values())
@@ -2035,8 +2069,11 @@ def foreach_run_and_map_input_device(
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
 def index_tensor(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> torch.Tensor:
     from torch._meta_registrations import meta_index_Tensor
 
     _, new_kwargs = _normalize_function_or_error(
@@ -2054,8 +2091,11 @@ def index_tensor(
 # will roughly do the right thing even when given real devices
 @register_op_impl(aten._embedding_bag.default)
 def embedding_bag(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> tuple[FakeTensor, FakeTensor, FakeTensor, FakeTensor]:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     from torch._meta_registrations import meta_embedding_bag
 
     with fake_mode:
@@ -2064,7 +2104,10 @@ def embedding_bag(
 
 @register_op_impl(aten.embedding.default)
 def embedding(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
 ) -> Any:
     from torch._meta_registrations import embedding as meta_embedding
 
@@ -2091,8 +2134,11 @@ def embedding(
 @register_op_impl(aten.slice_scatter.default)
 @register_op_impl(aten.diagonal_scatter.default)
 def multi_device_op_default(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> torch.Tensor:
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
@@ -2129,8 +2175,11 @@ def multi_device_op_out(
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten.index_put_.default)
 def index_put_impl(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> torch.Tensor:
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -2188,8 +2237,13 @@ def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) 
     ]
 )
 def conv(
-    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
-) -> FakeTensor | tuple[FakeTensor | None, FakeTensor | None, FakeTensor | None]:
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    func: OpOverload,
+    *args: Any,
+    **kwargs: Any,
+) -> (
+    torch.Tensor | tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]
+):
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -2290,7 +2344,7 @@ def conv(
 
     def convert(
         t: torch.Tensor | None, mem_fmt: torch.memory_format | None
-    ) -> FakeTensor | None:
+    ) -> torch.Tensor | None:
         if t is None:
             return t
         if mem_fmt is not None:
@@ -2299,7 +2353,9 @@ def conv(
                 t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
             else:
                 t = t.to(memory_format=mem_fmt)
-        return FakeTensor(fake_mode, t, device)
+        return fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode, t, device
+        )
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(**new_kwargs)
@@ -2612,13 +2668,14 @@ def make_fast_binary_impl(
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
 def fast_detach(
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
     x: FakeTensor | torch.Tensor,
     include_real: bool = False,
 ) -> torch.Tensor:
     if (
         not isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         or fake_mode is None
+        or isinstance(fake_mode, CppFakeTensorMode)
     ):
         raise AssertionError(
             "type widening added for cpp faketensor but this is not used yet"

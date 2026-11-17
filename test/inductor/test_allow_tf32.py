@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import unittest
 from unittest import mock
 
@@ -14,7 +15,8 @@ from torch._dynamo.device_interface import (
     register_interface_for_device,
     XpuInterface,
 )
-from torch._dynamo.source import ConstantSource
+from torch._dynamo.source import ConstantSource, LocalSource
+from torch._guards import tracing, TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.codecache import compiled_fx_graph_hash, FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
@@ -26,13 +28,20 @@ from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    ShapeEnv,
+    StatefulSymbolicContext,
+    StrictMinMaxConstraint,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 class _TensorNode:
@@ -116,14 +125,40 @@ class TestAllowTf32DynamicShapes(TestCase):
         dtype=torch.float32,
         tf32=True,
         m_range=None,
+        strict_min=None,
         b200=False,
         n=512,
         n_range=None,
         batched=False,
     ):
         shape_env = ShapeEnv()
+        tracing_context = contextlib.nullcontext()
         if m == "unbacked":
             sym_m = shape_env.create_unbacked_symint().node.expr
+        elif strict_min is not None:
+            # Mirror mark_dynamic(t, 0, min=strict_min): Dynamo keeps the user's
+            # constraint in the tracing context, not in the shape env.
+            t = torch.empty(m, 4)
+            ctx = StatefulSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+                constraint_sizes=[
+                    StrictMinMaxConstraint(
+                        warn_only=False, vr=ValueRanges(strict_min, int_oo)
+                    ),
+                    None,
+                ],
+                tensor_source=LocalSource("a"),
+                shape_env_to_source_to_symbol_cache={},
+            )
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+            sym_m = (
+                fake_mode.from_tensor(t, source=LocalSource("a"), symbolic_context=ctx)
+                .shape[0]
+                .node.expr
+            )
+            tc = TracingContext(fake_mode)
+            tc.tensor_to_context[t] = ctx
+            tracing_context = tracing(tc)
         else:
             sym_m = shape_env.create_symbol(m, ConstantSource("m"))
         if m_range is not None:
@@ -138,6 +173,7 @@ class TestAllowTf32DynamicShapes(TestCase):
         try:
             torch.backends.cuda.matmul.fp32_precision = precision
             with (
+                tracing_context,
                 V.set_graph_handler(graph),
                 mock.patch("torch.cuda.is_available", return_value=True),
                 mock.patch("torch.cuda.is_tf32_supported", return_value=tf32),
@@ -224,6 +260,14 @@ class TestAllowTf32DynamicShapes(TestCase):
     def test_cuda_gate_sm10x_symbolic_n(self, n, n_range, batched, expected, guards):
         result = self._gate(1024, b200=True, n=n, n_range=n_range, batched=batched)
         self.assertEqual(result, (expected, guards))
+
+    @parametrize("strict_min", (2, 4))
+    @parametrize("b200", (False, True))
+    def test_cuda_gate_strict_min_only_needs_proof(self, strict_min, b200):
+        # A min-only user range has no finite upper bound (and min=2 equals the
+        # default range), but a guard would still narrow it.
+        result = self._gate(1024, strict_min=strict_min, b200=b200)
+        self.assertEqual(result, (False, []))
 
     def test_cuda_gate_no_guard_without_tf32(self):
         self.assertEqual(self._gate(1024, precision="ieee"), (False, []))

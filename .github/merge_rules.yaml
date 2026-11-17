@@ -510,6 +510,8 @@
   - hameerabbasi
   - riccardofelluga
   - amjames
+  - dsashidh
+  - ayushsatyam146
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -638,6 +640,9 @@
   patterns:
   - torch/testing/**
   - test/**
+  - tools/linter/adapters/test_linter.py
+  - tools/linter/adapters/test_linter_allowlist.json
+  - tools/test/test_test_linter.py
   approved_by:
   - fffrog
   mandatory_checks_name:
@@ -655,6 +660,7 @@
   - anshul-si
   - aorenste
   - atalman
+  - banitag1
   - blaine-rister
   - bobrenjc93
   - BoyuanFeng
@@ -663,6 +669,7 @@
   - digantdesai
   - dolpm
   - drisspg
+  - dshi7
   - egienvalue
   - fegin
   - frgossen
@@ -670,12 +677,17 @@
   - htyu
   - huydhn
   - IvanKobzarev
+  - ivy-zhou
   - izaitsevfb
   - jananisriram
   - janeyx99
   - jathu
   - jbschlosser
+  - jdonald
   - jeanschmidt
+  - jerryzh168
+  - jijunyan
+  - joshuuuasu
   - kapilsh
   - karthickai
   - laithsakka
@@ -686,8 +698,8 @@
   - mlazos
   - nandesuka
   - NicolasHug
+  - Nicoshev
   - njriasan
-  - oulgen
   - pdesupinski
   - pianpwk
   - ryanzhang22
@@ -703,7 +715,6 @@
   - tushar00jain
   - vkuzo
   - warrendeng
-  - wconstab
   - weifengpy
   - williamwen42
   - ydwu4

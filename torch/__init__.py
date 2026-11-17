@@ -28,7 +28,10 @@ from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
+    LiteralString as _LiteralString,
+    Never as _Never,
     overload as _overload,
+    Self as _Self,
     TYPE_CHECKING,
     TypeAlias as _TypeAlias,
     TypeGuard as _TypeGuard,
@@ -36,10 +39,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
-    LiteralString as _LiteralString,
-    Never as _Never,
     ParamSpec as _ParamSpec,
-    Self as _Self,
     TypeIs as _TypeIs,
 )
 
@@ -209,6 +209,7 @@ if sys.platform == "win32":
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
+        cudnn_dll_path = th_dll_path
         if cuda_version:
             try:
                 # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
@@ -228,7 +229,15 @@ if sys.platform == "win32":
                     "cupti",
                     "cudnn",
                 ):
-                    load_nvidia_dynamic_lib(lib)
+                    try:
+                        loaded = load_nvidia_dynamic_lib(lib)
+                        if lib == "cudnn" and loaded.abs_path:
+                            cudnn_dll_path = os.path.dirname(loaded.abs_path)
+                    except Exception:
+                        warnings.warn(
+                            f"cuda-pathfinder is unable to find {lib} lib in the current python environment or sys PATH variable",
+                            stacklevel=2,
+                        )
             except Exception:
                 warnings.warn(
                     "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
@@ -287,12 +296,7 @@ if sys.platform == "win32":
         )
 
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
-        with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
         prev_error_mode = kernel32.SetErrorMode(0x0001)
-
-        kernel32.LoadLibraryW.restype = ctypes.c_void_p
-        if with_load_library_flags:
-            kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
@@ -312,32 +316,15 @@ if sys.platform == "win32":
                 ).strip()
             )
 
-        dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
-        path_patched = False
-        for dll in dlls:
-            is_loaded = False
-            if with_load_library_flags:
-                res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
-                last_error = ctypes.get_last_error()
-                if res is None and last_error != 126:
-                    err = ctypes.WinError(last_error)
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
-                elif res is not None:
-                    is_loaded = True
-            if not is_loaded:
-                if not path_patched:
-                    os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
-                    path_patched = True
-                res = kernel32.LoadLibraryW(dll)
-                if res is None:
-                    err = ctypes.WinError(ctypes.get_last_error())
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
+        # cudnn64_9.dll loads its sub-libraries (cudnn_graph64_9.dll, ...) by bare
+        # name on first use, which searches PATH. Preload them from the directory
+        # cudnn64_9.dll comes from (cuda-pathfinder's, else torch\lib) so a missing
+        # or different cuDNN on PATH is never used.
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+        for dll in glob.glob(os.path.join(cudnn_dll_path, "cudnn*.dll")):
+            if kernel32.LoadLibraryExW(dll, None, 0x00001100) is None:
+                err = ctypes.WinError(ctypes.get_last_error()).strerror
+                warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
 
         kernel32.SetErrorMode(prev_error_mode)
 
@@ -1822,6 +1809,8 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` with ``mode='bilinear'`` and ``antialias=False``
+          when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
         * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
@@ -1849,7 +1838,6 @@ def use_deterministic_algorithms(
           and one of the following modes is used:
 
           - ``linear``
-          - ``bilinear``
           - ``bicubic``
           - ``trilinear``
 
