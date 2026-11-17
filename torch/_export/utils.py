@@ -847,7 +847,10 @@ def node_inline_(
     Inline the submodule of the given node into the parent module.
     Note: we only support the case where submodule takes tensors inputs.
     A caller that inlines many nodes of one module can pass ``recompile=False``
-    and recompile the module once at the end.
+    and recompile the module once at the end. Until then the module's code is
+    stale: it can call a submodule that is gone, or a reused submodule name that
+    now holds a different module. So nothing may run the module or read its code
+    before it is recompiled.
     """
     if call_mod_node.op != "call_module":
         raise AssertionError(f"expected call_module op, got {call_mod_node.op}")
