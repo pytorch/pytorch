@@ -475,8 +475,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             with self.assertRaisesRegex(RuntimeError, "negative dimension"):
                 torch.sparse.spdiags(torch.randn(1, 3), out_of_range_offsets, (3, 3))
 
-    # _spdiags allocates unbacked sizes, which the C++ fallback rejects.
-    @xfailIf(torch._dynamo.config.use_cpp_fake_tensor)
     def test_sparse_spdiags_cuda_not_supported(self):
         diagonals_meta = torch.empty(2, 3, device="meta")
         offsets_meta = torch.empty(2, dtype=torch.long, device="meta")
@@ -850,6 +848,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                         with self.assertRaisesRegex(IndexError, re.escape(message)):
                             op(*fake_args)
 
+    @fake_tensor_test()
     def test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo(self):
         shape_env = ShapeEnv()
         for dtype in (torch.int64, torch.float64):
@@ -862,6 +861,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     )
                     self.assertIsNone(maybe_get_item_memo(scalar))
 
+    @fake_tensor_test()
     def test_scalar_tensor_item_memo_invalidates_on_epoch(self):
         shape_env = ShapeEnv()
         scalar = torch.tensor(2, dtype=torch.int64)
@@ -1196,9 +1196,15 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertTrue(is_fake_tensor(y))
             self.assertEqual(y.shape, (1, 2, 4, 4))
 
+    @fake_tensor_test()
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             u0 = shape_env.create_unbacked_symint()
@@ -1207,7 +1213,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             b = torch.empty(u0, 16, device="cpu")
         prims.utils.compare_tensor_meta(a, b, check_strides=True)
 
+    @fake_tensor_test()
     def test_stack_symbolic_shapes(self):
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         # torch.stack, for a non-trailing dim, is computed as
         # cat(...).view(result_sizes). The inner view must not require concrete
         # sizes when the stacked tensors have symbolic shapes, otherwise it
@@ -1658,14 +1670,20 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             y = x + x
             self.assertTrue(mode.in_kernel_invocation)
 
-    @skipIfCppFakeTensor("no data-dependent output support")
+    @fake_tensor_test()
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
 
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
+    @fake_tensor_test()
     def test_symbolic_number_tensor_argument_not_constant(self):
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         symint = shape_env.create_unbacked_symint()
         with FakeTensorMode(shape_env=shape_env):
@@ -1683,6 +1701,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
         self.assertTrue(isinstance(fake_x, torch.nn.Parameter))
 
+    @fake_tensor_test()
     def test_tolist(self):
         shape_env = ShapeEnv()
         with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
@@ -1727,6 +1746,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertIs(t2.size(0).node.shape_env, t1.size(0).node.shape_env)
         self.assertEqual(str(t2.size(0)), str(t1.size(0)))
 
+    @fake_tensor_test()
     def test_linear_rank3_unbacked_batch_dim(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
@@ -1767,6 +1787,11 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(replay_out.shape, (5, 16, 3072))
 
     def test_view_unbacked_contiguous_relation_from_hints(self):
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
         with fake_mode:
@@ -1794,6 +1819,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(metadata["size"], "3*u0")
         self.assertEqual(metadata["size_hint"], 48)
 
+    @fake_tensor_test()
     def test_matmul_rank4_unbacked_batch_dim(self):
         fake_mode, (q, k) = self.fake_with_unbacked_batch(
             torch.randn(4, 2, 8, 16),
@@ -1810,6 +1836,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(out.shape[1:], (2, 8, 8))
         self.assertTrue(free_unbacked_symbols(out.shape[0]))
 
+    @fake_tensor_test()
     def test_sdpa_math_unbacked_batch_dim(self):
         fake_mode, (q, k, v) = self.fake_with_unbacked_batch(
             torch.randn(4, 2, 8, 16),
@@ -1830,6 +1857,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(out.shape[1:], (2, 8, 16))
         self.assertTrue(free_unbacked_symbols(out.shape[0]))
 
+    @fake_tensor_test()
     def test_size_default_unbacked_batch_dim(self):
         fake_mode, (x,) = self.fake_with_unbacked_batch(torch.randn(4, 2))
 
@@ -1851,6 +1879,7 @@ def forward(self, x_1):
         self.assertEqual(out.shape[1:], (2,))
         self.assertTrue(free_unbacked_symbols(out.shape[0]))
 
+    @fake_tensor_test()
     def test_cudnn_sdpa_unbacked_batch_dim(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
@@ -2216,6 +2245,11 @@ def forward(self, x_1):
 
     @fake_tensor_test()
     def test_unsqueeze_copy(self):
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         t1 = torch.ones(2, 2, 768)
         with FakeTensorMode(shape_env=shape_env) as fake_mode:
@@ -2261,26 +2295,54 @@ def forward(self, x_1):
         self.assertTrue(is_fake_tensor(r[0]))
         self.assertTrue(is_fake_tensor(r[1]))
 
-    def test_fast_div_int_to_float(self):
-        mode = FakeTensorMode()
+    @parametrize("symbolic", [False, True])
+    def test_fast_div_int_to_float(self, symbolic):
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+        shape_env = ShapeEnv() if symbolic else None
+        mode = FakeTensorMode(shape_env=shape_env)
+        size = shape_env.create_unbacked_symint() if shape_env is not None else 2
         with mode:
-            x = torch.empty(2, 2, device="cpu", dtype=torch.int32)
-            y = torch.empty(2, 2, device="cpu", dtype=torch.int32)
+            x = torch.empty(size, 2, device="cpu", dtype=torch.int32)
+            y = torch.empty(size, 2, device="cpu", dtype=torch.int32)
         from torch._subclasses.fake_impls import get_fast_op_impls
 
         fast_div = get_fast_op_impls()[torch.ops.aten.div.Tensor]
         z = fast_div(mode, x, y)
         self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z.shape, x.shape)
+        self.assertIs(maybe_get_fake_mode(z), mode)
+        if symbolic:
+            dispatched = torch.ops.aten.div.Tensor(x, y)
+            prims.utils.compare_tensor_meta(z, dispatched, check_strides=True)
+            self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
-    def test_fast_div(self):
-        mode = FakeTensorMode()
+    @parametrize("symbolic", [False, True])
+    def test_fast_div(self, symbolic):
+        if (
+            torch._dynamo.config.use_cpp_fake_tensor
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+        shape_env = ShapeEnv() if symbolic else None
+        mode = FakeTensorMode(shape_env=shape_env)
+        size = shape_env.create_unbacked_symint() if shape_env is not None else 2
         with mode:
-            x = torch.empty(2, 2, device="cpu", dtype=torch.int32)
+            x = torch.empty(size, 2, device="cpu", dtype=torch.int32)
         from torch._subclasses.fake_impls import get_fast_op_impls
 
         fast_div = get_fast_op_impls()[torch.ops.aten.div.Tensor]
         y = fast_div(mode, x, 2)
         self.assertEqual(y.dtype, torch.float32)
+        self.assertEqual(y.shape, x.shape)
+        self.assertIs(maybe_get_fake_mode(y), mode)
+        if symbolic:
+            dispatched = torch.ops.aten.div.Tensor(x, 2)
+            prims.utils.compare_tensor_meta(y, dispatched, check_strides=True)
+            self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
@@ -2378,6 +2440,7 @@ def forward(self, x_1):
             x = torch.empty(10)
             torch.ops.aten._assert_tensor_metadata.default(x, size=[10], stride=[1])
 
+    @fake_tensor_test()
     def test_unique_default_dynamic_output_shape(self):
         x = torch.tensor([2, 1, 4, 2, 2])
         with FakeTensorMode() as mode:
@@ -4525,6 +4588,7 @@ class TestFakeTensorProp(TestCase):
                 value, None, another_optional_value
             )
 
+    @fake_tensor_test()
     def test_unbacked_shape_realloc(self):
         def f(x):
             return x.nonzero()
@@ -4553,6 +4617,7 @@ class TestFakeTensorProp(TestCase):
         self.assertIsNot(u0, u1)
         self.assertTrue(statically_known_true(u0 == u1))
 
+    @fake_tensor_test()
     def test_nonzero_stride(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
@@ -4564,6 +4629,7 @@ class TestFakeTensorProp(TestCase):
 
         self.assertEqual(fake_r.T.is_contiguous(), r.T.is_contiguous())
 
+    @fake_tensor_test()
     def test_nonzero_numpy_arity_matches_eager(self):
         # Normal dispatch decomposes this CIA op before fake mode sees it; the
         # fake rule is only used when export preserves the op, so call it directly.
@@ -4579,6 +4645,7 @@ class TestFakeTensorProp(TestCase):
             self.assertEqual(len(actual), len(expected))
             self.assertEqual([t.dim() for t in actual], [t.dim() for t in expected])
 
+    @fake_tensor_test()
     def test_nan_to_num(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
@@ -4589,6 +4656,7 @@ class TestFakeTensorProp(TestCase):
         self.assertEqual(x.size(), y.size())
         self.assertEqual(x.stride(), y.stride())
 
+    @fake_tensor_test()
     def test_inference_mode_nonzero_memo(self):
         """D106102842: nonzero() memo must be stored for inference FakeTensors.
 
@@ -4618,6 +4686,7 @@ class TestFakeTensorProp(TestCase):
                 # mask.nonzero() is memoized.
                 self.assertTrue(statically_known_true(sx == sy))
 
+    @fake_tensor_test()
     @parametrize(
         "op",
         [torch.nonzero, torch.unique, torch.unique_consecutive],
@@ -4670,6 +4739,7 @@ class TestFakeTensorProp(TestCase):
                 maybe_set_sym_memo(x, "nonzero_memo", 3)
             self.assertIsNone(maybe_get_sym_memo(x, "nonzero_memo"))
 
+    @fake_tensor_test()
     @parametrize(
         "op",
         [torch.nonzero, torch.unique, torch.unique_consecutive],
@@ -6890,7 +6960,11 @@ class TestCppFakeTensorModeBindings(TestCase):
         names = ["decomp", "python_cia", "native_cia"]
         self.assertEqual(seen, [(n, True, False, mode) for n in names] * 2)
 
-    def test_fake_fallback_static_shape_decomp_registration(self):
+    @fake_tensor_test()
+    @parametrize("symbolic", [False, True])
+    def test_fake_fallback_static_shape_decomp_registration(self, symbolic):
+        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
+            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         from torch._decomp import (
             decomposition_table,
             register_decomposition,
@@ -6910,7 +6984,24 @@ class TestCppFakeTensorModeBindings(TestCase):
             remove_decompositions(decomposition_table, [op])
             self.assertFalse(contains(op.name(), ""))
 
+            calls = []
+
+            @register_decomposition(op)
+            def decomp(x):
+                calls.append("decomp")
+                return x.clone()
+
+            self.assertFalse(contains(op.name(), ""))
+            lib.impl("op", lambda x: x.clone(), "Meta")
+            mode = FakeTensorMode(shape_env=ShapeEnv() if symbolic else None)
+            fake = mode.from_tensor(torch.empty(2, 3))
+            result = op(fake)
+            self.assertEqual(calls, ["decomp"] if symbolic else [])
+            self.assertEqual(result.shape, fake.shape)
+            self.assertIs(maybe_get_fake_mode(result), mode)
+
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("symbolic", [False, True])
     @parametrize(
         "op,preserve_keys",
         [
@@ -6920,15 +7011,18 @@ class TestCppFakeTensorModeBindings(TestCase):
             (torch.t, False),
         ],
     )
-    def test_fake_fallback_dispatch_keys(self, op, preserve_keys):
-        mode = CppFakeTensorMode()
+    def test_fake_fallback_dispatch_keys(self, op, preserve_keys, symbolic):
+        mode = CppFakeTensorMode(shape_env=ShapeEnv() if symbolic else None)
         real = torch.randn(2, 3)
         fake = mode.from_tensor(real)
         keys = torch._C._dispatch_keys(real)
         torch._C._set_fake_dispatch_keys(fake, keys)
+        result = op(fake)
         self.assertEqual(
-            maybe_get_fake_dispatch_keys(op(fake)), keys if preserve_keys else None
+            maybe_get_fake_dispatch_keys(result), keys if preserve_keys else None
         )
+        self.assertEqual(result._has_symbolic_sizes_strides, symbolic)
+        self.assertIs(maybe_get_fake_mode(result), mode)
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("active", [False, True])
