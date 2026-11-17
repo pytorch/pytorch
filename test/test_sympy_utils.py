@@ -1304,6 +1304,10 @@ class TestIdentity(TestCase):
         self.assertRaises(TypeError, int, tup_I)
         self.assertRaises(TypeError, float, tup_I)
 
+    def test_modular_indexing_folds_constant_identity(self):
+        self.assertEqual(ModularIndexing(Identity(-1), 1, 2), 1)
+        self.assertEqual(ModularIndexing(Identity(-1) + 3, 1, 2), 0)
+
 class TestTypedExpr(TestCase):
     def test_typed_expr(self):
         I = Identity(1)

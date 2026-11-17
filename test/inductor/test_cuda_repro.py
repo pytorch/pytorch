@@ -2681,6 +2681,18 @@ class CudaReproTests(TestCase):
                 ".run(", 1, exactly=True
             ).run(code[0])
 
+    @parametrize("reduction", ["max", "sum"])
+    def test_cat_of_sliced_cat_constant_load_index(self, reduction):
+        # The unrolled reduction gives the load a constant index that wraps
+        # the cat offset in Identity, which blocked ModularIndexing folding.
+        def fn(p, q):
+            v = torch.cat([p, p])
+            return getattr(torch.cat([q, v[0:1]]), reduction)()
+
+        p = torch.randn(2, device=device_type)
+        q = torch.randn(1, device=device_type)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(p, q), fn(p, q))
+
     @config.patch("triton.use_block_ptr", True)
     def test_selecsls42b_misaligned_address(self):
         # https://github.com/triton-lang/triton/issues/2836
