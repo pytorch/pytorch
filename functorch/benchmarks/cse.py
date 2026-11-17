@@ -26,11 +26,6 @@ def profile_function(name, f, inp):
 
     new_g = fx_graph_cse(fx_g.graph)
     new_g = fx.GraphModule(fx_g, new_g)
-    # do not benchmark against the scripted version because script already does some CSE
-    # script_f = torch.jit.script(fx_g)
-    # script_g = torch.jit.script(new_g)
-    # avg_cuda_time_f = profile_it(script_f, inp)
-    # avg_cuda_time_g = profile_it(script_g, inp)
     avg_cuda_time_f = profile_it(fx_g, inp)
     avg_cuda_time_g = profile_it(new_g, inp)
     num_node_decrease = len(fx_g.graph.nodes) - len(new_g.graph.nodes)
