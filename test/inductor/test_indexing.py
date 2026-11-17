@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import sympy
 
@@ -12,7 +13,7 @@ from torch._dynamo.source import ConstantSource
 from torch._inductor import config
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
-from torch._inductor.codegen.triton import texpr
+from torch._inductor.codegen.triton import TritonCSEVariable, TritonKernel, texpr
 from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -53,6 +54,7 @@ from torch.utils._sympy.functions import (
     RoundToInt,
 )
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 # int64_t is long long on MacOS, but long on 64-bit Linux
@@ -65,6 +67,225 @@ REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
 
 
 class TestIndexingSimplification(InductorTestCase):
+    def test_mask_axioms_simplify_guarded_modular_indexing(self):
+        sizevars = SizeVarAllocator()
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        r = sympy.Symbol("r", integer=True, nonnegative=True)
+        modulus = sympy.Symbol("modulus", integer=True, positive=True)
+        base = i + 64 * r
+        bound = 64 * modulus
+        ranges = {i: 64, r: 1024}
+        axiom = sympy.Lt(base, bound)
+
+        direct = ModularIndexing(base, 1, bound)
+        quotient = ModularIndexing(base, 64, modulus)
+        self.assertEqual(sizevars.simplify_with_ranges(direct, ranges), direct)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(quotient, ranges),
+            ModularIndexing(r, 1, modulus),
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(direct, ranges, (axiom,)),
+            base,
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(quotient, ranges, (axiom,)),
+            r,
+        )
+
+        unrelated = sympy.Lt(base, 64 * (modulus + 1))
+        self.assertEqual(
+            sizevars.simplify_with_ranges(direct, ranges, (unrelated,)),
+            direct,
+        )
+
+        loop = sympy.Symbol("loop", integer=True)
+        group = sympy.Symbol("group", integer=True)
+        extent = sympy.Symbol("extent", integer=True)
+        captured_base = loop + group * FloorDiv(68 * extent + 1446, 1447)
+        captured_bound = 68 * extent
+        captured_ranges = {loop: 68, group: 1447}
+        captured_axiom = sympy.Lt(captured_base, captured_bound)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                ModularIndexing(captured_base, 1, captured_bound),
+                captured_ranges,
+                (captured_axiom,),
+            ),
+            captured_base,
+        )
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                ModularIndexing(captured_base, 68, extent),
+                captured_ranges,
+                (captured_axiom,),
+            ),
+            FloorDiv(captured_base, 68),
+        )
+        negative_base = loop - 1
+        self.assertEqual(
+            sizevars.simplify_with_ranges(
+                ModularIndexing(negative_base, 1, captured_bound),
+                captured_ranges,
+                (sympy.Lt(negative_base, captured_bound),),
+            ),
+            ModularIndexing(negative_base, 1, captured_bound),
+        )
+
+    def test_mask_axiom_simplification_uses_ranges_cache(self):
+        sizevars = SizeVarAllocator()
+        index = sympy.Symbol("index", integer=True, nonnegative=True)
+        extent = sympy.Symbol("extent", integer=True, positive=True)
+        expr = ModularIndexing(index, 1, extent)
+        ranges = {index: 1024}
+        axiom = sympy.Lt(index, extent)
+
+        with patch.object(
+            sizevars,
+            "_simplify_with_ranges",
+            wraps=sizevars._simplify_with_ranges,
+        ) as simplify:
+            self.assertEqual(
+                sizevars.simplify_with_ranges(expr, ranges, (axiom,)),
+                index,
+            )
+            first_call_count = simplify.call_count
+            self.assertEqual(
+                sizevars.simplify_with_ranges(expr, ranges, (axiom,)),
+                index,
+            )
+            self.assertEqual(simplify.call_count, first_call_count)
+
+        unrelated_axiom = sympy.Lt(index, extent + 1)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, ranges, (unrelated_axiom,)),
+            expr,
+        )
+
+    def test_triton_cse_variable_tracks_mask_axioms(self):
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        modulus = sympy.Symbol("modulus", integer=True, positive=True)
+        lhs = TritonCSEVariable("tmp0", ValueRanges.unknown(), torch.int32, shape=(1,))
+        lhs.index_expr = i
+        rhs = TritonCSEVariable("tmp1", ValueRanges.unknown(), torch.int32, shape=(1,))
+        rhs.index_expr = modulus
+        predicate = TritonCSEVariable(
+            "tmp2", ValueRanges.unknown(), torch.bool, shape=(1,)
+        )
+        predicate.update_on_args("lt", (lhs, rhs), {})
+        self.assertEqual(predicate.mask_axioms, ())
+
+        with config.patch({"triton.mask_aware_index_simplification": True}):
+            predicate.update_on_args("lt", (lhs, rhs), {})
+            self.assertEqual(predicate.mask_axioms, (sympy.Lt(i, modulus),))
+
+            other = TritonCSEVariable(
+                "tmp3", ValueRanges.unknown(), torch.bool, shape=(1,)
+            )
+            other.mask_axioms = (sympy.Ge(i, 0),)
+            for name in ("and_", "logical_and"):
+                with self.subTest(name=name):
+                    conjunction = TritonCSEVariable(
+                        "tmp4", ValueRanges.unknown(), torch.bool, shape=(1,)
+                    )
+                    conjunction.update_on_args(name, (predicate, other), {})
+                    self.assertEqual(
+                        conjunction.mask_axioms,
+                        (sympy.Lt(i, modulus), sympy.Ge(i, 0)),
+                    )
+
+            narrowed = TritonCSEVariable(
+                "tmp5", ValueRanges.unknown(), torch.float32, shape=(1,)
+            )
+            narrowed.index_expr = i
+            rejected = TritonCSEVariable(
+                "tmp6", ValueRanges.unknown(), torch.bool, shape=(1,)
+            )
+            rejected.update_on_args("lt", (narrowed, rhs), {})
+            self.assertEqual(rejected.mask_axioms, ())
+
+            non_integer = TritonCSEVariable(
+                "tmp7", ValueRanges.unknown(), torch.bool, shape=(1,)
+            )
+            non_integer.update_on_args("lt", (lhs, sympy.Rational(1, 2)), {})
+            self.assertEqual(non_integer.mask_axioms, ())
+
+            always_true = TritonCSEVariable(
+                "tmp8", ValueRanges.unknown(), torch.bool, shape=(1,)
+            )
+            always_true.update_on_args("le", (lhs, lhs), {})
+            self.assertEqual(always_true.mask_axioms, ())
+
+            always_false = TritonCSEVariable(
+                "tmp9", ValueRanges.unknown(), torch.bool, shape=(1,)
+            )
+            always_false.update_on_args("lt", (lhs, lhs), {})
+            self.assertEqual(always_false.mask_axioms, (sympy.false,))
+
+    def test_mask_axioms_simplify_load_index(self):
+        sizevars = SizeVarAllocator()
+        loop = sympy.Symbol("loop", integer=True)
+        group = sympy.Symbol("group", integer=True)
+        extent = sympy.Symbol("extent", integer=True)
+        base = loop + group * FloorDiv(68 * extent + 1446, 1447)
+        bound = 68 * extent
+        index = ModularIndexing(base, 1, bound)
+        ranges = {loop: 68, group: 1447}
+        axiom = sympy.Lt(base, bound)
+
+        self.assertEqual(
+            TritonKernel._simplify_index_with_mask_axioms(
+                sizevars, index, ranges, (axiom,)
+            ),
+            base,
+        )
+
+        with patch.object(
+            sizevars, "simplify_with_ranges", return_value=sympy.Integer(0)
+        ):
+            self.assertEqual(
+                TritonKernel._simplify_index_with_mask_axioms(
+                    sizevars, index, ranges, (axiom,)
+                ),
+                index,
+            )
+
+        with patch.object(sizevars, "simplify_with_ranges") as simplify:
+            self.assertEqual(
+                TritonKernel._simplify_index_with_mask_axioms(
+                    sizevars, index, ranges, (sympy.false,)
+                ),
+                index,
+            )
+            simplify.assert_not_called()
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.mask_aware_index_simplification": True,
+        }
+    )
+    def test_mask_aware_index_simplification_dynamic_cat_wires_load(self):
+        def fn(left, middle, right):
+            return torch.cat((left, middle, right), dim=0)
+
+        inputs = [torch.randn(rows, 68, device=GPU_TYPE) for rows in (3, 5, 7)]
+        for value in inputs:
+            torch._dynamo.mark_dynamic(value, 0)
+        expected = fn(*inputs)
+
+        simplify_index = TritonKernel._simplify_index_with_mask_axioms
+        with patch.object(
+            TritonKernel,
+            "_simplify_index_with_mask_axioms",
+            wraps=simplify_index,
+        ) as simplify:
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(expected, actual)
+        self.assertGreater(simplify.call_count, 0)
+
     def test_simplify_index_in_vec_range(self):
         i = sympy.Symbol("i", integer=True, nonnegative=True)
 
