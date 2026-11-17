@@ -34,7 +34,6 @@ namespace c10 {
 template <typename scalar_t>
 inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b) {
   if (b == 0) [[unlikely]] {
-
     // Divide by zero: return standard IEEE result
     return a / b;
   }
