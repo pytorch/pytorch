@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import collections
+import contextlib
 import dataclasses
 import doctest
 import functools
@@ -29,13 +30,15 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, set_cwd, HardwareClassification,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, set_cwd, add_skip_condition, check_if_enable, lazy_skip_if, skip_reason_at_collection,
+    HardwareClassification,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes, skipCPUIf, skipCUDAIf, skipCUDAIfNoMagma, skipIf,
+     DeviceTypeTestBase, PrivateUse1TestBase, preserves_device_selection, MPSTestBase, CPUTestBase, onlyAccelerator)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
@@ -716,15 +719,16 @@ if __name__ == '__main__':
 _JUNIT_TESTDATA = Path(__file__).resolve().parent / "junit_xml_testdata"
 _REGENERATE_JUNIT_GOLDENS = os.environ.get("REGENERATE_JUNIT_GOLDENS") == "1"
 _HW_CLASSIFICATION_TESTDATA = Path(__file__).resolve().parent / "hw_classification_testdata"
-# Run fixture suites (TestJunitXml, TestHardwareClassifications) as the default
-# config: drop the job's CI / PYTORCH_TEST_* / PYTEST_ADDOPTS settings and a
+# Run fixture suites (TestJunitXml, TestHardwareClassifications,
+# TestPruneSkipsAtCollection) as the default config: drop the job's CI,
+# PYTORCH_TEST_*, PYTORCH_TESTING_DEVICE_*, and pytest settings and a
 # PYTHONPATH whose repo root would shadow the installed torch, and don't write
 # bytecode into test/.
 _FIXTURE_CHILD_ENV = {
     k: v
     for k, v in os.environ.items()
     if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")
-    and not k.startswith("PYTORCH_TEST_")
+    and not k.startswith(("PYTORCH_TEST_", "PYTORCH_TESTING_DEVICE_"))
 } | {"PYTHONDONTWRITEBYTECODE": "1"}
 
 
@@ -808,10 +812,12 @@ class TestJunitXml(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             xml_path = Path(tmp) / "report.xml"
             # Run in place under test/ so test/conftest.py and pytest.ini apply, as in CI.
+            # The goldens pin how skipped tests are reported, so keep the collection
+            # pruner from deselecting the mark-skipped fixtures.
             proc = subprocess.run(
                 [
                     sys.executable, "-m", "pytest", "junit_xml_testdata/pytest_suite.py",
-                    f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", "-q",
+                    f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", "-p", "no:prune_skips_plugin", "-q",
                 ],
                 cwd=_JUNIT_TESTDATA.parent,
                 env=_FIXTURE_CHILD_ENV,
@@ -2615,6 +2621,1112 @@ class TestOmitSkippedTests(TestCase):
         self.assertEqual(_get_test_names_for_test_class(TestKept), ['TestKept.test_skipped'])
 
 
+class TestSkipReasonAtCollection(TestCase):
+    """skip_reason_at_collection is the decision behind the collection pruner in
+    test/conftest.py: which skips can be made before a test runs."""
+
+    _CU = "torch.testing._internal.common_utils"
+    _CDT = "torch.testing._internal.common_device_type"
+
+    def _lists(self, slow=None, with_slow=True, skip_fast=False, disabled=None):
+        # Pin the slow/disabled lists and mode flags so the expectations hold in
+        # the slow, rerun-disabled and fbcode CI configs too.
+        stack = contextlib.ExitStack()
+        for name, value in (("slow_tests_dict", slow or {}), ("TEST_WITH_SLOW", with_slow), ("TEST_SKIP_FAST", skip_fast),
+                            ("disabled_tests_dict", disabled or {}), ("IS_SANDCASTLE", False), ("RERUN_DISABLED_TESTS", False)):
+            stack.enter_context(unittest.mock.patch(f"{self._CU}.{name}", value))
+        for name in ("IS_SANDCASTLE", "IS_FBCODE"):
+            stack.enter_context(unittest.mock.patch(f"{self._CDT}.{name}", False))
+        return stack
+
+    def _reason(self, cls, name):
+        return skip_reason_at_collection(cls, getattr(cls, name), name)
+
+    def test_pre_test_hooks_exist(self):
+        from torch.testing._internal.common_utils import _PRE_TEST_HOOKS
+
+        self.assertEqual([name for name in _PRE_TEST_HOOKS if not hasattr(TestCase, name)], [])
+
+    def test_static_marks(self):
+        class Static(TestCase):
+            @unittest.skip("static method mark")
+            def test_marked(self):
+                pass
+
+            def test_plain(self):
+                pass
+
+        @unittest.skip("static class mark")
+        class StaticClass(TestCase):
+            def test_in_skipped_class(self):
+                pass
+
+        with self._lists():
+            self.assertEqual(self._reason(Static, "test_marked"), "static method mark")
+            self.assertIsNone(self._reason(Static, "test_plain"))
+            self.assertEqual(self._reason(StaticClass, "test_in_skipped_class"), "static class mark")
+
+    def test_recorded_conditions(self):
+        flag = [True]
+
+        class Recorded(TestCase):
+            def test_recorded(self):
+                pass
+
+            @skipIfTorchDynamo("policy")
+            def test_dynamo(self):
+                pass
+
+            def test_raises(self):
+                pass
+
+        add_skip_condition(Recorded.test_recorded, lambda cls: flag[0], "recorded condition")
+        add_skip_condition(Recorded.test_raises, lambda cls: 1 / 0, "raising condition")
+        with self._lists():
+            self.assertEqual(self._reason(Recorded, "test_recorded"), "recorded condition")
+            flag[0] = False
+            self.assertIsNone(self._reason(Recorded, "test_recorded"))
+            with unittest.mock.patch(f"{self._CU}.TEST_WITH_TORCHDYNAMO", True):
+                self.assertEqual(self._reason(Recorded, "test_dynamo"), "policy")
+            with unittest.mock.patch(f"{self._CU}.TEST_WITH_TORCHDYNAMO", False):
+                self.assertIsNone(self._reason(Recorded, "test_dynamo"))
+            # A predicate that raises keeps the test.
+            self.assertIsNone(self._reason(Recorded, "test_raises"))
+
+    @parametrize("own_constructor", [False, True])
+    @parametrize("mutation", [None, "parent_constructor", "parent_binder", "binder", "copied_owner", "cooperative_constructor", "audited_cooperative_constructor", "changed_bases", "standard_constructor", "standard_runner"])
+    def test_class_owned_skip_mark_contract(self, own_constructor, mutation):
+        from torch.testing._internal.common_utils import preserves_unittest_skip_marks
+
+        @preserves_unittest_skip_marks("bind")
+        class Parent(TestCase):
+            def __init__(self, methodName="runTest"):
+                super().__init__(methodName)
+                setattr(self, methodName, self.bind(getattr(self, methodName)))
+
+            def bind(self, fn):
+                return fn
+
+            @unittest.skip("existing skip")
+            def test_marked(self):
+                self.fail("the original mark must skip")
+
+            def test_runtime(self):
+                pass
+
+        original_parent = Parent.__dict__["_unittest_skip_mark_contract"]
+
+        @preserves_unittest_skip_marks()
+        class Child(Parent):
+            if own_constructor:
+                def __init__(self, methodName="runTest"):
+                    unittest.TestCase.__init__(self, methodName)
+
+            def bind(self, fn):
+                @functools.wraps(fn)
+                def wrapper():
+                    return fn()
+                return wrapper
+
+        cls = Child
+        if mutation in ("standard_constructor", "standard_runner"):
+            hook = "__init__" if mutation == "standard_constructor" else "run"
+            with unittest.mock.patch.object(TestCase, hook, lambda *args: None), self._lists():
+                self.assertIsNone(self._reason(cls, "test_marked"))
+            return
+        if mutation == "parent_constructor":
+            Parent.__init__ = lambda self, name: unittest.TestCase.__init__(self, name)
+        elif mutation == "parent_binder":
+            Parent.bind = lambda self, fn: lambda: None
+        elif mutation == "binder":
+            Child.bind = functools.wraps(Child.bind)(lambda self, fn: lambda: None)
+        elif mutation == "copied_owner":
+            class Copy(Parent):
+                _unittest_skip_mark_contract = Child.__dict__["_unittest_skip_mark_contract"]
+            cls = Copy
+        elif mutation == "cooperative_constructor":
+            class Other(TestCase):
+                def __init__(self, methodName="runTest"):
+                    super().__init__(methodName)
+                    self.test_marked = lambda: None
+
+            class Cooperative(Child, Other):
+                pass
+            cls = Cooperative
+        elif mutation in ("audited_cooperative_constructor", "changed_bases"):
+            @preserves_unittest_skip_marks("bind_other")
+            class Other(TestCase):
+                def __init__(self, methodName="runTest"):
+                    super().__init__(methodName)
+                    setattr(self, methodName, self.bind_other(getattr(self, methodName)))
+
+                def bind_other(self, fn):
+                    return fn
+
+            class Cooperative(Child, Other):
+                def bind_other(self, fn):
+                    return lambda: None
+
+            if mutation == "changed_bases":
+                Child.__bases__ = (Parent, Other)
+                Child.bind_other = Cooperative.bind_other
+            else:
+                cls = Cooperative
+
+        with self._lists():
+            self.assertEqual(self._reason(cls, "test_marked"), None if mutation else "existing skip")
+            self.assertIs(Parent.__dict__["_unittest_skip_mark_contract"], original_parent)
+            if mutation is None:
+                result = unittest.TestResult()
+                unittest.TestCase.run(cls("test_marked"), result)
+                self.assertEqual([reason for _, reason in result.skipped], ["existing skip"])
+                self.assertEqual(result.errors, [])
+                predicate = unittest.mock.Mock(return_value=True)
+                add_skip_condition(cls.test_runtime, predicate, "runtime condition")
+                self.assertIsNone(self._reason(cls, "test_runtime"))
+                predicate.assert_not_called()
+
+    @parametrize("shadow_contract", [False, True])
+    def test_audited_constructor_aliasing_live_default(self, shadow_contract):
+        from torch.testing._internal.common_utils import preserves_unittest_skip_marks
+
+        @preserves_unittest_skip_marks()
+        class Audited(TestCase):
+            def __init__(self, methodName="runTest"):
+                unittest.TestCase.__init__(self, methodName)
+                fn = getattr(self, methodName)
+
+                @functools.wraps(fn)
+                def wrapper():
+                    try:
+                        fn()
+                    except unittest.SkipTest:
+                        pass
+
+                setattr(self, methodName, wrapper)
+
+            def test_runtime(self):
+                self.skipTest("existing runtime skip")
+
+        add_skip_condition(Audited.test_runtime, lambda cls: True, "existing runtime skip")
+        cls = Audited
+        if shadow_contract:
+            class Child(Audited):
+                _unittest_skip_mark_contract = None
+            cls = Child
+        case = cls("test_runtime")
+        with unittest.mock.patch.object(TestCase, "__init__", Audited.__init__), self._lists():
+            self.assertIsNone(self._reason(cls, "test_runtime"))
+            result = unittest.TestResult()
+            unittest.TestCase.run(case, result)
+            self.assertEqual(result.testsRun, 1)
+            self.assertEqual((result.skipped, result.errors, result.failures), ([], [], []))
+
+    def test_lazy_condition_is_not_evaluated_at_collection(self):
+        condition = unittest.mock.Mock(return_value=True)
+
+        class Lazy(TestCase):
+            @lazy_skip_if(condition, "runtime condition")
+            def test_lazy(self):
+                pass
+
+        with self._lists():
+            self.assertIsNone(self._reason(Lazy, "test_lazy"))
+            condition.assert_not_called()
+            with self.assertRaisesRegex(unittest.SkipTest, "runtime condition"):
+                Lazy("test_lazy").test_lazy()
+            condition.assert_called_once_with()
+
+    def test_inductor_device_skip_uses_captured_condition(self):
+        from torch.testing._internal.inductor_utils import skipDeviceIf
+
+        enabled = [True]
+        checks = []
+        calls = []
+
+        class Condition:
+            def __bool__(self):
+                checks.append("checked")
+                return enabled[0]
+
+        class Fixed(TestCase):
+            device = "cpu"
+            _device_at_collection = "cpu"
+
+            @skipDeviceIf(Condition(), "existing CPU skip", device="cpu")
+            def test_runs(self):
+                calls.append(self.device)
+
+        class Other(Fixed):
+            device = "cuda"
+            _device_at_collection = "cuda"
+
+        class Unrecorded(Fixed):
+            device = "cuda"
+
+        enabled[0] = False
+        with self._lists():
+            self.assertEqual(self._reason(Fixed, "test_runs"), "existing CPU skip")
+            with self.assertRaisesRegex(unittest.SkipTest, "existing CPU skip"):
+                Fixed("test_runs").test_runs()
+            for cls in (Other, Unrecorded):
+                self.assertIsNone(self._reason(cls, "test_runs"))
+                cls("test_runs").test_runs()
+        self.assertEqual(checks, ["checked"])
+        self.assertEqual(calls, ["cuda", "cuda"])
+
+    def test_python_version_predicate_stays_lazy(self):
+        from torch.testing._internal.common_utils import skipIfPythonVersionMismatch
+
+        predicate = unittest.mock.Mock(return_value=False)
+
+        @skipIfPythonVersionMismatch(predicate)
+        def test_runs():
+            return "ran"
+
+        predicate.assert_not_called()
+        self.assertIsNone(skip_reason_at_collection(TestCase, test_runs, "test_runs"))
+        predicate.return_value = True
+        self.assertEqual(test_runs(), "ran")
+        predicate.assert_called_once_with(*sys.version_info[:3])
+
+    def test_expected_failure_consumes_runtime_skip(self):
+        from torch.testing._internal.common_device_type import expectedFailure
+
+        class Expected(TestCase):
+            device_type = "cpu"
+
+            @expectedFailure("cpu")
+            @skipIf(True, "inner skip")
+            def test_runs(self):
+                self.fail("must raise SkipTest first")
+
+        with self._lists():
+            self.assertIsNone(self._reason(Expected, "test_runs"))
+            Expected("test_runs").test_runs()
+
+    @parametrize("wrapper_kind", ["device", "count", "sandcastle", "sandcastle_if"])
+    @parametrize("internal_mode", ["IS_FBCODE", "IS_SANDCASTLE"])
+    def test_internal_pass_takes_precedence_over_inner_skip(self, wrapper_kind, internal_mode):
+        from torch.testing._internal.common_utils import skip_but_pass_in_sandcastle, skip_but_pass_in_sandcastle_if
+
+        with self._lists(), unittest.mock.patch(f"{self._CDT}.{internal_mode}", True), \
+                unittest.mock.patch(f"{self._CU}.IS_SANDCASTLE", True):
+            wrappers = {
+                "device": onlyCUDA,
+                "count": deviceCountAtLeast(2),
+                "sandcastle": skip_but_pass_in_sandcastle("pass internally"),
+                "sandcastle_if": skip_but_pass_in_sandcastle_if(True, "pass internally"),
+            }
+
+            class Passing(TestCase):
+                device_type = "cpu"
+
+                @wrappers[wrapper_kind]
+                @skipIf(True, "inner skip")
+                def test_runs(self, devices=None):
+                    self.fail("the outer wrapper must return first")
+
+            self.assertIsNone(self._reason(Passing, "test_runs"))
+            Passing("test_runs").test_runs([])
+
+    @parametrize("entrypoint", ["init", "run"])
+    @parametrize("static", [False, True])
+    def test_custom_execution_can_override_a_runtime_skip(self, entrypoint, static):
+        class Original(TestCase):
+            @(unittest.skip("inner skip") if static else skipIf(True, "inner skip"))
+            def test_runs(self):
+                self.fail("must raise SkipTest first")
+
+        class CustomInit(Original):
+            def __init__(self, methodName="runTest"):
+                super().__init__(methodName)
+                self.test_runs = lambda: None
+
+        class CustomRun(Original):
+            def run(self, result):
+                result.startTest(self)
+                with contextlib.suppress(unittest.SkipTest):
+                    self.test_runs()
+                result.addSuccess(self)
+                result.stopTest(self)
+
+        cls = CustomInit if entrypoint == "init" else CustomRun
+        with self._lists():
+            self.assertIsNone(self._reason(cls, "test_runs"))
+            result = unittest.TestResult()
+            case = cls("test_runs")
+            if entrypoint == "init":
+                unittest.TestCase.run(case, result)
+            else:
+                case.run(result)
+            self.assertEqual(result.testsRun, 1)
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    def test_xfail_takes_precedence_over_runtime_skip(self):
+        import pytest
+        from torch.testing._internal.common_utils import xfailIfNoAcceleratorTriton
+
+        with unittest.mock.patch("torch.utils._triton.has_triton", return_value=False):
+            class Expected(TestCase):
+                device_type = "cuda"
+
+                @xfailIfNoAcceleratorTriton
+                @skipIf(True, "inner skip")
+                def test_runs(self):
+                    self.fail("must xfail first")
+
+        with self._lists():
+            self.assertIsNone(self._reason(Expected, "test_runs"))
+            with self.assertRaises(pytest.xfail.Exception):
+                Expected("test_runs").test_runs()
+
+    @parametrize("decorator_kind", ["only", "skip", "native"])
+    def test_mutable_device_selection_stays_at_runtime(self, decorator_kind):
+        from torch.testing._internal.common_device_type import onlyOn, onlyNativeDeviceTypesAnd
+
+        devices = ["custom"] if decorator_kind == "skip" else []
+        decorators = {
+            "only": onlyOn(devices),
+            "skip": skipIf(True, "inner skip", device_type=devices),
+            "native": onlyNativeDeviceTypesAnd(devices),
+        }
+
+        class Dynamic(DeviceTypeTestBase):
+            device_type = "custom"
+            _device_type_at_collection = "custom"
+
+            @decorators[decorator_kind]
+            def test_runs(self):
+                pass
+
+        with self._lists():
+            self.assertIsNone(self._reason(Dynamic, "test_runs"))
+            devices[:] = [] if decorator_kind == "skip" else ["custom"]
+            Dynamic("test_runs").test_runs()
+
+    @parametrize("class_target", [False, True])
+    @parametrize("enabled", [False, True])
+    def test_stable_skip_decorator(self, class_target, enabled):
+        calls = []
+
+        class Stable(TestCase):
+            def test_runs(self):
+                calls.append("test")
+
+        with self._lists(), unittest.mock.patch(f"{self._CU}.TEST_XPU", enabled):
+            if class_target:
+                self.assertIs(skipIfXpu(Stable, msg="policy"), Stable)
+            else:
+                Stable.test_runs = skipIfXpu(Stable.test_runs, msg="policy")
+            self.assertEqual(self._reason(Stable, "test_runs"), "skipIfXpu: policy" if enabled else None)
+            result = unittest.TestResult()
+            # Avoid nesting TestCase.run's Dynamo wrapper inside this test's wrapper.
+            unittest.TestCase.run(Stable("test_runs"), result)
+            self.assertEqual(calls, [] if enabled else ["test"])
+            self.assertEqual(len(result.skipped), int(enabled))
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    @parametrize("enabled", [False, True])
+    def test_rocm_only_condition(self, enabled):
+        from torch.testing._internal.common_utils import runOnRocm
+
+        calls = []
+
+        class RocmOnly(TestCase):
+            @runOnRocm
+            def test_runs(self):
+                calls.append("test")
+
+        with self._lists(), unittest.mock.patch(f"{self._CU}.TEST_WITH_ROCM", enabled):
+            reason = None if enabled else "test currently only works on the ROCm stack"
+            self.assertEqual(self._reason(RocmOnly, "test_runs"), reason)
+            result = unittest.TestResult()
+            unittest.TestCase.run(RocmOnly("test_runs"), result)
+            self.assertEqual(calls, ["test"] if enabled else [])
+            self.assertEqual(len(result.skipped), int(not enabled))
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    @parametrize("custom_setup", [None, "setUp", "setUpClass"])
+    def test_device_decorators_through_instantiation(self, custom_setup):
+        class TestGeneric(TestCase):
+            if custom_setup == "setUp":
+                @preserves_device_selection
+                def setUp(self):
+                    super().setUp()
+                    self.ready = True
+            elif custom_setup == "setUpClass":
+                @classmethod
+                @preserves_device_selection
+                def setUpClass(cls):
+                    super().setUpClass()
+                    cls.ready = True
+
+            @onlyCUDA
+            def test_cuda_only(self, device):
+                pass
+
+            @skipCPUIf(True, "cpu dep")
+            def test_cpu_dep(self, device):
+                pass
+
+            @skipCUDAIfNoMagma
+            def test_magma(self, device):
+                pass
+
+            @deviceCountAtLeast(2)
+            def test_two_devices(self, devices):
+                pass
+
+            def test_plain(self, device):
+                pass
+
+        if custom_setup:
+            with self._lists(skip_fast=True):
+                self.assertIsNone(self._reason(TestGeneric, "test_plain"))
+
+        scope = {"TestGeneric": TestGeneric}
+        # CUDA CI jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda, which overrides only_for.
+        env = {PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY: "", PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY: ""}
+        with unittest.mock.patch.dict(os.environ, env):
+            instantiate_device_type_tests(TestGeneric, scope, only_for="cpu")
+        cpu = scope["TestGenericCPU"]
+        with self._lists():
+            self.assertEqual(self._reason(cpu, "test_cuda_only_cpu"), "Only runs on cuda")
+            self.assertEqual(self._reason(cpu, "test_cpu_dep_cpu"), "cpu dep")
+            self.assertIsNone(self._reason(cpu, "test_magma_cpu"))
+            self.assertIsNone(self._reason(cpu, "test_plain_cpu"))
+            expected_count = None if custom_setup else "fewer than 2 devices detected"
+            self.assertEqual(self._reason(cpu, "test_two_devices_cpu"), expected_count)
+            with self.assertRaisesRegex(unittest.SkipTest, "Only runs on cuda"):
+                cpu("test_cuda_only_cpu").test_cuda_only_cpu()
+
+    def test_device_template_without_setup_hooks(self):
+        class NoSetup:
+            pass
+
+        class TestGeneric(NoSetup):
+            @onlyCUDA
+            def test_cuda_only(self, device):
+                self.fail("CPU must retain the existing runtime skip")
+
+        scope = {"TestGeneric": TestGeneric}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[CPUTestBase]):
+            instantiate_device_type_tests(TestGeneric, scope)
+        cpu = scope["TestGenericCPU"]
+        with self._lists():
+            self.assertIsNone(self._reason(cpu, "test_cuda_only_cpu"))
+            with self.assertRaisesRegex(unittest.SkipTest, "Only runs on cuda"):
+                cpu("test_cuda_only_cpu").test_cuda_only_cpu()
+
+    @parametrize("setup_kind", ["device", "bypass", "wrapped", "inherited"])
+    def test_setup_device_selection_opt_in_is_not_inherited(self, setup_kind):
+        class Audited(TestCase):
+            @preserves_device_selection
+            def setUp(self):
+                super().setUp()
+
+        calls = []
+
+        class Dynamic(Audited):
+            @onlyCUDA
+            def test_runs(self, device):
+                calls.append("test")
+
+        if setup_kind != "inherited":
+            def setUp(self):
+                TestCase.setUp(self)
+                if setup_kind == "bypass":
+                    self.bypass_device_restrictions = True
+                else:
+                    self.device_type = "cuda"
+
+            Dynamic.setUp = functools.wraps(Audited.setUp)(setUp) if setup_kind == "wrapped" else setUp
+
+        scope = {"Dynamic": Dynamic}
+        env = {PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY: "", PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY: ""}
+        with unittest.mock.patch.dict(os.environ, env):
+            instantiate_device_type_tests(Dynamic, scope, only_for="cpu")
+        cpu = scope["DynamicCPU"]
+        with self._lists():
+            self.assertIsNone(self._reason(cpu, "test_runs_cpu"))
+            result = unittest.TestResult()
+            unittest.TestCase.run(cpu("test_runs_cpu"), result)
+            self.assertEqual(calls, [] if setup_kind == "inherited" else ["test"])
+            self.assertEqual(len(result.skipped), int(setup_kind == "inherited"))
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    @parametrize("required_devices", [1, 2])
+    @parametrize("decorator", [skipCPUIf(False, "unused"), skipCUDAIf(True, "unused"), onlyNativeDeviceTypes, common_cuda.with_tf32_off])
+    def test_device_count_uses_captured_arguments(self, required_devices, decorator):
+        calls = []
+        test_op = OpInfo('test_op', op=lambda x: x, dtypes=floating_types(), sample_inputs_func=lambda _: [], decorators=(decorator,))
+
+        class Generic(TestCase):
+            @onlyAccelerator
+            @deviceCountAtLeast(required_devices)
+            @ops([test_op], dtypes=OpDTypes.none, skip_if_dynamo=False)
+            def test_runs(self, devices, op):
+                calls.append(len(devices))
+
+        scope = {"Generic": Generic}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[MPSTestBase]):
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericMPS"]
+        name = "test_runs_test_op_mps"
+        with self._lists(), unittest.mock.patch.object(MPSTestBase, "get_all_devices", side_effect=AssertionError("queried again")):
+            self.assertEqual(self._reason(cls, name), "fewer than 2 devices detected" if required_devices == 2 else None)
+            result = unittest.TestResult()
+            unittest.TestCase.run(cls(name), result)
+            self.assertEqual(len(result.skipped), int(required_devices == 2))
+            self.assertEqual(calls, [] if required_devices == 2 else [1])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+            with unittest.mock.patch(f"{self._CDT}.IS_FBCODE", True):
+                self.assertIsNone(self._reason(cls, name))
+
+    @parametrize("mutation", ["getter", "precision_hook", "precision_value", "tolerance_value", "precision", "rel_tol"])
+    def test_device_count_defers_for_argument_mutation(self, mutation):
+        devices = ["mps:0"]
+        calls = []
+
+        class Generic(TestCase):
+            @deviceCountAtLeast(2)
+            @dtypes(torch.float32)
+            def test_runs(self, devices, dtype):
+                calls.append(len(devices))
+
+        if mutation == "precision_hook":
+            def apply_precision(self, test, kwargs):
+                kwargs["devices"].append("mps:1")
+
+            Generic._apply_precision_override_for_test = apply_precision
+        elif mutation in ("precision_value", "tolerance_value"):
+            def override(self, test, dtype):
+                test._device_count_at_collection[1].num_required_devices = 1
+                return 0.0 if mutation == "precision_value" else (0.0, 0.0)
+
+            setattr(Generic, "_get_precision_override" if mutation == "precision_value" else "_get_tolerance_override", override)
+        elif mutation in ("precision", "rel_tol"):
+            def override(self):
+                test = getattr(type(self), self._testMethodName)
+                test._device_count_at_collection[1].num_required_devices = 1
+                return 0.0
+
+            setattr(Generic, mutation, property(override, lambda self, value: None))
+        getter_patch = unittest.mock.patch.object(MPSTestBase, "get_all_devices", return_value=devices)
+        scope = {"Generic": Generic}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[MPSTestBase]), \
+                getter_patch if mutation == "getter" else contextlib.nullcontext():
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericMPS"]
+        with self._lists():
+            self.assertIsNone(self._reason(cls, "test_runs_mps_float32"))
+            if mutation == "getter":
+                devices.append("mps:1")
+            result = unittest.TestResult()
+            unittest.TestCase.run(cls("test_runs_mps_float32"), result)
+            self.assertEqual(calls, [2] if mutation in ("getter", "precision_hook") else [1])
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    @parametrize("wrapped", [False, True])
+    def test_class_setup_device_selection_requires_exact_owner(self, wrapped):
+        class Audited(TestCase):
+            @classmethod
+            @preserves_device_selection
+            def setUpClass(cls):
+                super().setUpClass()
+
+        calls = []
+
+        class Generic(Audited):
+            @onlyCUDA
+            def test_runs(self, device):
+                calls.append("test")
+
+        if wrapped:
+            @functools.wraps(Audited.setUpClass.__func__)
+            def setup(cls):
+                Audited.setUpClass.__func__(cls)
+                cls.device_type = "cuda"
+            Generic.setUpClass = classmethod(setup)
+        scope = {"Generic": Generic}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[CPUTestBase]):
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericCPU"]
+        with self._lists():
+            self.assertIsNone(self._reason(cls, "test_runs_cpu"))
+            cls.setUpClass()
+            self.addCleanup(cls.tearDownClass)
+            result = unittest.TestResult()
+            unittest.TestCase.run(cls("test_runs_cpu"), result)
+            self.assertEqual(calls, ["test"] if wrapped else [])
+            self.assertEqual(len(result.skipped), int(not wrapped))
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    @parametrize("rewrites_arguments", [False, True])
+    def test_device_count_defers_through_unknown_wrappers(self, rewrites_arguments):
+        def decorate(fn):
+            @functools.wraps(fn)
+            def wrapped(self, devices):
+                if rewrites_arguments:
+                    devices.append("mps:1")
+                with contextlib.suppress(unittest.SkipTest):
+                    return fn(self, devices)
+            return wrapped
+
+        class Generic(TestCase):
+            @decorate
+            @onlyAccelerator
+            @deviceCountAtLeast(2)
+            def test_runs(self, devices):
+                self.assertEqual(len(devices), 2)
+
+        scope = {"Generic": Generic}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[MPSTestBase]):
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericMPS"]
+        with self._lists():
+            self.assertIsNone(self._reason(cls, "test_runs_mps"))
+            result = unittest.TestResult()
+            unittest.TestCase.run(cls("test_runs_mps"), result)
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    def test_privateuse1_bypass_defers_to_run_time(self):
+        # Out-of-tree backends opt into @onlyOn tests per instance in setUp
+        # (bypass_device_restrictions), so nothing is decided for them here.
+        class FakeOpenReg(PrivateUse1TestBase):
+            device_type = "openreg"
+
+        @onlyCUDA
+        def test_cuda_only(self, device):
+            pass
+
+        with self._lists():
+            self.assertIsNone(skip_reason_at_collection(FakeOpenReg, test_cuda_only, "test_cuda_only"))
+
+    def test_unknown_conditions_keep_the_test(self):
+        class FakeCUDA(DeviceTypeTestBase):
+            device_type = "cuda"
+            _device_type_at_collection = "cuda"
+
+        @skipCUDAIfNoMagma
+        def test_magma(self, device):
+            pass
+
+        @skipCUDAIf(True, "cuda dep")
+        def test_dep(self, device):
+            pass
+
+        # no_magma is a class attribute that setUpClass sets, so it is unknown here.
+        self.assertIsNone(skip_reason_at_collection(FakeCUDA, test_magma, "test_magma"))
+        self.assertEqual(skip_reason_at_collection(FakeCUDA, test_dep, "test_dep"), "cuda dep")
+        # Without a class the device type is unknown.
+        self.assertIsNone(skip_reason_at_collection(None, test_dep, "test_dep"))
+
+    def test_plain_test_cases(self):
+        # Device-agnostic skipIf also decorates plain TestCases (dynamo/test_exc.py),
+        # which have no device_type, and helpers build a TestCase with the default
+        # methodName and call setUp() directly.
+        class Plain(TestCase):
+            @skipIf(True, "plain dep")
+            def test_dep(self):
+                pass
+
+            @skipIf(False, "plain dep")
+            def test_no_dep(self):
+                pass
+
+        with self._lists():
+            self.assertEqual(self._reason(Plain, "test_dep"), "plain dep")
+            self.assertIsNone(self._reason(Plain, "test_no_dep"))
+            Plain("test_no_dep").test_no_dep()
+            check_if_enable(Plain())
+
+    @parametrize("descriptor", [False, True])
+    @parametrize("device_base", [False, True])
+    def test_instance_device_type_keeps_runtime_decision(self, descriptor, device_base):
+        base = DeviceTypeTestBase if device_base else TestCase
+
+        class Dynamic(base):
+            device_type = property(lambda self: "cuda") if descriptor else "cpu"
+
+            def setUp(self):
+                super().setUp()
+                if not descriptor:
+                    self.device_type = "cuda"
+
+            @onlyCUDA
+            def test_runs(self):
+                self.assertEqual(self.device_type, "cuda")
+
+        with self._lists():
+            self.assertIsNone(self._reason(Dynamic, "test_runs"))
+            result = unittest.TestResult()
+            unittest.TestCase.run(Dynamic("test_runs"), result)
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    def test_slow_list_and_skip_fast(self):
+        class TestLists(TestCase):
+            def test_listed_slow(self):
+                pass
+
+            def test_fast(self):
+                pass
+
+            @slowTest
+            def test_decorated_slow(self):
+                pass
+
+        slow = {"test_listed_slow (__main__.TestLists)": 10.0}
+        slow_reason = "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test"
+        with self._lists(slow=slow, with_slow=False):
+            self.assertEqual(self._reason(TestLists, "test_listed_slow"), slow_reason)
+            self.assertEqual(self._reason(TestLists, "test_decorated_slow"), slow_reason)
+            self.assertIsNone(self._reason(TestLists, "test_fast"))
+        with self._lists(slow=slow, with_slow=True, skip_fast=True):
+            self.assertIsNone(self._reason(TestLists, "test_listed_slow"))
+            self.assertIsNone(self._reason(TestLists, "test_decorated_slow"))
+            self.assertEqual(self._reason(TestLists, "test_fast"), "test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+
+    @parametrize("changed_hook", [None, "generic", "native", "last_native", "generated", "inherited"])
+    def test_generated_setup_preserves_slow_policy(self, changed_hook):
+        class Generic(TestCase):
+            def test_listed(self, device):
+                pass
+
+            def test_fast(self, device):
+                pass
+
+        scope = {"Generic": Generic}
+        bases = [CPUTestBase, MPSTestBase] if changed_hook == "last_native" else [CPUTestBase]
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=bases):
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericCPU"]
+        if changed_hook == "inherited":
+            cls = type("Inherited", (cls,), {})
+        with contextlib.ExitStack() as stack:
+            if changed_hook in ("generic", "native", "last_native", "generated"):
+                target = {"generic": Generic, "native": CPUTestBase, "last_native": MPSTestBase, "generated": cls}[changed_hook]
+                stack.enter_context(unittest.mock.patch.object(target, "setUpClass", classmethod(lambda cls: None)))
+            slow = {f"test_listed_cpu (__main__.{cls.__name__})": 10.0}
+            with self._lists(slow=slow, with_slow=False):
+                reason = self._reason(cls, "test_listed_cpu")
+                expected = "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test" if changed_hook is None else None
+                self.assertEqual(reason, expected)
+                if changed_hook is None:
+                    with self.assertRaises(unittest.SkipTest):
+                        cls("test_listed_cpu").setUp()
+            with self._lists(skip_fast=True):
+                expected = "test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST" if changed_hook is None else None
+                self.assertEqual(self._reason(cls, "test_fast_cpu"), expected)
+
+    @parametrize("dispatch", ["_run_custom", "_callSetUp", "__getattribute__", "__setattr__",
+                              "_reset_dynamo_if_imported", "addTypeEqualityFunc", "id", "wrap_with_policy",
+                              "TEST_WITH_TORCHDYNAMO", "TEST_WITH_AOT_EAGER", "TEST_WITH_TORCHINDUCTOR"])
+    def test_generated_setup_requires_default_dispatch(self, dispatch):
+        calls = []
+
+        class Generic(TestCase):
+            def test_listed(self, device):
+                calls.append("body")
+
+            def test_control(self, device):
+                calls.append("body")
+
+        def record_success(self, result):
+            result.startTest(self)
+            calls.append("body")
+            result.addSuccess(self)
+            result.stopTest(self)
+
+        compiled = dispatch.startswith("TEST_WITH_")
+        if compiled:
+            def compile_fn(self, fn, backend, nopython):
+                return lambda result: record_success(self, result)
+
+            Generic.compile_fn = compile_fn
+        elif dispatch == "_run_custom":
+            Generic._run_custom = record_success
+        elif dispatch == "_callSetUp":
+            Generic._callSetUp = lambda self: None
+        elif dispatch == "__getattribute__":
+            def getattribute(self, name):
+                return (lambda: None) if name == "_callSetUp" else object.__getattribute__(self, name)
+
+            Generic.__getattribute__ = getattribute
+        elif dispatch in ("_reset_dynamo_if_imported", "addTypeEqualityFunc", "id", "wrap_with_policy"):
+            def bypass_setup(self, *args):
+                self._callSetUp = lambda: None
+                return "test"
+
+            setattr(Generic, dispatch, bypass_setup)
+            Generic._do_cuda_non_default_stream = dispatch == "id"
+            Generic._ignore_not_implemented_error = dispatch == "wrap_with_policy"
+        else:
+            def setattr_(self, name, value):
+                if name == "_testMethodName":
+                    value = "test_control_cpu"
+                object.__setattr__(self, name, value)
+
+            Generic.__setattr__ = setattr_
+
+        if dispatch != "__setattr__":
+            # Only the renamed control test runs TestCase.setUp.
+            Generic.tearDown = unittest.TestCase.tearDown
+
+        scope = {"Generic": Generic}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[CPUTestBase]):
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericCPU"]
+        slow = {"test_listed_cpu (__main__.GenericCPU)": 10.0}
+        with self._lists(slow=slow, with_slow=False), contextlib.ExitStack() as stack:
+            for flag in ("TEST_WITH_TORCHDYNAMO", "TEST_WITH_AOT_EAGER", "TEST_WITH_TORCHINDUCTOR"):
+                stack.enter_context(unittest.mock.patch(f"{self._CU}.{flag}", flag == dispatch))
+            if dispatch == "id":
+                stack.enter_context(unittest.mock.patch(f"{self._CU}.IS_WINDOWS", False))
+            self.assertIsNone(self._reason(cls, "test_listed_cpu"))
+            result = unittest.TestResult()
+            # Nested runners reset compiler stance outside the outer compiled region.
+            torch.compiler.disable(cls("test_listed_cpu").run)(result)
+            self.assertEqual(calls, ["body"])
+            self.assertEqual(result.testsRun, 1)
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    def test_device_count_rechecks_generated_dispatch(self):
+        calls = []
+
+        class Generic(TestCase):
+            @deviceCountAtLeast(2)
+            def test_runs(self, devices):
+                raise AssertionError("the custom dispatcher must bypass this method")
+
+        scope = {"Generic": Generic}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[CPUTestBase]):
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericCPU"]
+        with self._lists():
+            self.assertEqual(self._reason(cls, "test_runs_cpu"), "fewer than 2 devices detected")
+            cls._callTestMethod = lambda self, fn: calls.append("custom dispatcher")
+            self.assertIsNone(self._reason(cls, "test_runs_cpu"))
+            result = unittest.TestResult()
+            unittest.TestCase.run(cls("test_runs_cpu"), result)
+            self.assertEqual(calls, ["custom dispatcher"])
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+
+    @parametrize("hook", ["tearDown", "_callTearDown"])
+    def test_device_count_preserves_teardown_failures(self, hook):
+        class Generic(TestCase):
+            @deviceCountAtLeast(2)
+            def test_runs(self, devices):
+                raise AssertionError("the existing device count check must skip the body")
+
+        def fail_teardown(self):
+            raise RuntimeError("existing teardown failure")
+
+        setattr(Generic, hook, fail_teardown)
+        scope = {"Generic": Generic}
+        with unittest.mock.patch(f"{self._CDT}.get_desired_device_type_test_bases", return_value=[CPUTestBase]):
+            instantiate_device_type_tests(Generic, scope)
+        cls = scope["GenericCPU"]
+        with self._lists():
+            self.assertIsNone(self._reason(cls, "test_runs_cpu"))
+            result = unittest.TestResult()
+            unittest.TestCase.run(cls("test_runs_cpu"), result)
+            self.assertEqual([reason for _, reason in result.skipped], ["fewer than 2 devices detected"])
+            self.assertEqual(len(result.errors), 1)
+            self.assertIn("existing teardown failure", result.errors[0][1])
+            self.assertEqual(result.failures, [])
+
+    @parametrize("listed_slow", [False, True])
+    @parametrize("chain_setup", [False, True])
+    def test_overridden_setup_defers_slow_and_fast_checks(self, listed_slow, chain_setup):
+        class Overridden(TestCase):
+            def setUp(self):
+                if chain_setup:
+                    super().setUp()
+
+            def test_runs(self):
+                pass
+
+        slow = {"test_runs (__main__.Overridden)": 10.0} if listed_slow else {}
+        with self._lists(slow=slow, with_slow=not listed_slow, skip_fast=not listed_slow):
+            self.assertIsNone(self._reason(Overridden, "test_runs"))
+            if chain_setup:
+                with self.assertRaises(unittest.SkipTest):
+                    Overridden("test_runs").setUp()
+            else:
+                Overridden("test_runs").setUp()
+
+    def test_setup_class_can_change_slow_metadata(self):
+        class Dynamic(TestCase):
+            @classmethod
+            def setUpClass(cls):
+                super().setUpClass()
+                cls.test_runs.slow_test = True
+
+            def test_runs(self):
+                pass
+
+        with self._lists(skip_fast=True):
+            self.assertIsNone(self._reason(Dynamic, "test_runs"))
+            Dynamic.setUpClass()
+            self.addCleanup(Dynamic.tearDownClass)
+            Dynamic("test_runs").setUp()
+
+    def test_disabled_tests_stay_at_run_time(self):
+        class TestDisabled(TestCase):
+            def test_disabled(self):
+                pass
+
+        disabled = {"test_disabled (__main__.TestDisabled)": ("https://github.com/pytorch/pytorch/issues/0", [])}  # @lint-ignore
+        with self._lists(disabled=disabled):
+            self.assertIsNone(self._reason(TestDisabled, "test_disabled"))
+            with self.assertRaisesRegex(unittest.SkipTest, "disabled"):
+                check_if_enable(TestDisabled("test_disabled"))
+
+
+instantiate_parametrized_tests(TestSkipReasonAtCollection)
+
+
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "onlyOn passes instead of skipping in fbcode, so the fixture counts differ")
+class TestPruneSkipsAtCollection(TestCase):
+    """The PruneSkipsPlugin hook in test/conftest.py, run in place under test/ as in CI."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if importlib.util.find_spec("pytest") is None:
+            raise unittest.SkipTest("the fixture suite needs pytest")
+        super().setUpClass()
+
+    def _run_fixture(self, *extra_args: str, env=None, expected_returncode=0) -> str:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "prune_skips_testdata/pytest_suite.py", "-p", "no:cacheprovider", "-q", *extra_args],
+            cwd=_JUNIT_TESTDATA.parent, env=_FIXTURE_CHILD_ENV | (env or {}), capture_output=True, text=True, timeout=300,
+        )
+        output = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, expected_returncode, output)
+        return output
+
+    def test_prunes_only_skips_decided_at_collection(self):
+        output = self._run_fixture()
+        self.assertIn("5 deselected", output)
+        self.assertIn("2 skipped", output)
+        self.assertIn("8 passed", output)
+        self.assertIn("2 xfailed", output)
+
+    def test_plugin_opt_out_reports_skips(self):
+        output = self._run_fixture("-p", "no:prune_skips_plugin")
+        self.assertIn("7 skipped", output)
+        self.assertIn("8 passed", output)
+        self.assertIn("2 xfailed", output)
+        self.assertNotIn("deselected", output)
+
+    def test_unresolvable_callable_is_kept(self):
+        from conftest import PruneSkipsPlugin
+
+        @unittest.skip("static class skip")
+        class Skipped(TestCase):
+            pass
+
+        class UnresolvedItem:
+            cls = Skipped
+            name = "test_unresolved"
+
+            @property
+            def obj(self):
+                raise RuntimeError("cannot resolve test callable")
+
+            def iter_markers(self, name):
+                return iter(())
+
+            def get_closest_marker(self, name):
+                return None
+
+        item = UnresolvedItem()
+        items = [item]
+        config = unittest.mock.Mock()
+        plugin = PruneSkipsPlugin()
+        plugin.pytest_collection_modifyitems(config, items)
+        self.assertEqual(items, [item])
+        self.assertFalse(plugin.reasons)
+        config.hook.pytest_deselected.assert_not_called()
+
+    def test_prunes_before_shard_assignment(self):
+        snapshots = []
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "shard.json"
+            for shard_id in (1, 2):
+                self._run_fixture(
+                    "-p", "prune_skips_testdata.shard_probe", "--shard-probe-log", str(log),
+                    "--num-shards=2", f"--shard-id={shard_id}",
+                )
+                snapshots.append(json.loads(log.read_text()))
+
+        first, second = snapshots
+        self.assertEqual(first["before"], second["before"])
+        self.assertEqual(len(first["before"]), 11)
+        excluded = {
+            "TestPruneFixture::test_runs", "TestPruneFixture::test_static_mark",
+            "TestCustomDispatch::test_static_mark",
+            "TestPruneFixtureDeviceCPU::test_cuda_only_cpu", "test_pytest_mark", "test_pytest_static_condition",
+        }
+        shard_inputs = {nodeid.split("::", 1)[1] for nodeid in first["before"]}
+        self.assertFalse(shard_inputs & excluded)
+        self.assertIn("TestPruneFixture::test_body_skip", shard_inputs)
+        self.assertIn("TestPruneFixture::test_lazy_skip", shard_inputs)
+        self.assertIn("TestCustomDispatch::test_recorded_skip", shard_inputs)
+        self.assertIn("test_pytest_xfail_before_unittest_skip", shard_inputs)
+        self.assertFalse(set(first["after"]) & set(second["after"]))
+        self.assertEqual(set(first["after"]) | set(second["after"]), set(first["before"]))
+        self.assertEqual(first["after"], first["final"])
+        self.assertEqual(second["after"], second["final"])
+
+        # A checkpoint from another shard must not select that shard's test here.
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "resume.json"
+            self._run_fixture(
+                "-p", "prune_skips_testdata.shard_probe", "--shard-probe-log", str(log),
+                "--num-shards=2", "--shard-id=1", "-p", "cacheprovider", "--rs=probe",
+                "-o", f"cache_dir={directory}/cache", "--shard-probe-resume-from", second["after"][0],
+            )
+            self.assertEqual(json.loads(log.read_text())["final"], first["after"])
+
+    def test_collection_failure_does_not_shard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "shard.json"
+            self._run_fixture(
+                "-p", "prune_skips_testdata.shard_probe", "--shard-probe-log", str(log),
+                "-k", "(", expected_returncode=4,
+            )
+            self.assertFalse(log.exists())
+
+    def test_overridden_setup_keeps_fast_tests_in_slow_config(self):
+        output = self._run_fixture(
+            "-k", "TestOverriddenSetup", env={"PYTORCH_TEST_WITH_SLOW": "1", "PYTORCH_TEST_SKIP_FAST": "1"},
+        )
+        self.assertIn("1 passed", output)
+        self.assertIn("16 deselected", output)
+
+
 class TestTestParametrizationDeviceType(TestCase):
     def test_unparametrized_names(self, device):
         # This test exists to protect against regressions in device / dtype test naming
@@ -2825,6 +3937,36 @@ class TestTestParametrizationDeviceType(TestCase):
         ]
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
+
+    def test_ops_allowlist_empty_intersection(self, device):
+        test_op = OpInfo('test_op', op=lambda x: x, dtypes=floating_types(), sample_inputs_func=lambda _: [])
+
+        class TestParametrized(TestCase):
+            @ops([test_op], dtypes=OpDTypes.none)
+            @parametrize('flag', [False, True])
+            def test_op_parametrized(self, device, op, flag):
+                pass
+
+        test_fn = TestParametrized.test_op_parametrized
+        with unittest.mock.patch.object(type(self), 'op_allowlist', ['other_op']):
+            cases = list(test_fn.parametrize_fn(test_fn, TestParametrized, type(self)))
+            self.assertEqual(cases, [])
+        with unittest.mock.patch.object(type(self), 'op_allowlist', ['test_op']):
+            cases = list(test_fn.parametrize_fn(test_fn, TestParametrized, type(self)))
+            self.assertEqual([kwargs['op'].name for _, _, kwargs, _ in cases], ['test_op', 'test_op'])
+            self.assertEqual([kwargs['flag'] for _, _, kwargs, _ in cases], [False, True])
+
+    @unittest.mock.patch.dict(os.environ, {'OPINFO_RESTRICT_TO_DSL': ''})
+    def test_ops_empty_input_still_errors_with_allowlist(self, device):
+        class TestParametrized(TestCase):
+            @ops(iter(()))
+            def test_op_parametrized(self, device, dtype, op):
+                pass
+
+        test_fn = TestParametrized.test_op_parametrized
+        with unittest.mock.patch.object(type(self), 'op_allowlist', ['other_op']):
+            with self.assertRaisesRegex(ValueError, 'An empty op_list was passed to @ops'):
+                list(test_fn.parametrize_fn(test_fn, TestParametrized, type(self)))
 
     def test_ops_composition_names(self, device):
         device = self.device_type
@@ -3131,6 +4273,7 @@ class TestImports(TestCase):
                            "torch._native.ops.reductions.ordered",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
+                           "torch._native.ops.quantize_tensor.blockscaled_tma",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
@@ -3183,6 +4326,16 @@ class TestImports(TestCase):
                 except Exception as e:
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
+
+    def test_import_aot_runtime_wrappers_before_dynamo(self):
+        self._check_python_output(textwrap.dedent("""
+            import sys
+            import torch
+
+            if "torch._dynamo" in sys.modules:
+                raise AssertionError("Dynamo was loaded before runtime_wrappers")
+            import torch._functorch._aot_autograd.runtime_wrappers
+        """))
 
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
@@ -3577,13 +4730,11 @@ class TestHardwareClassifications(TestCase):
             self._cu.filter_by_hw_classification([object()], None, get_class=lambda item: None, on_match=kept.append, exclude=exclude)
             self.assertEqual(len(kept), 1)
 
-    # The fixture runs as the default config, so other test configs and CUDA/ROCm
-    # builds would only repeat it.
+    # The fixture runs as the default config, so other test configs would only repeat it.
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
     @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
-    @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "the filter doesn't depend on the device")
     def test_hw_classification_exclude_env_var(self):
         # Runs the fixture directly (unittest) and with --use-pytest, as run_test.py
         # runs test files, in place under test/ so test/conftest.py and pytest.ini apply.
