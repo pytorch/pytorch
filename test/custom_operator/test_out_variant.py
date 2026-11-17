@@ -4,7 +4,6 @@ from torch import Tensor
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._library._out_variant import check_out_variant, to_out_variant
 from torch._library.utils import is_out
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -409,7 +408,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(mul_result.dtype, torch.float64)
         self.assertEqual(mul_result.stride(), (1, 3))
 
-    @fake_tensor_test()
     def test_auto_fake_kernel_single_out(self):
         self.lib.define("auto_fake_single(Tensor x, Tensor y) -> Tensor")
         self.lib.define(
@@ -431,7 +429,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             result = torch.ops._TestOutVariant.auto_fake_single.out(x, y, out=out)
             self.assertIs(result, out)
 
-    @fake_tensor_test()
     def test_auto_fake_kernel_multi_out(self):
         self.lib.define("auto_fake_multi(Tensor x, Tensor y) -> (Tensor, Tensor)")
         self.lib.define(

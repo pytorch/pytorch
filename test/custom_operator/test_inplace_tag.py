@@ -3,7 +3,6 @@ import torch
 from torch import Tensor
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._library.utils import is_inplace
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -43,7 +42,6 @@ class TestInplaceTag(TestCase):
     def test_basic_inplace(self):
         self.assertTrue(is_inplace(torch.ops._TestInplaceTag.add_.default))
 
-    @fake_tensor_test()
     def test_auto_fake_kernel_inplace(self):
         self.lib.define(
             "auto_fake_add_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
