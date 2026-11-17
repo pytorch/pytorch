@@ -6391,7 +6391,7 @@ class Scheduler:
         if (
             # pyrefly: ignore[unbound-name]
             config.graph_partition
-            and V.graph.cudagraphs_per_partition
+            and V.graph.partition_plan.cudagraphs_per_partition
             # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
             # pyrefly: ignore[unbound-name]
@@ -12326,9 +12326,9 @@ class Scheduler:
             if cudagraphs_override is False:
                 return "invoke_subgraph opts out of cudagraphs"
             if cudagraphs_override is True or (
-                not V.graph.cudagraph_partition_only_regions
+                not V.graph.partition_plan.captures_only_regions
                 and (
-                    V.graph.cudagraphs_top_level
+                    V.graph.partition_plan.cudagraphs_top_level
                     or _unstable_customized_partition_wrapper.wrapper is not None
                 )
             ):
@@ -12338,7 +12338,7 @@ class Scheduler:
                     return reason
                 return self._invoke_subgraph_family_cudagraph_skip_reason(node, region)
 
-        if V.graph.cudagraph_partition_only_regions:
+        if V.graph.partition_plan.captures_only_regions:
             return "partitioning is limited to annotated invoke_subgraph regions"
 
         # When not using cudagraphs, keep all kernels in the `call` function
@@ -12346,7 +12346,7 @@ class Scheduler:
         # benefit to cudagraph. Read the top-level setting: a region opting in
         # asks for that region alone to be captured.
         if (
-            not V.graph.cudagraphs_top_level
+            not V.graph.partition_plan.cudagraphs_top_level
             and _unstable_customized_partition_wrapper.wrapper is None
         ):
             return "partition includes all ops when cudagraphs is disabled"
@@ -12982,7 +12982,7 @@ class Scheduler:
             try:
                 return (
                     self._codegen_partitions()
-                    if V.graph.split_into_partitions
+                    if V.graph.partition_plan.split_into_partitions
                     else self._codegen(self.nodes)
                 )
             finally:
