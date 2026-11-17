@@ -2848,21 +2848,18 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(handler.eval_fn("hello", expected))
 
     def test_duplicate_input(self):
-        from torch._dynamo.source import LocalSource
-
         other = LocalSource("other")
         guard = self._make_guard(
             functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=other)
         )
         handler = self._get_handler("DUPLICATE_INPUT")
         self.assertEqual(handler.get_extra_sources_fn(guard), (other,))
-        tensor, other_tensor = torch.ones(1), torch.ones(1)
-        expected = handler.get_metadata_fn(guard, (tensor, tensor))
-        self.assertTrue(handler.eval_fn((tensor, tensor), expected))
-        self.assertFalse(handler.eval_fn((tensor, other_tensor), expected))
-        expected = handler.get_metadata_fn(guard, (tensor, other_tensor))
-        self.assertTrue(handler.eval_fn((tensor, other_tensor), expected))
-        self.assertFalse(handler.eval_fn((tensor, tensor), expected))
+        tensor = torch.ones(1)
+        same, distinct = (tensor, tensor), (tensor, tensor.clone())
+        for observed, changed in ((same, distinct), (distinct, same)):
+            expected = handler.get_metadata_fn(guard, observed)
+            self.assertTrue(handler.eval_fn(observed, expected))
+            self.assertFalse(handler.eval_fn(changed, expected))
 
     def test_constant_match(self):
         from torch._dynamo.guards import GuardBuilder

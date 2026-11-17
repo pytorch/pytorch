@@ -932,6 +932,8 @@ class InvokeSubgraphReuseEntry:
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
 
+    lifted_capture_sources: frozenset[Source] = frozenset()
+
     # (SymPy predicate, size_oblivious) from shape guards, finite ranges, and deferred asserts.
     shape_guards: list[tuple[Any, bool]] = dataclasses.field(default_factory=list)
 
@@ -948,13 +950,8 @@ class InvokeSubgraphReuseCondition:
     # appear in the guard delta.
     input_checks: list[tuple[Any, object]]  # list[tuple[InputTag, object]]
 
-    # Guards captured during the trace (delta + source-mapped).
-    # Each entry: (source, handler, expected_value, guard)
-    # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
-    guards: list[tuple[Source, GuardCheckSpec, object, Guard]]
-
-    # One structural source chain per guard, in the same order as guards.
-    guard_dependencies: list[OrderedSet[Source]]
+    # Each captured guard carries its evaluator, expected value and structural dependencies.
+    guards: dict[Guard, tuple[GuardCheckSpec, object, OrderedSet[Source]]]
 
     # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
     # On cache hit, we verify the new call has the same treespec.
@@ -1092,6 +1089,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
             [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], T | None
         ],
     ) -> T | None:
+        """Return the first accepted evaluator result and promote its cache entry."""
         entries = self.subgraph_reuse_cache.get(fn_code, [])
         for i, (condition, entry) in enumerate(entries):
             if (match := evaluator(condition, entry)) is not None:
