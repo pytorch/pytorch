@@ -34,6 +34,14 @@
     list_flash_attention_impls
     current_flash_attention_impl
     restore_flash_attention_impl
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    enable_cudnn_sdp_python
+    cudnn_sdp_python_enabled
+    is_cudnn_sdp_python_available
 ```
 
 ## Submodules
