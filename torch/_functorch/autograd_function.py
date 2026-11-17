@@ -934,6 +934,7 @@ class DynamoAutogradFunctionTraceHelper:
                     # custom_function.cpp). The alias is the output now, so
                     # the mark has to cover it as well.
                     alias = out.detach()
+                    # pyrefly: ignore [missing-attribute]
                     ctx.mark_non_differentiable(*ctx.non_differentiable, alias)
                     return alias
                 return out.view_as(out)
