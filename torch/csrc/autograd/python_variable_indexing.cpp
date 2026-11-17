@@ -66,7 +66,7 @@ static bool sequence_has_torch_function(PyObject* seq) {
     return false;
   }
 
-  for (Py_ssize_t i = 0; i < length; i++) {
+  for (const auto i : c10::irange(length)) {
     THPObjectPtr item(PySequence_GetItem(seq, i));
     if (!item.get()) {
       PyErr_Clear();
@@ -89,7 +89,7 @@ static int64_t count_specified_dimensions(
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
   auto size = PyTuple_GET_SIZE(index);
-  for (Py_ssize_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(index, i);
     if (!skip_torch_function && check_has_torch_function(obj)) {
       return -1;
@@ -347,7 +347,7 @@ static bool treatSequenceAsTuple(PyObject* index) {
   if (n >= 32) {
     return false;
   }
-  for (Py_ssize_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     auto obj = THPObjectPtr{PySequence_GetItem(index, i)};
     if (!obj.get()) {
       PyErr_Clear();

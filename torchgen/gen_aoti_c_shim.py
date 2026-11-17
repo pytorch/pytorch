@@ -82,18 +82,17 @@ base_type_to_callsite_expr = {
 
 # convert args to C types, names in declarations, and expressions in function bodies
 #
-# resolve_dispatch_flags: whether to materialize conj/neg input tensors before the
-# call. Device-specific shims call kernels directly and need this. Device-generic
-# (aten) shims go through the dispatcher, which already handles these flags, and
-# must pass tensors through as-is so that view ops keep aliasing their inputs.
+# resolve_dispatch_flags: whether to manually materialize conj/neg input tensors
+# before the call. Device-specific shims call kernels directly and need this.
+# Device-generic (aten) shims go through the dispatcher, which already handles these
+# flags, so one must pass tensors through as-is so that view ops called on complex
+# Tensors keep aliasing their inputs instead of operating on a temporary copy.
 def convert_arg_type_and_name(
     typ: Type,
     name: str,
     is_write: bool = False,
     resolve_dispatch_flags: bool = True,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
-    # Output tensors are never materialized: resolve_tensor_dispatch_flags returns
-    # an rvalue, which can't be passed to at::Tensor&.
     materialize = resolve_dispatch_flags and not is_write
     if isinstance(typ, BaseType):
         if typ.name in base_type_to_c_type:
@@ -222,7 +221,7 @@ def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
 def gen_arguments(
     flat_arguments: Sequence[Argument],
     skipped_args: set[str],
-    resolve_dispatch_flags: bool,
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[list[str], list[str]]:
     types: list[str] = []
     new_names: list[str] = []
@@ -308,7 +307,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
 
 
 # gen.py generates header first and then src, so caching the result here to avoid duplicate work
-declaration_definition_cache: dict[tuple[str, str, str], tuple[str, str]] = {}
+declaration_definition_cache: dict[tuple[str, str, str, bool], tuple[str, str]] = {}
 
 
 _TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
@@ -348,12 +347,14 @@ def gen_declaration_and_definition(
     device: str,
     backend_call: str,
     op_metadata: dict[str, str | dict[str, list[str] | str]],
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 
     global declaration_definition_cache
-    if (base_name, device, backend_call) in declaration_definition_cache:
-        return declaration_definition_cache[(base_name, device, backend_call)]
+    cache_key = (base_name, device, backend_call, resolve_dispatch_flags)
+    if cache_key in declaration_definition_cache:
+        return declaration_definition_cache[cache_key]
 
     # Check the validity of op_metadata. Each "vN" entry is a dict
     # {"new_args": [...], "since": "TORCH_VERSION_X_Y_Z"} where "since" is optional;
@@ -391,7 +392,6 @@ def gen_declaration_and_definition(
     declarations: list[str] = []
     definitions: list[str] = []
     skipped_args: set[str] = set()
-    resolve_dispatch_flags = device != "aten"
 
     for ver_id, new_args in sorted(indexed_op_metadata.items(), reverse=True):
         # Iterate in the reverse order, so the latest version of an op will get generated first
@@ -452,11 +452,11 @@ def gen_declaration_and_definition(
         declarations.append(decl)
         definitions.append(definition)
 
-    declaration_definition_cache[(base_name, device, backend_call)] = (
+    declaration_definition_cache[cache_key] = (
         "\n".join(declarations),
         "\n".join(definitions),
     )
-    return declaration_definition_cache[(base_name, device, backend_call)]
+    return declaration_definition_cache[cache_key]
 
 
 def gen_static_dispatch_backend_call_signature(f: NativeFunction) -> CppSignature:
@@ -589,16 +589,17 @@ def gen_c_shim(
         func,
         backend_index,
     )
+    resolve_dispatch_flags = backend_index is not None
 
     try:
         if header:
             declaration, _ = gen_declaration_and_definition(
-                schema, device, backend_call, version_info
+                schema, device, backend_call, version_info, resolve_dispatch_flags
             )
             return declaration
         else:
             _, definition = gen_declaration_and_definition(
-                schema, device, backend_call, version_info
+                schema, device, backend_call, version_info, resolve_dispatch_flags
             )
             return definition
 

@@ -23,59 +23,6 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 /// is deallocated.
 using DeleterFnPtr = void (*)(void*);
 
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-namespace detail {
-// Optional tensor creation kwargs in the form taken by the generated
-// c_shim_aten functions: nullable int32_t pointers, where nullptr means unset.
-class ShimTensorOptions {
- public:
-  ShimTensorOptions(
-      std::optional<torch::headeronly::ScalarType> dtype,
-      std::optional<torch::headeronly::Layout> layout,
-      std::optional<torch::stable::Device> device,
-      std::optional<bool> pin_memory) {
-    if (dtype.has_value()) {
-      dtype_ = to<int32_t>(from(*dtype));
-    }
-    if (layout.has_value()) {
-      layout_ = to<int32_t>(from(*layout));
-    }
-    if (device.has_value()) {
-      device_type_ = to<int32_t>(from(device->type()));
-      device_index_ = device->index();
-    }
-    if (pin_memory.has_value()) {
-      pin_memory_ = *pin_memory;
-    }
-  }
-
-  int32_t* dtype() {
-    return ptr(dtype_);
-  }
-  int32_t* layout() {
-    return ptr(layout_);
-  }
-  int32_t* device_type() {
-    return ptr(device_type_);
-  }
-  int32_t device_index() const {
-    return device_index_;
-  }
-  int32_t* pin_memory() {
-    return ptr(pin_memory_);
-  }
-
- private:
-  static int32_t* ptr(std::optional<int32_t>& v) {
-    return v.has_value() ? &*v : nullptr;
-  }
-
-  std::optional<int32_t> dtype_, layout_, device_type_, pin_memory_;
-  int32_t device_index_ = 0;
-};
-} // namespace detail
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-
 /// Stable version of the empty_like op.
 ///
 /// Creates a new uninitialized tensor with the same size, dtype, layout, and
@@ -977,17 +924,21 @@ inline torch::stable::Tensor new_empty(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  detail::ShimTensorOptions opts(dtype, layout, device, pin_memory);
+  int32_t dtype_val = dtype ? detail::to<int32_t>(detail::from(*dtype)) : 0;
+  int32_t layout_val = layout ? detail::to<int32_t>(detail::from(*layout)) : 0;
+  int32_t device_type_val =
+      device ? detail::to<int32_t>(detail::from(device->type())) : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
   AtenTensorHandle ret0 = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_empty(
       self.get(),
       size.data(),
       static_cast<int64_t>(size.size()),
-      opts.dtype(),
-      opts.layout(),
-      opts.device_type(),
-      opts.device_index(),
-      opts.pin_memory(),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type_val : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
       &ret0));
   return torch::stable::Tensor(ret0);
 }
@@ -1015,17 +966,21 @@ inline torch::stable::Tensor new_zeros(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  detail::ShimTensorOptions opts(dtype, layout, device, pin_memory);
+  int32_t dtype_val = dtype ? detail::to<int32_t>(detail::from(*dtype)) : 0;
+  int32_t layout_val = layout ? detail::to<int32_t>(detail::from(*layout)) : 0;
+  int32_t device_type_val =
+      device ? detail::to<int32_t>(detail::from(device->type())) : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
   AtenTensorHandle ret0 = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_zeros(
       self.get(),
       size.data(),
       static_cast<int64_t>(size.size()),
-      opts.dtype(),
-      opts.layout(),
-      opts.device_type(),
-      opts.device_index(),
-      opts.pin_memory(),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type_val : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
       &ret0));
   return torch::stable::Tensor(ret0);
 }

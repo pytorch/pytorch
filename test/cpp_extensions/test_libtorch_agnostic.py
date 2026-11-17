@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal import common_device_type
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -75,6 +76,7 @@ class TestLibtorchAgnostic(TestCase):
     """
 
     @classmethod
+    @getattr(common_device_type, "preserves_device_selection", lambda fn: fn)
     def setUpClass(cls):
         # Build versioned extensions
         base_dir = Path(__file__).parent
@@ -866,6 +868,11 @@ class TestLibtorchAgnostic(TestCase):
         for t, fill_value in ((conj_t, 1 + 2j), (neg_t, 3.0)):
             out = libtorch_agnostic.ops.my_narrow(t, 0, 0, 1)
             self.assertEqual(out, torch.narrow(t, 0, 0, 1))
+            # only fixed in 2.16+
+            if _torchVersionLessThan(2, 16):
+                self.assertFalse(out.is_conj() or out.is_neg())
+                self.assertNotEqual(out.data_ptr(), t.data_ptr())
+                continue
             self.assertEqual(out.is_conj(), t.is_conj())
             self.assertEqual(out.is_neg(), t.is_neg())
             out.fill_(fill_value)
@@ -1289,6 +1296,23 @@ for warning in w:
         with set_warn_always_context(warn_always):
             enabled = libtorch_agnostic.ops.my_is_warn_always_enabled()
         self.assertEqual(enabled, warn_always)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("flag", ["conj", "neg", "inference"])
+    def test_is_conj_is_neg_is_inference(self, device, flag):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(flag == "inference"):
+            t = torch.ones(2, device=device, dtype=torch.complex64)
+        if flag == "conj":
+            t = t.conj()
+        elif flag == "neg":
+            t = torch._neg_view(t)
+
+        for name in ("conj", "neg", "inference"):
+            actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
+            self.assertEqual(actual, name == flag)
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
@@ -2195,29 +2219,23 @@ except RuntimeError as e:
         self.assertEqual(result_dtype.dtype, torch.float64)
 
         # Test with different device (move to CPU)
-        result_device = libtorch_agnostic.ops.my_new_empty(t, [2, 3], device="cpu")
+        pin_memory = torch.cuda.is_available()
+        result_device = libtorch_agnostic.ops.my_new_empty(
+            t, [2, 3], device="cpu", pin_memory=pin_memory
+        )
         expected_device = t.new_empty([2, 3], device="cpu")
         self.assertEqual(result_device.shape, expected_device.shape)
         self.assertEqual(result_device.device.type, "cpu")
+        self.assertEqual(result_device.is_pinned(), pin_memory)
 
         # Test with dtype and device together
         result_both = libtorch_agnostic.ops.my_new_empty(
-            t, [4, 5], dtype=torch.int64, device="cpu"
+            t, [4, 5], dtype=torch.int64, device=t.device
         )
-        expected_both = t.new_empty([4, 5], dtype=torch.int64, device="cpu")
+        expected_both = t.new_empty([4, 5], dtype=torch.int64, device=t.device)
         self.assertEqual(result_both.shape, expected_both.shape)
         self.assertEqual(result_both.dtype, torch.int64)
-        self.assertEqual(result_both.device.type, "cpu")
-
-        # Test with a device that has an explicit index
-        result_indexed = libtorch_agnostic.ops.my_new_empty(t, [2, 3], device=t.device)
-        self.assertEqual(result_indexed.device, t.device)
-
-        if torch.cuda.is_available():
-            result_pinned = libtorch_agnostic.ops.my_new_empty(
-                t, [2, 3], device="cpu", pin_memory=True
-            )
-            self.assertTrue(result_pinned.is_pinned())
+        self.assertEqual(result_both.device, t.device)
 
     @skipIfTorchVersionLessThan(2, 10)
     @skipIfTorchDynamo(
@@ -2242,26 +2260,20 @@ except RuntimeError as e:
         self.assertEqual(result_dtype, expected_dtype, exact_device=True)
 
         # Test with different device (move to CPU)
-        result_device = libtorch_agnostic.ops.my_new_zeros(t, [2, 3], device="cpu")
+        pin_memory = torch.cuda.is_available()
+        result_device = libtorch_agnostic.ops.my_new_zeros(
+            t, [2, 3], device="cpu", pin_memory=pin_memory
+        )
         expected_device = t.new_zeros([2, 3], device="cpu")
         self.assertEqual(result_device, expected_device, exact_device=True)
+        self.assertEqual(result_device.is_pinned(), pin_memory)
 
         # Test with dtype and device together
         result_both = libtorch_agnostic.ops.my_new_zeros(
-            t, [4, 5], dtype=torch.int64, device="cpu"
+            t, [4, 5], dtype=torch.int64, device=t.device
         )
-        expected_both = t.new_zeros([4, 5], dtype=torch.int64, device="cpu")
+        expected_both = t.new_zeros([4, 5], dtype=torch.int64, device=t.device)
         self.assertEqual(result_both, expected_both, exact_device=True)
-
-        # Test with a device that has an explicit index
-        result_indexed = libtorch_agnostic.ops.my_new_zeros(t, [2, 3], device=t.device)
-        self.assertEqual(result_indexed, t.new_zeros([2, 3]), exact_device=True)
-
-        if torch.cuda.is_available():
-            result_pinned = libtorch_agnostic.ops.my_new_zeros(
-                t, [2, 3], device="cpu", pin_memory=True
-            )
-            self.assertTrue(result_pinned.is_pinned())
 
     def test_my_unsqueeze(self, device):
         """Test unsqueeze op."""

@@ -6,8 +6,13 @@
 namespace at::native {
 
 struct ScatterAddOp;
+struct ScatterCopyOp;
 struct ScatterMinOp;
 struct ScatterMaxOp;
+
+// Below 256-byte slices, the per-entry overhead of vectorized/TMA scatter
+// outweighs the benefit of processing a row at a time.
+inline constexpr size_t kFastScatterMinSliceBytes = 256;
 
 template<int alignment>
 inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const out_ptr, char * const in_ptr, const size_t index_stride_bytes, const size_t element_size) {
@@ -20,25 +25,16 @@ inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const
   // and we need the src tensor to keep 0 stride from restriding
   // (it could have been deleted by dimension collapse, in this case iterator would still be 2d
   // but we cannot use fast path)
-  // the vectorized kernel launches at least a warp per index, so slices holding fewer
-  // than a warp's worth of vectors leave most threads idle and run slower than the
-  // elementwise kernel; require at least 32 vectors (512 bytes at 16-byte alignment)
 
   const auto slice_size_bytes = static_cast<size_t>(iter.shape()[0]) * element_size;
   return iter.ndim() == 2 && iter.strides(2)[0]==0 && iter.strides(2)[1]==index_element_size &&
          static_cast<size_t>(iter.strides(0)[0])==element_size &&
          static_cast<size_t>(iter.strides(1)[0])==element_size && iter.strides(1)[1] == 0 &&
          get_alignment(out_ptr) == alignment && get_alignment(in_ptr) == alignment &&
-         slice_size_bytes >= 32 * static_cast<size_t>(alignment) &&
          get_alignment(slice_size_bytes) == alignment &&
          get_alignment(static_cast<size_t>(index_stride_bytes)) == alignment &&
          get_alignment(static_cast<size_t>(iter.strides(0)[1])) == alignment;
 }
-
-// Minimum slice size for the vectorized/TMA scatter fast paths. They launch
-// at least a warp per entry, so below 256-byte slices the per-entry overhead
-// dominates and the elementwise kernel is faster (pre-#182675 routing).
-inline constexpr size_t kFastScatterMinSliceBytes = 256;
 
 // For scatter on dim=0: self is restrided (stride[dim]=0), src and index keep original strides.
 // In TensorIterator ordering (fast to slow):

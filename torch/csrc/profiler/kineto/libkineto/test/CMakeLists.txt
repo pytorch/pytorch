@@ -7,6 +7,16 @@
 include(GoogleTest)
 set(CMAKE_CXX_STANDARD 20)
 
+# This is a temporary workaround for the issue with PTI exporting its own copy of std::filesystem.
+# This can be removed once PTI (part of oneAPI) version is updated to 1.2.1
+if(KINETO_BACKEND STREQUAL "xpu" AND LINUX)
+  message(WARNING
+    "Kineto tests: force-linking the C++ standard library ahead of PTI "
+    "(${PTI_LIBRARY}), which exports its own copy of std::filesystem. This "
+    "workaround can be removed once PTI 1.2.1 or newer is required.")
+  add_link_options("LINKER:--push-state,--no-as-needed" -lstdc++ "LINKER:--pop-state")
+endif()
+
 if(KINETO_BACKEND STREQUAL "xpu")
     set(XPU_XPUPTI_LIBRARY ${PTI_LIBRARY} ${SYCL_LIBRARY})
     add_subdirectory(xpupti)
@@ -77,6 +87,17 @@ if(NOT WIN32)
     gtest_discover_tests(ConfigLoaderPollThreadExceptionTest)
 endif()
 
+# InitTest
+# Linux only: KINETO_USE_DAEMON is read only on Linux.
+if(NOT WIN32 AND NOT APPLE)
+    add_executable(InitTest InitTest.cpp)
+    target_link_libraries(InitTest PRIVATE
+        gtest_main
+        kineto_base kineto_api
+        ${XPU_XPUPTI_LIBRARY})
+    gtest_discover_tests(InitTest)
+endif()
+
 # AsyncE2ECpuTraceTest
 # Not supported on Windows: it drives an on-demand config, and Config only
 # accepts on-demand trace files under a directory that defaults to /tmp.
@@ -137,7 +158,8 @@ gtest_discover_tests(CuptiActivityProfilerTest)
 if(KINETO_ENABLE_CUPTI_PM_SAMPLING)
 # CuptiPMSamplingApiTest
 add_executable(CuptiPMSamplingApiTest
-    CuptiPMSamplingApiTest.cpp)
+    CuptiPMSamplingApiTest.cpp
+    MockCuptiPMSampling.cpp)
 target_link_libraries(CuptiPMSamplingApiTest PRIVATE
     gtest_main
     kineto_base kineto_api)
@@ -146,6 +168,31 @@ target_include_directories(CuptiPMSamplingApiTest PRIVATE
     "${LIBKINETO_DIR}/include"
     "${LIBKINETO_DIR}/src")
 gtest_discover_tests(CuptiPMSamplingApiTest)
+
+# CuptiPMSamplingControllerTest
+add_executable(CuptiPMSamplingControllerTest
+    CuptiPMSamplingControllerTest.cpp)
+target_link_libraries(CuptiPMSamplingControllerTest PRIVATE
+    gtest_main
+    kineto_base kineto_api)
+target_include_directories(CuptiPMSamplingControllerTest PRIVATE
+    "${LIBKINETO_DIR}"
+    "${LIBKINETO_DIR}/include"
+    "${LIBKINETO_DIR}/src")
+gtest_discover_tests(CuptiPMSamplingControllerTest)
+
+# CuptiPMSamplingIntegrationTest
+add_executable(CuptiPMSamplingIntegrationTest
+    CuptiPMSamplingIntegrationTest.cpp
+    MockCuptiPMSampling.cpp)
+target_link_libraries(CuptiPMSamplingIntegrationTest PRIVATE
+    gtest_main
+    kineto_base kineto_api)
+target_include_directories(CuptiPMSamplingIntegrationTest PRIVATE
+    "${LIBKINETO_DIR}"
+    "${LIBKINETO_DIR}/include"
+    "${LIBKINETO_DIR}/src")
+gtest_discover_tests(CuptiPMSamplingIntegrationTest)
 
 # CuptiPMSamplingProfilerTest
 add_executable(CuptiPMSamplingProfilerTest
