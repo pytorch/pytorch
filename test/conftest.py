@@ -189,7 +189,9 @@ class CppFakeTensorTestSelection:
 
     def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
         if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED:
-            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+            stepcurrent = session.config.pluginmanager.get_plugin("stepcurrentplugin")
+            if stepcurrent is None or not stepcurrent.exhausted:
+                session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
@@ -715,6 +717,7 @@ class StepcurrentPlugin:
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
+        self.exhausted = False
 
         self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
         self.cache.set(self.made_failing_xml_location, False)
@@ -748,6 +751,8 @@ class StepcurrentPlugin:
             self.report_status = f"skipping {failed_index} already run items."
             deselected = items[:failed_index]
             del items[:failed_index]
+            # Only a matched --scs resume point can exhaust a selected collection.
+            self.exhausted = bool(self.skip) and not items
             if self.run_single:
                 self.report_status += f" Running only {items[0].nodeid}"
                 deselected += items[1:]
