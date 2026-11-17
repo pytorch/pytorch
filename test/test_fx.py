@@ -59,6 +59,11 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
+from fx.test_fx_split import (  # noqa: F401
+    TestFXSplit,
+    TestSplitByTags,
+    TestSplitOutputType,
+)
 from fx.test_fx_traceback import TestFXNodeSource  # noqa: F401
 
 from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
@@ -5996,6 +6001,13 @@ event=aten::add node=add stack_trace=a = s + self.c
 event={kernel_event} node=add stack_trace=a = s + self.c""",
         )
 
+
+instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
+
+
+class TestFXDevice(JitTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @xfailIfNoAcceleratorTriton
     def test_graph_module_with_hop_serialization(self, device):
         """
@@ -6035,8 +6047,8 @@ event={kernel_event} node=add stack_trace=a = s + self.c""",
 
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         with fake_mode:
-            t1 = torch.randn(5)
-            t2 = torch.randn(5)
+            t1 = torch.randn(5, device=device)
+            t2 = torch.randn(5, device=device)
         gm = make_fx(f, tracing_mode="fake")(t1, t2)
 
         self.assertTrue(
@@ -6066,7 +6078,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c""",
         )
 
 
-instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFXDevice, globals())
 
 
 class TestOperatorSignatures(JitTestCase):
