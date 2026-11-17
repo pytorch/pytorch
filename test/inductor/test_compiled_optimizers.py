@@ -1350,7 +1350,6 @@ instantiate_device_type_tests(
     CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"
 )
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

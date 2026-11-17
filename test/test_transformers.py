@@ -1188,6 +1188,7 @@ class TestTransformersAccelerator(NNTestCase):
         self.assertEqual(eager_out, compiled_out)
 
 
+
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
@@ -1454,6 +1455,7 @@ class TestTransformersAccelerator(NNTestCase):
                 return mha(qkv, qkv, qkv, need_weights=False, key_padding_mask=kpm, attn_mask=am)
 
             self.assertRaises(RuntimeError, func)
+
 
 
     def test_transformer_bias_is_none(self, device):

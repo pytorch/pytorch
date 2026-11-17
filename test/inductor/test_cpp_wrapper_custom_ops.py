@@ -86,31 +86,24 @@ class TestCppWrapperCustomOps(InductorTestCase):
     @config.patch(cpp_wrapper=True)
     def test_cpp_custom_op_runtime_dispatch_stays_in_cpp(self):
         self._load_issue153478_extension()
-        lib = self.enterContext(
-            torch.library._scoped_library("issue153478_cpp_wrapper", "FRAGMENT")
-        )
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::sum_list", lib=lib)
+        @torch.library.register_fake("issue153478_cpp_wrapper::sum_list")
         def _(xs):
             return torch.empty_like(xs[0])
 
-        @torch.library.register_fake(
-            "issue153478_cpp_wrapper::sum_list_with_n", lib=lib
-        )
+        @torch.library.register_fake("issue153478_cpp_wrapper::sum_list_with_n")
         def _(xs, n):
             return torch.empty_like(xs[0])
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::add_scaled_", lib=lib)
+        @torch.library.register_fake("issue153478_cpp_wrapper::add_scaled_")
         def _(x, y, scale: float):
             return None
 
-        @torch.library.register_fake(
-            "issue153478_cpp_wrapper::add_list_return", lib=lib
-        )
+        @torch.library.register_fake("issue153478_cpp_wrapper::add_list_return")
         def _(x, xs):
             return x
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::optional_first", lib=lib)
+        @torch.library.register_fake("issue153478_cpp_wrapper::optional_first")
         def _(xs):
             return None, torch.empty_like(xs[0])
 

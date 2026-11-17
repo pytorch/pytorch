@@ -1401,7 +1401,6 @@ class TestFlopCounterCUDA(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
 
-@instantiate_parametrized_tests
 class TestFlexAttentionEstimation(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

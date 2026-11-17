@@ -9787,7 +9787,6 @@ def get_function_device_test_classes():
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

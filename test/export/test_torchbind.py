@@ -1755,6 +1755,5 @@ instantiate_parametrized_tests(TestExportTorchbind)
 instantiate_parametrized_tests(TestCompileTorchbind)
 instantiate_device_type_tests(TestCompileTorchbindDevice, globals(), allow_xpu=True)
 
-
 if __name__ == "__main__":
     run_tests()

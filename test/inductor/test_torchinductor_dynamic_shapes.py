@@ -1646,7 +1646,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

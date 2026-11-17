@@ -607,7 +607,6 @@ instantiate_device_type_tests(
     TestCase, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

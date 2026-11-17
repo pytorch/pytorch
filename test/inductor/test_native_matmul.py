@@ -640,7 +640,6 @@ instantiate_device_type_tests(
 if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
 
-
 if __name__ == "__main__":
     if HAS_GPU:
         run_tests()
