@@ -1716,51 +1716,22 @@ print(torch.xpu.is_initialized())
         with self.assertRaises(RuntimeError):
             torch.xpu.memory.change_current_allocator(allocator)
 
-        def check_output(script: str) -> str:
+        def check_output(script: str, *args: str) -> str:
             return (
-                subprocess.check_output([sys.executable, "-c", script])
+                subprocess.check_output([sys.executable, "-c", script, *args])
                 .decode("ascii")
                 .strip()
             )
 
+        # The subprocess loads the library the parent already built: rebuilding it
+        # would overwrite a DLL the parent holds, which Windows forbids.
         test_script = """\
 import ctypes
+import sys
 import torch
-from torch.utils.cpp_extension import load_inline
-
-dummy_allocator_source_vars = \"\"\"\
-#include <torch/extension.h>
-#include <c10/xpu/XPUFunctions.h>
-
-extern "C" {
-  C10_EXPORT int called_dummy_alloc = 0;
-  C10_EXPORT int called_dummy_free = 0;
-
-  C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
-    called_dummy_alloc = 123;
-    auto& sycl_device = c10::xpu::get_raw_device(device);
-    auto& sycl_context = c10::xpu::get_device_context();
-    void* ptr = sycl::malloc_shared(size, sycl_device, sycl_context);
-    return ptr;
-  }
-
-  C10_EXPORT void dummy_free(void* ptr, size_t size, int device, sycl::queue* queue) {
-    called_dummy_free = 321;
-    sycl::free(ptr, c10::xpu::get_device_context());
-  }
-}
-\"\"\"
 
 if __name__ == "__main__":
-    dummy_allocator = load_inline(
-        name='dummy_allocator',
-        cpp_sources=dummy_allocator_source_vars,
-        is_python_module=False,
-        keep_intermediates=False,
-        verbose=True,
-        with_sycl=True,
-    )
-
+    dummy_allocator = sys.argv[1]
     allocator = torch.xpu.memory.XPUPluggableAllocator(
         dummy_allocator,
         "dummy_alloc",
@@ -1777,7 +1748,7 @@ if __name__ == "__main__":
     _, _ = torch.accelerator.get_memory_info()
     print(called_dummy_alloc.value, called_dummy_free.value)
 """
-        rc = check_output(test_script).splitlines()[-1]
+        rc = check_output(test_script, dummy_allocator).splitlines()[-1]
         called_dummy_alloc_value, called_dummy_free_value = rc.split()
         self.assertEqual(called_dummy_alloc_value, "123")
         self.assertEqual(called_dummy_free_value, "321")
