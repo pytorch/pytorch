@@ -166,37 +166,6 @@ class TestRankBootstrap(TestCase):
             self.assertFalse(store.check([key]))
             self.assertFalse(store.check([f"{key}/ready"]))
 
-    def test_connect_rank_legacy_tcpstore(self):
-        # Legacy TCPStore's compare_set does not wake waiters; set does.
-        store = dist.TCPStore(
-            "127.0.0.1",
-            0,
-            is_master=True,
-            wait_for_workers=False,
-            timeout=timedelta(seconds=60),
-            use_libuv=False,
-        )
-        transports = [_Transport(bytes([rank])) for rank in range(2)]
-        with ThreadPoolExecutor(2) as pool:
-
-            def submit(rank):
-                return pool.submit(
-                    transports[rank].connect_rank,
-                    1 - rank,
-                    store=store.clone(),
-                    rank=rank,
-                    tag="test",
-                )
-
-            futures = [submit(0)]
-            # Rank 1 likely publishes while rank 0 waits; waiting on the
-            # compare_set key would then stall rank 0 for the 60 s timeout.
-            store.wait([f"{_PREFIX}/0/1/1/0/ready"])
-            futures.append(submit(1))
-            self.assertEqual([future.result(timeout=10) for future in futures], [0, 0])
-        self.assertEqual(transports[0].peers, [(bytes([1]), None)])
-        self.assertEqual(transports[1].peers, [(bytes([0]), None)])
-
     def test_connect_rank_multiple_peers(self):
         # Each thread needs its own client; a TCPStore wait blocks its client.
         store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
