@@ -168,8 +168,25 @@ single-GPU-to-TP memory savings.
 Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
 `Qwen/Qwen3.5-0.8B`.
 
-Launch it with torchrun, one worker per GPU. `--only` is required and
-`WORLD_SIZE` must equal `N` on one node:
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --nopython --disable-cudagraphs --hf-inference-mode=decode \
+  --tp-size=2 --prompt-length=1000 --decode-length=128 --batch-size=1 \
+  --only=Qwen/Qwen3-0.6B
+```
+
+Without torchrun, the script launches one `torchrun --standalone
+--nproc-per-node=N` worker group for each selected model (`--only`, or every
+supported model that passes `--filter`). The driver writes a failure row, with
+zero metrics in performance mode, for each group that leaves no result for its
+model, for example because it crashed or timed out. A group that writes
+several rows, an empty accuracy status, or a non-positive or non-finite speedup
+or latency keeps its rows but counts as failed. The driver continues through
+the remaining models, then exits unsuccessfully if any group failed. Reported
+accuracy statuses, including `fail_accuracy`, are results; judge them against a
+baseline with `check_accuracy.py`.
+It can also run as a torchrun worker directly, which
+requires `--only` and `WORLD_SIZE == N` on one node:
 
 ```
 torchrun --nproc-per-node=2 benchmarks/dynamo/huggingface.py --performance \

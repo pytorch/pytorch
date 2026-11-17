@@ -601,6 +601,22 @@ class HuggingfaceRunner(BenchmarkRunner):
             "decode_length": decode.shape[1] if decode is not None else 0,
         }
 
+    def get_requested_metadata(self):
+        mode = self.args.hf_inference_mode
+        if mode == "generate":
+            return {}
+        decode_length = 0
+        if mode == "decode":
+            decode_length = (
+                self.args.decode_length or TextGenerationBenchmark.DECODE_LENGTH
+            )
+        return {
+            "phase": mode,
+            "prompt_length": self.args.prompt_length
+            or TextGenerationBenchmark.INPUT_LENGTH,
+            "decode_length": decode_length,
+        }
+
     def deepcopy_model(self, model):
         if self.args.tp_size == 1:
             return super().deepcopy_model(model)
