@@ -88,6 +88,11 @@ void init_cpp_fake(
 
 namespace impl {
 
+bool may_turn_const(const Tensor& t) {
+  return t.numel() <= 1 && !t.is_sparse() &&
+      !t.unsafeGetTensorImpl()->is_sparse_compressed() && !t.device().is_meta();
+}
+
 Tensor fake_detach(const Tensor& self) {
   return fake_shallow_copy(
       self, /*version_counter=*/0, /*allow_tensor_metadata_change=*/false);
