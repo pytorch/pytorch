@@ -1677,6 +1677,9 @@ void fakeFallback(
     if (suppress_invariants) {
       at::globalContext().setCheckSparseTensorInvariants(false);
     }
+    torch::jit::ToIValueAllowNumbersAsTensors allow_numbers(
+        op_namespace && *op_namespace == "aten" &&
+        should_allow_numbers_as_tensors());
     op.redispatchBoxed(meta_keyset, stack);
   } catch (...) {
     auto error = std::current_exception();
