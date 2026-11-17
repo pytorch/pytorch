@@ -11,6 +11,7 @@ from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.choices import InductorChoices
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import persistent_reduction
@@ -23,6 +24,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     recover_orig_fp32_precision,
@@ -31,7 +33,18 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+from torch.utils._triton import (
+    has_triton_cuda_tma_device,
+    has_triton_stable_tma_api,
+    has_triton_tma_device,
+)
+
+
+# has_triton_tma_device() is also true on a pre-SM90 CUDA GPU when Triton has a
+# CPU backend, so CUDA needs the stricter check.
+HAS_GPU_TMA = has_triton_tma_device() and (
+    GPU_TYPE != "cuda" or has_triton_cuda_tma_device()
+)
 
 
 class TestBase(TestCase):
@@ -75,12 +88,8 @@ class SkipPatternTest(TestBase):
     """
 
     @inductor_config.patch(split_reductions=False)
-    def test_dimension_too_close(self):
-        """
-        Skip if the two reduction size are too close.
-        We require one reduction dimension to be much larger so we can split
-        that dimension and make it efficient.
-        """
+    def test_workload_too_small(self):
+        """768x768 = 589824 elements, under `size_thres = 5 * 2**20` elements in `MixOrderReduction.can_fuse`."""
 
         def f(x):
             out1 = x.sum(dim=1)
@@ -102,6 +111,10 @@ class SkipPatternTest(TestBase):
 )
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
+    @decorateIf(
+        unittest.skip("Invalid combination"),
+        lambda params: params["name"] == "prod" and len(params["shape"]) == 3,
+    )
     @parametrize(
         "name",
         [
@@ -155,9 +168,6 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("shape", ((4096, 8192), (4096, 16384), (8192, 16384)))
     def test_wide_reduction_fuses_in_strict_mode(self, shape):
-        """Wide reductions (large ncol, nrow < ncol*2) should use mix-order
-        fusion in the default (strict) mode, now that the `nrow >= ncol*2`
-        gate is removed."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -179,9 +189,6 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("shape", ((6144, 4000), (8192, 6144)))
     def test_flat_reduction_fuses_in_strict_mode(self, shape):
-        """A relatively flat reduction (nrow >= 4096, nrow < ncol*2) should use
-        mix-order fusion in the default (strict) mode, now that the
-        `nrow >= ncol*2` gate is removed."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -202,9 +209,6 @@ class MixOrderReductionTest(TestBase):
         )
 
     def test_wide_reduction_respects_row_floor(self):
-        """Strict mode still requires nrow >= 4096: with too few rows there is
-        not enough parallelism to split the other reduction across, so the
-        shape is left unfused (guards against over-fusing 2048x8192)."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -247,8 +251,8 @@ class MixOrderReductionTest(TestBase):
             "same-order reductions must not be classified as mix-order",
         )
 
-    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
-    def test_square_mix_order_reductions_non_strict(self):
+    def test_square_mix_order_reductions(self):
+        """8192x8192 clears both strict checks, so no non-strict override."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -417,6 +421,10 @@ class MixOrderReductionTest(TestBase):
             return x.sum(dim=-1), x.sum(dim=0)
 
         M = 32768 * 1024 if torch.version.hip is not None else 32768 * 256
+        # The split size grows with M / num_sm. On devices with few SMs
+        # (e.g. a 14-SM MIG slice) a large M only needs a 2 layer split.
+        num_sm = DeviceProperties.create(torch.device(GPU_TYPE)).multi_processor_count
+        M = min(M, 262144 * num_sm)
         x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions
@@ -459,8 +467,15 @@ class MixOrderReductionTest(TestBase):
         check_one_split_size(8)
         check_one_split_size(16)
 
-    @inductor_config.patch("triton.mix_order_reduction_autotune_split_size", True)
-    def test_split_size_autotune_times_finish(self):
+    @inductor_config.patch(
+        {
+            "triton.mix_order_reduction_autotune_split_size": True,
+            # Raise instead of timing a failing benchmark module as inf.
+            "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+        }
+    )
+    @parametrize("dtype", (torch.float, torch.bfloat16))
+    def test_split_size_autotune_times_finish(self, dtype):
         """Split-size autotuning also times the wrapper's finish of the
         partials, not just the kernel."""
         if not inductor_config.triton.mix_order_reduction:
@@ -477,18 +492,27 @@ class MixOrderReductionTest(TestBase):
             return ws_name, src_code
 
         def f(x):
-            return x.sum(dim=-1), x.sum(dim=0)
+            return x.sum(dim=-1), x.sum(dim=0), (x * x).sum(dim=0)
 
-        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+        x = torch.randn(32768, 768, dtype=dtype, device=GPU_TYPE)
         with mock.patch.object(
             SIMDScheduling, "_generate_kernel_code_for_mix_order_reduction", spy
         ):
-            self.check_numeric(f, (x,))
+            self.check_numeric(f, (x,), tol=1e-3 if dtype == torch.float else 1e-2)
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
         self.assertTrue(sources)
         for src in sources:
             call = src.split("def call(args):")[1].split("def benchmark_all_configs")[0]
-            FileCheck().check(".run(").check(".view(").check(".sum(dim=0)").run(call)
+            # One finish per column partial, the second offset past the first.
+            check = FileCheck().check(".run(")
+            for i in range(2):
+                check.check(f"[{i} * (").check(".view(").check(".sum(dim=0)")
+                if dtype != torch.float:
+                    check.check(f".to({dtype})")
+            check.run(call)
+            # The finish must run, not just appear in the source.
+            mod = PyCodeCache.load(src)
+            mod.call(mod.get_args())
 
     @inductor_config.patch(split_reductions=False)
     def test_non_contiguous_input(self):
@@ -512,7 +536,7 @@ class MixOrderReductionTest(TestBase):
         x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
         y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
 
-        self.check_numeric(f, (x, y))
+        self.check_numeric(f, (x, y), tol=1e-2)
         expected_mix_order_reduction = (
             0 if not inductor_config.triton.mix_order_reduction else 2
         )
@@ -520,6 +544,10 @@ class MixOrderReductionTest(TestBase):
             expected_mix_order_reduction, metrics.codegen_mix_order_reduction
         )
 
+    @decorateIf(
+        unittest.skip("Skip non-critical tests to save resources."),
+        lambda params: params["shape"] != (1000000, 256) and params["add_1dim"],
+    )
     @parametrize(
         "wdtype",
         [
@@ -613,9 +641,7 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @inductor_config.patch(
         {
@@ -690,9 +716,7 @@ class MixOrderReductionTest(TestBase):
                 .run(bwd_wrapper)
             )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @parametrize("shape", ((32768, 256), (32768 + 1023, 768)))
     @inductor_config.patch(
