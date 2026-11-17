@@ -49,7 +49,6 @@ from torch._inductor.ir import (
     FixedLayout,
     Layout,
     PermuteView,
-    ReductionEpilogue,
     TensorBox,
 )
 from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
@@ -550,16 +549,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
 
         self._cached_output_node = TensorBox.create(buffer)
         return self._cached_output_node
-
-    def supports_reduction_epilogue(self, epilogue: ReductionEpilogue) -> bool:
-        from .nv_universal_gemm_scheduling import NVUniversalGemmScheduling
-
-        min_tile_shape = epilogue.nvgemm_min_tile_shape
-        return (
-            self.supports_epilogue_fusion
-            and min_tile_shape is not None
-            and NVUniversalGemmScheduling._choice_fits_reduction(self, min_tile_shape)
-        )
 
     def call_name(self) -> str:
         return self.name
