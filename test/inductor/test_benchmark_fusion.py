@@ -126,6 +126,50 @@ class BenchmarkFusionTestTemplate:
             opt_f = torch.compile(f)
             opt_f(*inputs)
 
+    @skip_if_device(lambda device: device != GPU_TYPE, "GPU only")
+    def test_spilled_kernel_not_launched(self):
+        """
+        Nothing waits for a kernel skipped for its register spills, and the
+        next kernel load blocks until it finishes, so it must not be launched.
+        """
+        calls = []
+        orig_benchmark = TritonScheduling.benchmark_codegened_module
+
+        def benchmark_all_spilled(scheduling, mod, n_spills_threshold=8, **kwargs):
+            orig_call = mod.call
+
+            def call(*args):
+                calls.append(mod.__file__)
+                return orig_call(*args)
+
+            mod.call = call
+            ms, path = orig_benchmark(scheduling, mod, -1, **kwargs)
+            self.assertTrue(math.isinf(ms))
+            benchmarked.append(path)
+            return ms, path
+
+        def f(x):
+            return realize(x.sin()) + 1
+
+        for autotune_pointwise in (False, True):
+            benchmarked = []
+            torch._dynamo.reset()
+            with (
+                fresh_cache(),
+                config.patch(
+                    force_disable_caches=True,
+                    **{"triton.autotune_pointwise": autotune_pointwise},
+                ),
+                unittest.mock.patch.object(
+                    TritonScheduling,
+                    "benchmark_codegened_module",
+                    benchmark_all_spilled,
+                ),
+            ):
+                torch.compile(f)(torch.rand(1024, device=self.device))
+            self.assertTrue(benchmarked)
+            self.assertEqual(calls, [])
+
     def test_foreach_kernel(self):
         """
         Benchmark fusion should skip benchmarking kernels involves foreach kernel

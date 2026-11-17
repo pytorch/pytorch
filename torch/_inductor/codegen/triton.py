@@ -9376,9 +9376,17 @@ class TritonScheduling(SIMDScheduling):
             args = mod.get_args()
             call = mod.call
             wrapped_jit_function = mod.triton_
-            # call once to trigger the compilation
             try:
-                call(wrapped_jit_function.clone_args(*args)[0])
+                # Compile without launching, so that a kernel we skip for its
+                # spills is never run: nothing waits for that launch, and the
+                # next kernel load blocks until it finishes (a CUDA module load
+                # waits for the context's running kernels).
+                if not wrapped_jit_function.launchers:
+                    wrapped_jit_function.precompile()
+                spills = _all_configs_spill(wrapped_jit_function, n_spills_threshold)
+                if not spills:
+                    # call once to pick a config if there are several
+                    call(wrapped_jit_function.clone_args(*args)[0])
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
@@ -9392,11 +9400,11 @@ class TritonScheduling(SIMDScheduling):
                 return ms, mod.__file__
 
             launchers = wrapped_jit_function.launchers
-            if len(launchers) != 1:
+            if not spills and len(launchers) != 1:
                 raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
             # n_spills does not necessarily mean it's not profitable to fuse,
             # and sometimes it can be inaccurate
-            if launchers[0].n_spills > n_spills_threshold:
+            if spills or launchers[0].n_spills > n_spills_threshold:
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:
@@ -9597,13 +9605,18 @@ class TritonScheduling(SIMDScheduling):
                 call = mod.call
                 wrapped_jit_function = mod.triton_
 
-                # call once to trigger the compilation
-                call(wrapped_jit_function.clone_args(*args)[0])
+                # Compile without launching a kernel we skip for its spills (see
+                # benchmark_codegened_module).
+                if not wrapped_jit_function.launchers:
+                    wrapped_jit_function.precompile()
+                spills = _all_configs_spill(wrapped_jit_function, 0)
+                if not spills:
+                    call(wrapped_jit_function.clone_args(*args)[0])
 
                 launchers = wrapped_jit_function.launchers
-                if len(launchers) != 1:
+                if not spills and len(launchers) != 1:
                     raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
-                if launchers[0].n_spills > 0:
+                if spills or launchers[0].n_spills > 0:
                     # skip benchmarking the kernel if there are register spills
                     ms = ms_clone = float("inf")
                 else:
@@ -9635,6 +9648,20 @@ class TritonScheduling(SIMDScheduling):
             V.graph.removed_buffers = removed_buffers_orig
             V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list
+
+
+def _all_configs_spill(
+    kernel: triton_heuristics.CachingAutotuner, n_spills_threshold: int
+) -> bool:
+    """Whether every config of the precompiled kernel spills more than the
+    benchmark allows, so it can be skipped without a launch. Coordinate descent
+    tuning may still find a config that doesn't spill, and times what it runs."""
+    if kernel.inductor_meta.get("coordinate_descent_tuning"):
+        return False
+    return all(
+        launcher.n_spills is not None and launcher.n_spills > n_spills_threshold
+        for launcher in kernel.launchers
+    )
 
 
 def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
