@@ -7619,6 +7619,9 @@ class AOTInductorTestsTemplate:
             aot_inductor_module(y3)
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(y4)
+        # The package runs one model instance, so each rejected call must have
+        # returned it to the pool for this call to run.
+        self.assertEqual(aot_inductor_module(y0), y0)
 
     @skip_if_device(
         lambda device: device != GPU_TYPE or device == "mps",
