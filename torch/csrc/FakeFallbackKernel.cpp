@@ -44,8 +44,7 @@
 // wrap_meta_outputs_with_default_device_logic does.
 // Non-fake inputs are converted through the mode's converter when allowed;
 // metadata-mutating operations always require inputs owned by the mode.
-// Lifts first try Python's constant-creation path. Numbers-as-tensors calls
-// without mode fakes are unsupported until their real execution is enabled.
+// Lifts and numbers-as-tensors calls first try Python's constant-creation path.
 // Constant propagation remains unsupported once an input is a constant fake.
 // Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
@@ -739,12 +738,12 @@ c10::intrusive_ptr<c10::TensorImpl> from_real_tensor(
       return nullptr;
     }
     // Check before cloning: a clone can erase the original Python type.
-    // Keep the check, clone and conversion in the same GIL scope.
     c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
         {c10::DispatchKey::Python,
          c10::DispatchKey::PreDispatch,
          c10::DispatchKey::Fake,
          c10::DispatchKey::PythonTLSSnapshot}));
+    py::gil_scoped_release no_gil;
     real = real.clone();
   }
   const bool make_constant = conversion == FakeTensorConversion::Constant ||
@@ -821,6 +820,7 @@ bool try_initial_constant(
       auto tls = c10::impl::tls_local_dispatch_key_set();
       tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
       c10::impl::ForceDispatchKeyGuard guard(tls);
+      py::gil_scoped_release no_gil;
       op.callBoxed(outputs);
     }
     if (outputs.size() == 1 && outputs[0].isTensor() &&
@@ -940,6 +940,7 @@ void fakeFallback(
 
   bool has_mode_fakes = false;
   bool has_python_inputs = false;
+  bool has_symbolic_number = false;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
         if (!t.defined()) {
@@ -948,6 +949,8 @@ void fakeFallback(
         const auto* impl = t.unsafeGetTensorImpl();
         has_mode_fakes =
             has_mode_fakes || (t.is_fake() && impl->fake_tensor_mode() == mode);
+        has_symbolic_number =
+            has_symbolic_number || impl->is_symbolic_wrapped_number();
         has_python_inputs = has_python_inputs ||
             (!t.is_fake() && impl->pyobj_slot()->load_pyobj() != nullptr);
       });
@@ -962,18 +965,30 @@ void fakeFallback(
   const bool is_lift = schema.overload_name().empty() &&
       (schema.name() == "aten::lift_fresh" ||
        schema.name() == "aten::lift_fresh_copy");
-  const bool makes_constant = !has_mode_fakes && is_lift;
+  const bool is_to_copy =
+      schema.name() == "aten::_to_copy" && schema.overload_name().empty();
+  const auto avoiding_device_init = [&] {
+    if (is_to_copy) {
+      const auto& device =
+          (*stack)[arguments_begin + *schema.argumentIndexWithName("device")];
+      return device.isDevice() && !device.toDevice().is_cpu() &&
+          mode->avoid_device_init_;
+    }
+    return schema.name() == "prims::device_put" &&
+        schema.overload_name().empty() && mode->avoid_device_init_;
+  };
+  const bool makes_constant = !has_mode_fakes &&
+      (is_lift ||
+       (!has_symbolic_number && should_allow_numbers_as_tensors() &&
+        !(is_to_copy &&
+          (*stack)[arguments_begin].toTensor().device().is_meta()) &&
+        !avoiding_device_init()));
   if (has_python_inputs || makes_constant) {
     // Validate input subclasses before any real execution. Share the GIL scope
     // with the initial constant attempt, output checks, and lift conversion.
     if (try_initial_constant(op, stack, mode, makes_constant, is_lift)) {
       return;
     }
-  }
-  if (!has_mode_fakes && !is_lift && should_allow_numbers_as_tensors()) {
-    // Input conversion would skip Python's real execution and constant
-    // creation.
-    unsupported(op, "numbers-as-tensors operations without fake inputs");
   }
   replace_each_tensor(
       stack,
@@ -1206,9 +1221,6 @@ void fakeFallback(
       return;
     }
   }
-  if (input_devices.empty()) {
-    unsupported(op, "ops without fake tensor inputs");
-  }
   if (has_sparse_inputs &&
       !op.hasComputedKernelForDispatchKey(
           meta_keyset.highestPriorityTypeId())) {
@@ -1238,14 +1250,14 @@ void fakeFallback(
   // Run the (sparse) Meta kernel with the inputs reporting the meta device (see
   // Note [C++ in_kernel_invocation]), as Python's in_kernel_invocation_manager
   // does. Match _DisableTorchDispatch so nested ops bypass dispatch modes.
-  c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
-      {c10::DispatchKey::Fake,
-       c10::DispatchKey::Python,
-       c10::DispatchKey::PreDispatch,
-       c10::DispatchKey::PythonTLSSnapshot}));
-  c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
-  c10::impl::InKernelInvocationGuard in_kernel;
   {
+    c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
+        {c10::DispatchKey::Fake,
+         c10::DispatchKey::Python,
+         c10::DispatchKey::PreDispatch,
+         c10::DispatchKey::PythonTLSSnapshot}));
+    c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
+    c10::impl::InKernelInvocationGuard in_kernel;
     // Uses global state; see Note [C++ fake fallback] for the concurrency
     // limits.
     const bool suppress_invariants = has_sparse_inputs &&
@@ -1313,9 +1325,23 @@ void fakeFallback(
   // It does not provide Python's wrapping/memoization semantics.
   std::optional<c10::Device> output_common_device;
   std::unordered_set<const c10::TensorImpl*> converted_outputs;
-  auto wrap = [&](const at::Tensor& t, bool is_alias) {
+  auto wrap = [&](const at::Tensor& t,
+                  bool is_alias) -> std::optional<at::Tensor> {
     if (!t.defined()) {
-      return;
+      return std::nullopt;
+    }
+    if (input_devices.empty()) {
+      if (!should_allow_numbers_as_tensors()) {
+        auto name = schema.name();
+        name.replace(name.find("::"), 2, ".");
+        raise_assertion_error(c10::str(
+            "Could not find common device for ",
+            name,
+            ".",
+            schema.overload_name().empty() ? "default"
+                                           : schema.overload_name()));
+      }
+      return at::Tensor(from_real_tensor(mode, t.getIntrusivePtr()));
     }
     if (!output_common_device.has_value()) {
       output_common_device = find_common_device(/*resolve=*/true);
@@ -1323,10 +1349,9 @@ void fakeFallback(
     auto* impl = t.unsafeGetTensorImpl();
     // The same Meta tensor can occur several times in the return values.
     if (converted_outputs.contains(impl)) {
-      return;
+      return std::nullopt;
     }
     if (t.is_fake() && impl->fake_tensor_mode() == mode) {
-      // device() reports meta inside the kernel invocation scope.
       const auto fake_device = impl->fake_device();
       TORCH_CHECK(
           fake_device == output_common_device,
@@ -1337,7 +1362,7 @@ void fakeFallback(
       if (output_dispatch_keys.has_value()) {
         impl->set_fake_dispatch_keys(output_dispatch_keys);
       }
-      return;
+      return std::nullopt;
     }
     TORCH_CHECK(
         !t.is_fake(), "Meta kernel returned a fake tensor from another mode");
@@ -1358,13 +1383,14 @@ void fakeFallback(
         device_argument != output_common_device) {
       converted_outputs.insert(impl);
     }
+    return std::nullopt;
   };
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
   for (const auto i : c10::irange(num_returns)) {
     const bool is_alias = schema.returns()[i].alias_info() != nullptr;
-    for_each_tensor(stack, returns_begin + i, 1, [&](const at::Tensor& t) {
-      wrap(t, is_alias);
+    replace_each_tensor(stack, returns_begin + i, 1, [&](const at::Tensor& t) {
+      return wrap(t, is_alias);
     });
   }
 }
