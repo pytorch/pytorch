@@ -9,6 +9,7 @@
 #include <functional>
 #include <initializer_list>
 #include <iterator>
+#include <ostream>
 #include <type_traits>
 #include <vector>
 
@@ -256,6 +257,20 @@ class HeaderOnlyArrayRef {
   }
   friend bool operator!=(HeaderOnlyArrayRef a1, HeaderOnlyArrayRef a2) {
     return !a1.equals(a2);
+  }
+  /// @}
+  /// @name Stream operator
+  /// @{
+  friend std::ostream& operator<<(std::ostream& out, HeaderOnlyArrayRef list) {
+    int i = 0;
+    out << '[';
+    for (const auto& e : list) {
+      if (i++ > 0)
+        out << ", ";
+      out << e;
+    }
+    out << ']';
+    return out;
   }
   /// @}
 };

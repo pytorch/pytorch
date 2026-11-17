@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 import torch
 from torch._higher_order_ops.wrap import wrap_with_autocast
 
-from ..utils import node_inline_, nodes_filter, nodes_first, sequential_split
+from ..utils import node_inline_, nodes_filter, sequential_split
 from .replace_with_hop_pass_util import (
+    _first_call_in_sub_mod,
     _replace_with_hop_helper,
     _replace_with_hop_pass_helper,
     _sequential_split_and_maybe_inline_subgraphs_helper,
@@ -48,19 +49,17 @@ def _is_exit_autocast_node(node: torch.fx.Node) -> torch.fx.Node | bool:
 
 def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
     """
-    Check if the first non-placeholder node is `torch.amp.autocast_mode._enter_autocast`.
+    Check if the first call of the submodule is `torch.amp.autocast_mode._enter_autocast`.
     """
     if node.op == "call_module":
         if not isinstance(node.target, str):
             raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
-        first_non_ph = nodes_first(
-            subgm.graph.nodes, lambda node: node.op != "placeholder"
-        )
+        first_call = _first_call_in_sub_mod(subgm)
         if (
-            first_non_ph
-            and first_non_ph.op == "call_function"
-            and first_non_ph.target is torch.amp.autocast_mode._enter_autocast
+            first_call
+            and first_call.op == "call_function"
+            and first_call.target is torch.amp.autocast_mode._enter_autocast
         ):
             # TODO: check if current auto-cast type is the same as the args of
             # _enter_autocast. If so, return False, i.e. do not create a submodule.

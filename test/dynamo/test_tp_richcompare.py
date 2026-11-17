@@ -9,7 +9,11 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._library.opaque_object import register_custom_class
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class _OpaqueVal(torch._custom_class_base.CustomClassBase):
@@ -34,6 +38,7 @@ class _OpaqueVal(torch._custom_class_base.CustomClassBase):
 register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
+@instantiate_parametrized_tests
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1419,7 +1424,9 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
     # IS_OP (is / is not)
     # =====================================================================
 
-    def test_is_op(self):
+    @parametrize("receiver_kind", ["list", "list_subclass"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_is_op(self, receiver_kind):
         """IS_OP dispatches directly, not through COMPARE_OP's graph-break wrapper."""
         a = [1, 2, 3]
 
@@ -1428,6 +1435,21 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0), a)
         self.assertEqual(result, (False, True, True))
+
+        class ListSubclass(list):
+            pass
+
+        def wrapper_fn(x, values):
+            wrapper = values.__len__
+            return x + int(wrapper is None), wrapper is not None
+
+        x = torch.ones(2)
+        values = [x] if receiver_kind == "list" else ListSubclass([x])
+        counter = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(wrapper_fn, backend=counter, fullgraph=True)(x, values)
+        self.assertEqual(result, wrapper_fn(x, values))
+        self.assertGreater(counter.frame_count, 0)
+        self.assertGreater(counter.op_count, 0)
 
     # =====================================================================
     # Opaque object comparison (CustomClassObjectVariable)
@@ -1912,6 +1934,183 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(expected), len(result))
         for e, r in zip(expected, result):
             self.assertIs(r, e)
+
+    # =====================================================================
+    # Default tp_richcompare (object_richcompare on VariableTracker)
+    # =====================================================================
+
+    def _assert_fn_matches_eager(self, fn, *args):
+        expected = fn(*args)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(result, expected)
+
+    def test_object_richcompare_super(self):
+        class Base:
+            pass
+
+        class Child(Base):
+            def cmp(self):
+                s = super(Child, self)  # noqa: UP008
+                return s == s, s != s
+
+        self._assert_fn_matches_eager(lambda x: (x + 1, Child().cmp()), torch.ones(1))
+
+    def test_object_richcompare_super_ordering(self):
+        class Base:
+            pass
+
+        class Child(Base):
+            pass
+
+        def fn(x):
+            s = super(Child, Child())
+            try:
+                return s < s
+            except TypeError as e:
+                return str(e)
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_removable_handle(self):
+        x = torch.zeros(3, requires_grad=True)
+
+        def fn(t):
+            h = x.register_hook(lambda g: g)
+            return t + 1, h == h, h != h
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_random_class(self):
+        import random
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: random.Random, lambda: random.Random, error_ops=self._ORDERING_OPS
+        )
+        self._assert_fn_matches_eager(lambda: random.Random != int)  # noqa: E721
+
+    def test_object_richcompare_untyped_storage(self):
+        def fn(x):
+            s = x.untyped_storage()
+            return x + 1, s == s, s != s
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_ne_uses_eq_truthiness(self):
+        """object.__ne__ inverts PyObject_IsTrue(type(self).__eq__(...))."""
+
+        class Truthy:
+            def __init__(self, val):
+                self.val = val
+
+            def __bool__(self):
+                return self.val
+
+        class EqOnly:
+            def __init__(self, val):
+                self.val = val
+
+            def __eq__(self, other):
+                return Truthy(self.val == other.val)
+
+        a, b, c = EqOnly(1), EqOnly(1), EqOnly(2)
+
+        def fn(x):
+            return x + 1, a != b, a != c
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_missing_override_graph_breaks(self):
+        import logging
+
+        from torch._dynamo.exc import Unsupported
+
+        class CustomEqLogger(logging.Logger):
+            def __eq__(self, other):
+                return "custom"
+
+        logger = CustomEqLogger("custom_eq")
+
+        def fn(x):
+            return x + 1, logger == logger
+
+        msg = "Missing tp_richcompare_impl override"
+        with self.assertRaisesRegex(Unsupported, msg):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_object_richcompare_missing_override_graph_breaks_ordering(self):
+        import logging
+
+        from torch._dynamo.exc import Unsupported
+
+        class CustomLtLogger(logging.Logger):
+            def __lt__(self, other):
+                return "custom"
+
+        logger = CustomLtLogger("custom_lt")
+
+        def fn(x):
+            return x + 1, logger < logger
+
+        msg = "Missing tp_richcompare_impl override"
+        with self.assertRaisesRegex(Unsupported, msg):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_object_richcompare_missing_override_graph_breaks_sourceless(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(x):
+            return x + 1, f"{x}" == "tensor([1.])"
+
+        msg = "Missing tp_richcompare_impl override"
+        with self.assertRaisesRegex(Unsupported, msg):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_object_richcompare_tuple_iterator_source(self):
+        def f1():
+            pass
+
+        def f2():
+            pass
+
+        def fn(it):
+            g = next(it)
+            return g == g, g != None  # noqa: E711
+
+        expected = fn(iter((f1, f2)))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(iter((f1, f2)))
+        self.assertEqual(result, expected)
+
+    def test_object_richcompare_torch_function_mode_stack(self):
+        from torch.overrides import _get_current_function_mode_stack
+
+        class Mode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        def fn(x):
+            stack = _get_current_function_mode_stack()
+            return x + 1, stack[0] == stack[0], stack[0] != None  # noqa: E711
+
+        with Mode():
+            self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_wrapped_skip_function_dunder_eq(self):
+        import time
+
+        def fn():
+            w = torch.no_grad()(time.time)
+            return w.__eq__(w), w.__ne__(w), w == w, w != w
+
+        self._assert_fn_matches_eager(fn)
+
+    def test_skip_function_richcompare(self):
+        import random
+
+        r = random.Random()
+        # Equal but not identical: tests value comparison, not identity.
+        a, b = r.random, r.random
+        self.assertIsNot(a, b)
+        self._assert_all_cmp_equals(a, b, error_ops=self._ORDERING_OPS)
 
 
 # =====================================================================

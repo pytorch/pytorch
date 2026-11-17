@@ -70,7 +70,9 @@ def _scaled_mm_scale_placement(
     Handles three cases:
 
     1. Tensor-wise scale (single element): always Replicate.
-    2. 2D (or higher) scale, e.g. row-wise [M,1]: copy data placement directly.
+    2. 2D (or higher) scale, e.g. row-wise [M,1]: copy data placement, except
+       Replicate when the data is Partial or sharded on a dim where the scale
+       has size 1 (the scale broadcasts along it).
     3. 1D blockwise scale, e.g. MX format [M*K/block_size]: map
        non-contracting shard to Shard(0)/_ShardingPlaceholder(0), and reject
        contracting-dim shards (returns None).
@@ -79,6 +81,13 @@ def _scaled_mm_scale_placement(
         return Replicate()
 
     if len(scale_shape) != 1:
+        if isinstance(data_placement, Partial):
+            return Replicate()
+        if (
+            isinstance(data_placement, (_ShardingPlaceholder, Shard))
+            and scale_shape[data_placement.dim] == 1
+        ):
+            return Replicate()
         return data_placement
 
     # 1D blockwise scale: Shard(>=1) is invalid on a 1D tensor, so we need
