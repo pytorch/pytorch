@@ -2877,7 +2877,7 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline("args.clear()")
 
     def write_launcher_fn_call_get_indent(self) -> int:
-        if V.graph.split_into_partitions:
+        if V.graph.partition_plan.split_into_partitions:
             self.prefix.splice(
                 """
                 class Runner:
@@ -2930,7 +2930,7 @@ class PythonWrapperCodegen(CodeGen):
             # Under cudagraph partitioning, leave NaN/alignment checks to partitions
             # to avoid duplicates; call()-only inputs do not get these checks.
             if not (
-                V.graph.cudagraphs_per_partition
+                V.graph.partition_plan.cudagraphs_per_partition
                 and not is_codegen_graph_partition_subgraph(self)
             ):
                 self.codegen_input_alignment_and_nan_asserts()
@@ -3340,7 +3340,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if V.graph.split_into_partitions:
+        if V.graph.partition_plan.split_into_partitions:
             all_partition_name_list = ", ".join(self.all_partition_names) + (
                 "," if len(self.all_partition_names) == 1 else ""
             )
@@ -3609,7 +3609,7 @@ class PythonWrapperCodegen(CodeGen):
             return self._generate(is_inference)
 
     def get_wrapper_call_indent(self) -> int:
-        if V.graph.split_into_partitions:
+        if V.graph.partition_plan.split_into_partitions:
             return 2
         else:
             return 1
@@ -3971,7 +3971,7 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         else:
-            if V.graph.split_into_partitions:
+            if V.graph.partition_plan.split_into_partitions:
                 pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")

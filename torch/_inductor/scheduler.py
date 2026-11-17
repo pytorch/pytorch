@@ -6390,7 +6390,7 @@ class Scheduler:
         if (
             # pyrefly: ignore[unbound-name]
             config.graph_partition
-            and V.graph.cudagraphs_per_partition
+            and V.graph.partition_plan.cudagraphs_per_partition
             # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
             # pyrefly: ignore[unbound-name]
@@ -12311,7 +12311,7 @@ class Scheduler:
         region = self._get_invoke_subgraph_region(node)
         if (
             region is not None
-            and V.graph.cudagraphs_per_partition
+            and V.graph.partition_plan.cudagraphs_per_partition
             and config.triton.cudagraphs
         ):
             # invoke_subgraph is opaque to the outer scheduler, so the cudagraph
@@ -12324,7 +12324,7 @@ class Scheduler:
 
         # When the partitions are not for CUDA Graphs, keep kernels in call();
         # the whole callable may still be captured by post_compile.
-        if not V.graph.cudagraphs_per_partition:
+        if not V.graph.partition_plan.cudagraphs_per_partition:
             return (
                 "partition includes all ops when the partitions are not for CUDA Graphs"
             )
@@ -12960,7 +12960,7 @@ class Scheduler:
             try:
                 return (
                     self._codegen_partitions()
-                    if V.graph.split_into_partitions
+                    if V.graph.partition_plan.split_into_partitions
                     else self._codegen(self.nodes)
                 )
             finally:
