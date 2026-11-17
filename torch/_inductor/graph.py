@@ -1024,7 +1024,7 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
-            partition_plan=GraphPartitionPlan.unsplit(),
+            partition_plan=GraphPartitionPlan.no_partition(),
         )
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
