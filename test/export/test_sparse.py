@@ -366,6 +366,5 @@ class TestSparseProp(TestCase):
 
 instantiate_parametrized_tests(TestSparseProp)
 
-
 if __name__ == "__main__":
     run_tests()
