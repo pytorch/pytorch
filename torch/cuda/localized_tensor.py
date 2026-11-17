@@ -689,9 +689,8 @@ def _register_default_localizable_ops() -> None:
     """Register the built-in localizable ops.
 
     ``F.linear`` is what ``nn.Linear.forward`` calls and is therefore the
-    op that drives eager localization; ``aten.linear`` is its exported
-    shape, so users who localize a gm with raw aten.linear nodes get it
-    for free.  Both take ``(input, weight, bias)``.
+    op that drives eager localization. Its ATen counterpart,
+    ``aten.linear``, is also registered. Both take ``(input, weight, bias)``.
 
     Called lazily rather than at import time because ``torch.ops`` is not
     yet populated when ``torch.cuda.__init__`` pulls this module in.
@@ -764,7 +763,9 @@ def localize(
         inside their per-branch execution pools after the call returns.
 
     Args:
-        module: the module (or model) to walk.  Mutated in place.
+        module: the module (or model) to walk. Mutated in place.
+            :class:`torch.fx.GraphModule` instances, including nested
+            GraphModules, are not supported.
         num_partitions: forwarded to the per-tensor splitter.  Defaults
             to the device's locality-domain count (see
             :func:`torch.cuda.green_contexts.get_num_locality_domains`).
@@ -793,6 +794,12 @@ def localize(
     import torch.nn as nn
     from torch.nn.utils.parametrize import is_parametrized
 
+    if any(isinstance(child, torch.fx.GraphModule) for child in module.modules()):
+        raise NotImplementedError(
+            "torch.cuda.localize() does not support torch.fx.GraphModule "
+            "inputs or modules containing a GraphModule."
+        )
+
     if not torch.is_inference_mode_enabled():
         raise RuntimeError(
             "torch.cuda.localize() requires inference mode. Localization is "
@@ -809,13 +816,6 @@ def localize(
         )
 
     _register_default_localizable_ops()
-
-    if isinstance(module, torch.fx.GraphModule):
-        return _localize_graph_module(
-            module,
-            num_partitions=num_partitions,
-            mark_static_halves=mark_static_halves,
-        )
 
     # Track the Python objects we've already visited, keyed by id().  Holds
     # both params we swapped and params we skipped (unsupported / not on
@@ -921,97 +921,3 @@ def localize(
                     _swap_to_localized(p)
             break
     return module
-
-
-def _localize_graph_module(
-    gm: torch.fx.GraphModule,
-    *,
-    num_partitions: int | None = None,
-    mark_static_halves: bool = True,
-) -> torch.fx.GraphModule:
-    """:func:`localize` for an exported FX graph.
-
-    Walks ``gm.graph`` for ``call_function`` nodes whose target is in
-    :data:`_LOCALIZABLE_OPS`, resolves the ``get_attr`` parameter behind
-    each localized-position arg, and replaces it in place with a
-    :class:`_LocalizedTensor` Parameter.  The graph is not rewritten;
-    the subclass takes over at runtime via ``__torch_function__``.
-
-    Tied params (multiple ``get_attr`` nodes pointing at the same Python
-    object, or aliases held by other submodules) are coalesced via the
-    same id-keyed map used by the ``nn.Module`` path.
-    """
-    import torch.nn as nn
-
-    # Snapshot all (submodule, attr_name) holding each parameter, so a
-    # tied param replaced once propagates to every alias on gm.
-    id_to_locations: dict[int, list[tuple[nn.Module, str]]] = {}
-    for _, submod in gm.named_modules():
-        for pname, p in submod._parameters.items():
-            if p is None:
-                continue
-            id_to_locations.setdefault(id(p), []).append((submod, pname))
-
-    seen: dict[int, nn.Parameter] = {}
-
-    def _resolve_get_attr(node: torch.fx.Node) -> tuple[nn.Module, str] | None:
-        if node.op != "get_attr":
-            return None
-        parts = str(node.target).split(".")
-        owner: Any = gm
-        for p in parts[:-1]:
-            owner = getattr(owner, p)
-        return owner, parts[-1]
-
-    def _localize_attr(submod: nn.Module, attr_name: str) -> None:
-        p = getattr(submod, attr_name, None)
-        if p is None or isinstance(p, _LocalizedTensor) or not p.is_cuda:
-            return
-        if not _localization_supported_or_warn(p.device.index, stacklevel=5):
-            return
-        wid = id(p)
-        new = seen.get(wid)
-        if new is None:
-            # See the note in localize()'s _swap_to_localized: the
-            # Parameter wrap detaches and rebuilds the halves, so the
-            # mark must be applied on the final wrapped halves, not on
-            # the ones _localize_tensor produced internally.
-            new = nn.Parameter(
-                _localize_tensor(
-                    p,
-                    num_partitions=num_partitions,
-                    mark_static_halves=False,
-                ),
-                requires_grad=p.requires_grad,
-            )
-            for half in new._halves:  # type: ignore[attr-defined]
-                half.requires_grad_(p.requires_grad)
-            if mark_static_halves:
-                from torch._dynamo.decorators import mark_static_address
-
-                for half in new._halves:  # type: ignore[attr-defined]
-                    mark_static_address(half)
-            seen[wid] = new
-        for s, n in id_to_locations.get(wid, [(submod, attr_name)]):
-            setattr(s, n, new)
-
-    for node in gm.graph.nodes:
-        if node.op != "call_function":
-            continue
-        meta = _LOCALIZABLE_OPS.get(node.target)
-        if meta is None:
-            continue
-        for i in meta.localized_args:
-            if i < len(node.args):
-                arg = node.args[i]
-            elif i < len(meta.arg_names):
-                arg = node.kwargs.get(meta.arg_names[i])
-            else:
-                continue
-            if not isinstance(arg, torch.fx.Node):
-                continue
-            resolved = _resolve_get_attr(arg)
-            if resolved is None:
-                continue
-            _localize_attr(*resolved)
-    return gm
