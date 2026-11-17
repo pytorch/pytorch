@@ -112,7 +112,7 @@ bool get_fullgraph_error_on_nested_compile(void) {
   return get_fullgraph_error_raw(&fullgraph_error_key);
 }
 
-static PyObject* eval_frame_callback_get(void) {
+PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
   if (unlikely(result == NULL)) {
     return (PyObject*)Py_None;
@@ -631,7 +631,7 @@ static PyObject* decrement_working_threads(
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyObject* module) {
+PyObject* dynamo_set_eval_frame(PyObject* new_callback, PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -678,7 +678,7 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       !Py_IsNone(callback),
       Py_IsFalse(callback));
-  return set_eval_frame(callback, module);
+  return dynamo_set_eval_frame(callback, module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
