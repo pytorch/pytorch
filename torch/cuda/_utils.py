@@ -94,7 +94,7 @@ def _check_cuda(result: int) -> None:
     raise RuntimeError(f"CUDA error: {error_message}")
 
 
-def _check_cuda_bindings(result: Any) -> Any:
+def _check_cuda_bindings(result: Any, *, msg: str = "CUDA error") -> Any:
     """Check a cuda.bindings (cuda-python) call result for errors.
 
     All cuda.bindings driver/runtime calls return ``(error, *outputs)``. This
@@ -128,7 +128,7 @@ def _check_cuda_bindings(result: Any) -> Any:
             err_str = "unknown error type"
         if isinstance(err_str, bytes):
             err_str = err_str.decode()
-        raise RuntimeError(f"CUDA error: {err} ({err_str})")
+        raise RuntimeError(f"{msg}: {err} ({err_str})")
 
     if len(out) == 0:
         return None
@@ -544,6 +544,8 @@ class _CudaKernel:
         # Get device properties to validate against limits
         device_props = torch.cuda.get_device_properties()
         if torch.version.hip:
+            # TODO: read shared_memory_per_block_optin here as well once its
+            # values on gfx950 and gfx1250 are confirmed to match the sizes below.
             # navi, CDNA1-CDNA3 allows a max of 64KB shared memory,
             # CDNA4 (gfx950) 160KB, and CDNA5 (gfx1250) 320KB.
             gcn_arch = device_props.gcnArchName.split(":", 1)[0]

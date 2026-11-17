@@ -1,4 +1,7 @@
 {
+  "accelerator_test_refactoring": [
+    "@fffrog"
+  ],
   "autograd": [
     "@soulitzer"
   ],
@@ -8,8 +11,5 @@
   "nn": [
     "@albanD",
     "@jbschlosser"
-  ],
-  "testcase_refactoring": [
-    "@fffrog"
   ]
 }

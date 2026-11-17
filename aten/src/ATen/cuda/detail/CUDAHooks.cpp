@@ -555,6 +555,9 @@ const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
 #if ROCM_VERSION >= 71300
     "gfx1100", "gfx1101", "gfx1151",
 #endif
+#if ROCM_VERSION >= 100300
+    "gfx1170", "gfx1171",
+#endif
     // TheRock can provide a newer runtime than the ROCm headers used to build
     // PyTorch, so gfx1250 support cannot depend on the compile-time version.
     "gfx1250",
@@ -570,6 +573,9 @@ const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
 #endif
 #if ROCM_VERSION >= 70000
     "gfx950", "gfx1150", "gfx1151",
+#endif
+#if ROCM_VERSION >= 100300
+    "gfx1170", "gfx1171",
 #endif
     "gfx1250",
   };
