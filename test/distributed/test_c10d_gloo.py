@@ -1295,6 +1295,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_gloo()
+    def test_destroy_process_group_stops_worker_threads(self):
+        """
+        destroy_process_group() must stop the Gloo worker threads even when the
+        process group object is still referenced elsewhere (e.g. captured by a
+        compiled graph). Otherwise the threads outlive the interpreter and can
+        abort the process at exit while releasing Python-owned tensors.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        pg = dist.distributed_c10d._get_default_group()
+        pg.allreduce(torch.ones(4)).wait()
+
+        dist.destroy_process_group()
+
+        # With the worker threads stopped, new work must fail instead of hang.
+        with self.assertRaisesRegex(RuntimeError, "has been shut down"):
+            pg.allreduce(torch.ones(4))
+
+    @requires_gloo()
     def test_scatter_stress(self):
         inputs = [
             [torch.tensor([i + self.rank]) for _ in range(self.world_size)]

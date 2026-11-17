@@ -676,6 +676,10 @@ ProcessGroupGloo::ProcessGroupGloo(
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
+  shutdown();
+}
+
+void ProcessGroupGloo::shutdown() {
   std::unique_lock<std::mutex> lock(workMutex_);
   workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
@@ -687,9 +691,12 @@ ProcessGroupGloo::~ProcessGroupGloo() {
 
   workProduceCV_.notify_all();
 
-  // Wait for worker threads to terminate
+  // Wait for worker threads to terminate. A thread is no longer joinable
+  // once an earlier shutdown() has joined it.
   for (auto& thread : threads_) {
-    thread.join();
+    if (thread.joinable()) {
+      thread.join();
+    }
   }
 }
 
@@ -855,6 +862,8 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
+  // Without worker threads the work would never run and wait() would hang.
+  TORCH_CHECK(!stop_, "ProcessGroupGloo has been shut down");
   workQueue_.push_back(std::move(work));
   lock.unlock();
 

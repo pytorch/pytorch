@@ -330,6 +330,11 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   ~ProcessGroupGloo() override;
 
+  // Drains the work queue and joins the worker threads. Called by
+  // destroy_process_group(), so the threads (and the work they hold) are
+  // released even when other references keep this object alive.
+  void shutdown() override;
+
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
