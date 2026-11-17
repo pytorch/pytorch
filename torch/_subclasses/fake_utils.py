@@ -272,9 +272,7 @@ class CrossRefFakeMode(TorchDispatchMode):
 
             try:
                 # TODO: enable_python_dispatcher() here
-                with FakeTensorMode(
-                    _force_python=True, shape_env=ShapeEnv()
-                ) as fake_mode:
+                with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
                         torch.Tensor,
                         functools.partial(fake_mode.from_tensor, static_shapes=True),
