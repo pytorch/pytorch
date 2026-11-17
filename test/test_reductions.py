@@ -558,6 +558,15 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
+    @parametrize("op", ["cumsum", "cumprod", "logcumsumexp", "cummax", "cummin"])
+    def test_cumulative_ops_size_one_dim_stride(self, device, op):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202600
+        # mT leaves the size-1 dim with stride 1 instead of 5, yet the tensor is still contiguous
+        x = torch.randn(2, 3, 5, 1, device=device).mT
+        out = torch.zeros_like(x), torch.ones_like(x, dtype=torch.long)
+        res = getattr(torch, op)(x, 2, out=out if op.startswith("cumm") else out[0])
+        self.assertEqual(res, getattr(torch, op)(x.cpu(), 2))
+
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     def test_logcumsumexp_complex(self, device, dtype):
@@ -2567,26 +2576,69 @@ class TestReductionsDevice(TestCase):
     @serialTest()
     @largeMPSBufferTest("5GB")
     @largeTensorTest("5GB")
+    @parametrize("n", [subtest((1 << 32) + 4096, name="above_uint32"), subtest((1 << 32) - 4096, name="above_int32")])
     @parametrize("fn,expected", [
-        subtest((lambda x: x.max(), 1), name="max"),
-        subtest((lambda x: x.argmax(), (1 << 32) + 4095), name="argmax"),
-        subtest((lambda x: x.min(), 0), name="min"),
-        subtest((lambda x: x.argmin(), 0), name="argmin"),
+        subtest((lambda x: x.max(), lambda n: 1), name="max"),
+        subtest((lambda x: x.argmax(), lambda n: n - 1), name="argmax"),
+        subtest((lambda x: x.min(), lambda n: 0), name="min"),
+        subtest((lambda x: x.argmin(), lambda n: 0), name="argmin"),
         # sum promotes int8 to int64, materializing a 32GB cast of the input on CUDA and XPU.
-        # Keep explicit CUDA/XPU guards so MPS still exercises the 64-bit-indexing assertion.
-        subtest((lambda x: x.sum(), 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda"), largeTensorTest("36GB", device="xpu")]),
-        subtest((lambda x: x.any(), True), name="any"),
-        subtest((lambda x: x.all(), False), name="all"),
-        subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], 1 << 20), name="max_dim"),
+        subtest((lambda x: x.sum(), lambda n: 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda"), largeTensorTest("36GB", device="xpu")]),
+        subtest((lambda x: x.any(), lambda n: True), name="any"),
+        subtest((lambda x: x.all(), lambda n: False), name="all"),
+        subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], lambda n: n // 4096 - 1), name="max_dim"),
     ])
-    def test_reductions_above_uint32(self, device, fn, expected):
-        x = torch.zeros((1 << 32) + 4096, device=device, dtype=torch.int8)
+    def test_large_reductions(self, device, n, fn, expected):
+        x = torch.zeros(n, device=device, dtype=torch.int8)
         x[-1] = 1
-        # MPS reduction kernels index in 32 bits and should raise
-        if self.device_type == "mps":
-            self.assertRaisesRegex(NotImplementedError, "64-bit indexing", fn, x)
-        else:
-            self.assertEqual(fn(x), expected)
+        self.assertEqual(fn(x), expected(n))
+
+    @onlyAccelerator
+    @serialTest()
+    @largeMPSBufferTest("7GB")
+    @largeTensorTest("7GB")
+    def test_large_reductions_of_views(self, device):
+        # Expanded and strided views whose sizes or strides need 64-bit indexing over small storages
+        base = torch.arange(1 << 17, device=device).view(2, 1 << 16, 1)
+        self.assertEqual(base.expand(-1, -1, 1 << 16).sum((0, 2)), (base[0, :, 0] + base[1, :, 0]) * (1 << 16))
+        r = torch.tensor([[7], [3]], dtype=torch.int8, device=device).expand(2, 1 << 31).amax(0)
+        self.assertEqual((r.amin().item(), r.amax().item()), (7, 7))
+        del r
+        self.assertEqual(tuple(torch.zeros(1, dtype=torch.bool, device=device).expand((1 << 32) + 4096).max(0)), (False, 0))
+        out = torch.zeros((1 << 32) + 4096, dtype=torch.int8, device=device)[:: 1 << 20]
+        torch.amax(torch.full((2, out.numel()), 9, dtype=torch.int8, device=device), 0, out=out)
+        self.assertEqual(out, torch.full_like(out, 9))
+
+    @onlyAccelerator
+    @serialTest()
+    @largeTensorTest("4GB")
+    def test_reductions_many_short_rows(self, device):
+        # A simdgroup or threadgroup per row puts over 2**32 threads in the grid
+        rows = (1 << 27) + 8
+        x = torch.zeros(rows, 2, dtype=torch.int8, device=device)
+        x[:, 1] = 1
+        r = x.argmax(1)
+        self.assertEqual((r.amin().item(), r.amax().item()), (1, 1))
+        del x, r
+        y = torch.zeros(rows, 4, dtype=torch.int8, device=device)
+        y[:, 2] = 7
+        v = y[:, ::2]  # strided, so it is reduced by the generic kernels
+        for r, want in ((v.amax(1), 7), (v.sum(1), 7), (v.argmax(1), 1)):
+            self.assertEqual((r.amin().item(), r.amax().item()), (want, want))
+
+    @onlyAccelerator
+    @serialTest()
+    @largeMPSBufferTest("9GB")
+    @largeTensorTest("9GB")
+    def test_var_mean_above_uint32(self, device):
+        rows = (1 << 20) + 1
+        x = torch.zeros(rows, 4096, device=device, dtype=torch.half)
+        x[::2] = 1
+        p = (rows // 2 + 1) / rows
+        for dim, n in ((0, rows), (None, x.numel())):
+            var, mean = torch.var_mean(x, dim)
+            self.assertEqual(mean, torch.full_like(mean, p))
+            self.assertEqual(var, torch.full_like(var, p * (1 - p) * n / (n - 1)))
 
     def test_argminmax_axis_with_dim_one(self, device):
         # See: https://github.com/pytorch/pytorch/issues/38922
