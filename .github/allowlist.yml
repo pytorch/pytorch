@@ -67,6 +67,9 @@ L2:
   - aws-neuron/private-torch-neuronx:
       events:
         - nightly
+  - versi379/pytorch-tccl-ci:
+      events:
+        - nightly
 
 L3:
   npu:
