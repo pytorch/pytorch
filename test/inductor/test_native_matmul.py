@@ -377,8 +377,9 @@ class TestNativeMatmulChoices(TestCase):
                     self.assertEqual("tl.dot" in code, native)
                     self.assertEqual("extern_kernels.mm(" in code, not native)
                     self.assertEqual(actual, a @ b, atol=1e-4, rtol=1e-4)
-        # tl.dot takes no fp64, so Inductor does not ask about that matmul.
-        self.assertEqual(set(asked), {torch.float32, torch.bfloat16})
+        # V.choices is asked about fp64 too, which only the default declines:
+        # tl.dot takes no fp64.
+        self.assertEqual(set(asked), {torch.float32, torch.bfloat16, torch.float64})
 
 
 @inductor_config.patch({"triton.native_matmul": True})

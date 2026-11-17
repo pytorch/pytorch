@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
+from torch._inductor.utils import is_bf16x9_matmul, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
@@ -191,25 +191,6 @@ def use_native_matmul(mat1, mat2):
         # TODO: support block ptr
         if use_block_ptr_enabled():
             raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-
-    # Currently only enable native matmul for triton on GPU.
-    if not (
-        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
-    ):
-        return False
-
-    # Currently, tl.dot only supports following dtypes
-    triton_supported_dtype = [
-        torch.int8,
-        torch.uint8,
-        torch.float16,
-        torch.bfloat16,
-        torch.float32,
-    ]
-    if mat1.dtype not in triton_supported_dtype:
-        return False
-    if mat2.dtype not in triton_supported_dtype:
-        return False
 
     # (..., M, K) @ (..., K, N)
     m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]

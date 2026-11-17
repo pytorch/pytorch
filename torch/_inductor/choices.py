@@ -33,7 +33,7 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _use_autotune_backend
+from .utils import _use_autotune_backend, get_current_backend
 from .virtualized import V
 
 
@@ -132,6 +132,10 @@ class FusionScore:
             other.buffer_overlap_score,
             other.proximity_score,
         )
+
+
+# The dtypes tl.dot takes.
+_TL_DOT_DTYPES = (torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
 
 
 class InductorChoices:
@@ -494,9 +498,18 @@ class InductorChoices:
         use_native_matmul() in kernel/mm_common.py asks this while lowering mm,
         bmm, addmm, baddbmm and mm_plus_mm, only about matmuls it can lower
         natively. A dot cannot go back to the extern kernel: the device's
-        scheduling emits it, by default with Triton's native matmul codegen.
+        scheduling emits it. This default leaves it to Triton's native matmul
+        codegen, so it declines other backends (config.cuda_backend "halide")
+        and the dtypes tl.dot does not take (float64).
         """
-        return config.triton.native_matmul
+        device_type = mat1.get_device_or_error().type
+        return (
+            config.triton.native_matmul
+            and device_type in ("cuda", "xpu")
+            and get_current_backend(device_type) == "triton"
+            and mat1.get_dtype() in _TL_DOT_DTYPES
+            and mat2.get_dtype() in _TL_DOT_DTYPES
+        )
 
     def triton_kernel_kwargs(
         self,
