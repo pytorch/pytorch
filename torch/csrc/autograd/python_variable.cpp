@@ -1,5 +1,4 @@
 #include <ATen/DTensorState.h>
-#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/native/Resize.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
@@ -3190,14 +3189,6 @@ static PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "is_mkldnn");
   }
   auto& self_ = THPVariable_Unpack(self);
-  if (at::functionalization::impl::isFunctionalTensor(self_)) {
-    THPObjectPtr inner(THPVariable_Wrap(
-        at::functionalization::impl::from_functional_tensor(self_)));
-    if (!inner) {
-      return nullptr;
-    }
-    return PyObject_GetAttrString(inner.get(), "is_mkldnn");
-  }
   return torch::autograd::utils::wrap(
       self_.is_mkldnn() || is_fake_mkldnn(self_));
   END_HANDLE_TH_ERRORS
@@ -3299,14 +3290,6 @@ static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "layout");
   }
   auto& self_ = THPVariable_Unpack(self);
-  if (at::functionalization::impl::isFunctionalTensor(self_)) {
-    THPObjectPtr inner(THPVariable_Wrap(
-        at::functionalization::impl::from_functional_tensor(self_)));
-    if (!inner) {
-      return nullptr;
-    }
-    return PyObject_GetAttrString(inner.get(), "layout");
-  }
   return torch::autograd::utils::wrap(
       is_fake_mkldnn(self_) ? at::kMkldnn : self_.layout());
   END_HANDLE_TH_ERRORS
