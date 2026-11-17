@@ -5775,7 +5775,18 @@ class AlgorithmSelectorCache(PersistentCache):
                     f"Incorrect result from choice {choice}\n\n{e}"
                 )
             except SubprocException as e:
-                # Pool-worker compile failure; in process this is the RuntimeError above.
+                # A job that failed in a pool worker: apply the in-process rules to
+                # its original exception type. Pool failures (empty exc_types) and
+                # other types are re-raised so they are not cached as inf.
+                if "builtins.AssertionError" in e.exc_types:
+                    raise AssertionError(  # noqa: B904
+                        f"Incorrect result from choice {choice}\n\n{e}"
+                    )
+                if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY or not (
+                    "builtins.RuntimeError" in e.exc_types
+                    or "triton.runtime.errors.OutOfResources" in e.exc_types
+                ):
+                    raise
                 log.error(
                     "Compilation error during autotuning: \n%s. \nIgnoring this choice.",
                     e,
