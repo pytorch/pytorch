@@ -1180,11 +1180,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             u0 = shape_env.create_unbacked_symint()
@@ -1194,11 +1189,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         prims.utils.compare_tensor_meta(a, b, check_strides=True)
 
     def test_stack_symbolic_shapes(self):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         # torch.stack, for a non-trailing dim, is computed as
         # cat(...).view(result_sizes). The inner view must not require concrete
         # sizes when the stacked tensors have symbolic shapes, otherwise it
@@ -1636,11 +1626,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
     def test_symbolic_number_tensor_argument_not_constant(self):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         symint = shape_env.create_unbacked_symint()
         with FakeTensorMode(shape_env=shape_env):
@@ -1741,11 +1726,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(replay_out.shape, (5, 16, 3072))
 
     def test_view_unbacked_contiguous_relation_from_hints(self):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
         with fake_mode:
@@ -2177,11 +2157,6 @@ def forward(self, x_1):
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
 
     def test_unsqueeze_copy(self):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv()
         t1 = torch.ones(2, 2, 768)
         with FakeTensorMode(shape_env=shape_env) as fake_mode:
@@ -2229,11 +2204,6 @@ def forward(self, x_1):
 
     @parametrize("symbolic", [False, True])
     def test_fast_div_int_to_float(self, symbolic):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv() if symbolic else None
         mode = FakeTensorMode(shape_env=shape_env)
         size = shape_env.create_unbacked_symint() if shape_env is not None else 2
@@ -2254,11 +2224,6 @@ def forward(self, x_1):
 
     @parametrize("symbolic", [False, True])
     def test_fast_div(self, symbolic):
-        if (
-            torch._dynamo.config.use_cpp_fake_tensor
-            and torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
         shape_env = ShapeEnv() if symbolic else None
         mode = FakeTensorMode(shape_env=shape_env)
         size = shape_env.create_unbacked_symint() if shape_env is not None else 2
