@@ -3744,7 +3744,10 @@ class TestFakeTensorConverter(TestCase):
     @parametrize("requires_grad", [False, True])
     @parametrize("leaf", [False, True])
     @parametrize("view_kind", ["slice", "transpose", "real", "complex"])
-    def test_separate_tensor_storages_view(self, requires_grad, leaf, view_kind):
+    @parametrize("implicit", [False, True])
+    def test_separate_tensor_storages_view(
+        self, requires_grad, leaf, view_kind, implicit
+    ):
         dtype = torch.complex64 if view_kind == "real" else torch.float32
         x = torch.rand(2, 2, 2, dtype=dtype, requires_grad=requires_grad)
         if not leaf:
@@ -3755,9 +3758,12 @@ class TestFakeTensorConverter(TestCase):
             "real": lambda: torch.view_as_real(x),
             "complex": lambda: torch.view_as_complex(x),
         }[view_kind]()
-        mode = FakeTensorMode()
+        mode = FakeTensorMode(allow_non_fake_inputs=implicit)
         converter = mode.fake_tensor_converter
         x_conv = converter.from_real_tensor(mode, x)
+        if implicit:
+            with mode:
+                x_conv + y
         y_conv = converter.from_real_tensor(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
         self.assertIs(y_conv._base, x_conv)
@@ -3766,6 +3772,8 @@ class TestFakeTensorConverter(TestCase):
         self.assertEqual(y_conv.stride(), y.stride())
         self.assertEqual(y_conv.storage_offset(), y.storage_offset())
         self.assertEqual(y_conv.dtype, y.dtype)
+        self.assertEqual(y_conv.device, y.device)
+        self.assertIs(maybe_get_fake_mode(y_conv), mode)
         self.assertEqual(y_conv.requires_grad, y.requires_grad)
         self.assertEqual(y_conv.is_leaf, y.is_leaf)
         version = x_conv._version
