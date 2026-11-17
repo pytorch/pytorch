@@ -1254,6 +1254,19 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    @parametrize("align_corners", [False, True])
+    @torch._inductor.config.patch(implicit_fallbacks=False, force_disable_caches=True)
+    def test_upsample_trilinear3d_default(self, device, align_corners):
+        def fn(x):
+            return aten.upsample_trilinear3d.default(
+                x, [4, 8, 10], align_corners, None, 2.0, None
+            )
+
+        x = torch.randn(1, 3, 2, 4, 5, device=device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
         # A decomposition is inlined into a graph that must stay functional, so
         # it may not build its result and then write the parts into it.
