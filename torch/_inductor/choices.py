@@ -482,6 +482,21 @@ class InductorChoices:
 
         return callers
 
+    def use_native_matmul(self, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
+        """Lower mat1 @ mat2 to a "dot" reduction, which fuses with its epilogue,
+        instead of an extern kernel or a template. For relu(a @ b):
+
+            False: extern_kernels.mm(arg0_1, arg1_1, out=buf0)
+                   triton_poi_fused_relu_0.run(buf1, ...)
+            True:  triton_red_fused_mm_relu_0.run(buf1, arg0_1, arg1_1, ...)
+
+        use_native_matmul() in kernel/mm_common.py asks this while lowering mm,
+        bmm, addmm, baddbmm and mm_plus_mm, only about matmuls it can lower
+        natively. A dot cannot go back to the extern kernel: the device's
+        scheduling emits it, by default with Triton's native matmul codegen.
+        """
+        return config.triton.native_matmul
+
     def triton_kernel_kwargs(
         self,
         kernel_cls: type[TritonKernel],

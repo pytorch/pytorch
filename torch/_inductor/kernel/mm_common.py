@@ -12,7 +12,6 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
-from ..codegen.common import get_scheduling_for_device
 from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
@@ -233,13 +232,7 @@ def use_native_matmul(mat1, mat2):
     ):
         return False
 
-    if config.triton.native_matmul:
-        return True
-    # A backend that generates matmuls itself opts in; see
-    # BaseScheduling.lowers_native_matmul. The registration is a constructor,
-    # e.g. CUDA's is a function of config.cuda_backend, so ask an instance.
-    scheduling = get_scheduling_for_device(device_type)
-    return scheduling is not None and scheduling(None).lowers_native_matmul(mat1, mat2)
+    return V.choices.use_native_matmul(mat1, mat2)
 
 
 def _use_small_mm_pointwise(

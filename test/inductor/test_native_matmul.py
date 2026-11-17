@@ -1,28 +1,20 @@
 # Owner(s): ["module: inductor"]
 
 
-import unittest
 from collections.abc import Callable
-from unittest import mock
 
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, metrics
-from torch._inductor.codegen.common import (
-    custom_backend_codegen_configs,
-    custom_backend_passes,
-    device_codegens,
-    init_backend_registration,
-    register_backend_for_device,
-)
-from torch._inductor.codegen.cuda_combined_scheduling import CUDACombinedScheduling
+from torch._inductor.choices import InductorChoices
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     fresh_inductor_cache,
     run_and_get_code,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -351,41 +343,31 @@ class TestTritonDotReduction(TestCase):
                 self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
 
 
-@unittest.skipIf(GPU_TYPE != "cuda", "registers a CUDA backend")
-class TestNativeMatmulBackend(TestCase):
-    @inductor_config.patch(
-        {
-            "triton.native_matmul": False,
-            "max_autotune": False,
-            "force_disable_caches": True,
-            "test_configs.force_filter_reduction_configs": True,
-        }
-    )
-    def test_backend_lowers_native_matmul(self):
-        # A backend registered with register_backend_for_device, here as a
-        # function, asks for the native lowering of the matmuls it emits.
+@instantiate_parametrized_tests
+class TestNativeMatmulChoices(TestCase):
+    @parametrize("native_matmul", [False, True])
+    def test_choices_use_native_matmul(self, native_matmul):
+        # V.choices decides which matmuls are lowered natively, whatever
+        # triton.native_matmul says.
         asked = []
 
-        class Scheduling(CUDACombinedScheduling):
-            def lowers_native_matmul(self, mat1, mat2):
+        class Choices(InductorChoices):
+            def use_native_matmul(self, mat1, mat2):
                 asked.append(mat1.get_dtype())
                 return mat1.get_dtype() == torch.float32
 
-        init_backend_registration()
-        default = device_codegens[GPU_TYPE]
+        dtypes = {torch.float32: True, torch.bfloat16: False, torch.float64: False}
         with (
-            mock.patch.dict(device_codegens),
-            mock.patch.dict(custom_backend_passes),
-            mock.patch.dict(custom_backend_codegen_configs),
+            inductor_config.patch(
+                {
+                    "triton.native_matmul": native_matmul,
+                    "max_autotune": False,
+                    "force_disable_caches": True,
+                    "test_configs.force_filter_reduction_configs": True,
+                }
+            ),
+            V.set_choices_handler(Choices()),
         ):
-            register_backend_for_device(
-                GPU_TYPE,
-                lambda scheduler: Scheduling(scheduler),
-                default.wrapper_codegen,
-                default.cpp_wrapper_codegen,
-                default.fx_wrapper_codegen,
-            )
-            dtypes = {torch.float32: True, torch.bfloat16: False, torch.float64: False}
             for dtype, native in dtypes.items():
                 with self.subTest(dtype=dtype):
                     a = torch.randn(40, 72, device=GPU_TYPE, dtype=dtype)
