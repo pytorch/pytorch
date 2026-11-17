@@ -1087,7 +1087,8 @@ void fakeFallback(
        (schema.name() == "aten::detach_" && schema.overload_name().empty())) &&
       !avoiding_device_init() &&
       schema.name() != "aten::_nested_tensor_from_tensor_list") {
-    torch::jit::Stack outputs(stack->end() - num_arguments, stack->end());
+    const auto arguments = torch::jit::last(*stack, num_arguments);
+    torch::jit::Stack outputs(arguments.begin(), arguments.end());
     replace_each_tensor(
         &outputs,
         0,
