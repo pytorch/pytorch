@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -13,9 +12,10 @@ from ...ir import get_free_symbols
 from ...kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decompose_k_subgraph_template,
-    effective_two_ctas,
+    get_blackwell_decompose_k_splits,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
+from ...runtime.hints import DeviceProperties
 from ...utils import get_k_splits, use_triton_blackwell_tma_template
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
@@ -108,44 +108,40 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # dynamic dimensions must be specialized explicitly. Unbacked symbols
         # were rejected above.
         m_hint, n_hint, k_hint = V.graph.sizevars.guard_int_seq((m, n, k))
-        config_indices = [0, 3]
-        if m_hint > 128:
-            config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
+        device_properties = DeviceProperties.create(kernel_inputs.device())
+        # Keep the Triton search to one M/N-specific schedule family and its
+        # one- and two-wave splits. Narrow-N and one-M-tile cases use the 1CTA
+        # BK128 schedule; wider outputs with at least two M tiles use 2CTA
+        # BN256. The whole-plan autotuner retains direct and exact ATen
+        # fallbacks.
+        config_index = 2 if m_hint > 128 and n_hint > 128 else 0
+        partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
         # Same opt-in shared-memory pruning as the mm heuristics.
-        exceeds_smem = None
         if config.max_autotune_prune_choices_based_on_shared_mem:
             exceeds_smem = CUDAConfigHeuristic()._get_exceeding_shared_memory_checker(
                 has_sm_layout_conversion=False, layout_conversion_byte_size=0
             )
-        dtype_size = mat1.get_dtype().itemsize
+            if exceeds_smem is not None and exceeds_smem(
+                BaseConfig(
+                    partial_config.block_m,
+                    partial_config.block_n,
+                    partial_config.block_k,
+                    partial_config.num_stages,
+                    partial_config.num_warps,
+                ),
+                mat1.get_dtype().itemsize,
+            ):
+                return
 
-        for k_split in exact_k_splits:
-            for config_index in config_indices:
-                partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
-                if exceeds_smem is not None and exceeds_smem(
-                    BaseConfig(
-                        partial_config.block_m,
-                        partial_config.block_n,
-                        partial_config.block_k,
-                        partial_config.num_stages,
-                        partial_config.num_warps,
-                    ),
-                    dtype_size,
-                ):
-                    continue
-                m_tiles = math.ceil(m_hint / partial_config.block_m)
-                if effective_two_ctas(partial_config):
-                    m_tiles = math.ceil(m_tiles / 2) * 2
-                k_part = (
-                    math.ceil(math.ceil(k_hint / k_split) / partial_config.block_k)
-                    * partial_config.block_k
-                )
-                workspace_bytes = (
-                    k_split * m_tiles * partial_config.block_m * n_hint * 4
-                )
-                if (k_split - 1) * k_part < k_hint and workspace_bytes <= 128 * 1024**2:
-                    yield {
-                        "k_split": k_split,
-                        "bmm_backend": "triton",
-                        "bmm_config_index": config_index,
-                    }
+        for k_split in get_blackwell_decompose_k_splits(
+            m_hint,
+            n_hint,
+            k_hint,
+            device_properties.multi_processor_count,
+            partial_config,
+        ):
+            yield {
+                "k_split": k_split,
+                "bmm_backend": "triton",
+                "bmm_config_index": config_index,
+            }
