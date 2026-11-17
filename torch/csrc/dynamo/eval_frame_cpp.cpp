@@ -4,6 +4,7 @@
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/disable.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
@@ -18,6 +19,37 @@
 extern "C" {
 extern PyObject* guard_complete_hook;
 }
+
+namespace torch::dynamo {
+
+DisableDynamoGuard::DisableDynamoGuard() {
+  if (eval_frame_callback_get() != Py_None) {
+    py::gil_scoped_acquire gil;
+    // Keep the module alive without a decref during Python finalization.
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+        storage;
+    module_ = storage
+                  .call_once_and_store_result([]() -> py::object {
+                    return py::module::import("torch._C")
+                        .attr("_dynamo")
+                        .attr("eval_frame");
+                  })
+                  .get_stored()
+                  .ptr();
+    callback_ = dynamo_set_eval_frame(Py_None, module_);
+  }
+}
+
+DisableDynamoGuard::~DisableDynamoGuard() {
+  if (callback_ != nullptr) {
+    auto gil = PyGILState_Ensure();
+    Py_DECREF(dynamo_set_eval_frame(callback_, module_));
+    Py_DECREF(callback_);
+    PyGILState_Release(gil);
+  }
+}
+
+} // namespace torch::dynamo
 
 // Bytecode debugger callback - stored as raw PyObject* to avoid
 // shutdown issues with static py::object destructor running after Python

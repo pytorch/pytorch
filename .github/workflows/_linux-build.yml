@@ -175,7 +175,7 @@ jobs:
     timeout-minutes: 480
     outputs:
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      test-matrix: ${{ steps.cpp-faketensor.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -210,6 +210,27 @@ jobs:
           ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
           lf-runners: ${{ inputs.lf_runners }}
+
+      # Local composite actions are unavailable on container runners.
+      - name: Add C++ FakeTensor test configurations
+        id: cpp-faketensor
+        if: steps.filter.outputs.test-matrix != ''
+        shell: bash
+        working-directory: .github/scripts
+        env:
+          TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from filter_test_configs import add_cpp_faketensor_configs, set_output
+
+          matrix = add_cpp_faketensor_configs(
+              json.loads(os.environ["TEST_MATRIX"]), os.environ["JOB_NAME"]
+          )
+          set_output("test-matrix", json.dumps(matrix))
+          PY
 
       - name: Configure AWS credentials
         id: aws-creds

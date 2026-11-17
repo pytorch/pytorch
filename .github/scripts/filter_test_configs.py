@@ -12,6 +12,7 @@ import warnings
 from enum import Enum
 from functools import cache
 from logging import info, warning
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from urllib.request import Request, urlopen
 
@@ -70,6 +71,7 @@ def parse_args() -> Any:
     parser.add_argument(
         "--test-matrix", type=str, required=True, help="the original test matrix"
     )
+    parser.add_argument("--cpp-faketensor", action="store_true")
     parser.add_argument(
         "--selected-test-configs",
         type=str,
@@ -628,6 +630,41 @@ def enforce_lf_allowlist(
     return test_matrix
 
 
+def add_cpp_faketensor_configs(
+    test_matrix: dict[str, list[Any]],
+    job_name: str | None,
+) -> dict[str, list[Any]]:
+    selection = (
+        Path(__file__).resolve().parents[2] / ".ci/pytorch/cpp_faketensor_tests.json"
+    )
+    configs = (
+        json.loads(selection.read_text())["test_configs"]
+        if selection.exists()
+        else None
+    )
+    entries = test_matrix.get("include", [])
+    if any("fake_tensor" in entry for entry in entries):
+        return test_matrix
+    cpp_entries = [
+        {**entry, "fake_tensor": "cpp"}
+        for entry in entries
+        if configs is None or entry.get("config") in configs
+    ]
+    if configs is not None:
+        if not job_name or any(
+            device in job_name.lower() for device in ("cuda", "rocm", "xpu", "tpu")
+        ):
+            return test_matrix
+        cpp_entries = [
+            {**entry, "config": "cpp_faketensor", "shard": 1, "num_shards": 1}
+            for entry in cpp_entries[:1]
+        ]
+    return {
+        **test_matrix,
+        "include": entries + cpp_entries,
+    }
+
+
 def main() -> None:
     args = parse_args()
     # Load the original test matrix set by the workflow. Its format, however,
@@ -716,6 +753,10 @@ def main() -> None:
     )
 
     filtered_test_matrix = enforce_lf_allowlist(filtered_test_matrix, args.lf_runners)
+    if args.cpp_faketensor:
+        filtered_test_matrix = add_cpp_faketensor_configs(
+            filtered_test_matrix, args.job_name
+        )
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
