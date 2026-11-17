@@ -533,16 +533,25 @@ class BlockDescriptorOptions:
             # Need to expand rank to match the rank used inside the reduction loop
             final_shape += [sympy.S.One] * reduction_ndim
 
-        # Maybe reorder dimensions based on strides
-        # with tl.trans applied at load / store time
+        # Maybe reorder dimensions based on strides with tl.trans applied at
+        # load / store time. Store descriptors retain zero-stride dimensions,
+        # so pin them outermost: tensor descriptors require an innermost stride
+        # of 1, while the normal descending-stride sort puts zero strides last.
+        pin_dims_outermost = None
+        if for_store and stride_sorter_cls is not BlockParameters.IdentityStrideSorter:
+            pin_dims_outermost = [
+                sizevars.statically_known_equals(stride, 0) for stride in params.strides
+            ]
+
         params, stride_sorter = params.maybe_sort_with_stride_order(
-            stride_sorter_cls=stride_sorter_cls, shape_env=V.graph._shape_env
+            stride_sorter_cls=stride_sorter_cls,
+            shape_env=V.graph._shape_env,
+            pin_dims_outermost=pin_dims_outermost,
         )
 
-        # Strip out dimensions of stride 0 for load descriptors.
-        # These will be restored with tl.broadcast_to. For stores non-singleton
-        # Broadcasting dims cannot be removed as the descriptor block shape
-        # needs to match the kernel block shape
+        # Loads can remove dimensions of stride 0 and restore them with
+        # tl.broadcast_to. Stores must retain them because the descriptor block
+        # shape needs to match the block being stored.
         if for_store:
             broadcasting_dims = [False] * len(params.strides)
         else:
@@ -680,8 +689,9 @@ class BlockDescriptorOptions:
         for_store: bool,
     ) -> tuple[str, Sequence[sympy.Expr | int | str]]:
         """
-        Generate a broadcast and a reshape for the block descriptor.
-        This restores stride-0 dimensions which were removed from the block descriptor.
+        Generate any broadcast, transpose, and reshape needed for the block descriptor.
+        For loads and block pointer stores, this also restores stride-0 dimensions
+        which were removed from the block descriptor.
 
         Transposes are also applied to the input using self.stride_sorter:
         if for_store is True:
@@ -2872,7 +2882,10 @@ class BlockParameters:
         return cls(**{key: a[key] + b[key] for key in a})
 
     def maybe_sort_with_stride_order(
-        self, stride_sorter_cls: type[StrideSorter], shape_env: ShapeEnv
+        self,
+        stride_sorter_cls: type[StrideSorter],
+        shape_env: ShapeEnv,
+        pin_dims_outermost: list[bool] | None = None,
     ) -> tuple[BlockParameters, BlockParameters.StrideSorter]:
         """
         Sort `BlockParameter` with stride_sorter_cls. Returns block parameters
@@ -2880,6 +2893,19 @@ class BlockParameters:
         can be reverted.
         """
         stride_sorter = stride_sorter_cls.create(self.strides, shape_env=shape_env)
+        if pin_dims_outermost is not None:
+            if len(pin_dims_outermost) != len(self.strides):
+                raise AssertionError(
+                    f"expected len(pin_dims_outermost) == len(strides), got "
+                    f"{len(pin_dims_outermost)} != {len(self.strides)}"
+                )
+            sort_idx = [
+                idx for idx in stride_sorter.sort_idx if pin_dims_outermost[idx]
+            ] + [idx for idx in stride_sorter.sort_idx if not pin_dims_outermost[idx]]
+            stride_sorter = stride_sorter_cls(
+                original_strides=stride_sorter.original_strides,
+                sort_idx=sort_idx,
+            )
         params = BlockParameters(
             **{
                 key: stride_sorter.sort(val)
@@ -4913,9 +4939,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #     result to the shape of the pointer.
         value = f"tl.broadcast_to({value}, {indexing.final_shape})"
 
-        # If the strides have a non-trivial sort, then the broadcasting dims
-        # need to be reverted for the store
-        # Also see indexing.codegen_broadcast_and_reshape
+        # Block pointer stores may need to restore removed broadcasting dims.
+        # Tensor descriptor stores retain those dims, but may still need to
+        # transpose the value to match a non-trivial stride sort.
+        # Also see indexing.codegen_broadcast_and_reshape.
         broadcast_shape = indexing.broadcast_shape
         broadcasting_dims = indexing.broadcasting_dims
         if not indexing.stride_sorter.is_identity:

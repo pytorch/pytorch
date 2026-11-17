@@ -410,7 +410,10 @@ class CommonTemplate:
             rtol=rtol,
         )
 
-    def test_output_descriptor_with_zero_strides(self):
+    @parametrize("transpose_discontiguous_tensor_descriptor", [False, True])
+    def test_output_descriptor_with_zero_strides(
+        self, transpose_discontiguous_tensor_descriptor: bool
+    ):
         if "block_ptr" in self.block_descriptor_constructor_str:
             raise unittest.SkipTest("BlockPtr is deprecated.")
 
@@ -420,19 +423,30 @@ class CommonTemplate:
         # The second kernel reads from the first kernel's output and writes
         # back to the user buffer that has shape [1, 2048].
         # With `prefer_nd_tiling=True`, the compute block shape is [YBLOCK, XBLOCK].
-        # Dropping the broadcast dimension for the output (dim 0) will lead inserting
-        # a reshape [YBLOCK, XBLOCK] -> [XBLOCK] that raises an error.
+        # Dropping the broadcast dimension for the output (dim 0) will lead to
+        # inserting a reshape [YBLOCK, XBLOCK] -> [XBLOCK] that raises an error.
         def fn(x):
             x[[0, 0]] += x[[0, 0]]
             return x
 
         x = torch.randn(1, 2048, dtype=torch.float32, device=self.device)
-        result, code = self._run_and_compare(
-            fn,
-            x,
-            expected_num_triton_kernels=2,
-            expected_num_block_pointers=4,
-            config_patches={"triton.prefer_nd_tiling": True},
+        expected = fn(x.clone())
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": True,
+                "triton.transpose_discontiguous_tensor_descriptor": (
+                    transpose_discontiguous_tensor_descriptor
+                ),
+            }
+        ):
+            result, code = run_and_get_code(
+                torch.compile(fn, backend="inductor"), x.clone()
+            )
+
+        self.assertTrue(torch.allclose(expected, result))
+        self.assertEqual(sum(src.count("@triton.jit") for src in code), 2)
+        self.assertEqual(
+            sum(src.count(self.block_descriptor_constructor_str) for src in code), 4
         )
 
         # Store descriptor with stride 0 outermost dimension is not dropped.

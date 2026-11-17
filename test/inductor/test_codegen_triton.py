@@ -203,6 +203,29 @@ class TestCodegenTriton(InductorTestCase):
         ):
             self.assertTrue(checker.can_use_32bit_indexing())
 
+    def test_store_stride_sort_pins_zero_strides_outermost(self):
+        params = BlockParameters(
+            shape=[16, 32, 2],
+            block_shape=[8, 16, 2],
+            strides=[8, 1, 0],
+            offsets=[0, 0, 0],
+        )
+
+        normally_sorted, _ = params.maybe_sort_with_stride_order(
+            BlockParameters.TensorDecriptorStrideSorter,
+            self._graph._shape_env,
+        )
+        sorted_params, stride_sorter = params.maybe_sort_with_stride_order(
+            BlockParameters.TensorDecriptorStrideSorter,
+            self._graph._shape_env,
+            pin_dims_outermost=[False, False, True],
+        )
+
+        self.assertEqual(normally_sorted.strides, [8, 1, 0])
+        self.assertEqual(stride_sorter.sort_idx, [2, 0, 1])
+        self.assertEqual(sorted_params.strides, [0, 8, 1])
+        self.assertEqual(stride_sorter.revert(sorted_params.block_shape), [8, 16, 2])
+
     def test_tma_descriptor_local_int32_indexing_fails_closed(self):
         int32_max = torch.iinfo(torch.int32).max
         size = sympy.Symbol("s", positive=True, integer=True)
