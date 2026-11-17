@@ -86,7 +86,6 @@ def launch_cutedsl_kernel(
 
     from torch._higher_order_ops.cutedsl_kernel_wrap import (
         CUTEDSL_CONSTANT_RULES,
-        cutedsl_kernel_name,
         get_host_fn_info,
         python_scalar,
     )
@@ -99,8 +98,8 @@ def launch_cutedsl_kernel(
     )
     from torch._native.cutedsl.plan_cache import cached_plan
 
-    name = cutedsl_kernel_name(fn)
     info = get_host_fn_info(fn)
+    name = info.name
     info.check_call(name, args.keys())
     runtime_args, constant_args = info.split_args(name, args)
     device = _launch_device(name, runtime_args.values())
