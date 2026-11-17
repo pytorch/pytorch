@@ -455,11 +455,17 @@ def index_add(
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
     if not is_fbcode() and x.dtype == torch.bfloat16:
-        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer.
-        if x.device.type != "cuda" or (
-            torch.version.hip is None
-            and torch.cuda.get_device_capability(x.device) < (9, 0)
-        ):
+        from .virtualized import V
+
+        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer;
+        # the scatter pre-aggregation template lowers index_put without it.
+        if (
+            x.device.type != "cuda"
+            or (
+                torch.version.hip is None
+                and torch.cuda.get_device_capability(x.device) < (9, 0)
+            )
+        ) and not V.choices.should_use_scatter_preagg_template(x.device):
             return NotImplemented
     # The index_put lowering expects tensor indices to have at least one
     # dimension. Normalizing a scalar index preserves index_add semantics.

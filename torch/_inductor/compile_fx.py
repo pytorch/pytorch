@@ -989,7 +989,9 @@ def get_patched_config_dict(
         # arbitrary state, so they are not deep-copied.
         config_copy = config.get_serializable_config_copy()
         for name in config._save_config_ignore:
-            config_copy[name] = getattr(config, name)
+            # Reading a deprecated entry warns, and none affects compilation.
+            if not config._config[name].deprecated:  # type: ignore[attr-defined]
+                config_copy[name] = getattr(config, name)
         for name in config_patches or {}:
             # core inductor keys take precedence over device namespaces
             if name.replace("-", "_") in config._config:  # type: ignore[attr-defined]
@@ -3142,6 +3144,45 @@ class _ConstantDecompTable(Generic[_P, _T]):
         return self.table
 
 
+_scatter_env_vars_warned = False
+
+
+def _warn_deprecated_scatter_env_vars() -> None:
+    """Warn about the deprecated partitioned scatter variables, once per process."""
+    global _scatter_env_vars_warned
+    if _scatter_env_vars_warned and not torch.is_warn_always_enabled():
+        return
+    _scatter_env_vars_warned = True
+    if torch.version.hip:
+        enabled = (
+            "sets scatter_preagg_template unless "
+            "TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE is set; use that instead"
+        )
+    else:
+        enabled = (
+            "does nothing off ROCm; set TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE=1 "
+            "to opt in to its replacement"
+        )
+    for suffix, instead in (
+        ("ENABLED", enabled),
+        ("FP32_ACCUMULATION", "does nothing"),
+        (
+            "FORCE",
+            "does nothing: the template decides per block at run time (see "
+            "scatter_preagg_template_min_saved)",
+        ),
+    ):
+        name = f"TORCHINDUCTOR_PARTITIONED_SCATTER_{suffix}"
+        if name in os.environ:
+            warnings.warn(
+                f"The environment variable {name} has been deprecated since 2.16 "
+                f"(see https://github.com/pytorch/pytorch/issues/204051) and "
+                f"{instead}.",
+                FutureWarning,
+                stacklevel=1,
+            )
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -3173,9 +3214,12 @@ def compile_fx(
     else:
         get_decomp_fn = select_decomp_table
 
+    from torch._logging._internal import warn_deprecated_artifacts
     from torch.compiler._no_compile import check_compilation_allowed
 
     check_compilation_allowed("Inductor graph compilation")
+    _warn_deprecated_scatter_env_vars()
+    warn_deprecated_artifacts()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
