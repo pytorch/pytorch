@@ -1,8 +1,12 @@
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <map>
 #include <mutex>
 #include <optional>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
@@ -418,10 +422,22 @@ namespace {
 namespace CCA = c10::cuda::CUDACachingAllocator;
 using c10::cuda::CaptureId_t;
 using c10::cuda::MempoolId_t;
+using PoolKey = std::pair<c10::DeviceIndex, MempoolId_t>;
 
-// The current CUDA allocator after torch.cuda.memory._enable_graph_allocators:
-// a layer over the native caching allocator (inner) that forwards every call
-// to it.
+// The DataPtr context of a tensor made by a capture allocator.
+struct Owned {
+  std::shared_ptr<CCA::CUDAAllocator> allocator;
+  void* ptr;
+};
+
+void deleteOwned(void* ctx);
+
+// The current CUDA allocator after torch.cuda.memory._enable_graph_allocators.
+// It forwards everything to the native caching allocator (inner), except the
+// allocations inner would place into the pool of a capture given an allocator
+// (CUDAGraph::capture_begin(..., allocator)) while that capture is in
+// progress: the capture's allocator makes those, one call per allocation at
+// its exact size.
 class LayeredAllocator final : public CCA::CUDAAllocator {
  public:
   void install(CCA::CUDAAllocator* inner) {
@@ -432,14 +448,79 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
     return CCA::allocator.load() == this;
   }
 
-  // A virtual added to CUDAAllocator (or its bases) must be forwarded here, or
-  // the layer silently gets its default.
+  c10::DataPtr allocate(size_t size) override {
+    if (auto c = claimant(size)) {
+      void* ptr = allocFrom(*c, size);
+      return {
+          ptr,
+          new Owned{std::move(c->allocator), ptr},
+          &deleteOwned,
+          c10::Device(c10::DeviceType::CUDA, c->device)};
+    }
+    return inner()->allocate(size);
+  }
+  void recordStream(const c10::DataPtr& ptr, c10::cuda::CUDAStream stream)
+      override {
+    // A capture allocator's tensor: its allocator handles the stream use (a
+    // CUDAPluggableAllocator passes it to its record_stream_fn, if set), as
+    // for any allocator's own tensors.
+    if (ptr.get_deleter() == &deleteOwned) {
+      static_cast<Owned*>(ptr.get_context())
+          ->allocator->recordStream(ptr, stream);
+      return;
+    }
+    inner()->recordStream(ptr, stream);
+  }
+
+  // Called by CUDAGraph::capture_begin once the capture has begun, with the
+  // pool's allocation scope open (beginAllocateToPool allows one per pool).
+  void setPoolCaptureAllocator(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      CaptureId_t capture_id,
+      std::shared_ptr<CCA::CUDAAllocator> allocator) override {
+    TORCH_CHECK(allocator, "setPoolCaptureAllocator expects an allocator");
+    std::lock_guard<std::mutex> lock(mutex_);
+    const bool inserted = claims_
+                              .try_emplace(
+                                  PoolKey{device, mempool_id},
+                                  Claim{std::move(allocator), capture_id})
+                              .second;
+    TORCH_INTERNAL_ASSERT(inserted, "a second claim on a CUDA graph pool");
+    active_.store(claims_.size(), std::memory_order_relaxed);
+  }
+  // For a capture abandoned before capture_end (CUDAGraph::reset).
+  void clearPoolCaptureAllocator(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      CaptureId_t capture_id) override {
+    std::vector<std::shared_ptr<CCA::CUDAAllocator>> released;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = claims_.find({device, mempool_id});
+    if (it != claims_.end() && it->second.capture == capture_id) {
+      eraseLocked(it, released);
+    }
+  }
+  size_t markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id)
+      override {
+    if (C10_UNLIKELY(active_.load(std::memory_order_relaxed) != 0)) {
+      std::vector<std::shared_ptr<CCA::CUDAAllocator>> released;
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (auto it = claims_.begin(); it != claims_.end();) {
+        it = it->second.capture == capture_id ? eraseLocked(it, released)
+                                              : std::next(it);
+      }
+    }
+    return inner()->markCaptureEnd(device, capture_id);
+  }
+
+  // Everything else is inner's. A virtual added to CUDAAllocator (or its
+  // bases) must be forwarded here, or the layer silently gets its default.
   using MemoryInfo = std::pair<size_t, size_t>;
 #define LAYERED_FORWARD(ret, name, params, args) \
   ret name params override {                     \
     return inner()->name args;                   \
   }
-  LAYERED_FORWARD(c10::DataPtr, allocate, (size_t size), (size))
   LAYERED_FORWARD(void*, raw_alloc, (size_t nbytes), (nbytes))
   LAYERED_FORWARD(
       void*,
@@ -447,29 +528,6 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
       (size_t nbytes, cudaStream_t stream),
       (nbytes, stream))
   LAYERED_FORWARD(void, raw_delete, (void* ptr), (ptr))
-  LAYERED_FORWARD(
-      void,
-      recordStream,
-      (const c10::DataPtr& ptr, c10::cuda::CUDAStream stream),
-      (ptr, stream))
-  LAYERED_FORWARD(
-      void,
-      setPoolCaptureAllocator,
-      (c10::DeviceIndex device,
-       MempoolId_t mempool_id,
-       CaptureId_t capture_id,
-       std::shared_ptr<CCA::CUDAAllocator> allocator),
-      (device, mempool_id, capture_id, std::move(allocator)))
-  LAYERED_FORWARD(
-      void,
-      clearPoolCaptureAllocator,
-      (c10::DeviceIndex device, MempoolId_t mempool_id, CaptureId_t capture_id),
-      (device, mempool_id, capture_id))
-  LAYERED_FORWARD(
-      size_t,
-      markCaptureEnd,
-      (c10::DeviceIndex device, CaptureId_t capture_id),
-      (device, capture_id))
   LAYERED_FORWARD(c10::DeleterFnPtr, raw_deleter, () const, ())
   LAYERED_FORWARD(
       void,
@@ -714,17 +772,101 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
 #undef LAYERED_FORWARD
 
  private:
+  // The capture allocator of the capture in progress into a pool.
+  struct Claim {
+    std::shared_ptr<CCA::CUDAAllocator> allocator;
+    CaptureId_t capture;
+  };
+  struct Claimed {
+    std::shared_ptr<CCA::CUDAAllocator> allocator;
+    c10::DeviceIndex device;
+    cudaStream_t stream;
+  };
+
   CCA::CUDAAllocator* inner() const {
     return inner_.load(std::memory_order_relaxed);
   }
 
+  // The erased claim's allocator goes to `released`, to be dropped after the
+  // lock: dropping the last reference may run arbitrary (Python) code.
+  std::map<PoolKey, Claim>::iterator eraseLocked(
+      std::map<PoolKey, Claim>::iterator it,
+      std::vector<std::shared_ptr<CCA::CUDAAllocator>>& released) {
+    released.push_back(std::move(it->second.allocator));
+    it = claims_.erase(it);
+    active_.store(claims_.size(), std::memory_order_relaxed);
+    return it;
+  }
+
+  // The capture allocator serving an allocation of `size` on the current
+  // stream of the current device: inner would place it into the pool of a
+  // capture with an allocator in progress. One relaxed load while no such
+  // capture is in progress anywhere.
+  std::optional<Claimed> claimant(size_t size) {
+    if (C10_LIKELY(active_.load(std::memory_order_relaxed) == 0) || size == 0) {
+      return std::nullopt;
+    }
+    const c10::DeviceIndex device = c10::cuda::current_device();
+    const cudaStream_t s = c10::cuda::getCurrentCUDAStream(device).stream();
+    // Only a capturing stream routes to a capture's pool: skip the caching
+    // allocator's scope lookup (its lock and filters) for the others.
+    if (c10::cuda::captureStatusMayInitCtx(s) ==
+        c10::cuda::CaptureStatus::None) {
+      return std::nullopt;
+    }
+    const MempoolId_t pool = inner()->getAllocationPool(device, s);
+    if (pool == MempoolId_t{0, 0}) {
+      return std::nullopt;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = claims_.find({device, pool});
+    if (it == claims_.end()) {
+      return std::nullopt;
+    }
+    return Claimed{it->second.allocator, device, s};
+  }
+
+  static void* allocFrom(const Claimed& c, size_t size) {
+    void* ptr = nullptr;
+    {
+      // as for the caching allocator's own segments during a capture
+      // (cudaMallocMaybeCapturing): the allocator may cudaMalloc
+      c10::cuda::CUDAStreamCaptureModeGuard mode{cudaStreamCaptureModeRelaxed};
+      ptr = c.allocator->raw_alloc_with_stream(size, c.stream);
+    }
+    TORCH_CHECK_WITH(
+        OutOfMemoryError,
+        ptr != nullptr,
+        "CUDA out of memory: the CUDA graph capture allocator returned null "
+        "for ",
+        size,
+        " bytes");
+    if (C10_UNLIKELY(reinterpret_cast<uintptr_t>(ptr) % 256 != 0)) {
+      c.allocator->raw_delete(ptr);
+      TORCH_CHECK(
+          false,
+          "The CUDA graph capture allocator returned ",
+          ptr,
+          ", which is not aligned to 256 bytes");
+    }
+    return ptr;
+  }
+
   std::atomic<CCA::CUDAAllocator*> inner_{nullptr};
+  std::mutex mutex_;
+  std::map<PoolKey, Claim> claims_;
+  std::atomic<size_t> active_{0}; // claims_.size()
 };
 
 // Never destroyed: once enabled, it stays the current allocator until exit.
 LayeredAllocator& layered() {
   static auto* allocator = new LayeredAllocator();
   return *allocator;
+}
+
+void deleteOwned(void* ctx) {
+  std::unique_ptr<Owned> owned(static_cast<Owned*>(ctx));
+  owned->allocator->raw_delete(owned->ptr);
 }
 
 } // namespace
