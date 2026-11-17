@@ -6,6 +6,7 @@ import importlib
 import inspect
 import itertools
 import math
+import operator
 import os
 import re
 import struct
@@ -741,6 +742,26 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                 for node in graph_module.graph.nodes
             )
         )
+
+    def test_make_fx_indexes_single_tensor_output_like_dynamo(self):
+        # The QUACK lowering returns a tuple, so a consumer must read the HOP
+        # output through getitem. Dynamo always traces it that way; make_fx
+        # without Dynamo must too.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(a, b):
+            return flex_gemm(torch.mm, (a, b), lambda acc: acc + 1) * 2
+
+        a, b = torch.randn(4, 8), torch.randn(8, 16)
+        graph_module = make_fx(fn)(a, b)
+        (hop,) = (
+            node
+            for node in graph_module.graph.nodes
+            if node.target is torch.ops.higher_order.flex_gemm
+        )
+        self.assertTrue(hop.users)
+        self.assertTrue(all(user.target is operator.getitem for user in hop.users))
+        self.assertEqual(graph_module(a, b), fn(a, b))
 
     def test_quant_scale_fake_strides_match_eager(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
