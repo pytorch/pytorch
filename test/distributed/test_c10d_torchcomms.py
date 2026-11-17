@@ -614,7 +614,14 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         """
         captured = {}
 
-        def fake_new_comm(backend_str, device, name=None, store=None, hints=None):
+        def fake_new_comm(
+            backend_str,
+            device,
+            name=None,
+            store=None,
+            hints=None,
+            timeout=None,
+        ):
             captured["backend_str"] = backend_str
             captured["device"] = device
             captured["name"] = name
@@ -919,7 +926,7 @@ class TestC10dTorchCommsDynamicCreation(TestCase):
                 )
         return captured
 
-    def test_new_comm_options_are_dynamic_only(self):
+    def test_new_comm_options_for_static_and_dynamic_groups(self):
         dynamic = self._capture_new_comm_options(
             enable_reconfigure=True,
             timeout=self.TIMEOUT,
@@ -930,11 +937,12 @@ class TestC10dTorchCommsDynamicCreation(TestCase):
         )
 
         static = self._capture_new_comm_options(enable_reconfigure=False)
-        self.assertEqual(static, {})
+        self.assertEqual(static, {"timeout": self.TIMEOUT})
 
     def test_backend_wrapper_and_options_match_creation_mode(self):
         for enable_reconfigure, timeout, expected_options in (
-            (False, self.TIMEOUT, {}),
+            (False, self.TIMEOUT, {"timeout": self.TIMEOUT}),
+            (False, None, {}),
             (
                 True,
                 self.TIMEOUT,

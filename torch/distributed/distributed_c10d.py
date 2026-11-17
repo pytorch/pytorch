@@ -383,8 +383,8 @@ def _create_torchcomms_backend(
         dynamic_options: dict[str, object] = {}
         if enable_reconfigure:
             dynamic_options["enable_reconfigure"] = True
-            if timeout is not None:
-                dynamic_options["timeout"] = timeout
+        if timeout is not None:
+            dynamic_options["timeout"] = timeout
         comm = new_comm(
             _resolve_torchcomms_backend(backend),
             torch_device,
