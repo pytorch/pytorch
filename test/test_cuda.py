@@ -9703,8 +9703,7 @@ print(value, end="")
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @unittest.skipIf(torch.version.hip, "usedGpuMemory is specific to NVML")
-    def test_list_gpu_processes_unknown_memory(self):
+    def test_list_gpu_processes_unknown_memory_nvml(self):
         pynvml = unittest.mock.MagicMock()
         pynvml.nvmlDeviceGetComputeRunningProcesses.return_value = [
             unittest.mock.MagicMock(pid=1, usedGpuMemory=None),
@@ -9712,7 +9711,31 @@ print(value, end="")
         ]
         with (
             patch.dict(sys.modules, {"pynvml": pynvml}),
+            patch.object(torch.version, "hip", None),
             patch("torch.cuda.memory._get_nvml_device_index", return_value=0),
+        ):
+            printout = torch.cuda.list_gpu_processes(0)
+        self.assertEqual(
+            printout.splitlines(),
+            [
+                "GPU:0",
+                "process          1 uses          N/A MB GPU memory",
+                "process          2 uses        1.000 MB GPU memory",
+            ],
+        )
+
+    def test_list_gpu_processes_unknown_memory_amdsmi(self):
+        amdsmi = unittest.mock.MagicMock()
+        amdsmi.amdsmi_get_gpu_process_list.return_value = [
+            {"pid": 1, "memory_usage": {"vram_mem": None}},
+            {"pid": 2, "memory_usage": {"vram_mem": 1024 * 1024}},
+        ]
+        # Newer amdsmi dropped amdsmi_get_gpu_process_info; entries are the info dicts.
+        del amdsmi.amdsmi_get_gpu_process_info
+        with (
+            patch.dict(sys.modules, {"amdsmi": amdsmi}),
+            patch.object(torch.version, "hip", "7.0"),
+            patch("torch.cuda.memory._get_amdsmi_device_index", return_value=0),
         ):
             printout = torch.cuda.list_gpu_processes(0)
         self.assertEqual(
