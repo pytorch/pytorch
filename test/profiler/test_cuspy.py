@@ -32,7 +32,6 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_5,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -43,28 +42,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def setUpModule():
-    # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-    # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-    # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
-    # safe; libkineto re-subscribes on its next profile, so kineto tests are
-    # unaffected. See pylibcupti().finalize.
-    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_5:
-        from torch.profiler._cuspy.cupti_python import pylibcupti
-
-        try:
-            pylibcupti().finalize()
-        except Exception:
-            pass
-
-
 def _isolated(test_fn):
     """Run a cuspy test in a fresh subprocess. Cuspy needs the single
     process-wide CUPTI subscriber, but libkineto grabs it for the process lifetime once
-    any kineto-CUDA profile runs (setUpModule's prime, or another test in a full run),
-    and decoded-record native state can leak between tests. Re-running the test alone in
-    a child gives it a clean process: setUpModule's finalize releases the child's own
-    prime, so Cuspy subscribes, with no cross-test interference."""
+    any kineto-CUDA profile runs, and decoded-record native state can leak between
+    tests. Re-running the test alone in a child gives it a clean process, so Cuspy
+    subscribes, with no cross-test interference."""
 
     @functools.wraps(test_fn)
     def wrapper(self):
@@ -4454,14 +4437,19 @@ cuspy_core.enable_hes_early()
             print("OK")
             """
         )
-        # Run parity once with HES off and once with it on (the HES child self-skips
-        # via SKIP_HES when the platform doesn't support hardware events). Each child
+        # Run parity once with HES off and once with it on, except for the CUDA 13.5
+        # workaround below. The HES child self-skips via SKIP_HES when hardware
+        # events are unavailable. Each child
         # prints its Cuspy metadata after RESULT; the HES-on Cuspy must match the
         # HES-off Cuspy (which already matched stock above).
         import json
 
         captured = {}
-        for hes in (False, True):
+        # On CUDA 13.5 builds, skip HES on pre-SM100 GPUs (e.g. L4):
+        # the unsupported-HES fallback raises CUPTI_ERROR_NOT_COMPATIBLE.
+        # Tracking: https://github.com/pytorch/pytorch/issues/204831
+        skip_hes = torch.version.cuda == "13.5" and not SM100OrLater
+        for hes in (False,) if skip_hes else (False, True):
             env = dict(os.environ)
             if hes:
                 env["PARITY_HES"] = "1"
