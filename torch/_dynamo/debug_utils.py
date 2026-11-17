@@ -42,6 +42,7 @@ import torch._subclasses.meta_utils
 from torch import Tensor
 from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
+from torch._logging import warning_once
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._config_module import ConfigModule
@@ -492,6 +493,98 @@ def _cuda_system_info_comment() -> str:
         model_str += f"# {name} : {count} \n"
     model_str += "\n"
     return model_str
+
+
+def _probe_default_device() -> str:
+    """Default ``device`` for repros: the current accelerator.
+
+    The backend is whichever one ``torch.accelerator.current_accelerator()``
+    resolves (see that API for the resolution rules); it is called without
+    ``check_available``, so there is no runtime availability check: an
+    unavailable accelerator is still the one chosen. A CUDA build with no
+    visible GPU therefore resolves to ``cuda`` and fails loudly at input
+    creation rather than silently building CPU tensors. A build with no
+    accelerator at all resolves to ``cpu``.
+    """
+    acc = torch.accelerator.current_accelerator()
+    return acc.type if acc is not None else "cpu"
+
+
+@functools.cache  # display path runs per compiled graph; see _cuda_system_info_comment
+def _device_system_info_comment(device_type: str) -> str:
+    """Best-effort ``# <DEVICE> Info`` block for one device type.
+
+    Relies only on the de-facto backend-module API
+    (``is_available``/``device_count``/``get_device_name``/``torch.version.<dt>``)
+    so built-in and out-of-tree modules alike work. Every query failure
+    degrades to a comment line instead of raising: repro generation must not
+    break on a debug-info path.
+    """
+    if device_type == "cuda":
+        return _cuda_system_info_comment()
+
+    module = getattr(torch, device_type, None)
+    if module is None:
+        return f"# torch.{device_type} module not found, no device info collected\n"
+
+    is_available = getattr(module, "is_available", None)
+    try:
+        available = is_available is not None and bool(is_available())
+    except Exception:
+        # An availability check that raises is treated as unavailable.
+        available = False
+    if not available:
+        return (
+            f"# torch.{device_type}.is_available()==False, no device info collected\n"
+        )
+
+    model_str = f"# {device_type.upper()} Info: \n"
+    version = getattr(torch.version, device_type, None)
+    if version is not None:
+        model_str += f"# {device_type} version: {version} \n"
+    model_str += "\n"
+
+    if hasattr(module, "get_device_name"):
+        try:
+            device_names = Counter(
+                module.get_device_name(i) for i in range(module.device_count())
+            )
+        except Exception:
+            return model_str + f"# Failed to collect {device_type} hardware info\n"
+        model_str += f"# {device_type.upper()} Hardware Info: \n"
+        for name, count in device_names.items():
+            model_str += f"# {name} : {count} \n"
+        model_str += "\n"
+    return model_str
+
+
+def device_system_info_comment(args: Sequence[Any] = ()) -> str:
+    """Device-agnostic counterpart of _cuda_system_info_comment().
+
+    Target device: the most common tensor device among ``args`` after
+    filtering out ``cpu`` and ``meta`` (real tensors only, matching the repro
+    call sites), else the accelerator resolved by
+    ``torch.accelerator.current_accelerator()`` without ``check_available``
+    (so an unavailable accelerator is still the one chosen). ``cuda`` keeps
+    delegating to the cached legacy collector (byte-identical CUDA repros).
+    Probe failures degrade to a comment line.
+    """
+    device_types: Counter[str] = Counter(
+        arg.device.type
+        for arg in args
+        if isinstance(arg, Tensor) and arg.device.type not in ("cpu", "meta")
+    )
+    if device_types:
+        return _device_system_info_comment(device_types.most_common(1)[0][0])
+
+    try:
+        accelerator = torch.accelerator.current_accelerator()
+    except Exception:
+        warning_once(log, "failed to detect the default accelerator", exc_info=True)
+        return "# Accelerator probe failed, no device info collected\n"
+    if accelerator is None:
+        return "# No accelerator device detected, no device info collected\n"
+    return _device_system_info_comment(accelerator.type)
 
 
 def generate_env_vars_string(*, stable_output: bool = False) -> str:
@@ -1029,7 +1122,7 @@ class InputWriter:
         if _dtype_or_default(None) != _dtype_or_default(dtype_hint):
             maybe_dtype_hint = f", dtype_hint={dtype_hint!r}"
         # TODO: being optional on device is kind of pointless as the default
-        # is CPU but most repros we care about are CUDA
+        # is CPU but most repros we care about run on an accelerator
         maybe_device = ""
         device = untyped_storage.device
         if device.type == "meta":
@@ -1137,7 +1230,7 @@ class InputWriter:
 
 def aot_graph_input_parser(
     func: Callable[[list[Tensor]], list[Tensor]],
-    device: str = "cuda",
+    device: str | None = None,
     sym_shapes: dict[str, int] | None = None,
     default_sym_shape: int | None = None,
 ) -> dict[str, Any]:
@@ -1154,7 +1247,14 @@ def aot_graph_input_parser(
 
     kwargs = aot_graph_input_parser(forward)
     forward(**kwargs)
+
+    ``device`` defaults to the accelerator resolved by
+    ``torch.accelerator.current_accelerator()``, with no runtime availability
+    check, or ``cpu`` when torch has no accelerator; passing ``device``
+    explicitly is only needed to force a particular backend.
     """
+    if device is None:
+        device = _probe_default_device()
 
     from torch.utils._dtype_abbrs import dtype_abbrs
 
