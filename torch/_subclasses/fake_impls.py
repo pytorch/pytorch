@@ -21,10 +21,7 @@ from torch._C._functorch import (
     TransformType,
 )
 from torch._dispatch.python import no_python_dispatcher
-from torch._functorch.pyfunctorch import (
-    FunctionalizeInterpreter,
-    retrieve_current_functorch_interpreter,
-)
+from torch._functorch.pyfunctorch import retrieve_current_functorch_interpreter
 from torch._functorch.utils import enable_single_level_autograd_function
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -1875,8 +1872,6 @@ def to_dense_composite_impl(
     if layout == torch.strided:
         return self.to(dtype=dtype) if dtype is not None else self
     if layout == torch._mkldnn:  # type: ignore[attr-defined]
-        if torch._is_functional_tensor(self):
-            return aten._to_dense.default(self, dtype, masked_grad)
         return _ToDenseMkldnn.apply(self, dtype, masked_grad)
     if layout in _TO_DENSE_SPARSE_LAYOUTS:
         return aten._to_dense.default(self, dtype, masked_grad)
@@ -1891,23 +1886,6 @@ def to_dense_functorch_frontmode_impl(
     masked_grad: bool | None = None,
 ) -> torch.Tensor:
     interpreter = retrieve_current_functorch_interpreter()
-    if isinstance(interpreter, FunctionalizeInterpreter) and self.is_mkldnn:
-        from torch._subclasses.functional_tensor import FunctorchFunctionalizeAPI
-
-        ctx = FunctorchFunctionalizeAPI(interpreter)
-        (unwrapped,) = ctx.unwrap_tensors((self,))
-        with ctx.redispatch_to_next():
-            if is_fake_tensor(unwrapped):
-                out = to_dense_composite_impl(
-                    unwrapped, dtype=dtype, masked_grad=masked_grad
-                )
-            else:
-                out = aten.to_dense.default(
-                    unwrapped, dtype=dtype, masked_grad=masked_grad
-                )
-        (wrapped,) = ctx.wrap_tensors((out,))
-        return wrapped
-
     if interpreter.key() != TransformType.Grad or not is_functorch_wrapped_tensor(self):
         with torch.enable_grad(), interpreter.lower():
             return aten.to_dense.default(self, dtype=dtype, masked_grad=masked_grad)
@@ -1972,11 +1950,7 @@ def to_dense_python_tls_impl(
 ) -> torch.Tensor:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if (
-        is_fake_tensor(self)
-        or isinstance(self, FunctionalTensor)
-        or torch._is_functional_tensor(self)
-    ):
+    if is_fake_tensor(self) or isinstance(self, FunctionalTensor):
         return to_dense_composite_impl(self, dtype=dtype, masked_grad=masked_grad)
 
     with torch._C._ExcludeDispatchKeyGuard(_PYTHON_TLS_SNAPSHOT_KEYSET):
