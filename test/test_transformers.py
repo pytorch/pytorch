@@ -3640,6 +3640,7 @@ class TestSDPAAccelerator(NNTestCase):
 
     @unittest.skipIf(not TEST_WITH_ROCM or not PLATFORM_SUPPORTS_CK_SDPA, "CK SDPA is ROCm-only")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention is not supported on this system")
+    @setSdpaBackendsToDefaultFinally
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize("seq_lens", [(256, 1024), (1024, 256), (1, 128), (512, 512)])
     def test_mem_eff_attention_causal_variants_ck(self, device, causal_variant, seq_lens):
@@ -3648,6 +3649,9 @@ class TestSDPAAccelerator(NNTestCase):
         seq_len_q, seq_len_k = seq_lens
         if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_k:
             self.skipTest("Lower right causal mask has fully masked rows when seq_len_q > seq_len_k")
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if torch.backends.cuda.preferred_rocm_fa_library() != torch._C._ROCmFABackend.Ck:
+            self.skipTest("CK SDPA backend not available")
         dtype = torch.float16
         q = torch.randn(2, 4, seq_len_q, 64, device=device, dtype=dtype, requires_grad=True)
         k = torch.randn(2, 4, seq_len_k, 64, device=device, dtype=dtype, requires_grad=True)
@@ -3664,14 +3668,9 @@ class TestSDPAAccelerator(NNTestCase):
             out_ref = sdpa(q_ref, k_ref, v_ref)
         out_ref.backward(grad_out.float())
 
-        prev_fa_library = torch.backends.cuda.preferred_rocm_fa_library()
-        torch.backends.cuda.preferred_rocm_fa_library("ck")
-        try:
-            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
-                out = sdpa(q, k, v)
-            out.backward(grad_out)
-        finally:
-            torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            out = sdpa(q, k, v)
+        out.backward(grad_out)
 
         self.assertEqual(out, out_ref.to(dtype), atol=2e-3, rtol=2e-3)
         for t, t_ref in ((q, q_ref), (k, k_ref), (v, v_ref)):
