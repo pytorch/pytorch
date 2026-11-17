@@ -186,6 +186,10 @@ class CppFakeTensorTestSelection:
         with open(path) as f:
             self.selectors = json.load(f)["tests"]
 
+    def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
+        if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
     @pytest.hookimpl(tryfirst=True)
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         nodeids = {
