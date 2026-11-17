@@ -128,6 +128,38 @@ class ReleaseTLSProbeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unexpected completed request"):
             events.require(["wrong"])
 
+    def test_positive_installer_exit_path(self):
+        exhausted = b"Failed to install Python after 3 attempts"
+        missing = (
+            b"Python installer reported success but /owned/Python/python.exe is missing"
+        )
+        first = b"Python install attempt 1 failed, retrying...\n"
+        second = b"Python install attempt 2 failed, retrying...\n"
+        self.assertEqual(probe.positive_request_count(first + second, exhausted), 3)
+        for count, stdout in enumerate((b"", first, first + second), 1):
+            with self.subTest(count=count):
+                self.assertEqual(probe.positive_request_count(stdout, missing), count)
+        for stdout, stderr in (
+            (b"", b""),
+            (b"", b"unknown failure"),
+            (b"", exhausted + b"\n" + missing),
+            (b"", exhausted),
+            (first, exhausted),
+            (second, missing),
+            (second + first, missing),
+            (first + first, missing),
+            (first + second + first, missing),
+            (first.replace(b"1", b"3"), missing),
+            (b"", missing + b"\n" + missing),
+        ):
+            with (
+                self.subTest(stdout=stdout, stderr=stderr),
+                self.assertRaisesRegex(
+                    ValueError, "unexpected positive installer exit path"
+                ),
+            ):
+                probe.positive_request_count(stdout, stderr)
+
     @unittest.skipIf(os.name == "nt", "the native Windows controller tests TLS itself")
     def test_real_tls_proxy(self):
         openssl, curl = shutil.which("openssl"), shutil.which("curl")

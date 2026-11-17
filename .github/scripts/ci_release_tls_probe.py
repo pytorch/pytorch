@@ -291,6 +291,38 @@ def bash_path(bash, path):
     return value
 
 
+def positive_request_count(stdout, stderr):
+    retry_lines = [
+        line
+        for line in stdout.splitlines()
+        if line.startswith(b"Python install attempt ")
+    ]
+    expected = [
+        b"Python install attempt 1 failed, retrying...",
+        b"Python install attempt 2 failed, retrying...",
+    ]
+    exhausted = sum(
+        line == b"Failed to install Python after 3 attempts"
+        for line in stderr.splitlines()
+    )
+    missing = sum(
+        line.startswith(b"Python installer reported success but ")
+        and line.endswith(b" is missing")
+        for line in stderr.splitlines()
+    )
+    if (
+        exhausted + missing != 1
+        or len(retry_lines) > 2
+        or retry_lines != expected[: len(retry_lines)]
+        or (exhausted and retry_lines != expected)
+    ):
+        raise ValueError("unexpected positive installer exit path")
+    # Windows PowerShell may report a null ExitCode for a short-lived process.
+    # A reported success on any attempt reaches the missing-interpreter guard.
+    # Both source paths stop before its pip-install stage.
+    return 3 if exhausted else len(retry_lines) + 1
+
+
 def execute(source_root):
     validate_route(os.environ)
     if os.name != "nt":
@@ -301,7 +333,10 @@ def execute(source_root):
     request_path, hardened = source_details(raw)
     strict = source.with_name(".rls05-strict-installer.sh")
     downloaded = source_root / ".ci/pytorch/windows/python-amd64.exe"
-    if strict.exists() or downloaded.exists():
+    python_dir = source_root / ".ci/pytorch/windows/Python"
+    if any(
+        path.exists() or path.is_symlink() for path in (strict, downloaded, python_dir)
+    ):
         raise ValueError("owned test path already exists")
     bash, openssl = find_tools()
     source_ref = run(
@@ -357,7 +392,7 @@ def execute(source_root):
                 negative = run(
                     [str(bash), "--noprofile", "--norc", strict_arg], env=env
                 )
-                if negative.returncode != 1 or marker.exists():
+                if negative.returncode != 1 or marker.exists() or python_dir.exists():
                     raise ValueError("strict TLS negative control failed")
                 if downloaded.exists() and downloaded.stat().st_size:
                     raise ValueError("strict TLS accepted response bytes")
@@ -367,12 +402,19 @@ def execute(source_root):
                 positive = run(
                     [str(bash), "--noprofile", "--norc", source_arg], env=env
                 )
-                if positive.returncode != 1 or marker.read_bytes() != MARKER:
+                if (
+                    positive.returncode != 1
+                    or marker.read_bytes() != MARKER
+                    or python_dir.exists()
+                ):
                     raise ValueError(
                         "unchanged installer did not execute native marker"
                     )
+                positive_requests = positive_request_count(
+                    positive.stdout, positive.stderr
+                )
                 completed_events = events.require(
-                    ["tls-rejected"] * 3 + ["payload-served"] * 3
+                    ["tls-rejected"] * 3 + ["payload-served"] * positive_requests
                 )
                 if downloaded.read_bytes() != payload:
                     raise ValueError("downloaded PE differs")
@@ -385,6 +427,8 @@ def execute(source_root):
                     "payload_bytes": len(payload),
                     "negative_exit": negative.returncode,
                     "positive_exit": positive.returncode,
+                    "positive_requests": positive_requests,
+                    "interpreter_directory_absent": True,
                     "marker_matches": True,
                     "events": completed_events,
                     "curl": run(
@@ -407,10 +451,19 @@ def execute(source_root):
         finally:
             strict.unlink(missing_ok=True)
             downloaded.unlink(missing_ok=True)
+            if python_dir.is_symlink():
+                python_dir.unlink()
+            elif python_dir.is_dir():
+                shutil.rmtree(python_dir)
+            else:
+                python_dir.unlink(missing_ok=True)
         if source.read_bytes() != raw:
             raise ValueError("source script changed")
     evidence["temporary_resources_removed"] = (
-        not Path(temporary).exists() and not strict.exists() and not downloaded.exists()
+        not Path(temporary).exists()
+        and not strict.exists()
+        and not downloaded.exists()
+        and not python_dir.exists()
     )
     if not evidence["temporary_resources_removed"]:
         raise ValueError("temporary cleanup failed")
