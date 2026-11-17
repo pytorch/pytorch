@@ -3174,6 +3174,32 @@ class GraphModule(torch.nn.Module):
         out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(out_ref, out_test)
 
+    @parametrize("nested_graph_breaks", (False, True))
+    def test_hasattr_wrapper_subclass_method_after_graph_break(
+        self, nested_graph_breaks
+    ):
+        def fn(x):
+            wrapped = TwoTensor(x, x + 1)
+            torch._dynamo.graph_break()
+            has_flatten = hasattr(wrapped, "__tensor_flatten__")
+            flatten = getattr(wrapped, "__tensor_flatten__", None)
+            return x + 1 if has_flatten and flatten is not None else x - 1
+
+        x = torch.ones(2)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_hasattr_wrapper_subclass_method_on_input(self):
+        def fn(t, y):
+            if hasattr(t, "__tensor_flatten__") and not hasattr(t, "missing"):
+                return y + 1
+            return y - 1
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for t in (TwoTensor(x, x), x):
+            self.assertEqual(opt_fn(t, x), fn(t, x))
+
     def test_support_bases(self):
         import torch.fx._symbolic_trace
 

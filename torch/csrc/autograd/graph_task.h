@@ -33,6 +33,11 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // Records the nodes that are in the graph
   std::unordered_set<Node*> nodes_in_graph_;
   c10::SmallVector<Node*, 4> graph_roots_;
+
+  // Set by backward(..., disallow_implicit_grad_accumulation=True), and
+  // inherited by backward calls made while this one runs. A gradient arriving
+  // at a node input that already holds one raises instead of being summed.
+  bool disallow_implicit_grad_accumulation_ = false;
   // Note [Exec info]
   // Exec info is created for each GraphTask, which allows filtering paths on
   // the graph that are not needed. It has a bit complicated semantics. If it's
