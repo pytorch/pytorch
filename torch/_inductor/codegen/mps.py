@@ -408,6 +408,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
+        # TODO: -x on the int32 or int64 minimum is signed overflow in Metal
         return MetalOverrides._wrap_small_int(f"static_cast<decltype({x})>(-{x})", x)
 
     @staticmethod
@@ -415,8 +416,9 @@ class MetalOverrides(OpOverrides):
         # Metal promotes char, uchar and short operands to int, so cast the
         # result back to wrap like eager does. The operand can already be an int
         # temporary, for example from where, maximum or minimum, so this is
-        # needed for neg and abs as well. uint16 is left out because eager MPS
-        # has no uint16 add or mul to compare the compiled result against.
+        # needed for neg and abs as well. uint16 (ushort) is promoted the same
+        # way and is not wrapped yet, because eager MPS has no uint16 add or
+        # mul to test it against.
         dtypes = [a.dtype for a in args if isinstance(a, CSEVariable)]
         if not dtypes or None in dtypes:
             return expr

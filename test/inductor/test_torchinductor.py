@@ -20990,30 +20990,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize("dtype", [torch.int8, torch.int16])
     def test_small_int_abs_wraps(self, dtype):
         if self.device == "cpu":
-            raise unittest.SkipTest("CPU compiled abs of the minimum does not wrap")
+            raise unittest.SkipTest("CPU abs of the minimum does not wrap")
 
         def fn(x):
             return torch.where(x > 0, x, x.flip(0)).abs().float()
 
         self.common(fn, (small_int_edge_input(dtype, self.device),), check_lowp=False)
 
-    # Halide floordiv goes through float and Triton floordiv and truncdiv
-    # compute in int32, so min // -1 does not wrap on either
+    # Halide floordiv goes through float and Triton floordiv computes in int32
     @skip_if_halide
     @skip_if_triton
     @parametrize("dtype", [torch.int8, torch.int16])
-    def test_small_int_div_min_by_neg1_wraps(self, dtype):
+    def test_small_int_floordiv_min_by_neg1_wraps(self, dtype):
         x = small_int_edge_input(dtype, self.device)
         self.common(lambda x: (x // -1).float(), (x,), check_lowp=False)
-        if self.device == "cpu" and dtype == torch.int16:
-            raise unittest.SkipTest(
-                "CPU int16 truncdiv of the minimum by -1 does not wrap"
-            )
-        self.common(
-            lambda x: torch.div(x, -1, rounding_mode="trunc").float(),
-            (x,),
-            check_lowp=False,
-        )
+
+    # Scalar CPU truncdiv returns int, Halide truncdiv goes through float, and
+    # Triton truncdiv of min // -1 is a signed division overflow
+    @skip_if_cpu
+    @skip_if_halide
+    @skip_if_triton
+    @parametrize("dtype", [torch.int8, torch.int16])
+    def test_small_int_truncdiv_min_by_neg1_wraps(self, dtype):
+        def fn(x):
+            return torch.div(x, -1, rounding_mode="trunc").float()
+
+        self.common(fn, (small_int_edge_input(dtype, self.device),), check_lowp=False)
 
     # end of class CommonTemplate - add new tests here
 
