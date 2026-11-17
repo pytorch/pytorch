@@ -184,12 +184,10 @@ class _LoweringSerializerContextManager(contextlib.ExitStack):
 @dataclass
 class _FakeTensorModeSerializer:
     allow_non_fake_inputs: bool
-    use_cpp_fake_tensor: bool
 
     def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
         self.allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
         self.shape_env = fake_mode.shape_env
-        self.use_cpp_fake_tensor = isinstance(fake_mode, CppFakeTensorMode)
 
     @contextlib.contextmanager
     def patch(
@@ -235,9 +233,7 @@ class _WireProtocolInput:
         """
         from torch.fx._graph_pickler import GraphPickler
 
-        return _WireProtocolPickledInput(
-            GraphPickler.dumps(self), self.fake_tensor_mode.use_cpp_fake_tensor
-        )
+        return _WireProtocolPickledInput(GraphPickler.dumps(self))
 
 
 def _current_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
@@ -254,7 +250,6 @@ def _current_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
 @dataclass
 class _WireProtocolPickledInput:
     value: bytes
-    use_cpp_fake_tensor: bool
 
     def deserialize(self) -> _WireProtocolInput:
         """
@@ -570,13 +565,6 @@ class _SerializedFxCompile(FxCompile):
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch_subprocess_env(extra_env))
-            # The caller's config patch is not inherited by subprocess workers.
-            # Restore it before unpickling tensors and creating any fake modes.
-            stack.enter_context(
-                torch._dynamo.config.patch(
-                    use_cpp_fake_tensor=pickled_input.use_cpp_fake_tensor
-                )
-            )
 
             # Save warnings to "replay" in the parent
             warning_replay = stack.enter_context(warnings.catch_warnings(record=True))
