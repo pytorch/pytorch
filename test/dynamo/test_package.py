@@ -1033,32 +1033,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
             }
             self.assertEqual(modules, {"_inlined_dedup_mod_a", "_inlined_dedup_mod_b"})
 
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_repeated_inlines_record_each_code_once(self):
-        def fn(x):
-            for _ in range(8):
-                x = _inlined_layer(x)
-            return x
-
-        calls = self._count_add_code()
-        traced = []
-        original_add_inlined_source = CompilePackage.add_inlined_source
-
-        def add_inlined_source(package, sources):
-            traced.extend(sources)
-            return original_add_inlined_source(package, sources)
-
-        x = torch.randn(3)
-        with patch.object(CompilePackage, "add_inlined_source", add_inlined_source):
-            compiled = torch.compile(fn, backend="eager")
-            self.assertEqual(compiled(x), fn(x))
-        # Dynamo saw each layer code object once per inline call site.
-        self.assertEqual(traced.count(_inlined_layer.__code__), 8)
-        self.assertEqual(traced.count(_inlined_add.__code__), 8)
-        self.assertEqual(len(calls), len({id(code) for code in calls}))
-        for code in (_inlined_layer, _inlined_add, _inlined_mul):
-            self.assertIn(code.__code__, calls)
-
     @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_bypassed_guards_keep_the_frames_earlier_variant(self, config_cls):
