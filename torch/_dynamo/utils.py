@@ -1372,6 +1372,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
     # (a bottleneck for large iterables). Cached lazily since `variables` is a
     # circular import at module load.
     from . import variables
+    from .variables import dicts
 
     return (
         variables.ConstDictVariable,
@@ -1389,6 +1390,10 @@ def _unpack_fast_types() -> tuple[type, ...]:
         variables.ListReverseIteratorVariable,
         variables.ListVariable,
         variables.MappingProxyVariable,
+        dicts.NNModuleGlobalHooksDictVariable,
+        dicts.NNModuleGlobalHooksOrderedDictVariable,
+        variables.NNModuleHookFlagsDictVariable,
+        variables.NNModuleHookFlagsOrderedDictVariable,
         variables.NNModuleHooksDictVariable,
         variables.NNModuleHooksOrderedDictVariable,
         variables.NumpyNdarrayVariable,
@@ -4922,6 +4927,8 @@ forward_hook_names = [
     "_forward_hooks",
 ]
 backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
+forward_hook_attrs = frozenset(forward_hook_names + ["_forward_hooks_always_called"])
+module_hook_attrs = forward_hook_attrs.union(backward_hook_names)
 state_dict_hook_names = [
     "_state_dict_pre_hooks",
     "_state_dict_hooks",
