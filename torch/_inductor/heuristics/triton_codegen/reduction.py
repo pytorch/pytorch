@@ -30,9 +30,6 @@ if TYPE_CHECKING:
     from torch._inductor.runtime.triton_compat import Config
 
 
-MAX_PERSISTENT_BLOCK_NUMEL = 4096
-
-
 # ------------------------------------------------------------------
 # Helpers (moved from triton_heuristics.py, only used by reduction)
 # ------------------------------------------------------------------
@@ -428,6 +425,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         xnumel = size_hints["x"]
         rnumel = get_total_reduction_numel(size_hints)
 
+        MAX_PERSISTENT_BLOCK_NUMEL = 4096
         warp_size = triton_meta["device"].warp_size_or_default
 
         if triton_meta.get("native_matmul"):
@@ -837,20 +835,8 @@ class XPUReductionHeuristic(ReductionHeuristic):
     ) -> list[Config]:
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
-        # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
-        # We apply different configurations from #168335.
-        # We currently let cost model in Triton to decide whether to use
-        # shared memory.
-        loads_and_stores = inductor_meta.get("num_load", 0) + inductor_meta.get(
-            "num_store", 0
-        )
-        x_block = 8
-        if (
-            xnumel // x_block < 128
-            or loads_and_stores >= 5
-            or x_block * rnumel > MAX_PERSISTENT_BLOCK_NUMEL
-        ):
-            x_block = 1
+        # XBLOCK=8 vs 1 depends on rnumel and register pressure in ways a static
+        # rule has not captured (#169257, intel/torch-xpu-ops#5730); let autotune pick.
         return [
             triton_config_reduction(
                 size_hints,
@@ -862,4 +848,5 @@ class XPUReductionHeuristic(ReductionHeuristic):
                 reduction_hint=None,
                 warp_size=warp_size,
             )
+            for x_block in (8, 1)
         ]
