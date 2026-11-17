@@ -1138,6 +1138,22 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             compiled = torch.compile(f, fullgraph=True)
             self.assertEqual(compiled(x), (x.sin().sin(), x.cos()))
 
+    @parametrize("disable_decomposition", [False, True])
+    def test_auto_functionalized_decomposition_disabled(self, disable_decomposition):
+        def f(x):
+            out = torch.ones_like(x)
+            sin(x, out)
+            return out.cos()
+
+        x = torch.tensor([0.1, 0.5, 1.0])
+        with inductor_config.patch(
+            enable_auto_functionalized_v2=False,
+            disabled_passes=(
+                "decompose_auto_functionalized" if disable_decomposition else ""
+            ),
+        ):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), x.sin().cos())
+
     @parametrize("post_grad", [False, True])
     @parametrize("enable_v2", [False, True])
     def test_auto_functionalized_without_decomposition(self, enable_v2, post_grad):
