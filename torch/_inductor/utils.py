@@ -5227,13 +5227,19 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
+def is_strict_cuda_pointwise(device: torch.device | None = None) -> bool:
+    if not config.strict_pointwise or is_rocm():
+        return False
+    if device is None:
+        from torch._inductor.virtualized import V
+
+        device = V.graph.get_current_device_or_throw()
+    return device.type == "cuda"
+
+
 def is_strict_cuda_triton(device: torch.device) -> bool:
-    """Flag strict mode for cuda triton operations."""
-    return (
-        config.strict_pointwise
-        and config.cuda_backend == "triton"
-        and torch.version.hip is None
-        and device.type == "cuda"
+    return is_strict_cuda_pointwise(device) and (
+        get_current_backend(device.type) == "triton"
     )
 
 
