@@ -174,7 +174,7 @@ void tryRegisterMethod(const std::vector<c10::Argument>& args, Function& func) {
   }
 
   if (auto cls = args[0].type()->castRaw<ClassType>()) {
-    if (C10_UNLIKELY(cls->findMethod(func.name()))) {
+    if (cls->findMethod(func.name())) [[unlikely]] {
       return;
     }
     cls->addMethod(&func);
