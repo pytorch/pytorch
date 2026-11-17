@@ -3554,7 +3554,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         opt_fn = torch.compile(functools.partial(torch.add))
         result, (code,) = run_and_get_code(opt_fn, a, b)
         self.assertEqual(result, a + b)
-        self.assertIn("znumel", code)
+        self.assertIn("z0_numel", code)
 
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
