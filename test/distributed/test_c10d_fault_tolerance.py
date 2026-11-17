@@ -56,9 +56,9 @@ class AbstractFaultToleranceTest:
 
     @property
     def device(self):
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             return f"cuda:{self.rank}"
-        return self.device_type
+        return self._device_type
 
     def setUp(self):
         super().setUp()
@@ -85,7 +85,7 @@ class AbstractFaultToleranceTest:
 
     def _init_reconfigurable_pg(self):
         self.store = self._create_store()
-        if self.device_type == "cuda":
+        if self._device_type == "cuda":
             torch.cuda.set_device(self.rank)
         dist.init_process_group(
             self.backend_name,
@@ -610,7 +610,7 @@ class AbstractFaultToleranceTest:
         root = dist.get_rank() == 0
         # The new root's send buffer is checked. Only the CPU check raises; the
         # CUDA check is a device assert that poisons the context.
-        if root and self.device_type == "cpu":
+        if root and self._device_type == "cpu":
             with self.assertRaisesRegex(RuntimeError, "NaN"):
                 dist.broadcast(
                     torch.full((4,), float("nan"), device=self.device), src=0
@@ -644,10 +644,11 @@ class AbstractFaultToleranceTest:
 
 def _make_fault_tolerance_test_class(backend):
     class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
-        pass
+        @property
+        def _device_type(self) -> str:
+            return backend.device_type
 
     FaultToleranceTest.backend_name = backend.name
-    FaultToleranceTest.device_type = backend.device_type
     FaultToleranceTest.supports_work_result = backend.supports_work_result
     FaultToleranceTest.env = dict(backend.env)
     FaultToleranceTest.__name__ = (
