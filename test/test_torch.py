@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import torch
 import torch.utils.data
 import numpy as np
@@ -319,6 +320,7 @@ class TestTorchDeviceType(TestCase):
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
+    @fake_tensor_test()
     @onlyNativeDeviceTypes
     def test_storage_throws_on_data_ptr_access(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -507,6 +509,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
+    @fake_tensor_test()
     @onlyNativeDeviceTypes
     def test_has_storage_data(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -544,6 +547,7 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(cow))
         self.assertTrue(torch._C._is_cow_tensor(t))
 
+    @fake_tensor_test()
     @onlyNativeDeviceTypes
     def test_has_storage_data_ignores_data_access_checks(self, device):
         # _has_storage_data must not raise for storages whose data access is
