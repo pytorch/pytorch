@@ -33,6 +33,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.aot_compile import AOTCompiledFunction
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
+from torch._dynamo.output_graph import OutputGraphGuardsState
 from torch._dynamo.package import load_guards_state
 from torch._dynamo.source import (
     AttrSource,
@@ -304,7 +305,45 @@ def _mro_sum(x, left, right):
     return x + left.scale + right.scale
 
 
+@torch.compiler.assume_constant_result
+def _constant_mro_class():
+    return _MROLeft
+
+
+def _constant_mro_length(x):
+    return x + len(_constant_mro_class().__mro__)
+
+
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    def test_reload_without_constant_result_metadata(self):
+        def previous_layout(state):
+            fields = vars(state).copy()
+            del fields["constant_result_names"]
+            return fields
+
+        x = torch.ones(1)
+        with mock.patch.object(OutputGraphGuardsState, "__getstate__", previous_layout):
+            compiled = _aot_compile(_user_op, x)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x))
+        self.assertEqual(loaded(x), _user_op(x))
+
+    def test_constant_mro_reload_restores_only_generated_names(self):
+        x = torch.ones(1)
+        compiled = _aot_compile(_constant_mro_length, x)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        state = load_guards_state(compiled._artifacts.guards_state).output_graph
+        (name,) = state.constant_result_names
+        fresh_globals = dict(globals())
+        del fresh_globals[name]
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=fresh_globals)
+        self.assertIs(fresh_globals[name], _MROLeft)
+        self.assertTrue(loaded.guard_check(x))
+        self.assertEqual(loaded(x), _constant_mro_length(x))
+        fresh_globals[name] = object
+        self.assertFalse(loaded.guard_check(x))
+
     def test_builtin_method_comparison_alias_guard(self):
         def fn(x, left, right):
             return x + (
@@ -359,7 +398,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             keep = precompile_package.default_guard_filter_fn(entries)
             for index, entry in enumerate(entries):
                 if entry.orig_guard.originating_source == source:
-                    self.assertEqual(entry.guard_type, "ID_MATCH")
+                    self.assertEqual(entry.guard_type, "CLASS_MATCH")
                     self.assertIs(entry.value, _DynamicMROInput.__bases__[0])
                     self.assertFalse(keep[index])
                     selected.append(entry)
@@ -368,7 +407,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         # Retain only the otherwise-dropped MRO base guard, isolating its refusal.
         with self.assertRaisesRegex(
-            PackageError, "ID_MATCH guard cannot be serialized"
+            PackageError, "CLASS_MATCH guard cannot be serialized"
         ):
             _aot_compile(
                 _mro_sum,
