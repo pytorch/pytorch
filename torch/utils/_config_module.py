@@ -1213,6 +1213,10 @@ class ConfigModule(ModuleType):
             with config.patch("name", val):
                 ...
 
+        On exit, each key's previous override is restored, so a key that had no
+        override becomes unset again and keeps following its env, JustKnob, or
+        default value.
+
         For implication targets, this changes stored values; active implications
         still take precedence. On exit, stored values are restored before checking
         for conflicts. If changes to other sources leave conflicting implications,
@@ -1262,40 +1266,42 @@ class ConfigModule(ModuleType):
                 )
 
             def __enter__(self) -> None:
-                has_alias = any(
-                    config._config[key].alias
-                    for key in self.changes
-                    if key in config._config
-                )
                 prior: dict[str, Any] = {}
+                # Snapshots taken in key order, for when a later alias reaches an
+                # implication module and the whole patch switches to _set_raw_values.
+                # Resolving that alias can import modules that change earlier values.
                 raw_prior: dict[tuple[ModuleType, str], tuple[Any, bool]] = {}
                 for key, value in self.changes.items():
-                    if has_alias and key in config._config:
-                        module, name = config, key
-                        if config._config[key].alias:
-                            targets, modules = config._resolve_patch_changes(
-                                {key: value}
+                    entry = config._config.get(key)
+                    if entry is None or entry.hide:
+                        raise AttributeError(f"{config.__name__}.{key} does not exist")
+                    # Warn before anything is written, in case warnings are errors.
+                    config._warn_if_deprecated(key, entry)
+                    module, name = config, key
+                    if entry.alias:
+                        targets, mods = config._resolve_patch_changes({key: value})
+                        if any(isinstance(m, _ImplicationConfigModule) for m in mods):
+                            revert = config._set_raw_values(
+                                self.changes, prior=raw_prior
                             )
-                            if any(
-                                isinstance(m, _ImplicationConfigModule) for m in modules
-                            ):
-                                revert = config._set_raw_values(
-                                    self.changes, prior=raw_prior
-                                )
-                                self._prior.set((*self._prior.get(), revert))
-                                return
-                            module, name, _ = targets[0]
-                        if isinstance(module, ConfigModule):
-                            entry = module._config[name]
-                            raw_prior.setdefault(
-                                (module, name), (entry.user_override.get(), entry.hide)
-                            )
-                        else:
+                            self._prior.set((*self._prior.get(), revert))
+                            return
+                        module, name, _ = targets[0]
+                        if not isinstance(module, ConfigModule):
                             prior[key] = config.__getattr__(key)
                             raw_prior.setdefault((module, name), (prior[key], False))
                             continue
-                    # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
+                        entry = module._config[name]
+                        # Only the key and the final target are checked for hide,
+                        # not intermediate hops of a multi-hop alias chain.
+                        if entry.hide:
+                            raise AttributeError(
+                                f"{module.__name__}.{name} does not exist"
+                            )
+                    # Save the raw override (of the final alias target) rather than the
+                    # resolved value so that exit leaves an unset key unset.
+                    prior[key] = entry.user_override.get()
+                    raw_prior.setdefault((module, name), (prior[key], False))
                 prior_stack = self._prior.get()
                 self._prior.set((*prior_stack, prior))
                 try:
