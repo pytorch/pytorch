@@ -219,13 +219,16 @@ jobs:
         working-directory: .github/scripts
         env:
           TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
         run: |
-          uv run --no-project --with requests==2.32.5 --with pyyaml==6.0.2 python - <<'PY'
+          python - <<'PY'
           import json
           import os
           from filter_test_configs import add_cpp_faketensor_configs, set_output
 
-          matrix = add_cpp_faketensor_configs(json.loads(os.environ["TEST_MATRIX"]))
+          matrix = add_cpp_faketensor_configs(
+              json.loads(os.environ["TEST_MATRIX"]), os.environ["JOB_NAME"]
+          )
           set_output("test-matrix", json.dumps(matrix))
           PY
 
