@@ -243,7 +243,7 @@ class TestParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
@@ -264,7 +264,7 @@ class TestParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy | None,
     ):
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
@@ -289,7 +289,7 @@ class TestParamInit(FSDPTestContinuous):
         initialization persist.
         """
         # Establish reference behavior
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision()
         fsdp_model = TransformerWithSharedParams.init(
@@ -299,7 +299,7 @@ class TestParamInit(FSDPTestContinuous):
             fsdp_kwargs,
             deterministic=True,
         )
-        input = fsdp_model.module.get_input(self.device_type)
+        input = fsdp_model.module.get_input(torch.device(device).type)
         ref_output = fsdp_model(*input)
         # Initialize the same model but change its first parameter value
         # in-place after FSDP initialization
@@ -328,7 +328,7 @@ class TestHooks(FSDPTestContinuous):
     def test_pre_backward_hook_registration(self, device, cuda_first: bool):
         """Tests that FSDP pre-backward hooks are registered on forward pass
         outputs."""
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -341,7 +341,7 @@ class TestHooks(FSDPTestContinuous):
     def test_pre_backward_hook_registration_after_state_dict(self, device):
         """Tests that FSDP pre-backward hooks are registered on forward pass
         outputs after saving and loading the model from a checkpoint."""
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -357,11 +357,11 @@ class TestHooks(FSDPTestContinuous):
         optim = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
         optim.zero_grad()
         # Inputs always cuda, as computation happens on CUDA device only
-        input = model.module.get_input(self.device_type)
+        input = model.module.get_input(torch.device(device).type)
         output = model(*input)
         # this is pre-bwd hook
         self.assertEqual(len(output._backward_hooks), 1)
-        loss = model.module.get_loss(input, output).to(self.device_type)
+        loss = model.module.get_loss(input, output).to(torch.device(device).type)
         loss.backward()
         # It doesn't get removed
         self.assertEqual(len(output._backward_hooks), 1)
@@ -376,7 +376,7 @@ class TestHooks(FSDPTestContinuous):
     ):
         """Tests that ``_register_{pre|post}_backward_hooks()`` are called
         during the FSDP forward."""
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision()
         fsdp_model = TransformerWithSharedParams.init(
@@ -385,7 +385,7 @@ class TestHooks(FSDPTestContinuous):
             DEVICEInitMode.DEVICE_BEFORE if cuda_first else DEVICEInitMode.DEVICE_AFTER,
             fsdp_kwargs,
         )
-        input = fsdp_model.module.get_input(self.device_type)
+        input = fsdp_model.module.get_input(torch.device(device).type)
         # Since `_register_pre_backward_hooks()` modifies the forward output,
         # we cannot directly mock it. We implement our own counter instead.
         orig_register_pre_backward_hooks = (
@@ -424,7 +424,7 @@ class TestNoGrad(FSDPTestContinuous):
         parameters, after training for one iteration, running a forward pass in
         ``eval()`` mode gives the same output as running a forward pass in
         ``torch.no_grad()``."""
-        fsdp_kwargs = {"device_id": self.device_type}
+        fsdp_kwargs = {"device_id": torch.device(device).type}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision(
                 param_dtype=torch.float16,
@@ -445,7 +445,7 @@ class TestNoGrad(FSDPTestContinuous):
             autocast=False,
             mixed_precision=fsdp_kwargs["mixed_precision"],
         )
-        input = fsdp_model.module.get_input(self.device_type)
+        input = fsdp_model.module.get_input(torch.device(device).type)
         # Run a forward in eval mode
         fsdp_model.eval()
         ref_output = fsdp_model(*input)
@@ -514,17 +514,20 @@ class TestAutograd(FSDPTest):
             "forward_prefetch": forward_prefetch,
             "backward_prefetch": backward_prefetch,
             "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
-            "device_id": self.device_type,
+            "device_id": torch.device(device).type,
         }
         # Define a model with enough FSDP instances to exercise prefetching
         NUM_LINEARS = 5
         model = nn.Sequential(
-            *[nn.Linear(3, 3, device=self.device_type) for _ in range(NUM_LINEARS)]
+            *[
+                nn.Linear(3, 3, device=torch.device(device).type)
+                for _ in range(NUM_LINEARS)
+            ]
         )
         fsdp_model = FSDP(model, **fsdp_kwargs)
         self.assertEqual(len(list(FSDP.fsdp_modules(fsdp_model))), NUM_LINEARS + 1)
         for _ in range(3):
-            inp = torch.randn((2, 3), device=self.device_type)
+            inp = torch.randn((2, 3), device=torch.device(device).type)
             with self._patch_use_unsharded_views(
                 _use_unsharded_views_assert_as_tensors
             ):
