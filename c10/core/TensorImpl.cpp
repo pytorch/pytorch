@@ -1283,23 +1283,10 @@ void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
 
 c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
     c10::TensorImpl* fake_impl) const {
-  std::optional<c10::weak_intrusive_ptr<c10::TensorImpl>> weak_constant;
-  {
-    std::lock_guard guard(constant_mutex_);
-    auto* extra_meta = fake_impl->maybe_get_extra_meta();
-    TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
-    if (!extra_meta->fake_constant_) {
-      return nullptr;
-    }
-    weak_constant.emplace(extra_meta->fake_constant_);
-  }
-  // Promotion can acquire the GIL; never do it while holding the mutex.
-  auto constant = weak_constant->lock();
   std::lock_guard guard(constant_mutex_);
-  if (fake_impl->maybe_get_extra_meta()->fake_constant_ != constant) {
-    return nullptr;
-  }
-  return constant;
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  return extra_meta->fake_constant_;
 }
 
 void FakeTensorMode::invalidate_constant_aliases(
