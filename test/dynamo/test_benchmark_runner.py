@@ -567,18 +567,25 @@ class HuggingFaceLLMPhaseTestCase(TestCase):
             yield
 
     @contextlib.contextmanager
-    def _mock_whisper(self, model):
+    def _mock_whisper_processor(self, config):
         from benchmarks.dynamo import huggingface_llm_models as llm
         from transformers import WhisperFeatureExtractor
 
         # Truncates the benchmark's 30 seconds of audio to the tiny model's 1 second.
         feature_extractor = WhisperFeatureExtractor(
-            feature_size=model.config.num_mel_bins, chunk_length=1
+            feature_size=config.num_mel_bins, chunk_length=1
         )
+        with mock.patch.object(
+            llm.WhisperProcessor, "from_pretrained", return_value=feature_extractor
+        ):
+            yield
+
+    @contextlib.contextmanager
+    def _mock_whisper(self, model):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+
         with (
-            mock.patch.object(
-                llm.WhisperProcessor, "from_pretrained", return_value=feature_extractor
-            ),
+            self._mock_whisper_processor(model.config),
             mock.patch.object(
                 llm.WhisperForConditionalGeneration,
                 "from_pretrained",
@@ -795,6 +802,12 @@ class TestHuggingFaceLLMPhases(HuggingFaceLLMPhaseTestCase):
                     *extra,
                 ],
             )
+
+    def test_whisper_turbo_skips_training(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        skipped = runner.skip_not_suitable_for_training_models
+        self.assertIn("openai/whisper-large-v3-turbo", skipped)
+        self.assertNotIn("openai/whisper-tiny", skipped)
 
     @parametrize("mode", ("prefill", "decode"))
     def test_phase_requires_inference_backend(self, mode):
@@ -1727,6 +1740,23 @@ class TestHuggingFaceLLMPhasesDevice(HuggingFaceLLMPhaseTestCase):
 
 
 class TestHuggingFaceWhisperDevice(HuggingFaceLLMPhaseTestCase):
+    def test_checkpoint_dtype(self, device):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+
+        # whisper-large-v3-turbo has a float16 checkpoint.
+        turbo = llm.HF_LLM_MODELS["openai/whisper-large-v3-turbo"]
+        self.assertIs(turbo, llm.WhisperBenchmark)
+        checkpoint = _tiny_whisper().half()
+        with (
+            tempfile.TemporaryDirectory() as path,
+            self._mock_whisper_processor(checkpoint.config),
+        ):
+            checkpoint.save_pretrained(path)
+            model, _ = llm.WhisperBenchmark.get_model_and_inputs(path, device)
+        self.assertEqual(
+            {parameter.dtype for parameter in model.parameters()}, {torch.float32}
+        )
+
     def test_generate_inputs(self, device):
         runner = self.huggingface.HuggingfaceRunner()
         runner.args = common.parse_args(
