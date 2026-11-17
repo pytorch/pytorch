@@ -131,8 +131,8 @@ class TestFlyDSLTopK(TestCase):
         with pn.flydsl.disabled():
             ref_v, _ = torch.topk(x, k, dim=-1, largest=largest)
         got_v, got_i = torch.topk(x, k, dim=-1, largest=largest)
-        self.assertEqual(got_v, ref_v)
-        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+        self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v, atol=0, rtol=0)
         if k >= 2:
             sorted_i = got_i.sort(dim=-1).values
             self.assertTrue(sorted_i.diff(dim=-1).ne(0).all())
@@ -225,9 +225,7 @@ class TestFlyDSLTopK(TestCase):
 
                         misses = topk_cache_info(kernel).misses
                         got_v, _ = torch.topk(x, k, largest=largest)
-                        self.assertEqual(
-                            topk_cache_info(kernel).misses, misses + 1
-                        )
+                        self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
                         for value in (background, *planted):
                             skip_zero = (
                                 dtype.is_floating_point
@@ -352,9 +350,7 @@ class TestFlyDSLTopK(TestCase):
 
                     got_v, got_i = torch.topk(x, k, largest=largest)
                     gathered = torch.gather(x, -1, got_i)
-                    self.assertEqual(
-                        gathered.view(bit_dtype), got_v.view(bit_dtype)
-                    )
+                    self.assertEqual(gathered.view(bit_dtype), got_v.view(bit_dtype))
                     sorted_i = got_i.sort(dim=-1).values
                     self.assertTrue(sorted_i.diff(dim=-1).ne(0).all())
 
@@ -367,11 +363,13 @@ class TestFlyDSLTopK(TestCase):
                         self.assertEqual(
                             got_v.masked_select(~got_v.isnan()).reshape(m, finite_k),
                             ref_finite,
+                            atol=0,
+                            rtol=0,
                         )
                         self.assertTrue(got_v.isnan().sum(dim=-1).eq(len(cols)).all())
                     else:
                         self.assertFalse(got_v.isnan().any())
-                        self.assertEqual(got_v, ref_finite)
+                        self.assertEqual(got_v, ref_finite, atol=0, rtol=0)
                     self.assertEqual(topk_cache_info("radix").misses, misses + 1)
 
     def test_out_variant(self):
@@ -397,8 +395,8 @@ class TestFlyDSLTopK(TestCase):
                 )
                 self.assertIs(got_v, out_v)
                 self.assertIs(got_i, out_i)
-                self.assertEqual(got_v, ref_v)
-                self.assertEqual(torch.gather(x, -1, got_i), got_v)
+                self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+                self.assertEqual(torch.gather(x, -1, got_i), got_v, atol=0, rtol=0)
                 self.assertEqual(topk_cache_info("radix").misses, misses + 1)
 
     def test_cow_out_dispatches_and_materializes(self):
