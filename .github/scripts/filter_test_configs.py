@@ -632,6 +632,7 @@ def enforce_lf_allowlist(
 
 def add_cpp_faketensor_configs(
     test_matrix: dict[str, list[Any]],
+    job_name: str | None,
 ) -> dict[str, list[Any]]:
     selection = (
         Path(__file__).resolve().parents[2] / ".ci/pytorch/cpp_faketensor_tests.json"
@@ -644,14 +645,23 @@ def add_cpp_faketensor_configs(
     entries = test_matrix.get("include", [])
     if any("fake_tensor" in entry for entry in entries):
         return test_matrix
+    cpp_entries = [
+        {**entry, "fake_tensor": "cpp"}
+        for entry in entries
+        if configs is None or entry.get("config") in configs
+    ]
+    if configs is not None:
+        if not job_name or any(
+            device in job_name.lower() for device in ("cuda", "rocm", "xpu", "tpu")
+        ):
+            return test_matrix
+        cpp_entries = [
+            {**entry, "config": "cpp_faketensor", "shard": 1, "num_shards": 1}
+            for entry in cpp_entries[:1]
+        ]
     return {
         **test_matrix,
-        "include": entries
-        + [
-            {**entry, "fake_tensor": "cpp"}
-            for entry in entries
-            if configs is None or entry.get("config") in configs
-        ],
+        "include": entries + cpp_entries,
     }
 
 
@@ -744,7 +754,9 @@ def main() -> None:
 
     filtered_test_matrix = enforce_lf_allowlist(filtered_test_matrix, args.lf_runners)
     if args.cpp_faketensor:
-        filtered_test_matrix = add_cpp_faketensor_configs(filtered_test_matrix)
+        filtered_test_matrix = add_cpp_faketensor_configs(
+            filtered_test_matrix, args.job_name
+        )
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
