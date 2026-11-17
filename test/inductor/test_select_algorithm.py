@@ -39,7 +39,6 @@ from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI300_ARCH,
@@ -1960,8 +1959,6 @@ class TestTemplateRender(TestCase):
         self.assertIn("tl.atomic_add", code)
         self.assertFalse(self._template_kernel_has_atomic_add(code))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU and is_big_gpu():

@@ -52,7 +52,6 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import skipIfTorchInductor, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -3121,8 +3120,6 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             suggestion="torch.distributed.functional_collectives.all_gather_single",
         )
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

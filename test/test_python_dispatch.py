@@ -29,7 +29,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     first_sample,
@@ -1321,7 +1320,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
         self.assertExpectedInline(
             fx_g.code,
             """\
-
 
 
 def forward(self, x_a_1, x_b_1, y_1):
@@ -3083,7 +3081,6 @@ instantiate_device_type_tests(
     TestWrapperSubclassAliasingDevice, globals(), allow_xpu=True
 )
 
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

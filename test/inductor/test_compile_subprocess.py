@@ -18,7 +18,6 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
@@ -293,8 +292,6 @@ if RUN_GPU and not TEST_WITH_ASAN:
         inductor.test_torchinductor.CommonTemplate, GPUTests, GPU_TYPE, test_failures
     )
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

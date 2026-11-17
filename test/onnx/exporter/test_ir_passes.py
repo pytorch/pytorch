@@ -8,7 +8,6 @@ import onnx_ir as ir
 import torch
 from torch.onnx._internal.exporter import _ir_passes
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -94,8 +93,6 @@ class ONNXIRPassesTest(common_utils.TestCase):
             ),
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

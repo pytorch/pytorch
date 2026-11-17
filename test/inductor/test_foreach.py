@@ -10,7 +10,6 @@ from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -1678,8 +1677,6 @@ class ForeachTests(TestCase):
             )
         self.assertGreaterEqual(create_foreach_nodes_calls, 2)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

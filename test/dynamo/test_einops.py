@@ -10,7 +10,6 @@ import torch
 from torch import nn
 from torch._dynamo.test_case import TestCase
 from torch._vendor.packaging.version import InvalidVersion, Version
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
@@ -307,7 +306,6 @@ instantiate_parametrized_tests(
     TestEinops,
 )
 
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

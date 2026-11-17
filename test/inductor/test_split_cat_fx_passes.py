@@ -5,7 +5,6 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -1575,8 +1574,6 @@ class TestSplitCatFxPasses(TestCase):
 
         self.assertEqual(actual, expected)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

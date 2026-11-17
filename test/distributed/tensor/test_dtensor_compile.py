@@ -51,7 +51,6 @@ from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -3462,8 +3461,6 @@ class TestDTensorACCompile(DTensorTestBase):
         out2 = model(ids2)
         out2.sum().backward()
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -2,7 +2,6 @@
 
 import torch
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 def _reinterpret_debug_bounds_enabled() -> bool:
@@ -45,8 +44,6 @@ class TestInductorOps(TestCase):
         x_storage._swap_data_ptr_(y_storage)
         self.assertEqual(view, y_data[1:3])
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

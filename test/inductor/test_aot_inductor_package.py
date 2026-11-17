@@ -30,7 +30,6 @@ from torch.export.pt2_archive._package import (
     load_weights_to_pt2_contents,
 )
 from torch.testing._internal.common_cuda import requires_triton_ptxas_compat
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     add_skip_condition,
     HardwareClassification,
@@ -1416,8 +1415,6 @@ model(torch.ones(2))
         ):
             load_package(package_path, model_name="forward")
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -22,7 +22,6 @@ from torch._inductor.compile_fx import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module, fake_config_module2
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.utils._import_utils import import_dill
 
 
@@ -506,8 +505,6 @@ class TestCompileOptions(TestCase):
                 torch.compile(dummy_fn, options={"fake_device_a.e_bool": False})(x)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -7,7 +7,6 @@ from torch._inductor.codegen.mps import MetalOverrides
 from torch._inductor.codegen.triton import TritonKernelOverrides
 from torch._inductor.ops_handler import list_ops, OP_NAMES, OpsHandler
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -43,8 +42,6 @@ class TestOpCompleteness(TestCase):
     def test_metal_overrides(self):
         self.verify_ops_handler_completeness(MetalOverrides)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

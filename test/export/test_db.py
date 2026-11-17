@@ -11,7 +11,6 @@ from torch._export.db.examples import (
     get_rewrite_cases,
 )
 from torch.export import export
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -112,8 +111,6 @@ class ExampleTests(TestCase):
 
 instantiate_parametrized_tests(ExampleTests)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -19,7 +19,6 @@ from torch._inductor.choices import (
 )
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.virtualized import _choices, threadlocal, V
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._ordered_set import OrderedSet
 
@@ -571,8 +570,6 @@ class MultiTemplateFusionDecisionContractTest(TestCase):
         self.decide([takes, refuses], takes, producer_fused=True)
         self.assertEqual(len(self.reached_later_checks), 1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

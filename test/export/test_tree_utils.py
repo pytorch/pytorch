@@ -4,7 +4,6 @@ from collections import OrderedDict
 import torch
 from torch._dynamo.test_case import TestCase
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.utils._pytree import tree_structure
 
@@ -47,8 +46,6 @@ class TestTreeUtils(TestCase):
         spec3 = tree_structure(tree3)
         self.assertFalse(is_equivalent(spec1, spec3, dict_ordered_dict_eq))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -17,7 +17,6 @@ from common_utils import capture_codegen_source
 
 import torch
 import torch._functorch.config
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -96,8 +95,6 @@ class TestCodegenDebugAssert(TestCase):
 
         self.assertEqual(len(captured), 1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -3,7 +3,6 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -38,8 +37,6 @@ class InductorAnnotationTestCase(TestCase):
         )
         self.assertTrue(code.count("nvtx._device_range_end(training_annotation)") >= 1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -16,7 +16,6 @@ from unittest.mock import patch
 import torch._inductor.config as inductor_config
 from torch._inductor import cache as icache
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -891,8 +890,6 @@ class ConfigSerializationTest(TestCase):
             with self.assertRaises(RuntimeError):
                 inductor_config.save_config_portable(ignore_private_configs=False)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

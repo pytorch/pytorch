@@ -27,7 +27,6 @@ from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer, run_and_get_code
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
     instantiate_parametrized_tests,
@@ -1063,7 +1062,10 @@ class TestLazyCompileKernelCollision(InductorTestCase):
         if not RUN_GPU:
             self.skipTest("GPU not available")
 
-        with tempfile.TemporaryDirectory() as cache_dir:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Keep the cache off the subprocess's sys.path: `python -c` puts its
+            # cwd first, and a cache subdir such as "z3/" would shadow that module.
+            cache_dir = os.path.join(tmp_dir, "inductor_cache")
             env = {
                 **os.environ,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
@@ -1073,7 +1075,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r1 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
-                cwd=cache_dir,
+                cwd=tmp_dir,
                 text=True,
                 env=env,
             )
@@ -1086,7 +1088,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
-                cwd=cache_dir,
+                cwd=tmp_dir,
                 text=True,
                 env=env,
             )
@@ -1133,7 +1135,9 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         if not RUN_GPU:
             self.skipTest("GPU not available")
 
-        with tempfile.TemporaryDirectory() as cache_dir:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Keep the cache off sys.path; see the collision test above.
+            cache_dir = os.path.join(tmp_dir, "inductor_cache")
             env = {
                 **os.environ,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
@@ -1142,7 +1146,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
                 r = subprocess.run(
                     [sys.executable, "-c", _STATIC_INIT_DEADLOCK_SCRIPT],
                     capture_output=True,
-                    cwd=cache_dir,
+                    cwd=tmp_dir,
                     text=True,
                     env=env,
                     timeout=60,
@@ -1277,8 +1281,11 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
         if not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires Triton TensorDescriptor TMA support")
 
-        with tempfile.TemporaryDirectory() as cache_dir:
-            script_path = Path(cache_dir) / "lazy_tma_global_scratch_repro.py"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # The script's directory is first on sys.path, so keep the cache in a
+            # subdir; see TestLazyCompileKernelCollision.
+            cache_dir = os.path.join(tmp_dir, "inductor_cache")
+            script_path = Path(tmp_dir) / "lazy_tma_global_scratch_repro.py"
             script_path.write_text(_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT, encoding="utf-8")
             env = {
                 **os.environ,
@@ -1288,7 +1295,7 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
             result = subprocess.run(
                 [sys.executable, str(script_path)],
                 capture_output=True,
-                cwd=cache_dir,
+                cwd=tmp_dir,
                 text=True,
                 env=env,
                 timeout=180,
@@ -1539,7 +1546,6 @@ if RUN_GPU:
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

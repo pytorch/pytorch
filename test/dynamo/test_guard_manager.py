@@ -21,7 +21,6 @@ from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.guards import _ordered_dict_order, GuardBuilder
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2837,8 +2836,6 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         expected = handler.get_metadata_fn(guard, {float("nan"): None})
         self.assertTrue(handler.eval_fn({float("nan"): None}, expected))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

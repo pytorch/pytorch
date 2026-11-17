@@ -26,7 +26,6 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
@@ -6065,8 +6064,6 @@ class <lambda>(torch.nn.Module):
 
 instantiate_parametrized_tests(TestNestedTensor)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

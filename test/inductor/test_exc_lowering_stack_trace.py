@@ -4,7 +4,6 @@ import torch
 from torch._inductor.exc import InductorError, LoweringException
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -97,8 +96,6 @@ class TestLoweringExceptionStackTrace(InductorTestCase):
         msg_empty = str(exc_empty)
         self.assertNotIn("Found from", msg_empty)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

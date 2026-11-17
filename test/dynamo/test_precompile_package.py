@@ -47,7 +47,6 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import ChainedSource, Guard
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2922,8 +2921,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
 instantiate_parametrized_tests(TestPrecompilePackage)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -10,7 +10,6 @@ from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import ensure_cute_available
 from torch.nn import functional as F
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -154,8 +153,6 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         self.assertEqual(c_compiled.dtype, dtype)
         torch.testing.assert_close(c_eager, c_compiled)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

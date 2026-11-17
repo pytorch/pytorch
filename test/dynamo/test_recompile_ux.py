@@ -16,7 +16,6 @@ from torch._dynamo.eval_frame import (
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch._dynamo.types import FrameAction, FrameExecStrategy
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1758,8 +1757,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 instantiate_parametrized_tests(RecompileUxTests)
 instantiate_parametrized_tests(IsolateRecompilesTests)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

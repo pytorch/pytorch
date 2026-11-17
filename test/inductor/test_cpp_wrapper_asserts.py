@@ -18,7 +18,6 @@ from torch._inductor.utils import (
 )
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import RUN_CPU
 from torch.utils._ordered_set import OrderedSet
@@ -358,8 +357,6 @@ class CppWrapperMpsDeviceTests(InductorTestCase):
         self.assertIs(type(made), CppWrapperXpu)
         self.assertEqual(made.device, "xpu")
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

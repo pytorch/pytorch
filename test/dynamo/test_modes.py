@@ -23,7 +23,6 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import TEST_ACCELERATOR
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._device import DeviceContext
@@ -2497,8 +2496,6 @@ class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
         stack = _get_current_function_mode_stack()
         self.assertFalse(any(isinstance(mode, DeviceContext) for mode in stack))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

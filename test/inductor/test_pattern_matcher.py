@@ -49,7 +49,6 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import skipCUDAIf
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -4489,8 +4488,6 @@ class TestPatternMatcherLogging(LoggingTestCase):
             self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
             self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

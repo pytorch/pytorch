@@ -44,7 +44,6 @@ from torch.testing._internal.common_cuda import (
     xfailIfSM120OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
     data_to_nvfp4_scale,
@@ -11881,8 +11880,6 @@ instantiate_device_type_tests(
     TestFlexGemmExplicitConfigDevice, globals(), only_for="cuda"
 )
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

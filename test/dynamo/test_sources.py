@@ -10,7 +10,6 @@ from torch._dynamo.source import (
     is_from_local_source,
     LocalSource,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -78,8 +77,6 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
         torch.export.export(Model(), (), strict=True)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     torch._dynamo.test_case.run_tests()

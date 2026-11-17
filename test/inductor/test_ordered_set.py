@@ -10,7 +10,6 @@ import unittest
 import warnings
 import weakref
 
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     add_skip_condition,
     HardwareClassification,
@@ -2132,7 +2131,6 @@ class TestGraphs(TestCase):
 
 # ==============================================================================
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

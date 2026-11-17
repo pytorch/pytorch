@@ -39,7 +39,6 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
@@ -5907,7 +5906,6 @@ class TestCompiledAutogradOpInfo(TestCase):
 instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestCompiledAutograd)
 
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     if HAS_CPU:

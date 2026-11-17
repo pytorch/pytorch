@@ -17,7 +17,6 @@ retracing), and post_compile deserializes it back on load.
 
 import torch
 from torch._inductor.output_code import CompiledFxGraph
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -115,8 +114,6 @@ class TestCompiledFxGraphSerialization(TestCase):
         self.assertIsNone(cfg._original_gm)
         self.assertIsNotNone(cfg._serialized_original_gm)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

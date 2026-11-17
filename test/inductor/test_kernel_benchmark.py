@@ -16,7 +16,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_kernels
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 
@@ -550,8 +549,6 @@ class TestKernelBenchmark(TestCase):
             f"print_performance(fn, times=times, repeat=repeat, device='{GPU_TYPE}')"
         ).run(src)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     if HAS_GPU:

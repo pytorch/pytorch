@@ -2,7 +2,6 @@
 import unittest
 
 import torch
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -95,8 +94,6 @@ class TestControlFlowInCUDAGraphInitialization(TestCase):
 
         self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

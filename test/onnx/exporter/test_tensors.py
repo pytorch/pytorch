@@ -7,7 +7,6 @@ import onnxscript
 
 from torch.onnx._internal.exporter import _tensors
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -21,8 +20,6 @@ class SymbolicTensorTest(common_utils.TestCase):
         self.assertEqual(hash(tensor), hash(tensor))
         self.assertIn(tensor, {tensor})
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

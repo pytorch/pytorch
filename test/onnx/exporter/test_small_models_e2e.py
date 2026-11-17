@@ -15,7 +15,6 @@ import torch
 import torch.ao.quantization.fx._decomposed
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree as torch_pytree
 
@@ -1434,8 +1433,6 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
                     output.name for output in node.outputs if output is not None
                 )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

@@ -13,7 +13,6 @@ from torch._dynamo.repro.aoti import (
 )
 from torch._functorch.fx_minifier import MinifierSanityCheckFailed
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -146,7 +145,6 @@ class MinifierUtilsTests(TestCase):
 #         super().__init__()
 
 
-
 #     def forward(self, x):
 #         clone = torch.ops.aten.clone.default(x);  x = None
 #         return (clone,)
@@ -155,7 +153,6 @@ class MinifierUtilsTests(TestCase):
 # class false_graph_0_1(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
-
 
 
 #     def forward(self, x):
@@ -168,7 +165,6 @@ class MinifierUtilsTests(TestCase):
 #         super().__init__()
 #         self.true_graph_0 = true_graph_0_0()
 #         self.false_graph_0 = false_graph_0_1()
-
 
 
 #     def forward(self, x, flag):
@@ -208,8 +204,6 @@ class MinifierUtilsTests(TestCase):
         self.assertEqual(repro(torch.tensor(False), x), gm(torch.tensor(False), x))
         self.assertEqual(repro(torch.tensor(True), x), gm(torch.tensor(True), x))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

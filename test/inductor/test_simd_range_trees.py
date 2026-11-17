@@ -10,7 +10,6 @@ from torch._inductor.codegen.simd import DerivedIterationRangesRoot, IterationRa
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import IndexingOptions, TritonKernel, TritonSymbols
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -144,8 +143,6 @@ class TestSIMDRangeTrees(TestCase):
                 self.assertEqual(kernel.simplify_indexing.cache_info().currsize, 0)
                 self.assertEqual(kernel.range_trees, [x_tree, r_tree])
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

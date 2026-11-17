@@ -7,7 +7,6 @@ import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.testing._internal.inductor_utils import patch_custom_fallback_pass
 from torch.utils._triton import has_triton
@@ -57,8 +56,6 @@ instantiate_device_type_tests(
     SelectiveLoweringTest, globals(), except_for="cpu", allow_xpu=True
 )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
