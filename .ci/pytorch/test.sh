@@ -1518,7 +1518,7 @@ PY
     inductor/test_flydsl_flex_attention.py \
     --verbose
   python test/run_test.py --include python_native/test_topk_flydsl --verbose
-  python test/test_ops.py -k topk_flydsl_optimized --verbose
+  env OPINFO_RESTRICT_TO_DSL=flydsl python test/run_test.py --include test_ops -k topk_flydsl_optimized --verbose
   assert_git_not_dirty
 }
 
