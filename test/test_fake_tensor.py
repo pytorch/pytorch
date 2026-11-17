@@ -276,6 +276,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(t.shape, (2, 2))
             self.assertEqual(t.device, torch.device("cpu"))
 
+    @fake_tensor_test()
     def test_nansum_nanmean_empty_dim(self):
         # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is
         # passed, matching eager. The meta kernel used to preserve the input
@@ -508,11 +509,9 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 return self.cos()
 
             x = torch.empty(2, 2, device="cpu")
-            exc, msg = expectedIfCppFakeTensor(
-                (RuntimeError, "my_test_op::foo"),
-                (UnsupportedOperatorException, "my_test_op.foo.default"),
-            )
-            with self.assertRaisesRegex(exc, msg):
+            with self.assertRaisesRegex(
+                UnsupportedOperatorException, "my_test_op.foo.default"
+            ):
                 with FakeTensorMode(allow_fallback_kernels=True) as mode:
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
@@ -813,6 +812,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     out = x[idx]
                 self.checkType(out, "cpu", [4])
 
+    @fake_tensor_test()
     def test_index_tensor_types_match_eager(self):
         # index and index_put reject the same index dtypes as eager, with the
         # same error
@@ -1967,6 +1967,7 @@ def forward(self, x_1):
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
 
+    @fake_tensor_test()
     def test_embedding_bag_meta(self):
         def f():
             # This behavior was originally unintentional but we see people
@@ -2004,6 +2005,7 @@ def forward(self, x_1):
                 self.assertEqual(out.shape, (4, n))
                 self.assertEqual(out.device.type, device)
 
+    @fake_tensor_test()
     def test_embedding_meta_indices(self):
         with FakeTensorMode():
             weight = torch.empty(20, 8)
@@ -2111,6 +2113,7 @@ def forward(self, x_1):
                     mod(x)
         self.assertEqual(mode.allow_non_fake_inputs, allow)
 
+    @fake_tensor_test()
     def test__adaptive_avg_pool2d_backward(self):
         with FakeTensorMode():
             grad_out = torch.rand(2, 3, 4, 4)
@@ -2274,6 +2277,7 @@ def forward(self, x_1):
             prims.utils.compare_tensor_meta(y, dispatched, check_strides=True)
             self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
+    @fake_tensor_test()
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
         with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
@@ -2604,6 +2608,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             y = torch.mm(x, p).square().sum()
             y.backward()
 
+    @fake_tensor_test()
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
@@ -2766,6 +2771,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(out.device.type, self.device_type)
             self.assertTrue(is_fake_tensor(out))
 
+    @fake_tensor_test()
     def test_setitem(self, device):
         for dev in ("cpu", device):
             with FakeTensorMode():
@@ -2808,6 +2814,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             z = x.to(torch.device(device))
             self.assertEqual(z.device.type, self.device_type)
 
+    @fake_tensor_test()
     @onlyAccelerator
     def test_index_put_error(self, device):
         mode = FakeTensorMode()
@@ -2850,6 +2857,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.assertIs(maybe_get_fake_mode(z), mode)
             self.assertEqual(z.shape, x.shape)
 
+    @fake_tensor_test()
     def test_upsample_bilinear_small_channels(self, device):
         out = []
         mode = FakeTensorMode()
@@ -2868,6 +2876,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(out[1].is_contiguous())
         self.checkMetaProps(out[0], out[1])
 
+    @fake_tensor_test()
     @onlyAccelerator
     def test_cpu_fallback(self, device):
         with FakeTensorMode(allow_fallback_kernels=False):
@@ -2931,6 +2940,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.checkType(b.new(device=device), self.device_type, [0])
             self.checkType(a.new(torch.rand([1])), "cpu", [1])
 
+    @fake_tensor_test()
     @onlyAccelerator
     def test_embedding_device_indices(self, device):
         with FakeTensorMode():
@@ -2972,6 +2982,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
         self.checkType(copy2, self.device_type, (4,))
         self.checkType(out, "cpu", (4,))
 
+    @fake_tensor_test()
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
@@ -3036,6 +3047,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             torch.ops.aten.shallow_copy_data_(x3, x4)
             self.checkType(x3, "cpu", (4,))
 
+    @fake_tensor_test()
     @onlyAccelerator
     def test_lstm(self, device):
         # Ensure the non-cuDNN impl succeeds with fake tensors.
@@ -3073,6 +3085,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
+    @fake_tensor_test()
     @onlyAccelerator
     def test_gru(self, device):
         with torch.backends.cudnn.flags(enabled=False):
@@ -3119,6 +3132,7 @@ class TestFakeTensorCUDA(TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
+    @fake_tensor_test()
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
@@ -4110,6 +4124,7 @@ class TestFakeTensorOperatorInvariants(TestCase):
 
     # at::_embedding_bag has no op info,
     # and returns extra tensors that at::embedding bag throws away
+    @fake_tensor_test()
     def test_embedding_bag_private(self):
         args = [
             torch.ones(6, 1),
@@ -5926,6 +5941,7 @@ class TestFakeTensorPreferDeviceType(TestCase):
                 self.assertEqual(result.device.type, "cpu")
                 self.assertTrue(is_fake_tensor(result))
 
+    @fake_tensor_test()
     @torch._functorch.config.patch(fake_tensor_prefer_device_type=None)
     @parametrize("reverse", [False, True])
     @parametrize(
