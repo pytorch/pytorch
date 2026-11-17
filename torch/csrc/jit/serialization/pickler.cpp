@@ -297,9 +297,14 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // typename
   pushString("storage");
   // data_type
-  std::string data_type =
-      std::string(toString(tensor.scalar_type())).append("Storage");
-  pushGlobal("torch", data_type);
+  auto& storage_type_memo_id =
+      storage_type_memo_ids_[static_cast<size_t>(tensor.scalar_type())];
+  if (storage_type_memo_id) {
+    pushBinGet(*storage_type_memo_id);
+  } else {
+    storage_type_memo_id = pushGlobal(
+        "torch", std::string(toString(tensor.scalar_type())).append("Storage"));
+  }
   // root_key
   std::string root_key = get_tensor_id_ != nullptr
       ? get_tensor_id_(tensor)
@@ -333,7 +338,7 @@ void Pickler::pushBytes(const std::string& string) {
   }
 }
 
-void Pickler::pushGlobal(
+uint32_t Pickler::pushGlobal(
     std::string_view module_name,
     std::string_view class_name) {
   std::string key;
@@ -350,8 +355,10 @@ void Pickler::pushGlobal(
     // Push BINPUT without adding anything to the memoized_ivalues_
     size_t memo_id = pushNextBinPut();
     memoized_globals_map_.insert({key, memo_id});
+    return static_cast<uint32_t>(memo_id);
   } else {
     pushBinGet(memo_entry->second);
+    return memo_entry->second;
   }
 }
 
@@ -401,10 +408,9 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
           false,
           "Unsupported sparse tensor layout type in serialization ",
           layout);
-      break;
   }
   // backward_hooks
-  pushGlobal("collections", "OrderedDict");
+  pushCachedGlobal(ordered_dict_memo_id_, "collections", "OrderedDict");
   push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
   // Construct the collections.OrderedDict for the backward_hooks
   push<PickleOpCode>(PickleOpCode::REDUCE);
@@ -431,8 +437,12 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   bool quantized = tensor.is_quantized();
   // The arguments to this function are:
   //    storage, storage_offset, size, stride, requires_grad, backward_hooks
-  pushGlobal(
-      "torch._utils", quantized ? "_rebuild_qtensor" : "_rebuild_tensor_v2");
+  if (quantized) {
+    pushGlobal("torch._utils", "_rebuild_qtensor");
+  } else {
+    pushCachedGlobal(
+        rebuild_tensor_v2_memo_id_, "torch._utils", "_rebuild_tensor_v2");
+  }
 
   push<PickleOpCode>(PickleOpCode::MARK);
   pushStorageOfTensor(tensor);
@@ -474,7 +484,6 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
             false,
             "Unsupported tensor quantization type in serialization ",
             toString(tensor.qscheme()));
-        break;
     }
     push<PickleOpCode>(PickleOpCode::TUPLE);
   }
@@ -483,7 +492,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushIValue(tensor.requires_grad());
 
   // backward_hooks
-  pushGlobal("collections", "OrderedDict");
+  pushCachedGlobal(ordered_dict_memo_id_, "collections", "OrderedDict");
   push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
   // Construct the collections.OrderedDict for the backward_hooks
   push<PickleOpCode>(PickleOpCode::REDUCE);
@@ -578,8 +587,22 @@ void Pickler::pushLong(const std::string& data) {
   pushBytes(data);
 }
 
+void Pickler::pushCachedGlobal(
+    std::optional<uint32_t>& memo_id,
+    std::string_view module_name,
+    std::string_view class_name) {
+  if (memo_id) {
+    pushBinGet(*memo_id);
+  } else {
+    memo_id = pushGlobal(module_name, class_name);
+  }
+}
+
 void Pickler::pushTensorReference(const IValue& ivalue) {
-  pushGlobal("torch.jit._pickle", "build_tensor_from_id");
+  pushCachedGlobal(
+      build_tensor_from_id_memo_id_,
+      "torch.jit._pickle",
+      "build_tensor_from_id");
   tensor_table_->push_back(ivalue.toTensor());
   auto tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
