@@ -717,15 +717,22 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return self.fn.__globals__
 
     def should_allow_nested_graph_breaks(self) -> bool:
-        from torch._dynamo.trace_rules import (
-            BUILTIN_INLINE_WHEN_CALLED,
-            is_ngb_suppressed_inline,
-        )
+        trace_rules = torch._dynamo.trace_rules
+        BUILTIN_INLINE_WHEN_CALLED = trace_rules.BUILTIN_INLINE_WHEN_CALLED
+        is_ngb_suppressed_module = trace_rules.is_ngb_suppressed_module
 
         filename = self.get_filename()
         if any(filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED):
             return False
-        if is_ngb_suppressed_inline(filename):
+        if is_ngb_suppressed_module(filename):
+            return False
+        module = self.fn.__module__
+        qualname = self.fn.__qualname__
+        if (
+            type(module) is str
+            and type(qualname) is str
+            and qualname in trace_rules.NGB_SUPPRESS_FUNCTION_NAMES.get(module, ())
+        ):
             return False
         return True
 
