@@ -69,6 +69,10 @@ _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
         # is first autotuned, runtime/benchmarking.py reads the global value to
         # choose CUDA-graph timing (only with autotune_cudagraph_benchmarking).
         "max_autotune",
+        # Read only during lowering, post-grad passes and scheduling for GEMM
+        # autotuning choices; never baked into inductor_meta or read at runtime.
+        # Unlike max_autotune, it does not affect pointwise/reduction tuning.
+        "max_autotune_gemm",
         # Baked into the region's kernels' inductor_meta at codegen. The runtime
         # heuristics read max_autotune or this key to widen the configs tried
         # for pointwise, reduction, persistent and split reduction, and
