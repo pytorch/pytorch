@@ -851,8 +851,8 @@ class AOTInductorTestsTemplate:
         os.environ.pop("AOTI_COPY_USE_PINNED_ASYNC", None)
         model, example_inputs, package_path = _compile_model_with_constants(self.device)
 
-        # Each load extracts the package to a new directory and dlopens its own
-        # copy of the .so, with its own statics.
+        # Each load extracts the package to a new directory and dlopens a
+        # separate copy of the .so.
         optimized, load_log = _load_package_capturing_stderr(package_path)
         self.assertEqual(optimized(*example_inputs), model(*example_inputs))
         _, other_load_log = _load_package_capturing_stderr(package_path)
