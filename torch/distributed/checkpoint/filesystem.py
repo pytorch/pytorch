@@ -438,6 +438,10 @@ def _write_files_from_queue(
                 for tensor, write_item in loader.values():
                     if not tensor.is_cpu:
                         raise AssertionError("Tensor must be on CPU")
+                    if serialization_format == SerializationFormat.SAFETENSORS:
+                        # safetensors only serializes contiguous tensors, and a
+                        # state_dict may hold views such as transposed weights.
+                        tensor = tensor.contiguous()
                     write_results.append(
                         _write_item(
                             transforms,

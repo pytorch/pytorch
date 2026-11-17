@@ -241,6 +241,7 @@ class Library:
 
         f = sys._getframe(1)
         filename, lineno = f.f_code.co_filename, f.f_lineno
+        self._site = f"{filename}:{lineno}"
         self.m: Any | None = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno
         )
@@ -746,9 +747,11 @@ def define(qualname, schema, *, lib=None, tags=()):
             f"to be instance of str, got {type(qualname)}"
         )
     namespace, name = torch._library.utils.parse_namespace(qualname)
+    caller = None
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
+        caller = (torch._library.utils.caller_module(), lib._site)
     if not NAMELESS_SCHEMA.fullmatch(schema):
         raise ValueError(
             f"define(qualname, schema, ...): expected schema "
@@ -756,6 +759,8 @@ def define(qualname, schema, *, lib=None, tags=()):
             f'got "{schema}"'
         )
     lib.define(name + schema, alias_analysis="", tags=tags)
+    if caller is not None:
+        torch._library.utils.REGISTRATION_CALLERS[qualname, ""] = caller
 
 
 @define.register
@@ -952,6 +957,10 @@ def _impl(
         else:
             for key in keys:
                 use_lib.impl(qualname, func, key)
+        if lib is None:
+            caller = (torch._library.utils.caller_module(), use_lib._site)
+            for key in keys:
+                torch._library.utils.REGISTRATION_CALLERS[qualname, key] = caller
 
     if func is None:
         return register_
