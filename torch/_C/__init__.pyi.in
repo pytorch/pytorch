@@ -2320,6 +2320,7 @@ class _CppFakeTensorMode:
     _allow_unsafe_data_ptr_access: _bool
     allow_non_fake_inputs: _bool
     allow_scalar_outputs: _bool
+    propagate_real_tensors: _bool
     epoch: _int
     @property
     def avoid_device_init(self) -> _bool: ...
