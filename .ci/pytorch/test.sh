@@ -603,6 +603,7 @@ test_python_smoke_b200() {
   (
     setup_cuda_smoke_compat
     time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+    time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include inductor/test_localization $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   )
   time python test/run_test.py \
     --include \
