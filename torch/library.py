@@ -1845,9 +1845,9 @@ def opcheck(
       running the operator on real tensors and the result of running
       the operator on FakeTensors and checks that they have the same
       Tensor metadata (sizes/strides/dtype/device/etc).
-    - test_symbolic_faketensor: If an explicit Meta/Fake kernel can run
-      with symbolic Tensor input sizes without adding shape guards. This is an
-      opt-in check and does not validate output metadata.
+    - test_symbolic_faketensor: Experimental. If an explicit Meta/Fake kernel
+      can run with symbolic Tensor input sizes without adding shape guards.
+      This opt-in check does not validate output metadata.
     - test_aot_dispatch_dynamic: If the operator has correct behavior
       with PyTorch compilation APIs (torch.compile/export/FX).
       This checks that the outputs (and gradients, if applicable) are the

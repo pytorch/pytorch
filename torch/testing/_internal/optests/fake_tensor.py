@@ -39,5 +39,8 @@ def symbolic_fake_check(op, args, kwargs):
             )
         except UnsupportedFakeTensorException:
             return
-        with shape_env.error_on_new_guards():
-            op(*fake_args, **fake_kwargs)
+        try:
+            with shape_env.error_on_new_guards():
+                op(*fake_args, **fake_kwargs)
+        except UnsupportedFakeTensorException as e:
+            raise RuntimeError(str(e)) from e

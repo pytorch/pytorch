@@ -218,8 +218,8 @@ def generate_opcheck_tests(
     - test_schema: This runs SchemaCheckMode.
     - test_autograd_registration: This runs autograd_registration_check.
     - test_faketensor: This runs CrossRefFakeMode.
-    - test_symbolic_faketensor: This checks that explicit Meta/Fake kernels do
-        not specialize symbolic Tensor input sizes.
+    - test_symbolic_faketensor: Experimental. This checks that explicit
+        Meta/Fake kernels do not specialize symbolic Tensor input sizes.
     - test_aot_dispatch_static: This runs aot_autograd_check, which:
         checks that the outputs (and gradients, if they are computable)
         are the same under eager-mode PyTorch and using AOTAutograd.
@@ -358,6 +358,7 @@ def generate_tag_tests(testcase, failures_dict, additional_decorators):
             # We're about to delete the following test after Ed's PR
             # to specialize on C++ .size() calls
             if "test_aot_dispatch_static" not in test
+            and not any(test_util in test for test_util in EXPERIMENTAL_TEST_UTILS)
             and status_dict["status"] == "xfail"
         ]
         definitely_not_pt2_compliant = len(xfailed_tests) > 0
@@ -608,12 +609,11 @@ class OpCheckMode(TorchFunctionMode):
         try:
             self.test_util(op, args, kwargs, copy_inputs=False)
         except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
-            if self.test_util_name == "test_symbolic_faketensor":
-                raise
             # We might get here if the input is already a FakeTensor
             # or if we're in a torch.compile block. Just ignore these
             # since we can't handle them and reporting them as failures
             # is too noisy.
+            return
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
