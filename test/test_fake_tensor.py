@@ -6785,6 +6785,104 @@ class TestCppFakeTensorModeBindings(TestCase):
         )
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("active", [False, True])
+    @parametrize("transform", ["grad", "vjp", "jvp"])
+    def test_fake_data_functorch(self, active, transform):
+        mode = CppFakeTensorMode()
+        captured = mode.from_tensor(torch.ones(2, requires_grad=True))
+        arg = mode.from_tensor(torch.ones(2))
+        copies = []
+
+        def fn(x):
+            copies.append(captured.data)
+            return x.sum()
+
+        with mode if active else contextlib.nullcontext():
+            if transform == "grad":
+                torch.func.grad(fn)(arg)
+            elif transform == "vjp":
+                torch.func.vjp(fn, arg)
+            else:
+                torch.func.jvp(fn, (arg,), (arg,))
+        self.assertEqual(len(copies), 1)
+        result = copies[0]
+        self.assertFalse(torch._C._functorch.is_gradtrackingtensor(result))
+        self.assertTrue(is_fake_tensor(result))
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertFalse(result.requires_grad)
+        version = captured._version
+        result.add_(1)
+        self.assertEqual(captured._version, version)
+        self.assertEqual(result._version, 1)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_data_trace(self):
+        mode = CppFakeTensorMode()
+        captured = mode.from_tensor(torch.ones(2, requires_grad=True))
+        copies = []
+
+        def fn(x):
+            copies.append(captured.data)
+            return x + 1
+
+        traced = torch.jit._trace.trace(fn, torch.ones(2), check_trace=False)
+        self.assertNotIn("aten::detach", str(traced.graph))
+        self.assertEqual(len(copies), 1)
+        self.assertFalse(copies[0].requires_grad)
+        self.assertIs(maybe_get_fake_mode(copies[0]), mode)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("op", ["data", "saved_output"])
+    def test_fake_data_profiler(self, op):
+        mode = CppFakeTensorMode()
+        fake = mode.from_tensor(torch.ones(2, requires_grad=True))
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as prof:
+            result = fake.data if op == "data" else fake.sqrt()
+        self.assertNotIn("aten::detach", [event.key for event in prof.key_averages()])
+        if op == "saved_output":
+            copies = []
+            result.grad_fn._raw_saved_result.register_hooks(
+                lambda t: copies.append(t) or t, lambda t: t
+            )
+            saved = copies[0]
+            self.assertFalse(saved.requires_grad)
+            version = result._version
+            saved.add_(1)
+            self.assertEqual(result._version, version + 1)
+            self.assertEqual(saved._version, result._version)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("exclude_python", [False, True])
+    def test_fake_data_python_hook(self, exclude_python):
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.ones(2, requires_grad=True))
+        replacement = mode.from_tensor(torch.ones(3))
+        calls = []
+
+        class DataMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                calls.append(func)
+                return replacement
+
+        with (
+            DataMode(),
+            torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+            )
+            if exclude_python
+            else contextlib.nullcontext(),
+        ):
+            result = fake.data
+        self.assertEqual(calls, [] if exclude_python else [aten.detach.default])
+        if exclude_python:
+            self.assertEqual(result.shape, fake.shape)
+            self.assertTrue(torch._C._is_alias_of(result, fake))
+        else:
+            self.assertIs(result, replacement)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @fake_tensor_modes
     @parametrize("active", [False, True])
     @parametrize("device,source_device", [("cpu", "cuda:0"), ("cuda:0", "cpu")])
@@ -6937,7 +7035,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(maybe_get_fake_mode(retained), mode)
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_fake_fallback_clears_inherited_dispatch_keys(self):
+    @parametrize("alias", ["detach", "data"])
+    def test_fake_fallback_clears_inherited_dispatch_keys(self, alias):
         mode = CppFakeTensorMode()
         real = torch.randn(2, 3)
         fake = mode.from_tensor(real)
@@ -6945,7 +7044,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         torch._C._set_fake_dispatch_keys(fake, keys)
 
         def meta_impl(x):
-            result = x.detach()
+            result = x.detach() if alias == "detach" else x.data
             self.assertTrue(result.is_meta)
             self.assertFalse(is_fake_tensor(result))
             self.assertIsNone(maybe_get_fake_dispatch_keys(result))
