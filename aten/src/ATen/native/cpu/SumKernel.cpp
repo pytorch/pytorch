@@ -4,7 +4,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/UnaryOps.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/cpu/SumKernel.h>
 #include <ATen/native/cpu/utils.h>
@@ -708,9 +707,14 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
   iter.output_base().fill_(out_t(0));
   iter.parallel_reduce(loop);
   if (sqrt_result) {
+    // Not sqrt_kernel: with MKL it calls vsSqrt, which is not correctly rounded,
+    // so the last bit could differ from main and from the all-reduce above.
     TensorBase out = iter.output_base();
     auto sqrt_iter = TensorIterator::unary_op(out, out);
-    sqrt_kernel(sqrt_iter);
+    cpu_kernel_vec(
+        sqrt_iter,
+        [](out_t a) -> out_t { return std::sqrt(a); },
+        [](Vectorized<out_t> a) { return a.sqrt(); });
   }
 }
 
