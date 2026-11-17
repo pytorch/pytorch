@@ -317,8 +317,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/tcm/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
-  # shellcheck disable=SC1091
-  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  if [ -f /opt/intel/oneapi/mpi/latest/env/vars.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  fi
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Check XPU status before testing
@@ -669,8 +671,6 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
-  # Required by the device info tests in test_xpu, pinned to the XPU wheel's dep
-  pip_install "pyzes==0.1.2"
   time python test/run_test.py --include test_transformers test_xpu $PYTHON_TEST_EXTRA_OPTION
   # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
   # time test_xpu_sycl_tla_backend
@@ -845,6 +845,13 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_load_package_multiple_gpus --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_uncapturable_models --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_aot_cudagraphs_rejects_multi_device_model --verbose
+  # CUDA graph capture on a second GPU: the test_shim tests whose names end in
+  # MultiGpu, which skip or check only device 0 on single-GPU runners.
+  /usr/bin/env LD_LIBRARY_PATH="${TORCH_LIB_DIR}" "${BUILD_BIN_DIR}/test_shim" \
+    --gtest_filter='*MultiGpu' \
+    --gtest_output=xml:test/test-reports/cpp/test_shim_multi_gpu.xml
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
@@ -2474,12 +2481,13 @@ test_cpp_extensions() {
   assert_git_not_dirty
 }
 
-test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+test_vec_all_types() {
+  # Runs vec_test_all_types, built once per CPU capability, for each capability
+  # that dispatch can pick on this CPU.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing vec256 instructions"
+    echo "Testing vectorized types (vec_test_all_types) for the CPU capabilities that dispatch can pick"
     pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
+    vec_all_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
     # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
     cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
     # Unlike most tests, deliberately run every binary and report their failures
@@ -2488,21 +2496,21 @@ test_vec256() {
     # tests can't silently stop running.
     ran=0
     failed=""
-    for vec256_exec in $vec256_tests
+    for vec_all_exec in $vec_all_tests
     do
       # Only run the capabilities that dispatch can pick on this CPU: the others
       # would hit illegal instructions, or for SVE, assume another vector length.
-      capability=${vec256_exec#./vec_test_all_types_}
+      capability=${vec_all_exec#./vec_test_all_types_}
       if [[ "$capability" != DEFAULT && "$capability" != "$cpu_capability" &&
             ! ( "$capability" == AVX2 && "$cpu_capability" == AVX512 ) ]]; then
-        echo "Skipping $vec256_exec: PyTorch uses $cpu_capability"
+        echo "Skipping $vec_all_exec: PyTorch uses $cpu_capability"
         continue
       fi
       # Find libc10 in the installed torch, as the build tree's RPATH doesn't
       # point to it where jobs run from a copy of the workspace (XPU). Each
       # capability reports to its own directory, which test stats key on.
-      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec256_exec --gtest_output=xml:../../test/test-reports/vec256_"$capability"/"$vec256_exec".xml; then
-        failed="$failed $vec256_exec"
+      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec_all_exec --gtest_output=xml:../../test/test-reports/vec_test_all_types_"$capability"/"$vec_all_exec".xml; then
+        failed="$failed $vec_all_exec"
       fi
       ran=$((ran + 1))
     done
@@ -2924,7 +2932,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
-  test_vec256
+  test_vec_all_types
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
@@ -2985,7 +2993,7 @@ else
   test_cpuset_num_threads
   test_python
   test_aten
-  test_vec256
+  test_vec_all_types
   test_libtorch
   test_aot_compilation
   test_custom_script_ops

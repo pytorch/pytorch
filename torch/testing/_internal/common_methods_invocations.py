@@ -11748,13 +11748,6 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe
             # cast from a result of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
-            DecorateInfo(
-                unittest.skip("failed on xpu"),
-                "TestForeachDevice",
-                "test_foreach_norm_empty_tensor_inf_error",
-                device_type="xpu",
-                dtypes=floating_types_and(torch.bfloat16, torch.half),
-            ),
         ),
     ),
 ]
@@ -19018,8 +19011,6 @@ op_db: list[OpInfo] = [
                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
            ],
            skips=(
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # test_out passes on MPS, which the expectedFailure above would report as an unexpected success
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
@@ -23007,7 +22998,7 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
         # (CompositeCompliantTensor, COW wrapper) or FakeTensor.
         supports_cow_input_no_materialize_forward=False,
         decorators=[
-            DecorateInfo(onlyCUDA),
+            DecorateInfo(onlyOn(["cuda", "xpu"])),
         ],
         skips=(
             DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
