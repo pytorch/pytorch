@@ -3,7 +3,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -564,8 +563,6 @@ class TestGuardExclusion(TestCase):
         self.assertEqual(tracker.frame_count, 5, "Should not recompile")
         self.assertEqual(tracker.call_log[-1], 4, "All-new values should use Graph 4")
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

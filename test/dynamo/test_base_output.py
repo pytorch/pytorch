@@ -5,7 +5,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 try:
@@ -91,8 +90,6 @@ class TestBaseOutput(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 1)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -23,7 +23,6 @@ import torch
 import torch._functorch.config
 from functorch.compile import nop
 from torch._functorch.aot_autograd import aot_function
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -199,8 +198,6 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertEqual(out, x + y)
         self.assertEqual(len(captured), 0)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

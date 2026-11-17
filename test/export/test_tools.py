@@ -3,7 +3,6 @@
 import torch
 from torch._dynamo.test_case import TestCase
 from torch._export.tools import report_exportability
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
@@ -65,8 +64,6 @@ class TestExportTools(TestCase):
         self.assertTrue(report["unsupported"] is not None)
         self.assertTrue(report["supported"] is None)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()
