@@ -1459,6 +1459,20 @@ class TestObjectConstruction(TestCase):
         self.assertIs(type(s), object)
         self.assertEqual(cnt.frame_count, 0)
 
+    @parametrize("base", ["int", "float", "str"])
+    def test_constant_subclass_construction(self, base):
+        # Before CPython 3.12.5 (gh-117482), int, float and str each publish
+        # their own __getattribute__ wrapper instead of inheriting object's
+        typ, arg = {"int": (int, 3), "float": (float, 0.5), "str": (str, "s")}[base]
+        cls = type("Sub", (typ,), {})
+
+        def fn():
+            obj = cls(arg)
+            return type(obj) is cls, obj == arg
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), (True, True))
+
 
 class _Namespace(types.SimpleNamespace):
     pass

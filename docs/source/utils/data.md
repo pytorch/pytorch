@@ -547,14 +547,6 @@ for batch_ndx, sample in enumerate(loader):
 ```
 
 ```{eval-rst}
-.. currentmodule:: torch.utils.data.datapipes.utils.decoder
-
-.. autofunction:: basichandlers
-
-.. autofunction:: handle_extension
-```
-
-```{eval-rst}
 .. automodule:: torch.utils.data.datapipes.utils.common
 
 .. currentmodule:: torch.utils.data.datapipes.utils.common
