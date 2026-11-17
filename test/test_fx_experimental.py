@@ -55,6 +55,7 @@ from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
@@ -2163,6 +2164,7 @@ class {test_classname}(torch.nn.Module):
 
 class TestNormalizeOperators(JitTestCase):
     hw_classification = HardwareClassification.CPU
+    setUp = preserves_device_selection(JitTestCase.setUp)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
