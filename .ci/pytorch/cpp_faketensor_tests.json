@@ -562,6 +562,16 @@
     "inductor/test_codecache.py::TestStandaloneCompile::test_dynamic_shapes_from_example_inputs_fake_mode",
     "inductor/test_compile_worker.py::TestSubprocessEnv::test_serialized_fx_compile_restores_subprocess_env",
     "test_fake_tensor.py::TestFakeTensorSerialization",
-    "test_functionalization.py::TestFunctionalization::test_view_clone_view_inplace"
+    "test_functionalization.py::TestFunctionalization::test_view_clone_view_inplace",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_parameter_from_lazy_module_parameter_propagate_real_tensors",
+    "test_fake_tensor.py::TestFakeTensorMoveModule",
+    "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_set_get_fake_dispatch_keys",
+    "test_python_dispatch.py::TestPythonDispatch::test_mode_detection_*",
+    "test_python_dispatch.py::TestPythonDispatch::test_mode_detection_without_enter",
+    "test_python_dispatch.py::TestPythonDispatch::test_mode_detection_compiles",
+    "test_python_dispatch.py::TestPythonDispatch::test_mode_with_make_subclass",
+    "test_python_dispatch.py::TestPythonDispatch::test_make_subclass_with_modes",
+    "test_python_dispatch.py::TestPythonDispatch::test_subclass_creation",
+    "test_python_dispatch.py::TestPythonDispatch::test_torch_dispatch_mode_respects_no_dispatch"
   ]
 }
