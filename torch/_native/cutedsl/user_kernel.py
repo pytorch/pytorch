@@ -24,10 +24,14 @@ cutlass/cutlass_dsl/cuda_jit_executor.py, in nvidia-cutlass-dsl 4.4 and 4.8).
 """
 
 import contextlib
+import inspect
+import io
+import pickle
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 import torch
+from torch.autograd import profiler as autograd_profiler
 
 
 # host function -> {argument signature -> compiled function}. Nothing is evicted,
@@ -150,10 +154,51 @@ def launch_cutedsl_kernel(
     launcher.run(*runtime_args.values(), stream=stream)
 
 
+class _ScriptPickler(pickle.Pickler):
+    """Pickles a launcher for a run of the generated module as a script, in which
+    __main__ is that module: refuses a host function of the compiling process's
+    __main__, which that run cannot import."""
+
+    @staticmethod
+    def reducer_override(obj: Any, /) -> Any:
+        if inspect.isfunction(obj) and obj.__module__ == "__main__":
+            raise pickle.PicklingError(f"{obj.__qualname__} is defined in __main__")
+        return NotImplemented
+
+
+def _non_plain_data_type(value: Any) -> type | None:
+    """The type of the first value in ``value`` that is not plain data, or None if
+    all of it is. Plain data, whose pickling runs no user code, is None, a bool,
+    int, float, str or bytes, a cutlass value keyed by its Python scalar (see
+    CUTEDSL_CONSTANT_RULES.scalar_value) such as a Numeric, or a tuple, list, dict
+    or frozenset of plain data, each of exactly that type (a subclass can define its
+    own pickling)."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+
+    cls = type(value)
+    if cls in (type(None), bool, int, float, str, bytes):
+        return None
+    if CUTEDSL_CONSTANT_RULES.scalar_value(value) is not None:
+        return None
+    if cls is dict:
+        items = [*value.keys(), *value.values()]
+    elif cls in (tuple, list, frozenset):
+        items = list(value)
+    else:
+        return cls
+    return next((t for t in map(_non_plain_data_type, items) if t is not None), None)
+
+
 class CuteDSLKernelLauncher:
     """Launches host function ``fn`` with constants bound once: one user CuTeDSL
-    kernel in Inductor's generated Python wrapper, or the eager launches of ``fn``
-    with these argument names and constants (see launch_cutedsl_kernel).
+    kernel in Inductor's generated Python wrapper, where ``name`` is its name, or the
+    eager launches of ``fn`` with these argument names and constants (see
+    launch_cutedsl_kernel), named after ``fn``. While the profiler runs, each launch
+    is a record function of that name, as a user Triton kernel's launch is, with the
+    keyword values ``kernel_backend`` ("cutedsl"), ``kernel_name`` (the host
+    function's name, also in generated code, where the record has the launcher's
+    name: unlike a Triton launch's, it is not the record's name) and ``stream`` (the
+    raw CUDA stream of the launch).
 
     ``run(*args, stream=...)`` takes the kernel arguments (``arg_names``: tensors and
     runtime scalars, in host-function signature order) positionally. Everything else
@@ -180,6 +225,7 @@ class CuteDSLKernelLauncher:
         fn: Callable[..., Any],
         arg_names: Sequence[str],
         constant_args: Mapping[str, Any],
+        name: str | None = None,
         *,
         constant_keys: Mapping[str, object] | None = None,
     ) -> None:
@@ -206,6 +252,7 @@ class CuteDSLKernelLauncher:
         self.fn = fn
         self.arg_names = tuple(arg_names)
         self.constant_args = dict(constant_args)
+        self.name = name or kernel_name
         self._stream_param = info.stream_param
         self._numeric_params = info.numeric_params
         # The parameters run() does not take, as cute.compile takes them, and their
@@ -240,6 +287,43 @@ class CuteDSLKernelLauncher:
         )
         # (device index, *argument signature) -> compiled function
         self._compiled: dict[tuple[Any, ...], Any] = {}
+
+    def __reduce__(self) -> Any:
+        # A run of the generated module as a script unpickles its launchers: each is
+        # rebuilt from its arguments, without the caches.
+        return type(self), (self.fn, self.arg_names, self.constant_args, self.name)
+
+    def rebuild_line(self) -> str:
+        """The line of Python that rebuilds this launcher in get_args() of a generated
+        module run as a script (``python <output_code>.py``), which is not loaded
+        with its launchers: ``<name> = pickle.loads(...)``, which imports the host
+        function by module and qualname, if the constants are plain data (see
+        _non_plain_data_type), else ``raise RuntimeError(...)`` naming the launcher
+        and the reason. Pickling any other constant could run user code while
+        compiling, and would write it, with any tensor it holds, into the module and
+        the debug artifacts that hold it, so the constants are checked first."""
+        reason = None
+        for param, value in self.constant_args.items():
+            if (cls := _non_plain_data_type(value)) is not None:
+                reason = f"its constant {param!r} is or holds a {cls.__name__}"
+                break
+        data = io.BytesIO()
+        if reason is None:
+            try:
+                _ScriptPickler(data).dump(self)
+            except Exception as e:
+                reason = f"{type(e).__name__}: {e}"
+        if reason is None:
+            return f"{self.name} = pickle.loads({data.getvalue()!r})"
+        msg = (
+            f"{self.name}: a run of this module as a script cannot rebuild the "
+            f"launcher of this CuTeDSL kernel ({reason}); its host function must be "
+            "importable by module and qualname, not defined in __main__ or inside a "
+            "function, and its constants plain data: None, bool, int, float, str, "
+            "bytes, cutlass Numeric values, and tuples, lists, dicts and frozensets "
+            "of these"
+        )
+        return f"raise RuntimeError({msg!r})"
 
     def run(self, *args: Any, stream: int | None = None) -> None:
         """Launch with ``args`` for ``arg_names`` on ``stream``, a raw CUDA stream
@@ -279,7 +363,25 @@ class CuteDSLKernelLauncher:
             compiled = self._compiled.get(tuple(key))
             if compiled is None:
                 compiled = self._get_compiled(device, tuple(key), values, cu_stream)
-            compiled(*call_args)
+            if autograd_profiler._is_profiler_enabled:
+                # As CachingAutotuner.get_profiler_kwargs describes a Triton launch;
+                # there is no kernel file or hash: the DSL compiles in memory. One
+                # difference is deliberate: Triton's kernel_name is the record's name,
+                # while this one names the host function also in generated code,
+                # where the record is named after the launcher (cutedsl_add_kernel_0
+                # for add_kernel), so that every launcher of a host function and its
+                # eager launches share it.
+                profiler_kwargs = {
+                    "kernel_backend": "cutedsl",
+                    "kernel_name": self._kernel_name,
+                    "stream": int(cu_stream),
+                }
+                with torch._C._profiler._RecordFunctionFast(
+                    self.name, args, profiler_kwargs
+                ):
+                    compiled(*call_args)
+            else:
+                compiled(*call_args)
 
     def _get_compiled(
         self, device: torch.device, key: tuple[Any, ...], values: list[Any], stream: Any
