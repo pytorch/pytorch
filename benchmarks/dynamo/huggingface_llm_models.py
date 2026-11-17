@@ -301,6 +301,8 @@ HF_LLM_MODELS: dict[str, Benchmark] = {
     "openai/whisper-tiny": WhisperBenchmark,
     "Qwen/Qwen3-0.6B": TextGenerationBenchmark,
     "Qwen/Qwen3.5-0.8B": TextGenerationBenchmark,
+    "Qwen/Qwen2.5-0.5B-Instruct": TextGenerationBenchmark,
+    "google/gemma-3-1b-it": TextGenerationBenchmark,
     "mistralai/Mistral-7B-Instruct-v0.3": TextGenerationBenchmark,
     "openai/gpt-oss-20b": TextGenerationBenchmark,
 }
@@ -348,6 +350,8 @@ INFERENCE_PHASES = {
             {
                 "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",
+                "google/gemma-3-1b-it",
+                "Qwen/Qwen2.5-0.5B-Instruct",
                 "Qwen/Qwen3-0.6B",
                 "Qwen/Qwen3.5-0.8B",
             }
@@ -357,11 +361,16 @@ INFERENCE_PHASES = {
         tokens_column="input_tokens_per_second",
         tokens_input="input_ids",
     ),
-    # gemma-2-2b is excluded: its sliding-window cache layers track their length
-    # in a Python int, so compiled decode recompiles every step.
+    # Gemma models are excluded: their sliding-window cache layers track their
+    # length in a Python int, so compiled decode recompiles every step.
     "decode": InferencePhase(
         models=frozenset(
-            {"meta-llama/Llama-3.2-1B", "Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"}
+            {
+                "meta-llama/Llama-3.2-1B",
+                "Qwen/Qwen2.5-0.5B-Instruct",
+                "Qwen/Qwen3-0.6B",
+                "Qwen/Qwen3.5-0.8B",
+            }
         ),
         iter_fn=decode_forward,
         setup_fn=setup_decode,
@@ -371,8 +380,11 @@ INFERENCE_PHASES = {
 }
 
 
+# Models benchmarked with tensor parallelism in both phases. The Gemma models
+# have no decode benchmark; gemma-3-1b-it's single KV head cannot be sharded either.
 TP_MODELS = {
     "meta-llama/Llama-3.2-1B",
+    "Qwen/Qwen2.5-0.5B-Instruct",
     "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3.5-0.8B",
 }
