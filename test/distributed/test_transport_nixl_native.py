@@ -9,7 +9,12 @@ import torch
 import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import NIXLRemoteBuffer
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def _receive(connection):
@@ -123,6 +128,33 @@ def _multi_peer_worker(rank, connections):
         connection.close()
 
 
+def _passive_worker(rank, connection, operation):
+    # Rank 1 only waits on the pipe; the progress thread must service rank 0's
+    # one-sided transfer over TCP.
+    with new_transport(
+        "nixl", "cpu", timeout=5, backend_options={"engine_config": "TLS=tcp"}
+    ) as transport:
+        expected = torch.arange(4096, dtype=torch.int64)
+        source_rank = 0 if operation == "write" else 1
+        tensor = expected.clone() if rank == source_rank else torch.zeros_like(expected)
+        memory = transport.register_memory(tensor)
+        if rank == 1:
+            connection.send_bytes(transport.bind())
+            connection.send_bytes(memory.to_remote_buffer().serialize())
+            if _receive(connection) != b"done":
+                raise AssertionError("unexpected control-plane message")
+        else:
+            transport.connect(_receive(connection))
+            remote = NIXLRemoteBuffer.deserialize(_receive(connection))
+            if operation == "write":
+                transport.write(memory.to_view(), remote)
+            else:
+                transport.read(memory.to_mutable_view(), remote)
+            connection.send_bytes(b"done")
+        torch.testing.assert_close(tensor, expected)
+    connection.close()
+
+
 def _connect_rank_worker(rank, port):
     # Rank 0 connects to ranks 1 and 2 with connect_rank and reads from both.
     store = dist.TCPStore("127.0.0.1", port, is_master=False)
@@ -155,6 +187,7 @@ def _run_worker(worker, *args):
     worker(*args)
 
 
+@instantiate_parametrized_tests
 @unittest.skipUnless(
     os.environ.get("TORCH_TEST_NIXL") == "1",
     "set TORCH_TEST_NIXL=1 with NIXL/UCX installed",
@@ -164,6 +197,15 @@ class TestNIXLNative(TestCase):
         connections = multiprocessing.Pipe()
         self._spawn(
             _native_worker, [(connection,) for connection in connections], connections
+        )
+
+    @parametrize("operation", ["read", "write"])
+    def test_passive_peer_tcp(self, operation):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _passive_worker,
+            [(connection, operation) for connection in connections],
+            connections,
         )
 
     def test_three_process_cpu_multi_peer(self):
