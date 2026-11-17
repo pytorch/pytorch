@@ -482,7 +482,6 @@
   "test/inductor/test_torchinductor_dynamic_shapes.py",
   "test/inductor/test_torchinductor_opinfo.py",
   "test/inductor/test_torchinductor_strided_blocks.py",
-  "test/inductor/test_triton_extension_backend.py",
   "test/inductor/test_triton_helpers.py",
   "test/inductor/test_triton_heuristics.py",
   "test/inductor/test_triton_kernels.py",
