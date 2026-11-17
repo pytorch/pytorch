@@ -2348,7 +2348,21 @@ def skipIfCppFakeTensor(reason):
         raise AssertionError("please provide a reason")
     from torch._dynamo import config
 
-    return unittest.skipIf(config.use_cpp_fake_tensor, reason)
+    def decorator(test):
+        if isinstance(test, type):
+            setup = test.setUpClass.__func__
+
+            @classmethod
+            def setUpClass(cls):
+                if config.use_cpp_fake_tensor:
+                    raise unittest.SkipTest(reason)
+                setup(cls)
+
+            test.setUpClass = setUpClass
+            return test
+        return lazy_skip_if(lambda: config.use_cpp_fake_tensor, reason)(test)
+
+    return decorator
 
 
 _CppFakeExpectedT = TypeVar("_CppFakeExpectedT")
