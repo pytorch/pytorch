@@ -207,7 +207,7 @@ jobs:
         working-directory: .github/scripts
         env:
           TEST_MATRIX: ${{ inputs.test-matrix }}
-          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
+          JOB_NAME: ${{ inputs.build-environment }}
           TESTS_TO_INCLUDE: ${{ github.event.inputs.tests-to-include }}
         run: |
           python - <<'PY'

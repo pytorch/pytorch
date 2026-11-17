@@ -636,39 +636,66 @@ def add_cpp_faketensor_configs(
     job_name: str | None,
     tests_to_include: str = "",
 ) -> dict[str, list[Any]]:
-    selection = (
-        Path(__file__).resolve().parents[2] / ".ci/pytorch/cpp_faketensor_tests.json"
-    )
-    manifest = json.loads(selection.read_text()) if selection.exists() else None
-    configs = manifest["test_configs"] if manifest is not None else None
-    if manifest is not None and tests_to_include.strip():
-        files = {
-            selector.split("::")[0].removesuffix(".py")
-            for selector in manifest["tests"]
-        }
-        requested = {test.split(".", 1)[0] for test in tests_to_include.split()}
-        if files.isdisjoint(requested):
-            return test_matrix
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tools.testing.discover_tests import COMPILER_TEST_PREFIXES
+
+    if not job_name or any(
+        name in job_name for name in ("libtorch", "mobile-lightweight-dispatch")
+    ):
+        return test_matrix
     entries = test_matrix.get("include", [])
     if any("fake_tensor" in entry for entry in entries):
         return test_matrix
+    requested = {
+        test.split("::")[0].split(".", 1)[0] for test in tests_to_include.split()
+    }
+    compiler_requested = not requested or any(
+        test.startswith(COMPILER_TEST_PREFIXES) for test in requested
+    )
+    # C++ default jobs select compiler suites; other configs keep their own routes.
+    configs = {
+        "default",
+        "dynamo_core",
+        "dynamo_wrapped",
+        "inductor",
+        "inductor_core",
+        "inductor_amx",
+        "inductor_distributed",
+        "inductor_cpp_wrapper",
+        "inductor_cpp_wrapper_cpu",
+        "inductor_aoti_fallback",
+        "inductor_avx2",
+    }
     cpp_entries = [
         {**entry, "fake_tensor": "cpp"}
         for entry in entries
-        if configs is None or entry.get("config") in configs
+        if entry.get("config") in configs
+        and (entry.get("config") != "default" or compiler_requested)
     ]
-    if configs is not None:
-        if not job_name or any(
-            device in job_name.lower() for device in ("cuda", "rocm", "xpu", "tpu")
-        ):
-            return test_matrix
-        cpp_entries = [
-            {**entry, "config": "cpp_faketensor", "shard": 1, "num_shards": 1}
-            for entry in cpp_entries[:1]
+    additions = []
+    default = next((e for e in entries if e.get("config") == "default"), None)
+    accelerator = any(
+        device in job_name.lower() for device in ("cuda", "rocm", "xpu", "tpu")
+    )
+    if (
+        default is not None
+        and not accelerator
+        and (not requested or "test_fake_tensor" in requested)
+    ):
+        # GENERIC FakeTensor classes run on CPU; GPU jobs exclude them.
+        additions = [
+            {
+                **default,
+                "config": "fake_tensor",
+                "shard": 1,
+                "num_shards": 1,
+                "fake_tensor": backend,
+            }
+            for backend in ("python", "cpp")
         ]
     return {
         **test_matrix,
-        "include": entries + cpp_entries,
+        "include": entries + additions + cpp_entries,
     }
 
 

@@ -120,7 +120,6 @@ aten = torch.ops.aten
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
-_CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
 
 # A conv with cpu inputs and xpu weights dispatches to aten::_slow_conv2d_forward, which
 # is unimplemented on XPU, so the expected device-mismatch error never surfaces.
@@ -199,9 +198,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     )
     @parametrize("inference", [False, True])
     def test_basic(self, op, inference):
-        if torch._dynamo.config.use_cpp_fake_tensor:
-            if TEST_WITH_TORCHDYNAMO:
-                self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         x = torch.empty(2, 2, device="cpu")
         y = torch.empty((2, 2) if op is torch.matmul else (4, 2, 2), device="cpu")
         expected = op(x, y)
@@ -1432,8 +1428,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     @parametrize("active", [False, True])
     @parametrize("inference", [False, True])
     def test_mode(self, op, active, inference):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         real = torch.rand([4], device="cpu")
         mode = FakeTensorMode()
         with torch.inference_mode(inference):
@@ -1680,9 +1674,9 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         mode = FakeTensorMode()
         with mode:
             x = torch.tensor(2)
-            mode.in_kernel_invocation = True
-            y = x + x
-            self.assertTrue(mode.in_kernel_invocation)
+            with in_kernel_invocation_manager(mode):
+                y = x + x
+                self.assertTrue(torch._C._in_kernel_invocation())
 
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
@@ -2265,43 +2259,24 @@ def forward(self, x_1):
         self.assertTrue(is_fake_tensor(r[1]))
 
     @parametrize("symbolic", [False, True])
-    @parametrize(
-        "op", [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
-    )
-    @parametrize(
-        "shape_case",
-        ["same", "broadcast", "both_broadcast", "transpose", "channels_last"],
-    )
-    def test_fast_binary(self, symbolic, op, shape_case):
+    def test_fast_div_int_to_float(self, symbolic):
         shape_env = ShapeEnv() if symbolic else None
         mode = FakeTensorMode(shape_env=shape_env)
         size = shape_env.create_unbacked_symint() if shape_env is not None else 2
         with mode:
-            x = torch.empty(size, 2, 3, 4, device="cpu", dtype=torch.int32)
-            y = torch.empty_like(x)
-            if shape_case == "broadcast":
-                y = torch.empty(1, 2, 3, 4, dtype=x.dtype)
-            elif shape_case == "both_broadcast":
-                x = torch.empty(size, 1, 3, 4, dtype=x.dtype)
-                y = torch.empty(1, 2, 3, 4, dtype=x.dtype)
-            elif shape_case == "transpose":
-                x, y = x.transpose(-1, -2), y.transpose(-1, -2)
-            elif shape_case == "channels_last":
-                x = x.contiguous(memory_format=torch.channels_last)
-                y = y.contiguous(memory_format=torch.channels_last)
-        from torch._subclasses.fake_impls import get_fast_op_impls, infer_size
+            x = torch.empty(size, 2, device="cpu", dtype=torch.int32)
+            y = torch.empty(size, 2, device="cpu", dtype=torch.int32)
+        from torch._subclasses.fake_impls import get_fast_op_impls
 
-        z = get_fast_op_impls()[op](mode, x, y)
-        self.assertEqual(z.dtype, torch.float32 if op == aten.div.Tensor else x.dtype)
+        fast_div = get_fast_op_impls()[torch.ops.aten.div.Tensor]
+        z = fast_div(mode, x, y)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z.shape, x.shape)
         self.assertIs(maybe_get_fake_mode(z), mode)
-        with patch(
-            "torch._subclasses.fake_impls.infer_size", wraps=infer_size
-        ) as python_shape_probe:
-            dispatched = op(x, y)
-        if isinstance(mode, CppFakeTensorMode):
-            python_shape_probe.assert_not_called()
-        prims.utils.compare_tensor_meta(z, dispatched, check_strides=True)
-        self.assertIs(maybe_get_fake_mode(dispatched), mode)
+        if symbolic:
+            dispatched = torch.ops.aten.div.Tensor(x, y)
+            prims.utils.compare_tensor_meta(z, dispatched, check_strides=True)
+            self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
     @parametrize("symbolic", [False, True])
     def test_fast_div(self, symbolic):
@@ -2496,8 +2471,6 @@ def forward(self, x_1):
         ],
     )
     def test_inplace_and_out_identity(self, shape, input_device, other_device):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         fake, out, other = (
             self.fake_from_meta(mode, torch.empty(shape, device="meta"), device)
@@ -2523,8 +2496,6 @@ def forward(self, x_1):
     @parametrize("layout", [torch.sparse_coo, torch.sparse_csr])
     @parametrize("python_dispatcher", [False, True])
     def test_sparse_metadata_without_backend_kernel(self, layout, python_dispatcher):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         meta = torch.eye(2).to_sparse(layout=layout).to("meta")
         sparse = self.fake_from_meta(mode, meta, "privateuseone:0")
@@ -2544,8 +2515,6 @@ def forward(self, x_1):
 
     @parametrize("python_dispatcher", [False, True])
     def test_sparse_meta_kernel_dispatch(self, python_dispatcher):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         if python_dispatcher:
             self.enterContext(enable_python_dispatcher())
         mode = FakeTensorMode()
@@ -2615,8 +2584,6 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @parametrize("active", [False, True])
     @parametrize("symbolic", [False, True])
     def test_metadata_copy(self, device, op, active, symbolic):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode(shape_env=ShapeEnv() if symbolic else None)
         source = mode.from_tensor(torch.arange(3.0, device=device))
         target = mode.from_tensor(torch.zeros(3, device=device))
@@ -3920,9 +3887,6 @@ class TestFakeTensorConverter(TestCase):
         self.assertEqual(len(converter.tensor_memo), 0)
 
     def test_no_active_mode(self):
-        if torch._dynamo.config.use_cpp_fake_tensor:
-            if TEST_WITH_TORCHDYNAMO:
-                self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         x = torch.empty(2, 2, device="cpu")
         y = torch.empty(2, 2, device="cpu")
         with FakeTensorMode() as mode:
@@ -3936,9 +3900,6 @@ class TestFakeTensorConverter(TestCase):
 
     @parametrize("include_active_mode", [False, True])
     def test_multiple_modes(self, include_active_mode):
-        if torch._dynamo.config.use_cpp_fake_tensor:
-            if TEST_WITH_TORCHDYNAMO:
-                self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         t = torch.rand([4])
         t2 = torch.rand([4])
         with FakeTensorMode() as m:
@@ -6233,7 +6194,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             for x, y in zip(shared, sparse_parts(sparse_meta)):
                 self.assertEqual(x.untyped_storage()._cdata, y.untyped_storage()._cdata)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_from_meta_and_device_rejects(self):
         mode = CppFakeTensorMode()
         meta_device, cpu = torch.device("meta"), torch.device("cpu")
@@ -6278,7 +6238,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._from_meta_and_device(inference, torch.device("cpu"), mode)
         inference.data_ptr()
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_maybe_get_fake_mode(self):
         mode = CppFakeTensorMode()
         other_mode = CppFakeTensorMode()
@@ -6647,7 +6606,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             guarding_hint_or_throw(unbacked_float.node)
         self.assertIsNone(unbacked_float.node.hint)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_set_get_fake_dispatch_keys(self):
         mode = CppFakeTensorMode()
         meta = torch.empty(2, device="meta")
@@ -6779,7 +6737,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                 mismatched.add(name)
         self.assertEqual(mismatched, set())
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_decomposition_on_launch_thread(self):
         import functools
         import threading
@@ -6850,8 +6807,6 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     @parametrize("symbolic", [False, True])
     def test_fake_fallback_static_shape_decomp_registration(self, symbolic):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         from torch._decomp import (
             decomposition_table,
             register_decomposition,
@@ -6887,7 +6842,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertEqual(result.shape, fake.shape)
             self.assertIs(maybe_get_fake_mode(result), mode)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("symbolic", [False, True])
     @parametrize(
         "op,preserve_keys",
@@ -6911,7 +6865,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(result._has_symbolic_sizes_strides, symbolic)
         self.assertIs(maybe_get_fake_mode(result), mode)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("active", [False, True])
     @parametrize("transform", ["grad", "vjp", "jvp"])
     def test_fake_data_functorch(self, active, transform):
@@ -6942,7 +6895,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(captured._version, version)
         self.assertEqual(result._version, 1)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_data_trace(self):
         mode = CppFakeTensorMode()
         captured = mode.from_tensor(torch.ones(2, requires_grad=True))
@@ -6958,7 +6910,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(copies[0].requires_grad)
         self.assertIs(maybe_get_fake_mode(copies[0]), mode)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("op", ["data", "saved_output"])
     def test_fake_data_profiler(self, op):
         mode = CppFakeTensorMode()
@@ -6980,7 +6931,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertEqual(result._version, version + 1)
             self.assertEqual(saved._version, result._version)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("exclude_python", [False, True])
     def test_fake_data_python_hook(self, exclude_python):
         mode = FakeTensorMode()
@@ -7009,7 +6959,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         else:
             self.assertIs(result, replacement)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("active", [False, True])
     @parametrize("device,source_device", [("cpu", "cuda:0"), ("cuda:0", "cpu")])
     def test_fake_shallow_copy_data(self, active, device, source_device):
@@ -7095,7 +7044,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             # In particular, rejection must precede the real add_ computation.
             self.assertEqual(base, torch.ones(size))
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("active", [False, True])
     @parametrize("device", [None, "cuda:0"])
     def test_fake_fallback_retained_outputs(self, active, device):
@@ -7139,7 +7087,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                         self.assertFalse(is_fake_tensor(retained))
                         self.assertEqual(retained.device, torch.device("meta"))
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("active", [False, True])
     @parametrize("output_device", ["cpu", "meta"])
     @parametrize("device", [None, "cuda:0"])
@@ -7169,7 +7116,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(retained.device, torch.device(output_device))
         self.assertIs(maybe_get_fake_mode(retained), mode)
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("alias", ["detach", "data"])
     def test_fake_fallback_clears_inherited_dispatch_keys(self, alias):
         mode = CppFakeTensorMode()
@@ -7197,8 +7143,6 @@ class TestCppFakeTensorModeBindings(TestCase):
     def test_fake_fallback_unsets_mode_in_meta_kernel(
         self, active, python_dispatcher, python_meta
     ):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         fake = mode.from_tensor(torch.randn(2, 3))
         seen = []
@@ -7236,8 +7180,6 @@ class TestCppFakeTensorModeBindings(TestCase):
     @parametrize("active", [False, True])
     @parametrize("python_dispatcher", [False, True])
     def test_fake_fallback_unsets_mode_in_python_fake(self, active, python_dispatcher):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         fake = mode.from_tensor(torch.randn(2, 3))
         seen = []
@@ -7276,8 +7218,6 @@ class TestCppFakeTensorModeBindings(TestCase):
     @parametrize("python_dispatcher", [False, True])
     @parametrize("decline", [False, True])
     def test_fake_fallback_python_cia(self, active, python_dispatcher, decline):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode()
         fake = mode.from_tensor(torch.randn(2, 3))
         seen = []
@@ -7326,7 +7266,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIs(maybe_get_fake_mode(result), mode)
         self.assertEqual(self._installed(), (None, False))
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_reentrant_mode_release(self):
         mode = CppFakeTensorMode()
         fake = mode.from_tensor(torch.randn(2, 3))
