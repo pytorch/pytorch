@@ -14,6 +14,7 @@
 #include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/dynamo/disable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/schema_info.h>
@@ -1032,6 +1033,8 @@ void fakeFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatchKeySet,
     torch::jit::Stack* stack) {
+  // Match TorchDispatchMode's recursive __torch_dispatch__ disable boundary.
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   const auto arguments_begin = stack->size() - num_arguments;
