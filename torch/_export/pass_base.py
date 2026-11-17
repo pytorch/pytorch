@@ -496,9 +496,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     raise AssertionError("Multiple fake tensor mode detected.")
                 fake_tensor_mode = require_python_fake_mode(maybe_get_fake_mode(i))
         if fake_tensor_mode is None:
-            self.tracer.fake_tensor_mode = FakeTensorMode(
-                _force_python=True, allow_non_fake_inputs=True
-            )
+            self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
             dispatcher_mode = nullcontext()  # type: ignore[assignment]
         else:

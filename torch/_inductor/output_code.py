@@ -974,7 +974,6 @@ class CompiledFxGraph(OutputCode):
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
             fake_mode = FakeTensorMode(
-                _force_python=True,
                 allow_non_fake_inputs=True,
                 shape_env=ShapeEnv(),
             )

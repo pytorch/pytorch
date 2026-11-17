@@ -4889,7 +4889,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4899,6 +4899,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            len(self.axioms),
             self._var_to_range_version_counter,
         )
 
@@ -7541,10 +7542,7 @@ class ShapeEnv:
             return singleton_int_expr
 
         def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
-            if not self._resimplify_floor_div_axioms:
-                return
-            self._resimplify_floor_div_axioms = False
-            new_items = {}
+            new_items: dict[sympy.Expr, sympy.Expr] = {}
             for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
@@ -7557,7 +7555,10 @@ class ShapeEnv:
 
         # Pattern matching
         if axioms is None:
-            resimplify_floor_div(self.axioms)
+            if self._resimplify_floor_div_axioms:
+                self._resimplify_floor_div_axioms = False
+                resimplify_floor_div(self.axioms)
+                self._update_version_counter()
             subst = self.axioms
         else:
             subst = {}
@@ -7566,7 +7567,8 @@ class ShapeEnv:
                 if e.free_symbols.issubset(expr_free_symbols):
                     subst.update(dict(self.get_implications(self.simplify(e))))
 
-            resimplify_floor_div(subst)
+            if self._resimplify_floor_div_axioms:
+                resimplify_floor_div(subst)
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
@@ -9136,6 +9138,7 @@ class ShapeEnv:
                     )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
+                    self._update_version_counter()
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
