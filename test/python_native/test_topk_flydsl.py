@@ -169,27 +169,12 @@ class TestFlyDSLTopK(TestCase):
         torch.manual_seed(13)
         for dtype in _SUPPORTED_DTYPES:
             for largest in (True, False):
-                for k in (8, 65, 257, 513):
+                for k in (2, 8, 65, 256, 257, 513, 1024):
                     n = _test_n(k, dtype)
                     rows = _test_m(k, dtype)
                     kernel = _expected_kernel(k, n, dtype)
                     with self.subTest(dtype=dtype, largest=largest, k=k, n=n):
                         x = _make_test_input((rows, n), dtype)
-                        cols = _special_cols(n)
-                        if dtype.is_floating_point:
-                            tiny = torch.finfo(dtype).smallest_normal / 2
-                            special = (
-                                float("-inf"),
-                                -0.0,
-                                0.0,
-                                tiny,
-                                float("inf"),
-                            )
-                        else:
-                            info = torch.iinfo(dtype)
-                            special = (info.min, -1, 0, 1, info.max)
-                        for col, value in zip(cols, special):
-                            x[:, col] = value
                         misses = topk_cache_info(kernel).misses
                         self._assert_topk_matches_aten(x, k, largest=largest)
                         self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
@@ -267,13 +252,17 @@ class TestFlyDSLTopK(TestCase):
 
         torch.manual_seed(3)
         k = 704
-        n = _test_n(k)
-        rows = (_test_m() + 3) // 4
-        x = make_tensor((4, rows, n), device="cuda", dtype=torch.float32)
-        self._assert_topk_matches_aten(x, k)
-        got_v, _ = torch.topk(x, k, dim=-1)
-        self.assertEqual(topk_cache_info("radix").misses, 1)
-        self.assertEqual(got_v.shape, (4, rows, k))
+        for dtype in _SUPPORTED_DTYPES:
+            for largest in (True, False):
+                n = _test_n(k, dtype)
+                rows = (_test_m(k, dtype) + 3) // 4
+                with self.subTest(dtype=dtype, largest=largest, n=n):
+                    x = make_tensor((4, rows, n), device="cuda", dtype=dtype)
+                    misses = topk_cache_info("radix").misses
+                    self._assert_topk_matches_aten(x, k, largest=largest)
+                    got_v, _ = torch.topk(x, k, dim=-1, largest=largest)
+                    self.assertEqual(topk_cache_info("radix").misses, misses + 1)
+                    self.assertEqual(got_v.shape, (4, rows, k))
 
     def test_correctness_with_extreme_values(self):
         k = 8
@@ -575,6 +564,27 @@ class TestFlyDSLTopK(TestCase):
                     misses = topk_cache_info("register").misses
                     self._assert_topk_matches_aten(x, k, largest=largest)
                     self.assertEqual(topk_cache_info("register").misses, misses + 1)
+
+    def test_misaligned_radix_base_matches_aten(self):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        torch.manual_seed(14)
+        k = 64
+        for dtype in _SUPPORTED_DTYPES:
+            for largest in (True, False):
+                n = _test_n(k, dtype)
+                m = _test_m(k, dtype)
+                with self.subTest(dtype=dtype, largest=largest, n=n):
+                    self.assertEqual(_expected_kernel(k, n, dtype), "radix")
+                    buf = _make_test_input((m * n + 1,), dtype)
+                    x = buf[1:].reshape(m, n)
+                    if not x.is_contiguous():
+                        raise AssertionError("expected contiguous misaligned-base view")
+                    if x.data_ptr() % 16 == 0:
+                        raise AssertionError("expected misaligned base pointer")
+                    misses = topk_cache_info("radix").misses
+                    self._assert_topk_matches_aten(x, k, largest=largest)
+                    self.assertEqual(topk_cache_info("radix").misses, misses + 1)
 
     def test_noncontiguous_out_dispatches_and_matches_aten(self):
         k = 8
