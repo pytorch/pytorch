@@ -16728,6 +16728,503 @@ class TestGraphAllocators(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+@unittest.skipIf(TEST_WITH_ROCM, "memory planned graphs are not supported on ROCm")
+@unittest.skipUnless(
+    _GRAPH_ALLOCATORS_TEST, "run in a subprocess by TestGraphAllocatorsSubprocess"
+)
+class TestMemoryPlannedGraph(TestCase):
+    @staticmethod
+    def _warmup(fn):
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                fn()
+        torch.cuda.current_stream().wait_stream(s)
+        torch.cuda.synchronize()
+
+    @staticmethod
+    def _arena(step):
+        p = step._placer
+        return max((o + a.size for o, a in zip(p.offsets, p.allocations)), default=0)
+
+    def _check_plan(self, step):
+        # the plan: allocations live at the same time (host order) do not
+        # overlap in the arena, which is at most the sum of the sizes; the
+        # outputs lie in the arena
+        allocations, offsets = step._placer.allocations, step._placer.offsets
+        for i, a in enumerate(allocations):
+            for j in range(i + 1, len(allocations)):
+                b = allocations[j]
+                if a.free_time is None or a.free_time > b.alloc_time:
+                    self.assertTrue(
+                        offsets[i] + a.size <= offsets[j]
+                        or offsets[j] + b.size <= offsets[i],
+                        (i, j),
+                    )
+        arena = self._arena(step)
+        self.assertLessEqual(
+            arena, sum((a.size + 255) // 256 * 256 for a in allocations)
+        )
+        self.assertGreaterEqual(step._placer._arena.nbytes, arena)
+        base = step._placer.base
+        for t in torch.utils._pytree.tree_leaves(step.outputs):
+            if isinstance(t, torch.Tensor):
+                self.assertTrue(base <= t.data_ptr() < base + arena)
+
+    def test_training_step_matches_eager(self):
+        def make():
+            torch.manual_seed(0)
+            model = nn.Sequential(
+                nn.Linear(256, 256), nn.GELU(), nn.Linear(256, 256), nn.GELU()
+            ).cuda()
+            opt = torch.optim.Adam(model.parameters(), lr=1e-3, capturable=True)
+            return model, opt
+
+        x = torch.randn(64, 256, device="cuda")
+        model, opt = make()
+
+        def step():
+            opt.zero_grad(set_to_none=True)
+            loss = model(x).square().mean()
+            loss.backward()
+            opt.step()
+            return loss.detach()
+
+        self._warmup(step)
+        start = (deepcopy(model.state_dict()), deepcopy(opt.state_dict()))
+        ref_losses = [step().clone() for _ in range(3)]
+        ref_params = [p.detach().clone() for p in model.parameters()]
+
+        model.load_state_dict(start[0])
+        opt.load_state_dict(start[1])
+        planned = torch.cuda.MemoryPlannedGraph(step)
+        # the first call captures and replays; later calls replay
+        losses = [planned().clone() for _ in range(3)]
+        self.assertEqual(losses, ref_losses, atol=0, rtol=0)
+        self.assertEqual(list(model.parameters()), ref_params, atol=0, rtol=0)
+        self._check_plan(planned)
+        self.assertGreater(len(planned._placer.allocations), 10)
+
+    def test_temporaries_share_memory(self):
+        x = torch.ones(1 << 20, device="cuda")
+
+        def fn():
+            y = x
+            for _ in range(8):
+                y = y * 2 + 1
+            return y
+
+        self._warmup(fn)
+        step = torch.cuda.MemoryPlannedGraph(fn)
+        out = step()
+        torch.cuda.synchronize()
+        self.assertEqual(out, fn())
+        self._check_plan(step)
+        # 16 temporaries of 4 MiB, of which few are live at once
+        self.assertGreater(len(step._placer.allocations), 8)
+        self.assertLessEqual(self._arena(step), 4 * x.nbytes)
+        # replays see new values of the static input
+        x.fill_(3)
+        self.assertIs(step(), out)
+        torch.cuda.synchronize()
+        self.assertEqual(out, fn())
+        # the explicit forms: capture() again re-plans
+        out2 = step.capture()
+        self.assertIsNot(out2, out)
+        self.assertIs(step.replay(), out2)
+        torch.cuda.synchronize()
+        self.assertEqual(out2, fn())
+
+    def test_cross_stream_sharing(self):
+        x = torch.ones(1 << 20, device="cuda")
+        side = torch.cuda.Stream()
+
+        def after_join():
+            cur = torch.cuda.current_stream()
+            side.wait_stream(cur)
+            with torch.cuda.stream(side):
+                t = x * 2
+                u = t + 1
+            cur.wait_stream(side)
+            del t  # freed after the join: v may reuse it
+            v = u * 3
+            return u, v
+
+        def before_join():
+            cur = torch.cuda.current_stream()
+            side.wait_stream(cur)
+            with torch.cuda.stream(side):
+                t = x * 2
+                u = t + 1
+            del t
+            v = x * 3  # allocated before cur waits on side: may race with t
+            cur.wait_stream(side)
+            return u, v
+
+        def record_stream(extra=None):
+            cur = torch.cuda.current_stream()
+            t = x * 2
+            side.wait_stream(cur)
+            with torch.cuda.stream(side):
+                u = t + 1
+            t.record_stream(side)
+            if extra is not None:
+                t.record_stream(extra)
+            del t  # still in use on side
+            v = x * 3
+            cur.wait_stream(side)
+            return u, v
+
+        def record_uncaptured():
+            # also recorded on a stream that is not captured: its work is not
+            # in the graph, and side's use still blocks the reuse
+            return record_stream(torch.cuda.default_stream())
+
+        for fn, buffers in (
+            (after_join, 2),
+            (before_join, 3),
+            (record_stream, 3),
+            (record_uncaptured, 3),
+        ):
+            self._warmup(fn)
+            ref = [t.clone() for t in fn()]
+            step = torch.cuda.MemoryPlannedGraph(fn)
+            outs = step()
+            torch.cuda.synchronize()
+            self.assertEqual(list(outs), ref)
+            self.assertEqual(self._arena(step), buffers * x.nbytes, fn.__name__)
+
+    def test_recapture_and_arena_release(self):
+        x = torch.ones(1 << 20, device="cuda")
+
+        def fn():
+            return (x * 2 + 1) * 3
+
+        self._warmup(fn)
+        step = torch.cuda.MemoryPlannedGraph(fn)
+        out = step()
+        placer = step._placer
+        self.assertIsNotNone(placer._arena)
+        # capturing again re-plans; the old arena lives while out does
+        out2 = step.capture()
+        self.assertIsNot(step._placer, placer)
+        self.assertIsNotNone(placer._arena)
+        step.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(out2, fn())
+        self.assertEqual(out, fn())
+        del out
+        self.assertIsNone(placer._arena)
+        # release() destroys the graph; the arena goes with its last tensor
+        placer = step._placer
+        step.release()
+        self.assertIsNone(step.graph)
+        with self.assertRaisesRegex(RuntimeError, "before capture"):
+            step.replay()
+        self.assertIsNotNone(placer._arena)
+        del out2
+        self.assertIsNone(placer._arena)
+        out3 = step()
+        torch.cuda.synchronize()
+        self.assertEqual(out3, fn())
+        # a tensor kept across a re-capture keeps its arena alive
+        placer = step._placer
+        del step
+        self.assertIsNotNone(placer._arena)
+        del out3
+        self.assertIsNone(placer._arena)
+
+    def test_nondeterministic_capture_raises(self):
+        x = torch.ones(1 << 20, device="cuda")
+        sizes = iter([1024, 2048])
+
+        def different_size():
+            return torch.empty(next(sizes), device="cuda").fill_(1)
+
+        with self.assertRaisesRegex(RuntimeError, "different allocation"):
+            torch.cuda.MemoryPlannedGraph(different_size)()
+        keep = []
+        calls = [0]
+
+        def later_free():
+            t = x * 2
+            u = t + 1
+            if calls[0] == 1:
+                keep.append(t)  # alive longer in the second capture
+            calls[0] += 1
+            del t
+            return u * 3  # may reuse t's memory
+
+        with self.assertRaisesRegex(
+            RuntimeError, "freed before allocation 2 when recorded"
+        ):
+            torch.cuda.MemoryPlannedGraph(later_free)()
+        keep.clear()
+
+    def test_exception_in_fn(self):
+        # an exception in fn, in capture 1 and in capture 2: no graph, the
+        # reservation and the arena are released, and a later capture works
+        import torch.cuda.memory_planning as mp
+
+        x = torch.ones(1 << 20, device="cuda")
+        calls, fail = [0], [None]
+
+        def fn():
+            y = x * 2
+            calls[0] += 1
+            if calls[0] == fail[0]:
+                raise ValueError("boom")
+            return y + 1
+
+        self._warmup(fn)
+        made = []
+
+        class Recorder(mp._Recorder):
+            def __init__(self, *args):
+                super().__init__(*args)
+                made.append(self)
+
+        class Placer(mp._Placer):
+            def __init__(self, *args):
+                super().__init__(*args)
+                made.append(self)
+
+        with (
+            patch.object(mp, "_Recorder", Recorder),
+            patch.object(mp, "_Placer", Placer),
+        ):
+            for capture in (1, 2):
+                step = torch.cuda.MemoryPlannedGraph(fn)
+                fail[0] = calls[0] + capture
+                with self.assertRaisesRegex(ValueError, "boom"):
+                    step()
+                self.assertIsNone(step.graph)
+                self.assertIsNone(step._placer)
+                out = step()
+                torch.cuda.synchronize()
+                self.assertEqual(out, fn())
+                del out, step
+        self.assertEqual(len(made), 7)  # 4 recorders, 3 placers
+        for r in made:
+            if isinstance(r, mp._Recorder):
+                self.assertEqual(r._reserved, [])
+            else:
+                self.assertIsNone(r._arena)
+
+    def test_record_stream_on_outputs(self):
+        # record_stream on a placed tensor reaches the arena: returned to the
+        # caching allocator, it stays active until the side stream's work ends
+        x = torch.ones(1 << 20, device="cuda")
+
+        def fn():
+            return x * 2
+
+        self._warmup(fn)
+        step = torch.cuda.MemoryPlannedGraph(fn)
+        out = step()
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(int(2e8))  # keeps side busy
+            y = out + 1
+        out.record_stream(side)
+
+        def active_blocks():
+            return torch.cuda.memory_stats()["active.all.current"]
+
+        before = active_blocks()
+        del out, step
+        self.assertEqual(active_blocks(), before)
+        torch.cuda.synchronize()
+        torch.empty(1, device="cuda")  # the caching allocator processes its events
+        self.assertEqual(active_blocks(), before - 1)
+        self.assertEqual(y, x * 2 + 1)
+
+    def test_release_ordered_after_replays(self):
+        # a graph replayed on another stream than its arena's, then destroyed
+        # (release() or garbage collection) while the replay runs: the arena is
+        # not handed out again before the replay ends
+        x = torch.ones(1 << 22, device="cuda")
+
+        def fn():
+            torch.cuda._sleep(int(5e8))  # a long replay
+            return x * 2
+
+        s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
+        for drop in ("release", "del"):
+            with torch.cuda.stream(s1):
+                fn()
+                torch.cuda.synchronize()
+                step = torch.cuda.MemoryPlannedGraph(fn)
+                step.capture()  # the arena is allocated on s1
+                nbytes = self._arena(step)
+            torch.cuda.synchronize()
+            with torch.cuda.stream(s2):
+                step.replay()
+            if drop == "release":
+                step.release()
+            else:
+                del step
+            with torch.cuda.stream(s1):
+                z = torch.empty(nbytes // 4, device="cuda").fill_(7.0)
+            torch.cuda.synchronize()
+            self.assertEqual(z.unique().tolist(), [7.0], drop)
+            del z
+
+    def test_captures_without_kernels(self):
+        for fn in (lambda: None, lambda: torch.empty(1024, device="cuda")):
+            step = torch.cuda.MemoryPlannedGraph(fn)
+            step()
+            step()
+            self.assertEqual(
+                len(step._placer.allocations), 1 if fn() is not None else 0
+            )
+
+    def test_allocation_streams_checked(self):
+        # the second capture must allocate on the streams the first did
+        x = torch.ones(1 << 16, device="cuda")
+        streams, calls = [torch.cuda.Stream(), torch.cuda.Stream()], [0]
+
+        def fn():
+            s = streams[calls[0] % 2]
+            calls[0] += 1
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                y = x * 2
+            torch.cuda.current_stream().wait_stream(s)
+            return y
+
+        self._warmup(fn)
+        with self.assertRaisesRegex(RuntimeError, "different allocation.*on stream"):
+            torch.cuda.MemoryPlannedGraph(fn)()
+
+    def test_dependencies_checked(self):
+        # a second capture whose stream synchronization differs from the
+        # recording's, with the same allocations and numbers of nodes and edges
+        # (the plan reuses a's memory for b, which is safe only with the
+        # recorded join): raises
+        N = 1 << 20
+        x = torch.full((N,), 1.0, device="cuda")
+        s = torch.cuda.Stream()
+        calls = [0]
+
+        def fn():
+            calls[0] += 1
+            placed = calls[0] % 2 == 0
+            m = torch.cuda.current_stream()
+            out = torch.empty(N, device="cuda")
+            a = x * 2
+            s.wait_stream(m)
+            with torch.cuda.stream(s):
+                out.copy_(a)
+            a.record_stream(s)
+            out.record_stream(s)
+            if not placed:
+                m.wait_stream(s)
+            del a
+            b = x + 5
+            if placed:
+                s.wait_stream(m)
+            with torch.cuda.stream(s):
+                out.add_(0)
+            m.wait_stream(s)
+            return out, b
+
+        calls[0] = 1  # (the warm-up runs the recording's variant)
+        self._warmup(fn)
+        calls[0] = 0
+        with self.assertRaisesRegex(RuntimeError, "dependencies differ"):
+            torch.cuda.MemoryPlannedGraph(fn)()
+
+    def test_recording_tensor_kept_raises(self):
+        # fn stores the tensors it creates in Python state (here a list): the
+        # first capture's tensor, in scratch memory, is still referenced after
+        # the second; raises at capture
+        x = torch.ones(1 << 20, device="cuda")
+        history = []
+
+        def fn():
+            y = x * 2
+            history.append(y)
+            return y
+
+        self._warmup(fn)
+        history.clear()
+        step = torch.cuda.MemoryPlannedGraph(fn)
+        with self.assertRaisesRegex(RuntimeError, "still referenced after the second"):
+            step()
+        self.assertIsNone(step.graph)
+        history.clear()
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_other_device_streams(self):
+        # a replay under another current device records the graph's device's
+        # stream on the arena, and record_stream with another device's stream
+        # records it on its own device (the arena's free used to abort)
+        x = torch.ones(1 << 20, device="cuda:0")
+        g = torch.cuda.MemoryPlannedGraph(lambda: x * 2)
+        out = g()
+        with torch.cuda.device(1):
+            g()
+        self.assertEqual(g._replay_stream.device, torch.device("cuda", 0))
+        s1 = torch.cuda.Stream(device=1)
+        y = torch.empty(1 << 20, device="cuda:1")
+        s1.wait_stream(torch.cuda.current_stream(0))
+        with torch.cuda.stream(s1):
+            y.copy_(out, non_blocking=True)
+        out.record_stream(s1)
+        del out, g
+        gc.collect()
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(y.cpu(), (x * 2).cpu())
+
+    def test_recording_reservation_rounded_to_granularity(self):
+        # an allocation beyond the current reservation, larger than twice it and
+        # not a multiple of the VA granularity (2 MiB): the new reservation is
+        # rounded up to the granularity (cuMemAddressReserve rejects it if not)
+        import torch.cuda.memory_planning as mp
+
+        x = torch.ones(1024, device="cuda")
+        n = (4 << 20) + 4096
+
+        def fn():
+            z = x * 2
+            y = torch.empty(n, dtype=torch.uint8, device="cuda")
+            y.fill_(1)
+            return z.sum(), y.sum()
+
+        self._warmup(fn)
+        with patch.object(mp._Recorder, "_CHUNK", 2 << 20):
+            step = torch.cuda.MemoryPlannedGraph(fn)
+            out = step()
+        self.assertEqual(out, fn(), atol=0, rtol=0)
+        self.assertEqual(out[1].item(), n)
+
+    @unittest.skipIf(not has_triton(), "test needs triton")
+    def test_triton_kernel(self):
+        # Triton's launcher checks that every pointer argument is mapped
+        # (cuPointerGetAttribute): the recording's addresses are, to scratch
+        # memory
+        from torch.testing._internal.triton_utils import add_kernel
+
+        x = torch.randn(4096, device="cuda")
+
+        def fn():
+            t = x * 2  # allocated by the capture
+            y = torch.empty_like(t)
+            add_kernel[(4,)](t, t, y, t.numel(), BLOCK_SIZE=1024)
+            return y
+
+        self._warmup(fn)
+        step = torch.cuda.MemoryPlannedGraph(fn)
+        for _ in range(2):
+            x.copy_(torch.randn_like(x))
+            self.assertEqual(step(), x * 4, atol=0, rtol=0)
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
 @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
 class TestMemoryPlanningUtils(TestCase):
     # the CUDA driver and graph helpers of torch.cuda.memory_planning
@@ -17084,20 +17581,25 @@ except RuntimeError as e:
         )
         self.assertIn("requires the native CUDA caching allocator", proc.stderr)
 
-    def test_graph_allocators(self):
-        # TestGraphAllocators with graph allocators enabled at the start of the
-        # process (with and without expandable segments), and enabled by the
-        # first capture given an allocator, after CUDA is initialized
+    @staticmethod
+    def _suite(name):
+        # runs the named tests of this file, with ENABLE run first
         module = os.path.splitext(os.path.basename(__file__))[0]
-        code = (
+        return (
             "import sys, unittest; "
             "sys.modules['torchvision'] = None; "
             "import torch; "
             "ENABLE; "
-            f"suite = unittest.defaultTestLoader.loadTestsFromName('{module}.TestGraphAllocators'); "
+            f"suite = unittest.defaultTestLoader.loadTestsFromName('{module}.{name}'); "
             "result = unittest.TextTestRunner(verbosity=2).run(suite); "
             "raise SystemExit(0 if result.wasSuccessful() and result.testsRun else 1)"
         )
+
+    def test_graph_allocators(self):
+        # TestGraphAllocators with graph allocators enabled at the start of the
+        # process (with and without expandable segments), and enabled by the
+        # first capture given an allocator, after CUDA is initialized
+        code = self._suite("TestGraphAllocators")
         env = {"_PYTORCH_TEST_GRAPH_ALLOCATORS": "1"}
         at_start = code.replace("ENABLE", "torch.cuda.memory._enable_graph_allocators()")
         lazily = code.replace("ENABLE", "torch.ones(1, device='cuda')")
@@ -17108,6 +17610,15 @@ except RuntimeError as e:
         ):
             proc = self._run(run, alloc_conf, env)
             self.assertEqual(proc.returncode, 0, msg=f"{alloc_conf}\n{proc.stderr}")
+
+    def test_memory_planned_graph(self):
+        # TestMemoryPlannedGraph, with graph allocators enabled by its first
+        # capture (the usual case: after an eager warm-up)
+        code = self._suite("TestMemoryPlannedGraph").replace(
+            "ENABLE", "torch.ones(1, device='cuda')"
+        )
+        proc = self._run(code, env={"_PYTORCH_TEST_GRAPH_ALLOCATORS": "1"})
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
 
     def test_enabled_mid_process(self):
         # enabled by the first capture given an allocator, after an eager
@@ -17136,6 +17647,34 @@ print("y", y.sum().item())
         out = self._run(code).stdout
         self.assertIn("log [4096, 64]", out)
         self.assertIn("y 32.0", out)
+
+    def test_memory_planned_graph_conditional_node(self):
+        # an allocation inside a conditional node's body raises (no crash)
+        code = """
+import torch
+x = torch.ones(1 << 20, device="cuda")
+pred = torch.ones((), device="cuda", dtype=torch.bool)
+def fn():
+    y = x * 2
+    g = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+    g.begin_capture_to_if_node(pred)
+    z = y + 1
+    y.add_(z)
+    g.end_capture_to_conditional_node()
+    return y * 2
+fn_eager = lambda: x * 2
+fn_eager()
+torch.cuda.synchronize()
+try:
+    torch.cuda.MemoryPlannedGraph(fn)()
+    print("NO ERROR")
+except Exception as e:
+    print("RAISED", str(e).splitlines()[0])
+"""
+        proc = self._run(code)
+        self.assertGreaterEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("RAISED", proc.stdout, msg=proc.stdout + proc.stderr)
+        self.assertIn("conditional node", proc.stdout)
 
     def test_requires_native_allocator(self):
         code = """
