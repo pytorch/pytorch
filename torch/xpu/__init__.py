@@ -141,8 +141,8 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     Enumerates devices from all Level Zero Sysman drivers and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
-    The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
-    device ordinal.
+    The populated ``_cached_zes_device_infos`` list is indexed by Level Zero
+    Sysman device ordinal (dGPU first); callers should match entries by UUID.
 
     Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
     dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
@@ -265,9 +265,7 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
 
     # Sort iGPUs to the end, then count only the visible ordinals.
     infos.sort(key=lambda info: info.is_integrated)
-    # device_count() may run this concurrently from several threads before XPU
-    # init, so publish the fully built list in one step instead of rebuilding
-    # the shared list in place.
+    # Atomic in-place update; readers never see a partially built list.
     _cached_zes_device_infos[:] = infos
     visible = set(visible_mask)
     num_igpu = 0
@@ -872,8 +870,8 @@ def _get_zes_device_info(device: Device = None) -> _ZesDeviceInfo:
 
     device = _get_device_index(device, optional=True)
     uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
-    # Look up by UUID without reordering the shared list, which may be read
-    # concurrently from other threads.
+    # Match by UUID since Sysman and SYCL may enumerate devices in different
+    # orders. The list is read-only here so that lock-free access stays safe.
     for info in _cached_zes_device_infos:
         if info.uuid == uuid:
             return info
