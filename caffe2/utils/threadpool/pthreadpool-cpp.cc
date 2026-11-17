@@ -90,7 +90,7 @@ PThreadPool* pthreadpool(size_t thread_count) {
     pthread_atfork(nullptr, nullptr, child_atfork);
   });
 #endif
-  if (C10_UNLIKELY(leak_corrupted_threadpool)) {
+  if (leak_corrupted_threadpool) [[unlikely]] {
     leak_corrupted_threadpool = false;
     if (auto leaked = threadpool.release()) {
       auto num_threads = leaked->get_thread_count();
