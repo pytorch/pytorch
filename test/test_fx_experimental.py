@@ -1,6 +1,7 @@
 # Owner(s): ["module: fx"]
 # ruff: noqa: F841
 
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 import functools
 import math
 import numbers
@@ -2511,6 +2512,8 @@ if TEST_Z3:
 
 instantiate_parametrized_tests(TestFXExperimental)
 instantiate_device_type_tests(TestNormalizeOperators, globals(), only_for="cpu")
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

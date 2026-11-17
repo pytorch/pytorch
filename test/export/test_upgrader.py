@@ -3,6 +3,7 @@
 import json
 
 import torch
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
@@ -280,6 +281,8 @@ class TestUpgrader(TestCase):
         self.assertIn("outputs", graph)
         self.assertIn("nodes", graph)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

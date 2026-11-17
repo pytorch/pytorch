@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
-# Owner(s): ["oncall: export"]
 import io
 import math
 import operator
@@ -51,6 +50,9 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+# Owner(s): ["oncall: export"]
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_MACOS,
@@ -1828,6 +1830,8 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

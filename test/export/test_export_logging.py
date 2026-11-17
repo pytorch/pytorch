@@ -7,6 +7,7 @@ import tempfile
 import textwrap
 
 import torch
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -77,6 +78,8 @@ class TestExportLogging(TestCase):
             "strict=False, pre_dispatch=False)"
         )
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

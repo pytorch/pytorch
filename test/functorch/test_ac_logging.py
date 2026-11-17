@@ -8,6 +8,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch.fx import Graph, Node
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -180,6 +181,8 @@ class TestAcLogging(TestCase):
 
         mock_json_dumps.assert_called_once()
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

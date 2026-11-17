@@ -4,6 +4,7 @@ import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 from torch.backends.cuda import can_use_flash_attention, SDPAParams
 from torch.nn.attention import _cur_sdpa_kernel_backends, sdpa_kernel, SDPBackend
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class TestSDPA(torch._dynamo.test_case.TestCase):
@@ -132,6 +133,8 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         self.assertEqual(result.shape, x.shape)
         self.assertEqual(counter.frame_count, 1)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -17,6 +17,7 @@ from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
 from torch._dynamo.utils import counters
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -3272,6 +3273,8 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
 instantiate_parametrized_tests(DecoratorTests)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -1,6 +1,7 @@
 # Owner(s): ["module: ProxyTensor"]
 # ruff: noqa: F841
 
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2473,6 +2474,8 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
             )
 
 instantiate_device_type_tests(TestUnbackedSymbolicTracingDevice, globals(), except_for="cpu")
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == '__main__':
     run_tests()

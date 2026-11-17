@@ -14,6 +14,7 @@ import torch
 import torch._dynamo
 from torch._dynamo.bytecode_debugger import debug
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class InteractiveDebugSession:
@@ -1399,6 +1400,8 @@ Stack (TOS at end):
         self.assertEqual(r1, inp + 1)
         self.assertEqual(r2, inp * 2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

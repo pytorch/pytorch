@@ -11,6 +11,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -1452,6 +1453,8 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ByteArrayTest)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

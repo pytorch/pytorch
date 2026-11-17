@@ -4,6 +4,7 @@ import operator
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
@@ -236,6 +237,8 @@ class TestNbMatrixMultiply(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(a, b), fn(a, b))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

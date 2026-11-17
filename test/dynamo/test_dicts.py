@@ -26,6 +26,7 @@ from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -5022,6 +5023,8 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(DictGuardTests)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
