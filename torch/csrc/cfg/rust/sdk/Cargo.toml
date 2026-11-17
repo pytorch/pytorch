@@ -1,0 +1,9 @@
+[package]
+name = "torch-rewrite-pass"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Passes for torch.rewrite, written in Rust and loaded from a library of one's own"
+
+[lib]
+name = "torch_rewrite_pass"

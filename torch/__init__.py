@@ -138,6 +138,7 @@ __all__ = [
     "no_grad",
     "rand",
     "randn",
+    "rewrite",
     "save",
     "seed",
     "set_default_device",
@@ -3386,7 +3387,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import compiler as compiler, fx as fx
+from torch import compiler as compiler, fx as fx, rewrite as rewrite
 
 
 class _TritonLibrary:
