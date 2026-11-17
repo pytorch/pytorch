@@ -10,6 +10,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -132,6 +133,8 @@ class TestMemoryTracker(TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -88,6 +88,7 @@ from torch.testing._internal.common_dtype import (
     highest_precision_complex,
     highest_precision_float,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,
     skip_if_no_torchvision,
@@ -13800,6 +13801,8 @@ class TestCppWrapperFallbackProfiling(TestCase):
 
 common_utils.instantiate_parametrized_tests(TestCppWrapperFallbackProfiling)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

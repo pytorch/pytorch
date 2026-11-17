@@ -92,6 +92,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     PYTORCH_CUDA_MEMCHECK,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
@@ -21806,6 +21807,8 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 got = torch.compile(fn, backend=backend, fullgraph=True)(a, b)
                 self.assertEqual(got, expected)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

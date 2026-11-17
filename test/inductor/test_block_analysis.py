@@ -6,6 +6,7 @@ import torch
 from torch._inductor.codegen.block_analysis import BlockPatternMatcher
 from torch._inductor.utils import sympy_dot
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -143,6 +144,8 @@ class BlockAnalysisTest(TestCase):
                         )
                     )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

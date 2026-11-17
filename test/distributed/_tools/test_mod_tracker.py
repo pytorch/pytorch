@@ -4,6 +4,7 @@ from copy import copy
 
 import torch
 from torch.distributed._tools.mod_tracker import ModTracker
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -205,6 +206,8 @@ class TestModTracker(TestCase):
         ]
         self.assertEqual(test_op, expected_op)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

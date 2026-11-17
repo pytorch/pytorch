@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -335,6 +336,8 @@ fn = functools.partial(my_fn, scale=2)
             self.assertTrue(same(compiled(x), x + 2))
             self.assertEqual(mod.flag, 2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

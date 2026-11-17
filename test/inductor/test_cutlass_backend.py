@@ -14,6 +14,7 @@ from enum import Enum
 from pathlib import Path
 
 import torch
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 _CUTLASS_DIR_ENV_VAR = "TORCHINDUCTOR_CUTLASS_DIR"
@@ -3108,6 +3109,8 @@ class TestCutlassBackend(TestCase):
             f"Got counts: {config_counts}",
         )
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

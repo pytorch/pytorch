@@ -19,6 +19,7 @@ from torch._inductor.virtualized import NullHandler, V
 from torch.autograd import DeviceType
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -272,6 +273,8 @@ class TestReinterpretView(TestCase):
 
         self.assertEqual(str(result), expected)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests(device_type)

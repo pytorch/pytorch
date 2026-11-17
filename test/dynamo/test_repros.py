@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 """
 
-# Owner(s): ["module: dynamo"]
 import collections
 import contextlib
 import copy
@@ -74,6 +73,9 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
+
+# Owner(s): ["module: dynamo"]
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -10920,6 +10922,8 @@ devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
     ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
 )
+instantiate_fake_tensor_tests(globals())
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

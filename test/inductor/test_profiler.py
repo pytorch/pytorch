@@ -12,6 +12,7 @@ import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
 from torch.profiler import ProfilerActivity, record_function
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -386,6 +387,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             ignore_empty_lines=True,
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

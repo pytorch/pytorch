@@ -8,6 +8,7 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 from torch._C import FileCheck
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device
 
@@ -261,6 +262,8 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
 instantiate_parametrized_tests(DeviceToAtenTests)
 instantiate_parametrized_tests(ExtensionBackendTests)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -4,6 +4,7 @@ import sys
 
 import torch
 import torch.distributed as dist
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 if not dist.is_available() or (
@@ -198,6 +199,8 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         dist.barrier()
         dist.destroy_process_group()
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

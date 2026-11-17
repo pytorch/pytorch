@@ -51,6 +51,7 @@ from torch.testing._internal.common_dtype import (
     highest_precision_float,
     integral_types_and,
 )
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_methods_invocations import (
     BinaryUfuncInfo,
     op_db,
@@ -537,6 +538,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
+    @fake_tensor_test()
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -822,6 +824,7 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
+    @fake_tensor_test()
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -2997,29 +3000,6 @@ fake_op_db = [
     and "sparse" not in op.full_name
     and "jiterator" not in op.full_name
 ]
-# CPU OpInfos whose samples are supported by the initial C++ fake fallback.
-cpp_fake_ops = {
-    "abs",
-    "acos",
-    "add",
-    "ceil",
-    "clone",
-    "cos",
-    "exp",
-    "floor",
-    "isinf",
-    "log",
-    "mean",
-    "mul",
-    "neg",
-    "nn.functional.silu",
-    "sin",
-    "sqrt",
-    "sub",
-    "t",
-    "transpose",
-    "view_as_real",
-}
 
 
 @unMarkDynamoStrictTest
@@ -3043,11 +3023,6 @@ class TestFakeTensor(TestCase):
         self.addCleanup(cache_crosscheck.stop)
 
     def _test_fake_helper(self, device, dtype, op, context):
-        if torch._dynamo.config.use_cpp_fake_tensor:
-            if TEST_WITH_TORCHDYNAMO:
-                self.skipTest("Dynamo does not support C++ fakes as inputs yet")
-            if torch.device(device).type != "cpu" or op.name not in cpp_fake_ops:
-                self.skipTest("not yet covered by the C++ fake fallback tests")
         name = op.name
         if op.variant_test_name:
             name += "." + op.variant_test_name
@@ -3155,6 +3130,7 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
+    @fake_tensor_test()
     @skipOps(
         {
             skip("bmm", variant_name="triton_optimized"),
@@ -3214,6 +3190,7 @@ class TestFakeTensor(TestCase):
                 with mode:
                     op(input, *args, **kwargs)
 
+    @fake_tensor_test()
     @skipOps(
         {
             xfail("item"),
@@ -3226,6 +3203,7 @@ class TestFakeTensor(TestCase):
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
+    @fake_tensor_test()
     @skipOps(
         {
             xfail("item"),
@@ -3285,6 +3263,7 @@ class TestFakeTensor(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
+    @fake_tensor_test()
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
@@ -3293,6 +3272,7 @@ class TestFakeTensor(TestCase):
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
+    @fake_tensor_test()
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
@@ -3303,6 +3283,7 @@ class TestFakeTensor(TestCase):
             device, dtype, op, partial(torch.amp.autocast, device_type=device)
         )
 
+    @fake_tensor_test()
     @ops([op for op in ops_and_refs if op.is_factory_function])
     def test_strided_layout(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)

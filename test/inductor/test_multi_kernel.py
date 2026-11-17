@@ -16,6 +16,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -529,6 +530,8 @@ class MultiKernelTest(TestCase):
         make_cpp_wrapper_test(test_reduction_scratch_buffer, force_multi_kernel=3)
     )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

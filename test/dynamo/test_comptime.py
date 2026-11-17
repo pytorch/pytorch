@@ -9,6 +9,7 @@ from io import StringIO
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -473,6 +474,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(probe.calls, 1)
         self.assertEqual(probe.ctx_type, "ComptimeContext")
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

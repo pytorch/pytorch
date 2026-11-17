@@ -13,6 +13,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 def _multiply(x):
@@ -314,6 +315,8 @@ class GraphModule(torch.nn.Module):
                 with compiled_autograd._enable(compiler_fn):
                     out.backward(grad_out)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

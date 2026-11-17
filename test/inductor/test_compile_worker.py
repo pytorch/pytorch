@@ -30,6 +30,7 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1582,6 +1583,8 @@ class TestTritonCompileWorker(TestCase):
             with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
                 triton_helpers.set_driver_to_gpu()
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

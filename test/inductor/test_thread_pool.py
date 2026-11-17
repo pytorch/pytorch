@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import torch._inductor.config as config
 from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class TestThreadPool(TestCase):
@@ -45,6 +46,8 @@ class TestThreadPool(TestCase):
         config.compile_worker_mode = "process"
         self.assertFalse(AsyncCompile.should_use_thread_workers())
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

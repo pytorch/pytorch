@@ -5,6 +5,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
 from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -114,6 +115,8 @@ class TestMetrics(TestCase):
             metrics._parse_kernel_args_num_gb(kernel_code, "pointwise"), 2.0
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_GPU:

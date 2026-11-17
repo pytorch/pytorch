@@ -11,6 +11,8 @@ import warnings
 from types import ModuleType
 from unittest.mock import patch
 
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
+
 
 os.environ["ENV_TRUE"] = "1"
 os.environ["ENV_FALSE"] = "0"
@@ -1332,6 +1334,7 @@ class TestConfigImplications(TestCase):
                 self.assertEqual(cfg.unrelated, 1)
             jk.assert_not_called()
 
+    @fake_tensor_test()
     def test_live_justknob_updates_cache(self):
         import torch
         from torch._guards import tracing, TracingContext

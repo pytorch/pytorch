@@ -22,6 +22,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     add_skip_condition,
     HardwareClassification,
@@ -2681,6 +2682,8 @@ if RUN_CPU:
             dtype=torch.float32,
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if IS_LINUX:

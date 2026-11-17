@@ -18,6 +18,7 @@ import torch
 from torch._inductor.codegen.common import InplacedBuffer, REMOVED
 from torch._inductor.codegen.triton import triton_store_type
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -106,6 +107,8 @@ class TestBlockPtrStoreDtype(TestCase):
         self.assertEqual(result, torch.bfloat16)
         self.assertEqual(triton_store_type(result), "tl.bfloat16")
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

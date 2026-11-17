@@ -5,6 +5,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import allow_in_graph
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 device_type = (
@@ -79,6 +80,8 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn_opt(x), fn_opt_traceable(x))
         self.assertEqual(cnts.frame_count, 2)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

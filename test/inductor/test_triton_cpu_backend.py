@@ -3,6 +3,7 @@ import unittest
 
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
 
 
@@ -79,6 +80,8 @@ if HAS_CPU and TRITON_HAS_CPU:
             unittest.skip("Triton CPU: slow test")(getattr(CpuTritonTests, name)),
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_CPU and TRITON_HAS_CPU:

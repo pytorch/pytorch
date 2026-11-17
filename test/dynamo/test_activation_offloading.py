@@ -17,6 +17,7 @@ from torch._dynamo.graph_bytecode_inputs import reset_user_object_tracking
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -763,6 +764,8 @@ def forward(self, add, cpu_offload_add_1, add_3, tangents_1):
                 atol=1e-5,
             )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_GPU:

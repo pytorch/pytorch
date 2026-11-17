@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.fx.graph_module import GraphModule
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -555,6 +556,8 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         inp = torch.randn(5, 5)
         self.check_export_matches_expectation(mod, 1, (inp,))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

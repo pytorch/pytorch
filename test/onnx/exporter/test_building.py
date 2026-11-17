@@ -10,6 +10,7 @@ import onnxscript
 import torch
 from torch.onnx._internal.exporter import _building, _tensors
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -139,6 +140,8 @@ class TestOpRecorder(common_utils.TestCase):
         self.assertEqual(tracer.nodes[-2].op_type, "Concat")
         self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

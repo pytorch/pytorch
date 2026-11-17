@@ -63,6 +63,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
 )
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     HardwareClassification,
@@ -5900,6 +5901,8 @@ instantiate_device_type_tests(
     only_for=only_for,
     allow_xpu=True,
 )
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()
