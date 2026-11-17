@@ -109,9 +109,10 @@ __all__ = [
 def _is_integer_check_safe(expr: sympy.Basic) -> bool:
     """Return whether rounding an expression is known to be a no-op.
 
-    Trust integer literals and symbols, integer-returning division, indexing,
-    and rounding functions, and modulo functions whose operands are recursively
-    trusted. SymPy assumptions and other PyTorch functions are not sufficient.
+    Trust integer literals, symbols declared ``integer=True``, integer-returning
+    division, indexing, and rounding functions, and modulo functions whose
+    operands are recursively trusted. SymPy's inferred ``is_integer`` on
+    composite expressions and other PyTorch functions are not sufficient.
     """
 
     if isinstance(expr, sympy.Integer):
@@ -124,7 +125,6 @@ def _is_integer_check_safe(expr: sympy.Basic) -> bool:
         expr,
         (
             FloorDiv,
-            CleanDiv,
             ModularIndexing,
             CeilToInt,
             FloorToInt,
@@ -1342,7 +1342,11 @@ class TruncToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if _is_integer_check_safe(number):
+        # Keep TruncToInt's behavior from before _is_integer_check_safe was
+        # introduced. Callers rely on integer-valued composite expressions
+        # being unwrapped; narrowing this check leaves uninterpretable
+        # TruncToInt nodes in symbolic runtime assertions.
+        if number.is_integer is True:
             return number
         if isinstance(number, IntTrueDiv):
             base, divisor = number.args

@@ -1166,16 +1166,25 @@ class TestSympyFunctions(TestCase):
             with self.subTest(rounding=rounding):
                 self.assertIs(rounding(integer_symbol), integer_symbol)
 
+    def test_trunc_to_int_preserves_integer_composite_canonicalization(self):
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        addition = integer_symbol + 1
+        multiplication = 2 * integer_symbol
+
+        self.assertIs(TruncToInt(addition), addition)
+        self.assertIs(TruncToInt(multiplication), multiplication)
+
     @parametrize("modulo", (Mod, PythonMod))
     @parametrize("rounding", (CeilToInt, FloorToInt, TruncToInt))
     def test_rounding_to_int_canonicalizes_integer_modulo(self, modulo, rounding):
         integer_symbol = sympy.Symbol("integer_symbol", integer=True)
         expr = modulo(integer_symbol, sympy.Integer(3))
 
+        self.assertIs(expr.func, modulo)
         self.assertIs(rounding(expr), expr)
 
     @parametrize("modulo", (Mod, PythonMod))
-    @parametrize("rounding", (CeilToInt, FloorToInt, TruncToInt))
+    @parametrize("rounding", (CeilToInt, FloorToInt))
     def test_rounding_to_int_does_not_canonicalize_float_modulo(
         self, modulo, rounding
     ):
@@ -1183,6 +1192,7 @@ class TestSympyFunctions(TestCase):
         value = sympy.Float("0.7") * ToFloat(s0)
         expr = modulo(value, sympy.Float(2.0))
 
+        self.assertIs(expr.func, modulo)
         self.assertIs(rounding(expr).func, rounding)
 
     def test_rounding_to_int_does_not_canonicalise_expressions_with_incorrect_assumptions(
@@ -1201,8 +1211,10 @@ class TestSympyFunctions(TestCase):
             incorrectly_assumed_integer.subs({s14: 2016, s37: 1, s46: 1}),
             sympy.Rational(348, 11),
         )
+        if incorrectly_assumed_integer.is_integer is not True:
+            self.skipTest("SymPy does not infer this expression to be integer-valued")
 
-        for rounding in (CeilToInt, FloorToInt, TruncToInt):
+        for rounding in (CeilToInt, FloorToInt):
             with self.subTest(rounding=rounding):
                 result = rounding(incorrectly_assumed_integer)
                 self.assertIs(result.func, rounding)

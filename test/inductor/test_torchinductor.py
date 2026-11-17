@@ -15877,6 +15877,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @parametrize("prefer_nd_tiling", [False, True])
     def test_index_dynamic_shapes(self, prefer_nd_tiling):
+        if prefer_nd_tiling and not is_triton_backend(self.device):
+            self.skipTest("prefer_nd_tiling requires a Triton backend")
+
         # Repro from vision_maskrcnn
         def fn(arg0_1):
             unsqueeze = arg0_1.unsqueeze(0)

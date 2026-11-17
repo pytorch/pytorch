@@ -29,6 +29,7 @@ from torch._inductor.runtime.triton_helpers import (
     randn4x,
     rounding_to_int,
     select_one,
+    trunc_to_float,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
@@ -176,6 +177,17 @@ if HAS_GPU:
         tl.store(result_ptr + offsets, result)
 
     @triton.jit
+    def test_kernel_trunc_to_float(
+        x_ptr,
+        result_ptr,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        x = tl.load(x_ptr + offsets)
+        result = trunc_to_float(x, tl.float32)
+        tl.store(result_ptr + offsets, result)
+
+    @triton.jit
     def test_kernel_online_softmax_combine(
         a_ptr,
         b_ptr,
@@ -230,6 +242,16 @@ class RoundingToIntTest(TestCase):
             x, result, BLOCK_SIZE=x.numel(), ROUNDING=rounding_type
         )
         self.assertEqual(result, rounding_fn(x).to(torch.int64))
+
+    @dtypes(torch.int32, torch.int64, torch.float32)
+    def test_trunc_to_float_integer_and_float_inputs(self, device, dtype) -> None:
+        values = [-3.75, -2.0, -1.0, -0.0, 0.0, 1.0, 2.0, 3.75]
+        x = torch.tensor(values, dtype=dtype, device=device)
+        result = torch.empty(x.numel(), dtype=torch.float32, device=device)
+        test_kernel_trunc_to_float[(1,)](x, result, BLOCK_SIZE=x.numel())
+
+        expected = torch.trunc(x.to(torch.float32)) + torch.zeros_like(result)
+        self.assertEqual(result.view(torch.int32), expected.view(torch.int32))
 
 
 class OnlineSoftmaxCombineTest(TestCase):

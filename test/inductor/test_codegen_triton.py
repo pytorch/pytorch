@@ -1438,7 +1438,7 @@ def helper(x):
                 "triton_helpers.rounding_to_int(2*triton_helpers.rounding_to_int(x, tl.int32, 'floor'), tl.int32, 'ceil')",
             )
 
-    def test_trunc_to_float_printer_dispatches_integer_input(self):
+    def test_trunc_to_float_printer_uses_helper(self):
         expr = TruncToFloat(sympy.Symbol("x", integer=True))
         with patch(
             "torch._inductor.codegen.triton.TritonPrinter._get_scalar_float_type",
