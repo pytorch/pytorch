@@ -3056,8 +3056,8 @@ def _xpu_descriptor_operands_compatible(matrices: Sequence[IRNode]) -> bool:
 
 def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
     """Whether the XPU mm templates may take this BF16/FP16 mm.
-    Gated to Xe2 or later by the device-ID table in common_xpu (currently BMG only,
-    where the configs were tuned); other devices keep the default templates."""
+    Gated to Xe2 or later by the device-ID table in torch.xpu._utils (currently
+    BMG only, where the configs were tuned); other devices keep the default templates."""
     if not matrices or not config.triton.enable_xpu_mm_templates:
         return False
     if layout.device.type != "xpu" or layout.dtype not in (
@@ -3065,11 +3065,10 @@ def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
         torch.float16,
     ):
         return False
-    from torch.testing._internal.common_xpu import get_xpu_arch, XPUArch
     from torch.utils._triton import has_triton_stable_tma_api
+    from torch.xpu._utils import get_xpu_arch, XPUArch
 
-    arch = get_xpu_arch()
-    if not has_triton_stable_tma_api() or arch is None or arch < XPUArch.Xe2:
+    if not has_triton_stable_tma_api() or get_xpu_arch() < XPUArch.Xe2:
         return False
     return _xpu_descriptor_operands_compatible(matrices)
 
