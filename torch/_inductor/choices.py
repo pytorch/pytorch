@@ -495,9 +495,9 @@ class InductorChoices:
         use_native_matmul() in kernel/mm_common.py asks this while lowering mm,
         bmm, addmm, baddbmm and mm_plus_mm, only about matmuls it can lower
         natively. A dot cannot go back to the extern kernel: the device's
-        scheduling emits it. This default leaves it to Triton's native matmul
-        codegen, so it declines other backends (config.cuda_backend "halide"),
-        the dtypes tl.dot does not take (float64) and dims of size 1.
+        scheduling emits it. This default decides for Triton's native matmul
+        codegen; another backend (config.cuda_backend) overrides it in its own
+        InductorChoices.
         """
         if not config.triton.native_matmul:
             return False
