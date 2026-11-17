@@ -93,12 +93,8 @@ def _map_nested_region(body):
 _add_captured_sizes = _map_nested_region(lambda x, holder: x + holder.tensor.shape[0])
 
 
-class _ReuseTensorHolder:
-    def __init__(self, tensor):
-        self.tensor = tensor
-
-
-_lexical_holder = _ReuseTensorHolder(None)
+_GUARD_OBSERVATIONS = ("scalar", "callback", "shape", "order")
+_lexical = SimpleNamespace(tensor=None)
 
 
 class _ReuseGuardHolder:
@@ -1459,16 +1455,13 @@ class GraphModule(torch.nn.Module):
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, l_y_);  subgraph_1 = getitem = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, l_y_);  getitem = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        subgraph_2 = self.subgraph_0
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', getitem_1, l_y_);  subgraph_2 = getitem_1 = None
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem_1, l_y_);  getitem_1 = None
         getitem_2: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
-        subgraph_3 = self.subgraph_0
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_3, 'subgraph_0', getitem_2, l_y_);  subgraph_3 = getitem_2 = None
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem_2, l_y_);  getitem_2 = None
         getitem_3: "f32[8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
-        subgraph_4 = self.subgraph_0
-        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_4, 'subgraph_0', getitem_3, l_y_);  subgraph_4 = getitem_3 = l_y_ = None
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem_3, l_y_);  subgraph_1 = getitem_3 = l_y_ = None
         getitem_4: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
         return (getitem_4,)
 
@@ -3758,52 +3751,64 @@ class TestInvokeSubgraphReuse(TestCase):
             yield check
 
     def test_reused_region_dependency_walks_are_shared(self):
-        @_map_nested_region
-        def mapped(x, holder):
-            return x * holder.scale + holder.shape_only.shape[0]
+        class Holder:
+            scale, other = 2, 3
+
+        mapped = _map_nested_region(lambda x, h: x * h.scale + h.tensor.shape[0])
 
         def fn(x, holders):
-            return mapped(x, holders), holders[-1].shape_only.sin()
+            observed = holders[1].scale + holders[1].other
+            return mapped(x, holders), holders[-1].tensor.sin(), observed
 
-        guard_type = torch._guards.Guard
-        original = guard_type.source_dependencies
-        original_remap = guard_type.remap_sources
+        guard = torch._guards.Guard
+        deps = guard.source_dependencies
+        remap_sources = guard.remap_sources
 
         def remap(guard, replace):
-            result = original_remap(guard, replace)
+            result = remap_sources(guard, replace)
             self.assertIsNot(result, guard)
             self.assertNotEqual(guard.create_fn_name(), "TENSOR_MATCH")
             return result
 
-        holders = [_ReuseGuardHolder() for _ in range(9)]
-        holders[-1].shape_only = holders[-2].shape_only
+        holders = [Holder() for _ in range(9)]
+        for h in holders:
+            h.tensor = torch.ones(2)
+        holders[-1].tensor = holders[-2].tensor
+        exported = []
         x = torch.ones(1)
         with (
             mock.patch.object(
-                guard_type, "source_dependencies", autospec=True, side_effect=original
+                guard, "source_dependencies", autospec=True, side_effect=deps
             ) as walks,
-            mock.patch.object(guard_type, "remap_sources", remap),
-            self._trace_reuse(fn) as run,
+            mock.patch.object(guard, "remap_sources", remap),
+            self._trace_reuse(fn, guard_export_fn=exported.extend) as run,
         ):
             run(x, holders, traces=1)
+            holders[1].unread = 9
             run(x, holders, frames=1)
-            self.assertGreater(walks.call_count, 0)
-            unique = {id(call.args[0]) for call in walks.call_args_list}
-            self.assertEqual(walks.call_count, len(unique))
-            holders[-1].shape_only = holders[-1].shape_only.clone()
+            self.assertTrue(walks.called)
+            walked = [id(c.args[0]) for c in walks.call_args_list]
+            self.assertEqual(len(walked), len(set(walked)))
+            for i in range(len(holders)):
+                guards = [g for g in exported if g.name == f"L['holders'][{i}]"]
+                names = [g.create_fn_name() for g in guards]
+                self.assertEqual(names.count("TYPE_MATCH"), 1)
+                attrs = [
+                    g.create_fn.keywords["attr"]
+                    for g in guards
+                    if g.create_fn_name() == "NOT_PRESENT_IN_GENERIC_DICT"
+                ]
+                self.assertEqual(attrs.count("scale"), 1)
+                self.assertEqual(attrs.count("other"), int(i == 1))
+            holders[-1].tensor = holders[-1].tensor.clone()
             run(x, holders, frames=2)
             holders[-1].scale += 1
             run(x, holders, frames=3)
 
     @parametrize(
         "target,kind",
-        [
-            *product(
-                ("direct", "nested_first", "nested_second"),
-                ("scalar", "callback", "shape", "order"),
-            ),
-            ("in_trace", "scalar"),
-        ],
+        list(product(("direct", "nested_first", "nested_second"), _GUARD_OBSERVATIONS))
+        + [("in_trace", "scalar")],
     )
     def test_reused_region_runtime_guard(self, target, kind):
         @nested_compile_region
@@ -3867,18 +3872,15 @@ class TestInvokeSubgraphReuse(TestCase):
     @torch._dynamo.config.patch(force_parameter_static_shapes=False)
     @parametrize(
         "policy,preload",
-        [
-            *product(("dynamic", "maybe"), (False, True)),
-            ("automatic", False),
-            ("parameter", False),
-        ],
+        list(product(("dynamic", "maybe"), (False, True)))
+        + [("automatic", False), ("parameter", False)],
     )
     def test_reused_region_static_to_dynamic_capture(self, policy, preload):
         def holder(size):
             value = torch.ones(size)
-            return _ReuseTensorHolder(
-                torch.nn.Parameter(value) if policy == "parameter" else value
-            )
+            if policy == "parameter":
+                value = torch.nn.Parameter(value)
+            return SimpleNamespace(tensor=value)
 
         def fn(x, holders):
             observed = holders[1].tensor.shape[0] if preload else None
@@ -3902,30 +3904,26 @@ class TestInvokeSubgraphReuse(TestCase):
     def test_reused_region_shape_predicate(self, kind):
         shape_env = ShapeEnv()
         old = sympy.Symbol("cached", integer=True)
-        current = shape_env.create_unbacked_symint().node.expr
-        shape_env.constrain_symbol_range(current, compiler_min=0, compiler_max=9)
+        dim = shape_env.create_unbacked_symint().node.expr
+        shape_env.constrain_symbol_range(dim, compiler_min=0, compiler_max=9)
         predicate = sympy.Ge(old, 0) if kind == "bounded" else sympy.Eq(old, 1)
         if kind == "division":
             predicate = sympy.Eq(FloorDiv(8, old), 2)
-        condition = torch._guards.InvokeSubgraphReuseCondition([], [], [])
+        condition = reuse.InvokeSubgraphReuseCondition([], {})
         entry = SimpleNamespace(
             arg_sources=[], subgraph_input_mapping=[], shape_guards=[(predicate, False)]
         )
         replacements = {source.LocalSource("old"): source.LocalSource("new")}
         match = reuse.SubgraphReuseMatch(entry, replacements, {}, condition)
-        match.symbol_replacements[old] = (
-            current if kind in ("bounded", "unbacked") else 0
-        )
+        match.symbol_replacements[old] = dim if kind in ("bounded", "unbacked") else 0
         tx = SimpleNamespace(output=mock.Mock(shape_env=shape_env))
         tx.output.side_effects.mutated_sources = set()
+        inputs = reuse.InputFingerprint([], [])
         with mock.patch.object(reuse.hc_log, "debug") as log:
-            reusable = reuse.is_reusable(
-                tx, condition, reuse.InputFingerprint([], []), match
-            )
-            self.assertEqual(reusable, kind == "bounded")
+            accepted = reuse.is_reusable(tx, condition, inputs, match)
+        self.assertEqual(accepted, kind == "bounded")
         self.assertFalse(match.pending_shape_guards)
-        if kind != "bounded":
-            self.assertTrue(log.called)
+        self.assertEqual(log.called, not accepted)
 
     @parametrize("prebuilt", [False, True])
     def test_reused_region_shared_capture_symbol(self, prebuilt):
@@ -3942,9 +3940,9 @@ class TestInvokeSubgraphReuse(TestCase):
             size = x.shape[0] if prebuilt else 2 * holders[1].tensor.shape[0]
             return x + 100 if outputs[1].shape[0] == size else x - 100
 
-        x, fixed = torch.ones(1), _ReuseTensorHolder(torch.ones(5))
+        x, fixed = torch.ones(1), SimpleNamespace(tensor=torch.ones(5))
         first = _dynamic_capture(5) if prebuilt else torch.ones(5)
-        holders = [_ReuseTensorHolder(first), _ReuseTensorHolder(_dynamic_capture(5))]
+        holders = [SimpleNamespace(tensor=t) for t in (first, _dynamic_capture(5))]
         with self._trace_reuse(fn, dynamic=True) as run:
             for size in (5, 7):
                 holders[1].tensor = _dynamic_capture(size)
@@ -3992,13 +3990,13 @@ class TestInvokeSubgraphReuse(TestCase):
             return x + holder.tensor.sum()
 
         x = torch.ones(1)
-        holders = [_ReuseTensorHolder(_dynamic_capture(5)) for _ in range(2)]
+        holders = [SimpleNamespace(tensor=_dynamic_capture(5)) for _ in range(2)]
 
         def reject(tx, match, *args):
-            self.assertEqual(len(match.pending_shape_guards), 2)
-            installed = [guard.expr for guard in tx.output.shape_env.guards]
-            for predicate, _ in match.pending_shape_guards:
-                self.assertNotIn(predicate, installed)
+            ((predicate, oblivious),) = match.pending_shape_guards
+            self.assertFalse(oblivious)
+            self.assertEqual(predicate, next(iter(predicate.free_symbols)) < 6)
+            self.assertNotIn(predicate, [g.expr for g in tx.output.shape_env.guards])
             tensors = {vt.as_proxy().node for vt in match.captured_variables.values()}
             for node in tx.output.graph.find_nodes(op="call_method"):
                 if node.target in ("size", "stride", "storage_offset"):
@@ -4014,7 +4012,7 @@ class TestInvokeSubgraphReuse(TestCase):
             holders[-1].tensor.add_(3)
             run(x, holders)
             for size, frames in ((2, 1), (5, 1), (6, 2), (7, 2)):
-                holders[-1] = _ReuseTensorHolder(_dynamic_capture(size))
+                holders[-1] = SimpleNamespace(tensor=_dynamic_capture(size))
                 run(x, holders, frames=frames)
         if reject_candidate:
             self.assertTrue(policy_check.called)
@@ -4031,7 +4029,7 @@ class TestInvokeSubgraphReuse(TestCase):
             return outputs[0][0].shape[0] == outputs[1][0].shape[0], outputs
 
         n = 9 if second_capture == "independent" else 2
-        holders = [_ReuseTensorHolder(torch.ones(5)) for _ in range(n)]
+        holders = [SimpleNamespace(tensor=torch.ones(5)) for _ in range(n)]
         if second_capture in ("dynamic", "independent"):
             for holder in holders[1:]:
                 torch._dynamo.mark_dynamic(holder.tensor, 0)
@@ -4103,7 +4101,6 @@ class TestInvokeSubgraphReuse(TestCase):
 
     def test_reused_region_explicit_spec_parameter_captures(self):
         fn = _map_nested_region(lambda x, layer: x @ layer.weight)
-
         layers = [torch.nn.Linear(3, 3, bias=False) for _ in range(9)]
         shapes = {"x": TensorSpec([ShapeVar("batch"), 3])}
         with self._trace_reuse(fn, dynamic_shapes=shapes) as run:
@@ -4128,12 +4125,10 @@ class TestInvokeSubgraphReuse(TestCase):
             observed = tuple(obj.tensor.shape for obj in holders) if prebuilt else None
             return regions(x, holders), observed
 
-        sizes = (2, 3, 3) if prebuilt else (2, 2)
-        if kind == "iter":
-            sizes = (0, 3, 3)
-        elif kind == "type":
-            sizes = (2, 2, 2)
-        holders = [_ReuseTensorHolder(torch.ones(size)) for size in sizes]
+        sizes = {"iter": (0, 3, 3), "type": (2, 2, 2)}.get(
+            kind, (2, 3, 3) if prebuilt else (2, 2)
+        )
+        holders = [SimpleNamespace(tensor=torch.ones(size)) for size in sizes]
         if not prebuilt or kind == "type":
             for holder in holders[0 if kind == "parameter" else 1 :]:
                 holder.tensor = torch.nn.Parameter(holder.tensor, requires_grad=False)
@@ -4144,11 +4139,27 @@ class TestInvokeSubgraphReuse(TestCase):
             for _ in range(2):
                 run(x, holders, traces=traces, frames=1)
 
+    @parametrize("shape", [(1, 5), (2,)])
+    def test_reused_region_resize_captured_data(self, shape):
+        @nested_compile_region
+        def region(x, holder):
+            return x + holder.tensor.sin().shape[0]
+
+        def fn(x, first, second):
+            a = region(x, first)
+            second.tensor.data = torch.ones(shape)
+            return a, region(x, second)
+
+        x = torch.ones(1)
+        holders = [SimpleNamespace(tensor=torch.ones(5)) for _ in range(2)]
+        with self._trace_reuse(fn) as run:
+            run(x, *holders, traces=2, frames=1, expected=(x + 5, x + shape[0]))
+
     def test_reused_region_merged_capture_policy(self):
         x = torch.ones(1)
         with self._trace_reuse(_add_captured_sizes) as run:
             for size, traces, frames in ((2, 2, 1), (5, 5, 2), (7, 5, 2)):
-                holders = [_ReuseTensorHolder(torch.ones(n)) for n in (5, 2, size)]
+                holders = [SimpleNamespace(tensor=torch.ones(n)) for n in (5, 2, size)]
                 run(x, holders, traces=traces, frames=frames)
 
     def test_reused_region_automatic_capture_policy(self):
@@ -4156,7 +4167,7 @@ class TestInvokeSubgraphReuse(TestCase):
             op = (torch.sin, torch.cos, torch.square)[mode]
             return _add_captured_sizes(op(x), holders)
 
-        holders = [_ReuseTensorHolder(torch.ones(2)) for _ in range(2)]
+        holders = [SimpleNamespace(tensor=torch.ones(2)) for _ in range(2)]
         with self._trace_reuse(fn) as run:
             for mode, size in [(0, 2), (1, 3), (2, 2), (2, 5)]:
                 holders[1].tensor = torch.ones(size)
@@ -4194,12 +4205,9 @@ class TestInvokeSubgraphReuse(TestCase):
         with mock.patch.object(match, "resolve", return_value=tensor):
             self.assertTrue(reuse.is_reusable(tx, condition, args[1], match))
         evaluate.assert_called_once_with((tensor,) * 4, 4)
-        self.assertIn(extra.base, condition.guard_dependencies[0])
+        self.assertIn(extra.base, condition.guards[guard][2])
         self.assertEqual(condition.guard_on_key_order, set(mappings))
         self.assertIn(sources[1], condition.traced_sources)
-        condition.guard_dependencies.clear()
-        with self.assertRaisesRegex(ValueError, "zip"):
-            reuse.is_reusable(tx, condition, args[1], match)
 
         tx.output.resolve_source_value.side_effect = {sources[0]: tensor}.__getitem__
         with self.assertRaisesRegex(
@@ -4251,7 +4259,7 @@ class TestInvokeSubgraphReuse(TestCase):
 
         x = torch.ones(1)
         pairs = [
-            (_ReuseTensorHolder(x), _ReuseTensorHolder(x if alias else x * 3))
+            (SimpleNamespace(tensor=x), SimpleNamespace(tensor=x if alias else x * 3))
             for alias in (first, candidate)
         ]
         with self._trace_reuse(fn) as run:
@@ -4265,7 +4273,7 @@ class TestInvokeSubgraphReuse(TestCase):
         def region(a, b):
             return a.tensor + 3 * b.tensor + (10 if a is b else 20)
 
-        a, b, c = [_ReuseTensorHolder(torch.full((1,), n)) for n in (1, 2, 5)]
+        a, b, c = [SimpleNamespace(tensor=torch.full((1,), n)) for n in (1, 2, 5)]
         pairs = ((b, c), (a, a)) if reverse else ((a, a), (b, c))
         with self._trace_reuse(lambda pairs: tuple(region(*p) for p in pairs)) as run:
             run(pairs, traces=2)
@@ -4275,25 +4283,19 @@ class TestInvokeSubgraphReuse(TestCase):
         x, y = torch.ones(1), torch.full((1,), 3.0)
         captured = x
 
-        def matches(a):
-            return a is (captured if scope == "closure" else _lexical_holder.tensor)
-
         @nested_compile_region
         def region(a):
-            return a + (10 if matches(a) else 20)
+            other = captured if scope == "closure" else _lexical.tensor
+            return a + (10 if a is other else 20)
 
         def fn(x, y):
-            observed = (
-                (x.shape, _lexical_holder.tensor.shape)
-                if scope == "preloaded"
-                else None
-            )
-            return region(captured if scope == "closure" else x), region(y), observed
+            shapes = (x.shape, _lexical.tensor.shape) if scope == "preloaded" else None
+            return region(captured if scope == "closure" else x), region(y), shapes
 
-        self.enterContext(mock.patch.object(_lexical_holder, "tensor", x))
+        self.enterContext(mock.patch.object(_lexical, "tensor", x))
         with self._trace_reuse(fn) as run:
             run(x, y, traces=2)
-            captured = _lexical_holder.tensor = y
+            captured = _lexical.tensor = y
             run(x, y, frames=2)
 
     def test_reused_region_distinct_closures(self):
@@ -4314,40 +4316,10 @@ class TestInvokeSubgraphReuse(TestCase):
                 seen.append(1)
                 return torch.ones(5)
 
-        holders = [_ReuseTensorHolder(torch.ones(5)), Property()]
+        holders = [SimpleNamespace(tensor=torch.ones(5)), Property()]
         with self._trace_reuse(_add_captured_sizes) as run:
             run(torch.ones(1), holders, expected=(torch.full((1,), 6.0),) * 2, traces=2)
         self.assertEqual(seen, [1])
-
-    def test_reused_region_guard_payloads(self):
-        class Holder:
-            scale, other = 2, 3
-
-        mapped = _map_nested_region(lambda x, holder: x * holder.scale)
-
-        def fn(x, holders):
-            observed = holders[1].scale + holders[1].other
-            return mapped(x, holders), observed
-
-        saved = []
-        x, holders = torch.ones(1), [Holder() for _ in range(3)]
-        with self._trace_reuse(fn, guard_export_fn=saved.extend) as run:
-            run(x, holders, traces=1)
-            first = tuple(saved)
-            holders[1].unread = 9
-            run(x, holders, frames=1)
-            holders[2].scale = 4
-            run(x, holders, frames=2)
-        for index in range(3):
-            guards = [g for g in first if g.name == f"L['holders'][{index}]"]
-            self.assertEqual(sum(g.create_fn_name() == "TYPE_MATCH" for g in guards), 1)
-            attrs = [
-                g.create_fn.keywords["attr"]
-                for g in guards
-                if g.create_fn_name() == "NOT_PRESENT_IN_GENERIC_DICT"
-            ]
-            self.assertEqual(attrs.count("scale"), 1)
-            self.assertEqual(attrs.count("other"), int(index == 1))
 
     def test_reused_region_placeholder_order(self):
         @_map_nested_region
@@ -4366,12 +4338,10 @@ class TestInvokeSubgraphReuse(TestCase):
         with self._count_speculate_calls() as count:
             self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(count(), 1)
-        placeholders = backend.graphs[0].graph.find_nodes(op="placeholder")
-        names = [str(node.target) for node in placeholders]
+        names = [n.name for n in backend.graphs[0].graph.find_nodes(op="placeholder")]
         for index in range(2):
-            matched = [name for name in names if f"holders_{index}_" in name]
-            suffixes = [name.rsplit("_capture_", 1)[-1] for name in matched]
-            self.assertEqual(suffixes, list(map(str, range(12))))
+            matched = [n.rsplit("_", 1)[-1] for n in names if f"holders_{index}_" in n]
+            self.assertEqual(matched, list(map(str, range(12))))
 
     def test_subgraph_reuse_skips_tracing(self):
         @nested_compile_region
@@ -4903,11 +4873,10 @@ class GraphModule(torch.nn.Module):
         x: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
 
         subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', x, synthetic_local_tmp_2_);  subgraph_1 = x = synthetic_local_tmp_2_ = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', x, synthetic_local_tmp_2_);  x = synthetic_local_tmp_2_ = None
         x_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
-        subgraph_2 = self.subgraph_0
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', x_1, synthetic_local_tmp_4_);  subgraph_2 = x_1 = synthetic_local_tmp_4_ = None
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', x_1, synthetic_local_tmp_4_);  subgraph_1 = x_1 = synthetic_local_tmp_4_ = None
         x_2: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
         return (x_2,)
 
@@ -5006,10 +4975,9 @@ class GraphModule(torch.nn.Module):
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_self_modules_layers_modules_0_buffers_w_, s77, s27, l_x_);  subgraph_0 = l_self_modules_layers_modules_0_buffers_w_ = l_x_ = None
         x: "f32[s77, 8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_self_modules_layers_modules_1_buffers_w_, s77, s27, x);  subgraph_1 = l_self_modules_layers_modules_1_buffers_w_ = x = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_self_modules_layers_modules_1_buffers_w_, s77, s27, x);  l_self_modules_layers_modules_1_buffers_w_ = x = None
         x_1: "f32[s77, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        subgraph_2 = self.subgraph_0
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', l_self_modules_layers_modules_2_buffers_w_, s77, s27, x_1);  subgraph_2 = l_self_modules_layers_modules_2_buffers_w_ = s77 = s27 = x_1 = None
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_self_modules_layers_modules_2_buffers_w_, s77, s27, x_1);  subgraph_1 = l_self_modules_layers_modules_2_buffers_w_ = s77 = s27 = x_1 = None
         x_2: "f32[s77, 8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
         return (x_2,)
 
