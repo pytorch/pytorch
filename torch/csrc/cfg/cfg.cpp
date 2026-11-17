@@ -1988,7 +1988,7 @@ void initCfgBindings(PyObject* module) {
         pyop.kwnames = kwnames ? kwnames->ptr() : nullptr;
         pyop.callee = callee.is_none() ? nullptr : callee.ptr();
         pyop.result = result.ptr();
-        pyop.flags = skip_autograd ? TCFG_ALLOW_SKIP_AUTOGRAD : 0;
+        pyop.flags = skip_autograd ? uint32_t{TCFG_ALLOW_SKIP_AUTOGRAD} : 0U;
         std::string reason;
         std::unique_ptr<TcfgSite> site;
         if (trace) {
