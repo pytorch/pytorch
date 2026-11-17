@@ -151,14 +151,16 @@ struct TcfgApi {
   // Interpreter frames, so that whatever looks at the Python stack while a
   // compiled function runs (a traceback, a warning, sys._getframe, the module
   // a new class is attributed to) finds the function there. Both are null
-  // where the layout of CPython's frames is not known: anything but 3.12.
+  // where the layout of CPython's frames is not known: it is for 3.12, and
+  // for the default build of 3.14 on 64-bit platforms other than Windows.
   //
   // Pushes a frame for func, a Python function, and makes it the current
   // frame of the thread. *instr gets the address of the frame's instruction
   // pointer and *code that of the first instruction of the function's code,
   // so the caller can keep the pointer on what it is executing. *locals gets
-  // the frame's variables, one owned reference or null each, in the order of
-  // the code's co_localsplusnames: the caller keeps them what the variables
+  // the frame's variables, one owned reference or null each (in 3.14 as the
+  // stack reference that stands for it), in the order of the code's
+  // co_localsplusnames: the caller keeps them what the variables
   // of the function are bound to, the cells of the closure excepted, which
   // are there already. The frame counts as one Python call against the
   // recursion limit. *object gets the address of the frame's frame object,

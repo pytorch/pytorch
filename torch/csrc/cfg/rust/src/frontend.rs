@@ -1321,8 +1321,8 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     // A compiled function runs under a frame of the interpreter that has its
     // variables (see `Op::StoreLocal`), so what reads them there finds them:
     // `eval`, `exec`, `locals`, `vars`, `dir` and `super()` are calls like
-    // any other. Where compiled functions have no frame (anything but
-    // CPython 3.12) those are out of reach, as are the function's globals
+    // any other. Where compiled functions have no frame (see `frame_push`
+    // in cfg.h) those are out of reach, as are the function's globals
     // and walking the stack; `locals`, `vars` and `dir` are then supported
     // where they are called on the spot (see `Op::Locals`). That is about
     // the globals of these names; an attribute may be called what it likes.
