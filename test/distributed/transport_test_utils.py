@@ -1,6 +1,5 @@
 import asyncio
 import threading
-from datetime import timedelta
 
 import torch
 from torch.distributed._transport import MemoryView, MutableMemoryView, wait_all, Work
@@ -189,8 +188,7 @@ class TransportTestMixin:
     def _receive(self, transport, count=1):
         received = []
         while len(received) < count:
-            transport.wait_notifications().wait(timedelta(seconds=30))
-            received += transport.poll_notifications()
+            received += transport.wait_notifications(timeout=30)
         return received
 
     def test_notification_round_trip(self) -> None:
@@ -200,7 +198,7 @@ class TransportTestMixin:
             self.assertTrue(first.send_notification(second.peer_id, payload).wait())
             received = self._receive(second)
             self.assertEqual(received, [(first.peer_id, payload)])
-            self.assertEqual(second.poll_notifications(), [])
+            self.assertEqual(second.wait_notifications(timeout=0), [])
             second.send_notification(received[0].peer, b"ack").wait()
             self.assertEqual(self._receive(first), [(second.peer_id, b"ack")])
         finally:
@@ -257,7 +255,7 @@ class TransportTestMixin:
                 first.write(view[:0], remote, notification=b"x")
             first.send_notification(second.peer_id, b"after").wait()
             self.assertEqual(self._receive(second), [(first.peer_id, b"after")])
-            self.assertEqual(second.poll_notifications(), [])
+            self.assertEqual(second.wait_notifications(timeout=0), [])
         finally:
             first.close()
             second.close()
@@ -265,29 +263,100 @@ class TransportTestMixin:
     def test_wait_notifications(self) -> None:
         first, second = self._notification_pair()
         try:
-            work = second.wait_notifications()
-            self.assertFalse(work.is_completed())
-            with self.assertRaises(TimeoutError):
-                work.wait(timedelta(milliseconds=10))
+            self.assertEqual(second.wait_notifications(timeout=0), [])
+            self.assertEqual(second.wait_notifications(timeout=0.01), [])
+            received = []
+            waiter = threading.Thread(
+                target=lambda: received.extend(second.wait_notifications(timeout=30))
+            )
+            waiter.start()
             first.send_notification(second.peer_id, b"late").wait()
-            self.assertTrue(work.wait(timedelta(seconds=30)))
-            self.assertEqual(second.poll_notifications(), [(first.peer_id, b"late")])
+            waiter.join(30)
+            self.assertFalse(waiter.is_alive())
+            self.assertEqual(received, [(first.peer_id, b"late")])
 
-            first.send_notification(second.peer_id, b"asyncio").wait()
-            asyncio.run(wait_all([second.wait_notifications()], timeout=30))
-            self.assertEqual(self._receive(second), [(first.peer_id, b"asyncio")])
-
-            chained = second.wait_notifications().get_future().then(lambda _: None)
-            done = threading.Event()
-            chained.add_done_callback(lambda _: done.set())
-            first.send_notification(second.peer_id, b"chained").wait()
-            self.assertTrue(done.wait(30))
-            self.assertEqual(self._receive(second), [(first.peer_id, b"chained")])
-
-            pending = second.wait_notifications()
             second.close()
             with self.assertRaisesRegex(RuntimeError, "closed"):
-                pending.wait()
+                second.wait_notifications(timeout=0)
+        finally:
+            first.close()
+            second.close()
+
+    def test_wait_notifications_async(self) -> None:
+        first, second = self._notification_pair()
+
+        async def run():
+            self.assertEqual(await second.wait_notifications_async(timeout=0), [])
+            self.assertEqual(await second.wait_notifications_async(timeout=0.01), [])
+
+            waiting = asyncio.ensure_future(second.wait_notifications_async(timeout=30))
+            await asyncio.sleep(0)  # Let the first poll find nothing.
+            self.assertFalse(waiting.done())
+            first.send_notification(second.peer_id, b"asyncio").wait()
+            self.assertEqual(await waiting, [(first.peer_id, b"asyncio")])
+
+            cancelled = asyncio.ensure_future(
+                second.wait_notifications_async(timeout=30)
+            )
+            await asyncio.sleep(0)
+            cancelled.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await cancelled
+            first.send_notification(second.peer_id, b"kept").wait()
+            self.assertEqual(self._receive(second), [(first.peer_id, b"kept")])
+
+        try:
+            asyncio.run(run())
+        finally:
+            first.close()
+            second.close()
+
+    def test_poller_takes_notification_from_blocked_waiter(self) -> None:
+        first, second = self._notification_pair()
+        try:
+            waited = []
+            waiter = threading.Thread(
+                target=lambda: waited.extend(second.wait_notifications(timeout=1))
+            )
+            waiter.start()
+            first.send_notification(second.peer_id, b"x").wait()
+            polled = []
+            while not polled and waiter.is_alive():
+                polled += second.wait_notifications(timeout=0.001)
+            waiter.join(30)
+            # Whoever lost the race returns empty at its timeout instead of hanging.
+            self.assertFalse(waiter.is_alive())
+            self.assertEqual(waited + polled, [(first.peer_id, b"x")])
+        finally:
+            first.close()
+            second.close()
+
+    def test_concurrent_waiters_share_notifications(self) -> None:
+        first, second = self._notification_pair()
+        try:
+            count = 100
+            received = []
+            lock = threading.Lock()
+
+            def receive():
+                while True:
+                    with lock:
+                        if len(received) >= count:
+                            return
+                    batch = second.wait_notifications(timeout=0.05)
+                    with lock:
+                        received.extend(batch)
+
+            waiters = [threading.Thread(target=receive) for _ in range(4)]
+            for waiter in waiters:
+                waiter.start()
+            for i in range(count):
+                first.send_notification(second.peer_id, str(i).encode()).wait()
+            for waiter in waiters:
+                waiter.join(30)
+                self.assertFalse(waiter.is_alive())
+            payloads = sorted(int(payload) for _, payload in received)
+            self.assertEqual(payloads, list(range(count)))
         finally:
             first.close()
             second.close()
@@ -307,7 +376,8 @@ class TransportTestMixin:
             ]
             for work in works:
                 work.wait()
-            receiver.join()
+            receiver.join(30)
+            self.assertFalse(receiver.is_alive())
             self.assertEqual(
                 sorted(int(payload) for _, payload in received), list(range(count))
             )

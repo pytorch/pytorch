@@ -68,8 +68,8 @@ class NIXLTransport(Transport):
     send a transfer's notification only when the initiator checks the transfer,
     as UCX does through NIXL 1.5.2 (ai-dynamo/nixl#2439), and NIXL cannot signal
     arriving notifications, so a thread polls transfers that carry a
-    notification, and incoming notifications while a ``wait_notifications`` Work
-    is pending.
+    notification, and ``wait_notifications`` polls for incoming ones with
+    backoff.
     """
 
     def __init__(
@@ -130,9 +130,8 @@ class NIXLTransport(Transport):
         self._progress_thread: Thread | None = None
         self._notifying: set[_NIXLWork] = set()
         self._received: list[Notification] = []
-        # Pending wait_notifications Works share this future; it is replaced
-        # once it fires.
-        self._available: _ThreadFuture[None] | None = None
+        # Whether a wait_notifications caller is polling NIXL for the others.
+        self._draining = False
         # Lifecycle: open -> closing -> closed. Closing rejects new operations and
         # is terminal; a failed or timed-out close retains unreleased resources
         # and retrying close only finishes cleanup. Failed transfer-handle or
@@ -224,26 +223,38 @@ class NIXLTransport(Transport):
 
         return self._call(send, timeout)
 
-    def poll_notifications(self) -> list[Notification]:
+    def wait_notifications(self, *, timeout: float | None = None) -> list[Notification]:
+        timeout = self._timeout if timeout is None else timeout
+        _validate_timeout(timeout)
+        deadline = time.monotonic() + timeout
         with self._locked(None):
-            self._ensure_open()
-            self._drain_notifications()
-            received, self._received = self._received, []
-        return received
-
-    def wait_notifications(self, *, timeout: float | None = None) -> Work:
-        with self._locked(timeout):
-            self._ensure_open()
-            self._drain_notifications()
-            if self._received:
-                future: _ThreadFuture[None] = _ThreadFuture()
-                future.set_result(None)
-            else:
-                if self._available is None:
-                    self._available = _ThreadFuture()
-                future = self._available
-                self._start_progress()
-        return _FutureWork(future, self._timeout if timeout is None else timeout)
+            while True:
+                self._ensure_open()
+                self._drain_notifications()
+                remaining = deadline - time.monotonic()
+                if self._received or remaining <= 0:
+                    received, self._received = self._received, []
+                    return received
+                if self._draining:
+                    # One waiter polls at a time, so waiters do not compete with
+                    # transfers for _operation_lock; it wakes the rest on return.
+                    self._progress_cv.wait(remaining)
+                    continue
+                self._draining = True
+                try:
+                    delay = 1e-6
+                    while not self._received:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        # Releases _operation_lock while backing off.
+                        self._progress_cv.wait(min(delay, remaining))
+                        delay = min(delay * 2, 1e-3)
+                        self._ensure_open()
+                        self._drain_notifications()
+                finally:
+                    self._draining = False
+                    self._progress_cv.notify_all()
 
     def _drain_notifications(self) -> None:
         # Caller holds _operation_lock.
@@ -263,44 +274,28 @@ class NIXLTransport(Transport):
     def _progress(self) -> None:
         # Polling needs _operation_lock, which serializes agent calls, so it
         # never holds the lock across a whole sweep: _poll takes it per transfer
-        # and skips a transfer while another thread holds it, and a drain takes
-        # it for one get_new_notifs call. User calls usually wait for one native
-        # call instead of a sweep, but the lock is not fair, so some still wait
-        # for a sweep, and a call with timeout=0 can miss the lock. Removing the
-        # polling needs NIXL completion and notification callbacks.
+        # and skips a transfer while another thread holds it. User calls usually
+        # wait for one native call instead of a sweep, but the lock is not fair,
+        # so some still wait for a sweep, and a call with timeout=0 can miss the
+        # lock. Removing the polling needs NIXL completion callbacks.
         delay = 0.0
         try:
             while True:
-                available, error = None, None
                 with self._progress_cv:
                     if delay:
                         self._progress_cv.wait(delay)
-                    if self._closed or (
-                        not self._notifying and self._available is None
-                    ):
+                    if self._closed or not self._notifying:
                         self._progress_thread = None
                         return
                     notifying = list(self._notifying)
                 done = [work for work in notifying if work._poll()]
                 with self._operation_lock:
                     self._notifying.difference_update(done)
-                    if self._available is not None and not self._closed:
-                        try:
-                            self._drain_notifications()
-                        except Exception as failure:
-                            error = failure
-                        if error is not None or self._received:
-                            available, self._available = self._available, None
                 # Outside the lock: completion runs Work callbacks, which may
                 # call back into this transport.
                 for work in done:
                     work.is_completed()
-                if available is not None:
-                    if error is None:
-                        available.set_result(None)
-                    else:
-                        available.set_exception(error)
-                delay = 0.0 if done or available else min(max(delay * 2, 1e-6), 1e-3)
+                delay = 0.0 if done else min(max(delay * 2, 1e-6), 1e-3)
         finally:
             with self._operation_lock:
                 if self._progress_thread is current_thread():
@@ -617,11 +612,8 @@ class NIXLTransport(Transport):
     def _begin_close(self, timeout: float) -> list[_NIXLWork]:
         self._closing = True
         with self._locked(timeout):
-            available, self._available = self._available, None
-            pending = list(self._pending.values())
-        if available is not None:
-            available.set_exception(RuntimeError("transport is closed"))
-        return pending
+            self._progress_cv.notify_all()  # Fail blocked notification waits.
+            return list(self._pending.values())
 
     def close(self, *, timeout: float | None = None) -> None:
         self._close_cuda_streams()
@@ -659,10 +651,8 @@ class NIXLTransport(Transport):
         deadline = time.monotonic() + timeout
         self._closing = True
         async with self._locked_async(deadline):
-            available, self._available = self._available, None
+            self._progress_cv.notify_all()  # Fail blocked notification waits.
             pending = list(self._pending.values())
-        if available is not None:
-            available.set_exception(RuntimeError("transport is closed"))
         error: BaseException | None = None
         try:
             await wait_all(pending, timeout=max(0.0, deadline - time.monotonic()))
