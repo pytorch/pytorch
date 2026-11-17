@@ -1663,7 +1663,7 @@ class TestCudaStaticTritonCompileResult(_StaticTritonCompileResultMixin, TestCas
 class TestFastLauncher(_FastLauncherMixin, TestCase):
     """Tests for the _FastCudaLauncher / _FastXpuLauncher C extensions."""
 
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     def test_basic(self, device):
         @triton.jit
@@ -1683,7 +1683,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         fast(1, 1, 1, stream, new_arg0, 5)
         self.assertEqual(new_arg0, torch.tensor([5], dtype=torch.int32, device=device))
 
-    def test_float_scalars(self):
+    def test_float_scalars(self, device):
         @triton.jit
         def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
             x = tl.load(arg0)
@@ -1691,16 +1691,16 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
             tl.store(arg0, x + y)
 
         scalar = float.fromhex("0x1.0020000000001p+0")
-        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
         launcher = self._make_launcher(compiled_kernel)
-        expected = torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=GPU_TYPE)
+        expected = torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=device)
         self.assertEqual(arg0, expected)
         self.assertEqual(launcher.arg_tys, "Oefd")
         fast = self._make_fast_launcher(launcher)
 
-        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
-        device_interface = get_interface_for_device(GPU_TYPE)
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=device)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
         self.assertEqual(new_arg0, expected)
@@ -1709,7 +1709,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         not HAS_XPU_AND_TRITON and not SM80OrLater,
         "uses bfloat16 which requires SM >= 80 or XPU",
     )
-    def test_bfloat16_scalar(self):
+    def test_bfloat16_scalar(self, device):
         @triton.jit
         def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
             x = tl.load(arg0)
@@ -1717,16 +1717,16 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
             tl.store(arg0, x + y)
 
         scalar = float.fromhex("0x1.018p+0")
-        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
         launcher = self._make_launcher(compiled_kernel)
-        expected = torch.tensor([3.0], dtype=torch.float64, device=GPU_TYPE)
+        expected = torch.tensor([3.0], dtype=torch.float64, device=device)
         self.assertEqual(arg0, expected)
         self.assertEqual(launcher.arg_tys, "Oyfd")
         fast = self._make_fast_launcher(launcher)
 
-        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
-        device_interface = get_interface_for_device(GPU_TYPE)
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=device)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
         self.assertEqual(new_arg0, expected)
@@ -1788,61 +1788,61 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         with self.assertRaisesRegex(ValueError, "too many arguments"):
             self._make_fast_launcher(launcher, arg_tys="O" * 130)
 
-    def test_keyword_arguments_rejected(self):
+    def test_keyword_arguments_rejected(self, device):
         launcher = self._store_sum_launcher()
         fast = self._make_fast_launcher(launcher)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         with self.assertRaisesRegex(RuntimeError, "keyword arguments"):
             fast(1, 1, 1, self._stream(), arg0, 5, unexpected=1)
 
-    def test_call_without_vectorcall(self):
+    def test_call_without_vectorcall(self, device):
         # tp_call, for callers that go through PyObject_Call.
         launcher = self._store_sum_launcher()
         fast = self._make_fast_launcher(launcher)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         type(fast).__call__(fast, 1, 1, 1, self._stream(), arg0, 5)
-        self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
+        self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=device))
 
-    def test_pointer_arg_kinds(self):
+    def test_pointer_arg_kinds(self, device):
         # Pointer arguments other than a plain tensor: a raw address; a
         # Parameter, which the exact type check accepts like a plain tensor;
         # and an object with a data_ptr() method, which only the fallback that
         # calls that method can handle.
         launcher = self._store_sum_launcher()
         fast = self._make_fast_launcher(launcher)
-        expected = torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
+        expected = torch.tensor([5], dtype=torch.int32, device=device)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         fast(1, 1, 1, self._stream(), arg0.data_ptr(), 5)
         self.assertEqual(arg0, expected)
 
         param = torch.nn.Parameter(
-            torch.zeros(1, dtype=torch.int32, device=GPU_TYPE), requires_grad=False
+            torch.zeros(1, dtype=torch.int32, device=device), requires_grad=False
         )
         fast(1, 1, 1, self._stream(), param, 5)
         self.assertEqual(param.data, expected)
 
-        target = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        target = torch.zeros(1, dtype=torch.int32, device=device)
         fast(1, 1, 1, self._stream(), SimpleNamespace(data_ptr=target.data_ptr), 5)
         self.assertEqual(target, expected)
 
-    def test_launches_are_independent(self):
+    def test_launches_are_independent(self, device):
         # Each launch must bind its own arguments, including when the same
         # launcher is reused with different ones.
         launcher = self._store_sum_launcher()
         fast = self._make_fast_launcher(launcher)
         stream = self._stream()
 
-        first = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
-        second = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        first = torch.zeros(1, dtype=torch.int32, device=device)
+        second = torch.zeros(1, dtype=torch.int32, device=device)
         fast(1, 1, 1, stream, first, 5)
         fast(1, 1, 1, stream, second, 7)
-        self.assertEqual(first, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
-        self.assertEqual(second, torch.tensor([7], dtype=torch.int32, device=GPU_TYPE))
+        self.assertEqual(first, torch.tensor([5], dtype=torch.int32, device=device))
+        self.assertEqual(second, torch.tensor([7], dtype=torch.int32, device=device))
 
-    def test_grid_2d(self):
+    def test_grid_2d(self, device):
         # A grid other than (1, 1, 1): catches a swapped grid dimension or a
         # work-group size the kernel was not compiled for.
         @triton.jit
@@ -1852,7 +1852,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
             tl.store(out + x * stride + y, x * 10 + y)
 
         grid_x, grid_y = 4, 3
-        out = torch.zeros(grid_x * grid_y, dtype=torch.int32, device=GPU_TYPE)
+        out = torch.zeros(grid_x * grid_y, dtype=torch.int32, device=device)
         launcher = self._make_launcher(pid_kernel[(1, 1, 1)](out, grid_y))
         fast = self._make_fast_launcher(launcher)
 
@@ -1861,11 +1861,11 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         expected = torch.tensor(
             [x * 10 + y for x in range(grid_x) for y in range(grid_y)],
             dtype=torch.int32,
-            device=GPU_TYPE,
+            device=device,
         )
         self.assertEqual(out, expected)
 
-    def test_build_fast_launcher_launches(self):
+    def test_build_fast_launcher_launches(self, device):
         # The real _build_fast_launcher dispatch, the real C extension, and a
         # launch through the launcher it installs.
         import types
@@ -1889,9 +1889,9 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
             fast_launcher.__globals__["runner"], self._fast_launcher_cls()
         )
 
-        out = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        out = torch.zeros(1, dtype=torch.int32, device=device)
         fast_launcher(1, 1, 1, self._stream(), out, 5)
-        self.assertEqual(out, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
+        self.assertEqual(out, torch.tensor([5], dtype=torch.int32, device=device))
 
 
 @requires_gpu_and_triton
@@ -2029,7 +2029,7 @@ class TestFastLauncherFallbackCompileResult(_FastLauncherCompileMixin, TestCase)
     regular launcher is used.
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     def test_basic_compile(self, device):
         """Verify torch.compile uses the fast launcher and produces correct output."""
