@@ -10,7 +10,10 @@ import sympy
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor import ir
-from torch._inductor.codegen.common import get_device_op_overrides
+from torch._inductor.codegen.common import (
+    get_device_op_overrides,
+    get_aten_c_shim_ops,
+)
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
 from torch._inductor.codegen.wrapper import (
@@ -33,6 +36,79 @@ from torch.utils._ordered_set import OrderedSet
 
 @instantiate_parametrized_tests
 class TestPythonWrapperCodegen(TestCase):
+    @parametrize("case", ["default", "empty", "partial", "extended"])
+    def test_backend_aten_c_shim_ops(self, case):
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        defaults = dict(inductor_fallback_ops)
+        ops = {
+            "default": None,
+            "empty": {},
+            "partial": {"aten.mul.Tensor": defaults["aten.mul.Tensor"]},
+            "extended": {**defaults, "aten.sin.default": {}},
+        }[case]
+        device = torch.device("cpu")
+        overrides = get_device_op_overrides("cpu")
+        with mock.patch.object(overrides, "get_aten_c_shim_ops", return_value=ops):
+            effective = defaults if ops is None else ops
+            self.assertEqual(get_aten_c_shim_ops(device), effective)
+            self.assertIs(get_aten_c_shim_ops(torch.device("cuda")), inductor_fallback_ops)
+            with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
+                for op in (torch.ops.aten.mul.Tensor, torch.ops.aten.sin.default):
+                    self.assertEqual(
+                        ir.FallbackKernel._uses_aot_proxy_executor(op, device),
+                        str(op) not in effective,
+                    )
+            self.assertEqual(inductor_fallback_ops, defaults)
+
+    def test_backend_aten_c_shim_version(self):
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        defaults = dict(inductor_fallback_ops)
+        ops = {"aten.mul.Tensor": {"v2": {"new_args": []}}}
+        node = ir.ExternKernel.__new__(ir.ExternKernel)
+        node.op_overload = torch.ops.aten.mul.Tensor
+        node.layout = ir.FixedLayout(torch.device("cpu"), torch.float32, [4], [1])
+        overrides = get_device_op_overrides("cpu")
+        with (
+            mock.patch.object(overrides, "get_aten_c_shim_ops", return_value=ops),
+            V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)),
+        ):
+            node.set_cpp_kernel_name()
+            self.assertEqual(node.cpp_kernel_name, "at::_ops::mul_Tensor_v2::call")
+            self.assertEqual(inductor_fallback_ops, defaults)
+
+    @parametrize("has_shim", [False, True])
+    def test_backend_aten_c_shim_scalar_materialization(self, has_shim):
+        op = torch.ops.aten.mul.Tensor
+        x = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="x",
+                layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [4], [1]),
+            )
+        )
+        graph = SimpleNamespace(cpp_wrapper=True, add_tensor_constant=mock.Mock())
+        ops = {str(op): {}} if has_shim else {}
+        overrides = get_device_op_overrides("cpu")
+        with (
+            mock.patch.object(overrides, "get_aten_c_shim_ops", return_value=ops),
+            V.set_graph_handler(graph),
+        ):
+            args, kwargs, materialized = ir.FallbackKernel._materialize_scalar_tensor_args(
+                op, (x, 2), {}
+            )
+            self.assertEqual(materialized, not has_shim)
+            self.assertEqual(kwargs, {})
+            if has_shim:
+                self.assertEqual(args[1], 2)
+                graph.add_tensor_constant.assert_not_called()
+            else:
+                graph.add_tensor_constant.assert_called_once()
+                const = graph.add_tensor_constant.call_args.args[0]
+                self.assertEqual(const.item(), 2)
+                self.assertEqual(const.shape, torch.Size([]))
+                self.assertIs(args[1], graph.add_tensor_constant.return_value)
+
     def _new_wrapper(self):
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
         wrapper.prefix = IndentedBuffer()

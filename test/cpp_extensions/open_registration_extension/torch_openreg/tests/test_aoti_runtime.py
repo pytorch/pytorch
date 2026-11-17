@@ -226,12 +226,18 @@ class TestAOTIOpenRegRun(InductorTestCase):
     """AOTI compile -> load -> run cycle on the openreg device."""
 
     def test_aoti_compile_load_run(self):
+        from torch._inductor.codegen.common import get_aten_c_shim_ops
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
         model = SmallModel().eval().to("openreg")
         x = torch.randn(2, 4, device="openreg")
         loaded = torch._inductor.aoti_load_package(aoti_compile(model, (x,)))
         out = loaded(x)
         self.assertEqual(out.device.type, "openreg")
         self.assertEqual(out.cpu(), model(x).cpu())
+        self.assertEqual(get_aten_c_shim_ops(torch.device("openreg")), {})
+        self.assertIs(get_aten_c_shim_ops(torch.device("cpu")), inductor_fallback_ops)
+        self.assertIn("aten.mul.Tensor", inductor_fallback_ops)
 
     def test_aoti_run_on_second_device(self):
         model = SmallModel().eval().to("openreg")

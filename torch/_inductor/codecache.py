@@ -64,6 +64,7 @@ from torch._inductor import config, config_comms, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
+    device_op_overrides_dict,
     init_backend_registration,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
@@ -1804,6 +1805,13 @@ class FxGraphHashDetails:
 
         # Register inductor backends and custom passes and get their UUIDs.
         init_backend_registration()
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        shim_tables = {"": inductor_fallback_ops}
+        for device, overrides in device_op_overrides_dict.items():
+            if (ops := overrides.get_aten_c_shim_ops()) is not None:
+                shim_tables[device] = dict(ops)
+        self.aten_c_shim_ops = json.dumps(shim_tables, sort_keys=True)
         self.custom_backend_passes = tuple(
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )

@@ -34,11 +34,11 @@ class OpenRegCppWrapperCodegen(CppWrapperCpu):
 
 
 class OpenRegDeviceOpOverrides(NoOpDeviceOpOverrides):
+    def get_aten_c_shim_ops(self):
+        return {}
+
     def aten_device_type(self) -> str:
         return "at::kPrivateUse1"
-
-    def has_aten_c_shims(self) -> bool:
-        return False
 
 
 def register_inductor_backend() -> None:

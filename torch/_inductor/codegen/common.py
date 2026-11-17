@@ -14,6 +14,7 @@ import re
 import tempfile
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
@@ -330,11 +331,26 @@ KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | Constexp
 # code expression evaluated at run time (e.g. current_device_idx_expr() under
 # compile-on-one-rank).
 DeviceIdx = int | str
+AtenCShimOpInfo = dict[str, str | dict[str, list[str] | str]]
 
 device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
+    r"""Backend-specific hooks used by Inductor's wrapper code generation."""
+
+    def get_aten_c_shim_ops(self) -> Mapping[str, AtenCShimOpInfo] | None:
+        r"""Return this backend's compile-time ATen C shim table.
+
+        None uses the shared torchgen table; an empty mapping selects runtime
+        lookup for all ATen fallbacks. Keys are overloads such as
+        ``aten.mul.Tensor``; values use torchgen's ABI version metadata format.
+        The backend must provide the declared shim symbols. This does not
+        generate shims or modify the shared table. Treat the returned mapping
+        as read-only and keep it stable throughout a compilation.
+        """
+        return None
+
     def uses_gpu_cpp_wrapper(self) -> bool:
         """Explicitly opt into the CUDA/XPU-style C++ wrapper two-pass path.
 
@@ -344,10 +360,6 @@ class DeviceOpOverrides:
         that reason.
         """
         return False
-
-    def has_aten_c_shims(self) -> bool:
-        """If False on a PrivateUse1 device, aten fallbacks use the proxy executor."""
-        return True
 
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
@@ -840,6 +852,17 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         raise AssertionError(type(device))
     _initialize_device_op_overrides()
     return device_op_overrides_dict[device]
+
+
+def get_aten_c_shim_ops(device: torch.device | None) -> Mapping[str, AtenCShimOpInfo]:
+    r"""Get the backend's effective shim table without changing torchgen defaults."""
+    from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+    if device is not None:
+        ops = get_device_op_overrides(device.type).get_aten_c_shim_ops()
+        if ops is not None:
+            return ops
+    return inductor_fallback_ops
 
 
 def _uses_gpu_cpp_wrapper(device: str) -> bool:
