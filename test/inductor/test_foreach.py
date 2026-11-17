@@ -11,6 +11,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -417,6 +418,93 @@ class ForeachTests(TestCase):
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu
+    @parametrize(
+        "op",
+        [
+            torch._foreach_add_,
+            torch._foreach_mul_,
+            torch._foreach_div_,
+            torch._foreach_copy_,
+            torch._foreach_addcmul_,
+            torch._foreach_addcdiv_,
+        ],
+        name_fn=lambda f: f.__name__,
+    )
+    def test_inplace_fallback_list(self, op):
+        if op in (torch._foreach_addcmul_, torch._foreach_addcdiv_):
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                op([a0, a1], [b0, b1], [c0, c1])
+                return [a0 * 2, a1 * 2]
+
+            n_args = 6
+        else:
+
+            def fn(a0, a1, b0, b1):
+                op([a0, a1], [b0, b1])
+                return [a0 * 2, a1 * 2]
+
+            n_args = 4
+
+        inputs = [
+            torch.randn(10, 10, device=GPU_TYPE, dtype=torch.complex64)
+            for _ in range(n_args)
+        ]
+        self.check_model_gpu(fn, inputs, check_lowp=False)
+
+    @requires_gpu
+    @parametrize(
+        "op",
+        [torch._foreach_add_, torch._foreach_mul_, torch._foreach_div_],
+        name_fn=lambda f: f.__name__,
+    )
+    def test_inplace_fallback_scalar(self, op):
+        def fn(a0, a1):
+            op([a0, a1], 2j)
+            return [a0 * 2, a1 * 2]
+
+        inputs = [
+            torch.randn(10, 10, device=GPU_TYPE, dtype=torch.complex64)
+            for _ in range(2)
+        ]
+        self.check_model_gpu(fn, inputs, check_lowp=False)
+
+    @requires_gpu
+    def test_sgd_foreach_fallback(self):
+        def fn(params, grads):
+            with torch.no_grad():
+                torch.optim._functional.sgd(
+                    params,
+                    grads,
+                    [None] * len(params),
+                    foreach=True,
+                    fused=False,
+                    has_sparse_grad=False,
+                    weight_decay=0,
+                    momentum=0,
+                    lr=0.1,
+                    dampening=0,
+                    nesterov=False,
+                    maximize=False,
+                )
+            return params
+
+        p = torch.nn.Parameter(
+            torch.complex(
+                torch.randn(3, 2, device=GPU_TYPE), torch.randn(3, 2, device=GPU_TYPE)
+            )
+        )
+        grad = torch.ones_like(p)
+
+        expected = [p.detach().clone()]
+        actual = [p.detach().clone()]
+
+        expected = fn(expected, [grad])
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(actual, [grad])
+
+        self.assertEqual(actual, expected)
 
     @requires_gpu
     @scalar_bin_ops
@@ -963,6 +1051,10 @@ class ForeachTests(TestCase):
         torch.compile(fn)(*args)
         return torch._inductor.metrics.ir_nodes_pre_fusion
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("case", ("add", "mul_self", "sgd_momentum"))
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_computed_into_target(self, device, case):
@@ -999,6 +1091,10 @@ class ForeachTests(TestCase):
         self.assertEqual(self._nodes_pre_fusion(fn, x, y), 1)
         self.assertEqual(x, x_eager)
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_reads_target_elsewhere(self, device):
         # https://github.com/pytorch/pytorch/issues/198033: computed straight

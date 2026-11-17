@@ -12,7 +12,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.vmap import restore_vmap
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
@@ -46,7 +46,7 @@ class UnsupportedAliasMutationException(RuntimeError):
 def _find_or_create_fake_mode() -> FakeTensorMode:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    fake_mode = detect_fake_mode()
+    fake_mode = require_python_fake_mode(detect_fake_mode())
     if fake_mode is None:
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
