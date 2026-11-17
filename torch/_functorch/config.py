@@ -22,6 +22,7 @@ from torch.utils._config_module import Config, install_config_module
 _save_config_ignore = [
     # callable not serializable
     "joint_custom_pass",
+    "hop_joint_custom_pass",
     # callable configs with uuid() for caching, or raw callables
     "activation_memory_budget_runtime_estimator",
     "activation_memory_budget_solver",
@@ -461,6 +462,10 @@ saved_tensors_hooks_filtering_mode = "donated"
 
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
+
+# Like joint_custom_pass, but invoked on the joint graph of a higher-order op's
+# body (e.g. scan's) before the op partitions it. Never on the top-level graph.
+hop_joint_custom_pass: Callable = None  # type: ignore[assignment]
 
 force_autograd_cache = False
 
