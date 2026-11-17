@@ -96,15 +96,6 @@ inline bool isExternalTracerState(ProfilerState state) {
       state == ProfilerState::PRIVATEUSE1;
 }
 
-inline bool hasRequestedDeviceActivity(
-    const std::set<torch::profiler::impl::ActivityType>& activities) {
-  return activities.contains(ActivityType::CUDA) ||
-      activities.contains(ActivityType::XPU) ||
-      activities.contains(ActivityType::MTIA) ||
-      activities.contains(ActivityType::HPU) ||
-      activities.contains(ActivityType::PrivateUse1);
-}
-
 struct KinetoThreadLocalState : public ProfilerStateBase {
   explicit KinetoThreadLocalState(
       const ProfilerConfig& config,
@@ -181,10 +172,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   void pausePython() {
     recordQueue.stop();
-  }
-
-  void resumePython() {
-    recordQueue.restart();
   }
 
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
@@ -659,7 +646,6 @@ void prepareProfiler(
       isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!hasRequestedDeviceActivity(activities),
       activities,
       config.experimental_config,
       config.trace_id,
@@ -697,51 +683,41 @@ void prepareProfiler(
 static void toggleTorchOpCollectionDynamic(bool enable) {
   std::shared_ptr<ProfilerStateBase> global_state =
       ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  TORCH_CHECK(state);
+  if (!enable) {
+    state->removeCallback();
+    return;
+  }
+  // Only a session that collects CPU has scopes to turn back on.
+  const auto state_info = profilerStateInfo();
+  if (!state_info) {
+    LOG(WARNING)
+        << "Dynamic toggle skipped CPU activity, which this profiler does not collect";
+    return;
+  }
   if (global_state) {
-    if (enable) {
-      auto scopes = profilerStateInfo()->scopes;
-      // Mid-session re-arm on the same RecordQueue: do not bump the generation.
-      pushGlobalProfilingCallbacks(scopes, /*new_session=*/false);
-    } else {
-      global_state->removeCallback();
-    }
+    // Mid-session re-arm on the same RecordQueue: do not bump the generation.
+    pushGlobalProfilingCallbacks(state_info->scopes, /*new_session=*/false);
   } else {
-    ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
-    TORCH_CHECK(tls_state);
-    if (enable) {
-      auto scopes = profilerStateInfo()->scopes;
-      pushTLSProfilingCallbacks(scopes);
-    } else {
-      tls_state->removeCallback();
-    }
+    pushTLSProfilingCallbacks(state_info->scopes);
   }
 }
 
-// Set this function to be unused as profiler implementation needs more
-// refactoring to support Python ops collection dynamic toggling
-#ifdef _MSC_VER
-#define UNUSED
-#else
-#define UNUSED __attribute__((unused))
-#endif
-static UNUSED void togglePythonCollectionDynamic(bool enable) {
-  std::shared_ptr<KinetoThreadLocalState> global_state =
-      KinetoThreadLocalState::getGlobal();
-  if (global_state) {
-    if (enable) {
-      global_state->resumePython();
-    } else {
-      global_state->pausePython();
-    }
-  } else {
-    KinetoThreadLocalState* tls_state = KinetoThreadLocalState::getTLS();
-    TORCH_CHECK(tls_state);
-    if (enable) {
-      tls_state->resumePython();
-    } else {
-      tls_state->pausePython();
-    }
-  }
+void togglePythonCollectionDynamic(bool enable) {
+  // PythonTracer::restart() does not re-capture the frames already on the
+  // stack, so later returns would be matched against the wrong frames.
+  TORCH_CHECK(!enable, "Resuming Python stack collection is not supported yet");
+  std::shared_ptr<ProfilerStateBase> global_state =
+      ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  // The legacy, NVTX and ITT profilers use the same state slot.
+  TORCH_CHECK(
+      state != nullptr && state->profilerType() == ActiveProfilerType::KINETO,
+      "Toggling Python stack collection requires an active Kineto profiler");
+  static_cast<KinetoThreadLocalState*>(state)->pausePython();
 }
 
 static void toggleCPUCollectionDynamic(bool enable) {
