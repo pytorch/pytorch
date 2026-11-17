@@ -11,7 +11,6 @@ import torch._inductor
 import torch._inductor.decomposition
 from torch._higher_order_ops import InvokeQuant
 from torch._inductor import config
-from torch._inductor.codegen.common import BackendFeature, has_backend_feature
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -210,11 +209,6 @@ class TestInvokeQuantInductorPrologue(TestCase):
     )
     @config.patch(prologue_fusion=True)
     def test_prologue(self, device):
-        if not has_backend_feature(
-            torch.device(device), BackendFeature.TRITON_TEMPLATES
-        ):
-            raise unittest.SkipTest(f"requires Triton templates for {device}")
-
         if not is_big_gpu(torch.device(device)):
             raise unittest.SkipTest("requires large gpu to max-autotune")
 
