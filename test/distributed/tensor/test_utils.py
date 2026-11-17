@@ -625,7 +625,7 @@ class UtilTest(DTensorContinuousTestBase):
     @with_comms
     def test_compute_global_tensor_shape_1D(self):
         one_d_placements = [[Shard(1)], [Shard(0)], [Replicate()]]
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         for placements in one_d_placements:
             if isinstance(placements[0], Shard):
                 uneven_dim = list(range(self.world_size))
@@ -657,7 +657,7 @@ class UtilTest(DTensorContinuousTestBase):
     @with_comms
     def test_compute_global_tensor_shape_1D_invalid_shape(self):
         one_d_placement = [Shard(1)]
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         uneven_dim = list(range(self.world_size))
 
         @maybe_run_for_local_tensor
@@ -684,7 +684,7 @@ class UtilTest(DTensorContinuousTestBase):
     @with_comms
     def test_compute_global_tensor_shape_failure_2D(self):
         placement_2D = [Shard(0), Shard(1)]
-        device_mesh_2D = init_device_mesh(self.device_type, (2, 2))
+        device_mesh_2D = init_device_mesh(self._device_type, (2, 2))
         with self.assertRaisesRegex(
             NotImplementedError,
             "compute_global_tensor_shape only supports 1 placement for now.",
@@ -709,7 +709,7 @@ class UtilTest(DTensorContinuousTestBase):
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]
 
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         for placements in one_d_placements:
             # When the placements is [Shard(0)], we test for three different scenarios:
             # 1) sharding resulting in empty shards on all or some of the ranks
@@ -742,7 +742,7 @@ class UtilTest(DTensorContinuousTestBase):
         )
 
         # mesh: 2 * 4
-        device_mesh = init_device_mesh(self.device_type, (2, 4))
+        device_mesh = init_device_mesh(self._device_type, (2, 4))
         for placements in two_d_placements:
             for dim_0_size in range(1, 9):
                 nelem = 64 // dim_0_size * dim_0_size
@@ -790,7 +790,7 @@ class UtilTest(DTensorContinuousTestBase):
         mesh_size_1 = 2
         mesh_size_2 = self.world_size // (mesh_size_0 * mesh_size_1)
         global_mesh = init_device_mesh(
-            self.device_type,
+            self._device_type,
             (mesh_size_0, mesh_size_1, mesh_size_2),
             mesh_dim_names=("mesh-0", "mesh-1", "mesh-2"),
         )
@@ -816,7 +816,7 @@ class UtilTest(DTensorContinuousTestBase):
         mesh_size_2 = 2
         mesh_size_3 = self.world_size // (mesh_size_0 * mesh_size_1 * mesh_size_2)
         global_mesh = init_device_mesh(
-            self.device_type,
+            self._device_type,
             (mesh_size_0, mesh_size_1, mesh_size_2, mesh_size_3),
             mesh_dim_names=("mesh-0", "mesh-1", "mesh-2", "mesh-3"),
         )
@@ -861,7 +861,7 @@ class UtilTest(DTensorContinuousTestBase):
         tp_size = 2
         dp_size = self.world_size // tp_size
         global_mesh = init_device_mesh(
-            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+            self._device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
         )
         # local shard shape is [2, 2]
         global_tensor_shape = torch.Size([2 * self.world_size, 2])
@@ -886,7 +886,7 @@ class UtilTest(DTensorContinuousTestBase):
         tp_size = 2
         dp_size = self.world_size // tp_size
         global_mesh = init_device_mesh(
-            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+            self._device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
         )
         global_tensor_shape = torch.Size([15, 5])
         placements = [_StridedShard(0, split_factor=tp_size), Shard(0)]
@@ -922,7 +922,7 @@ class UtilTest(DTensorContinuousTestBase):
             with self.subTest(
                 global_shape=global_shape, mesh_shape=mesh_shape, placements=placements
             ):
-                mesh = init_device_mesh(self.device_type, mesh_shape)
+                mesh = init_device_mesh(self._device_type, mesh_shape)
                 full = torch.arange(math.prod(global_shape)).view(global_shape)
                 expected = distribute_tensor(
                     full, mesh, placements, src_data_rank=src_data_rank
@@ -945,7 +945,7 @@ class UtilTest(DTensorContinuousTestBase):
         dp_shard_size = 2
         dp_replic_size = self.world_size // (dp_shard_size * tp_size)
         global_mesh = init_device_mesh(
-            self.device_type,
+            self._device_type,
             (dp_replic_size, dp_shard_size, tp_size),
             mesh_dim_names=("dp_replic", "dp_shard", "tp"),
         )
@@ -1074,9 +1074,9 @@ class TestStridedSharding(DTensorContinuousTestBase):
 
     @with_comms
     def test_1d_mesh_strided_sharding(self):
-        mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
+        mesh_1d = init_device_mesh(self._device_type, (self.world_size,))
         # Test 1: 1-d tensor over 1-d mesh
-        x = torch.arange(2 * self.world_size, device=self.device_type)
+        x = torch.arange(2 * self.world_size, device=self._device_type)
         """
         contiguous sharding: [0, 1 | 2, 3 | 4, 5 | 6, 7]
         """
@@ -1127,13 +1127,15 @@ class TestStridedSharding(DTensorContinuousTestBase):
     def test_2d_mesh_strided_sharding(self):
         # Test 2: 1-d tensor over 2-d mesh
         mesh_2d = init_device_mesh(
-            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dim0", "dim1")
+            self._device_type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dim0", "dim1"),
         )
         mesh_dim0_size = mesh_2d["dim0"].size()
         mesh_dim1_size = mesh_2d["dim1"].size()
         mesh_dim0_local_rank = mesh_2d["dim0"].get_local_rank(mesh_dim=0)
         mesh_dim1_local_rank = mesh_2d["dim1"].get_local_rank(mesh_dim=0)
-        x = torch.arange(2 * self.world_size, device=self.device_type)
+        x = torch.arange(2 * self.world_size, device=self._device_type)
         """
         contiguous sharding: [
             [ 0, 1 | 2, 3 ],
@@ -1204,9 +1206,9 @@ class TestStridedSharding(DTensorContinuousTestBase):
         def maybe_compute_rankwise_strided(mesh_dim0_local_rank):
             shard_x = tensor_list[mesh_dim0_local_rank]
             expected_shard_dim0 = (
-                torch.tensor([0, 1, 4, 5], device=self.device_type)
+                torch.tensor([0, 1, 4, 5], device=self._device_type)
                 if mesh_dim0_local_rank == 0
-                else torch.tensor([2, 3, 6, 7], device=self.device_type)
+                else torch.tensor([2, 3, 6, 7], device=self._device_type)
             )
             self.assertEqual(shard_x, expected_shard_dim0)
             return shard_x, expected_shard_dim0
@@ -1251,13 +1253,15 @@ class TestStridedSharding(DTensorContinuousTestBase):
     def test_2d_mesh_2d_tensor_strided_sharding(self):
         # Test 2: 1-d tensor over 2-d mesh
         mesh_2d = init_device_mesh(
-            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dim0", "dim1")
+            self._device_type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dim0", "dim1"),
         )
         mesh_dim0_size = mesh_2d["dim0"].size()
         mesh_dim1_size = mesh_2d["dim1"].size()
         mesh_dim0_local_rank = mesh_2d["dim0"].get_local_rank(mesh_dim=0)
         mesh_dim1_local_rank = mesh_2d["dim1"].get_local_rank(mesh_dim=0)
-        x = torch.arange(2 * self.world_size, device=self.device_type).reshape(2, -1)
+        x = torch.arange(2 * self.world_size, device=self._device_type).reshape(2, -1)
         """
         strided sharding:
             rank 0: [[0], [4]]
@@ -1274,9 +1278,9 @@ class TestStridedSharding(DTensorContinuousTestBase):
         def maybe_compute_rankwise_strided(mesh_dim0_local_rank, tensor_list):
             shard_x2 = tensor_list[mesh_dim0_local_rank]
             expected_shard_dim0 = (
-                torch.tensor([[0, 2], [4, 6]], device=self.device_type)
+                torch.tensor([[0, 2], [4, 6]], device=self._device_type)
                 if mesh_dim0_local_rank == 0
-                else torch.tensor([[1, 3], [5, 7]], device=self.device_type)
+                else torch.tensor([[1, 3], [5, 7]], device=self._device_type)
             )
             self.assertEqual(shard_x2, expected_shard_dim0)
             return shard_x2, expected_shard_dim0
@@ -1293,7 +1297,7 @@ class TestStridedSharding(DTensorContinuousTestBase):
         def maybe_compute_rankwise_strided(mesh_dim1_local_rank, rank, tensor_list):
             shard_x = tensor_list[mesh_dim1_local_rank]
             expected_shard_dim1 = [
-                torch.tensor(value, device=self.device_type)
+                torch.tensor(value, device=self._device_type)
                 for value in [[[0], [4]], [[2], [6]], [[1], [5]], [[3], [7]]]
             ][rank]
             self.assertEqual(shard_x, expected_shard_dim1)
@@ -1331,13 +1335,13 @@ class TestStridedSharding(DTensorContinuousTestBase):
     @with_comms
     def test_2d_mesh_uneven_strided_shard(self):
         mesh = init_device_mesh(
-            self.device_type,
+            self._device_type,
             (self.world_size // 2, 2),
             mesh_dim_names=("fsdp", "tp"),
         )
 
         for size in (2, 3, 5, 11):
-            tensor = torch.arange(size, device=self.device_type).view(1, -1)
+            tensor = torch.arange(size, device=self._device_type).view(1, -1)
             dtensor = distribute_tensor(
                 tensor,
                 device_mesh=mesh,
@@ -1578,7 +1582,7 @@ class Test_StridedShard_Optimizer(DTensorContinuousTestBase):
         dp_size = 2
         tp_size = self.world_size // dp_size
         global_mesh = init_device_mesh(
-            self.device_type,
+            self._device_type,
             (dp_size, tp_size),
             mesh_dim_names=("dp", "tp"),
         )
@@ -1599,7 +1603,7 @@ class Test_StridedShard_Optimizer(DTensorContinuousTestBase):
         dim = 16
         model = SimpleMLP(dim)
         ref_model = replicate(
-            deepcopy(model).to(self.device_type),
+            deepcopy(model).to(self._device_type),
             process_group=dp_mesh.get_group(),
         )
         ref_optim = optimizer_cls(ref_model.parameters(), lr=1e-2, **optimizer_kwargs)
@@ -1634,7 +1638,7 @@ class Test_StridedShard_Optimizer(DTensorContinuousTestBase):
 
         # Run training loop
         torch.manual_seed(42 + dp_mesh.get_local_rank() + 1)
-        inp = torch.randn((4, dim), device=self.device_type)
+        inp = torch.randn((4, dim), device=self._device_type)
 
         for iter_idx in range(5):
             ref_optim.zero_grad()
@@ -1763,7 +1767,7 @@ class Test2DStridedLocalShard(DTensorContinuousTestBase):
         with CommDebugMode() as comm_mode:
             global_tensor = torch.arange(8).view(4, 2)
             mesh_2d = init_device_mesh(
-                self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
+                self._device_type, (2, 2), mesh_dim_names=("DP", "TP")
             )
             tp_mesh = mesh_2d["TP"]
             dtensor_tp = distribute_tensor(
@@ -1802,7 +1806,7 @@ class Test2DStridedLocalShard(DTensorContinuousTestBase):
         global_tensor = torch.arange(8).view(4, 2)
         with CommDebugMode() as comm_mode:
             mesh_2d = init_device_mesh(
-                self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
+                self._device_type, (2, 2), mesh_dim_names=("DP", "TP")
             )
             tp_mesh = mesh_2d["TP"]
             dtensor_tp = distribute_tensor(

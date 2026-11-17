@@ -82,25 +82,27 @@ class TestCompileOnOneRank(DTensorTestBase):
 
         graph_bytes = local_graph_code.encode("utf-8")
         graph_tensor = torch.tensor(
-            list(graph_bytes), dtype=torch.uint8, device=self.device_type
+            list(graph_bytes), dtype=torch.uint8, device=self._device_type
         )
 
         # Pad to same length across ranks
         local_len = torch.tensor(
-            [len(graph_bytes)], dtype=torch.int64, device=self.device_type
+            [len(graph_bytes)], dtype=torch.int64, device=self._device_type
         )
         all_lens = [
-            torch.zeros(1, dtype=torch.int64, device=self.device_type)
+            torch.zeros(1, dtype=torch.int64, device=self._device_type)
             for _ in range(self.world_size)
         ]
         dist.all_gather(all_lens, local_len)
         max_len = int(max(l.item() for l in all_lens))
 
-        padded_tensor = torch.zeros(max_len, dtype=torch.uint8, device=self.device_type)
+        padded_tensor = torch.zeros(
+            max_len, dtype=torch.uint8, device=self._device_type
+        )
         padded_tensor[: len(graph_bytes)] = graph_tensor
 
         all_graphs = [
-            torch.zeros(max_len, dtype=torch.uint8, device=self.device_type)
+            torch.zeros(max_len, dtype=torch.uint8, device=self._device_type)
             for _ in range(self.world_size)
         ]
         dist.all_gather(all_graphs, padded_tensor)
@@ -175,7 +177,7 @@ class TestCompileOnOneRank(DTensorTestBase):
         num_embeddings = 256
         embedding_dim = 64
 
-        model = Network(num_embeddings, embedding_dim, device=self.device_type)
+        model = Network(num_embeddings, embedding_dim, device=self._device_type)
 
         parallelize_module(
             model,
@@ -191,7 +193,7 @@ class TestCompileOnOneRank(DTensorTestBase):
         compiled_model, fw_graph_cell = self._compile_and_capture_graph(model)
 
         torch.manual_seed(42)
-        inp = torch.randint(0, num_embeddings, (64, 16), device=self.device_type)
+        inp = torch.randint(0, num_embeddings, (64, 16), device=self._device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
 
         compiled_model(replicated_inp)
@@ -207,7 +209,7 @@ class TestCompileOnOneRank(DTensorTestBase):
             dist.all_reduce(t, group=group)
             return t + 1
 
-        x = torch.arange(4, dtype=torch.float32, device=self.device_type)
+        x = torch.arange(4, dtype=torch.float32, device=self._device_type)
         opt = torch.compile(f, backend="inductor", fullgraph=True)
         out = opt(x, pg)
         self.assertEqual(out, f(x, pg))
@@ -218,7 +220,7 @@ class TestCompileOnOneRank(DTensorTestBase):
         """Compiled random ops on sharded DTensors should produce identical graphs."""
         mesh = self.build_device_mesh()
         dt = DTensor.from_local(
-            torch.empty(8, 4, device=self.device_type), mesh, [Shard(0)]
+            torch.empty(8, 4, device=self._device_type), mesh, [Shard(0)]
         )
 
         fw_graph_cell = [None]
@@ -261,7 +263,7 @@ class TestCompileOnOneRank(DTensorTestBase):
             dist.all_reduce(t)
             return t + 1
 
-        x = torch.arange(4, dtype=torch.float32, device=self.device_type)
+        x = torch.arange(4, dtype=torch.float32, device=self._device_type)
         opt = torch.compile(f, backend="aot_eager", fullgraph=True)
         out = opt(x)
         self.assertEqual(out, f(x))
