@@ -836,7 +836,7 @@ class XPUReductionHeuristic(ReductionHeuristic):
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
         # XBLOCK=8 vs 1 depends on rnumel and register pressure in ways a static
-        # rule has not captured (#169257, intel/torch-xpu-ops#5730); let autotune pick.
+        # rule has not captured. let autotune pick the best one to avoid regression.
         return [
             triton_config_reduction(
                 size_hints,
