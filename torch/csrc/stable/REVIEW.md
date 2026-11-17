@@ -85,6 +85,9 @@ the `TORCH_FEATURE_VERSION` guard on the oldest runtime whose shim or dispatcher
 contract can support the wrapper, not simply on the version in which the C++
 wrapper is added.
 
+Document both the build time minimum version and the minimum compatible runtime
+on public APIs, following the `view.dtype` example in [`ops.h`](ops.h).
+
 Verify that the unstable declaration or dispatcher schema has not changed over
 the runtime range the wrapper promises to support. New C shims must be recorded
 and guarded according to the stable shim versioning rules. Put the test in the
@@ -100,15 +103,9 @@ Add focused coverage under
 stable declaration with the intended `TORCH_TARGET_VERSION` and call the
 `torch::stable` API itself.
 
-Keep C++ test helpers small and generic: accept inputs from Python, call the
-stable API, and return results for Python assertions. Put input construction,
-case selection, and parametrization in Python rather than hard-coding scenarios
-in C++. For example, pass concrete integers, symbolic integers, and `None` from
-Python through the same helper. Avoid repeating the same behavioral assertions
-in C++ and Python. Keep focused C++ tests for properties the Python tests do not
-observe, such as native reference counts during copy/move or representation
-assumptions. Pin expected ABI representations independently of implementation
-constants so that a representation change fails the test.
+Keep C++ test helpers small and generic: prefer using parametrization at the Python
+level. Input construction and case selection should go in Python rather than
+hard-coding scenarios in C++.
 
 These tests prove that the shim preserves access to the API; they do not need to
 re-prove the underlying operator. One representative end-to-end case is enough
