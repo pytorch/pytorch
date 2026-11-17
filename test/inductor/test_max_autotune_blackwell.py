@@ -2059,14 +2059,17 @@ class TestBlackwellBMMTemplate(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    def test_tuned_baddbmm_blackwell_bmm_bias_aliases_operand(self):
+    @parametrize("sliced", (True, False))
+    def test_tuned_baddbmm_blackwell_bmm_bias_aliases_operand(self, sliced: bool):
         # One kernel arg cannot carry both A's host descriptor and the bias pointer.
-        bsz, m, k, n = 4, 256, 256, 128
+        # Unsliced, the bias is the same node as A, which needs N == K.
+        bsz, m, k = 4, 256, 256
+        n = 128 if sliced else k
         a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).bfloat16()
         b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).bfloat16()
 
         def fn(a, b):
-            return torch.baddbmm(a[:, :, :n], a, b)
+            return torch.baddbmm(a[:, :, :n] if sliced else a, a, b)
 
         with config.patch(
             {

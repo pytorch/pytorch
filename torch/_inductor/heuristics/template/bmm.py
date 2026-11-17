@@ -7,7 +7,6 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
-from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...autows_utils import has_two_ctas, meta_ws_enabled
@@ -100,17 +99,13 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             for node, broadcast in ((mat1, a_broadcast), (mat2, b_broadcast))
             if not broadcast
         ]
-        host_tma_names = [node.get_name() for node in host_tma_nodes]
-        other_names = OrderedSet(
-            node.get_name()
-            for node in kernel_inputs.nodes()
-            if node is not mat1 and node is not mat2
-        )
+        # Count by name, not identity: baddbmm(a, a, b) passes the same node as
+        # bias and mat1.
+        input_names = [node.get_name() for node in kernel_inputs.nodes()]
         host_side_tma = (
             config.triton.enable_host_side_tma
             and all(node.get_layout().offset == 0 for node in host_tma_nodes)
-            and len(OrderedSet(host_tma_names)) == len(host_tma_names)
-            and not any(name in other_names for name in host_tma_names)
+            and all(input_names.count(node.get_name()) == 1 for node in host_tma_nodes)
         )
 
         output_layout = kernel_inputs.output_layout()
