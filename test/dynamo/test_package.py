@@ -1479,6 +1479,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
 import torch
 
 
+
 class Child(torch.nn.Module):
     def forward(self, x):
         return x.sin()
