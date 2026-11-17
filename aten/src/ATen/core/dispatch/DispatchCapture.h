@@ -60,11 +60,18 @@ namespace impl {
 
 // Number of threads with a sink installed. The dispatcher hot path only pays
 // for a load of this counter; the thread-local lookup happens behind it.
+// On Windows it pays for a call: code that includes this header without the
+// macros of the build (a wrapper that Inductor compiles) can import a function
+// of the DLL, but not a variable.
+#if defined(_WIN32)
+TORCH_API bool dispatch_capture_enabled();
+#else // defined(_WIN32)
 TORCH_API extern std::atomic<int> dispatch_capture_sink_count;
 
 inline bool dispatch_capture_enabled() {
   return dispatch_capture_sink_count.load(std::memory_order_relaxed) != 0;
 }
+#endif // defined(_WIN32)
 
 TORCH_API DispatchCaptureSink* tls_dispatch_capture_sink();
 
