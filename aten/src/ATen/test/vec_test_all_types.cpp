@@ -1146,7 +1146,10 @@ namespace {
         using VT = ValueType<TypeParam>;
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
-        for (const auto expected : test_masks(vec::size())) {
+        for (const auto mask : test_masks(vec::size())) {
+            // Compared in 32 bits: GCC 13.3 miscompiles the zero extension of
+            // AVX-512 masks to 64 bits here (a 16-bit spill reloaded whole).
+            const auto expected = static_cast<uint32_t>(mask);
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)
             {
