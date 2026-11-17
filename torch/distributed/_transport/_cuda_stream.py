@@ -212,7 +212,11 @@ class _CudaStreamOrdering:
         with self._lock:
             if self._closed:
                 return
-            torch.cuda.synchronize(self._stream.device)
+            if any(item[0] is None for item in self._retained):
+                # Captured callbacks may replay on a different stream.
+                torch.cuda.synchronize(self._stream.device)
+            else:
+                self._stream.synchronize()
             _closed_captures.extend(
                 item[3] for item in self._retained if item[0] is None
             )
