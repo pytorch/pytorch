@@ -10487,6 +10487,7 @@ class Scheduler:
             not template_buf.is_multi_outputs_template()
             and low_prec_fp(template_buf.dtype)
             and not prologue_node.can_codegen_in_low_precision()
+            and not config.prologue_fusion_allow_upcast
         ):
             why(
                 "prologue fusion that must be upcast to fp32 not profitable for low precision templates"

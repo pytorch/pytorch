@@ -6589,7 +6589,16 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, hint_override: int | None = None
     ) -> dict[ChoiceCaller, float]:
         if hint_override not in self._choice_timings:
-            self._choice_timings[hint_override] = self._choice_timings_fn(hint_override)
+            timings = self._choice_timings_fn(hint_override)
+            pref = config.max_autotune_extern_gemm_preference
+            if pref > 1.0:
+                from torch._inductor.select_algorithm import ExternKernelCaller
+
+                timings = {
+                    c: t if isinstance(c, ExternKernelCaller) else t * pref
+                    for c, t in timings.items()
+                }
+            self._choice_timings[hint_override] = timings
         return self._choice_timings[hint_override]
 
     @contextlib.contextmanager

@@ -4789,6 +4789,24 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     best_choice = min(fallback_choices, key=lambda c: timings[c])
 
+        pref = config.max_autotune_extern_gemm_preference
+        if pref > 1.0 and not isinstance(best_choice, ExternKernelCaller):
+            externs = [
+                c
+                for c in timings
+                if isinstance(c, ExternKernelCaller) and not math.isinf(timings[c])
+            ]
+            if externs:
+                extern = min(externs, key=timings.__getitem__)
+                if timings[extern] < timings[best_choice] * pref:
+                    log.debug(
+                        "Extern %s within %.2fx of template %s, keeping the extern",
+                        extern.name,
+                        pref,
+                        best_choice.name,
+                    )
+                    best_choice = extern
+
         best_choice = V.choices.override_best_choice(best_choice, timings)
 
         # Test-only: force choosing decomposition (non-fallback) if available

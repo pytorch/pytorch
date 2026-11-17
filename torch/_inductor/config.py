@@ -327,6 +327,11 @@ epilogue_fusion_with_atomic_add = False
 # fuse pointwise into template prologues
 prologue_fusion = prologue_fusion_enabled()
 
+# Fuse prologues that must compute in fp32 into low-precision templates too (e.g.
+# a bit-feature expansion feeding an fp16 GEMM), skipping the check that such a
+# prologue is not profitable.
+prologue_fusion_allow_upcast: bool = False
+
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
 
@@ -795,6 +800,12 @@ max_autotune_conv_bwd_weight_backends = os.environ.get(
 max_autotune_conv_bwd_input_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_BWD_INPUT_CONV_BACKENDS", _conv_default_backends
 ).upper()
+
+# When > 1.0, GEMM autotuning keeps the fastest extern choice (cuBLAS,
+# hipBLASLt) unless a template choice beats it by this factor. Isolated
+# benchmarks can overrate templates against vendor GEMMs under concurrent,
+# power-capped serving.
+max_autotune_extern_gemm_preference: float = 1.0
 
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
