@@ -152,6 +152,5 @@ class TestHOPDevice(TestCase):
 
 instantiate_device_type_tests(TestHOPDevice, globals(), allow_xpu=True)
 
-
 if __name__ == "__main__":
     run_tests()
