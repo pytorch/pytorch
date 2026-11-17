@@ -1,5 +1,6 @@
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <vector>
@@ -122,7 +123,11 @@ inline void initGlobalDevicePoolState() {
   // the officially supported range (Intel GPUs starting from Arc (Alchemist)
   // series).
   namespace syclex = sycl::ext::oneapi::experimental;
-  for (const auto& device : gDevicePool.devices) {
+  for (const auto i : c10::irange(gDevicePool.devices.size())) {
+    const auto& device = gDevicePool.devices[i];
+    TORCH_CHECK(
+        device->ext_oneapi_index_within_platform() == i,
+        "Device index within platform does not match the expected index.");
     auto architecture = device->get_info<syclex::info::device::architecture>();
     if (architecture < syclex::architecture::intel_gpu_acm_g10) {
       TORCH_WARN(
@@ -243,16 +248,8 @@ DeviceIndex get_device_idx_from_pointer(void* ptr) {
       type == sycl::usm::alloc::device, "ptr is not a device type pointer.");
 
   sycl::device raw_device = sycl::get_pointer_device(ptr, get_device_context());
-  auto match_device = [raw_device](const auto& device) -> bool {
-    return raw_device == *device;
-  };
-  auto it = std::find_if(
-      gDevicePool.devices.begin(), gDevicePool.devices.end(), match_device);
-  TORCH_CHECK(
-      it != gDevicePool.devices.end(),
-      "Can't find the pointer from XPU devices.");
   return static_cast<DeviceIndex>(
-      std::distance(gDevicePool.devices.begin(), it));
+      raw_device.ext_oneapi_index_within_platform());
 }
 
 DeviceIndex device_count() {
@@ -311,66 +308,6 @@ void device_synchronize(c10::DeviceIndex device) {
       false,
       "device_synchronize is not supported for the current SYCL compiler version. ",
       "Please upgrade to SYCL compiler version 2026.1 or newer.");
-#endif
-}
-
-void register_host_memory(void* ptr, size_t size) {
-#if SYCL_COMPILER_VERSION >= 20260200
-  TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
-  TORCH_CHECK_VALUE(size > 0, "size must be greater than 0.");
-  static size_t page_size = []() -> size_t {
-    TORCH_CHECK(
-        get_device_context().get_platform().has(
-            sycl::aspect::ext_oneapi_register_host_memory),
-        "Requires the ext_oneapi_register_host_memory extension, "
-        "which is not supported on this device. ",
-        "Please upgrade to a newer driver.");
-#ifdef _WIN32
-    SYSTEM_INFO si;
-    GetSystemInfo(&si);
-    return static_cast<size_t>(si.dwPageSize);
-#else
-    auto ret = sysconf(_SC_PAGESIZE);
-    TORCH_CHECK_VALUE(ret > 0, "Failed to query the system page size.");
-    return static_cast<size_t>(ret);
-#endif
-  }();
-  TORCH_CHECK_VALUE(
-      (reinterpret_cast<uintptr_t>(ptr) % page_size) == 0,
-      "ptr must be aligned to the system page size.");
-  TORCH_CHECK_VALUE(
-      (size % page_size) == 0,
-      "size must be a multiple of the system page size.");
-
-  sycl::ext::oneapi::experimental::register_host_memory(
-      ptr, size, get_device_context());
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "register_host_memory is not supported for the current SYCL compiler version. ",
-      "Please upgrade to SYCL compiler version 2026.2 or newer.");
-#endif
-}
-
-void unregister_host_memory(void* ptr) {
-#if SYCL_COMPILER_VERSION >= 20260200
-  TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
-  static bool _ [[maybe_unused]] = []() -> bool {
-    TORCH_CHECK(
-        get_device_context().get_platform().has(
-            sycl::aspect::ext_oneapi_register_host_memory),
-        "Requires the ext_oneapi_register_host_memory extension, "
-        "which is not supported on this device. ",
-        "Please upgrade to a newer driver.");
-    return true;
-  }();
-  sycl::ext::oneapi::experimental::unregister_host_memory(
-      ptr, get_device_context());
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "unregister_host_memory is not supported for the current SYCL compiler version. ",
-      "Please upgrade to SYCL compiler version 2026.2 or newer.");
 #endif
 }
 

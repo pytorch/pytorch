@@ -89,8 +89,6 @@ def check_graph_breaks(
                 "resnet152",
                 "sam",
                 "sam_fast",
-                "stable_diffusion_text_encoder",
-                "stable_diffusion_unet",
                 "timm_efficientdet",
                 "torchrec_dlrm",
                 "vgg16",
@@ -100,6 +98,7 @@ def check_graph_breaks(
                 "google/gemma-3-4b-it",
                 "openai/whisper-tiny",
                 "Qwen/Qwen3-0.6B",
+                "Qwen/Qwen3.5-0.8B",
                 "mistralai/Mistral-7B-Instruct-v0.3",
                 "openai/gpt-oss-20b",
                 # Discovered after gfx950 CI enablement and rocm 7.2

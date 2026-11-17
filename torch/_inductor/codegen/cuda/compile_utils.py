@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 import os
 import re
 import shutil
+import subprocess
 
 import torch
 from torch._inductor import config
@@ -82,9 +84,47 @@ def _cuda_compiler() -> str | None:
         return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
-    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
+    if (cuda_home := os.getenv("CUDA_HOME")) and cuda_env.nvcc_exist(
+        candidate := os.path.join(cuda_home, "bin/nvcc")
+    ):
+        return os.path.realpath(candidate)
     return "nvcc"
+
+
+@functools.lru_cache(None)
+def _cuda_driver_lib_dirs() -> list[str]:
+    """
+    Find directories containing the versioned CUDA driver library.
+
+    CUDA driver installs commonly expose libcuda.so.1 to the runtime loader
+    without an unversioned libcuda.so linker symlink. Linking by the soname
+    avoids requiring users to create that symlink.
+    """
+    dirs: list[str] = []
+
+    try:
+        libs = subprocess.check_output(
+            ["/sbin/ldconfig", "-p"], stderr=subprocess.DEVNULL
+        ).decode(errors="ignore")
+    except (FileNotFoundError, subprocess.SubprocessError):
+        libs = ""
+
+    for line in libs.splitlines():
+        if "libcuda.so.1" not in line or "=>" not in line:
+            continue
+        lib_path = line.rsplit("=>", 1)[1].strip()
+        if os.path.basename(lib_path).startswith("libcuda.so.1"):
+            dirs.append(os.path.dirname(lib_path))
+
+    env_ld_library_path = os.getenv("LD_LIBRARY_PATH")
+    if env_ld_library_path:
+        dirs.extend(
+            path
+            for path in env_ld_library_path.split(":")
+            if path and os.path.exists(os.path.join(path, "libcuda.so.1"))
+        )
+
+    return list(dict.fromkeys(dirs))
 
 
 def _cuda_lib_options() -> list[str]:
@@ -113,7 +153,14 @@ def _cuda_lib_options() -> list[str]:
             # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
             if os.path.basename(path) != "stubs":
                 extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
-        extra_ldflags.append("-lcuda")
+        cuda_driver_lib_dirs = _cuda_driver_lib_dirs()
+        if cuda_driver_lib_dirs:
+            extra_ldflags.extend(
+                f"-L{path}" for path in cuda_driver_lib_dirs if path not in lpaths
+            )
+            extra_ldflags.append("-l:libcuda.so.1")
+        else:
+            extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
         raise NotImplementedError(
