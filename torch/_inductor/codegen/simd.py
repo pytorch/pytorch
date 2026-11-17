@@ -5982,7 +5982,7 @@ class SIMDScheduling(BaseScheduling):
             node.is_split_scan()
             for node in NodeScheduleMarker.only_nodes(node_schedule)
         ):
-            if set(tiling) != {"x", "r0_"}:
+            if OrderedSet(tiling) != OrderedSet(["x", "r0_"]):
                 return False
         return all(
             SIMDKernel.is_compatible(
