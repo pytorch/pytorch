@@ -1148,15 +1148,13 @@ void RocprofLogger::setDispatchRecordWait(std::chrono::milliseconds wait) {
 }
 
 void RocprofLogger::ensureRegistered() {
-  int status = 0;
-  rocprofiler_is_initialized(&status);
-  VLOG(0) << "rocprofiler_is_initialized returned " << status;
-  if (status == 0) {
-    VLOG(0) << "Forcing rocprofiler-sdk tool registration";
-    if (ROCPROF_CALL(rocprofiler_force_configure(&rocprofiler_configure)) ==
-        ROCPROFILER_STATUS_SUCCESS) {
-      VLOG(0) << "rocprofiler-sdk tool registration completed successfully";
-    }
+  if (getGlobalContext().clientId != nullptr) {
+    return;
+  }
+  VLOG(0) << "Forcing rocprofiler-sdk tool registration";
+  if (ROCPROF_CALL(rocprofiler_force_configure(&rocprofiler_configure)) ==
+      ROCPROFILER_STATUS_SUCCESS) {
+    VLOG(0) << "rocprofiler-sdk tool registration completed successfully";
   }
 }
 
