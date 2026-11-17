@@ -1314,6 +1314,33 @@ for warning in w:
             actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
             self.assertEqual(actual, name == flag)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("outer_enabled", [False, True])
+    @parametrize("inner_enabled", [False, True])
+    def test_inference_mode_guard(self, device, outer_enabled, inner_enabled):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(outer_enabled):
+            actual = libtorch_agnostic.ops.my_inference_mode_guard(inner_enabled)
+            self.assertEqual(actual, inner_enabled)
+            # The stable guard must restore the outer thread-local state.
+            self.assertEqual(torch.is_inference_mode_enabled(), outer_enabled)
+            self.assertEqual(torch.is_grad_enabled(), not outer_enabled)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("outer_enabled", [False, True])
+    def test_default_inference_mode_guard(self, device, outer_enabled):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(outer_enabled):
+            actual = libtorch_agnostic.ops.my_default_inference_mode_guard()
+            self.assertTrue(actual)
+            # The stable guard must restore the outer thread-local state.
+            self.assertEqual(torch.is_inference_mode_enabled(), outer_enabled)
+            self.assertEqual(torch.is_grad_enabled(), not outer_enabled)
+
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
     @parametrize("memory_format", [None, torch.channels_last, torch.contiguous_format])
