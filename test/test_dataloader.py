@@ -152,9 +152,12 @@ if "forkserver" in torch.multiprocessing.get_all_start_methods():
 JOIN_TIMEOUT = 60.0  # seconds
 
 
-supported_multiprocessing_contexts = [None] + list(
-    torch.multiprocessing.get_all_start_methods()
-)
+# fork is unsafe on macOS: the objc runtime aborts forked children of multithreaded parents
+supported_multiprocessing_contexts = [None] + [
+    method
+    for method in torch.multiprocessing.get_all_start_methods()
+    if not (IS_MACOS and method == "fork")
+]
 
 
 # The following collate functions are defined globally here for pickle purposes.
