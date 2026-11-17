@@ -459,7 +459,6 @@ struct KinetoObserverContext : public at::ObserverContext {
     c10::approx_time_t end_time_{
         std::numeric_limits<c10::approx_time_t>::min()};
 
-    bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
     collective_meta_t* collective_meta_{};
   };
@@ -526,6 +525,8 @@ class InputOutputEncoder final {
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
+  AppendOnlyList<c10::TypePtr, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+      scalar_list_types_;
 };
 
 using perf_profiler_t = torch::profiler::impl::linux_perf::PerfProfiler;
@@ -635,6 +636,13 @@ class TORCH_API ThreadLocalSubqueue {
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
     AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
+
+    // Read once per profiling session and reported for every op. Changing the
+    // setting during a session isn't reflected in its events.
+    bool allow_tf32_cublas_ =
+        at::globalContext().float32Precision(
+            at::Float32Backend::CUDA,
+            at::Float32Op::MATMUL) == at::Float32Precision::TF32;
   } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler
