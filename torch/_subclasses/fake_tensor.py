@@ -1076,12 +1076,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         # HOP backward caches reuse metadata hashing without the Python dispatch cache.
         FakeTensorMode._prep_args_for_hash(self, result, args, state, id_hashed_objects)
 
-    def can_run_unsafe_fallback(self, func: OpOverload) -> bool:
-        return self.allow_fallback_kernels and (
-            func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
-            or func.name() == "fbgemm::gmm"
-        )
-
     def maybe_run_unsafe_fallback(
         self,
         func: OpOverload,
@@ -1092,7 +1086,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     ) -> Any:
         if library_utils.can_generate_trivial_fake_impl(func):
             return library_utils.generate_trivial_fake_impl(func, *args, **kwargs)
-        if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
+        can_run_unsafe_fallback = self.allow_fallback_kernels and (
+            func.namespace in FakeTensorMode._can_run_unsafe_fallback_allowed_namespaces
+            or func.name() == "fbgemm::gmm"
+        )
+        if has_symbolic_sizes or not can_run_unsafe_fallback:
             raise UnsupportedOperatorException(func)
         if error is None:
             error = UnsupportedOperatorException(func)
