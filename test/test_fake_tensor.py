@@ -3576,6 +3576,7 @@ class TestFakeTensorConstHandling(TestCase):
             y[0] = 1
             self.assertNotConst(x)
 
+    @fake_tensor_test()
     def test_constant_propagate_through_functions(self):
         with FakeTensorMode():
             y = torch.div(4, 4, rounding_mode="trunc")
