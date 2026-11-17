@@ -525,6 +525,8 @@ class InputOutputEncoder final {
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
+  AppendOnlyList<c10::TypePtr, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+      scalar_list_types_;
 };
 
 using perf_profiler_t = torch::profiler::impl::linux_perf::PerfProfiler;
