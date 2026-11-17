@@ -5431,7 +5431,6 @@ class TestPrepareReadsWithTheAppToken(unittest.TestCase):
         self.assertEqual(
             perms,
             {
-                "permission-actions": "read",
                 "permission-contents": "read",
                 "permission-pull-requests": "read",
             },

@@ -196,8 +196,8 @@ jobs:
           private-key: ${{ secrets.PR_REVIEW_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          # The `permissions:` this job grants GITHUB_TOKEN, and no more.
-          permission-actions: read
+          # Read-only. No Actions permission: the Stage-1 artifact download
+          # below works without it.
           permission-contents: read
           permission-pull-requests: read
 
