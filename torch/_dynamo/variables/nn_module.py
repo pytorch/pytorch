@@ -61,6 +61,7 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
+    forward_hook_attrs,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -68,6 +69,7 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
+    module_hook_attrs,
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
@@ -1665,15 +1667,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             )
 
         # Allow skipping of empty hook dict guards on inbuilt nn modules
-        if name in (
-            "_backward_hooks",
-            "_backward_pre_hooks",
-            "_forward_hooks_with_kwargs",
-            "_forward_hooks",
-            "_forward_hooks_always_called",
-            "_forward_pre_hooks_with_kwargs",
-            "_forward_pre_hooks",
-        ):
+        if name in module_hook_attrs:
             tracer = tx.output.current_tracer
             if self.source is not None and tracer.parent is not None:
                 # These custom trackers bypass VariableBuilder's source recording,
@@ -1737,14 +1731,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # Keep IDs lazy for dispatch reuse; observations read or guard the runtime value.
         if (
             self.source
-            and name
-            in (
-                "_forward_pre_hooks_with_kwargs",
-                "_forward_pre_hooks",
-                "_forward_hooks_with_kwargs",
-                "_forward_hooks",
-                "_forward_hooks_always_called",
-            )
+            and name in forward_hook_attrs
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             hooks_dict = getattr(self.value, name)
@@ -1762,7 +1749,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Internal key hashing must not specialize sourced IDs.
                 key_vt = LazyVariableTracker.create(k, source_key, tx=tx)
                 key = (
-                    HashableTracker(key_vt, known_hash=hash(k))
+                    HashableTracker.lazy_int_key(key_vt)
                     if type(k) is int
                     else HashableTracker(key_vt)
                 )

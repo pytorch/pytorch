@@ -1916,7 +1916,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), (x + 1, 1))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize("source_type", [dict, OrderedDict, tuple])
+    @parametrize("source_type", [dict, OrderedDict, tuple, list])
     @parametrize("keys", [("a", "b"), (1, 2), (False, True), (b"a", b"b"), (None,)])
     @parametrize("nonliteral_destination_key", [False, True])
     def test_ordered_dict_update_builtin_keys_fast_path(
@@ -2928,13 +2928,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         d = ReversedDict(d)
 
-        @torch.compile(backend="eager")
         def fn(x, d):
             # Forces side effects attribute reapplication logic
             d.sample = 1
             d["baz"] = 4
             return x * d["foo"] * d["bar"]
 
+        # Replay must resolve builtin operations independently of the frame's globals.
+        fn = types.FunctionType(
+            fn.__code__, {**fn.__globals__, "type": None, "dict": None}
+        )
+        fn = torch.compile(fn, backend="eager")
         fn(torch.randn(4), d)
         # This is intentional because the dict is mutated, so we will have a recompilation.
         fn(torch.randn(4), d)
@@ -6243,9 +6247,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x, make_input())
 
     @parametrize(
-        "method, args", [("clear", ()), ("pop", ("a",)), ("__delitem__", ("a",))]
+        "method, args",
+        [
+            ("clear", ()),
+            ("pop", ("a",)),
+            ("__delitem__", ("a",)),
+            ("__setitem__", ("c", 3)),
+            ("setdefault", ("c", 3)),
+            ("update", ({"c": 3},)),
+        ],
     )
-    def test_dict_raw_removal_refuses_ordered_storage(self, method, args):
+    def test_dict_raw_write_refuses_ordered_storage(self, method, args):
         def fn(x, mapping):
             result = getattr(dict, method)(mapping, *args)
             return x + 1, result, list(mapping.items())
