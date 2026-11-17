@@ -186,10 +186,10 @@ def _is_fake_tensor_same(
     if not torch._C._has_storage(new) or not torch._C._has_storage(old_tensor):
         return False
 
-    if not statically_known_true(
+    if statically_known_true(
         new.storage_offset() == old_tensor.storage_offset()
-    ) or get_storage(new) != get_storage(old_tensor):
-        return False
+    ) and get_storage(new) == get_storage(old_tensor):
+        return True
 
     def any_user_may_alias(node):
         # imported here because reinplace imports this module at load time
@@ -211,10 +211,12 @@ def _is_fake_tensor_same(
                 # likely never support HOPs that are aliasing.
                 continue
 
-            # Strategy: do a FakeTensor prop, see if the storage aliases.  If Inductor
-            # ever gets tighter invariants on OpOverloads (that is, we ban things like
-            # torch.ops.aten.reshape calls in the graph), then this could just be a fast
-            # schema lookup.
+            if isinstance(user.target, torch._ops.OpOverload) and all(
+                output.alias_info is None for output in user.target._schema.returns
+            ):
+                continue
+
+            # Potentially aliasing operators such as reshape can return fresh storage.
             is_valid, args, kwargs = get_fake_args_kwargs(user)
             if not is_valid:
                 return True
@@ -243,7 +245,8 @@ def _is_fake_tensor_same(
     # else.  If the FakeTensor's storage is fresh and none of the node's users can alias
     # it, then we don't need to update this node.
     if (
-        existing_storages[get_storage(old_tensor)] == 1
+        node is not None
+        and existing_storages[get_storage(old_tensor)] == 1
         and get_storage(new) not in existing_storages
         and not any_user_may_alias(node)
     ):
