@@ -128,6 +128,11 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 try:
+    import tabulate as _tabulate
+except ImportError:
+    _tabulate = None  # type: ignore[assignment]
+
+try:
     import torch._logging
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401
@@ -240,14 +245,11 @@ def tabulate(
     rows: list[tuple[str, Any]] | list[list[Any]],
     headers: tuple[str, ...] | list[str],
 ) -> str:
-    try:
-        import tabulate
-
-        return tabulate.tabulate(rows, headers=headers)
-    except ImportError:
-        return "\n".join(
-            ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
-        )
+    if _tabulate is not None:
+        return _tabulate.tabulate(rows, headers=headers)
+    return "\n".join(
+        ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
+    )
 
 
 curr_frame = 0
@@ -2015,7 +2017,9 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
 
     if torch._inductor.config:
         try:
-            inductor_config_copy = torch._inductor.config.get_config_copy()
+            # Skips entries excluded from saved configs, such as custom passes,
+            # which can hold arbitrary objects.
+            inductor_config_copy = torch._inductor.config.get_serializable_config_copy()
         except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
@@ -2049,7 +2053,7 @@ def _functorch_config_for_logging() -> str | None:
         return None
 
     try:
-        functorch_config_copy = torch._functorch.config.get_config_copy()
+        functorch_config_copy = torch._functorch.config.get_serializable_config_copy()
     except (TypeError, AttributeError, RuntimeError, AssertionError):
         return None
 
@@ -3262,7 +3266,7 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         # GC time) on that same dict mid-iteration, which a live view would turn
         # into "dictionary changed size during iteration".
         return list(obj.items())
-    elif isinstance(obj, OrderedDict):
+    elif issubclass(type(obj), OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
@@ -4859,9 +4863,7 @@ def tensor_always_has_static_shape(
 
 def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
     def inner() -> str:
-        try:
-            from tabulate import tabulate  # TODO: Check that this is installed
-        except ImportError:
+        if _tabulate is None:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
                 + str(lazy_format_graph_code(fn_name, gm))
@@ -4870,7 +4872,7 @@ def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
         node_specs = [
             [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
         ]
-        graph_str = tabulate(
+        graph_str = _tabulate.tabulate(
             node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
         )
         return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
@@ -5667,6 +5669,18 @@ def iter_mro_static_attrs(cls: type, name: str) -> Iterator[object]:
     for _, namespace in iter_mro_static_dicts(cls):
         if name in namespace:
             yield namespace[name]
+
+
+def has_custom_metaclass_accessor(klass: type, name: str) -> bool:
+    """Whether class metadata has a non-wrapper getter or a replaced descriptor."""
+    metacls = type(klass)
+    if metacls is type:
+        return False
+    getattribute = next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
+    return (
+        type(getattribute) is not types.WrapperDescriptorType
+        or next(iter_mro_static_attrs(metacls, name), None) is not type.__dict__[name]
+    )
 
 
 def find_bound_builtin_method_descriptor(value: object) -> object | None:

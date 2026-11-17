@@ -460,6 +460,8 @@ class CustomOpDef:
                     result,
                     get_module,
                 )
+            if self._non_differentiable:
+                result = autograd._detach_outputs(result)
             return result
 
         return backend_impl
@@ -638,9 +640,12 @@ class CustomOpDef:
             if torch_dispatch_class not in self._torch_dispatch_fns:
 
                 def inner(*args, **kwargs):
-                    return self._torch_dispatch_fns[torch_dispatch_class](
+                    result = self._torch_dispatch_fns[torch_dispatch_class](
                         *args, **kwargs
                     )
+                    if self._non_differentiable:
+                        result = autograd._detach_outputs(result)
+                    return result
 
                 self._lib._register_torch_dispatch_rule(
                     self._name, torch_dispatch_class, inner
@@ -703,11 +708,18 @@ class CustomOpDef:
         that needs different behavior, and switching between them at runtime.
 
         Pass ``"non-differentiable"`` instead of a backward callable to declare
-        that the outputs do not require gradients, even when the inputs do.
-        No generated :class:`torch.autograd.Function` is invoked in this mode.
+        that outputs are detached and have no ``grad_fn``, even when the inputs
+        require gradients or the kernel explicitly enables output gradients.
         ``setup_context`` must be ``None``.
-        This mode requires a functional operator without aliased outputs.
+        This mode requires a non-mutating operator with at least one return
+        and no aliased outputs.
         Registering a backward callable again restores differentiable behavior.
+        Enabling this mode does not remove the formula from existing graphs.
+        Python kernels and rules registered through this object also detach
+        outputs when no autograd keys are present. Direct low-level kernel
+        overrides must return detached outputs themselves in those calls.
+        Register the desired mode before compiling or exporting functions that
+        use the operator.
 
         Examples:
             >>> import torch
@@ -764,9 +776,13 @@ class CustomOpDef:
             False
 
         """
-        non_differentiable = isinstance(backward, str)
         if isinstance(backward, str):
             autograd._validate_non_differentiable(backward, setup_context)
+            backward_fn = None
+            non_differentiable = True
+        else:
+            backward_fn = backward
+            non_differentiable = False
         schema = self._opoverload._schema
         if utils.is_out(self._opoverload):
             raise RuntimeError(
@@ -778,8 +794,9 @@ class CustomOpDef:
         ):
             if non_differentiable:
                 raise RuntimeError(
-                    "Non-differentiable registration requires a functional "
-                    f"operator without aliased outputs, but got {schema}."
+                    "Non-differentiable registration requires a non-mutating "
+                    "operator with at least one return and without aliased "
+                    f"outputs, but got {schema}."
                 )
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
@@ -787,15 +804,13 @@ class CustomOpDef:
                 f"a functional operator and register an autograd formula for that."
             )
 
-        if isinstance(backward, str):
-            self._non_differentiable = True
-            self._backward_fn = None
-            self._setup_context_fn = None
-            return
-
-        self._non_differentiable = False
-        self._backward_fn = backward
-        self._setup_context_fn = setup_context
+        self._non_differentiable = non_differentiable
+        if not non_differentiable:
+            self._backward_fn = backward_fn
+            self._setup_context_fn = setup_context
+        if torch.compiler.is_dynamo_compiling():
+            # Flush registration state before tracing the next operator call.
+            torch._dynamo.graph_break()
 
     def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
         schema_str = self._name + self._schema
@@ -841,7 +856,10 @@ class CustomOpDef:
                     f"Please use `{self._init_fn.__name__}.register_fake` to add an "
                     f"fake impl."
                 )
-            return self._abstract_fn(*args, **kwargs)
+            result = self._abstract_fn(*args, **kwargs)
+            if self._non_differentiable:
+                result = autograd._detach_outputs(result)
+            return result
 
         self._lib._register_fake(self._name, fake_impl, _stacklevel=5)
 
@@ -1002,7 +1020,14 @@ class CustomOpDef:
 
         def register(func):
             need_register = self._vmap_fn is None
-            self._vmap_fn = func
+
+            def wrapped_vmap(*args, **kwargs):
+                result = func(*args, **kwargs)
+                if self._non_differentiable:
+                    result = autograd._detach_outputs(result)
+                return result
+
+            self._vmap_fn = wrapped_vmap
 
             if need_register:
 

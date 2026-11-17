@@ -23,9 +23,7 @@ class Info:
     _non_differentiable: bool = False
 
 
-def _validate_non_differentiable(
-    backward: str, setup_context: Callable | None
-) -> None:
+def _validate_non_differentiable(backward: str, setup_context: Callable | None) -> None:
     if backward != "non-differentiable":
         raise ValueError(
             "Expected a backward callable or 'non-differentiable', "

@@ -1379,12 +1379,20 @@ def register_autograd(
     that needs different behavior, and switching between them at runtime.
 
     Pass ``"non-differentiable"`` instead of a backward callable to prevent
-    the outputs from requiring gradients, even when the inputs do, without
-    invoking a generated :class:`torch.autograd.Function`.
+    the outputs from requiring gradients when dispatch reaches the Autograd
+    kernel. These outputs are detached and have no ``grad_fn``.
     ``setup_context`` must be ``None``.
     For operators created with :func:`torch.library.custom_op`, registering a
-    backward callable again restores differentiable behavior.
-    This mode requires a functional operator without aliased outputs.
+    backward callable again restores differentiable behavior. Python kernel,
+    fake, vmap, and torch-dispatch registrations through that object also detach
+    outputs when there are no autograd keys, such as factory calls without Tensor
+    inputs. Direct low-level kernel or dispatcher overrides must ensure
+    non-differentiable outputs themselves for those calls.
+    This mode requires a non-mutating operator with at least one return and no
+    aliased outputs. Low-level operators may have keyword-only Tensor inputs in
+    this mode, unlike operators registered with a backward callable.
+    Register the desired mode before compiling or exporting functions that use
+    the operator.
 
     Examples:
         >>> import torch
@@ -1452,9 +1460,13 @@ def register_autograd(
 
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
-    non_differentiable = isinstance(backward, str)
     if isinstance(backward, str):
         _library.autograd._validate_non_differentiable(backward, setup_context)
+        backward_fn = None
+        non_differentiable = True
+    else:
+        backward_fn = backward
+        non_differentiable = False
     schema = op._schema
     if _library.utils.is_out(op):
         raise RuntimeError(
@@ -1464,8 +1476,9 @@ def register_autograd(
     if not _library.utils.is_functional_schema(schema):
         if non_differentiable:
             raise RuntimeError(
-                "Non-differentiable registration requires a functional "
-                f"operator without aliased outputs, but got {schema}."
+                "Non-differentiable registration requires a non-mutating "
+                "operator with at least one return and without aliased "
+                f"outputs, but got {schema}."
             )
         raise RuntimeError(
             f"Cannot register autograd formula for non-functional operator "
@@ -1479,10 +1492,6 @@ def register_autograd(
             f"Got: {schema}"
         )
 
-    if isinstance(backward, str):
-        backward_fn = None
-    else:
-        backward_fn = backward
     info = _library.autograd.Info(
         backward_fn, setup_context, _non_differentiable=non_differentiable
     )

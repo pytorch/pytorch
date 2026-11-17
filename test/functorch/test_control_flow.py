@@ -38,6 +38,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipCUDAIf,
     skipXPUIf,
 )
@@ -3142,6 +3143,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 @skipIfNoDynamoSupport
 class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(_TestControlFlowBase.setUp)
 
     @onlyAccelerator
     def test_cond_gpu(self, device):
@@ -4965,6 +4967,11 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, (init, xs, kv))
 
+    @decorateIf(
+        unittest.skip("init aliasing requires an AOT backend"),
+        lambda params: params["alias_site"] == "init"
+        and params["compile_mode"] in ("none", "eager"),
+    )
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_site", ["init", "nested"])
@@ -5423,6 +5430,7 @@ class GraphModule(torch.nn.Module):
 class AssociativeScanTestsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @preserves_device_selection
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
