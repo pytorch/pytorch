@@ -5,6 +5,7 @@ from torch._prims.debug_prims import load_tensor_reader
 from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -72,6 +73,7 @@ class TestContentStore(TestCase):
         for _ in range(4):
             hash_storage(torch.tensor(2, device=device).untyped_storage())
 
+    @fake_tensor_test()
     def test_load_tensor(self, device):
         with TemporaryDirectoryName() as loc:
             writer = ContentStoreWriter(loc)

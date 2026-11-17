@@ -15,6 +15,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import (
     FSDPTestContinuous,
     FSDPTestMultiThread,
@@ -482,6 +483,8 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
         else:
             self.assertEqual(len(full_sd), 0)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -14,6 +14,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     RegisterPostBackwardFunction,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
@@ -288,6 +289,8 @@ class TestFullyShardFrozen(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

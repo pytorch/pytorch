@@ -5,6 +5,7 @@ from torch._C import FileCheck
 from torch._inductor.custom_graph_pass import CustomPartitionerFn, get_hash_for_files
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -64,6 +65,8 @@ class TestCustomPartitionerFn(TestCase):
         # make sure the custom partitioner function is indeed invoked
         self.assertTrue(custom_partitioner_fn.called)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

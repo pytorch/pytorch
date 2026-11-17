@@ -3,6 +3,7 @@
 
 import torch
 from torch._export.serde.serialize import deserialize, serialize
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 try:
@@ -53,6 +54,8 @@ tests = [
 for test in tests:
     make_dynamic_cls(test)
 del test
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

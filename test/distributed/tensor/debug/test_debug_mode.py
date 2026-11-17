@@ -28,6 +28,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
@@ -720,6 +721,7 @@ class TestDTensorDebugMode(TestCase):
       aten::sum(t: f32[8, 8, 8])""",
         )
 
+    @fake_tensor_test()
     def test_fake_tensor(self):
         with FakeTensorMode():
             x = torch.randn(8, 8)

@@ -14,6 +14,7 @@ from torch._inductor.runtime.runtime_utils import ceildiv
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -490,6 +491,8 @@ class TestFixedConfigs(TestCase):
         args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

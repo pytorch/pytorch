@@ -7,6 +7,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -890,6 +891,8 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result, int)
         self.assertEqual(cnt.frame_count, 0)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests

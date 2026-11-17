@@ -20,6 +20,7 @@ from torch._dynamo.testing import (
     empty_line_normalizer,
     normalize_gm,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     CrossRefMode,
     HardwareClassification,
@@ -2049,6 +2050,8 @@ class GraphModule(torch.nn.Module):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

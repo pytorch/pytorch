@@ -15,6 +15,7 @@ from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import IS_SM10X, IS_SM90, SM90OrLater
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -977,6 +978,8 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 """,
             )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

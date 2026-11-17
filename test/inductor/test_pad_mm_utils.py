@@ -4,6 +4,7 @@ import operator
 import torch
 from torch._inductor.fx_passes.pad_mm import get_non_view_def
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -18,6 +19,8 @@ class PadMMUtilsTest(TestCase):
 
         self.assertIs(get_non_view_def(getitem), sort)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

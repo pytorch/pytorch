@@ -63,6 +63,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2888,6 +2889,8 @@ class TestScaleSwizzleInference(TestCase):
             self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=False), (None, None)
         )
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

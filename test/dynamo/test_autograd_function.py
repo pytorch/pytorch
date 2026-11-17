@@ -12,6 +12,7 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 import torch.autograd.forward_ad as fwAD
 from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -4104,6 +4105,8 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
 instantiate_parametrized_tests(AutogradFunctionTests)
 instantiate_parametrized_tests(AutogradFunctionFunctorchTests)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

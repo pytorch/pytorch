@@ -27,6 +27,7 @@ from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
     instantiate_parametrized_tests,
@@ -1537,6 +1538,8 @@ if RUN_GPU:
         test_failures_gpu_wrapper,
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

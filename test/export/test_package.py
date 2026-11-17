@@ -12,6 +12,7 @@ from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
@@ -238,6 +239,8 @@ class TestAOTIPackageDeviceValidation(TestCase):
 
 instantiate_parametrized_tests(TestAOTIPackageDeviceValidation)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

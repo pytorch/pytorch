@@ -9,6 +9,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -394,6 +395,8 @@ class GraphModule(torch.nn.Module):
         # call_function  mul_1   <built-in function mul>  (mul, add)            {}
         # output         output  output                   ((mul_1, mul, add),)  {}
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

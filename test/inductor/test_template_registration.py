@@ -3,6 +3,7 @@ import torch._inductor.select_algorithm as select_algorithm
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.select_algorithm import ExternKernelChoice, TritonTemplate
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 # A module that registers Inductor templates / extern kernels can be initialized
@@ -77,6 +78,8 @@ class TestRegistrationIdempotency(TestCase):
         with self.assertRaisesRegex(AssertionError, "duplicate extern kernel"):
             ExternKernelChoice(kernel_b, name=name)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

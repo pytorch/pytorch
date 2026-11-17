@@ -1,5 +1,6 @@
 # Owner(s): ["module: sdpa"]
 
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
 import contextlib
 from functools import cache, partial
 from collections import namedtuple
@@ -2764,6 +2765,7 @@ class TestSDPAGeneric(NNTestCase):
             expected_shape[-1] = v_shape[-1]
             self.assertEqual(actual.shape, torch.Size(expected_shape))
 
+    @fake_tensor_test()
     @parametrize(
         "q_shape,kv_shape",
         [

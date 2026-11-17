@@ -5,6 +5,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -204,6 +205,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
             if _variable_2 != 0:
                 raise AssertionError(f"Expected _variable_2 0, got {_variable_2}")
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

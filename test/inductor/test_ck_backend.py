@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
+
 
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
@@ -1017,6 +1019,8 @@ class TestCKRowwiseScale(TestCase):
 
 instantiate_device_type_tests(TestCKRowwiseScale, globals(), only_for="cuda")
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

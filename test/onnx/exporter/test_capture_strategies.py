@@ -6,6 +6,7 @@ from __future__ import annotations
 import torch
 from torch.onnx._internal.exporter import _capture_strategies
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -61,6 +62,8 @@ class ExportStrategiesTest(common_utils.TestCase):
             raise AssertionError("ep is None")
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

@@ -39,6 +39,7 @@ from torch.testing._internal.common_device_type import (
     skipOps,
     xfail,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
@@ -2509,6 +2510,7 @@ main()
 
     @scoped_load_inline
     def test_autograd_cpp_node_non_traceable(self, load_inline):
+        namespace = "test_non_traceable_autograd_cpp_node_" + type(self).__name__
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = false;
@@ -2537,7 +2539,9 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
 
         module = load_inline(
             name="test_non_traceable_autograd_cpp_node",
-            cpp_sources=cpp_source,
+            cpp_sources=cpp_source.replace(
+                "test_non_traceable_autograd_cpp_node", namespace
+            ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
@@ -2579,7 +2583,7 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_basic_$is_traceable, m) {
+TORCH_LIBRARY(${test_class}_test_autograd_cpp_node_basic_$is_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
@@ -2588,7 +2592,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_basic_$is_traceable, m) {
         module = load_inline(
             name=f"test_autograd_cpp_node_basic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
-                is_traceable="true" if is_traceable else "false"
+                is_traceable="true" if is_traceable else "false",
+                test_class=type(self).__name__,
             ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -2655,7 +2660,7 @@ torch::Tensor custom_op_backed_by_autograd_fn2(torch::Tensor x) {
   return CustomOpAutogradFunction2::apply(x);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_id_$is_traceable, m) {
+TORCH_LIBRARY(${test_class}_test_autograd_cpp_node_id_$is_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
     m.def("custom_op_backed_by_autograd_fn2", custom_op_backed_by_autograd_fn2);
 }
@@ -2665,7 +2670,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_id_$is_traceable, m) {
         module = load_inline(
             name=f"test_autograd_cpp_node_id_{is_traceable}",
             cpp_sources=cpp_source.substitute(
-                is_traceable="true" if is_traceable else "false"
+                is_traceable="true" if is_traceable else "false",
+                test_class=type(self).__name__,
             ),
             functions=[
                 "custom_op_backed_by_autograd_fn",
@@ -2773,7 +2779,7 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torc
   return CustomOpAutogradFunction::apply(x, y, fixed);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_saved_basic_$is_traceable, m) {
+TORCH_LIBRARY(${test_class}_test_autograd_cpp_node_saved_basic_$is_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
@@ -2782,7 +2788,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_basic_$is_traceable, m) {
         module = load_inline(
             name=f"test_autograd_cpp_node_saved_basic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
-                is_traceable="true" if is_traceable else "false"
+                is_traceable="true" if is_traceable else "false",
+                test_class=type(self).__name__,
             ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -2839,7 +2846,7 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
+TORCH_LIBRARY(${test_class}_test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
@@ -2848,7 +2855,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
         module = load_inline(
             name=f"test_autograd_cpp_node_saved_dynamic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
-                is_traceable="true" if is_traceable else "false"
+                is_traceable="true" if is_traceable else "false",
+                test_class=type(self).__name__,
             ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -2907,7 +2915,7 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, int64_t y)
   return CustomOpAutogradFunction::apply(x, y);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_saved_int_$is_traceable, m) {
+TORCH_LIBRARY(${test_class}_test_autograd_cpp_node_saved_int_$is_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
@@ -2916,7 +2924,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int_$is_traceable, m) {
         module = load_inline(
             name=f"test_autograd_cpp_node_saved_int_{is_traceable}",
             cpp_sources=cpp_source.substitute(
-                is_traceable="true" if is_traceable else "false"
+                is_traceable="true" if is_traceable else "false",
+                test_class=type(self).__name__,
             ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -2974,7 +2983,7 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, double z) 
   return CustomOpAutogradFunction::apply(x, z);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
+TORCH_LIBRARY(${test_class}_test_autograd_cpp_node_saved_float_$is_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
@@ -2983,7 +2992,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
         module = load_inline(
             name=f"test_autograd_cpp_node_saved_float_{is_traceable}",
             cpp_sources=cpp_source.substitute(
-                is_traceable="true" if is_traceable else "false"
+                is_traceable="true" if is_traceable else "false",
+                test_class=type(self).__name__,
             ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -3076,7 +3086,7 @@ void reset() {
     CustomOpAutogradFunction::iteration = 0;
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_data_dependent_$is_traceable, m) {
+TORCH_LIBRARY(${test_class}_test_autograd_cpp_node_data_dependent_$is_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
     m.def("reset", reset);
 }
@@ -3086,7 +3096,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent_$is_traceable, m) {
         module = load_inline(
             name=f"test_autograd_cpp_node_data_dependent_{is_traceable}",
             cpp_sources=cpp_source.substitute(
-                is_traceable="true" if is_traceable else "false"
+                is_traceable="true" if is_traceable else "false",
+                test_class=type(self).__name__,
             ),
             functions=["custom_op_backed_by_autograd_fn", "reset"],
             verbose=True,
@@ -3384,6 +3395,9 @@ main()
     @scoped_load_inline
     @requires_cuda_and_triton
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
+        namespace = (
+            "test_cudagraphs_cpu_scalar_used_in_cpp_custom_op_" + type(self).__name__
+        )
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -3423,7 +3437,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         module = load_inline(
             name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
-            cpp_sources=cpp_source,
+            cpp_sources=cpp_source.replace(
+                "test_cudagraphs_cpu_scalar_used_in_cpp_custom_op", namespace
+            ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
@@ -3433,9 +3449,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             config.patch(compiled_autograd=True),
             inductor_config.patch("triton.cudagraphs", True),
         ):
-            out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
-                x
-            )
+            out = getattr(torch.ops, namespace).custom_op_backed_by_autograd_fn(x)
             opt_bwd = torch.compile(lambda: out.sum().backward())
             opt_bwd()
 
@@ -5892,6 +5906,8 @@ class TestCompiledAutogradOpInfo(TestCase):
 
 instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestCompiledAutograd)
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     if HAS_CPU:

@@ -20,6 +20,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.export.graph_signature import CustomObjArgument
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_MACOS,
@@ -424,6 +425,8 @@ class ConstantAttrMapTest(TestCase):
         del constant_attr_map[const_obj]
         self.assertEqual(len(constant_attr_map), 1)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()
