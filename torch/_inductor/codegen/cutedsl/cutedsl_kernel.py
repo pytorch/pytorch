@@ -521,13 +521,16 @@ class CuteDSLTemplateKernel(Kernel):
         # Build call args matching the signature generated in `def_kernel`
         call_args = []
         arg_types = []
+        raw_args: list[Any] = []
 
         for _, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)
             if reinterpret_view is not None:
                 call_args.append(reinterpret_view.codegen_reference())
+                raw_args.append(reinterpret_view)
             else:
                 call_args.append(input_node.get_name())
+                raw_args.append(input_node)
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
         # Add additional args from python_argdefs (output, sizevars, ..)
@@ -547,10 +550,19 @@ class CuteDSLTemplateKernel(Kernel):
                 call_args.append(capture.codegen_reference())
             else:
                 call_args.append(call_arg)
+            # Plain buffer names resolve through the wrapper's args_to_buffers.
+            raw_args.append(capture)
             arg_types.append(arg_type)
 
         # TODO this karg really should not be called `triton`
-        wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
+        wrapper.generate_kernel_call(
+            name,
+            call_args,
+            triton=True,
+            arg_types=arg_types,
+            raw_args=raw_args,
+            raw_keys=[None] * len(raw_args),
+        )
 
     def _get_subgraph(self, subgraph_number: int):
         """Get subgraph by number for modification processing."""
