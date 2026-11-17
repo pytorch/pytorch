@@ -2730,6 +2730,19 @@ def tdm_descriptor_row_major(mat: IRNode) -> bool | None:
     return _tdm_row_major_from_strides(strides_i)
 
 
+def tdm_bmm_descriptor_row_major(mat: IRNode) -> bool | None:
+    """Classify a rank-3 bmm operand by the unit-stride dimension of its 2D slice."""
+    from .virtualized import V
+
+    strides = mat.get_stride()
+    if len(strides) != 3:
+        return None
+    strides_i = [
+        V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides[1:]
+    ]
+    return _tdm_row_major_from_strides(strides_i)
+
+
 def _tdm_operand_policy_violation(
     mat: IRNode,
     accepted_dtypes: OrderedSet[torch.dtype],
@@ -3054,11 +3067,46 @@ def _xpu_descriptor_operands_compatible(matrices: Sequence[IRNode]) -> bool:
     )
 
 
-def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
-    """Whether the XPU mm templates may take this BF16/FP16 mm.
-    Gated to Xe2 or later by the device-ID table in torch.xpu._utils (currently
-    BMG only, where the configs were tuned); other devices keep the default templates."""
-    if not matrices or not config.triton.enable_xpu_mm_templates:
+def _xpu_bmm_descriptor_operands_compatible(matrices: Sequence[IRNode]) -> bool:
+    """Rank-3 analogue of _xpu_descriptor_operands_compatible; batch stride offsets the base."""
+    from .virtualized import V
+
+    sizevars = V.graph.sizevars
+    conditions = []
+    for mat in matrices:
+        strides = mat.get_stride()
+        if len(strides) != 3 or mat.get_name() in V.graph.unaligned_buffers:
+            return False
+        row_major = tdm_bmm_descriptor_row_major(mat)
+        if row_major is None:
+            return False
+        inner, outer = (
+            (strides[2], strides[1]) if row_major else (strides[1], strides[2])
+        )
+        conditions.append(sympy.Eq(inner, 1))
+        itemsize = mat.get_dtype().itemsize
+        for nbytes in (
+            outer * itemsize,
+            strides[0] * itemsize,
+            mat.get_layout().offset * itemsize,
+        ):
+            if not _bytes_aligned(sizevars.replace_backed_symbols_with_hints(nbytes)):
+                return False
+            conditions.append(sympy.Eq(Mod(nbytes, TMA_ALIGNMENT), 0))
+
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size()[1:] for mat in matrices], add_guards=True
+    ):
+        return False
+    condition = sympy.And(*conditions)
+    return sizevars.statically_known_true(condition) or sizevars.guard_or_false(
+        condition
+    )
+
+
+def _xpu_descriptor_template_device_ok(layout: Layout) -> bool:
+    """Config, device, dtype and arch gate shared by the XPU descriptor templates."""
+    if not config.triton.enable_xpu_mm_templates:
         return False
     if layout.device.type != "xpu" or layout.dtype not in (
         torch.bfloat16,
@@ -3068,9 +3116,23 @@ def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
     from torch.utils._triton import has_triton_stable_tma_api
     from torch.xpu._utils import get_xpu_arch, XPUArch
 
-    if not has_triton_stable_tma_api() or get_xpu_arch() < XPUArch.Xe2:
+    return has_triton_stable_tma_api() and get_xpu_arch() >= XPUArch.Xe2
+
+
+def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
+    """Whether the XPU mm templates may take this BF16/FP16 mm.
+    Gated to Xe2 or later by the device-ID table in torch.xpu._utils (currently
+    BMG only, where the configs were tuned); other devices keep the default templates."""
+    if not matrices or not _xpu_descriptor_template_device_ok(layout):
         return False
     return _xpu_descriptor_operands_compatible(matrices)
+
+
+def use_triton_xpu_bmm_template(mat1: IRNode, mat2: IRNode, *, layout: Layout) -> bool:
+    """Whether the XPU persistent bmm template may take this BF16/FP16 bmm (Xe2+)."""
+    if not _xpu_descriptor_template_device_ok(layout):
+        return False
+    return _xpu_bmm_descriptor_operands_compatible((mat1, mat2))
 
 
 def use_triton_tma_template(

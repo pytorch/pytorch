@@ -28,6 +28,7 @@ from ..utils import (
     use_cutlass_template,
     use_nv_universal_gemm_template,
     use_triton_template,
+    use_triton_xpu_bmm_template,
 )
 from ..virtualized import ops, V
 from .mm_common import (
@@ -162,6 +163,27 @@ blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm")
     + load_kernel_template("triton_gemm_helpers"),
     cache_codegen_enabled_for_template=True,
+)
+
+
+@SymbolicGridFn
+def persistent_bmm_grid(b, m, n, meta, *, cdiv, min):
+    tiles = b * cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])
+    return (min(meta["NUM_SMS"], tiles), 1, 1)
+
+
+# Intel XPU persistent bmm over per-batch rank-2 descriptors (see the jinja source).
+xpu_persistent_bmm_template = TritonTemplate(
+    name="bmm_xpu_persistent",
+    grid=persistent_bmm_grid,
+    source=load_kernel_template("triton_xpu_persistent_bmm"),
+)
+
+# Same source as the persistent template; NUM_SMS makes each tile its own work-group.
+xpu_non_persistent_bmm_template = TritonTemplate(
+    name="bmm_xpu_non_persistent",
+    grid=persistent_bmm_grid,
+    source=load_kernel_template("triton_xpu_persistent_bmm"),
 )
 
 
@@ -390,6 +412,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if use_triton_xpu_bmm_template(mat1, mat2, layout=layout):
+            templates_to_use.append(xpu_persistent_bmm_template)
+            templates_to_use.append(xpu_non_persistent_bmm_template)
 
     # Single unified call for all templates
     choices.extend(

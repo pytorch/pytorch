@@ -24,7 +24,11 @@ from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
 from ...autows_utils import has_two_ctas, meta_ws_enabled
-from ...kernel.bmm import bmm_template
+from ...kernel.bmm import (
+    bmm_template,
+    xpu_non_persistent_bmm_template,
+    xpu_persistent_bmm_template,
+)
 from ...kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
     mm_template,
@@ -52,10 +56,12 @@ from ...utils import (
     kpack_supported,
     mfma_kdim,
     rocm_gfx_arch,
+    tdm_bmm_descriptor_row_major,
     tdm_descriptor_row_major,
     TMA_DESCRIPTOR_SIZE,
     tma_inner_dim,
     triton_type,
+    use_triton_xpu_bmm_template,
     use_triton_xpu_template,
     using_b200,
     using_rocm_rdna3,
@@ -2701,6 +2707,35 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             GemmConfig(32, 64, 128, 2, 2),
             GemmConfig(64, 64, 32, 2, 8),
         ]
+        # Xe2 (BMG) tile pools of the XPU descriptor mm and bmm templates.
+        self.xpu_persistent_configs: list[BaseConfig] = [
+            GemmConfig(16, 512, 64, 2, 8),
+            GemmConfig(32, 256, 32, 2, 16),
+            GemmConfig(32, 256, 128, 3, 32),
+            GemmConfig(128, 128, 64, 2, 16),
+            GemmConfig(128, 128, 64, 3, 16),
+            GemmConfig(128, 128, 64, 3, 32),
+            GemmConfig(128, 128, 128, 2, 16),
+            GemmConfig(128, 256, 16, 4, 32),
+            GemmConfig(128, 256, 32, 3, 32),
+            GemmConfig(128, 256, 64, 2, 32),
+            GemmConfig(128, 512, 32, 2, 32),
+            GemmConfig(128, 512, 32, 3, 32),
+            GemmConfig(128, 512, 32, 4, 32),
+            GemmConfig(256, 128, 64, 2, 32),
+            GemmConfig(256, 256, 32, 5, 32),
+            GemmConfig(512, 128, 32, 1, 32),
+        ]
+        self.xpu_non_persistent_configs: list[BaseConfig] = [
+            GemmConfig(4, 512, 256, 1, 8),
+            GemmConfig(8, 128, 32, 2, 4),
+            GemmConfig(8, 256, 128, 3, 8),
+            GemmConfig(16, 64, 64, 4, 4),
+            GemmConfig(16, 128, 64, 4, 8),
+            GemmConfig(32, 128, 64, 3, 16),
+            GemmConfig(32, 256, 64, 1, 8),
+            GemmConfig(32, 512, 128, 1, 16),
+        ]
         self.xpu_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 1, 16),
             (torch.float32, 128): FlexConfig(128, 32, 1, 16),
@@ -4714,24 +4749,7 @@ class XPUPersistentMMTemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = [
-            GemmConfig(16, 512, 64, 2, 8),
-            GemmConfig(32, 256, 32, 2, 16),
-            GemmConfig(32, 256, 128, 3, 32),
-            GemmConfig(128, 128, 64, 2, 16),
-            GemmConfig(128, 128, 64, 3, 16),
-            GemmConfig(128, 128, 64, 3, 32),
-            GemmConfig(128, 128, 128, 2, 16),
-            GemmConfig(128, 256, 16, 4, 32),
-            GemmConfig(128, 256, 32, 3, 32),
-            GemmConfig(128, 256, 64, 2, 32),
-            GemmConfig(128, 512, 32, 2, 32),
-            GemmConfig(128, 512, 32, 3, 32),
-            GemmConfig(128, 512, 32, 4, 32),
-            GemmConfig(256, 128, 64, 2, 32),
-            GemmConfig(256, 256, 32, 5, 32),
-            GemmConfig(512, 128, 32, 1, 32),
-        ]
+        self.mm_configs = list(self.xpu_persistent_configs)
         self.exhaustive_configs = self.mm_configs
 
     # A work-group walking at least this many K steps gets a barrier after each tile.
@@ -4760,16 +4778,106 @@ class XPUNonPersistentMMTemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = [
-            GemmConfig(4, 512, 256, 1, 8),
-            GemmConfig(8, 128, 32, 2, 4),
-            GemmConfig(8, 256, 128, 3, 8),
-            GemmConfig(16, 64, 64, 4, 4),
-            GemmConfig(16, 128, 64, 4, 8),
-            GemmConfig(32, 128, 64, 3, 16),
-            GemmConfig(32, 256, 64, 1, 8),
-            GemmConfig(32, 512, 128, 1, 16),
-        ]
+        self.mm_configs = list(self.xpu_non_persistent_configs)
+        self.exhaustive_configs = self.mm_configs
+
+    def _num_sms(self) -> int:
+        # Above any reachable tile count, so the grid has one work-group per tile.
+        return 2**30
+
+
+def _xpu_bmm_descriptor_row_major(
+    kernel_inputs: KernelInputs,
+) -> dict[str, bool] | None:
+    """A_ROW_MAJOR / B_ROW_MAJOR for the XPU bmm descriptor templates, or None when
+    they do not take this bmm."""
+    if not isinstance(kernel_inputs, MMKernelInputs):
+        return None
+    mat1, mat2 = kernel_inputs.mat1mat2()
+    if not use_triton_xpu_bmm_template(
+        mat1, mat2, layout=kernel_inputs.output_layout()
+    ):
+        return None
+    return {
+        "A_ROW_MAJOR": bool(tdm_bmm_descriptor_row_major(mat1)),
+        "B_ROW_MAJOR": bool(tdm_bmm_descriptor_row_major(mat2)),
+    }
+
+
+class XPUDescriptorBMMTemplateConfigMixin(MMTemplateConfigMixin):
+    """Kwargs shared by the XPU bmm descriptor templates; subclasses set NUM_SMS."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.should_scale_configs = False
+
+    def _num_sms(self) -> int:
+        return get_num_sms()
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        flags = _xpu_bmm_descriptor_row_major(kernel_inputs)
+        if flags is None:
+            return
+        dtype_size = kernel_inputs.dtype().itemsize
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            if not _tdm_descriptor_blocks_aligned(
+                template_kwargs["BLOCK_M"],
+                template_kwargs["BLOCK_N"],
+                template_kwargs["BLOCK_K"],
+                dtype_size,
+                a_row_major=flags["A_ROW_MAJOR"],
+                b_row_major=flags["B_ROW_MAJOR"],
+                block_ok=_tdm_block_legal,
+            ):
+                continue
+            yield {**template_kwargs, **flags, "NUM_SMS": self._num_sms()}
+
+
+@register_template_heuristic(xpu_persistent_bmm_template.uid, "xpu")
+class XPUPersistentBMMTemplateConfigHeuristic(
+    XPUDescriptorBMMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """Persistent descriptor bmm template heuristic for XPU (Xe2/BMG)."""
+
+    # A work-group walking at least this many K steps gets a barrier after each tile.
+    TILE_BARRIER_MIN_K_STEPS = 1024
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = list(self.xpu_persistent_configs)
+        self.exhaustive_configs = self.mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {
+                **template_kwargs,
+                "TILE_BARRIER_MIN_K_STEPS": self.TILE_BARRIER_MIN_K_STEPS,
+            }
+
+
+@register_template_heuristic(xpu_non_persistent_bmm_template.uid, "xpu")
+class XPUNonPersistentBMMTemplateConfigHeuristic(
+    XPUDescriptorBMMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """Non-persistent descriptor bmm template heuristic for XPU."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = list(self.xpu_non_persistent_configs)
         self.exhaustive_configs = self.mm_configs
 
     def _num_sms(self) -> int:
