@@ -510,6 +510,8 @@ inductor_override_kwargs["cuda"] = {
     },
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
+    # Exception: Tensor-likes are not close!
+    ("nn.functional.bilinear", f16): {"atol": 3e-3, "rtol": 3e-3},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", f16): {"reference_in_float": True},
     ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
@@ -550,6 +552,9 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f64): {"check_gradient": False},
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
+    # The fp16 sample has ties, and which tied index gets which gradient is
+    # implementation-defined (it differs between ATen and the small-k decomposition).
+    ("topk", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("_unsafe_masked_index", f16): {
         "reference_in_float": True,
@@ -776,6 +781,8 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    # fp16 backward reduces over frames in a different order than eager.
+    ("stft", f16): {"grad_atol": 1e-2, "grad_rtol": 1e-3},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -1258,9 +1265,16 @@ def get_sort_assert_equal_fn(args, kwargs):
     return get_sort_argsort_assert_equal_fn(False, args, kwargs)
 
 
+def get_topk_assert_equal_fn(args, kwargs):
+    # topk's tie order is implementation-defined, so compare like an unstable sort.
+    dim = kwargs.get("dim", args[2] if len(args) > 2 else -1)
+    return get_sort_argsort_assert_equal_fn(False, args, {"dim": dim})
+
+
 CUSTOM_ASSERT_EQUALS_FNS = {
     "argsort": get_argsort_assert_equal_fn,
     "sort": get_sort_assert_equal_fn,
+    "topk": get_topk_assert_equal_fn,
 }
 
 

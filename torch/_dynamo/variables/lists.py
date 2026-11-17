@@ -991,13 +991,6 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is range:
-            return VariableTracker.build(tx, name in range.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
     def range_equals(self, other: "RangeVariable") -> bool:
         # ref: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/rangeobject.c#L514-L553  (range_equals)
         r0, r1 = self, other
@@ -1305,13 +1298,6 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
             # subclass's overridden extend/append (e.g. fx immutable_list).
             ListVariable.list_extend(self, tx, args, {})
         return ConstantVariable.create(None)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is not list:
-            return super().call_obj_hasattr(tx, name)
-        return VariableTracker.build(tx, hasattr([], name))
 
     def sq_ass_item_impl(
         self,
@@ -1983,13 +1969,6 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
             raise_observed_exception(AttributeError, tx, args=[msg])
         return super().call_method(tx, name, args, kwargs)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is collections.deque:
-            return VariableTracker.build(tx, name in collections.deque.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2122,13 +2101,6 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
             return "()"
         else:
             return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is not tuple:
-            return super().call_obj_hasattr(tx, name)
-        return VariableTracker.build(tx, hasattr((), name))
 
     def sq_concat_impl(
         self,
@@ -2891,6 +2863,30 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "translate")
 
+    def bytearray_center(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "center")
+
+    def bytearray_ljust(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "ljust")
+
+    def bytearray_rjust(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "rjust")
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
@@ -2914,6 +2910,9 @@ class ByteArrayVariable(VariableTracker):
         "title": Method(bytearray_title),
         "replace": Method(bytearray_replace),
         "translate": Method(bytearray_translate),
+        "center": Method(bytearray_center),
+        "ljust": Method(bytearray_ljust),
+        "rjust": Method(bytearray_rjust),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -3142,11 +3141,6 @@ class SizeVariable(TupleVariable):  # noqa: RVT001
                     f"index must be int or SymInt, got {type(index).__name__}"
                 )
             return self.items[index]
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(torch.Size, name))
 
     def sq_concat_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
@@ -3388,11 +3382,6 @@ class BaseListIteratorVariable(IteratorVariable):
         self.index += 1
         return self.items[old_index]
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(iter([]), name))
-
     def python_type(self) -> type:
         return type(iter([]))
 
@@ -3509,10 +3498,17 @@ class ByteArrayIteratorVariable(IteratorVariable):
         self.index += 1
         return value
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(iter(bytearray()), name))
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.parent.data) - self.index, 0))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def python_type(self) -> type:
         return type(iter(bytearray()))
@@ -3652,11 +3648,6 @@ class ListReverseIteratorVariable(IteratorVariable):
     def as_python_constant(self) -> Any:
         raise NotImplementedError
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return ConstantVariable.create(hasattr(reversed([]), name))
-
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if not self.is_mutable():
             raise AssertionError("list reverse iterator must be mutable to iterate")
@@ -3739,14 +3730,6 @@ class RangeIteratorVariable(IteratorVariable):  # noqa: RVT001
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Range iterators are their own iterator."""
         return self
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        if self.python_type() is range_iterator:
-            ri = iter(range(0))
-            return VariableTracker.build(tx, hasattr(ri, name))
-        return super().call_obj_hasattr(tx, name)
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L1072-L1091

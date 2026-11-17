@@ -252,7 +252,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
         vt_cls = _vt_cls_modeling(obj, objclass)
         sd = _compute_slotdefs(objclass).get(name)
-        if vt_cls is not None and sd is not None:
+        if vt_cls is not None and sd is not None and isinstance(obj, vt_cls):
             impl = getattr(vt_cls, sd.impl)
             return sd.wrapper(obj, tx, impl, rest, kwargs)
         return self.owner.call_method(
@@ -607,6 +607,18 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
 
     def python_type(self) -> type:
         return types.BuiltinMethodType
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        # builtin_function_or_method has no __getattr__ and no instance __dict__.
+        msg = f"'builtin_function_or_method' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
