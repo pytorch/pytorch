@@ -685,10 +685,12 @@ def validate_strides(strides: StrideType):
     Verifies the object specifies valid strides.
     """
 
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     if not isinstance(strides, Sequence):
         raise AssertionError(f"strides must be a Sequence, got {type(strides)}")
     for stride in strides:
-        if stride < 0:
+        if statically_known_true(stride < 0):
             raise AssertionError(f"stride must be non-negative, got {stride}")
 
 
@@ -1955,9 +1957,11 @@ def compute_required_storage_length(
     if guard_or_false(reduce(operator.mul, shape, 1) == 0):
         return 0
 
-    max_offset = sum((x - 1) * y for x, y in zip(shape, strides))
-    # +1 to account for the first element which offsets are taken from
-    return 1 + storage_offset + max_offset
+    return _nonempty_storage_length(shape, strides, storage_offset)
+
+
+def _nonempty_storage_length(shape: ShapeType, strides: StrideType, storage_offset: int):
+    return 1 + storage_offset + sum((size - 1) * stride for size, stride in zip(shape, strides))
 
 
 def check_in_bounds_for_storage(
@@ -1967,10 +1971,16 @@ def check_in_bounds_for_storage(
     Determines if the given shape, strides, and offset are valid for the given storage.
     """
 
-    required_length = compute_required_storage_length(shape, strides, storage_offset)
-    if a.size() < required_length:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_and
+
+    storage_size = a.size()
+    required_length = _nonempty_storage_length(shape, strides, storage_offset)
+    # Native as_strided checks bounds at runtime. Avoid specializing fake storage sizes.
+    if statically_known_true(
+        sym_and(reduce(operator.mul, shape, 1) != 0, storage_size < required_length)
+    ):
         msg = (
-            f"Can't view a storage of size {a.size()} with an offset of {storage_offset}, "
+            f"Can't view a storage of size {storage_size} with an offset of {storage_offset}, "
             f"shape of {str(shape)}, and strides of {str(strides)}, "
             f"which requires a storage of size {required_length}"
         )

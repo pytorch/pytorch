@@ -288,6 +288,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             subtest(((2, 1, 1, 1), (1, 9, 5, 7), (2, 1, 1)), name="trailing_run"),
             subtest(((2, 1, 2, 1), (1, 45, 2, 7), (2, 1, 1, 2)), name="same_rank"),
             subtest(((2, 1, 2), (1, 45, 2), (2, 1, 1, 2)), name="higher_rank"),
+            subtest(((1, 1), (9, 7), (1,)), name="single_element"),
+            subtest(((0, 2), (14, 2), (0, 2)), name="empty_same_shape"),
         ],
     )
     def test_view_with_singleton_strides(self, sizes, strides, shape):
@@ -329,50 +331,71 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual.stride(), expected.stride())
 
-    def test_decomposed_view_preserves_dynamic_strides(self):
+    @parametrize("change_rank", [False, True])
+    def test_decomposed_view_preserves_dynamic_strides(self, change_rank):
         class Model(torch.nn.Module):
             def forward(self, base, size):
-                x = base.as_strided((2, 1, size.size(0), 3), (128, 6, 32, 2))
+                n = size.size(0)
+                if change_rank:
+                    return base.as_strided((2, 1, 1, n), (16, 7, 5, 2)).view(2, 1, n)
+                x = base.as_strided((2, 1, n, 3), (128, 6, 32, 2))
                 return x.view(x.shape)
 
         model = Model()
         base = torch.arange(256)
         size = torch.empty(2)
-        dim = torch.export.Dim("n", min=1, max=4)
+        dim = torch.export.Dim("n", min=0, max=4)
         exported = torch.export.export(
             model, (base, size), dynamic_shapes=(None, {0: dim})
         ).run_decompositions({aten.view.default: torch._refs.view})
 
-        size = torch.empty(1)
-        actual = exported.module()(base, size)
-        expected = model(base, size)
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual.stride(), expected.stride())
+        ((output,),) = exported.graph.output_node().args
+        fake_stride = output.meta["val"].stride()
+        self.assertEqual(
+            tuple(guarding_hint_or_throw(s) for s in fake_stride),
+            model(base, size).stride(),
+        )
+
+        decomposed = exported.module()
+        for n in (0, 1, 2):
+            size = torch.empty(n)
+            actual = decomposed(base, size)
+            expected = model(base, size)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
 
     @skipIfPropagateRealTensors("propagate_real_tensors resolves the real nnz")
     @parametrize("tracing_mode", [None, "fake", "symbolic"])
     def test_refs_view_with_unbacked_storage(self, tracing_mode):
         from torch._prims.context import TorchRefsMode
 
-        def view(data):
-            base = torch.ones(data.nonzero().size(0))
-            x = base.as_strided((2, 1, 1, 3), (3, 45, 7, 1))
+        def view_input(data):
+            count = data.nonzero().size(0)
+            base = torch.arange(count + 6)
+            return base.as_strided((2, 1, 1, 3), (3, 45, 7, 1), count - 1)
+
+        def refs_view(data):
+            x = view_input(data)
             with TorchRefsMode(strict=True):
                 return x.view(2, 1, 3)
 
+        x = torch.ones(20)
+        expected = view_input(x).view(2, 1, 3)
         sample = torch.ones(12)
         if tracing_mode != "symbolic":
-            mode = torch._subclasses.fake_tensor.FakeTensorMode(shape_env=ShapeEnv())
+            mode = FakeTensorMode(shape_env=ShapeEnv())
             sample = mode.from_tensor(sample)
             if tracing_mode is None:
                 with mode:
-                    self.assertEqual(view(sample).shape, (2, 1, 3))
+                    actual = refs_view(sample)
+                self.assertEqual(actual.shape, expected.shape)
+                self.assertEqual(actual.stride(), expected.stride())
                 return
 
-        traced = make_fx(view, tracing_mode=tracing_mode)(sample)
-        x = torch.ones(20)
+        traced = make_fx(refs_view, tracing_mode=tracing_mode)(sample)
+        (output,) = traced.graph.output_node().args
+        self.assertEqual(output.meta["val"].stride(), expected.stride())
         actual = traced(x)
-        expected = view(x)
         self.assertEqual(actual, expected)
         self.assertEqual(actual.stride(), expected.stride())
 
