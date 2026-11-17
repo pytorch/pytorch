@@ -1,5 +1,5 @@
 """The TD scorer at runtime: the TD job's `scorer` block in td_results.json and
-run_test.py's cut."""
+run_test.py's cut, sized by the model's test budget when it has one."""
 
 from __future__ import annotations
 
@@ -19,12 +19,14 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
 from tools.testing.target_determination.scorer_model import (
     change_features,
     file_probability,
+    job_budget,
     ModelError,
     parse_model,
     risk_score,
     start_up_seconds,
     validate_model,
 )
+from tools.testing.target_determination.scorer_paths import count_build_files
 from tools.testing.test_run import TestRun
 
 
@@ -43,6 +45,7 @@ MAX_REASON_CHARS = 500
 MUST_RUN_HEURISTICS = (EditedByPR.__name__, PreviouslyFailedInPR.__name__)
 TRIAL_HEURISTICS = frozenset(h.name for h in HEURISTICS if h.trial_mode)
 MAX_MODEL_AGE_DAYS = 7
+BUDGET_STALE_DAYS = 3
 
 
 class NoModel(Exception):
@@ -76,18 +79,20 @@ def heuristic_file_scores(
     return out
 
 
-def _is_stale(version: str, today: date) -> bool:
+def _is_stale(
+    version: str, today: date, max_age_days: int = MAX_MODEL_AGE_DAYS
+) -> bool:
     """version is the refit's ISO date; one from the future by more than a day,
     or that does not parse, is stale too."""
     try:
         age = (today - date.fromisoformat(version)).days
     except (ValueError, TypeError):
         return True
-    return not -1 <= age <= MAX_MODEL_AGE_DAYS
+    return not -1 <= age <= max_age_days
 
 
 def _load_model(
-    fetch_model: Callable[[], bytes | None], today: date | None
+    fetch_model: Callable[[], bytes | None], today: date
 ) -> tuple[Any, str]:
     raw = fetch_model()
     if raw is None:
@@ -98,8 +103,6 @@ def _load_model(
         return None, invalid_reason(e)
     if not model["enabled"]:
         return None, "disabled"
-    if today is None:
-        today = datetime.now(UTC).date()
     if _is_stale(model["version"], today):
         return None, f"stale: {model['version']}"
     return model, "ok"
@@ -113,18 +116,33 @@ def _build_block(
     today: date | None,
 ) -> dict[str, Any]:
     heuristics = list(heuristics)
+    if today is None:
+        today = datetime.now(UTC).date()
     model, reason = _load_model(fetch_model, today)
+    budget_reason = None
+    if (
+        model is not None
+        and "budget" in model
+        and _is_stale(model["version"], today, BUDGET_STALE_DAYS)
+    ):
+        budget_reason = (
+            f"stale: version {model['version']} is over {BUDGET_STALE_DAYS} days "
+            f"before {today}"
+        )
+        print(f"TD scorer: budget dropped: {budget_reason!r}")
+        model = {k: v for k, v in model.items() if k != "budget"}
     ran = {h.name for h in aggregated._heuristic_results}
     unknown = None
     if model is not None:
         known = {h.name for h in heuristics}
         unknown = sorted(set(model["scorer"]["heuristics"]) - known)
-    change, risk = None, None
+    change, risk, build_files = None, None, None
     try:
         if changed_files is not None:
             change = change_features(changed_files)
             if model is not None:
                 risk = risk_score(model, change)
+            build_files = count_build_files(changed_files)
     except Exception as e:
         print(f"TD scorer: risk not computed: {error_reason(e)!r}")
     return {
@@ -135,6 +153,8 @@ def _build_block(
         "unknown": unknown,
         "change": change,
         "risk": risk,
+        "build_files": build_files,
+        "budget_reason": budget_reason,
     }
 
 
@@ -150,10 +170,13 @@ def build_scorer_block(
     Test jobs `needs:` the TD job, so an exception escaping here would skip every
     test job CI-wide. On any error the block is reduced to the reason, or None if
     even that fails, and TD's own scores are written regardless. changed_files is
-    None when they could not be listed; risk is then null. A model whose version
-    is more than MAX_MODEL_AGE_DAYS before today (UTC by default), more than a
-    day after it, or not a date is dropped as stale. `unknown` lists the model's heuristics that are not in `heuristics`:
-    they score 0 for every file.
+    None when they could not be listed; risk and build_files are then null. A
+    model whose version is more than MAX_MODEL_AGE_DAYS before today (UTC by
+    default), more than a day after it, or not a date is dropped as stale; of a
+    model kept, the budget alone is dropped when its version is more than
+    BUDGET_STALE_DAYS before today, with budget_reason saying why. `unknown`
+    lists the model's heuristics that are not in `heuristics`: they score 0 for
+    every file.
     """
     try:
         try:
@@ -208,6 +231,10 @@ def _info(
     start_up: float | None = None,
     files: list[str] | None = None,
     seconds: float | None = None,
+    share: float | None = None,
+    risk: float | None = None,
+    cost_exponent: float | None = None,
+    budget_mode: str = "error",
 ) -> dict[str, Any]:
     if files is None:
         files, seconds = td_files, td_seconds
@@ -223,6 +250,10 @@ def _info(
         "hash": _selection_hash(files),
         "td_n": len(td_files),
         "td_seconds": td_seconds,
+        "share": share,
+        "risk": risk,
+        "cost_exponent": cost_exponent,
+        "budget_mode": budget_mode,
     }
 
 
@@ -234,17 +265,23 @@ def select_tests(
     build_env_key: str,
     test_config: str,
 ) -> tuple[list[TestRun], list[TestRun], dict[str, Any]]:
-    """The scorer's cut at the cost of TD's own cut, as whole test files.
+    """The scorer's cut, as whole test files.
 
     A file's cost is its recorded seconds plus the model's start_up_seconds for
-    this build_env_key and test_config; the budget is the cost of TD's include
-    list. Files with a non-zero score from a must-run heuristic come first, by
-    name, whatever their cost; the rest fill what is left of the budget by
-    p / cost. Costs are summed in integer milliseconds so the order of summation
-    cannot change what fits. Raises when the block carries no usable model or
-    the model has no start-up for this job. Trial-mode heuristics score nothing,
-    as they reorder nothing in TD. Every shard computes the same selection: this
-    depends only on its arguments.
+    this build_env_key and test_config. The budget is budget_share's share of
+    the cost of all the job's files (TD's include plus exclude lists), ranked by
+    p / cost ** a with a the model's cost_exponent. When budget_share gives no
+    share (no budget block, or one the TD job dropped as stale), the budget is
+    the cost of TD's include list and the ranking is p / cost.
+
+    Files with a non-zero score from a must-run heuristic come first, by name,
+    whatever their cost; the rest fill what is left of the budget in rank order,
+    skipping files that do not fit, but with a share the top-ranked file always
+    runs, and without one it runs when nothing else is selected. Costs are summed
+    in integer milliseconds so the order of summation cannot change what fits.
+    Raises when the block carries no usable model or the model has no start-up
+    for this job. Trial-mode heuristics score nothing, as they reorder nothing in
+    TD. Every shard computes the same selection: it depends only on its arguments.
     """
     if not isinstance(block, dict):
         raise NoModel("no scorer block")
@@ -267,8 +304,16 @@ def select_tests(
         return round(cost(f) * 1000)
 
     td_files = _unique_files(td_include)
-    budget = sum(cost_ms(f) for f in td_files)
     files = _unique_files(td_include + td_exclude)
+    plan = job_budget(
+        model,
+        block.get("build_files"),
+        block.get("risk"),
+        block.get("budget_reason"),
+        sum(cost_ms(f) for f in td_files),
+        sum(cost_ms(f) for f in files),
+    )
+    exponent, budget = plan["cost_exponent"], plan["budget_ms"]
     must_run = {
         f
         for name in MUST_RUN_HEURISTICS
@@ -286,17 +331,21 @@ def select_tests(
         scores = {name: h.get(f, 0.0) for name, h in heuristics.items()}
         c = cost(f)
         p = file_probability(model, scores, c, build_env_key, test_config, raised)
-        ranked.append((-p / c, f))
+        ranked.append((-(p / c**exponent), f))
     ranked.sort()
 
     rest: list[str] = []
-    for _, f in ranked:
+    for i, (_, f) in enumerate(ranked):
         c_ms = cost_ms(f)
-        if used + c_ms <= budget:
+        if used + c_ms <= budget or (i == 0 and plan["share"] is not None):
             selected.append(f)
             used += c_ms
         else:
             rest.append(f)
+    if not selected and rest:
+        top = rest.pop(0)
+        selected.append(top)
+        used += cost_ms(top)
     info = _info(
         "scorer",
         "ok",
@@ -308,6 +357,10 @@ def select_tests(
         start_up=start_up,
         files=selected,
         seconds=sum(seconds(f) for f in selected),
+        share=plan["share"],
+        risk=plan["risk"],
+        cost_exponent=exponent,
+        budget_mode=plan["mode"],
     )
     return [TestRun(f) for f in selected], [TestRun(f) for f in rest], info
 
@@ -320,7 +373,11 @@ def scorer_cut(
     build_env_key: str,
     test_config: str,
 ) -> tuple[list[TestRun], list[TestRun], dict[str, Any]]:
-    """select_tests on td_results.json's block; TD's own cut on any failure."""
+    """select_tests on td_results.json's block; TD's own cut on any failure.
+
+    The fallback reads nothing from the block, so a malformed block (budget
+    included) can only make it report budget_mode "error".
+    """
     try:
         block = load_scorer_block(td_results_path)
         return select_tests(
