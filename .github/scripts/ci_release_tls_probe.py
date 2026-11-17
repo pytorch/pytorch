@@ -16,8 +16,8 @@ from pathlib import Path
 
 
 REPOSITORY = "pytorch/pytorch"
-PR_NUMBER = "0"  # Inert until the owned draft is allocated and re-reviewed.
-HEAD_REF = "gh/d4l3k/0/head"
+PR_NUMBER = "205338"  # Exact owned draft; never merge.
+HEAD_REF = "gh/d4l3k/347/head"
 SOURCE_COMMIT = "d0f2af8b66b20da4baa50644c0cd3f887a2eae2e"
 SOURCE_PATH = ".ci/wheel/windows/set_desired_python.sh"
 SOURCE_SHA256 = "0e95c944223016625e70b45ca20a84b63074c05a480804a0d8be280d8013c627"

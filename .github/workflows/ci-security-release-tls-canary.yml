@@ -16,11 +16,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check-ci:
-    if: github.event_name == 'pull_request' && github.actor == 'd4l3k' && github.triggering_actor == 'd4l3k' && github.repository == 'pytorch/pytorch' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'd4l3k' && github.event.pull_request.head.repo.full_name == 'pytorch/pytorch' && github.event.pull_request.head.ref == 'gh/d4l3k/0/head'
+    if: github.event_name == 'pull_request' && github.actor == 'd4l3k' && github.triggering_actor == 'd4l3k' && github.repository == 'pytorch/pytorch' && github.event.pull_request.number == 205338 && github.event.pull_request.user.login == 'd4l3k' && github.event.pull_request.head.repo.full_name == 'pytorch/pytorch' && github.event.pull_request.head.ref == 'gh/d4l3k/347/head'
     uses: ./.github/workflows/_check-ci.yml
   exact-replay:
     needs: check-ci
-    if: github.event_name == 'pull_request' && github.actor == 'd4l3k' && github.triggering_actor == 'd4l3k' && github.repository == 'pytorch/pytorch' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'd4l3k' && github.event.pull_request.head.repo.full_name == 'pytorch/pytorch' && github.event.pull_request.head.ref == 'gh/d4l3k/0/head'
+    if: github.event_name == 'pull_request' && github.actor == 'd4l3k' && github.triggering_actor == 'd4l3k' && github.repository == 'pytorch/pytorch' && github.event.pull_request.number == 205338 && github.event.pull_request.user.login == 'd4l3k' && github.event.pull_request.head.repo.full_name == 'pytorch/pytorch' && github.event.pull_request.head.ref == 'gh/d4l3k/347/head'
     runs-on: windows-2022
     timeout-minutes: 15
     env:
