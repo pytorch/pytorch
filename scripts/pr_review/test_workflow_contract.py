@@ -5469,7 +5469,7 @@ class TestReviewJobBringsItsOwnBun(unittest.TestCase):
         self.assertEqual(list(inputs), ["bun-download-url"])
         self.assertRegex(
             inputs["bun-download-url"],
-            r"^https://github\.com/oven-sh/bun/releases/download/"
+            r"^https://github\.com/oven-sh/bun/releases/download/"  # @lint-ignore
             # The bun-version claude-code-action@9ca9355b installs; bump both together.
             r"bun-v1\.3\.14/bun-linux-x64-baseline\.zip$",
         )
