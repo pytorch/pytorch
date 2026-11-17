@@ -130,6 +130,14 @@ class _Capped(_Failed):
     pass
 
 
+class _Dependent(Exception):
+    """A trace on the numbers of a call came to a size or a number that only
+    what a tensor holds decides (``nonzero``, a mask as an index, ``item``).
+    It is made again in a ``ShapeEnv`` (an ``_Open`` with nothing open) that
+    the backend then shares, so that the symbol such a size is in the graph
+    is one both know."""
+
+
 class _Opaque(Exception):
     # An input of a region that cannot be an input of a graph.
     def __init__(self, position: int, reason: str) -> None:
@@ -1844,11 +1852,42 @@ def _trace(fn: Callable[..., Any], example: list[Any], opening: _Open | None) ->
             raise _Failed(None, "needs to know a number that is no size it was given")
         raise _Close(opening.closing)
     if error is None:
+        # Without what watches a trace that has symbols, the graph goes to
+        # the backend as it is.
+        watched = _monitor is not None and _monitor >= 0
+        if opening is None and watched and _depends_on_data(graph):  # type: ignore[arg-type]
+            raise _Dependent
         return graph
     if isinstance(error, (_Failed, _Retry)):
         raise error
     reason = f"{type(error).__name__}: {error}".split("\n")[0][:200]
     raise _Failed(getattr(error, "cfg_index", None), reason) from None
+
+
+def _depends_on_data(graph: torch.fx.GraphModule) -> bool:
+    """Whether a graph that was traced on numbers has a size or a number in
+    it that is a symbol all the same: one that only the data decides."""
+
+    def symbolic(value: Any) -> bool:
+        if type(value) in _SYMS:
+            return True
+        if isinstance(value, torch.Tensor):
+            return any(type(size) is torch.SymInt for size in value.shape)
+        if type(value) in (tuple, list):
+            return any(symbolic(item) for item in value)
+        return False
+
+    return any(symbolic(node.meta.get("val")) for node in graph.graph.nodes)
+
+
+def _unopened(key: Any, inputs: "_Inputs") -> "_Open":
+    """The inputs for a trace that leaves nothing open and is made in a
+    ``ShapeEnv`` all the same (see ``_Dependent``)."""
+    try:
+        return _Open(key, inputs, set())
+    except Exception as e:
+        reason = f"a size that depends on data, and {type(e).__name__}: {e}"
+        raise _Failed(None, reason.split("\n")[0][:200]) from None
 
 
 # ----------------------------------------------------------------------
@@ -2670,7 +2709,10 @@ class _Region:
         while True:
             opening = self.open_for(key, inputs)
             if opening is None:
-                return self.build(key, args, inputs, None)
+                try:
+                    return self.build(key, args, inputs, None)
+                except _Dependent:
+                    return self.build(key, args, inputs, _unopened(key, inputs))
             known = self.sizes[_kind(key)]
             try:
                 return self.build(key, args, inputs, opening)
@@ -2748,7 +2790,7 @@ class _Region:
         variant.written = sorted(found["written"])
         if built is not None:
             variant.freeze(flat, *built)
-        if opening is not None:
+        if opening is not None and opening.opened:
             self.leave_open(variant, key, inputs, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
@@ -3228,14 +3270,21 @@ class _Path(_Region):
             if arg is not undefined and self.inputs[p] not in refused
         ]
         limit: int | None = None
+        # Whether a size of the path depends on data (see ``_Dependent``).
+        dependent = False
         for _ in range(12):
             inputs = _Inputs()
             key = self.key(args, inputs, positions)
             opening = self.open_for(key, inputs)
+            if opening is None and dependent:
+                opening = _unopened(key, inputs)
             try:
                 graph, found, keep = self.trace(
                     args, inputs, positions, refused, limit, opening
                 )
+            except _Dependent:
+                dependent = True
+                continue
             except _Retry as again:
                 limit = again.limit if again.limit is not None else limit
                 positions = (
@@ -3246,7 +3295,7 @@ class _Path(_Region):
                 self.sizes[_kind(key)].fixed |= close.slots
                 continue
             except _Failed as e:
-                if opening is None or isinstance(e, _Capped):
+                if opening is None or not opening.opened or isinstance(e, _Capped):
                     raise
                 # What a trace on symbols cannot do, one on numbers may.
                 self.sizes[_kind(key)].static = True
@@ -3286,7 +3335,7 @@ class _Path(_Region):
         variant.written = sorted(found["written"])
         if built is not None:
             variant.freeze(inputs.flat, *built)
-        if opening is not None:
+        if opening is not None and opening.opened:
             self.leave_open(variant, key, final, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
