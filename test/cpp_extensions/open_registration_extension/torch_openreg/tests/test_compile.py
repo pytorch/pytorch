@@ -281,9 +281,9 @@ class TestPrivateUse1Routing(TestCase):
             traced_stream = compiled_fn()
             # The cleanup hook ran at the end of tracing, restoring device 0
             # before the backend was invoked (without it the backend would have
-            # seen the switched device 1). The second call starts on device 1
-            # (the runtime switch), so its compile records 1.
-            self.assertEqual(devices_at_compile, [0, 1])
+            # seen the switched device 1). Only the first compile has run so
+            # far; the second call recompiles on device 1 (asserted below).
+            self.assertEqual(devices_at_compile, [0])
             # The traced stream was captured for device 0 (the device at trace
             # time); it reconstructs to the eager current stream of device 0.
             self.assertEqual(traced_stream, torch.openreg.current_stream(0))
@@ -293,9 +293,11 @@ class TestPrivateUse1Routing(TestCase):
             # devices_at_compile above), not after each call.
             self.assertEqual(torch.openreg.current_device(), 1)
             # The current_device guard was installed for device 0 at compile
-            # time, so starting this call from device 1 recompiles.
+            # time, so starting this call from device 1 recompiles: the second
+            # compile records device 1.
             compiled_fn()
             self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(devices_at_compile, [0, 1])
 
             graph = cnt.graphs[0]
             call_targets = {
