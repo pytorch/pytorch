@@ -1,6 +1,10 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import unittest
+from unittest import mock
+
+import sympy
 
 import torch
 from torch._dynamo.device_interface import (
@@ -11,14 +15,33 @@ from torch._dynamo.device_interface import (
     register_interface_for_device,
     XpuInterface,
 )
+from torch._dynamo.source import ConstantSource, LocalSource
+from torch._guards import tracing, TracingContext
+from torch._inductor import config as inductor_config
 from torch._inductor.codecache import compiled_fx_graph_hash, FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
-from torch._inductor.heuristics.template.triton import MMTemplateConfigMixin
+from torch._inductor.heuristics.template.triton import (
+    mm_allow_tf32,
+    MMTemplateConfigMixin,
+)
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    ShapeEnv,
+    StatefulSymbolicContext,
+    StrictMinMaxConstraint,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 class _TensorNode:
@@ -91,6 +114,119 @@ class TestAllowTf32Interface(TestCase):
             self.assertFalse(XpuInterface.allow_tf32())
 
 
+@instantiate_parametrized_tests
+class TestAllowTf32DynamicShapes(TestCase):
+    def _gate(
+        self,
+        m,
+        *,
+        aot_mode=False,
+        precision="tf32",
+        dtype=torch.float32,
+        tf32=True,
+        m_range=None,
+        strict_min=None,
+    ):
+        shape_env = ShapeEnv()
+        tracing_context = contextlib.nullcontext()
+        if m == "unbacked":
+            sym_m = shape_env.create_unbacked_symint().node.expr
+        elif strict_min is not None:
+            # Mirror mark_dynamic(t, 0, min=strict_min): Dynamo keeps the user's
+            # constraint in the tracing context, not in the shape env.
+            t = torch.empty(m, 4)
+            ctx = StatefulSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+                constraint_sizes=[
+                    StrictMinMaxConstraint(
+                        warn_only=False, vr=ValueRanges(strict_min, int_oo)
+                    ),
+                    None,
+                ],
+                tensor_source=LocalSource("a"),
+                shape_env_to_source_to_symbol_cache={},
+            )
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+            sym_m = (
+                fake_mode.from_tensor(t, source=LocalSource("a"), symbolic_context=ctx)
+                .shape[0]
+                .node.expr
+            )
+            tc = TracingContext(fake_mode)
+            tc.tensor_to_context[t] = ctx
+            tracing_context = tracing(tc)
+        else:
+            sym_m = shape_env.create_symbol(m, ConstantSource("m"))
+        if m_range is not None:
+            shape_env.constrain_symbol_range(sym_m, *m_range)
+        gm = make_fx(lambda: torch.zeros(2, 2))()
+        graph = GraphLowering(gm, shape_env=shape_env, aot_mode=aot_mode)
+        orig = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = precision
+            with (
+                tracing_context,
+                V.set_graph_handler(graph),
+                mock.patch("torch.cuda.is_available", return_value=True),
+                mock.patch("torch.cuda.is_tf32_supported", return_value=tf32),
+            ):
+                dtype_arg = () if dtype is None else (dtype,)
+                result = mm_allow_tf32(sym_m, 512, 512, "cuda", *dtype_arg)
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = orig
+        return result, [
+            str(g.expr.subs(sym_m, sympy.Symbol("m"))) for g in shape_env.guards
+        ]
+
+    @parametrize(
+        "m,expected,guards",
+        [(1024, True, ["m >= 16"]), (8, False, ["m < 16"]), ("unbacked", False, [])],
+    )
+    def test_cuda_gate_guards_backed_dims(self, m, expected, guards):
+        self.assertEqual(self._gate(m), (expected, guards))
+
+    @parametrize(
+        "m,m_range,expected,guards",
+        [
+            # A guard would narrow a user's max, so a bounded range spanning
+            # the threshold needs a proof.
+            (1024, (2, 4096), False, []),
+            # A bounded range on one side of the threshold is already decided.
+            (1024, (32, 4096), True, []),
+            (8, (2, 15), False, []),
+            # Unbounded ranges (plain mark_dynamic) follow the hint and get a guard.
+            (1024, (2, int_oo), True, ["m >= 16"]),
+        ],
+    )
+    def test_cuda_gate_bounded_range(self, m, m_range, expected, guards):
+        self.assertEqual(self._gate(m, m_range=m_range), (expected, guards))
+
+    @parametrize("strict_min", (2, 4))
+    def test_cuda_gate_strict_min_only_needs_proof(self, strict_min):
+        # A min-only user range has no finite upper bound (and min=2 equals the
+        # default range), but a guard would still narrow it.
+        self.assertEqual(self._gate(1024, strict_min=strict_min), (False, []))
+
+    def test_cuda_gate_no_guard_without_tf32(self):
+        self.assertEqual(self._gate(1024, precision="ieee"), (False, []))
+
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_cuda_gate_no_guard_for_non_fp32(self, dtype):
+        # ALLOW_TF32 only affects fp32 dots, so other dtypes keep the proof.
+        self.assertEqual(self._gate(1024, dtype=dtype), (False, []))
+
+    def test_cuda_gate_no_guard_without_dtype(self):
+        # Callers that don't pass a dtype (4-arg form) keep the guard-free check.
+        self.assertEqual(self._gate(1024, dtype=None), (False, []))
+
+    def test_cuda_gate_no_guard_without_tf32_hardware(self):
+        self.assertEqual(self._gate(1024, tf32=False), (False, []))
+
+    def test_cuda_gate_aot_mode_needs_proof(self):
+        # AOT mode never checks guards at runtime, so a hint alone is not enough.
+        self.assertEqual(self._gate(1024, aot_mode=True), (False, []))
+
+
 class TestAllowTf32ExtraKwargs(TestCase):
     mixin = MMTemplateConfigMixin()
 
@@ -102,6 +238,10 @@ class TestAllowTf32ExtraKwargs(TestCase):
         self._graph_ctx = V.set_graph_handler(self.graph)
         self._graph_ctx.__enter__()
         self.addCleanup(self._graph_ctx.__exit__, None, None, None)
+        # GEMM templates (and so ALLOW_TF32) only run under max-autotune.
+        config_ctx = inductor_config.patch(max_autotune=True)
+        config_ctx.__enter__()
+        self.addCleanup(config_ctx.__exit__, None, None, None)
 
     def tearDown(self):
         if self._prev_pua is None:
