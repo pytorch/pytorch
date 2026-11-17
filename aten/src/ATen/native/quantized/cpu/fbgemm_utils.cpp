@@ -80,7 +80,7 @@ void CopyICFirst3dTensorToChannelsLast3dTensor(
     T* dst) {
   // IC OC/G THW -> G OC/G THW IC/G
   const int64_t inner_size = D * H * W;
-  for (int64_t i = 0; i < G * OC_G; ++i) {
+  for (const auto i : c10::irange(G * OC_G)) {
     for (const auto j : c10::irange(inner_size)) {
       for (const auto ic : c10::irange(IC_G)) {
         int g = static_cast<int>(i / OC_G);

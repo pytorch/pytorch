@@ -1,6 +1,10 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import functools
 import math
+import os
+import sys
+import types
 import unittest
 import unittest.mock
 
@@ -90,6 +94,75 @@ class TestInductorConfig(TestCase):
             ):
                 with self.assertWarns(FutureWarning):
                     self.assertFalse(triton_utils.use_block_ptr_enabled())
+
+    @staticmethod
+    def _patch_compile_iq(env, *, flags=None, fbtriton=True):
+        """Patch `env` into os.environ, fbtriton detection, and a stub triton.magnon
+        package.
+
+        `flags` maps triton.magnon.flags function names to their return values; None
+        makes importing triton.magnon.flags fail.
+        """
+        magnon = types.ModuleType("triton.magnon")
+        magnon.__path__ = []
+        modules = {"triton.magnon": magnon, "triton.magnon.flags": None}
+        if flags is not None:
+            magnon.flags = types.ModuleType("triton.magnon.flags")
+            for name, value in flags.items():
+                setattr(magnon.flags, name, lambda value=value: value)
+            modules["triton.magnon.flags"] = magnon.flags
+        stack = contextlib.ExitStack()
+        stack.enter_context(unittest.mock.patch.dict(os.environ, env))
+        stack.enter_context(unittest.mock.patch.dict(sys.modules, modules))
+        stack.enter_context(
+            unittest.mock.patch(
+                "torch.utils._triton.has_triton_compile_iq", return_value=fbtriton
+            )
+        )
+        return stack
+
+    @parametrize("env_var", ["TRITON_COMPILE_IQ_COLLECT", "TRITON_COMPILE_IQ_APPLY"])
+    def test_static_cuda_launcher_default_off_for_compile_iq(self, env_var):
+        with self._patch_compile_iq({env_var: "1"}):
+            self.assertFalse(config.static_cuda_launcher_default())
+
+    @parametrize("env_var", ["TRITON_COMPILE_IQ_COLLECT", "TRITON_COMPILE_IQ_APPLY"])
+    def test_static_cuda_launcher_default_ignores_compile_iq_without_fbtriton(
+        self, env_var
+    ):
+        with self._patch_compile_iq(
+            {env_var: "1", "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER": "1"},
+            fbtriton=False,
+        ):
+            self.assertTrue(config.static_cuda_launcher_default())
+
+    @parametrize("env_var", ["TRITON_COMPILE_IQ_COLLECT", "TRITON_COMPILE_IQ_APPLY"])
+    def test_compile_iq_overrides_static_cuda_launcher_env(self, env_var):
+        with (
+            self._patch_compile_iq(
+                {env_var: "1", "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER": "1"}
+            ),
+            self.assertLogs("torch._inductor.config", level="WARNING") as logs,
+        ):
+            self.assertFalse(config.static_cuda_launcher_default())
+        self.assertIn("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1", logs.output[0])
+
+    def test_static_cuda_launcher_default_follows_magnon_flag_parsing(self):
+        with self._patch_compile_iq(
+            {
+                "TRITON_COMPILE_IQ_COLLECT": "0",
+                "TRITON_COMPILE_IQ_APPLY": "false",
+                "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER": "1",
+            },
+            flags={"collect_enabled": False, "apply_enabled": False},
+        ):
+            self.assertTrue(config.static_cuda_launcher_default())
+
+    def test_static_cuda_launcher_default_tolerates_partial_magnon_flags(self):
+        with self._patch_compile_iq(
+            {"TRITON_COMPILE_IQ_APPLY": "1"}, flags={"collect_enabled": False}
+        ):
+            self.assertFalse(config.static_cuda_launcher_default())
 
     def test_hasattr(self):
         self.assertTrue(hasattr(config, "max_fusion_size"))
