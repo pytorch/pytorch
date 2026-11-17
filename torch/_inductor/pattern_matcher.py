@@ -3337,11 +3337,7 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
         if "get_decomp_fn" in _fn_params:
             kwargs["get_decomp_fn"] = get_decomp_fn
 
-        with (
-            torch._guards.tracing(None),
-            unset_fake_temporarily(),
-            FakeTensorMode(_force_python=True),
-        ):
+        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn(**kwargs)
 
         # clear view matches encountered during tracing

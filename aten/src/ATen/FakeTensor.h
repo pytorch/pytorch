@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/boxing/BoxedKernel.h>
 #include <c10/core/Device.h>
 #include <c10/macros/Export.h>
 
@@ -50,6 +51,13 @@ TORCH_API Tensor fake_tensor_data(
     const Tensor& self,
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change);
+
+// Out-of-core fakes (torchdistx's) carry the Fake key without a
+// FakeTensorMode. The Fake fallback hands an op for which it finds no mode to
+// this handler, if one is set, instead of raising.
+using ModelessFakeFallback =
+    c10::BoxedKernel::BoxedKernelFunction_withDispatchKeys;
+TORCH_API void setModelessFakeFallback(ModelessFakeFallback* fn);
 
 } // namespace impl
 
