@@ -1039,9 +1039,20 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         self,
         *,
         shape_env: ShapeEnv | None = None,
+        allow_fallback_kernels: bool = True,
         allow_non_fake_inputs: bool = False,
         static_shapes: bool | None = None,
+        export: bool = False,
     ) -> None:
+        if not allow_fallback_kernels:
+            raise NotImplementedError(
+                "CppFakeTensorMode does not support allow_fallback_kernels=False yet"
+            )
+        if export:
+            raise NotImplementedError(
+                "CppFakeTensorMode does not support export=True yet"
+            )
+
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
@@ -1087,12 +1098,25 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             trace=trace,
         )
 
+    def _make_fake_tensor(
+        self,
+        t: Tensor,
+        device: torch.device,
+        *,
+        pytype: type[Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> Tensor:
+        if pytype not in (None, Tensor):
+            raise NotImplementedError(
+                f"C++ fake tensors of type {pytype} are not supported yet"
+            )
+        out = torch._C._from_meta_and_device(t, torch.device(device), self)
+        if dispatch_keys is not None:
+            torch._C._set_fake_dispatch_keys(out, dispatch_keys)
+        return out
+
     def is_our_fake(self, t: object) -> TypeGuard[Tensor]:
         return isinstance(t, Tensor) and torch._C._maybe_get_fake_mode(t) is self
-
-    @property
-    def avoid_device_init(self) -> bool:
-        return _avoid_device_init()
 
     def __enter__(self) -> Self:
         if type(self) is not CppFakeTensorMode:
@@ -1524,9 +1548,6 @@ class FakeTensorConverter:
         if make_constant:
             if cpp_fakes:
                 # The C++ mode records the constant's storage aliases itself.
-                # TODO: invalidate them when a constant's storage is mutated.
-                # Nothing does yet, so ops on C++ fakes have to reject constant
-                # inputs until something does.
                 torch._C._set_fake_constant(out, constant)
             else:
                 self.add_constant_storage_mapping(cast(FakeTensor, out))
@@ -1579,18 +1600,9 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        if isinstance(fake_mode, CppFakeTensorMode):
-            if pytype not in (None, torch.Tensor):
-                raise NotImplementedError(
-                    f"C++ fake tensors of type {pytype} are not supported yet"
-                )
-            out = torch._C._from_meta_and_device(t, torch.device(device), fake_mode)
-            if dispatch_keys is not None:
-                torch._C._set_fake_dispatch_keys(out, dispatch_keys)
-        else:
-            out = FakeTensor(
-                fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
-            )
+        out = fake_mode._make_fake_tensor(
+            t, device, pytype=pytype, dispatch_keys=dispatch_keys
+        )
         self.set_tensor_memo(t, out)
         return out
 
@@ -2562,6 +2574,21 @@ class FakeTensorMode(TorchDispatchMode):
             torch.nested._internal.nested_tensor._tensor_id_counter
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
+    @functools.wraps(__init__, assigned=(), updated=())
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        import torch._dynamo.config
+
+        if torch._dynamo.config.use_cpp_fake_tensor:
+            if cls is not FakeTensorMode:
+                raise NotImplementedError(
+                    "FakeTensorMode subclasses are not supported with "
+                    "use_cpp_fake_tensor=True"
+                )
+            # Returning an unrelated type skips FakeTensorMode.__init__.
+            # pyrefly: ignore [bad-return]
+            return CppFakeTensorMode(*args, **kwargs)
+        return super().__new__(cls)
 
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
@@ -3727,7 +3754,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(cast(FakeTensor, op_impl_out))
 
         # If there's a Python meta, prefer that over the decomposition.
-        # fake_try_decomp in torch/csrc/PyInterpreter.cpp mirrors this block for
+        # try_decomp in torch/csrc/FakeFallbackKernel.cpp mirrors this block for
         # C++ FakeTensor, and _register_static_shape_decomps in
         # torch/_meta_registrations.py its static shape case; keep them in sync.
         from torch._decomp import meta_table
@@ -4109,6 +4136,16 @@ class FakeTensorMode(TorchDispatchMode):
             symbolic_context=symbolic_context,
             trace=trace,
         )
+
+    def _make_fake_tensor(
+        self,
+        t: Tensor,
+        device: torch.device,
+        *,
+        pytype: type[Tensor] | None = None,
+        dispatch_keys: torch.DispatchKeySet | None = None,
+    ) -> FakeTensor:
+        return FakeTensor(self, t, device, pytype=pytype, dispatch_keys=dispatch_keys)
 
 
 _StoragePointer = object
