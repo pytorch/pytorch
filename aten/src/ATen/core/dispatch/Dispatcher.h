@@ -442,13 +442,8 @@ class TORCH_API Dispatcher final {
       const std::string& debug);
 
   std::list<OperatorDef> operators_;
-#if !defined(C10_MOBILE)
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>>
       operatorLookupTable_;
-#else
-  RWSafeLeftRightWrapper<ska::flat_hash_map<OperatorName, OperatorHandle>>
-      operatorLookupTable_;
-#endif
   // Map from namespace to debug string (saying, e.g., where the library was
   // defined)
   ska::flat_hash_map<std::string, std::string> libraries_;
@@ -806,7 +801,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(
     runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
   }
 
-  if (C10_UNLIKELY(guard.needsOutputs())) {
+  if (guard.needsOutputs()) [[unlikely]] {
     // Calls the kernel and capture the output temporarily to pass to
     // RecordFunction.
     detail::CaptureKernelCall<Return> captureKernelCall(
@@ -831,7 +826,7 @@ C10_ALWAYS_INLINE Return Dispatcher::CapturedKernel::call(
     const TypedOperatorHandle<Return(Args...)>& op,
     DispatchKeySet dispatchKeySet,
     Args... args) const {
-  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+  if (impl::dispatch_capture_enabled()) [[unlikely]] {
     if (auto* sink = impl::tls_dispatch_capture_sink()) {
       return callWithCaptureSink<Return, Args...>(
           op,
@@ -904,8 +899,8 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(
-          step_callbacks.has_value() && op.operatorDef_->op.isObserved())) {
+  if (step_callbacks.has_value() && op.operatorDef_->op.isObserved())
+      [[unlikely]] {
     return callWithDispatchKeySlowPath<Return, Args...>(
         op,
         *step_callbacks,
@@ -986,7 +981,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(step_callbacks.has_value() && entry.isObserved())) {
+  if (step_callbacks.has_value() && entry.isObserved()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     auto& schema = op.schema();
@@ -1003,7 +998,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
     // keeping the guard alive while executing the kernel
     callBoxedKernel(op, dispatchKeySet, kernel, /*isRedispatch=*/false, stack);
 
-    if (C10_UNLIKELY(guard.needsOutputs())) {
+    if (guard.needsOutputs()) [[unlikely]] {
       guard.setOutputs(*stack);
     }
     return;
@@ -1018,7 +1013,7 @@ inline void Dispatcher::callBoxedKernel(
     const KernelFunction& kernel,
     bool isRedispatch,
     Stack* stack) {
-  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+  if (impl::dispatch_capture_enabled()) [[unlikely]] {
     if (auto* sink = impl::tls_dispatch_capture_sink()) {
       callBoxedWithCaptureSink(
           op, *sink, dispatchKeySet, kernel, isRedispatch, stack);
