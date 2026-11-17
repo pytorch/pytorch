@@ -371,7 +371,7 @@
     {
       "Gb_type": "Descriptor mutation on a constant-source object",
       "Context": "name={name_str}, class_source={self.cls_source.name}",
-      "Explanation": "Dynamo cannot guard the class metadata used to resolve a descriptor mutation on an object returned by a constant-result function.",
+      "Explanation": "Dynamo does not track descriptor mutations on an object returned by a constant-result function.",
       "Hints": [
         "Pass the object as an input instead of returning it from a function ",
         "marked with `torch._dynamo.assume_constant_result`.",
@@ -2091,6 +2091,17 @@
       "Hints": [
         "Ensure your nn.Module instance has called `super().__init__()`.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3303": [
+    {
+      "Gb_type": "Unsupported unbound builtin __hash__ call",
+      "Context": "{self.fn.__name__}.__hash__({arg})",
+      "Explanation": "Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+      "Hints": [
+        "Use hash(x) if calling x's own hash implementation is intended.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

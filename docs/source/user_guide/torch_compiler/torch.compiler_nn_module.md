@@ -43,10 +43,10 @@ currently trigger a graph-break so that the affected modules run outside of dyna
 introduce a significant performance regression, and additional work is required to improve this support.
 
 **skip_nnmodule_hook_guards**
-By default, `torch._dynamo.config.skip_nnmodule_hook_guards=True` lets Dynamo skip checks on empty
-hook registries during module dispatch. Adding a hook to a registry that was empty at compile time
-can therefore go unnoticed. Dynamo still guards the callback values and flag membership it reads
-from populated registries. Set `skip_nnmodule_hook_guards=False` to check empty registries too.
+During module dispatch, the default `torch._dynamo.config.skip_nnmodule_hook_guards=True` skips
+empty local hook checks and some type checks on populated builtin registries and flag keys.
+Dynamo guards the callbacks and flag membership it reads. Set the flag to `False` to detect hooks
+added to empty local registries. The no-hook shortcut can miss new global hooks with either setting.
 
 TODO: confirm if backward/pre_backward hooks are working or not and document accordingly
 

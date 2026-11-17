@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import types
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -86,6 +88,35 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         self.assertIs(getter, Child.value.fget)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_constant_object_class_attribute_replacement(self):
+        class Parent:
+            @property
+            def value(self):
+                return 2
+
+        class Child(Parent):
+            pass
+
+        config = types.SimpleNamespace(model_cls=Child)
+
+        @torch._dynamo.assume_constant_result
+        def get_config():
+            return config
+
+        def fn(x):
+            try:
+                return x + get_config().model_cls.value.fget(None)
+            except AttributeError:
+                return x - 1
+
+        cnt = CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), x + 2)
+        config.model_cls = None
+        self.assertEqual(compiled(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_constant_class_mro_guards_reassigned_bases(self):
         class Parent:
             pass
@@ -104,7 +135,11 @@ class SourceTests(torch._dynamo.test_case.TestCase):
             return x + len(read_mro(get_class()))
 
         x = torch.ones(1)
-        for read_mro in (lambda cls: cls.mro(), lambda cls: cls.__mro__):
+        for read_mro in (
+            lambda cls: cls.mro(),
+            lambda cls: cls.__mro__,
+            lambda cls: type.__dict__["__mro__"].__get__(cls),
+        ):
             counter = CompileCounter()
             compiled = torch.compile(fn, backend=counter, fullgraph=True)
             Child.__bases__ = (Parent,)
