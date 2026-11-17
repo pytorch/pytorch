@@ -4374,6 +4374,7 @@ class TestPrecompileNumerics(TestCase):
                 loaded.run(*args, **kwargs)
                 self.assertEqual(out, expected)
 
+
 instantiate_device_type_tests(TestPrecompileNumerics, globals())
 
 

@@ -340,7 +340,8 @@ def _load_frozen_triton_kernel(key: str, payload: bytes) -> CachingAutotuner:
         raise RuntimeError("Invalid Inductor Triton source identity")
     kernel = record.kernel
     if not kernel.compile_results or not all(
-        isinstance(result, StaticTritonCompileResult) for result in kernel.compile_results
+        isinstance(result, StaticTritonCompileResult)
+        for result in kernel.compile_results
     ):
         raise RuntimeError(
             "Inductor Triton runtime artifact has no selected static kernel"
