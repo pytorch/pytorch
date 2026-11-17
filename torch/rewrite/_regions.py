@@ -130,6 +130,14 @@ class _Capped(_Failed):
     pass
 
 
+class _Dependent(Exception):
+    """A trace on the numbers of a call came to a size or a number that only
+    what a tensor holds decides (``nonzero``, a mask as an index, ``item``).
+    It is made again in a ``ShapeEnv`` (an ``_Open`` with nothing open) that
+    the backend then shares, so that the symbol such a size is in the graph
+    is one both know."""
+
+
 class _Opaque(Exception):
     # An input of a region that cannot be an input of a graph.
     def __init__(self, position: int, reason: str) -> None:
@@ -238,6 +246,14 @@ _MOST_GROWTH = 2
 # How many lists, dicts and objects with state one call of a region may hand
 # it: each is copied for a trace and compared after it.
 _MOST_HELD = 4096
+# After this many calls of a region in a row that were not like the one
+# before, it is asked what a call is like (``_usual``) only once in as many.
+_MOST_UNUSUAL = 16
+# How many kinds of call a region keeps for that (one per layer of a model).
+_MOST_USUAL = 256
+# How many times a region has its modules looked at anew because one of
+# their tensors was written to or moved (``_Region.settle``).
+_MOST_SETTLES = 8
 
 
 _CONTAINERS = frozenset(
@@ -697,13 +713,36 @@ class _Known:
     is one of those, in one pass over the places the tensors are kept at
     instead of three over the tensors."""
 
-    __slots__ = ("kinds", "numbers", "offsets", "seen", "shared", "snapshot", "tensors")
+    __slots__ = (
+        "again",
+        "epoch",
+        "kinds",
+        "numbers",
+        "offsets",
+        "seen",
+        "shared",
+        "snapshot",
+        "tensors",
+    )
 
     def __init__(
-        self, snapshot: Any, tensors: list[torch.Tensor], shared: list[torch.Tensor]
+        self,
+        snapshot: Any,
+        tensors: list[torch.Tensor],
+        shared: list[torch.Tensor],
+        epoch: int | None,
     ) -> None:
         self.snapshot = snapshot
         self.tensors = tensors
+        # What ``module_epoch`` gave when the places were last found to hold
+        # these tensors, if the dicts they are in are watched: a call that is
+        # given the same has no need to look at the places.
+        self.epoch = epoch
+        # Set when the tensors were found written to or moved, and what a
+        # graph has built in of them was found good all the same: the next
+        # call looks at them anew, so that the ones after it find them
+        # untouched again (``_Variant.stale``).
+        self.again = False
         # The tensors of the module that the call had before it came to the
         # module: something else it was handed holds them too.
         self.shared = frozenset(id(tensor) for tensor in shared)
@@ -724,10 +763,23 @@ class _Known:
 class _ModuleState:
     """The tensors of a module and of its submodules, for one stamp."""
 
-    __slots__ = ("accessors", "hooked", "ids", "known", "module", "stamp", "token")
+    __slots__ = (
+        "accessors",
+        "epoch",
+        "hooked",
+        "ids",
+        "known",
+        "module",
+        "stamp",
+        "token",
+    )
 
     def __init__(self, module: nn.Module, stamp: int) -> None:
         self.module = weakref.ref(module)
+        # What ``module_epoch`` gave when the stamp was taken, if the dicts
+        # the stamp was read from are watched: while it gives the same, the
+        # stamp is what it was (see ``_module_state``).
+        self.epoch: int | None = None
         self.refresh(module, stamp)
 
     def refresh(self, module: nn.Module, stamp: int) -> None:
@@ -776,15 +828,25 @@ def _forget_module(key: int) -> None:
 def _module_state(module: nn.Module) -> _ModuleState:
     # What is known about a module holds while its stamp is what it was: a
     # parameter, buffer, submodule or hook more or less, a tensor attribute
-    # that was none, another training flag all change it.
-    stamp = _runtime.module_stamp(module, _TENSOR_TYPES)
+    # that was none, another training flag all change it. The stamp is a
+    # walk over the dicts of the module and of every module inside it; they
+    # are watched, so that a call that finds none of them changed since the
+    # last walk (``module_epoch``) does not walk again.
     state = _module_states.get(id(module))
-    if state is None or state.module() is not module:
+    known = state is not None and state.module() is module
+    if known and state.epoch == _runtime.module_epoch():  # type: ignore[union-attr]
+        return state  # type: ignore[return-value]
+    # Not on the first look: a module that is made for one call (a loss, an
+    # activation) would, when it goes, tell every other one that something
+    # changed.
+    stamp, epoch = _runtime.module_look(module, _TENSOR_TYPES, known)
+    if not known:
         state = _module_states[id(module)] = _ModuleState(module, stamp)
         weakref.finalize(module, _forget_module, id(module))
-    elif state.stamp != stamp:
-        state.refresh(module, stamp)
-    return state
+    elif state.stamp != stamp:  # type: ignore[union-attr]
+        state.refresh(module, stamp)  # type: ignore[union-attr]
+    state.epoch = epoch  # type: ignore[union-attr]
+    return state  # type: ignore[return-value]
 
 
 # ----------------------------------------------------------------------
@@ -921,12 +983,21 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         inputs.inside.append(state.ids)
         known = state.known
         same = 0
-        if known is not None:
+        places: dict[int, int] = {}
+        if known is not None and not known.again:
             places = known.places(len(flat))
             # The call has the tensors it had before this module that the
             # look had, and no others of the module's.
             if seen.keys() >= known.shared and seen.keys().isdisjoint(places):
-                same = known.snapshot.holds(state.accessors)
+                epoch = state.epoch
+                if epoch is not None and known.epoch == epoch:
+                    # No dict a place is in has changed since the places
+                    # were looked at: they hold what they held.
+                    same = known.snapshot.holds_in_place()
+                else:
+                    same = known.snapshot.holds(state.accessors)
+                    if same:
+                        known.epoch = epoch
         if same:
             # The tensors it had when they were last looked at.
             inputs.known.append((len(flat), known))  # type: ignore[arg-type]
@@ -934,7 +1005,6 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
             flat.extend(known.tensors)  # type: ignore[union-attr]
             seen.update(places)
         else:
-            inputs.unwritten = False
             first = len(flat)
             shared: list[torch.Tensor] = []
             try:
@@ -951,14 +1021,17 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
             except LookupError:
                 # Changed since the stamp was taken.
                 state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
+                state.epoch = None
                 return _describe(obj, inputs)
             if len(flat) > first:
+                # Looked at for the first time, or not what they were.
+                inputs.unwritten = False
                 tensors = flat[first:]
                 snapshot = _runtime.snapshot(state.accessors, tensors + shared)
                 if snapshot is None:
                     state.known = None
                 else:
-                    state.known = _Known(snapshot, tensors, shared)
+                    state.known = _Known(snapshot, tensors, shared, state.epoch)
         return _module_part(obj, cls, state)
     if cls is types.MethodType:
         return (
@@ -1007,6 +1080,123 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         return ("instance", cls, tuple(state), values)
     # Anything else may have state that a trace would change unseen.
     raise _Opaque(0, f"a {cls.__name__} from before the region")
+
+
+def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> Any:
+    """What tells, without the walk of ``_describe``, that a later call is
+    like this one, which was described the long way, and gives what the
+    walk would (``Usual`` of the runtime). None if this call is not of the
+    kind it knows: it came with a set, a method or an object with
+    attributes, a module was looked at for the first time or is not watched,
+    a tensor of a module came on its own as well."""
+    if _function_stack():
+        return None
+    epoch = _runtime.module_epoch()
+    inside: list[frozenset[int]] = []
+    held: set[int] = set()
+    # How many modules were found as a look had left them, and their tensors.
+    looked = 0
+    theirs: set[int] = set()
+
+    def spec(obj: Any, part: Any) -> Any:
+        # By what the walk made of the object: what is the same in the next
+        # call if the object is the same, equal, or built the same way.
+        nonlocal looked
+        cls = type(obj)
+        if cls in _TENSORS:
+            return ("tensor", part) if type(part) is int else None
+        if part is int:
+            return ("int",)
+        if type(part) is not tuple:
+            return None
+        if cls in _VALUES:
+            return ("value", obj) if len(part) == 2 and part[0] is cls else None
+        if part[0] == "object":
+            return ("object", obj)
+        if cls is types.CellType:
+            if part[0] != "cell" or id(obj) in held:
+                return None
+            held.add(id(obj))
+            inner = spec(obj.cell_contents, part[1])
+            return None if inner is None else ("cell", inner)
+        if cls is tuple or cls is list or cls is dict:
+            if cls is not tuple:
+                if part[0] == "again" or id(obj) in held:
+                    return None
+                held.add(id(obj))
+            values = obj.values() if cls is dict else obj
+            parts = part[2] if cls is dict else part[1]
+            items = [spec(item, sub) for item, sub in zip(values, parts)]
+            if len(items) != len(obj) or any(item is None for item in items):
+                return None
+            return ("dict", tuple(obj), items) if cls is dict else (cls.__name__, items)
+        if isinstance(obj, nn.Module):
+            if any(id(obj) in ids for ids in inside):
+                # Inside a module that is checked: so is this one.
+                return ("object", obj)
+            state = _module_states.get(id(obj))
+            if state is None or state.module() is not obj or state.epoch != epoch:
+                return None
+            inside.append(state.ids)
+            if not state.accessors:
+                return ("object", obj)
+            known = state.known
+            if known is None or known.again or known.epoch != epoch:
+                return None
+            if looked >= len(inputs.known) or inputs.known[looked][1] is not known:
+                return None
+            # A tensor it has in common with something before it is one of
+            # a module before it, which is checked.
+            if not known.shared <= theirs:
+                return None
+            theirs.update(map(id, known.tensors))
+            looked += 1
+            return ("module", obj, state, known, inputs.known[looked - 1][0])
+        node = pytree.SUPPORTED_NODES.get(cls)
+        if node is not None and len(part) == 3 and part[0] is cls:
+            if id(obj) in held:
+                return None
+            held.add(id(obj))
+            children, context = node.flatten_fn(obj)
+            items = [spec(item, sub) for item, sub in zip(children, part[2])]
+            if len(items) != len(children) or any(item is None for item in items):
+                return None
+            return ("node", cls, node.flatten_fn, part[1], items)
+        return None
+
+    nodes = []
+    for position, part in zip(positions, key[0]):
+        node = spec(args[position], part)
+        if node is None:
+            return None
+        nodes.append(node)
+    if looked != len(inputs.known):
+        return None
+    usual = _runtime.Usual(
+        list(positions),
+        nodes,
+        key[0],
+        key[3],
+        inputs.known,
+        _TENSOR_TYPES,
+        _WIDE,
+        _GLOBAL_HOOK_DICTS,
+    )
+    # Only if, for this very call, it finds what the walk found.
+    found = usual.look(args)
+    if found is None:
+        return None
+    again, flat, objects, ints, offsets, known, unwritten = found
+    same = (
+        again == key
+        and _same_items(flat, inputs.flat)
+        and _same_items(objects, inputs.held)
+        and ints == inputs.ints
+        and offsets == inputs.offsets
+        and known is inputs.known
+        and unwritten == inputs.unwritten
+    )
+    return usual if same else None
 
 
 def _acceptable(obj: Any) -> str | None:
@@ -1844,11 +2034,55 @@ def _trace(fn: Callable[..., Any], example: list[Any], opening: _Open | None) ->
             raise _Failed(None, "needs to know a number that is no size it was given")
         raise _Close(opening.closing)
     if error is None:
+        # Without what watches a trace that has symbols, the graph goes to
+        # the backend as it is.
+        watched = _monitor is not None and _monitor >= 0
+        if opening is None and watched and _depends_on_data(graph):  # type: ignore[arg-type]
+            raise _Dependent
         return graph
     if isinstance(error, (_Failed, _Retry)):
         raise error
     reason = f"{type(error).__name__}: {error}".split("\n")[0][:200]
     raise _Failed(getattr(error, "cfg_index", None), reason) from None
+
+
+def _depends_on_data(graph: torch.fx.GraphModule) -> bool:
+    """Whether a graph that was traced on numbers has a size or a number in
+    it that is a symbol all the same: one that only the data decides."""
+
+    def symbolic(value: Any) -> bool:
+        if type(value) in _SYMS:
+            return True
+        if isinstance(value, torch.Tensor):
+            return any(type(size) is torch.SymInt for size in value.shape)
+        if type(value) in (tuple, list):
+            return any(symbolic(item) for item in value)
+        return False
+
+    return any(symbolic(node.meta.get("val")) for node in graph.graph.nodes)
+
+
+_settles = False
+
+
+def _on_device(tensors: list[torch.Tensor]) -> None:
+    """After a graph was made for tensors: if they are on a GPU, the
+    measurement of a function against the interpreter waits for the device
+    from now on (``trial_settles`` of the runtime)."""
+    global _settles
+    if not _settles and any(tensor.is_cuda for tensor in tensors):
+        _settles = True
+        _runtime.trial_settles(torch._C._cuda_synchronize)
+
+
+def _unopened(key: Any, inputs: "_Inputs") -> "_Open":
+    """The inputs for a trace that leaves nothing open and is made in a
+    ``ShapeEnv`` all the same (see ``_Dependent``)."""
+    try:
+        return _Open(key, inputs, set())
+    except Exception as e:
+        reason = f"a size that depends on data, and {type(e).__name__}: {e}"
+        raise _Failed(None, reason.split("\n")[0][:200]) from None
 
 
 # ----------------------------------------------------------------------
@@ -1983,19 +2217,41 @@ def _static_output(leaf: Any, reachable: set[int]) -> bool:
     return isinstance(leaf, (type, enum.Enum))
 
 
-def _is_plain_instance(obj: Any) -> bool:
-    """Whether ``obj`` is its class and its ``__dict__`` and nothing more, as
-    ``copy.copy`` assumes of an object that does not say otherwise."""
-    cls = type(obj)
+def _is_its_attributes(obj: Any) -> bool:
+    """Whether all that ``obj`` holds is in its ``__dict__``: no class of
+    its has slots or is a type of the interpreter's that keeps something of
+    its own."""
     if isinstance(obj, (nn.Module, BaseException, type)) or not hasattr(
         obj, "__dict__"
     ):
         return False
-    for base in cls.__mro__[:-1]:
+    for base in type(obj).__mro__[:-1]:
         if not base.__flags__ & _HEAPTYPE or vars(base).get("__slots__"):
             return False
+    return True
+
+
+def _is_its_items(obj: Any) -> bool:
+    """Whether ``obj`` is a dict of a class of its own and all that it holds
+    is its items and its ``__dict__``: what a model returns, often."""
+    cls = type(obj)
+    if cls in _DICTS or not isinstance(obj, dict) or not hasattr(obj, "__dict__"):
+        return False
+    for base in cls.__mro__[:-1]:
+        if base not in _DICTS and (
+            not base.__flags__ & _HEAPTYPE or vars(base).get("__slots__")
+        ):
+            return False
+    return True
+
+
+def _is_plain_instance(obj: Any) -> bool:
+    """Whether ``obj`` is its class and its ``__dict__`` and nothing more, as
+    ``copy.copy`` assumes of an object that does not say otherwise."""
+    cls = type(obj)
     return (
-        cls.__reduce_ex__ is object.__reduce_ex__
+        _is_its_attributes(obj)
+        and cls.__reduce_ex__ is object.__reduce_ex__
         and cls.__reduce__ is object.__reduce__
         and cls.__getstate__ is object.__getstate__
         and not hasattr(cls, "__setstate__")
@@ -2003,6 +2259,7 @@ def _is_plain_instance(obj: Any) -> bool:
 
 
 _PLAIN_STATE: dict[type, bool] = {}
+_DICTS = (dict, collections.OrderedDict)
 
 
 def _has_plain_state(obj: Any) -> bool:
@@ -2053,6 +2310,13 @@ class _Recipes:
             self.young = {id(o) for o in gc.get_objects(generation=0)}
         return id(obj) in self.young
 
+    def instance(self, obj: Any) -> bool:
+        """Whether ``obj`` is given back as a new object of its class with
+        the same attributes. One the trace made is, if its attributes are
+        all there is to it: what its class says of copies and pickles (a
+        ``__getstate__`` that leaves a cache out) is about neither."""
+        return _is_plain_instance(obj) or (_is_its_attributes(obj) and self.made(obj))
+
     def number(self, obj: Any) -> list[Any]:
         """A value computed from open sizes. An integer is a result of the
         graph, which gives it back as a plain one; anything else is what it
@@ -2095,13 +2359,22 @@ class _Recipes:
         elif cls is dict or cls is collections.OrderedDict:
             recipe = ["dict", False, cls, list(obj)]
             children = list(obj.values())
-        elif cls in pytree.SUPPORTED_NODES:
+        elif _is_its_items(obj) and self.made(obj):
+            # A new one of its class with the same items and attributes.
+            # Made the way a pytree node is, from what it flattens to, its
+            # ``__init__`` would run on every call.
+            recipe = ["mapping", False, cls, list(obj), list(vars(obj))]
+            children = [*obj.values(), *vars(obj).values()]
+        elif cls in pytree.SUPPORTED_NODES and not self.instance(obj):
             children, context = pytree.SUPPORTED_NODES[cls].flatten_fn(obj)
             recipe = ["node", False, pytree.SUPPORTED_NODES[cls].unflatten_fn, context]
         elif isinstance(obj, tuple) and hasattr(cls, "_fields"):
             recipe = ["sequence", False, cls._make]
             children = list(obj)
-        elif _is_plain_instance(obj):
+        elif self.instance(obj):
+            # Also when its class is a pytree node: what it flattens to is
+            # what its ``__init__`` takes, and making it from that would run
+            # the ``__init__`` on every call, and lose what was set since.
             recipe = ["instance", False, cls, list(vars(obj))]
             children = list(vars(obj).values())
         else:
@@ -2111,7 +2384,19 @@ class _Recipes:
         # Kept alive, so that no other object gets its id while the trace runs.
         self.alive.append(obj)
         if children is not None:
-            parts = [self.of(child, depth + 1) for child in children]
+            try:
+                parts = [self.of(child, depth + 1) for child in children]
+            except Untraceable:
+                if recipe[0] not in ("instance", "mapping"):
+                    raise
+                if cls not in pytree.SUPPORTED_NODES:
+                    raise
+                # It holds something a graph cannot give back: then it is
+                # made the way its class says, from what it flattens to.
+                node = pytree.SUPPORTED_NODES[cls]
+                children, context = node.flatten_fn(obj)
+                recipe[:] = ["node", False, node.unflatten_fn, context]
+                parts = [self.of(child, depth + 1) for child in children]
             recipe.append(parts)
             recipe[1] = any(part[1] for part in parts)
             if recipe[0] == "instance" and not recipe[1] and not self.made(obj):
@@ -2149,6 +2434,16 @@ def _build(
     if kind == "instance":
         value = built[id(recipe)] = object.__new__(recipe[2])
         for name, part in zip(recipe[3], recipe[4]):
+            value.__dict__[name] = _build(part, results, built, flat, held)
+        return value
+    if kind == "mapping":
+        cls, keys, names, parts = recipe[2:]
+        value = built[id(recipe)] = cls.__new__(cls)
+        # Not through what the class makes of storing an item.
+        store = _DICTS[issubclass(cls, collections.OrderedDict)].__setitem__
+        for key, part in zip(keys, parts):
+            store(value, key, _build(part, results, built, flat, held))
+        for name, part in zip(names, parts[len(keys) :]):
             value.__dict__[name] = _build(part, results, built, flat, held)
         return value
     parts = [_build(part, results, built, flat, held) for part in recipe[-1]]
@@ -2358,21 +2653,59 @@ class _Region:
         # has modules that are being trained.
         self.melts = 0
         self.unstable: set[int] = set()
+        # What the calls that were described the long way were like, for
+        # the calls that are like one of them (``_usual``): by the first
+        # module among what the key is made of, since a region of a layer
+        # is called with every layer in turn; and how many calls in a row
+        # were like none.
+        self.usual: dict[int, Any] = {}
+        self.unusual = 0
+        self.settles = 0
 
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
             return self.cold(args)
         inputs = _Inputs()
-        try:
-            key = self.key(args, inputs)
-        except _Opaque:
-            return self.decline(args)
+        found = None
+        if self.usual:
+            lead = self.lead(args)
+            usual = self.usual.get(lead)
+            if usual is not None:
+                found = usual.look(args)
+        if found is not None:
+            (
+                key,
+                inputs.flat,
+                inputs.held,
+                inputs.ints,
+                inputs.offsets,
+                inputs.known,
+                inputs.unwritten,
+            ) = found
+            self.unusual = 0
+        else:
+            try:
+                key = self.key(args, inputs)
+            except _Opaque:
+                return self.decline(args)
+            # A region whose calls are never alike is not asked every time.
+            self.unusual += 1
+            if self.unusual < _MOST_UNUSUAL or self.unusual % _MOST_UNUSUAL == 0:
+                usual = _usual(self.keyed(args), args, inputs, key)
+                if len(self.usual) >= _MOST_USUAL:
+                    self.usual.clear()
+                if usual is not None:
+                    self.usual[self.lead(args)] = usual
+                else:
+                    self.usual.pop(self.lead(args), None)
         variant = self.variants.get(key, self)
         if variant is not self and variant is not None:
             stale = variant.stale(inputs)  # type: ignore[union-attr]
             if stale is not None:
                 self.melt(variant, stale)  # type: ignore[arg-type]
                 variant = self
+            elif not inputs.unwritten and variant.state is not None:  # type: ignore[union-attr]
+                self.settle(inputs)
         if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
             variant = self.widened(key, inputs)
             if variant is not None:
@@ -2385,6 +2718,32 @@ class _Region:
         if variant.proven:  # type: ignore[union-attr]
             return variant.run(inputs)  # type: ignore[union-attr]
         return self.first_run(key, variant, args, inputs)  # type: ignore[arg-type]
+
+    def settle(self, inputs: _Inputs) -> None:
+        """After a call that found a tensor of a module written to or in
+        other memory than when it was last looked at, and what the graph has
+        built in good all the same (a weight moves once when something asks
+        for a pointer it could write through): the next call looks at the
+        modules anew, so that the calls after it find them untouched, and
+        need no check of what is built in. Not for a region whose modules
+        never come to rest."""
+        if self.settles < _MOST_SETTLES and inputs.known:
+            self.settles += 1
+            for _, found in inputs.known:
+                found.again = True
+            self.usual.clear()
+
+    def keyed(self, args: tuple[Any, ...]) -> Any:
+        """Which of the values of a call its key is made of."""
+        return range(len(args))
+
+    def lead(self, args: tuple[Any, ...]) -> int:
+        """Which module a call comes with first, among what its key is made
+        of: 0 if with none."""
+        for position in self.keyed(args):
+            if isinstance(args[position], nn.Module):
+                return id(args[position])
+        return 0
 
     def widened(self, key: Any, inputs: _Inputs) -> _Variant | None:
         """A variant that leaves open what this call has other numbers for."""
@@ -2670,7 +3029,10 @@ class _Region:
         while True:
             opening = self.open_for(key, inputs)
             if opening is None:
-                return self.build(key, args, inputs, None)
+                try:
+                    return self.build(key, args, inputs, None)
+                except _Dependent:
+                    return self.build(key, args, inputs, _unopened(key, inputs))
             known = self.sizes[_kind(key)]
             try:
                 return self.build(key, args, inputs, opening)
@@ -2743,12 +3105,13 @@ class _Region:
         ops = self.ops_of(graph)
         frozen = self.freezable(inputs, modules, found["written"])
         compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
+        _on_device(flat)
         variant = _Variant(compiled, found["recipes"], ops, keep)
         variant.affects(*found["effects"])
         variant.written = sorted(found["written"])
         if built is not None:
             variant.freeze(flat, *built)
-        if opening is not None:
+        if opening is not None and opening.opened:
             self.leave_open(variant, key, inputs, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
@@ -3168,6 +3531,9 @@ class _Path(_Region):
     def decline(self, args: tuple[Any, ...]) -> Any:
         return None
 
+    def keyed(self, args: tuple[Any, ...]) -> Any:
+        return self.positions or ()
+
     def key(self, args: tuple[Any, ...], inputs: _Inputs, positions: Any = None) -> Any:
         parts = []
         for position in positions if positions is not None else self.positions or ():
@@ -3228,14 +3594,21 @@ class _Path(_Region):
             if arg is not undefined and self.inputs[p] not in refused
         ]
         limit: int | None = None
+        # Whether a size of the path depends on data (see ``_Dependent``).
+        dependent = False
         for _ in range(12):
             inputs = _Inputs()
             key = self.key(args, inputs, positions)
             opening = self.open_for(key, inputs)
+            if opening is None and dependent:
+                opening = _unopened(key, inputs)
             try:
                 graph, found, keep = self.trace(
                     args, inputs, positions, refused, limit, opening
                 )
+            except _Dependent:
+                dependent = True
+                continue
             except _Retry as again:
                 limit = again.limit if again.limit is not None else limit
                 positions = (
@@ -3246,7 +3619,7 @@ class _Path(_Region):
                 self.sizes[_kind(key)].fixed |= close.slots
                 continue
             except _Failed as e:
-                if opening is None or isinstance(e, _Capped):
+                if opening is None or not opening.opened or isinstance(e, _Capped):
                     raise
                 # What a trace on symbols cannot do, one on numbers may.
                 self.sizes[_kind(key)].static = True
@@ -3273,11 +3646,13 @@ class _Path(_Region):
             self.positions = tuple(positions)
             self.variants.clear()
             self.sizes.clear()
+            self.usual.clear()
         final = _Inputs()
         key = self.key(args, final)
         self.sizes.setdefault(_kind(key), _Sizes(key[2]))
         frozen = self.freezable(inputs, found["modules"], found["written"])
         compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
+        _on_device(inputs.flat)
         variant = _Variant(compiled, found["recipes"], self.ops_of(graph), keep)
         variant.direct = False
         variant.leap = found["leap"]
@@ -3286,7 +3661,7 @@ class _Path(_Region):
         variant.written = sorted(found["written"])
         if built is not None:
             variant.freeze(inputs.flat, *built)
-        if opening is not None:
+        if opening is not None and opening.opened:
             self.leave_open(variant, key, final, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()

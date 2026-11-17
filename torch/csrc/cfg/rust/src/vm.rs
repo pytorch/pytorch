@@ -267,6 +267,45 @@ pub fn unsettled() {
     TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed);
 }
 
+/// What waits for a device to be done with what it was given, once a
+/// compiled graph runs on one: a builtin, kept for good. A kernel on a GPU
+/// is started and not waited for, so the time of a call says little: a
+/// graph that waits somewhere inside would look slower than the same
+/// kernels started one by one, and the function would be handed to the
+/// interpreter for it.
+static TRIAL_SETTLE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// A sample that took this long is one that may have started such work.
+const TRIAL_SETTLE_NS: u64 = 100_000;
+
+pub fn trial_settles(settle: Obj) {
+    if !settle.is_null() {
+        unsafe { ffi::Py_INCREF(settle) };
+    }
+    let before = TRIAL_SETTLE.swap(settle as usize, Ordering::Relaxed) as Obj;
+    if !before.is_null() {
+        unsafe { ffi::Py_DECREF(before) };
+    }
+}
+
+/// Waits for the devices, if anything runs on one. Whatever is raised is
+/// dropped: a sample is then of the time until the call returned.
+unsafe fn trial_settle() {
+    let settle = TRIAL_SETTLE.load(Ordering::Relaxed) as Obj;
+    if settle.is_null() {
+        return;
+    }
+    let raised = ffi::PyErr_GetRaisedException();
+    let done = ffi::PyObject_CallNoArgs(settle);
+    if done.is_null() {
+        ffi::PyErr_Clear();
+    } else {
+        ffi::Py_DECREF(done);
+    }
+    if !raised.is_null() {
+        ffi::PyErr_SetRaisedException(raised);
+    }
+}
+
 /// The builtins `locals`, `vars` and `dir`, which look for the variables of
 /// the frame that calls them (see `Op::Locals`). Kept for good.
 unsafe fn frame_readers() -> (Obj, Obj, Obj) {
@@ -2545,9 +2584,20 @@ impl Compiled {
             TRIAL_DRAW.store(state, Ordering::Relaxed);
             state & 1 == 0
         };
+        // The outermost call that is measured starts with the devices idle
+        // and ends when they are again, and so does any other that took
+        // long enough to have given them work (see `TRIAL_SETTLE`).
+        let outermost = TRIAL_DEPTH.load(Ordering::Relaxed) == 1;
+        if outermost {
+            trial_settle();
+        }
         let start = std::time::Instant::now();
         let result = if as_compiled { run_compiled() } else { run_interpreted() };
-        let elapsed = start.elapsed().as_nanos() as u64;
+        let mut elapsed = start.elapsed().as_nanos() as u64;
+        if outermost || elapsed >= TRIAL_SETTLE_NS {
+            trial_settle();
+            elapsed = start.elapsed().as_nanos() as u64;
+        }
         // The callee may have called itself: what is in the slot now counts.
         let mut trial = slot.get();
         if trial.phase != TRIAL_SAMPLING {

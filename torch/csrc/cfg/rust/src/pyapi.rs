@@ -959,6 +959,22 @@ pub fn unsettled() {
     vm::unsettled();
 }
 
+/// Has the measurement of a function against the interpreter wait, with
+/// `settle()`, for the devices that run what it started: see
+/// `TRIAL_SETTLE`. `settle` must be a builtin, which runs without a frame
+/// for the hook to be offered; None for no waiting.
+#[pyfunction]
+pub fn trial_settles(settle: &Bound<'_, PyAny>) -> PyResult<()> {
+    if settle.is_none() {
+        vm::trial_settles(null_mut());
+    } else if unsafe { ffi::PyCFunction_Check(settle.as_ptr()) } == 0 {
+        return Err(pyo3::exceptions::PyTypeError::new_err("trial_settles takes a builtin"));
+    } else {
+        vm::trial_settles(settle.as_ptr());
+    }
+    Ok(())
+}
+
 #[pyfunction]
 pub fn plan_changed() {
     vm::plan_changed();
@@ -980,6 +996,35 @@ pub fn profiling_depth() -> usize {
 /// has to be told when one of them changes.
 #[pyfunction]
 pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> PyResult<u64> {
+    Ok(stamp_of(module, tensors, false)?.0)
+}
+
+/// `module_stamp`, and a number for which `module_epoch` is asked from then
+/// on: while that gives the same number, no dict the stamp was read from
+/// has changed, and the stamp is what another walk would find. With
+/// `watch` the dicts of the modules are watched for that (their own, and
+/// those of their parameters, buffers, submodules and hooks). None instead
+/// of the number without `watch`, when the interpreter has no watcher to
+/// give, and for a module that keeps tensors in a list, which nothing
+/// watches.
+#[pyfunction]
+pub fn module_look(
+    module: &Bound<'_, PyAny>,
+    tensors: &Bound<'_, PyTuple>,
+    watch: bool,
+) -> PyResult<(u64, Option<u64>)> {
+    let epoch = pyffi::modules_version();
+    let (stamp, watched) = stamp_of(module, tensors, watch)?;
+    Ok((stamp, if watch && watched { Some(epoch) } else { None }))
+}
+
+/// What a change to a dict that `module_look` watches bumps.
+#[pyfunction]
+pub fn module_epoch() -> u64 {
+    pyffi::modules_version()
+}
+
+fn stamp_of(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>, watch: bool) -> PyResult<(u64, bool)> {
     static NAMES: std::sync::OnceLock<[PyObj; 8]> = std::sync::OnceLock::new();
     let names = NAMES.get_or_init(|| {
         let intern = |name: &std::ffi::CStr| unsafe {
@@ -1001,6 +1046,8 @@ pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> 
     let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
     let mut pending = vec![module.as_ptr()];
     let mut seen = 0usize;
+    // Whether every dict that is read tells of its changes.
+    let mut watched = true;
     unsafe {
         let is_tensor = |o: Obj| types.contains(&(ffi::Py_TYPE(o) as usize));
         let none = ffi::Py_None();
@@ -1016,9 +1063,15 @@ pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> 
             if slot.is_null() || (*slot).is_null() {
                 continue;
             }
+            if watch {
+                watched = watched && pyffi::watch_module_dict(*slot);
+            }
             let (mut pos, mut key, mut value) = (0, null_mut(), null_mut());
             while ffi::PyDict_Next(*slot, &mut pos, &mut key, &mut value) != 0 {
                 let which = names.iter().position(|n| n.as_ptr() == key);
+                if watch && which.is_some_and(|w| w >= 1) && ffi::PyDict_Check(value) != 0 {
+                    watched = watched && pyffi::watch_module_dict(value);
+                }
                 let kind: u64 = match which {
                     Some(0) => 2 + (value == ffi::Py_True()) as u64,
                     Some(1..=3) if ffi::PyDict_Check(value) != 0 => {
@@ -1046,6 +1099,8 @@ pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> 
                         for i in 0..n {
                             let item = is_tensor(ffi::PyList_GET_ITEM(value, i));
                             held = held.wrapping_mul(31).wrapping_add(item as u64);
+                            // What a list holds changes without a word.
+                            watched = watched && !item;
                         }
                         held
                     }
@@ -1059,7 +1114,7 @@ pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> 
             return Err(PyErr::fetch(module.py()));
         }
     }
-    Ok(stamp)
+    Ok((stamp, watched))
 }
 
 /// A number that changes when an `nn.Module` or a module below it is given
