@@ -247,10 +247,10 @@ inline bool is_mixed_dtype_fused_type(ScalarType t) {
   return t == kFloat || t == kHalf || t == kBFloat16;
 }
 
-// Add/sub where each list has one dtype but the lists differ, e.g.
-// fp32 params updated with bf16 buffers. Every float/half/bfloat16 pair
-// computes in float, the same as the per-tensor slow path. Bool alpha and
-// partially overlapping pairs retain the slow path.
+// Mixed-dtype add/sub supports fp32<->fp16 and fp32<->bf16, with each
+// list having one dtype. These pairs compute in fp32; fp16<->bf16 uses
+// the slow path. Bool alpha and partially overlapping pairs also use
+// the slow path to preserve its validation and error behavior.
 bool can_use_mixed_dtype_fast_route(
     TensorList tensors1,
     TensorList tensors2,
@@ -280,6 +280,10 @@ template <template <class> class Op, int depth, int res_arg_index>
 void foreach_tensor_list_op_mixed_dtype_apply(
     std::vector<std::vector<Tensor>>& tensor_lists,
     const Scalar& alpha) {
+  static_assert(
+      std::is_same_v<Op<float>, std::plus<float>> ||
+          std::is_same_v<Op<float>, std::minus<float>>,
+      "mixed-dtype foreach path only supports add/sub");
   constexpr const char* dispatch_name = res_arg_index == 0
       ? "foreach_tensor_list_op_mixed_dtype_"
       : "foreach_tensor_list_op_mixed_dtype";
