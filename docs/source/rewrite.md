@@ -23,6 +23,18 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.rewrite.swap
+```
+
+```{eval-rst}
+.. autofunction:: torch.rewrite.fuse_checked
+```
+
+```{eval-rst}
+.. autoexception:: torch.rewrite.Mismatch
+```
+
+```{eval-rst}
 .. autofunction:: torch.rewrite.regions
 ```
 

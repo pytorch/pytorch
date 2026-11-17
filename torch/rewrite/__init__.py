@@ -78,18 +78,22 @@ from typing import Any
 import torch
 
 from . import _regions, _shortcuts
+from ._passes import fuse_checked, Mismatch, swap
 
 
 __all__ = [
     "Graphs",
+    "Mismatch",
     "Unsupported",
     "canonical",
     "graphs",
+    "fuse_checked",
     "inductor",
     "is_available",
     "memory",
     "regions",
     "rewrite",
+    "swap",
 ]
 
 

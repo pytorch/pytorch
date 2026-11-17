@@ -241,6 +241,23 @@ impl SiteSlot {
         self.descriptions.borrow().join(" | ")
     }
 
+    /// The operator the first site calls, as the dispatcher names it
+    /// (`aten::mul.Tensor`).
+    pub unsafe fn operator(&self) -> Option<String> {
+        if self.len() == 0 {
+            return None;
+        }
+        let info = (api()?.site_info)(self.get(0));
+        if info.is_null() {
+            ffi::PyErr_Clear();
+            return None;
+        }
+        let op = ffi::PyDict_GetItemString(info, c"op".as_ptr());
+        let name = (!op.is_null()).then(|| pyffi::str_to_string(op));
+        ffi::Py_DECREF(info);
+        name
+    }
+
     /// New reference to a list with one info dict per variant.
     pub unsafe fn info(&self) -> Obj {
         let list = ffi::PyList_New(0);
