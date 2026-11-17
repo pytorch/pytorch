@@ -175,7 +175,7 @@ jobs:
     timeout-minutes: 480
     outputs:
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
-      test-matrix: ${{ steps.cpp-faketensor.outputs.test-matrix }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -199,38 +199,42 @@ jobs:
           job-id: ${{ steps.setup-linux.outputs.job-id }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
 
+      # Local composite actions are unavailable on container runners.
+      - name: Add C++ FakeTensor test configurations
+        id: cpp-faketensor
+        if: inputs.test-matrix != ''
+        shell: bash
+        working-directory: .github/scripts
+        env:
+          TEST_MATRIX: ${{ inputs.test-matrix }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
+          TESTS_TO_INCLUDE: ${{ github.event.inputs.tests-to-include }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import yaml
+          from filter_test_configs import add_cpp_faketensor_configs, set_output
+
+          matrix = add_cpp_faketensor_configs(
+              yaml.safe_load(os.environ["TEST_MATRIX"]),
+              os.environ["JOB_NAME"],
+              os.environ["TESTS_TO_INCLUDE"],
+          )
+          set_output("test-matrix", json.dumps(matrix))
+          PY
+
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
         uses: pytorch/pytorch/.github/actions/filter-test-configs@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
+          test-matrix: ${{ steps.cpp-faketensor.outputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}
           ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
           lf-runners: ${{ inputs.lf_runners }}
-
-      # Local composite actions are unavailable on container runners.
-      - name: Add C++ FakeTensor test configurations
-        id: cpp-faketensor
-        if: steps.filter.outputs.test-matrix != ''
-        shell: bash
-        working-directory: .github/scripts
-        env:
-          TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
-          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from filter_test_configs import add_cpp_faketensor_configs, set_output
-
-          matrix = add_cpp_faketensor_configs(
-              json.loads(os.environ["TEST_MATRIX"]), os.environ["JOB_NAME"]
-          )
-          set_output("test-matrix", json.dumps(matrix))
-          PY
 
       - name: Configure AWS credentials
         id: aws-creds
