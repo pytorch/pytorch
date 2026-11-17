@@ -537,6 +537,14 @@ def local_scalar_dense_single_dim_strategy(
     return []
 
 
+@register_single_dim_strategy(aten._assert_async.msg)
+def assert_async_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    r"""Only allow replicated predicates; assertions have no tensor output."""
+    return []
+
+
 @register_single_dim_strategy(
     [
         aten.scatter_.value,
