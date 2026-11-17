@@ -37,8 +37,8 @@ class TestSaveAndLoadAPI(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
     def test_auto_detect(self):
-        model = FSDP(MyTestModule().to(self.device_type))
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model = FSDP(MyTestModule().to(self._device_type))
+        device_mesh = init_device_mesh(self._device_type, (self.world_size,))
         model = FSDP(model, device_mesh=device_mesh)
         dcp.save(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
         dcp.load(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
