@@ -28,8 +28,8 @@ namespace {
 //
 // scales block: {BLOCK_N}
 //
-template <int BLOCK_M, int BLOCK_N>
-inline void tinygemm_kernel(
+template <int BLOCK_M, int BLOCK_N, bool HAS_TAIL>
+inline void tinygemm_kernel_impl(
     const BFloat16* RESTRICT A,
     const int8_t* RESTRICT B,
     const BFloat16* RESTRICT scales,
@@ -65,7 +65,7 @@ inline void tinygemm_kernel(
     constexpr int col = i % COLS;
 
     if constexpr (col == 0) {
-      __m256i a16 = _mm256_load_si256((__m256i*)(A + row * lda + k));
+      __m256i a16 = _mm256_loadu_si256((const __m256i*)(A + row * lda + k));
       if (k + PREFETCH_SIZE_K < K) {
         _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
       }
@@ -73,7 +73,7 @@ inline void tinygemm_kernel(
     }
 
     if constexpr (row == 0) {
-      __m128i b8 = _mm_load_si128((__m128i*)(B + col * ldb + k));
+      __m128i b8 = _mm_loadu_si128((const __m128i*)(B + col * ldb + k));
       if (k + PREFETCH_SIZE_K < K) {
         _mm_prefetch(B + col * ldb + k + PREFETCH_SIZE_K, _MM_HINT_T0);
       }
@@ -86,14 +86,23 @@ inline void tinygemm_kernel(
     vc[idx] = _mm512_fmadd_ps(va, vb[col], vc[idx]);
   };
 
-  for (int k = 0; k < K; k += 16) {
+  const int K_vec = HAS_TAIL ? K / 16 * 16 : K;
+  for (int k = 0; k < K_vec; k += 16) {
       c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
   }
 
   auto storec = [&](auto i) {
     constexpr int row = i / COLS;
     constexpr int col = i % COLS;
-    C[row * ldc + col] = static_cast<BFloat16>(_mm512_reduce_add_ps(vc[i]));
+    float sum = _mm512_reduce_add_ps(vc[i]);
+    if constexpr (HAS_TAIL) {
+      const float scale_val = static_cast<float>(scales[col]);
+      for (int k = 0; k < K % 16; ++k) {
+        sum += static_cast<float>(A[row * lda + K_vec + k]) *
+            (static_cast<float>(B[col * ldb + K_vec + k]) * scale_val);
+      }
+    }
+    C[row * ldc + col] = static_cast<BFloat16>(sum);
   };
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
@@ -110,8 +119,8 @@ inline float _mm256_reduce_add_ps(__m256& v) {
   return _mm256_cvtss_f32(v);
 }
 
-template <int BLOCK_M, int BLOCK_N>
-inline void tinygemm_kernel(
+template <int BLOCK_M, int BLOCK_N, bool HAS_TAIL>
+inline void tinygemm_kernel_impl(
     const BFloat16* RESTRICT A,
     const int8_t* RESTRICT B,
     const BFloat16* RESTRICT scales,
@@ -147,7 +156,7 @@ inline void tinygemm_kernel(
     constexpr int col = i % COLS;
 
     if constexpr (col == 0) {
-      __m128i a16 = _mm_load_si128((__m128i*)(A + row * lda + k));
+      __m128i a16 = _mm_loadu_si128((const __m128i*)(A + row * lda + k));
       if (k + PREFETCH_SIZE_K < K) {
         _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
       }
@@ -168,18 +177,61 @@ inline void tinygemm_kernel(
      vc[idx] = _mm256_fmadd_ps(va, vb[col], vc[idx]);
   };
 
-  for (int k = 0; k < K; k += 8) {
+  const int K_vec = HAS_TAIL ? K / 8 * 8 : K;
+  for (int k = 0; k < K_vec; k += 8) {
     c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
   }
 
   auto storec = [&](auto i) {
     constexpr int row = i / COLS;
     constexpr int col = i % COLS;
-    C[row * ldc + col] = static_cast<BFloat16>(_mm256_reduce_add_ps(vc[i]));
+    float sum = _mm256_reduce_add_ps(vc[i]);
+    if constexpr (HAS_TAIL) {
+      const float scale_val = static_cast<float>(scales[col]);
+      for (int k = 0; k < K % 8; ++k) {
+        sum += static_cast<float>(A[row * lda + K_vec + k]) *
+            (static_cast<float>(B[col * ldb + K_vec + k]) * scale_val);
+      }
+    }
+    C[row * ldc + col] = static_cast<BFloat16>(sum);
   };
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
+#endif
+
+#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+// Keep remainder code out of the inlined full-vector path.
+template <int BLOCK_M, int BLOCK_N>
+C10_NOINLINE void tinygemm_kernel_tail(
+    const BFloat16* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const BFloat16* RESTRICT scales,
+    BFloat16* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  tinygemm_kernel_impl<BLOCK_M, BLOCK_N, true>(A, B, scales, C, lda, ldb, ldc, K);
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const BFloat16* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const BFloat16* RESTRICT scales,
+    BFloat16* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  constexpr int VEC_SIZE = vec::Vectorized<float>::size();
+  if (K % VEC_SIZE == 0) {
+    tinygemm_kernel_impl<BLOCK_M, BLOCK_N, false>(A, B, scales, C, lda, ldb, ldc, K);
+  } else {
+    tinygemm_kernel_tail<BLOCK_M, BLOCK_N>(A, B, scales, C, lda, ldb, ldc, K);
+  }
+}
 #endif
 
 #if !defined(C10_MOBILE) && defined(__aarch64__)
