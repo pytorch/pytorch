@@ -40,6 +40,8 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     _unstable_customized_partition_wrapper,
+    GraphPartitionMode,
+    GraphPartitionPlan,
     run_and_get_code,
 )
 from torch._ops import OpOverload
@@ -310,22 +312,19 @@ class CUDAGraphAPIOnlyTests(TestCase):
             self.assertIsNotNone(reason)
             self.assertIn(expected, reason)
 
-    def test_graph_lowering_cudagraphs_per_partition_requires_split(self):
-        gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        with self.assertRaisesRegex(ValueError, "requires split_into_partitions"):
-            GraphLowering(
-                gm, split_into_partitions=False, cudagraphs_per_partition=True
-            )
+    def test_graph_partition_plan_requires_split(self):
+        with self.assertRaisesRegex(ValueError, "requires partitioning"):
+            GraphPartitionPlan(cudagraphs_per_partition=True)
 
 
 instantiate_parametrized_tests(CUDAGraphAPIOnlyTests)
 
 
 @contextlib.contextmanager
-def _force_graph_lowering_decisions(**decisions):
+def _force_partition_plan(plan):
     class ForcedGraphLowering(GraphLowering):
         def __init__(self, *args, **kwargs):
-            kwargs.update(decisions)
+            kwargs["partition_plan"] = plan
             super().__init__(*args, **kwargs)
 
     with mock.patch.object(
@@ -948,9 +947,7 @@ if HAS_CUDA_AND_TRITON:
             compiled = torch.compile(f)
             x = torch.randn(8, device="cuda")
             with (
-                _force_graph_lowering_decisions(
-                    split_into_partitions=False, cudagraphs_per_partition=None
-                ),
+                _force_partition_plan(GraphPartitionPlan.unsplit()),
                 mock.patch.object(
                     _unstable_customized_partition_wrapper,
                     "wrapper",
@@ -992,10 +989,12 @@ if HAS_CUDA_AND_TRITON:
             x = torch.randn(8, device="cuda")
             with (
                 config.patch("triton.cudagraphs", not cudagraphs_per_partition),
-                _force_graph_lowering_decisions(
-                    split_into_partitions=True,
-                    cudagraphs_per_partition=cudagraphs_per_partition,
-                    cudagraphs_top_level=cudagraphs_per_partition,
+                _force_partition_plan(
+                    GraphPartitionPlan(
+                        GraphPartitionMode.CONFIG,
+                        cudagraphs_top_level=cudagraphs_per_partition,
+                        cudagraphs_per_partition=cudagraphs_per_partition,
+                    )
                 ),
             ):
                 compiled = torch.compile(f)
@@ -1055,9 +1054,14 @@ if HAS_CUDA_AND_TRITON:
                         "graph_partition": graph_partition,
                     }
                 ),
-                _force_graph_lowering_decisions(
-                    split_into_partitions=split_into_partitions,
-                    cudagraphs_per_partition=cudagraphs_per_partition,
+                _force_partition_plan(
+                    GraphPartitionPlan(
+                        GraphPartitionMode.CONFIG
+                        if split_into_partitions
+                        else GraphPartitionMode.NONE,
+                        cudagraphs_top_level=cudagraphs,
+                        cudagraphs_per_partition=cudagraphs_per_partition,
+                    )
                 ),
                 mock.patch.object(
                     Scheduler,
