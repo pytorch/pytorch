@@ -4273,6 +4273,18 @@ def demote_caller(n, x):
     return demote_python(n), x + 1
 
 
+def demote_unsettled(n):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    cfg_rs.unsettled()
+    return total
+
+
+def demote_unsettled_caller(n, x):
+    return demote_unsettled(n), x + 1
+
+
 def demote_tensor_caller(n, x):
     for _ in range(100):
         x = x + 1
@@ -4314,6 +4326,44 @@ class TestCfgDemotion(TestCase):
         # A loop of integer arithmetic is several times slower in the VM.
         self.assertEqual(stats["demoted_callees"], ["demote_python"])
         self.assertEqual(stats["compiled_callees"], ["demote_python"])
+
+    def test_a_call_that_is_not_settled_does_not_count_against_a_function(self):
+        # The same loop as demote_python, which is left to the interpreter;
+        # this one says of every call that it is not what it will be.
+        compiled = torch.rewrite(
+            demote_unsettled_caller,
+            fallback=False,
+            demote=True,
+            passes=without("inline"),
+        )
+        x = torch.ones(2)
+        for _ in range(200):
+            total, _ = compiled(300, x)
+            self.assertEqual(total, demote_python(300))
+        self.assertEqual(compiled.stats()["demoted_callees"], [])
+
+    def test_a_region_that_is_deciding_keeps_measurements_open(self):
+        calls = []
+        model = RegionNet().eval()
+        passes = with_graphs("aot_eager")
+        compiled = torch.rewrite(region_infer, passes=passes, fallback=False)
+        x = torch.randn(2, 3, 6, 6)
+        said = unittest.mock.patch.object(cfg_rs, "unsettled", lambda: calls.append(1))
+        with torch.no_grad(), said:
+            for _ in range(3):
+                compiled(model, x)
+            early = len(calls)
+            for _ in range(20):
+                compiled(model, x)
+            settled = len(calls)
+            for _ in range(5):
+                compiled(model, x)
+        # Said while the region ran its instructions one by one, and no
+        # longer once it had its graph.
+        self.assertGreater(early, 0)
+        self.assertEqual(len(calls), settled)
+        states = [r["state"] for r in torch.rewrite.regions(compiled)]
+        self.assertEqual(states.count("compiled"), 1)
 
     def test_python_function_is_left_to_the_interpreter(self):
         compiled = torch.rewrite(demote_python, fallback=False, demote=True)
