@@ -1,0 +1,33 @@
+name: Release artifact admission audit
+description: Run the exact-owned, inert artifact-service audit canary
+inputs:
+  mode:
+    required: true
+    description: Fixed canary operation
+  github-token:
+    required: true
+    description: Current owned workflow token
+outputs:
+  fixture_root:
+    description: Owned disposable fixture root
+  ordinary_name:
+    description: Ordinary artifact name
+  leading_name:
+    description: Leading-parent control artifact name
+  embedded_name:
+    description: Embedded-parent artifact name
+  legacy_ordinary_path:
+    description: Owned extraction directory
+  legacy_leading_path:
+    description: Owned extraction directory
+  legacy_embedded_path:
+    description: Owned extraction directory
+  modern_ordinary_path:
+    description: Owned extraction directory
+  modern_leading_path:
+    description: Owned extraction directory
+  modern_embedded_path:
+    description: Owned extraction directory
+runs:
+  using: node20
+  main: index.cjs

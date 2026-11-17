@@ -1,0 +1,98 @@
+# Owner(s): ["module: ci"]
+name: CI security artifact admission canary
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch' && github.repository == 'pytorch/pytorch' && github.event_name == 'pull_request' && github.event.pull_request.number == 205398 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-artifact-admission-audit' && github.actor == 'ptdbot' && (github.triggering_actor == 'ptdbot' || github.triggering_actor == 'd4l3k')
+    uses: ./.github/workflows/_check-ci.yml
+
+  exact-owned-admission:
+    # Only this reviewed, never-merge draft PR can run the bounded audit.
+    needs: check-ci
+    if: github.repository_owner == 'pytorch' && github.repository == 'pytorch/pytorch' && github.event_name == 'pull_request' && github.event.pull_request.number == 205398 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-artifact-admission-audit' && github.actor == 'ptdbot' && (github.triggering_actor == 'ptdbot' || github.triggering_actor == 'd4l3k')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ptdbot/pytorch
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact-owned draft PR and run
+        id: guard
+        uses: ./.github/actions/release-artifact-admission
+        with:
+          mode: guard
+          github-token: ${{ github.token }}
+      - name: Checkout immutable artifact SDK lock
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: actions/download-artifact
+          ref: d3f86a106a0bac45b974a628896c90dbdf5c8093
+          path: .artifact-admission-sdk
+          persist-credentials: false
+      - name: Verify dependency inputs
+        uses: ./.github/actions/release-artifact-admission
+        with:
+          mode: dependencies
+          github-token: ${{ github.token }}
+      - name: Install locked runtime without lifecycle scripts
+        id: dependencies
+        working-directory: .artifact-admission-sdk
+        env:
+          NPM_CONFIG_CACHE: ${{ steps.guard.outputs.fixture_root }}/npm-cache
+        run: npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+      - name: Prove deletion and upload fixed inert archives
+        uses: ./.github/actions/release-artifact-admission
+        with:
+          mode: produce
+          github-token: ${{ github.token }}
+      - name: Legacy ordinary control
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ steps.guard.outputs.ordinary_name }}
+          path: ${{ steps.guard.outputs.legacy_ordinary_path }}
+      - name: Legacy leading-parent control
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ steps.guard.outputs.leading_name }}
+          path: ${{ steps.guard.outputs.legacy_leading_path }}
+      - name: Legacy embedded-parent case
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ steps.guard.outputs.embedded_name }}
+          path: ${{ steps.guard.outputs.legacy_embedded_path }}
+      - name: Modern ordinary control
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ${{ steps.guard.outputs.ordinary_name }}
+          path: ${{ steps.guard.outputs.modern_ordinary_path }}
+      - name: Modern leading-parent control
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ${{ steps.guard.outputs.leading_name }}
+          path: ${{ steps.guard.outputs.modern_leading_path }}
+      - name: Modern embedded-parent control
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ${{ steps.guard.outputs.embedded_name }}
+          path: ${{ steps.guard.outputs.modern_embedded_path }}
+      - name: Verify bounded extraction results
+        uses: ./.github/actions/release-artifact-admission
+        with:
+          mode: verify
+          github-token: ${{ github.token }}
+      - name: Delete exact-owned artifacts and fixture
+        if: always() && steps.guard.outcome == 'success'
+        uses: ./.github/actions/release-artifact-admission
+        with:
+          mode: cleanup
+          github-token: ${{ github.token }}
