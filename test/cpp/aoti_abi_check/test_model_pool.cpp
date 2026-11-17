@@ -86,8 +86,9 @@ class FakeModel {
 using Stream = void*;
 using Pool = ModelPool<FakeModel, Stream>;
 
-// Only checkout() creates leases: the constructor is private, so a caller
-// can't wrap a bare model in one.
+// Only checkout() creates leases: the constructor is private and takes the
+// pool's private slot type, so a caller can neither forge a lease nor wrap a
+// bare model in one.
 static_assert(
     !std::is_constructible_v<Pool::Lease, Pool&, FakeModel*>,
     "A lease must not be constructible from a bare model");
