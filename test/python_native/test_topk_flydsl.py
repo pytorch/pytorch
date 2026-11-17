@@ -153,9 +153,15 @@ class TestFlyDSLTopK(TestCase):
 
     @parametrize("k", _RADIX_PADDING_KS)
     def test_radix_sort_length_padding(self, k: int):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
         torch.manual_seed(0)
-        x = make_tensor((_test_m(), _test_n(k)), device="cuda", dtype=torch.float32)
+        n = _test_n(k)
+        kernel = _expected_kernel(k, n)
+        x = make_tensor((_test_m(), n), device="cuda", dtype=torch.float32)
+        misses = topk_cache_info(kernel).misses
         self._assert_topk_matches_aten(x, k)
+        self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
 
     def test_register_correctness_with_odd_rows(self):
         # Register kernel packs two rows per CTA; odd M leaves a tail
@@ -220,13 +226,14 @@ class TestFlyDSLTopK(TestCase):
                                 1,
                             )
                         x = torch.full((m, n), background, dtype=dtype, device="cuda")
-                        for col, value in enumerate(planted):
+                        cols = _special_cols(n)[: len(planted)]
+                        for col, value in zip(cols, planted):
                             x[:, col] = value
                         if dtype.is_floating_point:
                             bits = x.view(
                                 torch.int32 if dtype == torch.float32 else torch.int16
                             )
-                            bits[:, 1] = -(1 << (bits.element_size() * 8 - 1))
+                            bits[:, cols[1]] = -(1 << (bits.element_size() * 8 - 1))
 
                         misses = topk_cache_info(kernel).misses
                         got_v, _ = torch.topk(x, k, largest=largest)
@@ -260,7 +267,7 @@ class TestFlyDSLTopK(TestCase):
                 n = _test_n(k, dtype)
                 rows = (_test_m(k, dtype) + 3) // 4
                 with self.subTest(dtype=dtype, largest=largest, n=n):
-                    x = make_tensor((4, rows, n), device="cuda", dtype=dtype)
+                    x = _make_test_input((4, rows, n), dtype)
                     misses = topk_cache_info("radix").misses
                     self._assert_topk_matches_aten(x, k, largest=largest)
                     got_v, _ = torch.topk(x, k, dim=-1, largest=largest)
