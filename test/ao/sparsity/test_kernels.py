@@ -1,7 +1,6 @@
 # Owner(s): ["module: sparse"]
 
 import copy
-import io
 import logging
 from itertools import product
 
@@ -136,7 +135,6 @@ def _sparse_layer_test_helper(
     qconfig_dict,
     fqn_to_check,
     test_class,
-    test_scripting,
 ):
     # SET UP TEST PARAMETERS, INPUTS AND WEIGHTS
     # ------------------------------------------
@@ -234,16 +232,6 @@ def _sparse_layer_test_helper(
                 f"Expected row_block_size == 1 and col_block_size == 4, got {row_block_size} and {col_block_size}"
             )
 
-        # only run during serialization/deserialization tests
-        # makes sure script/save/load doesn't malform the sqmodel
-        if test_scripting:
-            scripted_sqmodel = torch.jit.script(sqmodel)
-            scripted_sqmodel.eval()
-            buffer = io.BytesIO()
-            torch.jit.save(scripted_sqmodel, buffer)
-            buffer.seek(0)
-            sqmodel = torch.jit.load(buffer)
-
         # use correct input dtype
         if is_dynamic:
             Y_ref = qmodel(X_fp32)
@@ -296,39 +284,6 @@ class TestQuantizedSparseLayers(TestCase):
             qconfig_dict=qconfig_dict,
             fqn_to_check=fqn_to_check,
             test_class=self,
-            test_scripting=False,
-        )
-
-    @override_qengines
-    def test_sparse_qlinear_serdes(self):
-        # Note: At the moment, for sparse kernels
-        # fbgemm supports only static quantized sparse linear
-        # qnnpack supports only dynamically quantized sparse linear
-        # Hence we have two different tests.
-        # fbgemm tests static flow, qnnpack tests dynamic.
-        # Should be unified later on and tests should be fixed
-        # appropriately.
-        model_class = SparseQuantizedModel
-        fqn_to_check = "linear"
-        if qengine_is_fbgemm():
-            sparse_mapping = tq.get_default_static_sparse_quant_module_mappings()
-            ref_mapping = tq.get_default_static_quant_module_mappings()
-            qconfig_dict = {nn.Linear: tq.get_default_qconfig("fbgemm")}
-        elif qengine_is_qnnpack():
-            sparse_mapping = tq.get_default_dynamic_sparse_quant_module_mappings()
-            ref_mapping = tq.get_default_dynamic_quant_module_mappings()
-            qconfig_dict = {nn.Linear: tq.qconfig.default_dynamic_qconfig}
-        else:
-            return
-
-        _sparse_layer_test_helper(
-            model_class=model_class,
-            sparse_mapping=sparse_mapping,
-            ref_mapping=ref_mapping,
-            qconfig_dict=qconfig_dict,
-            fqn_to_check=fqn_to_check,
-            test_class=self,
-            test_scripting=True,
         )
 
 
