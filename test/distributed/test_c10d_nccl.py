@@ -61,7 +61,7 @@ from torch.profiler import (
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     TEST_CUDA_GRAPH_TOOLS_ID,
-    TEST_CUPTI_V13_3,
+    TEST_CUPTI_V13_5,
     TEST_MULTIGPU,
 )
 from torch.testing._internal.common_distributed import (
@@ -7930,8 +7930,8 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
 
     @skipIfRocm
     def test_cuspy_collective_is_annotated(self):
-        if not TEST_CUPTI_V13_3:
-            self.skipTest("requires libcupti >= 13.3")
+        if not TEST_CUPTI_V13_5:
+            self.skipTest("requires CUDA >= 13.5 + libcupti >= 13.5")
         torch.cuda.set_device(self.device)
         x = torch.ones(1024, device=self.device)
         dist.all_reduce(x)
