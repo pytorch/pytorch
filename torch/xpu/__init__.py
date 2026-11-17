@@ -95,13 +95,22 @@ def _parse_visible_devices(strict=False) -> list[int]:
     Returns a list of non-negative device ordinals specified by the mask.
     When the mask is unset, returns ``[0, 1, ..., 127]`` (the maximum range
     for ``int8_t`` device indices).  Returns an empty list for unsupported
-    COMPOSITE-style masks (e.g. ``"0.0,0.1"``).
+    COMPOSITE-style masks (e.g. ``"0.0,0.1"``) or when
+    ``ONEAPI_DEVICE_SELECTOR`` is set.
 
     Args:
         strict (bool): If ``True``, raises ``ValueError`` on unsupported mask
-            formats (e.g. COMPOSITE-style ``"0.0,0.1"``).  If ``False``
-            (default), returns an empty list instead.
+            formats (e.g. COMPOSITE-style ``"0.0,0.1"``) and when
+            ``ONEAPI_DEVICE_SELECTOR`` is set.  If ``False`` (default),
+            returns an empty list instead.
     """
+    var = os.getenv("ONEAPI_DEVICE_SELECTOR")
+    if var is not None:
+        if strict:
+            raise ValueError(
+                f"Unsupported ONEAPI_DEVICE_SELECTOR format: '{var}'. Please unset this environment variable."
+            )
+        return []
     var = os.getenv("ZE_AFFINITY_MASK")
     if var is None:
         # DeviceIndex is stored as int8_t, so valid indices are 0–127
@@ -532,7 +541,7 @@ def get_device_properties(
     - ``has_atomic64`` (bool): whether 64-bit atomic operations are supported.
     - ``has_bfloat16_conversions`` (bool): whether bfloat16 conversions are supported.
     - ``has_subgroup_matrix_multiply_accumulate`` (bool): whether DPAS (Dot Product Accumulate Systolic) is supported.
-    - ``has_subgroup_matrix_multiply_accumulate_tensor_float32`` (bool): whether DPAS with tf32 inputs is supported.
+    - ``has_subgroup_matrix_multiply_accumulate_tf32`` (bool): whether DPAS with tf32 inputs is supported.
     - ``has_subgroup_2d_block_io`` (bool): whether 2D block I/O for efficient matrix multiplication is supported.
     - ``is_integrated_gpu`` (bool): whether the device is an integrated GPU (iGPU).
     - ``total_memory`` (int): device global memory in bytes.
@@ -959,7 +968,10 @@ def temperature(device: Device = None) -> float:
 
     temp = c_double(0.0)
     rc = pyzes.zesTemperatureGetState(temperature_handle, byref(temp))
-    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+    if (
+        rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE
+        or rc == pyzes.ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS
+    ):
         raise RuntimeError(
             "GPU temperature querying is not available. Try running with elevated privileges (e.g. sudo)."
         )
