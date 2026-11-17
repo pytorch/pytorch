@@ -61,7 +61,6 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   ~RawTensorMetadata() = default;
   explicit RawTensorMetadata(const at::Tensor& t, bool with_weak_ref = true);
 
-  TensorImplAddress impl_{nullptr};
   // `weak_self_` is only set with profile_memory, where tensor IDs need
   // TensorImpl addresses to stay unique for the whole session.
   WeakTensor weak_self_;
@@ -79,10 +78,9 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
       std::vector<int64_t> strides);
 
   TensorImplAddress impl() const {
-    return impl_;
+    return weak_self_.get();
   }
 
-  TensorImplAddress impl_;
   WeakTensor weak_self_;
   c10::Device device_;
   std::vector<int64_t> sizes_;
