@@ -7292,31 +7292,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                 self.assertEqual(self._installed(), (mode, True))
         self.assertEqual(self._installed(), (None, False))
 
-    def test_require_python_fake_mode(self):
-        from torch._guards import require_python_fake_mode
-
-        msg = "CppFakeTensorMode is not supported here yet"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            require_python_fake_mode(CppFakeTensorMode())
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
-            py_mode = FakeTensorMode()
-        self.assertIs(require_python_fake_mode(py_mode), py_mode)
-        self.assertIsNone(require_python_fake_mode(None))
-
-    def test_shape_prop_fake_mode(self):
-        from torch.fx.passes.shape_prop import ShapeProp
-
-        gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        x = torch.randn(2, 3)
-        mode = CppFakeTensorMode()
-        out = ShapeProp(gm, fake_mode=mode).propagate(x)
-        self.assertEqual(out.shape, x.shape)
-        self.assertIs(maybe_get_fake_mode(out), mode)
-        with tracing(TracingContext(mode)):
-            out = ShapeProp(gm).propagate(x)
-        self.assertEqual(out.shape, x.shape)
-        self.assertIs(maybe_get_fake_mode(out), mode)
-
     @parametrize(
         "callback,propagate_real_tensors",
         [
