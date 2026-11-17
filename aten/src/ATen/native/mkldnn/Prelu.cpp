@@ -31,7 +31,7 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
   }
 
   const ideep::tensor& x = itensor_from_mkldnn(input);
-  const ideep::tensor& w = itensor_from_tensor(weight);
+  const ideep::tensor& w = itensor_from_const_tensor(weight);
 
   ideep::tensor y;
   ideep::prelu_forward::compute(
@@ -42,7 +42,7 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
 
 std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& weight) {
   const ideep::tensor& x = itensor_from_mkldnn(input);
-  const ideep::tensor& w = itensor_from_tensor(weight);
+  const ideep::tensor& w = itensor_from_const_tensor(weight);
   const ideep::tensor grady = itensor_from_mkldnn(grad_output);
   ideep::tensor gradx;
   ideep::tensor gradw;
