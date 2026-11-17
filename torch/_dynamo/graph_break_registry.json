@@ -72,6 +72,17 @@
       ]
     }
   ],
+  "GB0976": [
+    {
+      "Gb_type": "CuTeDSL kernel wrapper not supported",
+      "Context": "{type(wrapper).__name__}({name}, mutates_args={wrapper.mutates_args})",
+      "Explanation": "CuTeDSL kernel {name}: Dynamo does not capture a call of a CuTeDSL kernel wrapper (what torch._library.cutedsl.wrap_cutedsl returns): the call graph-breaks and runs outside the graph, so torch.compile(fullgraph=True) and strict torch.export refuse it. make_fx and non-strict torch.export capture the call, but not in the body of a higher-order op that Dynamo traces even eagerly and under make_fx and non-strict torch.export, such as torch.cond, while_loop, scan, map and associative_scan, or in a torch.compiler.nested_compile_region function under non-strict torch.export.",
+      "Hints": [
+        "Call it outside the compiled region, or drop fullgraph=True to run it between the compiled graphs.",
+        "To capture the launch in a graph, use make_fx or non-strict torch.export, with the call outside the body of any higher-order op that Dynamo traces (such as torch.cond, while_loop, scan, map and associative_scan) and, under non-strict torch.export, outside any torch.compiler.nested_compile_region function."
+      ]
+    }
+  ],
   "GB2861": [
     {
       "Gb_type": "Untraceable C tp_hash",
