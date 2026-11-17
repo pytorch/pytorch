@@ -43,6 +43,7 @@
 #include <structmember.h>
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <utility>
@@ -1236,6 +1237,19 @@ void log_sharding_prop_cache_hit(
   }
   dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
 }
+
+void log_sharding_prop_cache_insert_refused(
+    const NativeOpSchema& schema,
+    const char* reason) {
+  init_dtensor_dispatch_logger();
+  if (!dtensor_debug_logging_enabled) {
+    return;
+  }
+  std::ostringstream ss;
+  ss << "sharding_prop INSERT REFUSED (" << reason << "): ";
+  ss << schema.format_inputs();
+  dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
+}
 } // namespace
 
 // The four DTensorSpec fields with no DeviceMesh
@@ -1244,12 +1258,21 @@ struct CachedSpec {
   py::object tensor_meta;
   py::object shard_order;
   py::object use_strided_shard_as_shard_order;
+  uint8_t slot_idx;
 };
 
 struct CachedSharding {
   enum class Shape { None, Single, Tuple, List };
   Shape shape = Shape::None;
   std::vector<std::optional<CachedSpec>> specs;
+};
+
+struct NativeOpSchemaAndMeshes {
+  NativeOpSchema schema;
+  // meshes[0] is compute_mesh.
+  // Rest are meshes that output_specs may refer to.
+  // First come first serve through DTensor args.
+  c10::SmallVector<py::object, 2> meshes;
 };
 
 // Map from OpSchema to pyobject sharding propagation config.
@@ -1289,17 +1312,32 @@ class NativeShardingPropagatorCache {
   mutable std::size_t misses_ = 0;
 };
 
-static CachedSpec make_cached_spec(py::handle spec) {
-  return CachedSpec{
-      spec.attr("placements"),
-      spec.attr(dtensor_interned_strings.tensor_meta),
-      spec.attr("shard_order"),
-      spec.attr("use_strided_shard_as_shard_order")};
+static bool append_cached_spec(
+    py::handle spec,
+    c10::ArrayRef<py::object> meshes,
+    std::vector<std::optional<CachedSpec>>& out) {
+  py::object mesh = spec.attr("mesh");
+  for (const auto i : c10::irange(meshes.size())) {
+    if (meshes[i].is(mesh)) {
+      out.push_back(CachedSpec{
+          spec.attr("placements"),
+          spec.attr(dtensor_interned_strings.tensor_meta),
+          spec.attr("shard_order"),
+          spec.attr("use_strided_shard_as_shard_order"),
+          static_cast<uint8_t>(i)});
+      return false;
+    }
+  }
+  return true;
 }
 
-static std::optional<CachedSharding> make_cached_sharding(py::handle sharding) {
+static std::optional<CachedSharding> make_cached_sharding(
+    py::handle sharding,
+    c10::ArrayRef<py::object> meshes,
+    const NativeOpSchema& schema) {
   if (checked_istrue(
           sharding.attr(dtensor_interned_strings.needs_redistribute).ptr())) {
+    log_sharding_prop_cache_insert_refused(schema, "needs_redistribute");
     return std::nullopt;
   }
   CachedSharding result;
@@ -1308,7 +1346,12 @@ static std::optional<CachedSharding> make_cached_sharding(py::handle sharding) {
     result.shape = CachedSharding::Shape::None;
   } else if (py::isinstance(output_spec, get_dtensor_spec_class())) {
     result.shape = CachedSharding::Shape::Single;
-    result.specs.emplace_back(make_cached_spec(output_spec));
+    bool mesh_not_found = append_cached_spec(output_spec, meshes, result.specs);
+    if (mesh_not_found) {
+      log_sharding_prop_cache_insert_refused(
+          schema, "output spec mesh is not an input mesh");
+      return std::nullopt;
+    }
   } else if (
       PyTuple_Check(output_spec.ptr()) || PyList_Check(output_spec.ptr())) {
     result.shape = PyTuple_Check(output_spec.ptr())
@@ -1318,18 +1361,31 @@ static std::optional<CachedSharding> make_cached_sharding(py::handle sharding) {
       if (item.is_none()) {
         result.specs.emplace_back(std::nullopt);
       } else if (py::isinstance(item, get_dtensor_spec_class())) {
-        result.specs.emplace_back(make_cached_spec(item));
+        bool mesh_not_found = append_cached_spec(item, meshes, result.specs);
+        if (mesh_not_found) {
+          log_sharding_prop_cache_insert_refused(
+              schema, "output spec list element mesh is not an input mesh");
+          return std::nullopt;
+        }
       } else {
+        log_sharding_prop_cache_insert_refused(
+            schema, "output spec list contains non-DTensorSpec item");
         return std::nullopt;
       }
     }
   } else {
+    log_sharding_prop_cache_insert_refused(
+        schema, "output spec is not None, DTensorSpec, tuple, or list");
     return std::nullopt;
   }
   return result;
 }
 
-static py::object make_spec(const CachedSpec& c, py::handle mesh) {
+static py::object make_spec(
+    const CachedSpec& c,
+    c10::ArrayRef<py::object> meshes) {
+  TORCH_INTERNAL_ASSERT(c.slot_idx < meshes.size());
+  py::handle mesh = meshes[c.slot_idx];
   return checked_vectorcall(
       get_dtensor_spec_class().ptr(),
       mesh.ptr(),
@@ -1341,19 +1397,19 @@ static py::object make_spec(const CachedSpec& c, py::handle mesh) {
 
 static py::object make_output_sharding(
     const CachedSharding& cached,
-    py::handle mesh) {
+    c10::ArrayRef<py::object> meshes) {
   py::object spec;
   switch (cached.shape) {
     case CachedSharding::Shape::None:
       spec = py::none();
       break;
     case CachedSharding::Shape::Single:
-      spec = make_spec(*cached.specs.front(), mesh);
+      spec = make_spec(*cached.specs.front(), meshes);
       break;
     default: {
       py::list items;
       for (const auto& s : cached.specs) {
-        items.append(s ? make_spec(*s, mesh) : py::none());
+        items.append(s ? make_spec(*s, meshes) : py::none());
       }
       spec = cached.shape == CachedSharding::Shape::Tuple
           ? py::reinterpret_steal<py::object>(PyList_AsTuple(items.ptr()))
@@ -1364,8 +1420,7 @@ static py::object make_output_sharding(
   return checked_vectorcall(get_output_sharding_class().ptr(), spec.ptr());
 }
 
-static std::optional<std::pair<NativeOpSchema, /*ComputeMesh*/ py::object>>
-create_native_op_schema(
+static std::optional<NativeOpSchemaAndMeshes> create_native_op_schema(
     const c10::OperatorHandle& op,
     py::handle py_op,
     torch::jit::Stack* stack);
@@ -1639,7 +1694,7 @@ py::object dispatchDTensorOp(
     native_sharding_propagator_cache =
         &get_thread_local_native_sharding_propagator_cache();
     cache_hit =
-        native_sharding_propagator_cache->find(opt_native_op_schema->first);
+        native_sharding_propagator_cache->find(opt_native_op_schema->schema);
   }
 
   py::object py_op_info;
@@ -1671,9 +1726,12 @@ py::object dispatchDTensorOp(
     }
     cached_sharding = sharding;
     if (opt_native_op_schema.has_value()) {
-      if (auto cached = make_cached_sharding(sharding)) {
+      if (auto cached = make_cached_sharding(
+              sharding,
+              opt_native_op_schema->meshes,
+              opt_native_op_schema->schema)) {
         native_sharding_propagator_cache->insert(
-            std::move(opt_native_op_schema->first), std::move(*cached));
+            std::move(opt_native_op_schema->schema), std::move(*cached));
       }
     }
     py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
@@ -1699,15 +1757,16 @@ py::object dispatchDTensorOp(
 
   py::object compute_mesh;
   if (opt_native_op_schema.has_value()) {
-    compute_mesh = std::move(opt_native_op_schema->second);
+    compute_mesh = opt_native_op_schema->meshes[0];
   } else {
     get_py_op_info_if_needed();
     compute_mesh = py_op_info.attr(dtensor_interned_strings.compute_mesh);
   }
 
   if (cache_hit) {
-    cached_sharding = make_output_sharding(*cache_hit, compute_mesh);
-    log_sharding_prop_cache_hit(opt_native_op_schema->first, cached_sharding);
+    cached_sharding =
+        make_output_sharding(*cache_hit, opt_native_op_schema->meshes);
+    log_sharding_prop_cache_hit(opt_native_op_schema->schema, cached_sharding);
   }
 
   const bool participating =
@@ -2380,8 +2439,7 @@ static bool dtensor_spec_has_symints(py::handle spec) {
 // flattening (e.g. future pytree custom ops)
 static constexpr bool kRunPytreeWithFastPath = true;
 
-static std::optional<std::pair<NativeOpSchema, /*ComputeMesh*/ py::object>>
-create_native_op_schema(
+static std::optional<NativeOpSchemaAndMeshes> create_native_op_schema(
     const c10::OperatorHandle& op,
     py::handle py_op,
     torch::jit::Stack* stack) {
@@ -2405,6 +2463,17 @@ create_native_op_schema(
   std::size_t comparison_key_hash = 0;
 
   py::object compute_mesh = py::none();
+  c10::SmallVector<py::object, 2> meshes;
+
+  const auto intern_mesh = [&meshes](py::handle mesh) {
+    for (const auto i : c10::irange(meshes.size())) {
+      if (meshes[i].is(mesh)) {
+        return i;
+      }
+    }
+    meshes.emplace_back(py::reinterpret_borrow<py::object>(mesh));
+    return meshes.size() - 1;
+  };
 
   const auto handle_non_dtensor_arg =
       [&comparison_key, &comparison_key_hash, &native_info](
@@ -2495,6 +2564,9 @@ create_native_op_schema(
       // sharding propagation. bail out to slow path.
       return true;
     }
+    const auto idx = static_cast<int64_t>(intern_mesh(spec.attr("mesh")));
+    comparison_key.emplace_back(idx);
+    comparison_key_hash = hash_combine(comparison_key_hash, idx);
     handle_dtensor_arg(std::move(spec));
     if (compute_mesh.is_none()) {
       compute_mesh = py::reinterpret_borrow<py::object>(
@@ -2698,13 +2770,25 @@ create_native_op_schema(
       "found no DeviceMesh from dtensor args for ",
       op.operator_name());
 
-  return std::make_pair(
+  if (meshes.empty()) {
+    meshes.emplace_back(compute_mesh);
+  }
+
+  if (meshes.size() >
+      static_cast<size_t>(
+          std::numeric_limits<decltype(CachedSpec::slot_idx)>::max())) {
+    return std::nullopt;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(meshes[0].is(compute_mesh));
+
+  return NativeOpSchemaAndMeshes{
       NativeOpSchema(
           op,
           std::move(comparison_key),
           comparison_key_hash,
           args_kwargs.num_positional_args()),
-      std::move(compute_mesh));
+      std::move(meshes)};
 }
 
 static PyObject* get_DTensor_sharding_propagator_cache_stats(
