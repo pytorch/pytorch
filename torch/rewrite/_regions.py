@@ -841,6 +841,9 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         except ValueError:
             raise _Opaque(0, "a variable that has no value yet") from None
     if isinstance(obj, nn.Module):
+        if "_modules" not in vars(obj):
+            # Handed to a region of its own __init__, or of what that calls.
+            raise _Opaque(0, "a module that is being made")
         state = _module_state(obj)
         if state.hooked or any(_GLOBAL_HOOK_DICTS):
             raise _Opaque(
