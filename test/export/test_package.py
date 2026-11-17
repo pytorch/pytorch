@@ -13,7 +13,6 @@ from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
@@ -159,15 +158,19 @@ class TestAOTIPackageStreamAffinity(TestCase):
         loader_type.assert_called_once_with("model.pt2", "model", False, 4, 2, True)
 
 
-class TestAOTIPackageDeviceValidation(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+def _unavailable_msg(device_type):
+    return (
+        f"Cannot load AOTInductor package for device '{device_type}' because "
+        f"{device_type.upper()} is not available in this process."
+    )
 
-    def test_aoti_load_uses_cpp_device_validation_before_device_info(self, device):
-        device_type = torch.device(device).type
-        unavailable_msg = (
-            f"Cannot load AOTInductor package for device '{device_type}' because "
-            f"{device_type.upper()} is not available in this process."
-        )
+
+class TestAOTIPackageDeviceValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("device_type", ["cuda", "xpu"])
+    def test_aoti_load_uses_cpp_device_validation_before_device_info(self, device_type):
+        unavailable_msg = _unavailable_msg(device_type)
 
         class FakeAOTIModelPackageLoader:
             @staticmethod
@@ -188,12 +191,9 @@ class TestAOTIPackageDeviceValidation(TestCase):
 
             get_info.assert_not_called()
 
-    def test_load_package_does_not_fallback_on_device_validation_error(self, device):
-        device_type = torch.device(device).type
-        unavailable_msg = (
-            f"Cannot load AOTInductor package for device '{device_type}' because "
-            f"{device_type.upper()} is not available in this process."
-        )
+    @parametrize("device_type", ["cuda", "xpu"])
+    def test_load_package_does_not_fallback_on_device_validation_error(self, device_type):
+        unavailable_msg = _unavailable_msg(device_type)
 
         class FakeAOTIModelPackageLoader:
             def __init__(self, *args, **kwargs):
@@ -242,9 +242,7 @@ class TestAOTIPackageAvailability(TestCase):
                 torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
 
 
-instantiate_device_type_tests(
-    TestAOTIPackageDeviceValidation, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_parametrized_tests(TestAOTIPackageDeviceValidation)
 instantiate_parametrized_tests(TestAOTIPackageAvailability)
 
 
