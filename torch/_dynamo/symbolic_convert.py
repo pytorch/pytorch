@@ -145,6 +145,7 @@ from .source import (
     LocalSource,
     SkipGuardSource,
     Source,
+    TypeSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -157,6 +158,7 @@ from .utils import (
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
+    get_type_mro_no_user_code,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -190,6 +192,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
     CO_VARKEYWORDS,
+    FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -216,11 +219,15 @@ from .variables.object_protocol import (
     _is_skipped_constant_property,
     generic_delitem,
     generic_getattr,
+    generic_getitem,
     generic_getiter,
     generic_is_true,
     generic_setitem,
+    mro_attr_source,
+    mro_lookup,
     pyiter_send,
     pysequence_contains,
+    type_is_immutable,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -387,18 +394,18 @@ class SpeculationLog:
                 SpeculationEntry(filename, lineno, instruction_pointer, inst)
             )
         entry = self.entries[self.index]
-        prev_entry_msg = ""
-        if self.index != 0:
-            prev_entry = self.entries[self.index - 1]
-            prev_entry_msg = (
-                f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
-                f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
-            )
         if not (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
         ):
+            prev_entry_msg = ""
+            if self.index != 0:
+                prev_entry = self.entries[self.index - 1]
+                prev_entry_msg = (
+                    f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
+                    f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
+                )
             raise SpeculationLogDivergence(
                 f"""
 SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
@@ -1884,7 +1891,7 @@ class InstructionTranslatorBase(
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
 
-        if inst.starts_line:
+        if inst.starts_line and inst.starts_line != self.lineno:
             self.starts_line(inst.starts_line)
 
         tc = TracingContext.try_get()
@@ -1908,7 +1915,7 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process,
         # Used repr for byte processing and limiting the length to 2048
-        if config.verbose:
+        if self._is_verbose:
             try:
                 stack_repr = repr(self.stack)
             except ValueError:
@@ -1918,7 +1925,8 @@ class InstructionTranslatorBase(
                 f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
             )
 
-        self.update_block_stack(inst)
+        if inst.exn_tab_entry is not None or self.block_stack:
+            self.update_block_stack(inst)
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
@@ -2336,25 +2344,33 @@ class InstructionTranslatorBase(
         if not isinstance(val, VariableTracker):
             raise AssertionError(f"push expects VariableTracker, got {typestr(val)}")
         if val.source_location is None:
-            inst = self.current_instruction
-            if inst.positions is not None and inst.positions.lineno is not None:
-                val = val.with_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.positions.lineno,
-                        end_lineno=inst.positions.end_lineno,
-                        col_offset=inst.positions.col_offset,
-                        end_col_offset=inst.positions.end_col_offset,
-                    )
-                )
-            elif inst.starts_line is not None:
-                val = val.with_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.starts_line,
-                    )
-                )
+            loc = self._source_location_of(self.current_instruction)
+            if loc is not None:
+                val = val.with_source_location(loc)
         self.stack.append(val)
+
+    def _source_location_of(self, inst: Instruction) -> SourceLocation | None:
+        # Keyed by id because Instruction.__hash__ is a Python-level call; the
+        # entry keeps the instruction alive so the id cannot be reused.
+        cache = self._source_location_cache
+        entry = cache.get(id(inst))
+        if entry is not None and entry[0] is inst:
+            return entry[1]
+        loc = None
+        if inst.positions is not None and inst.positions.lineno is not None:
+            loc = SourceLocation(
+                filename=self.f_code.co_filename,
+                lineno=inst.positions.lineno,
+                end_lineno=inst.positions.end_lineno,
+                col_offset=inst.positions.col_offset,
+                end_col_offset=inst.positions.end_col_offset,
+            )
+        elif inst.starts_line is not None:
+            loc = SourceLocation(
+                filename=self.f_code.co_filename, lineno=inst.starts_line
+            )
+        cache[id(inst)] = (inst, loc)
+        return loc
 
     def push_many(self, vals: list[VariableTracker]) -> None:
         for val in vals:
@@ -2364,7 +2380,14 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> list[VariableTracker]:
-        return [*reversed([self.pop() for _ in range(n)])]
+        if n == 0:
+            return []
+        stack = self.stack
+        if len(stack) < n:
+            raise IndexError("pop from empty list")
+        ret = stack[-n:]
+        del stack[-n:]
+        return ret
 
     def LOAD_FAST(self, inst: Instruction) -> None:
         name = inst.argval
@@ -4522,6 +4545,94 @@ class InstructionTranslatorBase(
             )
         if not obj.is_mutable():
             raise AssertionError("expected obj.is_mutable() to be true")
+        if inst.opname == "DICT_MERGE":
+            v = v.realize()
+            if isinstance(v, ConstDictVariable):
+                # Match CALL_FUNCTION_EX's callable/NULL stack layout.
+                offset = 3 if sys.version_info >= (3, 13) else 2
+                fn = self.stack[-inst.arg - offset].realize()
+                positional = self.stack[-inst.arg - 1].realize()
+                nargs = 0
+                while isinstance(fn, FunctoolsPartialVariable):
+                    nargs += len(fn.args)
+                    fn = fn.func.realize()
+                observes_order = True
+                if isinstance(fn, BaseUserFunctionVariable) and istype(
+                    positional, (ListVariable, TupleVariable)
+                ):
+                    try:
+                        code = fn.get_code()
+                        observes_order = bool(code.co_flags & CO_VARKEYWORDS)
+                        if not observes_order:
+                            nargs += len(positional.items)
+                            nargs += isinstance(fn, UserMethodVariable)
+                            nargs = min(nargs, code.co_argcount)
+                            names = code.co_varnames[
+                                max(code.co_posonlyargcount, nargs) : code.co_argcount
+                                + code.co_kwonlyargcount
+                            ]
+                            # Binding errors expose the order of unexpected keywords.
+                            for key in v.items:
+                                if not key.vt.is_python_constant():
+                                    observes_order = True
+                                    break
+                                name = key.vt.as_python_constant()
+                                if type(name) is not str or name not in names:
+                                    observes_order = True
+                                    break
+                    except NotImplementedError:
+                        pass
+                if observes_order:
+                    v.install_dict_order_guard(self)
+                else:
+                    v.install_dict_keys_match_guard()
+                side_effects = self.output.side_effects
+                if any(
+                    cls in side_effects
+                    and side_effects.has_pending_mutation_of_attr(
+                        side_effects[cls], "__iter__"
+                    )
+                    for cls in get_type_mro_no_user_code(v.python_type())
+                ):
+                    unimplemented(
+                        gb_type="kwargs expansion after iteration slot mutation",
+                        context="DICT_MERGE",
+                        explanation="Dynamo cannot expand a mapping after changing its type's __iter__.",
+                        hints=["Expand the mapping outside the compiled function."],
+                        skip_frame=True,
+                    )
+                if v.source and not type_is_immutable(v.python_type()):
+                    iter_source = mro_attr_source(
+                        self, v.python_type(), TypeSource(v.source), "__iter__"
+                    )
+                    if iter_source:
+                        install_guard(iter_source.make_guard(GuardBuilder.ID_MATCH))
+                if type_is_immutable(v.python_type()) or (
+                    mro_lookup(v.python_type(), "__iter__") is dict.__iter__
+                ):
+                    v = ConstDictVariable(v.items, mutation_type=ValueMutationNew())
+                else:
+                    # PyDict_Merge uses the mapping protocol for a different iteration slot.
+                    snapshot = ConstDictVariable(
+                        obj.items, mutation_type=ValueMutationNew()
+                    )
+                    keys = generic_getattr(self, v, "keys").call_function(self, [], {})
+                    for key in unpack_iterable(self, keys):
+                        if pysequence_contains(
+                            self, snapshot, key
+                        ).as_python_constant():
+                            unimplemented(
+                                gb_type="Duplicate keyword mapping key",
+                                context="DICT_MERGE",
+                                explanation="Dynamo cannot trace duplicate keys while expanding a custom mapping.",
+                                hints=[
+                                    "Use unique keyword names or expand the mapping outside the compiled function."
+                                ],
+                                skip_frame=True,
+                            )
+                        value = generic_getitem(self, v, key)
+                        generic_setitem(self, snapshot, key, value)
+                    v = snapshot
         obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
@@ -5433,6 +5544,9 @@ class InstructionTranslatorBase(
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
+        self._source_location_cache: dict[
+            int, tuple[Instruction, SourceLocation | None]
+        ] = {}
         self._comprehension_depth = 0
         self._comprehension_end_for_ips: set[int] = set()
         # Per-prefix counters for generating fresh pycode-local variable names.
@@ -5525,6 +5639,8 @@ class InstructionTranslatorBase(
         self.is_trace_source_log_enabled: bool | None = trace_source_log.isEnabledFor(
             logging.DEBUG
         )
+        # Read once: config attribute access is slow and step() is hot.
+        self._is_verbose: bool = config.verbose
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
@@ -5965,16 +6081,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         kwargs: dict[str, VariableTracker],
         allow_nested_graph_breaks: bool = False,
     ) -> VariableTracker:
-        tracer = None
+        if not config.dynamo_profiler:
+            tracer = cls.build_inline_tracer(
+                parent, func, args, kwargs, allow_nested_graph_breaks
+            )
+            return tracer.inline_call_()
         with profile_inline_call(
             parent.output, func.get_code(), lambda: parent.inline_depth + 1
         ):
             tracer = cls.build_inline_tracer(
-                parent,
-                func,
-                args,
-                kwargs,
-                allow_nested_graph_breaks=allow_nested_graph_breaks,
+                parent, func, args, kwargs, allow_nested_graph_breaks
             )
             return tracer.inline_call_()
 
@@ -6206,12 +6322,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.is_child_tracer_active = True
         code = self.f_code
 
-        strict_ctx: Any = contextlib.nullcontext()
-        if parent.strict_checks_fn:
-            strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
-
         try:
-            with strict_ctx:
+            if parent.strict_checks_fn:
+                with self.strict_translation_mode(parent.strict_checks_fn):
+                    self.run()
+            else:
                 self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
@@ -6249,7 +6364,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.inconsistent_side_effects |= self.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
-        self.output.tracing_context.traced_code.append(code)
+        traced_code = self.output.tracing_context.traced_code
+        if not traced_code or traced_code[-1] is not code:
+            traced_code.append(code)
 
         if (
             is_generator(code)
@@ -6331,13 +6448,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
         self._allow_nested_graph_breaks = allow_nested_graph_breaks
+        self._parent_frame_summary_inst: Instruction | None = None
+        self._parent_frame_summary: traceback.FrameSummary | None = None
 
     @property
     def fake_mode(self) -> FakeTensorMode | None:
         return self.parent.fake_mode
 
     def run_ctx_mgr(self) -> Any:
-        return TracingContext.current_frame(self.parent.frame_summary())
+        # A generator is resumed many times from the same parent instruction;
+        # reuse that instruction's FrameSummary instead of rebuilding it.
+        parent = self.parent
+        inst = parent.current_instruction
+        if self._parent_frame_summary_inst is not inst:
+            self._parent_frame_summary_inst = inst
+            self._parent_frame_summary = parent.frame_summary()
+        return TracingContext.current_frame(self._parent_frame_summary)
 
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in this inlined context.
@@ -6495,14 +6621,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.gi_exc_state = Segment()
 
     @contextlib.contextmanager
-    def link_gi_exc_state(self):
-        try:
-            self.exn_vt_stack.push_segment(self.gi_exc_state)
-            yield
-        finally:
-            self.exn_vt_stack.pop_segment()
-
-    @contextlib.contextmanager
     def temporarily_set_frame_state(self, state: FrameState):
         saved_frame_state = self.frame_state
         try:
@@ -6512,6 +6630,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.frame_state = saved_frame_state
 
     def inline_call_(self) -> VariableTracker:
+        if not config.dynamo_profiler:
+            return super().inline_call_()
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
 
