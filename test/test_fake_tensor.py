@@ -2604,8 +2604,6 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
     @parametrize("reverse", [False, True])
     @parametrize("constant", [False, True])
     def test_zero_dim(self, device, reverse, constant):
-        if torch._dynamo.config.use_cpp_fake_tensor and constant:
-            self.skipTest("C++ fake fallback does not support constant inputs")
         if (
             torch._dynamo.config.use_cpp_fake_tensor
             and torch._functorch.config.fake_tensor_propagate_real_tensors
