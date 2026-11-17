@@ -13481,13 +13481,13 @@ class BaseScheduling:  # noqa: docstring_linter
         works as well as a class. mat1 is [..., M, K] and mat2 is [..., K, N];
         their sizes can be symbolic.
 
-        What True promises, and what it does not:
-        - It is a request: the matmul is lowered natively only where
-          triton.native_matmul would lower it, i.e. on a CUDA or XPU device whose
-          backend is "triton", with int8, uint8, fp16, bf16 or fp32 operands
-          (not a BF16x9 matmul), and with M, N and K not known to be 1 and free
-          of unbacked symbols. Elsewhere, or on False, the matmul keeps its
-          extern kernel or template.
+        When it asks, and what True promises:
+        - It asks only while triton.native_matmul is off (on, every such matmul
+          is lowered natively whatever you return), and only about a matmul it
+          can lower natively: on a CUDA or XPU device whose backend is "triton",
+          with operands tl.dot takes, and sizes that are neither unbacked nor
+          known to be 1 (use_native_matmul() has the full list). On False, the
+          matmul keeps its extern kernel or template.
         - Your kernel gets a Reduction with reduction_type "dot" over K, whose
           inner function is ops.dot(a, b) of the operands broadcast to
           [..., M, K, N] (kernel/mm.py), fused with what the scheduler fuses into
@@ -13495,10 +13495,13 @@ class BaseScheduling:  # noqa: docstring_linter
           ranges are equal. Your kernel handles ops.dot and the "dot" reduction
           itself: ShapePropagationOpsHandler.dot asserts for any kernel but
           TritonKernel.
-        - Once the matmul is a dot there is no way back to the extern kernel: if
-          your scheduling declines it, Triton's native matmul codegen emits it.
-          So decline here what your kernels cannot generate, e.g. symbolic sizes
-          if they need static shapes.
+        - Once the matmul is a dot there is no way back to the extern kernel. A
+          scheduling that subclasses CUDACombinedScheduling (or
+          XPUCombinedScheduling) hands the nodes it declines to TritonScheduling,
+          whose native matmul codegen emits the dot; a scheduling without such a
+          fallback must generate every dot itself. So decline here what your
+          kernels cannot generate, e.g. symbolic sizes if they need static
+          shapes.
 
         Pitfalls:
         - Triton's own options are not checked here, e.g.
@@ -13511,10 +13514,11 @@ class BaseScheduling:  # noqa: docstring_linter
           includes.
         - Replacing a device's registration drops what it dispatched on: CUDA's
           picks a scheduling by config.cuda_backend ("triton", "halide",
-          "pallas"). Register a function that returns your scheduling only where
-          the replaced one would return Triton's.
-        - The instance is built for every matmul lowering, so keep __init__
-          cheap with scheduler=None.
+          "pallas"), CUDACombinedScheduling for "triton". Register a function
+          that returns your scheduling, a CUDACombinedScheduling subclass, only
+          for "triton".
+        - The instance is built each time Inductor asks, so keep __init__ cheap
+          with scheduler=None.
         """
         return False
 

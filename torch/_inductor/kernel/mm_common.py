@@ -192,14 +192,6 @@ def use_native_matmul(mat1, mat2):
         # TODO: support block ptr
         if use_block_ptr_enabled():
             raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-    elif not (
-        # A backend that generates matmuls itself opts in; see
-        # BaseScheduling.lowers_native_matmul. The registration is a constructor,
-        # e.g. CUDA's is a function of config.cuda_backend, so ask an instance.
-        (scheduling := get_scheduling_for_device(device_type)) is not None
-        and scheduling(None).lowers_native_matmul(mat1, mat2)
-    ):
-        return False
 
     # Currently only enable native matmul for triton on GPU.
     if not (
@@ -241,7 +233,13 @@ def use_native_matmul(mat1, mat2):
     ):
         return False
 
-    return True
+    if config.triton.native_matmul:
+        return True
+    # A backend that generates matmuls itself opts in; see
+    # BaseScheduling.lowers_native_matmul. The registration is a constructor,
+    # e.g. CUDA's is a function of config.cuda_backend, so ask an instance.
+    scheduling = get_scheduling_for_device(device_type)
+    return scheduling is not None and scheduling(None).lowers_native_matmul(mat1, mat2)
 
 
 def _use_small_mm_pointwise(

@@ -3,12 +3,15 @@
 
 import unittest
 from collections.abc import Callable
+from unittest import mock
 
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, metrics
 from torch._inductor.codegen.common import (
+    custom_backend_codegen_configs,
+    custom_backend_passes,
     device_codegens,
     init_backend_registration,
     register_backend_for_device,
@@ -361,29 +364,39 @@ class TestNativeMatmulBackend(TestCase):
     def test_backend_lowers_native_matmul(self):
         # A backend registered with register_backend_for_device, here as a
         # function, asks for the native lowering of the matmuls it emits.
+        asked = []
+
         class Scheduling(CUDACombinedScheduling):
             def lowers_native_matmul(self, mat1, mat2):
+                asked.append(mat1.get_dtype())
                 return mat1.get_dtype() == torch.float32
 
         init_backend_registration()
         default = device_codegens[GPU_TYPE]
-        self.addCleanup(device_codegens.__setitem__, GPU_TYPE, default)
-        register_backend_for_device(
-            GPU_TYPE,
-            lambda scheduler: Scheduling(scheduler),
-            default.wrapper_codegen,
-            default.cpp_wrapper_codegen,
-            default.fx_wrapper_codegen,
-        )
-        for dtype, native in ((torch.float32, True), (torch.bfloat16, False)):
-            with self.subTest(dtype=dtype):
-                a = torch.randn(40, 72, device=GPU_TYPE, dtype=dtype)
-                b = torch.randn(72, 136, device=GPU_TYPE, dtype=dtype)
-                torch._dynamo.reset()
-                actual, (code,) = run_and_get_code(torch.compile(torch.mm), a, b)
-                self.assertEqual("tl.dot" in code, native)
-                self.assertEqual("extern_kernels.mm(" in code, not native)
-                self.assertEqual(actual, a @ b, atol=1e-4, rtol=1e-4)
+        with (
+            mock.patch.dict(device_codegens),
+            mock.patch.dict(custom_backend_passes),
+            mock.patch.dict(custom_backend_codegen_configs),
+        ):
+            register_backend_for_device(
+                GPU_TYPE,
+                lambda scheduler: Scheduling(scheduler),
+                default.wrapper_codegen,
+                default.cpp_wrapper_codegen,
+                default.fx_wrapper_codegen,
+            )
+            dtypes = {torch.float32: True, torch.bfloat16: False, torch.float64: False}
+            for dtype, native in dtypes.items():
+                with self.subTest(dtype=dtype):
+                    a = torch.randn(40, 72, device=GPU_TYPE, dtype=dtype)
+                    b = torch.randn(72, 136, device=GPU_TYPE, dtype=dtype)
+                    torch._dynamo.reset()
+                    actual, (code,) = run_and_get_code(torch.compile(torch.mm), a, b)
+                    self.assertEqual("tl.dot" in code, native)
+                    self.assertEqual("extern_kernels.mm(" in code, not native)
+                    self.assertEqual(actual, a @ b, atol=1e-4, rtol=1e-4)
+        # tl.dot takes no fp64, so Inductor does not ask about that matmul.
+        self.assertEqual(set(asked), {torch.float32, torch.bfloat16})
 
 
 @inductor_config.patch({"triton.native_matmul": True})
