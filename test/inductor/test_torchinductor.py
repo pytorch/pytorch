@@ -101,6 +101,7 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
     instantiate_device_type_tests,
+    largeMPSBufferTest,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import (
@@ -4874,6 +4875,26 @@ for dtype in (torch.int32, torch.int64):
         if torch.device(self.device).type == "mps":
             actual = actual.cpu()
         self.assertTrue((actual == 2).all())
+
+    @serialTest()
+    @skip_if_cpu
+    @skip_if_halide  # only 32-bit indexing
+    @skip_if_pallas  # only 32-bit indexing
+    @largeTensorTest("5GB", inductor=True)
+    @largeMPSBufferTest(65 * 32 * 64 * 256 * 129)
+    def test_large_pointwise_over_uint32(self):
+        # More than 2**32 elements do not fit in a 32-bit thread grid axis
+        def fn(b):
+            return b.expand(-1, -1, 64, -1, -1).contiguous()
+
+        shape = (65, 32, 1, 256, 129)
+        b = torch.randint(0, 127, shape, dtype=torch.int8, device=self.device)
+        out = torch.compile(fn, fullgraph=True)(b)
+        self.assertGreater(out.numel(), 2**32)
+        ref = b.expand(-1, -1, 64, -1, -1)
+        # Compare per batch row: MPS rejects whole-tensor ops over 2**32 elements
+        bad = sum(int((out[i] != ref[i]).sum()) for i in range(out.shape[0]))
+        self.assertEqual(bad, 0)
 
     @skip_if_halide  # only 32-bit indexing
     @skip_if_pallas  # only 32-bit indexing
@@ -14128,6 +14149,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 a, b, [3, 3], [2, 2], [1, 1], [1, 1], True, c
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         x = torch.randn([2, 4, 40, 56])
         result, indices = aten.max_pool2d_with_indices(
             x,
@@ -14146,6 +14168,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
+        if self.device == "xpu":
+            assertGeneratedKernelCountEqual(self, 0)
+        else:
+            assertGeneratedKernelCountGreater(self, 0)
 
     # From https://github.com/pytorch/torchdynamo/issues/1200
     def test_max_pool2d_with_indices_backward3(self):
@@ -14171,6 +14197,67 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
+
+    @parametrize(
+        "shape,kernel_size,stride,padding,dilation,ceil_mode",
+        [
+            subtest(
+                ((2, 4, 5, 7), [2, 2], [2, 2], [0, 0], [1, 1], False),
+                name="nondivisible",
+            ),
+            subtest(
+                ((2, 4, 10, 11), [2, 2], [3, 3], [0, 0], [1, 1], False),
+                name="stride_gap",
+            ),
+            subtest(
+                ((2, 4, 6, 6), [2], [2], [0], [1], False),
+                name="single_value_args",
+                # MPS keeps the pre-PR Inductor lowering, which requires
+                # kernel_size/stride/padding/dilation to have length 2.
+                decorators=[skip_if_mps],
+            ),
+            subtest(
+                ((4, 5, 1), [2, 1], [2, 1], [0, 0], [1, 1], False),
+                name="unbatched_width_one",
+                # A 3D input with width 1 has stride[1] == 1, which the pre-PR
+                # Inductor lowering mistakes for 4D channels-last.
+                decorators=[skip_if_mps],
+            ),
+            subtest(
+                ((2, 4, 5, 7), [2, 2], [2, 2], [0, 0], [1, 1], True),
+                name="ceil_mode_partial_window",
+            ),
+            subtest(
+                ((2, 4, 7, 10), [2, 2], [3, 3], [0, 0], [1, 1], True),
+                name="ceil_mode_stride_gap",
+            ),
+        ],
+    )
+    def test_max_pool2d_with_indices_backward_nonoverlap_edge_cases(
+        self, shape, kernel_size, stride, padding, dilation, ceil_mode
+    ):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a,
+                b,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+                c,
+            )
+
+        x = torch.randn(shape)
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+        )
+        self.common(fn, [torch.randn_like(result), x, indices])
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
     @xfail_if_mps  # Small tolerances bug
@@ -14268,21 +14355,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device != "mps" and self.device != "xpu":
             self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
-    def test_max_pool2d_with_indices_backward_fallback(self):
+    @skip_if_mps  # MPS uses the existing Inductor lowering.
+    @parametrize(
+        "kernel_size,ceil_mode",
+        [
+            subtest(([2, 2], False), name="two_by_two"),
+            subtest(([2, 2], True), name="ceil_mode"),
+            subtest(([5, 5], False), name="five_by_five"),
+        ],
+    )
+    def test_max_pool2d_with_indices_backward_nonoverlap_codegen(
+        self, kernel_size, ceil_mode
+    ):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
-                a, b, [2, 2], [2, 2], [0, 0], [1, 1], False, c
+                a,
+                b,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+                c,
             )
 
         torch._inductor.metrics.generated_kernel_count = 0
-        x = torch.randn([2, 4, 18, 14])
+        x = torch.randn([2, 4, 21, 23]).contiguous(memory_format=torch.channels_last)
         result, indices = aten.max_pool2d_with_indices(
             x,
-            [2, 2],
-            [2, 2],
+            kernel_size,
+            kernel_size,
             [0, 0],
             [1, 1],
-            False,
+            ceil_mode,
         )
         self.common(
             fn,
@@ -14292,10 +14397,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        if self.device == "xpu":
-            assertGeneratedKernelCountEqual(self, 0)
-        else:
-            assertGeneratedKernelCountGreater(self, 0)
+        assertGeneratedKernelCountGreater(self, 0)
+
+        if self.device in ("cuda", "xpu"):
+            x = x.to(self.device, dtype=torch.float16)
+            result, indices = aten.max_pool2d_with_indices(
+                x,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+            )
+            grad_output = torch.randn_like(result)
+            compiled = torch.compile(fn, fullgraph=True)
+            actual, codes = run_and_get_code(
+                compiled,
+                grad_output,
+                x,
+                indices,
+            )
+            self.assertEqual(
+                actual,
+                fn(grad_output, x, indices),
+                exact_stride=True,
+            )
+            source = "\n".join(codes)
+            FileCheck().check(
+                "triton_poi_fused_max_pool2d_with_indices_backward"
+            ).check("tl.store(").run(source)
+            FileCheck().check_not("tl.atomic_add(").run(source)
 
     def test_issue102546(self):
         def fn(x):
@@ -24268,6 +24399,19 @@ if RUN_GPU:
                     "Expected Triton sort codegen for median",
                 )
                 torch.testing.assert_close(result, fn(inp))
+
+        @parametrize("persistent", [False, True])
+        def test_argmax_gather_epilogue(self, persistent):
+            def fn(x, table):
+                index = x.argmax(dim=1, keepdim=True)
+                return table.gather(1, index)
+
+            x = torch.randn(8, 100, device=GPU_TYPE)
+            table = torch.randn_like(x)
+            with config.patch({"triton.persistent_reductions": persistent}):
+                actual = torch.compile(fn)(x, table)
+            self.assertEqual(actual, fn(x, table))
+            assertGeneratedKernelCountEqual(self, 1)
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_mode_decompose_sort_ops(self):
