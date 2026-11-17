@@ -1,16 +1,20 @@
 # Owner(s): ["module: inductor"]
+import sys
+import types
 import unittest
 from unittest import mock
 
 import torch
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._inductor import config
+from torch._inductor import autows_utils, config
 from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.heuristics.registry import (
     _HEURISTIC_CACHE,
+    _lookup,
     get_template_heuristic,
     override_template_heuristics,
 )
+from torch._inductor.heuristics.template import triton as triton_heuristics
 from torch._inductor.heuristics.template.bmm import (
     CUDABlackwellBMMTemplateConfigHeuristic,
 )
@@ -20,6 +24,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
+    ROCmPersistentTDMTemplateConfigHeuristic,
     TMATemplateConfigMixin,
 )
 from torch._inductor.ir import FixedLayout
@@ -27,19 +32,27 @@ from torch._inductor.kernel.bmm import (
     blackwell_ws_persistent_tma_bmm_template,
     BlackwellBMMConfig,
 )
-from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
+from torch._inductor.kernel.mm import (
+    blackwell_ws_persistent_tma_mm_template,
+    persistent_tdm_mm_template,
+)
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import get_num_sms, run_and_get_code
+from torch._inductor.utils import (
+    get_num_sms,
+    run_and_get_code,
+    use_triton_blackwell_tma_template,
+)
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._triton import has_datacenter_blackwell_tma_device
@@ -1335,6 +1348,159 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertEqual(len(configs), 1)
         self.assertTrue(configs[0]["WARP_SPECIALIZE"])
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
+
+
+# Template options that only the Blackwell WS/AutoWS/MetaWS templates consume.
+_BLACKWELL_WS_ONLY_OPTIONS = frozenset(
+    {
+        "WARP_SPECIALIZE",
+        "USE_META_WS",
+        "DATA_PARTITION_FACTOR",
+        "SEPARATE_EPILOGUE_STORE",
+        "TWO_CTAS",
+        "EPILOGUE_SUBTILE",
+        "FLATTEN",
+    }
+)
+
+
+# Host-side contract: ROCm GEMM codegen must not pick up the Blackwell
+# warp-specialization template or its options, even in a Triton build that
+# provides Meta autoWS. No GPU is required.
+@unittest.skipUnless(TEST_WITH_ROCM, "ROCm-specific host-side test; no GPU required")
+@instantiate_parametrized_tests
+class TestBlackwellWSIsolationOnROCm(TestCase):
+    @parametrize("is_hip", (True, False))
+    def test_blackwell_ws_template_gate_rejects_hip(self, is_hip):
+        # Every other condition of the gate is forced true, so the outcome
+        # depends only on the HIP check. The CUDA case is the control that
+        # shows the mocks reach the gate.
+        mat = mock.Mock()
+        with (
+            mock.patch("torch.version.hip", "7.14" if is_hip else None),
+            mock.patch(
+                "torch._inductor.codegen.cuda.cuda_env.get_cuda_arch",
+                return_value="100",
+            ),
+            mock.patch(
+                "torch._inductor.utils.use_triton_tma_template", return_value=True
+            ),
+            mock.patch(
+                "torch.utils._triton.has_triton_tensor_descriptor_host_tma",
+                return_value=True,
+            ),
+            mock.patch.object(triton_heuristics, "USE_META_WS", True),
+            config.patch({"triton.enable_template_autows": True}),
+        ):
+            selected = use_triton_blackwell_tma_template(
+                mat, mat, output_layout=mock.Mock()
+            )
+        self.assertEqual(selected, not is_hip)
+
+    @unittest.skipIf(
+        torch.version.hip is None,
+        "registration is decided when a ROCm build imports Inductor",
+    )
+    def test_blackwell_heuristics_not_registered(self):
+        for template, op_name in (
+            (blackwell_ws_persistent_tma_mm_template, "mm"),
+            (blackwell_ws_persistent_tma_mm_template, "addmm"),
+            (blackwell_ws_persistent_tma_mm_template, "scaled_mm"),
+            (blackwell_ws_persistent_tma_bmm_template, "bmm"),
+        ):
+            with self.subTest(template=template.uid, op_name=op_name):
+                self.assertIsNone(_lookup(template.uid, "cuda", op_name))
+        # Control: the ROCm TDM heuristic from the same module is registered.
+        self.assertIs(
+            _lookup(persistent_tdm_mm_template.uid, "cuda", "mm"),
+            ROCmPersistentTDMTemplateConfigHeuristic,
+        )
+
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    @parametrize(
+        "heuristic_name",
+        (
+            "ROCmPersistentTDMTemplateConfigHeuristic",
+            "ROCmAddMMPersistentTDMTemplateConfigHeuristic",
+            "PersistentMMTemplateConfigHeuristic",
+            "ROCmAddMMPersistentTemplateConfigHeuristic",
+            "ROCmMMTemplateConfigHeuristic",
+            "ROCmAddMMTemplateConfigHeuristic",
+        ),
+    )
+    def test_rocm_gemm_configs_ignore_autows(self, heuristic_name, search_space):
+        heuristic_cls = getattr(triton_heuristics, heuristic_name)
+        graph = mock.Mock()
+        graph.sizevars.optimization_hint_with_override.side_effect = (
+            lambda expr, hint_override=None: int(expr)
+        )
+
+        def emitted(heuristic, enable_autows):
+            with config.patch(
+                {
+                    "max_autotune_gemm_search_space": search_space,
+                    "triton.enable_template_autows": enable_autows,
+                }
+            ):
+                # Production reuses the singleton across mode changes.
+                self.assertIs(heuristic_cls(), heuristic)
+                # TDM pools filter on operand orientation, which the template
+                # heuristic normally injects from the real operands.
+                extra = (
+                    {"tdm_a_row_major": True, "tdm_b_row_major": True}
+                    if getattr(heuristic, "uses_tdm_configs", False)
+                    else {}
+                )
+                generator = heuristic._get_config_generator()
+                return [
+                    (dict(cfg.kwargs), cfg.num_stages, cfg.num_warps)
+                    for cfg in generator(512, 512, 512, dtype_size=2, **extra)
+                ]
+
+        # Isolate the caches once around the whole sequence so a single
+        # heuristic instance observes every mode transition.
+        with (
+            mock.patch.dict(_HEURISTIC_CACHE, clear=True),
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch.object(triton_heuristics, "USE_META_WS", True),
+            V.set_graph_handler(graph),
+        ):
+            heuristic = heuristic_cls()
+            baseline = emitted(heuristic, False)
+            self.assertGreater(len(baseline), 0)
+            for kwargs, _, _ in baseline:
+                self.assertFalse(_BLACKWELL_WS_ONLY_OPTIONS & kwargs.keys(), kwargs)
+            # Toggle off -> on -> off: the ROCm candidates must not change.
+            self.assertEqual(emitted(heuristic, True), baseline)
+            self.assertEqual(emitted(heuristic, False), baseline)
+
+    def test_meta_ws_probe_reports_capability_not_platform(self):
+        # The probe reports whether the installed Triton has the Meta autoWS
+        # knob. ROCm isolation comes from the gates above, not from this probe.
+        self.addCleanup(autows_utils.has_meta_ws.cache_clear)
+        cases = (
+            (None, False, False),
+            (types.SimpleNamespace(), False, False),
+            (types.SimpleNamespace(use_meta_ws=False), True, False),
+            (types.SimpleNamespace(use_meta_ws=True), True, True),
+        )
+        for hip in ("7.14", None):
+            for nvidia_knobs, has_ws, enabled in cases:
+                fake_triton = types.ModuleType("triton")
+                if nvidia_knobs is not None:
+                    fake_triton.knobs = types.SimpleNamespace(nvidia=nvidia_knobs)
+                with (
+                    self.subTest(hip=hip, knobs=nvidia_knobs),
+                    # Block any already-imported triton.knobs: `from triton import
+                    # knobs` falls back to it when the fake parent lacks `knobs`.
+                    mock.patch.dict(
+                        sys.modules, {"triton": fake_triton, "triton.knobs": None}
+                    ),
+                    mock.patch("torch.version.hip", hip),
+                ):
+                    autows_utils.has_meta_ws.cache_clear()
+                    self.assertEqual(autows_utils.has_meta_ws(), has_ws)
+                    self.assertEqual(autows_utils.meta_ws_enabled(), enabled)
 
 
 @instantiate_parametrized_tests
