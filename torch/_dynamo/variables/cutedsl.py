@@ -343,16 +343,6 @@ class CuteDSLKernelVariable(VariableTracker):
         self.tp_getattro_impl(tx, name)  # refuses any other attribute
         return ConstantVariable.create(True)
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if self.is_wrapper:
-            return super().tp_richcompare_impl(tx, other, op)
-        # A host function compares by identity, as any function does.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_function(
         self,
         tx: "InstructionTranslatorBase",

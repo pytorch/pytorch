@@ -183,6 +183,15 @@ inline int cublasLtMatmulScaleMode(
   switch (scaling_type) {
     case at::blas::ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
+      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_MN_K4) {
+#if !defined(USE_ROCM) && CUBLAS_VERSION >= 130801
+        return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_MN_K4_UE8M0;
+#else
+        TORCH_CHECK_NOT_IMPLEMENTED(
+            false,
+            "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
+#endif
+      }
       if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
 #if defined(USE_ROCM) && ROCM_VERSION >= 71300
         return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
@@ -225,6 +234,18 @@ inline int cublasLtMatmulScaleMode(
           "and above");
 #endif
     case at::blas::ScalingType::BlockWise1x128:
+      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_MN_K4) {
+#if !defined(USE_ROCM) && CUBLAS_VERSION >= 130801
+        TORCH_CHECK(
+            scale_dtype == kFloat8_e8m0fnu,
+            "MNxK4 scales must have dtype float8_e8m0fnu");
+        return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_MN_K4_UE8M0;
+#else
+        TORCH_CHECK_NOT_IMPLEMENTED(
+            false,
+            "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
+#endif
+      }
       TORCH_CHECK(scale_dtype == kFloat);
       TORCH_CHECK(
           !use_fast_accum,
