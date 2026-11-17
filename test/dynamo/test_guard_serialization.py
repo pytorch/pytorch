@@ -5520,9 +5520,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_serialization("EQUALS_MATCH", fn, x)
 
     def test_guard_reading_a_literal_fake_tensor_owned_name_warns(self):
-        attr = (
-            "_fake_pytype" if torch._dynamo.config.use_cpp_fake_tensor else "constant"
-        )
+        attr = "constant"
 
         def fn(x):
             return x * getattr(x, attr)

@@ -285,8 +285,6 @@
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sdpa_math_unbacked_batch_dim_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_select_out_of_bounds_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_size_default_unbacked_batch_dim_*",
-    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_compressed_tensor_creation_*",
-    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_spdiags_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_stack_symbolic_shapes_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_suggest_memory_format_with_degenerate_dimensions_*",
@@ -572,6 +570,21 @@
     "test_python_dispatch.py::TestPythonDispatch::test_mode_with_make_subclass",
     "test_python_dispatch.py::TestPythonDispatch::test_make_subclass_with_modes",
     "test_python_dispatch.py::TestPythonDispatch::test_subclass_creation",
-    "test_python_dispatch.py::TestPythonDispatch::test_torch_dispatch_mode_respects_no_dispatch"
+    "test_python_dispatch.py::TestPythonDispatch::test_torch_dispatch_mode_respects_no_dispatch",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_compressed_tensor_creation_propagate_real_tensors",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_spdiags_coalesced_metadata_propagate_real_tensors",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_spdiags_compile_backend_eager_propagate_real_tensors",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_spdiags_cuda_not_supported_propagate_real_tensors",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_spdiags_propagate_real_tensors",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_spdiags_static_offset_errors_propagate_real_tensors",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_sparse_spdiags_zero_dim_static_offsets_propagate_real_tensors",
+    "test_fake_tensor.py::TestFakeTensor::test_scalar_tensor_index",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_scalar_tensor_index_propagate_real_tensors",
+    "dynamo/test_guard_serialization.py::TestGuardsStatePickler::test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys_*",
+    "dynamo/test_guard_serialization.py::TestGuardsStatePickler::test_fake_tensor_setter_names_are_owned",
+    "dynamo/test_guard_serialization.py::TestGuardsStatePickler::test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read",
+    "dynamo/test_guard_serialization.py::TestGuardsStatePickler::test_tensor_attributes_carried_through_the_pickle",
+    "test_fake_tensor.py::TestFakeTensorConverter::test_memoized_conversion_from_meta_*",
+    "test_fake_tensor.py::PropagateRealTensorsTestFakeTensorConverter::test_memoized_conversion_from_meta_*"
   ]
 }
