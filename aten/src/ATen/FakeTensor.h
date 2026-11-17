@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/boxing/BoxedKernel.h>
 #include <c10/core/Device.h>
 #include <c10/macros/Export.h>
 
@@ -42,6 +43,13 @@ namespace impl {
 // dispatch, but must not enter InKernelInvocationGuard: the copies stay fake.
 TORCH_API Tensor fake_detach(const Tensor& self);
 TORCH_API Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source);
+
+// Out-of-core fakes (torchdistx's) carry the Fake key without a
+// FakeTensorMode. The Fake fallback hands an op for which it finds no mode to
+// this handler, if one is set, instead of raising.
+using ModelessFakeFallback =
+    c10::BoxedKernel::BoxedKernelFunction_withDispatchKeys;
+TORCH_API void setModelessFakeFallback(ModelessFakeFallback* fn);
 
 } // namespace impl
 
