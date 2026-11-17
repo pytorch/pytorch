@@ -8128,7 +8128,7 @@ class TestPrecompileRuntimeCache(TestCase):
         kernel.compile_results = [
             _static_runtime_kernel(block).compile_results[0] for block in (32, 64, 128)
         ]
-        kernel.launchers = []
+        launchers = kernel.launchers = []
         kernel._cached_launcher = None
         # As incremental autotuning does while it is still timing the candidates.
         kernel._plugins = [Holding()]
@@ -8147,13 +8147,17 @@ class TestPrecompileRuntimeCache(TestCase):
         self.assertIsNone(saved.inductor_meta["combo_tuning_groups"])
         self.assertTrue(kernel.inductor_meta["coordinate_descent_tuning"])
         self.assertEqual(len(kernel.compile_results), 3)
-        self.assertEqual(kernel.launchers, [])
+        self.assertIs(kernel.launchers, launchers)
+        self.assertEqual(launchers, [])
         results = pickle.loads(sibling).kernel.compile_results
         self.assertEqual([result.config.kwargs["XBLOCK"] for result in results], [256])
         self.assertFalse(sibling_tuning)
-        kernel._plugins = []
-        with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
+        # A plugin that does not hold the candidates leaves the kernel refused.
+        kernel._plugins = [CachingAutotunerPlugin()]
+        with self.assertRaises(RuntimeError) as cm:
             _freeze_triton_kernel("source", [kernel])
+        (instance,) = cm.exception.sources[0]["instances"]
+        self.assertEqual(instance["reason"], "launcher_count_not_one")
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("incremental", (True, False))
@@ -8178,7 +8182,9 @@ class TestPrecompileRuntimeCache(TestCase):
         record = StaticallyLaunchedAutotuner("source", "runtime_kernel", kernel)
         frozen = {"source": pickle.dumps(record)}
         plugins = [Tuning()] if incremental else []
+        warns = self.assertLogs("torch.compiler._runtime_cache", "WARNING")
         with (
+            contextlib.nullcontext() if incremental else warns,
             mock.patch.object(_runtime_cache, "_frozen_triton_kernels", frozen),
             mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
             # The plugins unpickling gives the kernel in the serving process.

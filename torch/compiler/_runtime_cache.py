@@ -357,7 +357,7 @@ def _load_frozen_triton_kernel(key: str, payload: bytes) -> CachingAutotuner:
     with kernel.lock:
         for result in kernel.compile_results:
             result.reload_cubin_path()
-        # The artifact already selected its configs. Rechecking local tuning caches
+        # Only the frozen candidates are served. Rechecking local tuning caches
         # or running precompile can introduce new rblock/coordesc candidates.
         kernel._make_launchers()
     return kernel
@@ -704,8 +704,9 @@ def _freeze_triton_kernels(kernels: dict[str, list[CachingAutotuner]]) -> bytes:
         raise error
     if tuning:
         log.warning(
-            "precompile froze %d of %d Triton kernels mid tuning, with every candidate "
-            "config; a plugin that tunes prebuilt launchers finishes it in serving",
+            "precompile froze %d of %d Triton sources mid tuning, with every candidate "
+            "config and with coordinate descent and combo tuning off; a plugin that "
+            "tunes prebuilt launchers finishes the tuning in serving",
             tuning,
             len(kernels),
         )
