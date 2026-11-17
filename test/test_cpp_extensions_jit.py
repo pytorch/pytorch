@@ -11,6 +11,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import unittest
 import warnings
 from unittest import mock
@@ -27,8 +28,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
+    _get_rocm_dlink_link_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
+    COMMON_MSVC_FLAGS,
     CUDA_HOME,
     get_cxx_compiler,
     remove_extension_h_precompiler_headers,
@@ -42,6 +45,10 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
+# setuptools always supplies these on the MSVC path; a bare `cl -c` is missing /EHsc.
+# /Brepro keeps MSVC from stamping the compile time into each .obj, so the tests
+# that compare a rebuilt object byte for byte do not depend on the clock.
+BASE_CFLAGS = COMMON_MSVC_FLAGS + ["/Brepro"] if IS_WINDOWS else []
 
 
 class TestCppExtensionImport(common.TestCase):
@@ -89,6 +96,16 @@ with tempfile.TemporaryDirectory() as tmpdir:
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @unittest.skipIf(IS_WINDOWS, "ROCM_HOME=/usr is a Linux distro layout")
+    def test_hip_include_paths_skip_usr_include(self):
+        # An explicit -isystem /usr/include breaks libstdc++'s #include_next (#202007).
+        with (
+            mock.patch("torch.utils.cpp_extension.IS_HIP_EXTENSION", True),
+            mock.patch("torch.utils.cpp_extension.ROCM_HOME", "/usr"),
+        ):
+            paths = torch.utils.cpp_extension.include_paths("cuda")
+        self.assertNotIn("/usr/include", paths)
+
 
 class _TestCppExtensionJITBase(common.TestCase):
     """Shared set up and tear down functions for device-specific test classes
@@ -121,6 +138,7 @@ class _TestCppExtensionJITBase(common.TestCase):
 
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
+@common.instantiate_parametrized_tests
 class TestCppExtensionJIT(_TestCppExtensionJITBase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -225,6 +243,71 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
         )
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "Tanh and then sum :D")
+
+    def test_hip_jit_hipcc_flags(self):
+        # load() also hands extra_cflags to hipcc for HIP extensions. On Windows they
+        # may include MSVC-syntax flags, which hipcc's clang driver reads as input
+        # file paths, so only those are dropped.
+        ce = torch.utils.cpp_extension
+        default_arch = "--offload-arch=gfx1201"
+        user_arch = "--offload-arch=gfx942"
+
+        def ninja_flags(is_windows, extra_cflags, extra_cuda_cflags=()):
+            captured = {}
+            with (
+                mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx1201"}),
+                mock.patch.object(ce, "IS_WINDOWS", is_windows),
+                mock.patch.object(ce, "IS_HIP_EXTENSION", True),
+                mock.patch.object(ce, "COMMON_HIP_FLAGS", list(ce.COMMON_HIP_FLAGS)),
+                mock.patch.object(ce, "include_paths", return_value=[]),
+                mock.patch.object(ce, "library_paths", return_value=[]),
+                mock.patch.object(ce, "_prepare_ldflags", return_value=[]),
+                mock.patch.object(
+                    ce,
+                    "_write_ninja_file",
+                    side_effect=lambda **kw: captured.update(kw),
+                ),
+            ):
+                ce._write_ninja_file_to_build_library(
+                    path="build.ninja",
+                    name="ext",
+                    sources=["kernel.cu"],
+                    extra_cflags=list(extra_cflags),
+                    extra_cuda_cflags=list(extra_cuda_cflags),
+                    extra_sycl_cflags=[],
+                    extra_ldflags=[],
+                    extra_include_paths=[],
+                    with_cuda=True,
+                    with_sycl=False,
+                    is_standalone=False,
+                )
+            return captured["cflags"], captured["cuda_cflags"]
+
+        portable = ["-DFOO=1", "-IC:/custom/headers", "-O3"]
+        cflags, hip_flags = ninja_flags(
+            True, ["/O2", "/std:c++17", *portable], ["-DBAR=1"]
+        )
+        for flag in ["/O2", "/std:c++17", *portable]:
+            self.assertIn(flag, cflags)
+        self.assertNotIn("/O2", hip_flags)
+        self.assertNotIn("/std:c++17", hip_flags)
+        for flag in [*portable, "-DBAR=1", default_arch]:
+            self.assertIn(flag, hip_flags)
+
+        # A user arch replaces the default one, from either flag list.
+        for is_windows in (True, False):
+            for extra_cflags, extra_cuda_cflags in (
+                ([user_arch], []),
+                ([], [user_arch]),
+            ):
+                _, hip_flags = ninja_flags(is_windows, extra_cflags, extra_cuda_cflags)
+                self.assertIn(user_arch, hip_flags)
+                self.assertNotIn(default_arch, hip_flags)
+
+        # Linux passes extra_cflags through unchanged.
+        _, hip_flags = ninja_flags(False, ["-O3", "-DFOO"])
+        self.assertIn("-O3", hip_flags)
+        self.assertIn("-DFOO", hip_flags)
 
     def test_inline_jit_generated_bindings_gil_not_used(self):
         variants = (
@@ -1142,6 +1225,341 @@ except RuntimeError as e:
                         error_message,
                         f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
                     )
+
+    def _write_ninja_sources(self, root, name, count=2):
+        directory = os.path.join(root, name)
+        os.makedirs(directory)
+        sources = []
+        for i in range(count):
+            path = os.path.join(directory, f"{name}_{i}.cpp")
+            with open(path, "w") as source:
+                source.write(
+                    "#ifndef MODE\n"
+                    "#define MODE 0\n"
+                    "#endif\n"
+                    f"int {name}_{i}() {{ return MODE; }}\n"
+                )
+            sources.append(path)
+        return sources
+
+    def _compile_objects_into(self, sources, objects, build_directory, cflags):
+        torch.utils.cpp_extension._write_ninja_file_and_compile_objects(
+            sources=sources,
+            objects=objects,
+            cflags=cflags,
+            post_cflags=[],
+            cuda_cflags=None,
+            cuda_post_cflags=None,
+            cuda_dlink_post_cflags=None,
+            sycl_cflags=None,
+            sycl_post_cflags=None,
+            sycl_dlink_post_cflags=None,
+            build_directory=build_directory,
+            verbose=False,
+            with_cuda=False,
+            with_sycl=False,
+        )
+
+    @unittest.skipIf(
+        not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
+    )
+    def test_parallel_build_ext_compiles_every_extension(self):
+        # setuptools gives every extension of a project the same build_temp and
+        # `build_ext -j` compiles them in threads, so two of them used to write
+        # build.ninja and run ninja in that one directory at the same time. The
+        # second build file replaced the first, and all but one extension came
+        # out with no objects at all while still reporting success.
+        obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        with tempfile.TemporaryDirectory() as root:
+            shared = os.path.abspath(os.path.join(root, "temp.shared"))
+            os.makedirs(shared)
+
+            plan = {}
+            for name in ("ext0", "ext1"):
+                sources = self._write_ninja_sources(root, name)
+                os.makedirs(os.path.join(shared, name))
+                plan[name] = (
+                    sources,
+                    [
+                        os.path.join(
+                            shared,
+                            name,
+                            os.path.basename(s)[: -len(".cpp")] + obj_suffix,
+                        )
+                        for s in sources
+                    ],
+                )
+
+            errors = []
+
+            def build(name):
+                sources, objects = plan[name]
+                try:
+                    self._compile_objects_into(sources, objects, shared, BASE_CFLAGS)
+                except Exception as error:
+                    errors.append(error)
+
+            # every _run_ninja_build already fans out to #cpus+2 on its own
+            with mock.patch.dict(os.environ, {"MAX_JOBS": "2"}):
+                threads = [threading.Thread(target=build, args=(n,)) for n in plan]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+            if errors:
+                raise errors[0]
+            for name, (_, objects) in plan.items():
+                for obj in objects:
+                    self.assertTrue(
+                        os.path.exists(obj),
+                        f"compiling {name} reported success but produced no {obj}",
+                    )
+
+    @unittest.skipIf(
+        not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
+    )
+    @common.parametrize("dependency_log", [True, False])
+    def test_rebuilds_an_object_another_build_overwrote(self, dependency_log):
+        # Two builds that merely share an object path, one compiling {a}, the
+        # other {a, b}, still have to share the log entry for that object. If
+        # each got a log of its own, rerunning the first would find its own
+        # command recorded and leave the second build's object in place.
+        obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        writer = torch.utils.cpp_extension._write_ninja_file
+        with tempfile.TemporaryDirectory() as root:
+            shared = os.path.abspath(os.path.join(root, "temp.shared"))
+            os.makedirs(shared)
+            both = self._write_ninja_sources(root, "ext", count=2)
+            objects = [os.path.join(shared, f"ext_{i}" + obj_suffix) for i in range(2)]
+
+            def write_ninja(*args, **kwargs):
+                writer(*args, **kwargs)
+                if not dependency_log:
+                    # Reproduce rules without dependency logs (the ROCm and HIP
+                    # compile rules, device-link and link) using a CPU compiler.
+                    path = kwargs["path"]
+                    with open(path) as build_file:
+                        lines = build_file.readlines()
+                    with open(path, "w") as build_file:
+                        build_file.writelines(
+                            line
+                            for line in lines
+                            if not line.strip().startswith("deps =")
+                        )
+
+            def compile_first_only(mode):
+                self._compile_objects_into(
+                    both[:1], objects[:1], shared, BASE_CFLAGS + [f"-DMODE={mode}"]
+                )
+                with open(objects[0], "rb") as compiled:
+                    return compiled.read()
+
+            with mock.patch.object(
+                torch.utils.cpp_extension, "_write_ninja_file", write_ninja
+            ):
+                alone = compile_first_only(1)
+                # A wider build overwrites the shared object with other flags.
+                self._compile_objects_into(
+                    both, objects, shared, BASE_CFLAGS + ["-DMODE=2"]
+                )
+                with open(objects[0], "rb") as compiled:
+                    self.assertNotEqual(alone, compiled.read())
+                # The narrow build must take its own object back.
+                self.assertEqual(alone, compile_first_only(1))
+                # Rerunning it unchanged must not rebuild the object.
+                timestamp = os.stat(objects[0]).st_mtime_ns
+                self.assertEqual(alone, compile_first_only(1))
+                self.assertEqual(timestamp, os.stat(objects[0]).st_mtime_ns)
+
+
+class TestRocmDlinkArgs(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_dlink_link_flags(self):
+        device_opts = ["-O2", "-Xarch_device", "-O0", "--offload-compress"]
+        device_opts += ["--offload-arch=gfx942"]
+        cases = [
+            (
+                [
+                    "-O2",
+                    "--offload-arch=gfx942",
+                    "--no-offload-new-driver",
+                    "-fgpu-rdc",
+                ],
+                ["-O2", "--offload-arch=gfx942", "--no-offload-new-driver"],
+            ),
+            # Device code is generated at the rdc link, so it needs a debug build's -O0 -g.
+            (
+                ["-O0", "-g", "--offload-arch=gfx942", "-fgpu-rdc", "-DFOO"],
+                ["-O0", "-g", "--offload-arch=gfx942"],
+            ),
+            # Option values and look-alike options are not optimization or debug flags.
+            (
+                ["-O3", "-Xarch_host", "-O0", "-gen-cdb-fragment-path", "/tmp/cdb"]
+                + ["-mllvm", "-gpsize=0", "--offload-arch=gfx942"],
+                ["-O3", "--offload-arch=gfx942"],
+            ),
+            (["--amdgpu-target=gfx90a"], ["--amdgpu-target=gfx90a"]),
+            (["--no-offload-arch=gfx90a"], ["--no-offload-arch=gfx90a"]),
+            # Device-only options also shape the device code generated at the link.
+            (device_opts, device_opts),
+            # No user arch: all PYTORCH_ROCM_ARCH defaults; driver toggles keep their order.
+            (
+                ["-O2", "--offload-new-driver", "--no-offload-new-driver"],
+                ["-O2", "--offload-new-driver", "--no-offload-new-driver"]
+                + ["--offload-arch=gfx90a", "--offload-arch=gfx942"],
+            ),
+        ]
+        with mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx90a;gfx942"}):
+            for nvcc_flags, expected in cases:
+                with self.subTest(nvcc_flags=nvcc_flags):
+                    self.assertEqual(_get_rocm_dlink_link_flags(nvcc_flags), expected)
+
+    def test_dlink_on_windows_rocm_raises(self):
+        with (
+            mock.patch.object(torch.utils.cpp_extension, "IS_HIP_EXTENSION", True),
+            mock.patch.object(torch.utils.cpp_extension, "IS_WINDOWS", True),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "not supported for ROCm extensions on Windows"
+            ):
+                torch.utils.cpp_extension.CUDAExtension("x", ["x.cpp"], dlink=True)
+
+    def _rocm_cuda_extension(self, **kwargs):
+        # CUDAExtension as on Linux ROCm, without needing a ROCm install.
+        with (
+            mock.patch.object(torch.utils.cpp_extension, "IS_HIP_EXTENSION", True),
+            mock.patch.object(torch.utils.cpp_extension, "IS_WINDOWS", False),
+            mock.patch.object(
+                torch.utils.cpp_extension, "library_paths", return_value=[]
+            ),
+            mock.patch.object(
+                torch.utils.cpp_extension, "include_paths", return_value=[]
+            ),
+            mock.patch("torch.utils.hipify.hipify_python.hipify", return_value={}),
+            mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx942"}),
+        ):
+            return torch.utils.cpp_extension.CUDAExtension("x", ["x.cpp"], **kwargs)
+
+    def test_dlink_cuda_extension_args(self):
+        nvcc = [
+            "-O2",
+            "-rdc=true",
+            "-dc",
+            "-rdc",
+            "true",
+            "-dlto",
+            "-dlink",
+            "--device-link",
+        ]
+        args = {"cxx": [], "nvcc": list(nvcc), "nvcc_dlink": ["-dlto"]}
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=args)
+        # nvcc's rdc/dlink flags are dropped and nvcc_dlink is ignored with a warning,
+        # without changing the caller's args.
+        self.assertEqual(ext.extra_compile_args["nvcc"], ["-O2", "-fgpu-rdc"])
+        self.assertNotIn("nvcc_dlink", ext.extra_compile_args)
+        self.assertTrue(any("Ignoring nvcc_dlink flags" in o for o in logs.output))
+        self.assertEqual(args, {"cxx": [], "nvcc": nvcc, "nvcc_dlink": ["-dlto"]})
+        # A list of args applies to both compilers.
+        ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=["-g"])
+        self.assertEqual(
+            ext.extra_compile_args, {"cxx": ["-g"], "nvcc": ["-g", "-fgpu-rdc"]}
+        )
+        # dlink_libraries alone turns on dlink.
+        ext = self._rocm_cuda_extension(dlink_libraries=["dlink_lib"])
+        self.assertIn("dlink_lib", ext.libraries)
+        self.assertIn("-fgpu-rdc", ext.extra_compile_args["nvcc"])
+        self.assertIn(torch.utils.cpp_extension._ROCM_DLINK_MARKER, ext.extra_link_args)
+
+    @unittest.skipIf(IS_WINDOWS, "unix compiler only")
+    def test_build_extensions_adds_dlink_link_flags(self):
+        from setuptools import Distribution
+        from setuptools._distutils.ccompiler import new_compiler  # codespell:ignore
+        from setuptools.command.build_ext import build_ext
+
+        cpp_ext = torch.utils.cpp_extension
+
+        def build(extensions):
+            cmd = cpp_ext.BuildExtension(Distribution({"ext_modules": extensions}))
+            cmd.ensure_finalized()
+            cmd.compiler = new_compiler(compiler="unix")
+            # build_extensions extends src_extensions in place; keep that off the class list.
+            cmd.compiler.src_extensions = list(cmd.compiler.src_extensions)
+            with (
+                mock.patch.object(cpp_ext, "IS_HIP_EXTENSION", True),
+                mock.patch.object(cmd, "_check_abi", return_value=("c++", None)),
+                mock.patch.object(build_ext, "build_extensions") as base_build,
+                mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx90a"}),
+            ):
+                cmd.build_extensions()
+            base_build.assert_called_once()
+            return cmd
+
+        # Making the Extension in setup.py must not query the GPUs for archs.
+        with mock.patch.object(cpp_ext, "_get_rocm_arch_flags") as arch_flags:
+            ext = self._rocm_cuda_extension(
+                dlink=True, extra_compile_args={"cxx": [], "nvcc": []}
+            )
+        arch_flags.assert_not_called()
+        # Arch flags changed after the Extension was made still reach the link.
+        ext_user_arch = self._rocm_cuda_extension(
+            dlink=True, extra_compile_args={"cxx": [], "nvcc": []}
+        )
+        ext_user_arch.extra_compile_args["nvcc"].append("--offload-arch=gfx942")
+        cmd = build([ext, ext_user_arch])
+        dlink_args = ["-fgpu-rdc", "--hip-link", cpp_ext._ROCM_DLINK_MARKER]
+        self.assertEqual(ext.extra_link_args, dlink_args + ["--offload-arch=gfx90a"])
+        self.assertEqual(
+            ext_user_arch.extra_link_args, dlink_args + ["--offload-arch=gfx942"]
+        )
+        self.assertIn("link", vars(cmd.compiler))  # hipcc link wrapper installed
+        # Builds without dlink extensions keep the compiler's own link.
+        cmd = build([cpp_ext.CppExtension("y", ["y.cpp"])])
+        self.assertNotIn("link", vars(cmd.compiler))
+
+    @unittest.skipIf(IS_WINDOWS, "unix compiler only")
+    def test_hip_dlink_link_uses_hipcc(self):
+        from setuptools._distutils.ccompiler import new_compiler  # codespell:ignore
+
+        compiler = new_compiler(compiler="unix")
+        # A launcher in front of the compiler, as with CXX="ccache g++".
+        for attr in ("compiler_cxx", "linker_exe", "linker_exe_cxx"):
+            setattr(compiler, attr, ["ccache", "g++"])
+        for attr in ("linker_so", "linker_so_cxx"):
+            setattr(compiler, attr, ["ccache", "g++", "-shared"])
+        cmds = []
+        compiler.spawn = lambda cmd, **kwargs: cmds.append(cmd)
+        with mock.patch.object(
+            torch.utils.cpp_extension, "_get_hipcc_path", return_value="/rocm/bin/hipcc"
+        ):
+            torch.utils.cpp_extension._wrap_hip_dlink_link(compiler)
+            with tempfile.TemporaryDirectory() as d:
+                marker = torch.utils.cpp_extension._ROCM_DLINK_MARKER
+                for name, post in (
+                    ("dlink", ["-fgpu-rdc", "--hip-link", marker]),
+                    ("plain", []),
+                    # Passing --hip-link alone does not opt in to the hipcc link.
+                    ("own_hip_link", ["--hip-link"]),
+                ):
+                    compiler.link_shared_object(
+                        ["a.o"],
+                        os.path.join(d, f"{name}.so"),
+                        extra_postargs=post,
+                        target_lang="c++",
+                    )
+        dlink_cmd, plain_cmd, own_hip_link_cmd = cmds
+        self.assertEqual(dlink_cmd[0], "/rocm/bin/hipcc")
+        self.assertNotIn("g++", dlink_cmd)
+        self.assertNotIn("ccache", dlink_cmd)
+        self.assertIn("--hip-link", dlink_cmd)
+        self.assertIn("-shared", dlink_cmd)
+        self.assertNotIn(marker, dlink_cmd)
+        self.assertEqual(plain_cmd[:2], ["ccache", "g++"])
+        self.assertEqual(own_hip_link_cmd[:2], ["ccache", "g++"])
+        self.assertIn("--hip-link", own_hip_link_cmd)
+        self.assertEqual(compiler.compiler_cxx, ["ccache", "g++"])
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not found")

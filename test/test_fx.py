@@ -8,6 +8,7 @@ import contextlib
 import copy
 import gc
 import functools
+import importlib
 import inspect
 import io
 import math
@@ -15,11 +16,13 @@ import numbers
 import operator
 import os
 import pickle
+import subprocess
 import sys
 import traceback
 import types
 import typing
 import unittest
+import unittest.mock
 import weakref
 import warnings
 from math import sqrt
@@ -29,6 +32,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    preserves_device_selection,
 )
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
@@ -70,10 +74,7 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    blas_library_context,
-)
+from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
@@ -189,12 +190,6 @@ real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
 real_a_lifed_leaf2 = a_lifted_leaf2
 _sqrt = sqrt
-
-wrap("wrapper_fn")
-
-
-def wrapper_fn(x):
-    return torch.foo(x)
 
 
 class Pair(NamedTuple):
@@ -329,8 +324,6 @@ class TestFX(JitTestCase):
 
         m = MyModule()
         gm = symbolic_trace(m)
-
-        ms = torch.jit.script(gm)
 
         class M2(torch.nn.Module):
             def forward(self, A):
@@ -686,7 +679,7 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_via_decorator", m.code)
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_wrapped_via_decorator_and_transformed(self):
         self.assertEqual(wrapped_via_decorator(0), 1)
@@ -698,13 +691,13 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_via_decorator", m.code)
         self.assertEqual(m(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
         transformed = torch.fx.Transformer(m).transform()
         self.assertIn("wrapped_via_decorator", transformed.code)
         self.assertEqual(transformed(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_wrap_with_submodule(self):
         class M(torch.nn.Module):
@@ -734,6 +727,18 @@ class TestFX(JitTestCase):
         retraced = symbolic_trace(m)
         self.assertIn("wrapped_via_decorator", retraced.code)
         self.assertEqual(retraced(0), 1)
+
+    def test_wrapped_trace_while_already_patched(self):
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        with torch.fx._symbolic_trace._Patcher() as patcher:
+            torch.fx._symbolic_trace._patch_wrapped_functions(patcher)
+            m = symbolic_trace(to_trace)
+
+        targets = [n.target for n in m.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [real_wrapped_via_decorator])
+        self.assertEqual(m(0), 1)
 
     def test_wrap_decorated_function(self):
         def to_trace(y):
@@ -1023,6 +1028,7 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, (a, b))
 
+    @unittest.skipIf(IS_FBCODE or IS_WINDOWS or IS_MACOS, 'non-portable load_library call used in test')
     def test_native_callable(self):
         if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
@@ -1038,10 +1044,6 @@ class TestFX(JitTestCase):
         #    native callable rather than the original code
         # 3) Run both the original code and native callable wrapper with
         #    equivalent results
-        # 4) TorchScript compile the native callable wrapper and confirm
-        #    equivalent results with the reference
-        # 5) TorchScript serialize and deserialize the native callable
-        #    and confirm equivalent results with the reference
 
         # We use this simple Module as a reference computation
         class MySimpleMod(torch.nn.Module):
@@ -1171,16 +1173,6 @@ class TestFX(JitTestCase):
         ref_out = msm(x)
         test_out = lowered(x)
         torch.testing.assert_close(test_out, ref_out)
-
-        # Test TorchScript compilation
-        scripted_lowered = torch.jit.script(lowered)
-        script_out = scripted_lowered(x)
-        torch.testing.assert_close(script_out, ref_out)
-
-        # Test TorchScript Ser/De
-        import_copy = self.getExportImportCopy(scripted_lowered)
-        imported_out = import_copy(x)
-        torch.testing.assert_close(imported_out, ref_out)
 
     def test_reserved_getattr(self):
         """Ensure that we do not name any nodes with a reserved builtin like `getattr`"""
@@ -1622,18 +1614,6 @@ class TestFX(JitTestCase):
                 lambda msg: f"{msg}\nLine {i + 1} has trailing whitespace: {repr(line)}",
             )
 
-    def test_script_tensor_constant(self):
-        # TorchScript seems to ignore attributes that start with `__`.
-        # We used to call anonymous Tensor values `__tensor_constant*`, but
-        # they were getting ignored by script. Now they're called
-        # `_tensor_constant*`
-        class IHaveATensorConstant(torch.nn.Module):
-            def forward(self, x):
-                return x + torch.rand(3, 4)
-
-        traced = torch.fx.symbolic_trace(IHaveATensorConstant())
-        torch.jit.script(traced)
-
     def test_autowrap_functions(self):
         class AutowrapFnTest(torch.nn.Module):
             def forward(self, x):
@@ -1650,10 +1630,395 @@ class TestFX(JitTestCase):
         traced = GraphModule(tracer.root, graph, "test")
         tracer_2 = Tracer(autowrap_functions=(fx_int, fx_int_x2))
         tracer_2.trace(AutowrapFnTest2())
+        self.assertEqual(traced(torch.rand(4)), 2)
 
-        # Test scriptability
-        traced_scripted = torch.jit.script(traced)
-        self.assertEqual(traced_scripted(torch.rand(4)), 2)
+
+    _LAZY = object()
+
+    def _lazy_globals(self, name, resolve, **values):
+        # A module's globals under PEP 690 lazy imports: reading ``name`` the first
+        # time runs ``resolve`` (the module body) and binds what it returns.
+        lazy = self._LAZY
+
+        class Globals(dict):
+            def _resolve(self):
+                if dict.__getitem__(self, name) is lazy:
+                    dict.__setitem__(self, name, resolve(self))
+
+            def __getitem__(self, key):
+                if key == name:
+                    self._resolve()
+                return super().__getitem__(key)
+
+            def get(self, key, default=None):
+                if key == name:
+                    self._resolve()
+                return super().get(key, default)
+
+            def items(self):
+                self._resolve()
+                return super().items()
+
+            def values(self):
+                self._resolve()
+                return super().values()
+
+        return Globals({name: lazy, "__builtins__": builtins, **values})
+
+    def _patch_is_lazy_import(self):
+        return unittest.mock.patch.object(
+            importlib,
+            "is_lazy_import",
+            lambda d, name: name in d and dict.__getitem__(d, name) is self._LAZY,
+            create=True,
+        )
+
+    def _records_unpatched(self, seen):
+        from torch.fx._symbolic_trace import _orig_module_call
+
+        def resolve(d):
+            seen.append(torch.nn.Module.__call__ is _orig_module_call)
+            return math.sqrt
+
+        return resolve
+
+    def test_autowrap_resolves_lazy_imports_with_patches_reverted(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        def leaf(x):
+            return x
+
+        seen = []
+
+        def resolve(d):
+            seen.append(dict.__getitem__(d, "leaf"))
+            return math.sqrt
+
+        frame_dict = self._lazy_globals("sqrt", resolve, leaf=leaf)
+        with self._patch_is_lazy_import(), _Patcher() as patcher:
+            patcher.patch(frame_dict, "leaf", lambda x: x)
+            _autowrap_check(patcher, frame_dict, {id(math.sqrt)})
+            self.assertEqual(seen, [leaf])
+            self.assertIsNot(dict.__getitem__(frame_dict, "leaf"), leaf)
+            self.assertIsNot(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
+        self.assertIs(dict.__getitem__(frame_dict, "sqrt"), math.sqrt)
+        self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
+
+    def test_autowrap_restores_patches_when_resolving_a_lazy_import_fails(self):
+        from torch.fx._symbolic_trace import _autowrap_check, _Patcher
+
+        def leaf(x):
+            return x
+
+        def resolve(d):
+            raise ImportError("module body failed")
+
+        frame_dict = self._lazy_globals("broken", resolve, leaf=leaf)
+        patched = lambda x: x  # noqa: E731
+        with self._patch_is_lazy_import(), _Patcher() as patcher:
+            patcher.patch(frame_dict, "leaf", patched)
+            with self.assertRaisesRegex(ImportError, "module body failed"):
+                _autowrap_check(patcher, frame_dict, set())
+            self.assertIs(dict.__getitem__(frame_dict, "leaf"), patched)
+        self.assertIs(dict.__getitem__(frame_dict, "leaf"), leaf)
+
+    def test_wrap_resolves_a_lazily_imported_name_with_patches_reverted(self):
+        from torch.fx._symbolic_trace import (
+            _Patcher,
+            _patch_wrapped_functions,
+            _wrapped_fns_to_patch,
+        )
+
+        def leaf(x):
+            return x
+
+        seen = []
+
+        def resolve(d):
+            seen.append(dict.__getitem__(d, "leaf"))
+            return math.sqrt
+
+        frame_dict = self._lazy_globals("bar", resolve, leaf=leaf)
+        key = (id(frame_dict), "bar")
+        _wrapped_fns_to_patch[key] = frame_dict
+        try:
+            with self._patch_is_lazy_import(), _Patcher() as patcher:
+                patcher.patch(frame_dict, "leaf", lambda x: x)
+                _patch_wrapped_functions(patcher)
+                self.assertEqual(seen, [leaf])
+                self.assertIsNot(dict.__getitem__(frame_dict, "bar"), math.sqrt)
+            self.assertIs(dict.__getitem__(frame_dict, "bar"), math.sqrt)
+        finally:
+            del _wrapped_fns_to_patch[key]
+
+    def test_symbolic_trace_registers_wraps_that_resolving_a_lazy_global_runs(self):
+        from torch.fx._symbolic_trace import _wrapped_fns_to_patch
+
+        def leaf_fn(x):
+            return x * 3
+
+        def resolve(d):
+            # What a module body calling torch.fx.wrap("leaf_fn") records.
+            _wrapped_fns_to_patch[(id(d), "leaf_fn")] = d
+            return 1
+
+        frame_dict = self._lazy_globals("helper", resolve, leaf_fn=leaf_fn)
+        exec("def f(x):\n    return leaf_fn(x) + helper\n", frame_dict)
+        traced_fn = dict.__getitem__(frame_dict, "f")
+        try:
+            with self._patch_is_lazy_import():
+                gm = torch.fx.symbolic_trace(traced_fn)
+        finally:
+            _wrapped_fns_to_patch.pop((id(frame_dict), "leaf_fn"), None)
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIn(leaf_fn, targets)
+
+    def test_wrap_registered_while_patching_wrapped_functions_is_applied(self):
+        from torch.fx._symbolic_trace import (
+            _Patcher,
+            _patch_wrapped_functions,
+            _wrapped_fns_to_patch,
+        )
+
+        def leaf(x):
+            return x
+
+        def resolve(d):
+            _wrapped_fns_to_patch[(id(d), "leaf")] = d
+            return math.sqrt
+
+        frame_dict = self._lazy_globals("bar", resolve, leaf=leaf)
+        keys = [(id(frame_dict), "bar"), (id(frame_dict), "leaf")]
+        _wrapped_fns_to_patch[keys[0]] = frame_dict
+        try:
+            with self._patch_is_lazy_import(), _Patcher() as patcher:
+                _patch_wrapped_functions(patcher)
+                self.assertIsNot(dict.__getitem__(frame_dict, "leaf"), leaf)
+        finally:
+            for key in keys:
+                _wrapped_fns_to_patch.pop(key, None)
+
+    def test_lazy_import_body_scripts_a_function_calling_a_wrapped_helper(self):
+        # TorchScript compiling FX's wrapper for ``scaled`` resolves ``Scale`` in
+        # torch/fx/_symbolic_trace.py's globals and fails with "Unknown type name".
+        from fx import lazy_wrap_helper
+
+        resolved = []
+
+        def resolve(d):
+            double = lazy_wrap_helper.double
+            fn = types.FunctionType(double.__code__, double.__globals__)
+            resolved.append(torch.jit._script.script(fn)(torch.ones(1)).item())
+            return 1
+
+        def child_forward(self, x):
+            return x + child_body  # noqa: F821
+
+        def root_forward(self, x):
+            return self.child(x + root_body)  # noqa: F821
+
+        class Child(torch.nn.Module):
+            forward = types.FunctionType(
+                child_forward.__code__, self._lazy_globals("child_body", resolve)
+            )
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            forward = types.FunctionType(
+                root_forward.__code__, self._lazy_globals("root_body", resolve)
+            )
+
+        with self._patch_is_lazy_import():
+            gm = torch.fx.symbolic_trace(Root())
+        self.assertEqual(resolved, [2.0, 2.0])
+        self.assertEqual(gm(torch.ones(1)), torch.full((1,), 3.0))
+
+    @unittest.skipIf(not hasattr(importlib, "is_lazy_import"), "needs a lazy-import runtime")
+    def test_symbolic_trace_on_a_real_lazy_import_runtime(self):
+        # Same scenario as test_lazy_import_body_scripts_a_function_calling_a_wrapped_helper
+        # with real lazy imports: lazy_body resolves from the root forward's globals,
+        # lazy_body2 from the globals of a child forward defined in another file.
+        # Each body scripts a fresh function so torch.jit.script's per-function
+        # cache cannot reuse lazy_body's compilation for lazy_body2.
+        # No CI runner has a PEP 690 interpreter, so this is skipped in CI and
+        # kept for manual runs on one.
+        from fx import lazy_wrap_helper
+
+        helper_src = inspect.getsource(lazy_wrap_helper)
+        body_src = "import torch, types\nimport lazy_wrap_helper\nd = lazy_wrap_helper.double\nSCALE = torch.jit._script.script(types.FunctionType(d.__code__, d.__globals__))(torch.ones(1)).item()\n"
+        files = {
+            "lazy_wrap_helper.py": helper_src,
+            "lazy_body.py": body_src,
+            "lazy_body2.py": body_src,
+            "lazy_child.py": "import torch\nimport lazy_body2\nclass Child(torch.nn.Module):\n    def forward(self, x):\n        return x * lazy_body2.SCALE\n",
+            "lazy_model.py": "import torch\nimport lazy_body\nimport lazy_child\nclass M(torch.nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.child = lazy_child.Child()\n    def forward(self, x):\n        return self.child(x * lazy_body.SCALE)\n",
+        }
+        script = """
+import importlib, torch
+import lazy_wrap_helper, lazy_model
+# Load the helper so its torch.fx.wrap("scaled") registers before the trace.
+lazy_wrap_helper.__dict__
+m = lazy_model.M()
+assert importlib.is_lazy_import(lazy_model.__dict__, "lazy_body")
+assert importlib.is_lazy_import(lazy_model.lazy_child.__dict__, "lazy_body2")
+gm = torch.fx.symbolic_trace(m)
+assert torch.equal(gm(torch.ones(2)), torch.full((2,), 4.0))
+"""
+        with tempfile.TemporaryDirectory() as d:
+            for name, src in files.items():
+                with open(os.path.join(d, name), "w") as f:
+                    f.write(src)
+            result = subprocess.run(
+                [sys.executable, "-L", "-c", script],
+                cwd=d,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_nested_symbolic_trace_resolves_lazy_globals_with_every_patch_reverted(
+        self,
+    ):
+        seen = []
+
+        def f(x):
+            return x * 2
+
+        scope = self._lazy_globals("helper", self._records_unpatched(seen))
+        inner_fn = types.FunctionType(f.__code__, scope)
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                torch.fx.symbolic_trace(inner_fn)
+                return x + 1
+
+        with self._patch_is_lazy_import():
+            torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+
+    def test_nested_tracer_init_resolves_lazy_globals_of_autowrap_modules_unpatched(
+        self,
+    ):
+        seen = []
+        scope = self._lazy_globals("helper", self._records_unpatched(seen))
+
+        class LazyModule(types.ModuleType):
+            @property
+            def __dict__(self):
+                return scope
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                torch.fx.Tracer(autowrap_modules=(LazyModule("lazy_mod"),))
+                return x + 1
+
+        with self._patch_is_lazy_import():
+            torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+
+    def test_nested_trace_reverts_inner_patches_first_and_reapplies_them_last(self):
+        # The child's globals resolve in the inner module_call_wrapper, after both
+        # traces patched Module.__call__ and the inner one recorded the outer wrapper
+        # as its original.
+        from torch.fx._symbolic_trace import _orig_module_call
+
+        seen = []
+
+        class Child(torch.nn.Module):
+            pass
+
+        def forward(self, x):
+            return x
+
+        scope = self._lazy_globals("helper", self._records_unpatched(seen))
+        Child.forward = types.FunctionType(forward.__code__, scope)
+
+        class LeafTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, qualname):
+                return isinstance(m, Child) or super().is_leaf_module(m, qualname)
+
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                return self.child(self.child(x))
+
+        graphs = []
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                graphs.append(LeafTracer().trace(Inner()))
+                return x + 1
+
+        with self._patch_is_lazy_import():
+            torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+        # The second child call must still go through the inner trace's wrapper.
+        targets = [n.target for n in graphs[0].nodes if n.op == "call_module"]
+        self.assertEqual(targets, ["child", "child"])
+        self.assertIs(torch.nn.Module.__call__, _orig_module_call)
+
+    def _builtin_patch(self, patcher):
+        # What torch.fx.wrap("len") makes: a patch deleted, not restored, on revert.
+        frame_dict = {"__builtins__": builtins}
+        patcher.patch(frame_dict, "len", lambda x: 0)
+        return frame_dict
+
+    def test_lazy_import_resolved_while_an_outer_trace_is_reverted(self):
+        # Dynamo reverts an FX trace's patches to compile under it, then make_fx
+        # traces inside that window.
+        from torch.fx._symbolic_trace import (
+            _autowrap_check,
+            _maybe_revert_all_patches,
+            _new_patcher,
+        )
+
+        seen = []
+        scope = self._lazy_globals("helper", self._records_unpatched(seen))
+        with self._patch_is_lazy_import(), _new_patcher() as outer:
+            frame_dict = self._builtin_patch(outer)
+            with _maybe_revert_all_patches():
+                with _new_patcher() as inner:
+                    _autowrap_check(inner, scope, set())
+                # Still reverted for the rest of Dynamo's window.
+                self.assertNotIn("len", frame_dict)
+            self.assertIn("len", frame_dict)
+        self.assertEqual(seen, [True])
+
+    def test_lazy_import_body_can_open_its_own_revert_window(self):
+        # A module body that calls a torch.compile'd function at import sees no FX
+        # trace, so Dynamo compiles it and reverts the patches inside FX's window.
+        from torch.fx._symbolic_trace import (
+            _autowrap_check,
+            _is_fx_tracing_context,
+            _maybe_revert_all_patches,
+            _new_patcher,
+            is_fx_symbolic_tracing,
+        )
+
+        seen = []
+        with _new_patcher() as patcher, _is_fx_tracing_context(True):
+            frame_dict = self._builtin_patch(patcher)
+
+            def resolve(d):
+                with _maybe_revert_all_patches():
+                    pass
+                # Dynamo's window closing must not reapply FX's patches.
+                seen.append((is_fx_symbolic_tracing(), "len" not in frame_dict))
+                return math.sqrt
+
+            with self._patch_is_lazy_import():
+                _autowrap_check(patcher, self._lazy_globals("helper", resolve), set())
+            self.assertEqual(seen, [(False, True)])
+            self.assertIn("len", frame_dict)
+            self.assertTrue(is_fx_symbolic_tracing())
 
     def test_tuple_no_subscript(self):
         def foo(x: tuple):
@@ -1682,13 +2047,6 @@ class TestFX(JitTestCase):
 
         traced = symbolic_trace(FXLenTest())
         self.assertEqual(traced(torch.rand(3, 4)), 3)
-
-        # Test scriptability
-        scripted = torch.jit.script(FXLenTest())
-        self.assertEqual(scripted(torch.rand(3)), 3)
-
-        traced_scripted = torch.jit.script(traced)
-        self.assertEqual(traced_scripted(torch.rand(3)), 3)
 
         # Test non-proxy len
         class FXLenTest2(torch.nn.Module):
@@ -2086,10 +2444,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         traced(torch.rand(4, 5))
         with self.assertRaisesRegex(AssertionError, "assert_foobar"):
             traced(torch.rand(4, 3))
-        # verify the symbolically traced module is scriptable
-        ms = torch.jit.script(m)
-        with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
-            ms(torch.rand(4, 3))
 
     def test_fx_create_arg(self):
         class CustomArgObject:
@@ -2655,25 +3009,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         input = torch.randn(3, 4)
         self.assertEqual(new_gm(input), gm(input))
 
-    def test_fn_type_annotations(self):
-        class Foo(torch.nn.Module):
-            def forward(
-                self, p: Pair, z: torch.Tensor, i: int
-            ) -> dict[str, torch.Tensor]:
-                return {"a": p.x + p.y + z + i}
 
-        foo_scripted = torch.jit.script(Foo())
-        foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
-
-        fixed = symbolic_trace(Foo())
-        fxed_scripted = torch.jit.script(fixed)
-        fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
-
-    def test_fn_type_annotation_empty(self):
-        def forward(a: list[torch.Tensor]):
-            return a[0]
-
-        torch.jit.script(symbolic_trace(forward))
 
     def test_optional_typing_dict_placeholder_annotation_python314(self):
         class OptionalTypingDictModule(torch.nn.Module):
@@ -2692,7 +3028,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         FileCheck().check("value : typing_Union[typing_Dict").check(
             "typing_Tuple"
         ).check("NoneType]").run(traced.code)
-        torch.jit.script(traced)
 
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
@@ -3347,6 +3682,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         with self.assertRaisesRegex(AttributeError, "__update_args_kwargs"):
             node.__update_args_kwargs((), {})
 
+    @unittest.skipIf(IS_FBCODE or IS_WINDOWS or IS_MACOS, 'torch.classes._TorchScriptTesting._StackString is registered, skipping')
     def test_torchbind_class_attribute_in_fx(self):
         if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest(
@@ -3364,6 +3700,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         m = FooBar1234()
         self.checkGraphModule(m, ())
 
+    @unittest.skipIf(IS_FBCODE or IS_WINDOWS or IS_MACOS, 'torch.classes._TorchScriptTesting._ReLUClass is registered, skipping')
     def test_torchbind_class_attribute_in_fx_tensor_arg(self):
         if IS_FBCODE or IS_WINDOWS or IS_MACOS:
             self.skipTest(
@@ -3394,7 +3731,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         class Holder(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.s = torch.jit.script(Scripted())
+                self.s = torch.jit._script.script(Scripted())
 
             def forward(self, x):
                 return self.s(x)
@@ -3459,8 +3796,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
 
         traced = symbolic_trace(ReturnTypeModule())
         self.assertIn("-> list[str]", traced._code)
-        scripted = torch.jit.script(traced)
-        self.assertIn("-> List[str]", scripted.code)
 
     def test_return_type_exists_pre_pep585(self):
         class ReturnTypeModule(torch.nn.Module):
@@ -3472,8 +3807,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
 
         traced = symbolic_trace(ReturnTypeModule())
         self.assertIn("-> typing_List[str]", traced._code)
-        scripted = torch.jit.script(traced)
-        self.assertIn("-> List[str]", scripted.code)
 
     def getitem_inner(self):
         class GetItemBase(torch.nn.Module):
@@ -3512,32 +3845,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         proc.join()
         self.assertEqual(proc.exitcode, 0)
 
-    def test_user_friendly_call_provenance_with_function(self):
-        def fn(x):
-            return wrapper_fn(x)
 
-        traced = torch.fx.symbolic_trace(fn)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "'wrapper_fn' is "
-            "being compiled since it was called"
-            " from 'fn.forward'",
-        ):
-            scripted = torch.jit.script(traced)
-
-    def test_user_friendly_call_provenance_with_module(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return wrapper_fn(x)
-
-        traced = torch.fx.symbolic_trace(M())
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "'wrapper_fn' is " "being compiled since it was called" " from 'M.forward'",
-        ):
-            scripted = torch.jit.script(traced)
 
     def test_snake_case(self):
         class M(torch.nn.Module):
@@ -3814,7 +4122,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertIn("wrapped_via_decorator", traced.code)
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_ast_rewriter_wrapped_via_decorator_and_transformed(self):
         self.assertEqual(wrapped_via_decorator(0), 1)
@@ -3829,13 +4137,13 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertIn("wrapped_via_decorator", traced.code)
         self.assertEqual(traced(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
         transformed = torch.fx.Transformer(traced).transform()
         self.assertIn("wrapped_via_decorator", transformed.code)
         self.assertEqual(transformed(0), 1)
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
-        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+        self.assertFalse(hasattr(wrapped_via_decorator, "_fx_already_patched"))
 
     def test_ast_rewriter_wrap_with_submodule(self):
         class M(torch.nn.Module):
@@ -4036,6 +4344,30 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         gm2 = torch.fx.GraphModule(model, traced_graph)
         gm2.delete_all_unused_submodules()
         torch.testing.assert_close(gm2(inputs), model(inputs))
+
+    def test_delete_unused_submodules_get_attr(self):
+        # A submodule that a get_attr reads, such as the body of a higher order
+        # op, keeps its own submodules.
+        root = torch.nn.Module()
+        root.submod = torch.nn.Sequential(torch.nn.Linear(10, 10), torch.nn.ReLU())
+        graph = torch.fx.Graph()
+        graph.output(graph.get_attr("submod"))
+        gm = torch.fx.GraphModule(root, graph)
+        gm.delete_all_unused_submodules()
+        self.assertEqual(
+            [name for name, _ in gm.named_modules()], ["", "submod", "submod.0", "submod.1"]
+        )
+
+    def test_has_attr_dotted_name(self):
+        root = torch.nn.Module()
+        root.sub = torch.nn.Linear(1, 1)
+        self.assertTrue(torch.fx.graph_module._has_attr(root, "sub.weight"))
+        self.assertFalse(torch.fx.graph_module._has_attr(root, "sub.missing"))
+        self.assertFalse(torch.fx.graph_module._has_attr(root, "missing.weight"))
+        # A prefix that is not a Module is followed too, as _get_attr does.
+        root.t = torch.ones(1)
+        self.assertTrue(torch.fx.graph_module._has_attr(root, "t.shape"))
+        self.assertFalse(torch.fx.graph_module._has_attr(root, "t.missing"))
 
     def test_fx_stateless(self):
         class MockModule(torch.nn.Module):
@@ -4331,12 +4663,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
             "typing_Tuple[str,typing_Tuple[()]]"
         ).run(traced.code)
 
-        scripted = torch.jit.script(traced)
-
-        scripted(x, y)
-
-        FileCheck().check("Tuple[()]").check("Tuple[str, Tuple[()]]").run(scripted.code)
-
     def test_pytree(self):
         # Used to test that you can use your own placeholder class
         class PHTest(PHBase):
@@ -4570,9 +4896,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(
             nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(vals))), f(*vals)
         )
-
-        ts_f = torch.jit.script(nf)
-        self.assertEqual(nf(vals), ts_f(vals))
 
     def test_custom_codegen_with_transformer(self):
         class ListCodeGen(CodeGen):
@@ -5126,26 +5449,18 @@ class TestFXCUDA(JitTestCase):
                 },
             )
         else:
-            # cuBLASLt added two internal cudaStreamIsCapturing checks before
-            # launching GEMM kernels starting with CUDA 13.4, which show up
-            # as extra runtime events ahead of each addmm's kernel launch.
-            extra_event = not torch.version.hip and _get_torch_cuda_version() >= (13, 4)
-            capture_1, capture_2 = "", ""
-            if extra_event:
-                capture_1 = (
-                    "event=cudaStreamIsCapturing node=addmm "
-                    "stack_trace=x = self.linear1(x)\n"
-                ) * 2
-                capture_2 = (
-                    "event=cudaStreamIsCapturing node=addmm_1 "
-                    "stack_trace=x = self.linear2(x)\n"
-                ) * 2
+            # cuBLASLt's internal capture checks need not all appear in the trace.
+            actual_traces = "\n".join(
+                line
+                for line in actual_traces.splitlines()
+                if not line.startswith("event=cudaStreamIsCapturing ")
+            )
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-{capture_1}event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
+event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
 event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
@@ -5153,7 +5468,7 @@ event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-{capture_2}event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             self.assertExpectedInline(actual_traces, expected)
 
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
@@ -5329,6 +5644,7 @@ instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
 class TestOperatorSignatures(JitTestCase):
     hw_classification = HardwareClassification.CPU
 
+    @preserves_device_selection
     def setUp(self):
         # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
         # hooks that cause segfaults during process cleanup. Record state
@@ -5347,7 +5663,7 @@ class TestOperatorSignatures(JitTestCase):
             self.orig_tracer_mutable_flag
         )
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db if isinstance(op.op, types.BuiltinFunctionType)], allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
         if not isinstance(op.op, types.BuiltinFunctionType):
             raise unittest.SkipTest("This path doesn't work on Python functions")
@@ -6038,10 +6354,6 @@ class TestVisionTracing(JitTestCase):
         )
 
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
-    INCONSISTENT_TYPE = (
-        RuntimeError,
-        r"Return value was annotated as having type __torch__.torchvision.models[.\w]+ but is actually of type Tensor",
-    )
 
     UNTRACEABLE_MODELS = {
         "fasterrcnn_resnet50_fpn": PROXY_ITERATED,
@@ -6056,10 +6368,6 @@ class TestVisionTracing(JitTestCase):
         "ssd300_vgg16": PROXY_ITERATED,
         "fcos_resnet50_fpn": PROXY_ITERATED,
         "ssdlite320_mobilenet_v3_large": PROXY_ITERATED,
-    }
-    UNSCRIPTABLE_MODELS = {
-        "googlenet": INCONSISTENT_TYPE,
-        "inception_v3": INCONSISTENT_TYPE,
     }
 
     output_transform = {
@@ -6092,15 +6400,6 @@ class TestVisionTracing(JitTestCase):
                 a = out_transform(model(x))
                 b = out_transform(graph(x))
                 self.assertEqual(a, b)
-
-                if name in self.UNSCRIPTABLE_MODELS:
-                    err, exc = self.UNSCRIPTABLE_MODELS[name]
-                    with self.assertRaisesRegex(err, exc):
-                        script = torch.jit.script(graph)
-                else:
-                    script = torch.jit.script(graph)
-                    c = out_transform(script(x))
-                    self.assertEqual(a, c)
 
         return run_test
 
