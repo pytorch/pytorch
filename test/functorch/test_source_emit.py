@@ -12,7 +12,6 @@ from torch._functorch._aot_autograd.source_emit import (
     emit_value,
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymIntEqByExpr
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -600,8 +599,6 @@ class TestSourceEmit(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "does not.*round-trip"):
             _emit_importable(torch.add, set())
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

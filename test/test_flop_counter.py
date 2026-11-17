@@ -23,7 +23,6 @@ from torch.testing._internal.common_device_type import (
     requires_capabilities,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1125,7 +1124,6 @@ class TestFlopCounterDevice(TestCase):
             ),
         )
 
-    @fake_tensor_test()
     @requires_capabilities(Capability.attention.flash_attention)
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2853")
     def test_nested_attention_fake_tensors(self, device):
@@ -1454,7 +1452,6 @@ class TestFlexAttentionEstimation(TestCase):
         expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
         self.assertEqual(fwd_flops, expected_flops)
 
-    @fake_tensor_test()
     def test_sparsity_hint_annotate_propagates(self):
         """fx_traceback.annotate propagates sparsity_hint to flex_attention node."""
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1484,7 +1481,6 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertIn("sparsity_hint", custom)
         self.assertAlmostEqual(custom["sparsity_hint"], 0.9)
 
-    @fake_tensor_test()
     def test_sparsity_hint_affects_flex_attention_flops(self):
         """sparsity_hint via annotate reduces flex_attention flop count."""
         from torch._subclasses.fake_tensor import FakeTensorMode

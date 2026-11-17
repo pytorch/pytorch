@@ -11,7 +11,6 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 from torch._inductor import config
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 try:
@@ -299,8 +298,6 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             "@triton.jit"
         ).run(code)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

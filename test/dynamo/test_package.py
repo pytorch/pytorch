@@ -45,7 +45,6 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
@@ -1480,7 +1479,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
 import torch
 
 
-
 class Child(torch.nn.Module):
     def forward(self, x):
         return x.sin()
@@ -2668,8 +2666,6 @@ instantiate_device_type_tests(
     allow_mps=True,
 )
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

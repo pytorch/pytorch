@@ -46,7 +46,6 @@ from torch._inductor.utils import (
 )
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -5762,8 +5761,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             f"No finite NVGEMM benchmarks: {bench_results}",
         )
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

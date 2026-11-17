@@ -5,7 +5,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._inductor.utils import pass_execution_and_save
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -34,8 +33,6 @@ class FxPassesPreGradTests(torch._dynamo.test_case.TestCase):
         pass_execution_and_save(fx_pass, gm, sample_input, "Apply testing pass")
         mock_shape_prop.assert_called_once()
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

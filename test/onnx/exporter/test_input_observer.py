@@ -8,7 +8,6 @@ import torch
 from torch.onnx import InputObserver
 from torch.onnx._internal.exporter._input_observer import _infer_dynamic_dimensions
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -1161,8 +1160,6 @@ class TestInputObserver(common_utils.TestCase):
         self.assertIsInstance(args, tuple)
         self.assertEqual(len(args), 3)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

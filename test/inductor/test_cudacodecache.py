@@ -16,7 +16,6 @@ from torch._inductor.exc import CUDACompileError, XPUCompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.testing._internal.triton_utils import (
     requires_gpu_and_triton,
@@ -237,8 +236,6 @@ class TestXPUCodeCacheClear(InductorTestCase):
             "cache should be empty after cache_clear()",
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

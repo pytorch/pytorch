@@ -11,7 +11,6 @@ import onnx
 import torch
 from torch.onnx._internal.exporter import _dynamic_shapes
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree
 
@@ -633,8 +632,6 @@ class TestDynamicShapes(common_utils.TestCase):
             _dynamic_shapes._any_str_or_dim_in_dynamic_shapes(dynamic_shapes)
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

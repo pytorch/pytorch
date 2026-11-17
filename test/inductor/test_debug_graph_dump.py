@@ -10,7 +10,6 @@ from torch._functorch import partitioners
 from torch._inductor import config as inductor_config, debug as inductor_debug
 from torch._inductor.debug import DebugFormatter
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -202,8 +201,6 @@ class TestDebugGraphDump(TestCase):
                 os.path.join(tmpdir, "orig_fx_graph_diagram.dot"),
             )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

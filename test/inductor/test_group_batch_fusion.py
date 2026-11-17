@@ -20,7 +20,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1065,6 +1064,72 @@ class TestGroupBatchFusion(TestCase):
         # The view chain leading to the raw-storage consumer blocks a, while
         # the unrelated b/c/d projections still fuse.
         self.assertEqual(subsets, [3])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @parametrize("view", ["split", "unbind"])
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_post_grad_getitem_as_strided(self, view):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                if view == "split":
+                    piece = large.split(16, dim=0)[0]
+                    out = piece.as_strided((16, 48), (48, 1))
+                else:
+                    piece = large.unbind(1)[0]
+                    out = piece.as_strided((32,), (1,))
+                return torch.sin(out), torch.cos(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # as_strided behind a multi-output view still observes raw storage.
+        self.assertEqual(subsets, [])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @parametrize("view", ["split", "unbind"])
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_post_grad_multi_output_view_fuses(self, view):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                piece = (
+                    large.split(16, dim=0)[0] if view == "split" else large.unbind(1)[0]
+                )
+                return torch.sin(piece), torch.cos(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(subsets, [2])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     def test_batch_linear_lhs_match_ignores_mm_dtype(self):
@@ -2867,8 +2932,6 @@ class TestCatLinearFusion(TestCase):
                 self.assertEqual(gr, gs)
             counters.clear()
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

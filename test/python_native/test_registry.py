@@ -7,7 +7,6 @@ import torch
 import torch._dynamo.trace_rules as trace_rules
 import torch._native.registry as registry_module
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -832,7 +831,6 @@ class TestRegistryRuntime(TestCase):
             (True, True, True),
         )
 
-    @fake_tensor_test()
     def test_cow_guard_misses_on_fake_tensor(self):
         from torch._dynamo.guards import _cow_tensor_matches
 
@@ -1020,7 +1018,6 @@ class TestRegistryRuntime(TestCase):
         self.assertNotIn(("aten", "mul.Tensor", "CPU"), self.registry._override_libs)
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([8.0, 15.0])))
 
-    @fake_tensor_test()
     def test_fake_tensor_shape_inference(self):
         """FakeTensor shape-infers through `_native::<id>` via the registered
         fake kernel, without running the implementation or runtime initialization.

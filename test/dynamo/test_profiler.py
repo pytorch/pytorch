@@ -10,7 +10,6 @@ from torch._dynamo.utils import chromium_event_timed, ChromiumEventLogger, dynam
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import ProfilerRecordFunctionContextVariable
 from torch.profiler import record_function
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     TemporaryFileName,
@@ -561,8 +560,6 @@ def forward(self, L_args_0_ : torch.Tensor):
             ],
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

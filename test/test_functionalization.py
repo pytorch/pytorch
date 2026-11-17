@@ -18,7 +18,6 @@ from torch._subclasses.functional_tensor import (
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -246,7 +245,6 @@ class TestFunctionalization(TestCase):
             """\
 
 
-
 def forward(self, arg0_1):
     view_copy = torch.ops.aten.view_copy.default(arg0_1, [1, 1024, 128, 128]);  arg0_1 = None
     clone = torch.ops.aten.clone.default(view_copy);  view_copy = None
@@ -292,7 +290,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2])
@@ -311,7 +308,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -343,7 +339,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2]);  arg0_1 = None
@@ -360,7 +355,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -389,7 +383,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     empty = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False);  empty = None
     empty_1 = torch.ops.aten.empty.memory_format([4], device = device(type='cpu'), pin_memory = False);  empty_1 = None
@@ -409,7 +402,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -438,7 +430,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     _tensor_constant0 = self._tensor_constant0
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
@@ -454,7 +445,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -510,7 +500,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4, 2], device = device(type='cpu'), pin_memory = False)
     view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2]);  view_copy = None
@@ -527,7 +516,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -552,7 +540,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -581,7 +568,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     as_strided_copy = torch.ops.aten.as_strided_copy.default(arg0_1, [2], [2], 1)
     add = torch.ops.aten.add.Tensor(as_strided_copy, 1);  as_strided_copy = None
@@ -599,7 +585,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -625,7 +610,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     block_diag = torch.ops.aten.block_diag.default([arg0_1, arg0_1]);  arg0_1 = None
     return block_diag
@@ -645,7 +629,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     empty = torch.ops.aten.empty.memory_format([0], device = device(type='cpu'), pin_memory = False);  empty = None
     cat = torch.ops.aten.cat.default([arg0_1]);  arg0_1 = None
@@ -659,7 +642,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -685,7 +667,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     clone = torch.ops.aten.clone.default(arg0_1)
@@ -704,7 +685,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -734,7 +714,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(arg0_1)
@@ -753,7 +732,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -803,7 +781,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     split_copy = torch.ops.aten.split_copy.Tensor(arg0_1, 2)
@@ -829,7 +806,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -867,7 +843,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
     split_with_sizes_copy = torch.ops.aten.split_with_sizes_copy.default(arg0_1, [2, 2])
@@ -893,7 +868,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -929,7 +903,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
     transpose_copy = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0)
@@ -952,7 +925,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -986,7 +958,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
     transpose_copy = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0)
@@ -1009,7 +980,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1043,7 +1013,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
     transpose_copy = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0)
@@ -1068,7 +1037,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1105,7 +1073,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     view_copy = torch.ops.aten.view_copy.default(arg0_1, [8])
     arange = torch.ops.aten.arange.default(4, device = device(type='cpu'), pin_memory = False)
@@ -1133,7 +1100,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1165,7 +1131,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     ge = torch.ops.aten.ge.Scalar(clone, 0);  clone = None
@@ -1180,7 +1145,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1224,7 +1188,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     view_copy = torch.ops.aten.view_copy.default(arg0_1, [4, 2]);  arg0_1 = None
     return view_copy
@@ -1251,7 +1214,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1308,7 +1270,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
@@ -1361,7 +1322,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1417,7 +1377,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros)
@@ -1439,7 +1398,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros)
@@ -1457,7 +1415,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1481,7 +1438,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros)
@@ -1499,7 +1455,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1523,7 +1478,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros)
@@ -1541,7 +1495,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1563,7 +1516,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1590,7 +1542,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     expand_copy = torch.ops.aten.expand_copy.default(arg0_1, [2, 2]);  arg0_1 = None
     return expand_copy
@@ -1611,7 +1562,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     diagonal_copy = torch.ops.aten.diagonal_copy.default(add)
@@ -1628,7 +1578,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1656,7 +1605,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1687,7 +1635,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1743,7 +1690,6 @@ def forward(self, arg0_1):
             """\
 
 
-
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
     resize = torch.ops.aten.resize.default(add, [5, 5]);  add = None
@@ -1762,7 +1708,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1857,7 +1802,6 @@ $3: f32[4] = torch._ops.aten.add.Tensor($2, 1)""",
             """\
 
 
-
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([10], device = device(type='cpu'), pin_memory = False)
     select_copy = torch.ops.aten.select_copy.int(zeros, 0, 5)
@@ -1874,7 +1818,6 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1):
@@ -1916,7 +1859,6 @@ def forward(self, arg0_1):
             self.assertExpectedInline(
                 logs,
                 """\
-
 
 
 def forward(self, arg0_1, arg1_1, arg2_1):
@@ -1962,7 +1904,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertExpectedInline(
                 reinplaced_logs,
                 """\
-
 
 
 def forward(self, arg0_1, arg1_1, arg2_1):
@@ -2030,7 +1971,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             """\
 
 
-
 def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'));  empty = None
     _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, True, 0.1, 1e-05);  arg0_1 = None
@@ -2056,7 +1996,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertExpectedInline(
             reinplaced_logs,
             """\
-
 
 
 def forward(self, arg0_1, arg1_1, arg2_1):
@@ -2428,8 +2367,6 @@ class TestViewMetaSerialization(TestCase):
             restored = pickle.loads(pickle.dumps(view_meta))
             self.assertEqual(restored.as_tuple(), view_meta.as_tuple())
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -107,7 +107,6 @@ from torch.testing._internal.common_dtype import (
     get_all_dtypes,
     highest_precision_float,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
     _group_quantize_tensor_symmetric,
@@ -9771,6 +9770,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+    def test_remove_noop_slice_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            a = torch.ops.aten.slice.Tensor(x, 0, -n, n)
+            b = torch.ops.aten.slice.Tensor(x, 0, -n - 1, n)
+            c = torch.ops.aten.slice.Tensor(x, 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
+
+    def test_remove_noop_slice_scatter_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            src = x * 2
+            a = torch.ops.aten.slice_scatter(x, src, 0, -n, n)
+            b = torch.ops.aten.slice_scatter(x, src, 0, -n - 1, n)
+            c = torch.ops.aten.slice_scatter(x, src[1:], 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice_scatter" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
@@ -20305,7 +20341,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(10, device=GPU_TYPE)
         compiled_fn = torch.compile(f, dynamic=True)
         result, code = run_and_get_code(compiled_fn, x)
-        expected = f(x)
+        # Eager f(x) reads the non-blocking copy without syncing, so it can race.
+        expected = torch.clamp(x, 0.0, x.abs().sum().item())
         self.assertEqual(result, expected)
         wrapper_code = code[0]
         self.assertIn("torch.Event()", wrapper_code)
@@ -24160,6 +24197,88 @@ if RUN_GPU:
             self.assertEqual(result, fn(y, x), atol=1e-4, rtol=1e-4)
             self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
 
+        @unittest.skipIf(
+            GPU_TYPE != "cuda" or torch.version.hip is not None,
+            "the small-k topk decomposition is CUDA-only",
+        )
+        def test_topk_small_k(self):
+            def reference(x, k, dim):
+                # Stable descending order; as in ATen, NaN ranks highest and
+                # +0 ranks above -0 (float64 keys keep -0 just below +0).
+                key = torch.where(x.isnan(), float("inf"), x.double())
+                key = torch.where((key == 0) & key.signbit(), -1e-300, key)
+                order = torch.sort(key, dim=dim, descending=True, stable=True).indices
+                nan_first = torch.gather(x.isnan().to(torch.int8), dim, order)
+                order = torch.gather(
+                    order,
+                    dim,
+                    torch.sort(
+                        nan_first, dim=dim, descending=True, stable=True
+                    ).indices,
+                )
+                indices = order.narrow(dim, 0, k)
+                return torch.gather(x, dim, indices), indices
+
+            specials = torch.tensor(
+                [
+                    float("inf"),
+                    -float("inf"),
+                    float("nan"),
+                    -float("nan"),
+                    0.0,
+                    -0.0,
+                    1.0,
+                    1.0,
+                ],
+                device=GPU_TYPE,
+            )
+            for shape, k, dim, dtype, special in [
+                ((256, 8, 32), 2, -1, torch.float32, False),
+                ((256, 256), 8, -1, torch.bfloat16, False),
+                ((64, 16), 16, -1, torch.float32, False),
+                ((16, 128, 3), 3, 1, torch.float32, False),
+                ((512, 64), 8, -1, torch.float32, True),
+                ((512, 64), 8, -1, torch.bfloat16, True),
+                ((512, 64), 8, -1, torch.float16, True),
+            ]:
+                x = torch.randn(shape, device=GPU_TYPE)
+                if special:
+                    pick = specials[
+                        torch.randint(0, len(specials), shape, device=GPU_TYPE)
+                    ]
+                    x = torch.where(torch.rand(shape, device=GPU_TYPE) < 0.5, pick, x)
+                x = x.to(dtype)
+                torch._dynamo.reset()
+                (values, indices), code = run_and_get_code(
+                    torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
+                )
+                # Only the last dim decomposes; other dims keep the ATen fallback,
+                # called as aten.topk.default (Python wrapper) or
+                # aoti_torch_*_topk (C++ wrapper).
+                fallback = re.search(
+                    r"aten\.topk\.default\(|aoti_torch_\w+_topk\(", " ".join(code)
+                )
+                if dim in (-1, x.dim() - 1):
+                    self.assertIsNone(fallback)
+                else:
+                    self.assertIsNotNone(fallback)
+                ref_values, ref_indices = reference(x, k, dim)
+                self.assertEqual(indices, ref_indices)
+                bits = torch.int16 if dtype.itemsize == 2 else torch.int32
+                self.assertTrue(torch.equal(values.view(bits), ref_values.view(bits)))
+
+            # As in ATen, +0 ranks above -0; equal values go to the lowest index.
+            x = torch.zeros(64, 32, device=GPU_TYPE)
+            x[:, 0:20:2] = -0.0
+            x[:, 20:] = -1.0
+            torch._dynamo.reset()
+            values, indices = torch.compile(lambda t: torch.topk(t, 4, dim=-1))(x)
+            self.assertEqual(
+                indices, torch.tensor([1, 3, 5, 7], device=GPU_TYPE).expand(64, 4)
+            )
+            self.assertFalse(torch.signbit(values).any())
+            self.assertFalse(torch.signbit(torch.topk(x, 4, dim=-1).values).any())
+
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
             def fn(a):
@@ -24699,8 +24818,6 @@ def _run_and_get_stripped_kernels(
     result, codes = run_and_get_kernels(fn, *args, **kwargs)
     return result, [_strip_tmp_path(code) for code in codes]
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

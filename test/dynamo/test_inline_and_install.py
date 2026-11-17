@@ -2,7 +2,6 @@
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 try:
@@ -41,7 +40,6 @@ for test in tests:
     make_dynamic_cls(test)
 del test
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

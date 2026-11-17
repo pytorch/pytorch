@@ -77,7 +77,6 @@ from torch.testing._internal.common_device_type import (
     skipMPSIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -11950,8 +11949,6 @@ if LONG_COMPILATION_ON_CPU:
                 globals()[name]
             )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

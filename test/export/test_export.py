@@ -84,7 +84,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
@@ -20130,8 +20129,6 @@ def forward(self, x, y):
         result = decomposed.module()(torch.randn(1, 16, 64))
         self.assertEqual(result.shape, (1, 256, 64))
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

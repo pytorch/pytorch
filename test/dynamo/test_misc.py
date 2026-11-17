@@ -92,7 +92,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     PYTORCH_CUDA_MEMCHECK,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
@@ -17157,8 +17156,6 @@ def fn():
             """\
 
 
-
-
 AAA
 AAA.DUMMY
 AAA.DUMMY.DUMMY2
@@ -17179,6 +17176,66 @@ AAA.BBB.CCC.DDD.EEE
 AAA.BBB.CCC
 fn
 fn
+""",
+        )
+
+    def test_funcname_cache_single_line(self):
+        from torch._dynamo.funcname_cache import get_funcname
+
+        src = """\
+class E(Exception): pass
+def f():
+    return 1
+def one_line(): pass
+value = 1
+class A:
+    @overload
+    def to(self, x: int): ...
+    @overload
+    def to(self, x: str): ...
+    @staticmethod
+    def bar(
+    ):
+        # Comment before the body.
+
+        return 1
+    def inline(self): pass
+    value = 2
+    async def async_inline(self): pass
+    def last(self):
+        return 2
+value = 3
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "source.py")
+            with open(filename, "w") as f:
+                f.write(src)
+            names = [get_funcname(filename, i + 1) for i in range(src.count("\n"))]
+
+        self.assertExpectedInline(
+            "\n".join(names),
+            """\
+E
+f
+f
+one_line
+
+A
+A
+A.to
+A
+A.to
+A
+A.bar
+A.bar
+A.bar
+A.bar
+A.bar
+A.inline
+A
+A.async_inline
+A.last
+A.last
 """,
         )
 
@@ -21807,8 +21864,6 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 got = torch.compile(fn, backend=backend, fullgraph=True)(a, b)
                 self.assertEqual(got, expected)
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

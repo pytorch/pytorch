@@ -24,7 +24,6 @@ from torch._inductor.utils import (
     needs_fallback_due_to_atomic_add_limitations,
     run_and_get_code,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     runOnRocm,
@@ -1511,7 +1510,6 @@ class TestPartitionedScatterOpt(TestCase):
 if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

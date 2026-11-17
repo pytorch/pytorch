@@ -6,7 +6,6 @@ import collections
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -1944,8 +1943,6 @@ class TestDequeConstruct(torch._dynamo.test_case.TestCase):
         with self.assertRaises(TypeError):
             collections.deque([], maxlen=1, bad=2)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

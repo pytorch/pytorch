@@ -7,8 +7,13 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
+
+#include <atomic>
+
 namespace at {
 namespace {
+
+std::atomic<at::impl::ModelessFakeFallback*> modeless_fake_fallback{nullptr};
 
 bool isIndexedDeviceType(c10::DeviceType type) {
   return type == kCUDA || type == kHIP || type == kHPU || type == kXPU ||
@@ -127,6 +132,14 @@ Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source) {
   // Keep set_data's type/dtype checks and gradient accumulator reset.
   self.set_data(source);
   return self;
+}
+
+void setModelessFakeFallback(ModelessFakeFallback* fn) {
+  modeless_fake_fallback.store(fn);
+}
+
+ModelessFakeFallback* getModelessFakeFallback() {
+  return modeless_fake_fallback.load();
 }
 
 } // namespace impl

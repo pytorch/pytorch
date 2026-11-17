@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
     tol,
     toleranceOverride,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1087,12 +1086,6 @@ class TestOperatorsDevice(TestCase):
             tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("linalg.lu", {torch.float32: tol(atol=5e-04, rtol=7e-04)}),
             tol1("linalg.lu_factor", {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
-            # CUDA exceeds the test default here (abs 3.2e-02); CPU and XPU do not.
-            tol1(
-                "linalg.lu_factor_ex",
-                {torch.float32: tol(atol=2e-03, rtol=2e-02)},
-                device_type="cuda",
-            ),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
             # CUDA exceeds the test default here (rel 3.0e-04); CPU and XPU do not.
             tol2(
@@ -3043,7 +3036,6 @@ class TestOperatorsDevice(TestCase):
 
 instantiate_device_type_tests(TestOperatorsDevice, globals(), allow_xpu=True)
 
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

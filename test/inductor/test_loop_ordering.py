@@ -33,7 +33,6 @@ from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symb
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2825,8 +2824,6 @@ class TestIndexInversion(TestCase):
             )
         )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     if HAS_GPU:

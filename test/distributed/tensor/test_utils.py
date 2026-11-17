@@ -43,7 +43,6 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -97,7 +96,6 @@ R = Replicate()
 
 @instantiate_parametrized_tests
 class LocalTest(TestCase):
-    @fake_tensor_test()
     def test_strided_shard_to_replicate_preserves_even_unbacked_shape(self):
         import torch.distributed.tensor.placement_types as placement_types
         from torch._subclasses.fake_tensor import FakeTensorMode

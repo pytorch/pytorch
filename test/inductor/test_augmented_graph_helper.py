@@ -4,7 +4,6 @@ import operator
 import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
@@ -540,8 +539,6 @@ class TestAugmentedGraphHelper(TestCase):
         self.assertIn(other_node, tracker.extra_uses[new_2_3])
         self.assertIn(new_4_5, tracker.extra_uses[other_node])
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

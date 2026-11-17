@@ -35,7 +35,6 @@ from functorch.einops._parsing import (
     ParsedExpression,
     validate_rearrange_expressions,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -311,8 +310,6 @@ class TestValidateRearrangeExpressions(TestCase):
         with self.assertRaises(ValueError):
             validate_rearrange_expressions(left, right, axes_lengths)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

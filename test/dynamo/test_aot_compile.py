@@ -75,7 +75,6 @@ from torch.fx._graph_pickler import GraphPickler
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     decorateIf,
     disable_gc,
@@ -12204,8 +12203,6 @@ class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
         finally:
             kernel_side_table.reset_table()
 
-
-instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
