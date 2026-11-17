@@ -703,7 +703,10 @@ class SizeVarAllocator:
 
         def gcd_covers_denominator(gcd: sympy.Basic) -> bool:
             return gcd != 1 and (
-                gcd == denominator or self.simplify(gcd - denominator) == 0
+                gcd == denominator
+                or self.simplify(gcd - denominator) == 0
+                # sympy picks the gcd's sign, so it can be the negated denominator
+                or self.simplify(gcd + denominator) == 0
             )
 
         try:
