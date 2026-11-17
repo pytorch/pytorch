@@ -1,4 +1,4 @@
-"""Runs modules of CPython's own test suite through torch.cfg_compile.
+"""Runs modules of CPython's own test suite through torch.rewrite.
 
 Every test method of a module is compiled, and what it calls is compiled in
 turn, so a test passes only if the frontend and the VM behave like the
@@ -6,8 +6,8 @@ interpreter for everything the test does. The outcome of each test is compared
 with its outcome under the plain interpreter; the two runs are separate
 processes, so neither sees state the other left behind.
 
-    python benchmarks/cfg_compile/cpython_suite.py test_grammar test_scope
-    python benchmarks/cfg_compile/cpython_suite.py --lib ~/cpython/Lib --verbose test_dict
+    python benchmarks/rewrite/cpython_suite.py test_grammar test_scope
+    python benchmarks/rewrite/cpython_suite.py --lib ~/cpython/Lib --verbose test_dict
 
 ``--lib`` names the ``Lib`` directory of a CPython source tree of the running
 version, for interpreters that are installed without the ``test`` package.
@@ -68,11 +68,9 @@ def run_one(name, compiled):
     if compiled:
         for cls, method, fn in test_methods(suite):
             try:
-                setattr(
-                    cls, method, torch.cfg_compile(fn, fallback=False, demote=False)
-                )
+                setattr(cls, method, torch.rewrite(fn, fallback=False, demote=False))
                 report["compiled"] += 1
-            except torch.cfg_compile.Unsupported as e:
+            except torch.rewrite.Unsupported as e:
                 report["rejected"] += 1
                 reason = str(e).split(": ", 1)[-1]
                 reason = " ".join(

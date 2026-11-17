@@ -1,6 +1,6 @@
 #pragma once
 
-// C++ side of torch.cfg_compile.
+// C++ side of torch.rewrite.
 //
 // The compiler and its VM live in a Rust extension module
 // (torch/csrc/cfg/rust). Everything that has to touch the dispatcher lives
@@ -97,7 +97,15 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 10
+#define TCFG_API_VERSION 11
+
+// What frame_hook registers. It is offered the frame the interpreter made
+// for a call of func, with the arguments bound and nothing run. It returns 0
+// to leave the frame to the interpreter, or 1 after it has run the call and
+// disposed of the frame (frame_adopt and frame_pop, or frame_interpret), with
+// *result a new reference, or null with a Python error set.
+typedef int32_t (
+    *TcfgTakeFrame)(PyObject* func, void* frame, PyObject** result);
 
 struct TcfgApi {
   uint32_t version;
@@ -153,13 +161,15 @@ struct TcfgApi {
   // the code's co_localsplusnames: the caller keeps them what the variables
   // of the function are bound to, the cells of the closure excepted, which
   // are there already. The frame counts as one Python call against the
-  // recursion limit. Returns null with a Python error set: RecursionError,
-  // or MemoryError.
+  // recursion limit. *object gets the address of the frame's frame object,
+  // which is null until something looks at the frame. Returns null with a
+  // Python error set: RecursionError, or MemoryError.
   void* (*frame_push)(
       PyObject* func,
       uint16_t*** instr,
       uint16_t** code,
-      PyObject*** locals);
+      PyObject*** locals,
+      PyObject*** object);
   // Pops the frame, which must be the current one. A frame object that
   // something still refers to (a traceback) takes the frame's contents over,
   // its variables among them.
@@ -174,6 +184,33 @@ struct TcfgApi {
   // Whether the thread has a trace function (sys.settrace): the interpreter
   // calls it for the frames it enters and the lines it runs in them.
   int32_t (*frame_traced)();
+
+  // The frames the interpreter makes itself: for the calls that C code makes
+  // (a constructor, a property, an operator, a callback), and for those that
+  // a function makes which the interpreter runs. frame_hook says who is
+  // offered them, once. They are offered while some thread wants them:
+  // frame_want(1), and frame_want(-1) when it no longer does. The
+  // interpreter's own calls are slower meanwhile, since it then starts every
+  // frame through this.
+  void (*frame_hook)(TcfgTakeFrame take);
+  void (*frame_want)(int32_t delta);
+  // Makes a frame that was offered the current one of the thread, as
+  // frame_push does for one it makes; frame_pop disposes of it. Returns 0
+  // with RecursionError set, and the frame gone.
+  int32_t (*frame_adopt)(
+      void* frame,
+      uint16_t*** instr,
+      uint16_t** code,
+      PyObject*** locals,
+      PyObject*** object);
+  // Has the interpreter run a frame that was offered. Returns a new
+  // reference, or null with a Python error set.
+  PyObject* (*frame_interpret)(void* frame);
+  // For a frame that is about to return result and has a frame object: if
+  // a debugger put its trace function on the frame (it does so for every
+  // frame of the stack it is entered under), tells it of the return, as the
+  // interpreter does. Returns -1 with a Python error set if it raised.
+  int32_t (*frame_returns)(void* frame, PyObject* result);
 
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.

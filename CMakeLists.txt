@@ -435,7 +435,7 @@ cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" OFF
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 option(USE_CFG_COMPILE
-       "Build the Rust runtime of torch.cfg_compile (needs cargo)" OFF)
+       "Build the Rust runtime of torch.rewrite (needs cargo)" OFF)
 # On macOS, NNPACK's FFT-based convolutions are slower than im2col + Accelerate and spread NaN/Inf
 # across the whole tile, see https://github.com/pytorch/pytorch/issues/157237
 if(APPLE AND NOT IOS)

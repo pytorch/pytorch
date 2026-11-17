@@ -1,6 +1,6 @@
 """Runs of a basic block compiled by a graph backend.
 
-With ``torch.cfg_compile(fn, backend="inductor")`` the VM hands the tensor work
+With ``torch.rewrite(fn, passes=[torch.rewrite.inductor, ...])`` the VM hands the tensor work
 of each basic block to AOTAutograd and Inductor. The unit is a *region*: a run
 of consecutive instructions of one block that have no effect a trace cannot
 capture (calls, arithmetic, attribute reads, building containers). A region is
@@ -106,6 +106,7 @@ import torch
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
 from torch.utils import _pytree as pytree
+from torch.utils._device import DeviceContext
 
 
 Backend = Callable[[torch.fx.GraphModule, list[torch.Tensor]], Callable[..., Any]]
@@ -205,7 +206,7 @@ _WIDE = 1 << 62
 # How many variants of a region may leave sizes open, for inputs that are
 # otherwise alike: one per path that the sizes choose.
 _MOST_OPEN = 4
-# A region may have ``region_max_variants`` graphs. Variants that use the
+# A region may have ``max_variants`` graphs. Variants that use the
 # graph of another (the layers of a model, called in a loop) do not count,
 # up to this many times the limit; and after this many traces whose graph
 # was one too many, no further variant is tried.
@@ -602,7 +603,7 @@ def _watch_module_changes(on: bool) -> None:
         _monitor = -1
         for tool in (4, 3):
             try:
-                monitoring.use_tool_id(tool, "torch.cfg_compile")
+                monitoring.use_tool_id(tool, "torch.rewrite")
             except ValueError:
                 continue
             start = monitoring.events.PY_START
@@ -841,6 +842,9 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         except ValueError:
             raise _Opaque(0, "a variable that has no value yet") from None
     if isinstance(obj, nn.Module):
+        if "_modules" not in vars(obj):
+            # Handed to a region of its own __init__, or of what that calls.
+            raise _Opaque(0, "a module that is being made")
         state = _module_state(obj)
         if state.hooked or any(_GLOBAL_HOOK_DICTS):
             raise _Opaque(
@@ -1246,7 +1250,37 @@ def _modes() -> tuple[Any, ...]:
         torch.is_autocast_enabled("cuda"),
         torch.is_autocast_enabled("cpu"),
         torch.get_default_dtype(),
+        _function_modes() if _function_stack() else (),
     )
+
+
+_function_stack = torch._C._len_torch_function_stack
+
+
+def _function_modes() -> tuple[Any, ...]:
+    """The torch function modes that are active, bottom first: the device of
+    a default device (``torch.set_default_device``, ``with torch.device``),
+    which a graph made under it has built in, and any other mode as the
+    object it is."""
+    modes = [torch._C._get_function_stack_at(i) for i in range(_function_stack())]
+    return tuple([str(m.device) if type(m) is DeviceContext else id(m) for m in modes])
+
+
+def _below_modes(compiled: Callable[..., Any], args: list[Any]) -> Any:
+    """Calls a graph that was made under a default device without the mode
+    that is the default device: what the mode does is in the graph, and it
+    would otherwise be called, in Python, for every operation of the code
+    the backend made."""
+    modes = [torch._C._get_function_stack_at(i) for i in range(_function_stack())]
+    if any(type(mode) is not DeviceContext for mode in modes):
+        return compiled(*args)
+    for _ in modes:
+        torch._C._pop_torch_function_stack()
+    try:
+        return compiled(*args)
+    finally:
+        for mode in modes:
+            torch._C._push_on_torch_function_stack(mode)
 
 
 # ----------------------------------------------------------------------
@@ -2096,7 +2130,9 @@ class _Variant:
         taken = flat if self.rest is None else self.rest(flat)
         if self.numbers:
             ints = inputs.ints
-            results = self.compiled(*taken, *[ints[k] for k in self.numbers])
+            taken = [*taken, *[ints[k] for k in self.numbers]]
+        if _function_stack():
+            results = _below_modes(self.compiled, taken)
         else:
             results = self.compiled(*taken)
         if self.direct:
@@ -2343,6 +2379,9 @@ class _Region:
             self.decide(args)
             if self.hot:
                 return self(*args)
+        # Slower than the function will be either way: no measurement of it
+        # against the interpreter should be decided by calls like this one.
+        _runtime.unsettled()
         self.calls += 1
         _state.pending += 1
         try:
