@@ -49,7 +49,10 @@ from torch.compiler.precompile import (
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
@@ -3748,6 +3751,10 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
 
 
+def _precompile_pointwise(x):
+    return x.sin() * 2 + 1
+
+
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
@@ -4280,6 +4287,92 @@ class TestPrecompileNumerics(TestCase):
         f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), x.t())
 
+    @onlyCUDA
+    def test_runtime_serves_incremental_autotune_without_compilation(self, device):
+        try:
+            from torch._inductor.runtime.fb.incremental._plugin import (
+                _shared_autotuner_registry,
+            )
+        except ImportError:
+            self.skipTest("requires the incremental autotuner")
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        x = make_tensor((1 << 22,), device=device, dtype=torch.float32)
+        expected = _precompile_pointwise(x)
+        launches = []
+        run = CachingAutotuner.run
+
+        def record(kernel, *args, **kwargs):
+            launches.append((kernel, args, kwargs))
+            return run(kernel, *args, **kwargs)
+
+        with (
+            fresh_cache(),
+            mock.patch.object(_runtime_cache, "_frozen_triton_kernels", {}),
+            mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
+            torch._inductor.config.patch(
+                {
+                    "incremental_autotune": True,
+                    "max_autotune_pointwise": True,
+                    "use_static_triton_launcher": True,
+                    "compile_threads": 1,
+                    "triton.cudagraphs": False,
+                    "fx_graph_remote_cache": False,
+                    "autotune_remote_cache": False,
+                    "bundled_autotune_remote_cache": False,
+                }
+            ),
+        ):
+            with (
+                mock.patch.dict(_shared_autotuner_registry, clear=True),
+                mock.patch.object(CachingAutotuner, "run", record),
+            ):
+                compiled = torch.compile(_precompile_pointwise, backend="inductor")
+                for _ in range(2):
+                    self.assertEqual(compiled(x), expected)
+            # A short capture leaves the kernel mid incremental tuning.
+            kernel, args, kwargs = launches[0]
+            self.assertEqual(kernel.launchers, [])
+            self.assertGreater(len(kernel.compile_results), 1)
+            out = next(
+                arg for arg in args if isinstance(arg, torch.Tensor) and arg is not x
+            )
+            _runtime_cache._frozen_triton_kernels["source"] = (
+                _runtime_cache._freeze_triton_kernel("source", [kernel])
+            )
+            with (
+                mock.patch.dict(_shared_autotuner_registry, clear=True),
+                torch.compiler.precompile.no_compilation(),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "precompile",
+                    side_effect=AssertionError("precompiled kernel"),
+                ),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "autotune_to_one_config",
+                    side_effect=AssertionError("benchmarked kernel"),
+                ),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "bench",
+                    side_effect=AssertionError("benchmarked kernel"),
+                ),
+            ):
+                loaded = _runtime_cache.load_triton_kernel("source")
+                self.assertEqual(len(loaded.launchers), len(kernel.compile_results))
+                for step in range(5000):
+                    loaded.run(*args, **kwargs)
+                    if step % 100 == 99:
+                        torch.cuda.synchronize()
+                        if len(loaded.launchers) == 1:
+                            break
+                self.assertEqual(len(loaded.launchers), 1)
+                out.zero_()
+                loaded.run(*args, **kwargs)
+                self.assertEqual(out, expected)
 
 instantiate_device_type_tests(TestPrecompileNumerics, globals())
 
@@ -8018,6 +8111,66 @@ class TestPrecompileRuntimeCache(TestCase):
         kernel.launchers = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_static_export_keeps_incremental_candidates(self):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler._runtime_cache import _freeze_triton_kernel
+
+        kernel = _static_runtime_kernel(32)
+        kernel.compile_results = [
+            _static_runtime_kernel(block).compile_results[0] for block in (32, 64, 128)
+        ]
+        kernel.launchers = []
+        kernel._cached_launcher = None
+        # The incremental plugin holds the candidates while it is still timing them.
+        kernel._plugins = [types.SimpleNamespace(_state=object())]
+        with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
+            saved = pickle.loads(_freeze_triton_kernel("source", [kernel])).kernel
+        blocks = [result.config.kwargs["XBLOCK"] for result in saved.compile_results]
+        self.assertEqual(blocks, [32, 64, 128])
+        self.assertFalse(saved.inductor_meta["coordinate_descent_tuning"])
+        self.assertEqual(len(kernel.compile_results), 3)
+        self.assertEqual(kernel.launchers, [])
+        kernel._plugins = [types.SimpleNamespace(_state=None)]
+        with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
+            _freeze_triton_kernel("source", [kernel])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("incremental", (True, False))
+    def test_static_load_serves_incremental_candidates(self, incremental):
+        from torch._inductor.runtime.triton_heuristics import (
+            CachingAutotuner,
+            StaticTritonCompileResult,
+        )
+        from torch.compiler import _runtime_cache
+
+        kernel = _static_runtime_kernel(32)
+        kernel.compile_results = [
+            _static_runtime_kernel(block).compile_results[0] for block in (32, 64)
+        ]
+        kernel.launchers = []
+        kernel._cached_launcher = None
+        kernel._plugins = [types.SimpleNamespace(_state=object())]
+        with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
+            payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+        with (
+            mock.patch.object(
+                _runtime_cache, "_frozen_triton_kernels", {"source": payload}
+            ),
+            mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
+            mock.patch.object(
+                _runtime_cache,
+                "_serves_incremental_autotune",
+                return_value=incremental,
+            ),
+            mock.patch.object(StaticTritonCompileResult, "reload_cubin_path") as reload,
+            mock.patch.object(CachingAutotuner, "_make_launchers"),
+        ):
+            loaded = _runtime_cache.load_triton_kernel("source")
+        blocks = [result.config.kwargs["XBLOCK"] for result in loaded.compile_results]
+        self.assertEqual(blocks, [32, 64] if incremental else [32])
+        self.assertEqual(reload.call_count, len(blocks))
 
     def test_static_records_follow_cache_reset(self):
         import hashlib
