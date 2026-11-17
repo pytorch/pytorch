@@ -3,6 +3,7 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
+# Owner(s): ["oncall: export"]
 import copy
 import io
 import math
@@ -50,8 +51,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipMPSIf,
 )
-
-# Owner(s): ["oncall: export"]
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,

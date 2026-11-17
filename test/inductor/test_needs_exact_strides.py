@@ -154,7 +154,6 @@ class TestNeedsExactStrides(InductorTestCase):
 
 instantiate_parametrized_tests(TestNeedsExactStrides)
 
-
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")

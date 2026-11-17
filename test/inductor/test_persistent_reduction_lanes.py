@@ -288,6 +288,5 @@ instantiate_device_type_tests(
     TestPersistentReductionLanes, globals(), only_for=("cuda",)
 )
 
-
 if __name__ == "__main__":
     run_tests()

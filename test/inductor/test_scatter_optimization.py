@@ -1510,7 +1510,6 @@ class TestPartitionedScatterOpt(TestCase):
 if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

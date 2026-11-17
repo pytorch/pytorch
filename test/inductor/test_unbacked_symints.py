@@ -1554,7 +1554,6 @@ class TestUnbackedSymints(InductorTestCase):
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
