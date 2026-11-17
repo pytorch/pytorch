@@ -344,7 +344,6 @@ class AutogradCompilerInstance:
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
         self.fake_tensor_mode = FakeTensorMode(
-            _force_python=True,
             allow_fallback_kernels=True,
             allow_non_fake_inputs=True,
             shape_env=self.shape_env,

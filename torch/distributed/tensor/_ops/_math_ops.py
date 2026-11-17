@@ -375,12 +375,13 @@ def _reduction_single_dim_strategy(
 # all/any are listed here because the remaining reduction helpers share this map,
 # but they are registered separately with reduction_linear=False.
 LINEAR_REDUCTION_OP_MAP = {
-    aten.all.default: "product",
-    aten.all.dim: "product",
-    aten.any.default: "sum",
-    aten.any.dim: "sum",
-    aten.any.dims: "sum",
-    aten.any.out: "sum",
+    aten.all.default: "min",
+    aten.all.dim: "min",
+    aten.all.dims: "min",
+    aten.any.default: "max",
+    aten.any.dim: "max",
+    aten.any.dims: "max",
+    aten.any.out: "max",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
     prims.sum.default: "sum",
@@ -408,11 +409,13 @@ FOREACH_LINEAR_REDUCTION_OP_MAP = {
 
 FOREACH_LINEAR_REDUCTION_OPS = list(FOREACH_LINEAR_REDUCTION_OP_MAP)
 
-# all/any are NOT linear reductions: validation showed S(reduction_dim)->P(...)
-# produces incorrect results. They only support sharding on non-reduction dims.
+# Bool reductions combine local results with min/max, not sum/product.
+# Shards on reduction dims can reduce locally, including uneven/empty shards.
+# Existing partial inputs need dtype-aware rules before converting to bool.
 NON_LINEAR_BOOL_REDUCTION_OPS = [
     aten.all.default,
     aten.all.dim,
+    aten.all.dims,
     aten.any.default,
     aten.any.dim,
     aten.any.dims,
@@ -551,17 +554,44 @@ def mean_single_dim_strategy(
     return strategies
 
 
+def _bool_reduction_full_mesh_strategy_filter(
+    _mesh: DeviceMesh,
+    op_schema: OpSchema,
+    input_specs: list[DTensorSpec],
+    _output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+) -> bool:
+    r"""Materialize numeric min/max partial axes before truth-value conversion."""
+    input_strategy = op_schema.args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    input_spec = input_strategy.strategies[0].output_spec
+    input_meta = input_spec.tensor_meta
+    if input_meta is None:
+        raise AssertionError("Expected input tensor meta")
+    if input_meta.dtype == torch.bool:
+        return True
+    # min/max NaN behavior can differ between all-reduce and reduce-scatter.
+    # Materialize numeric partial axes before changing their values to bool.
+    # Other shard axes can still reduce locally and produce bool partials.
+    return all(
+        not (isinstance(placement, Partial) and placement.reduce_op in ("min", "max"))
+        or target.is_replicate()
+        for placement, target in zip(input_spec.placements, input_specs[0].placements)
+    )
+
+
 @register_single_dim_strategy(
     NON_LINEAR_BOOL_REDUCTION_OPS,
-    schema_info=RuntimeSchemaInfo(1),
+    schema_info=RuntimeSchemaInfo(1, ["out"]),
     allow_uneven_sharding=True,
+    full_mesh_strategy_filter=_bool_reduction_full_mesh_strategy_filter,
 )
 def bool_reduction_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    """all/any: only shard on non-reduction dims (no partial propagation)."""
+    r"""Reduce shards locally and propagate matching bool partials."""
     input_meta = args_schema[0]
     if not isinstance(input_meta, TensorMeta):
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
@@ -572,13 +602,25 @@ def bool_reduction_single_dim_strategy(
         dims = _infer_reduction_dims(args_schema[1], ndim)
 
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
-    return _reduction_single_dim_strategy(
+    reduction_op = LINEAR_REDUCTION_OP_MAP[op]
+    strategies = _reduction_single_dim_strategy(
         args_schema,
         reduction_dims=dims,
         keep_dim=keep_dim,
         reduction_linear=False,
-        reduction_op="sum",
+        reduction_op=reduction_op,
     )
+    partial = Partial(reduction_op)
+    reduce_dims = range(ndim) if dims is None else dims
+    strategies.extend([partial, _ShardingPlaceholder(dim)] for dim in reduce_dims)
+    # Resolve numeric partials before converting them to truth values.
+    # bool(max(-1, 0)) is False, while max(bool(-1), bool(0)) is True.
+    # Bool inputs can safely propagate a matching min/max partial.
+    if input_meta.dtype == torch.bool:
+        strategies.append([partial, partial])
+    if "out" in kwargs_schema:
+        strategies = [rule + [rule[0]] for rule in strategies]
+    return strategies
 
 
 def _shard_non_reduction_dim(
