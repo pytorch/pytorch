@@ -41,7 +41,7 @@ class AbstractWindowTest:
 
     @property
     def device(self):
-        return torch.device(f"{self.device_type}:{self.rank}")
+        return torch.device(f"{self._device_type}:{self.rank}")
 
     @classmethod
     def backend_str(cls):
@@ -49,7 +49,7 @@ class AbstractWindowTest:
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        if cls.device_type == "cuda":
+        if cls._device_type.fget(cls) == "cuda":
             torch.cuda.set_device(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 
@@ -408,10 +408,11 @@ class AbstractWindowTest:
 
 def _make_window_test_class(backend_name, device_type):
     class WindowTest(AbstractWindowTest, MultiProcContinuousTest):
-        pass
+        @property
+        def _device_type(self) -> str:
+            return device_type
 
     WindowTest.backend_name = backend_name
-    WindowTest.device_type = device_type
     class_name = backend_name.replace("-", " ").title().replace(" ", "")
     WindowTest.__name__ = f"{class_name}WindowTest"
     WindowTest.__qualname__ = WindowTest.__name__

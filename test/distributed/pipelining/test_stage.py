@@ -576,8 +576,8 @@ class StageTest(MultiProcContinuousTest):
         # Testing with NCCL backend
         return backend
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return device_type
 
     @property
@@ -934,8 +934,8 @@ class StageNegativeTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return backend
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return device_type
 
     @property

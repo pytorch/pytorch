@@ -403,8 +403,8 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
@@ -978,8 +978,8 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
@@ -1948,8 +1948,8 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2311,8 +2311,8 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2355,8 +2355,8 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2527,8 +2527,8 @@ class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2656,8 +2656,8 @@ class _DeterministicNVLSTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2723,8 +2723,8 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def _device_type(self) -> str:
         return "cuda"
 
     @property
