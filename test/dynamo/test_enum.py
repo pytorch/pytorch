@@ -21,6 +21,13 @@ _MIXIN_ENUM_CASES = [
 ]
 _MIXIN_ENUM_CASES.append(((enum.StrEnum,), str, ("a", "b")))
 
+_COMPARISON_OPS = {
+    "==": lambda a, b: a == b,
+    "!=": lambda a, b: a != b,
+    "<": lambda a, b: a < b,
+    ">=": lambda a, b: a >= b,
+}
+
 
 class EnumTests(torch._dynamo.test_case.TestCase):
     """Tests for enum support in torch.compile."""
@@ -483,6 +490,43 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, Priority.HIGH)
         self.assertEqual(ref, res)
+
+    @parametrize(
+        "bases,mixin,values",
+        [case for case in _MIXIN_ENUM_CASES if case[1] is not str],
+        name_fn=lambda bases, mixin, values: "_".join(b.__name__ for b in bases),
+    )
+    @parametrize("op", list(_COMPARISON_OPS))
+    def test_tensor_compare_with_numeric_enum(self, bases, mixin, values, op):
+        # https://github.com/pytorch/pytorch/issues/204353
+        class Mode(*bases):
+            A = values[0]
+            B = values[1]
+
+        cmp = _COMPARISON_OPS[op]
+
+        def fn(x, mask):
+            return cmp(x, Mode.A) | mask, cmp(Mode.B, x) | mask
+
+        x = torch.tensor([values[0], values[1], values[0]])
+        mask = torch.tensor([False, True, False])
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, mask), opt_fn(x, mask))
+
+    @parametrize("op", list(_COMPARISON_OPS))
+    def test_symint_compare_with_int_enum(self, op):
+        class Size(enum.IntEnum):
+            THREE = 3
+
+        cmp = _COMPARISON_OPS[op]
+
+        def fn(x):
+            return x + cmp(x.size(0), Size.THREE), x + cmp([x.size(0)], [Size.THREE])
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        for n in (3, 4):
+            x = torch.arange(n)
+            self.assertEqual(fn(x), opt_fn(x))
 
     @parametrize(
         "bases,mixin,values",
