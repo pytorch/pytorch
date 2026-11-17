@@ -7,7 +7,6 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class _Color(enum.Enum):
@@ -373,8 +372,6 @@ class NbBoolTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), compiled(x))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

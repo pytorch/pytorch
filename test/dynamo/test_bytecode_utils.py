@@ -11,7 +11,6 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo import bytecode_analysis, bytecode_transformation
 from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 def coalesced_co_lines(code):
@@ -805,8 +804,6 @@ class BytecodeHookTests(torch._dynamo.test_case.TestCase):
         finally:
             handle.remove()
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

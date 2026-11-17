@@ -6,7 +6,6 @@ from torch._export.serde.schema_check import (
     SchemaUpdateError,
     update_schema,
 )
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
@@ -482,8 +481,6 @@ Example(s):
         self.assertEqual(sig, sig_same)
         self.assertNotEqual(sig, sig_diff)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

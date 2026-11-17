@@ -2,7 +2,7 @@
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
+import torch._dynamo.testing
 
 
 def fn_creator():
@@ -35,8 +35,32 @@ class ResumeFunctionTests(torch._dynamo.test_case.TestCase):
         # co_freevars of resume functions, are sorted concatenation of the original function's co_freevars and co_cellvars
         self.assertEqual(code.co_freevars, ("var1", "var2"))
 
+    def _check_graph_break_in_generated_fn(self, body, *args):
+        src = "\n".join(
+            [
+                "def fn(x, flag):",
+                *body,
+                "    torch._dynamo.graph_break()",
+                "    return x + 1",
+            ]
+        )
+        scope = {"torch": torch}
+        exec(src, scope)
+        fn = scope["fn"]
+        cnt = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=cnt)(*args), fn(*args))
+        self.assertEqual(cnt.frame_count, 2)
 
-instantiate_fake_tensor_tests(globals())
+    def test_graph_break_after_many_with_blocks(self):
+        body = ["    with torch.no_grad():\n        x = x + 1"] * 400
+        self._check_graph_break_in_generated_fn(body, torch.zeros(2), True)
+
+    def test_graph_break_after_many_branches_in_with_block(self):
+        body = ["    with torch.no_grad():"]
+        body += ["        if flag:\n            x = x + 1"] * 200
+        body += ["        x = x * 2"]
+        self._check_graph_break_in_generated_fn(body, torch.zeros(2), True)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

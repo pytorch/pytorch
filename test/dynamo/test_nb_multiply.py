@@ -7,7 +7,6 @@ import sys
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -615,8 +614,6 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(TestNbMultiply)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

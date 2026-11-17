@@ -8,7 +8,6 @@ from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch.export import export
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -200,8 +199,6 @@ class TestPassInfra(TestCase):
         old_signature = ep_before.graph_signature
         self.assertNotEqual(sig.user_outputs, old_signature.user_outputs)
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

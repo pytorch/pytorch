@@ -6,6 +6,10 @@ description: |
   test configs matrix is returned untouched.
 
 inputs:
+  cpp-faketensor:
+    description: Add C++ FakeTensor variants of the selected test jobs.
+    required: false
+    default: "false"
   github-token:
     description: GITHUB_TOKEN
     required: true
@@ -158,6 +162,7 @@ runs:
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
+          ${{ inputs.cpp-faketensor == 'true' && '--cpp-faketensor' || '' }} \
           --selected-test-configs "${{ inputs.selected-test-configs }}" \
           ${{ inputs.ignore-test-config-labels == 'true' && '--ignore-test-config-labels' || '' }} \
           --pr-number "${PR_NUMBER}" \

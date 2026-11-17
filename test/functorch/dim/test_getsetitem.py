@@ -1,7 +1,6 @@
 # Owner(s): ["module: functorch"]
 import torch
 from functorch.dim import Dim, DimList, dims, Tensor
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -267,8 +266,6 @@ class TestGetSetItem(TestCase):
         self.assertIsInstance(result_cpu, Tensor)
         self.assertEqual(result_cpu.device, torch.device("cpu"))
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

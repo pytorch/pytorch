@@ -20,7 +20,6 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -326,8 +325,6 @@ class TestTypeSlots(TestCase):
                 lambda msg: f"{msg}\n{t.__name__} should have mp_subscript",
             )
 
-
-instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()
