@@ -122,7 +122,10 @@ class RequestEvents:
                 lambda: len(self.events) >= len(expected), timeout=15
             )
             if not completed or self.events != expected:
-                raise ValueError("unexpected completed request sequence")
+                raise ValueError(
+                    f"unexpected completed request sequence: {self.events!r}; "
+                    f"expected {expected!r}"
+                )
             return self.events.copy()
 
 
