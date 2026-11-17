@@ -202,8 +202,9 @@ jobs:
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
-        uses: pytorch/pytorch/.github/actions/filter-test-configs@main
+        uses: ./.github/actions/filter-test-configs
         with:
+          cpp-faketensor: "true"
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}

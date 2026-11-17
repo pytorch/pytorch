@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -3053,7 +3052,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         result_exp = _fake_scan(body, init, None, length=3)
         self.assertEqual(result, result_exp)
 
-    @fake_tensor_test()
     @parametrize("output", ["tensor", "none"])
     @parametrize("tracing_mode", [None, "fake", "symbolic"])
     def test_scan_xs_none_length_zero(self, output, tracing_mode):
