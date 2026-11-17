@@ -293,18 +293,31 @@ class PerfData:
 # ---------------------------------------------------------------------------
 
 
-def get_run_jobs(run_id: int) -> list[dict]:
-    data = gh(
-        "run",
-        "view",
-        str(run_id),
-        "--repo",
-        REPO,
-        "--json",
-        "jobs",
-        json_output=True,
+def get_run_jobs(run_id: int, attempt: int | None = None) -> list[dict]:
+    """Return the jobs of a run attempt, by default the latest.
+
+    Re-running failed jobs copies the other jobs into the new attempt under new
+    IDs, but their artifacts stay under the attempt and ID they ran with, so a
+    copied job is returned as the execution it was copied from.
+    """
+    output = gh(
+        "api",
+        "--paginate",
+        f"repos/{REPO}/actions/runs/{run_id}/jobs?filter=all&per_page=100",
+        "--jq",
+        ".jobs[] | {id, run_attempt, name, conclusion, started_at}",
     )
-    return data["jobs"]
+    jobs = sorted(map(json.loads, output.splitlines()), key=lambda j: j["run_attempt"])
+    # A copied job keeps the start time of the execution it was copied from.
+    executions = {}
+    for job in jobs:
+        executions.setdefault((job["name"], job["started_at"]), job)
+    attempt = attempt or max((job["run_attempt"] for job in jobs), default=1)
+    return [
+        executions[job["name"], job["started_at"]]
+        for job in jobs
+        if job["run_attempt"] == attempt
+    ]
 
 
 def get_perf_jobs(jobs: list[dict]) -> list[dict]:
@@ -324,7 +337,8 @@ def get_perf_jobs(jobs: list[dict]) -> list[dict]:
                 "shard": m.group("shard"),
                 "num_shards": m.group("num_shards"),
                 "runner": m.group("runner"),
-                "job_id": job["databaseId"],
+                "job_id": job["id"],
+                "attempt": job["run_attempt"],
                 "name": job["name"],
                 "job_prefix": m.group("job_name"),
             }
@@ -332,7 +346,8 @@ def get_perf_jobs(jobs: list[dict]) -> list[dict]:
     return perf_jobs
 
 
-def s3_artifact_url(run_id: int, attempt: int, job: dict) -> str:
+def s3_artifact_url(run_id: int, job: dict) -> str:
+    attempt = job["attempt"]
     config = job["config"]
     shard = job["shard"]
     num_shards = job["num_shards"]
@@ -348,8 +363,8 @@ def s3_artifact_url(run_id: int, attempt: int, job: dict) -> str:
 CACHE_DIR = Path.home() / ".cache" / "perf_cli"
 
 
-def get_cache_dir(run_id: int, attempt: int) -> Path:
-    d = CACHE_DIR / f"{run_id}" / f"{attempt}"
+def get_cache_dir(run_id: int) -> Path:
+    d = CACHE_DIR / f"{run_id}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -357,11 +372,10 @@ def get_cache_dir(run_id: int, attempt: int) -> Path:
 def download_and_extract_csvs(
     run_id: int,
     jobs: list[dict],
-    attempt: int = 1,
     no_cache: bool = False,
 ) -> list[tuple[str, str]]:
     """Download artifacts and return list of (csv_filename, csv_content) pairs."""
-    cache = get_cache_dir(run_id, attempt)
+    cache = get_cache_dir(run_id)
     results = []
     fetched = 0
 
@@ -379,7 +393,7 @@ def download_and_extract_csvs(
                 results.append((csv_name, csv_file.read_text()))
             continue
 
-        url = s3_artifact_url(run_id, attempt, job)
+        url = s3_artifact_url(run_id, job)
         zip_path = cache / f"{cache_key}.zip"
         try:
             urllib.request.urlretrieve(url, str(zip_path))
@@ -729,7 +743,7 @@ def cmd_launch(args):
                 suite=None,
                 mode=None,
                 group_by=None,
-                attempt=1,
+                attempt=None,
                 no_cache=False,
             )
             print(f"\n{'=' * 70}")
@@ -897,11 +911,8 @@ def resolve_runs(branch: str, devices: list[str]) -> dict[str, int]:
     return result
 
 
-def resolve_baseline(head_run_id: int) -> tuple[int, int]:
-    """Find a main run with successful matching perf jobs, skipping the head.
-
-    Returns the run ID and its latest attempt, the one whose jobs were checked.
-    """
+def resolve_baseline(head_run_id: int) -> int:
+    """Find a main run with successful matching perf jobs, skipping the head."""
     run_data = gh(
         "run",
         "view",
@@ -944,7 +955,7 @@ def resolve_baseline(head_run_id: int) -> tuple[int, int]:
         "--limit",
         "50" if periodic else "5",
         "--json",
-        "databaseId,createdAt,headBranch,attempt",
+        "databaseId,createdAt,headBranch",
         json_output=True,
     )
     # Skip the head run itself to avoid comparing a run to itself
@@ -960,7 +971,7 @@ def resolve_baseline(head_run_id: int) -> tuple[int, int]:
                     continue
             created = run["createdAt"][:10]
             print(f"Baseline: run {baseline_id} (main, {created})")
-            return baseline_id, run.get("attempt", 1)
+            return baseline_id
 
     print(
         "No suitable baseline run found on main; use --baseline RUN_ID.",
@@ -1038,13 +1049,13 @@ def print_run_header(
 
 def fetch_run_perf(
     run_id: int,
-    attempt: int,
+    attempt: int | None,
     no_cache: bool,
     device: str = "",
     allow_empty: bool = False,
 ) -> list[PerfData]:
-    """Fetch and parse perf data for a run."""
-    jobs = get_run_jobs(run_id)
+    """Fetch and parse perf data for a run attempt, by default the latest."""
+    jobs = get_run_jobs(run_id, attempt)
     perf_jobs = get_perf_jobs(jobs)
     if not perf_jobs:
         if allow_empty:
@@ -1058,9 +1069,7 @@ def fetch_run_perf(
         jobs_by_device[identity].append(job)
     results = []
     for identity, device_jobs in jobs_by_device.items():
-        csv_pairs = download_and_extract_csvs(
-            run_id, device_jobs, attempt, no_cache=no_cache
-        )
+        csv_pairs = download_and_extract_csvs(run_id, device_jobs, no_cache=no_cache)
         results.extend(parse_csvs(csv_pairs, device=identity))
     if not results:
         if allow_empty:
@@ -1359,9 +1368,8 @@ def cmd_summary(args):
         base_perf: list[PerfData] = []
 
         for device, head_run_id in head_run_ids.items():
-            base_attempt = attempt
             if args.baseline == "latest":
-                baseline_id, base_attempt = resolve_baseline(head_run_id)
+                baseline_id = resolve_baseline(head_run_id)
             else:
                 try:
                     baseline_id = int(args.baseline)
@@ -1371,8 +1379,8 @@ def cmd_summary(args):
             print(f"Fetching baseline run {baseline_id} ({device})...")
             base_data = fetch_run_perf(
                 baseline_id,
-                base_attempt,
-                args.no_cache,
+                attempt=None,
+                no_cache=args.no_cache,
                 device=device,
                 allow_empty=auto_discovered,
             )
@@ -1863,7 +1871,7 @@ Examples:
         help=f"Group S-curves by key(s) (default: single combined). Choices: {', '.join(GROUP_CHOICES)}",
     )
     p_summary.add_argument(
-        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+        "--attempt", type=int, help="Head run attempt to read (default: latest)"
     )
     p_summary.add_argument(
         "--no-cache",
@@ -1915,7 +1923,7 @@ Examples:
         "--runtime", type=str, default=None, help="Filter to runtime (e.g. cuda, cpu)"
     )
     p_repro.add_argument(
-        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+        "--attempt", type=int, help="Run attempt to read (default: latest)"
     )
 
     # -- prepare-repro --
@@ -1960,7 +1968,7 @@ Examples:
         help="Only show setup, skip benchmark commands",
     )
     p_prep.add_argument(
-        "--attempt", type=int, default=1, help="Run attempt number (default: 1)"
+        "--attempt", type=int, help="Run attempt to read (default: latest)"
     )
 
     args = parser.parse_args()
