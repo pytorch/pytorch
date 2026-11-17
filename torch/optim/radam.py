@@ -18,6 +18,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _promote_step,
     _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
@@ -300,7 +301,10 @@ def _single_tensor_radam(
 
         # update step
         step_t += 1
-        step = step_t if capturable else _get_value(step_t)
+        if capturable:
+            step = _promote_step(step_t, param.dtype)
+        else:
+            step = _get_value(step_t)
 
         if weight_decay != 0:
             if decoupled_weight_decay:
@@ -440,12 +444,17 @@ def _multi_tensor_radam(
         bias_correction1: tuple[Tensor, ...] | list[Tensor]
         bias_correction2: tuple[Tensor, ...] | list[Tensor]
         rho_t_list: tuple[Tensor, ...] | list[Tensor]
+        steps = (
+            [_promote_step(s, grouped_params[0].dtype) for s in grouped_state_steps]
+            if capturable
+            else grouped_state_steps
+        )
         if capturable:
-            bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
+            bias_correction1 = torch._foreach_pow(beta2, steps)
             torch._foreach_neg_(bias_correction1)
             torch._foreach_add_(bias_correction1, 1)
-            bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
-            torch._foreach_mul_(bias_correction2, grouped_state_steps)
+            bias_correction2 = torch._foreach_pow(beta2, steps)
+            torch._foreach_mul_(bias_correction2, steps)
             torch._foreach_mul_(bias_correction2, 2)
             torch._foreach_div_(bias_correction2, bias_correction1)
             torch._foreach_neg_(bias_correction2)
@@ -505,17 +514,19 @@ def _multi_tensor_radam(
             ]
             del num
             del rho_t_list
-            unrect_step_size = [torch.where(rect > 0, 0.0, 1.0) for rect in rect]
+            unrect_step_size = [
+                torch.where(rect > 0, 0.0, 1.0).to(rect.dtype) for rect in rect
+            ]
             torch._foreach_mul_(unrect_step_size, lr)
 
-            bias_correction1 = torch._foreach_pow(beta1, grouped_state_steps)
+            bias_correction1 = torch._foreach_pow(beta1, steps)
             torch._foreach_neg_(bias_correction1)
             torch._foreach_add_(bias_correction1, 1)
 
             torch._foreach_div_(unrect_step_size, bias_correction1)
             torch._foreach_neg_(unrect_step_size)
 
-            bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
+            bias_correction2 = torch._foreach_pow(beta2, steps)
             torch._foreach_neg_(bias_correction2)
             torch._foreach_add_(bias_correction2, 1)
             torch._foreach_sqrt_(bias_correction2)

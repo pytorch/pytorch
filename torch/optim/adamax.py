@@ -16,6 +16,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _promote_step,
     _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
@@ -293,7 +294,8 @@ def _single_tensor_adamax(
         if capturable:
             # why jump through extra hoops and negate bias_correction? check out #121238
             # once fixed, we should use bias_correction with addcdiv value=-1 for readability
-            neg_bias_correction = beta1**step_t - 1
+            step = _promote_step(step_t, param.dtype)
+            neg_bias_correction = beta1**step - 1
             neg_bias_correction.div_(lr)
             denom = exp_inf * neg_bias_correction
             param.addcdiv_(exp_avg, denom)
@@ -405,7 +407,10 @@ def _multi_tensor_adamax(
 
         bias_corrections: tuple[Tensor, ...] | list[Tensor]
         if capturable:
-            bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
+            steps = [
+                _promote_step(s, grouped_params[0].dtype) for s in grouped_state_steps
+            ]
+            bias_corrections = torch._foreach_pow(beta1, steps)
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_corrections, 1)
             torch._foreach_div_(bias_corrections, lr)

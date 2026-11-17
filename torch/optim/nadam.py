@@ -18,6 +18,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _promote_step,
     _stack_if_compiling,
     _to_scalar,
     _use_grad_for_differentiable,
@@ -331,7 +332,7 @@ def _single_tensor_nadam(
         step_t += 1
 
         if capturable:
-            step = step_t
+            step = _promote_step(step_t, param.dtype)
         else:
             step = _get_value(step_t)
 
@@ -492,8 +493,11 @@ def _multi_tensor_nadam(
         mus: tuple[Tensor, ...] | list[Tensor]
         mu_nexts: tuple[Tensor, ...] | list[Tensor]
         if capturable:
+            steps = [
+                _promote_step(s, grouped_params[0].dtype) for s in grouped_state_steps
+            ]
             # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
-            exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)
+            exponent = torch._foreach_mul(steps, momentum_decay)
             mus = torch._foreach_pow(0.96, exponent)
             torch._foreach_mul_(mus, -0.5)
             torch._foreach_add_(mus, 1.0)
@@ -509,7 +513,7 @@ def _multi_tensor_nadam(
             # save peak memory as we don't need exponent anymore
             del exponent
 
-            bias_correction_sqrt = torch._foreach_pow(beta2, grouped_state_steps)
+            bias_correction_sqrt = torch._foreach_pow(beta2, steps)
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction_sqrt, 1.0)
             torch._foreach_neg_(bias_correction_sqrt)

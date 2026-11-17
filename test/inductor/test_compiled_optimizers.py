@@ -933,6 +933,25 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(ret_val, x)
 
+    @parametrize(
+        "optim_cls", [Adam, AdamW, Adamax, RAdam], name_fn=lambda c: c.__name__
+    )
+    @parametrize("foreach", [False, True])
+    def test_float64_params_match_eager(self, optim_cls, foreach):
+        def run(compiled):
+            torch._dynamo.reset()
+            param = torch.nn.Parameter(torch.ones(2, dtype=torch.float64))
+            opt = optim_cls([param], lr=0.1, foreach=foreach)
+            step = (
+                torch.compile(opt.step, backend="aot_eager") if compiled else opt.step
+            )
+            for grad in (0.5, -1.0, 0.125):
+                param.grad = torch.full_like(param, grad)
+                step()
+            return param.detach()
+
+        self.assertEqual(run(True), run(False), atol=0, rtol=0)
+
     # compile a large foreach op and verify
     # that the time taken is within an expected range
     @requires_gpu

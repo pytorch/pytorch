@@ -103,6 +103,12 @@ def _get_value(x: torch.Tensor | float) -> torch.Tensor | float:
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
+def _promote_step(step: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    # step is float32 unless the default dtype is float64: don't round constants derived from
+    # it to float32 for float64 params
+    return step.to(torch.promote_types(step.dtype, dtype))
+
+
 def _stack_if_compiling(
     x: Sequence[torch.Tensor | float],
 ) -> torch.Tensor | Sequence[torch.Tensor | float]:

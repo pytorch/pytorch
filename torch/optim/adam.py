@@ -18,6 +18,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _promote_step,
     _stack_if_compiling,
     _to_scalar,
     _use_grad_for_differentiable,
@@ -476,7 +477,7 @@ def _single_tensor_adam(
             exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)  # type: ignore[arg-type]
 
         if capturable or differentiable:
-            step = step_t
+            step = _promote_step(step_t, param.dtype)
 
             # Nested if is necessary to bypass jitscript rules
             if differentiable and isinstance(beta1, Tensor):
@@ -732,8 +733,11 @@ def _multi_tensor_adam(
         bias_correction2_sqrt: tuple[Tensor, ...] | list[Tensor]
 
         if capturable:
-            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
-            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]
+            steps = [
+                _promote_step(s, device_params[0].dtype) for s in device_state_steps
+            ]
+            bias_correction1 = torch._foreach_pow(beta1, steps)  # type: ignore[arg-type]
+            bias_correction2 = torch._foreach_pow(beta2, steps)  # type: ignore[arg-type]
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
