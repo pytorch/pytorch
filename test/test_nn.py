@@ -23,6 +23,7 @@ from unittest import mock, SkipTest
 import torch
 from torch import inf, nan
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.overrides import BaseTorchFunctionMode
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -2443,6 +2444,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         loss = F.huber_loss(input=inputs, target=targets, weight=weight, reduction='mean', delta=1.0)
         expected_loss = torch.tensor(0.25)
         print(torch.isclose(loss, expected_loss, atol=1e-6), f"Expected {expected_loss}, but got {loss}")
+
+    @parametrize_test("loss_fn", [F.l1_loss, F.mse_loss, F.huber_loss], name_fn=lambda f: f.__name__)
+    def test_weighted_loss_torch_function(self, loss_fn):
+        inputs = torch.tensor([1.0, 2.0, 3.0])
+        targets = torch.zeros(3)
+        weight = torch.tensor([2.0, 3.0, 4.0])
+        expected = loss_fn(inputs, targets, reduction="none") * weight
+
+        with BaseTorchFunctionMode():
+            self.assertEqual(loss_fn(inputs, targets, reduction="none", weight=weight), expected)
+
+        called = []
+
+        class RecordingTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                called.append(func)
+                return super().__torch_function__(func, types, args, kwargs)
+
+        out = loss_fn(inputs, targets, reduction="none", weight=weight.as_subclass(RecordingTensor))
+        self.assertEqual(called[:1], [loss_fn])
+        self.assertEqual(out, expected)
 
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
