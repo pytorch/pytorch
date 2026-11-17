@@ -83,11 +83,8 @@ _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
 # dict in the tracing process, so no module's vars() in a loading process holds
 # it, and the artifact carries the dict only where the graph lifted a value read
 # through it. None of the three is a name the advice below can send a caller to
-# define. The list is complete because a report here needs
-# a serializable guard rooted at a GlobalSource on the name: every other minted
-# family builds no Source (the codegen-only installs) or a guard type in
-# UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
-# moving a type off that list means re-checking this one.
+# define. Constant-result names have no fixed prefix and are restored from
+# the artifact when one of their guards is retained.
 _IMPORT_ALIAS_PREFIX = "__import_"
 _BUILTINS_DICT_PREFIX = "__builtins_dict__"
 _MINTED_GLOBAL_PREFIXES = (
@@ -780,7 +777,9 @@ class AOTCompiledFunction:
             # scope carries every recorded one freshly imported, so a guard
             # rooted at one resolves there without a captured-global warning.
             aliases = set(self._artifacts.runtime_env.import_sources)
-            self._has_global_guards = bool(recorded_globals - aliases)
+            self._has_global_guards = bool(
+                recorded_globals - aliases - output_graph.constant_result_names
+            )
             if guard_scope is not None:
                 # A live scope: a name it lacks must fail the guard rather than
                 # fall back to the value serialized with the artifact.
@@ -913,6 +912,8 @@ class AOTCompiledFunction:
                         f"{where}['__builtins__'] must be a dict or a module, got "
                         f"{type(bound).__name__}"
                     )
+        for name in output_graph.constant_result_names:
+            guard_scope.setdefault(name, output_graph.global_scope[name])
         # No disown for an alias: import_source and CompilePackage._install_global
         # bind one by plain dict assignment, and only install_global_unsafe
         # creates a CleanupHook, never for an alias.

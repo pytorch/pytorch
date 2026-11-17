@@ -565,7 +565,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                     return self._tree_map_with_path_fallback(
                         tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
                     )
-            key_const = key_tracker.vt.as_python_constant()
+            key_const = specialize_symnode(key_tracker.vt).as_python_constant()
             child_keypath = keypath + (MappingKey(key_const),)
             new_items_hashed[key_tracker] = value.call_tree_map_with_path(
                 tx,
@@ -885,8 +885,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         # A dict-family descriptor selects its declaring type, even on an OrderedDict.
         name = descriptor.__name__
+        is_read = name in ("keys", "values", "items", "__reversed__", "copy")
         if descriptor.__objclass__ is dict:
-            if issubclass(self.python_type(), collections.OrderedDict):
+            if not is_read and issubclass(self.python_type(), collections.OrderedDict):
                 flags = _flags_from_ml_flags(dict, name)
                 _check_method_arity(tx, descriptor.__qualname__, flags, args, kwargs)
                 if name == "update":
@@ -894,7 +895,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 elif name in ("pop", "setdefault"):
                     check_positional(tx, name, len(args), 1, 2)
             self.check_base_dict_mutation(tx, name)
-        if name not in ("keys", "values", "items", "__reversed__", "copy", "popitem"):
+        if not is_read and name != "popitem":
             return None
         owner = descriptor.__objclass__
         if owner is dict:
@@ -1097,28 +1098,42 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
         *,
         method_name: str = "update",
+        fast_ordered_arg: bool = False,
     ) -> VariableTracker:
         check_positional(tx, method_name, len(args), 0, 1)
         self.install_dict_keys_match_guard()
         if args or kwargs:
             tx.output.side_effects.mutation(self)
         if args:
-            self.dict_update_arg(tx, args[0])
+            self.dict_update_arg(tx, args[0], fast_ordered_arg=fast_ordered_arg)
         if kwargs:
             items = {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
             self.dict_merge(tx, ConstDictVariable(items))
         return ConstantVariable.create(None)
 
     def dict_update_arg(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        *,
+        fast_ordered_arg: bool = False,
     ) -> None:
+        # OrderedDict already checked the source and keys before selecting this path.
+        if fast_ordered_arg and isinstance(other, ConstDictVariable):
+            other.install_dict_order_guard(tx)
+            self._update_items(other.materialize_keys())
+            return
         # Probe subclass keys before dict_merge considers its raw-storage fast path.
-        if pydict_checkexact(other) or generic_hasattr_str(tx, other, "keys"):
+        if not fast_ordered_arg and (
+            pydict_checkexact(other) or generic_hasattr_str(tx, other, "keys")
+        ):
             self.dict_merge(tx, other)
         else:
             # Mutable iterables must retain live iteration across key hashes.
             pairs = lazily_unpack(
-                tx, other, allow_fast_path=self._can_fast_merge(other)
+                tx,
+                other,
+                allow_fast_path=fast_ordered_arg or self._can_fast_merge(other),
             )
             for idx, item in enumerate(pairs):
                 pair = _unpack_dict_update_pair(tx, item, idx)
@@ -1445,47 +1460,30 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         fast_keywords = all(type(key) is str for key in kwargs)
         exact_mutable = pyodict_checkexact(self) and fast_keywords and self.is_mutable()
         if exact_mutable and (not args or self._can_fast_merge(args[0])):
-            self.install_dict_keys_match_guard()
-            if args or kwargs:
-                tx.output.side_effects.mutation(self)
-            if args:
-                if isinstance(args[0], ConstDictVariable):
-                    source = args[0]
-                    source.install_dict_order_guard(tx)
-                    self._update_items(source.materialize_keys())
-                else:
-                    for idx, item in enumerate(lazily_unpack(tx, args[0])):
-                        key, value = _unpack_dict_update_pair(tx, item, idx)
-                        self._store_item(self._lookup_key(tx, key), value)
-            if kwargs:
-                self._update_items(
-                    {
-                        HashableTracker(VariableTracker.build(tx, key)): value
-                        for key, value in kwargs.items()
-                    }
-                )
-            return ConstantVariable.create(None)
+            return self.dict_update_common(tx, args, kwargs, fast_ordered_arg=True)
+        update = VariableTracker.build(tx, polyfills.odict_update)
         if exact_mutable and args:
             source = args[0].realize()
-            if (
-                type(source) is variables.ZipVariable
-                and len(source.iterable.items) == 2
-            ):
-                # zip produces pairs; keep iteration live across key hash callbacks.
+            seqs = (variables.ListVariable, variables.TupleVariable)
+            generators = (variables.ZipVariable, variables.LocalGeneratorObjectVariable)
+            if istype(source, (*seqs, *generators)):
+                # A destination key's equality callback can mutate a later pair.
                 for pair in lazily_unpack(tx, source, allow_fast_path=False):
-                    key, value = cast(variables.TupleVariable, pair).items
-                    generic_setitem(tx, self, key, value)
+                    pair = pair.realize()
+                    if istype(pair, seqs) and len(pair.items) == 2:
+                        generic_setitem(tx, self, *pair.items)
+                    else:
+                        tx.inline_user_function_return(
+                            update, [self, variables.TupleVariable([pair])], {}
+                        )
                 if kwargs:
                     OrderedDictVariable.odict_update(self, tx, [], kwargs)
                 return ConstantVariable.create(None)
-        return tx.inline_user_function_return(
-            VariableTracker.build(tx, polyfills.odict_update), [self, *args], kwargs
-        )
+        return tx.inline_user_function_return(update, [self, *args], kwargs)
 
     def nb_inplace_or_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> VariableTracker:
-        # odict_inplace_or uses mutablemapping_update_arg, including __setitem__.
         self.odict_update(tx, [other], {})
         return self
 
@@ -1969,7 +1967,7 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         # Key lookups, mutations and detached copies can observe IDs without
         # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
-            key.vt.realize()
+            specialize_symnode(key.vt.realize())
         return self.items
 
     def clone(self, **kwargs: Any) -> VariableTracker:

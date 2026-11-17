@@ -4,6 +4,7 @@ import ast
 import itertools
 import math
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
@@ -286,8 +287,281 @@ def forward(self, x_1):
                 self.assertIn("# GPU Hardware Info: \n", result)
 
 
+class TestDeviceSystemInfoComment(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        debug_utils._device_system_info_comment.cache_clear()
+        # warning_once is a process-wide functools.cache keyed on constant
+        # args; without this a second in-process run would see no warning.
+        debug_utils.warning_once.cache_clear()
+
+    def tearDown(self):
+        debug_utils._device_system_info_comment.cache_clear()
+        debug_utils.warning_once.cache_clear()
+        super().tearDown()
+
+    @staticmethod
+    def _fake_backend(device_names):
+        return SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: len(device_names),
+            get_device_name=lambda i: device_names[i],
+        )
+
+    def test_cuda_delegates_to_legacy_comment(self):
+        sentinel = "# CUDA SENTINEL\n"
+        with (
+            patch.object(
+                debug_utils, "_cuda_system_info_comment", return_value=sentinel
+            ),
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("cuda"),
+            ),
+        ):
+            self.assertEqual(debug_utils.device_system_info_comment(), sentinel)
+            # CPU tensors are filtered out, so the accelerator still decides.
+            self.assertEqual(
+                debug_utils.device_system_info_comment([torch.randn(2)]), sentinel
+            )
+
+    def test_generic_backend_collects_hardware_info(self):
+        fake = self._fake_backend(
+            ["FakeDev Model A", "FakeDev Model A", "FakeDev Model B", "FakeDev Model B"]
+        )
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+            patch.object(torch.xpu, "is_available", fake.is_available),
+            patch.object(torch.xpu, "device_count", fake.device_count),
+            patch.object(torch.xpu, "get_device_name", fake.get_device_name),
+        ):
+            out = debug_utils.device_system_info_comment([torch.randn(2)])
+        self.assertIn("# XPU Info: \n", out)
+        self.assertIn("# XPU Hardware Info: \n", out)
+        self.assertIn("# FakeDev Model A : 2 \n", out)
+        self.assertIn("# FakeDev Model B : 2 \n", out)
+
+    def test_generic_backend_includes_version_line(self):
+        fake = self._fake_backend(["FakeDev Model C"])
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+            patch.object(torch.xpu, "is_available", fake.is_available),
+            patch.object(torch.xpu, "device_count", fake.device_count),
+            patch.object(torch.xpu, "get_device_name", fake.get_device_name),
+        ):
+            with patch.object(torch.version, "xpu", "9.1.0", create=True):
+                out = debug_utils.device_system_info_comment()
+            self.assertIn("# xpu version: 9.1.0 \n", out)
+            debug_utils._device_system_info_comment.cache_clear()
+            with patch.object(torch.version, "xpu", None, create=True):
+                out = debug_utils.device_system_info_comment()
+        self.assertNotIn("version:", out)
+
+    def test_generic_backend_unavailable(self):
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+            patch.object(torch.xpu, "is_available", lambda: False),
+        ):
+            out = debug_utils.device_system_info_comment([torch.randn(2)])
+        expected = "# torch.xpu.is_available()==False, no device info collected\n"
+        self.assertEqual(out, expected)
+
+    def test_backend_without_device_name_lists(self):
+        # MPS and MTIA modules have no get_device_name; the block reports what
+        # exists instead of claiming a collection failure.
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("mps"),
+            ),
+            patch.object(torch.mps, "is_available", lambda: True),
+        ):
+            out = debug_utils.device_system_info_comment()
+        self.assertIn("# MPS Info: \n", out)
+        self.assertNotIn("Hardware Info", out)
+        self.assertNotIn("Failed to collect", out)
+
+    def test_backend_query_api_raises_degrades(self):
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+            patch.object(torch.xpu, "is_available", lambda: True),
+            patch.object(torch.xpu, "device_count", side_effect=RuntimeError("boom")),
+        ):
+            out = debug_utils.device_system_info_comment()
+        self.assertIn("# XPU Info: \n", out)
+        self.assertIn("# Failed to collect xpu hardware info\n", out)
+
+    def test_backend_availability_check_raises_degrades(self):
+        # An is_available() that throws must not escape the display path.
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+            patch.object(torch.xpu, "is_available", side_effect=RuntimeError("boom")),
+        ):
+            out = debug_utils.device_system_info_comment()
+        expected = "# torch.xpu.is_available()==False, no device info collected\n"
+        self.assertEqual(out, expected)
+
+    def test_backend_module_missing(self):
+        # The accelerator channel resolves to a type with no torch.<dt> module.
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+            patch.object(torch, "xpu", None),
+        ):
+            out = debug_utils.device_system_info_comment()
+        expected = "# torch.xpu module not found, no device info collected\n"
+        self.assertEqual(out, expected)
+
+    def test_probe_uses_accelerator_channel(self):
+        with patch.object(
+            torch.accelerator, "current_accelerator", return_value=torch.device("xpu")
+        ) as mock_current:
+            self.assertEqual(debug_utils._probe_default_device(), "xpu")
+        mock_current.assert_called_with()
+
+        with patch.object(torch.accelerator, "current_accelerator", return_value=None):
+            self.assertEqual(debug_utils._probe_default_device(), "cpu")
+
+    def test_comment_degrades_when_probe_fails(self):
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                side_effect=RuntimeError("Cannot have both"),
+            ),
+            self.assertLogs("torch._dynamo.debug_utils", level="WARNING") as logs,
+        ):
+            out = debug_utils.device_system_info_comment([torch.randn(2)])
+        expected = "# Accelerator probe failed, no device info collected\n"
+        self.assertEqual(out, expected)
+        logged = " ".join(logs.output)
+        self.assertIn("failed to detect the default accelerator", logged)
+
+        # warning_once: a second failing probe must not repeat the traceback.
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                side_effect=RuntimeError("Cannot have both"),
+            ),
+            self.assertNoLogs("torch._dynamo.debug_utils", level="WARNING"),
+        ):
+            out = debug_utils.device_system_info_comment()
+        self.assertEqual(out, "# Accelerator probe failed, no device info collected\n")
+
+    def test_cpu_only_inputs_report_no_accelerator(self):
+        args = [
+            torch.randn(2),
+            None,
+            "not a tensor",
+            torch.empty(1, device="meta"),
+        ]
+        with patch.object(torch.accelerator, "current_accelerator", return_value=None):
+            out = debug_utils.device_system_info_comment(args)
+        expected = "# No accelerator device detected, no device info collected\n"
+        self.assertEqual(out, expected)
+
+    def test_result_is_cached_per_device_type(self):
+        names = ["Old Model"]
+
+        with (
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+            patch.object(torch.xpu, "is_available", lambda: True),
+            patch.object(torch.xpu, "device_count", lambda: len(names)),
+            patch.object(torch.xpu, "get_device_name", lambda i: names[i]),
+        ):
+            out1 = debug_utils.device_system_info_comment()
+            names = ["Fresh Model"]
+            out2 = debug_utils.device_system_info_comment()
+            debug_utils._device_system_info_comment.cache_clear()
+            out3 = debug_utils.device_system_info_comment()
+        self.assertIn("Old Model", out1)
+        self.assertIn("Old Model", out2)
+        self.assertIn("Fresh Model", out3)
+
+    def test_aot_graph_input_parser_default_device(self):
+        def forward(x: "f32[2, 3]"):
+            return x
+
+        with patch.object(
+            torch.accelerator, "current_accelerator", return_value=torch.device("meta")
+        ):
+            kwargs = aot_graph_input_parser(forward)
+            self.assertEqual(kwargs["x"].device.type, "meta")
+            self.assertEqual(tuple(kwargs["x"].shape), (2, 3))
+
+            # An explicit device wins while the probe is live.
+            kwargs = aot_graph_input_parser(forward, device="cpu")
+            self.assertEqual(kwargs["x"].device.type, "cpu")
+
+        with patch.object(
+            torch.accelerator, "current_accelerator", side_effect=RuntimeError("boom")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                aot_graph_input_parser(forward)
+
+
 class TestDebugUtilsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_real_tensor_devices_dispatch(self, device):
+        recorded = []
+
+        def fake_comment(device_type):
+            recorded.append(device_type)
+            return f"# {device_type}\n"
+
+        # On the CPU variant the tensor is filtered out and the mocked
+        # accelerator channel decides; elsewhere the tensor device must win.
+        # mps is mocked because it is never a variant (except_for="mps" in
+        # the instantiation below), so the accelerator answer can never
+        # coincide with the tensor answer on any variant.
+        device_type = torch.device(device).type
+        expected = "mps" if device_type == "cpu" else device_type
+        with (
+            patch.object(debug_utils, "_device_system_info_comment", fake_comment),
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("mps"),
+            ),
+        ):
+            out = debug_utils.device_system_info_comment(
+                [torch.randn(2, device=device), torch.randn(2)]
+            )
+        self.assertEqual(recorded, [expected])
+        self.assertEqual(out, f"# {expected}\n")
 
     def test_aot_graph_parser(self, device):
         def forward(
@@ -398,6 +672,19 @@ class TestDebugUtilsDevice(TestCase):
         self.assertEqual(kwargs["primals_5"], 5)
 
 
+class TestDebugUtilsCUDAOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cuda_header_byte_identical(self, device):
+        # Nothing-patched CUDA regression anchor: real CUDA tensors through
+        # the public dispatcher must reproduce the untouched legacy output.
+        tensors = [torch.randn(4, device=device), torch.randn(2)]
+        self.assertEqual(
+            debug_utils.device_system_info_comment(tensors),
+            debug_utils._cuda_system_info_comment(),
+        )
+
+
 class TestNNModuleToStringBufferDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -437,6 +724,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestDebugUtilsDevice, globals(), except_for="mps", allow_xpu=True
 )
+
+instantiate_device_type_tests(TestDebugUtilsCUDAOnly, globals(), only_for="cuda")
 
 
 class TestBackendOverrideIntegration(TestCase):
