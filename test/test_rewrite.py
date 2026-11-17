@@ -6706,6 +6706,50 @@ class TestCfgRegions(TestCase):
             self.assertEqual(self.looks(compiled, model, x)[1], [])
             self.assertEqual(compiled(model, x), region_infer(model, x))
 
+    def test_what_stands_in_during_a_trace_does_not_leave_it(self):
+        def kept(w, x):
+            y = (w * x).sum() * 2 + 1
+            grad = torch.autograd.grad
+            z = y * 3 - 1
+            (g,) = grad(z, [w])
+            return g + 1
+
+        def again(p, x):
+            y = p * x + 1
+            return type(p)(y.detach() * 2)
+
+        def made(p, x):
+            y = p * x + 1
+            q = torch.nn.Parameter(y.detach() * 2)
+            return q, q * 3 + x
+
+        passes = with_graphs("aot_eager", min_ops=1)
+        w, x = torch.arange(4.0, requires_grad=True), torch.ones(4)
+        p = torch.nn.Parameter(torch.arange(4.0))
+        # A trace has a function that raises where torch.autograd.grad is,
+        # a tensor of its own where a Parameter is, and gives back tensors.
+        # None of that is what a call after the trace gets: the function a
+        # region read into a variable is the real one, the type of a tensor
+        # is asked of the tensor of the call, and a Parameter is made by
+        # the instruction that makes it.
+        leaves = torch.utils._pytree.tree_leaves
+        for fn, args in ((kept, (w, x)), (again, (p, x)), (made, (p, x))):
+            compiled = torch.rewrite(fn, passes=passes, fallback=False)
+            for _ in range(12):
+                got, want = compiled(*args), fn(*args)
+                for a, b in zip(leaves(got), leaves(want)):
+                    self.assertEqual(a, b)
+                    self.assertIs(type(a), type(b))
+                    self.assertEqual(a.requires_grad, b.requires_grad)
+            self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
+            if fn is again:
+                reasons = [
+                    r["reason"]
+                    for r in torch.rewrite.regions(compiled)
+                    if r["state"] == "vm"
+                ]
+                self.assertIn("asks for the type of a tensor", reasons)
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.rewrite(region_infer, passes=with_graphs("nope"))
