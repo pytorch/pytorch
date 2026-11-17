@@ -178,7 +178,7 @@ std::optional<c10::IValue> replace_each_tensor(
       }
     }
     if (copy) {
-      return std::move(copy);
+      return copy;
     }
   } else if (value.isGenericDict()) {
     std::optional<c10::impl::GenericDict> copy;
@@ -1129,9 +1129,6 @@ void fakeFallback(
   if (mode == nullptr && modeless_fallback != nullptr) {
     modeless_fallback(op, dispatchKeySet, stack);
     return;
-  }
-  if (c10::impl::PythonDispatcherTLS::get_state() != nullptr) {
-    unsupported(op, "the Python dispatcher");
   }
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
