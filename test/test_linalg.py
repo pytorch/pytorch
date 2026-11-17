@@ -1556,18 +1556,26 @@ class TestLinalg(TestCase):
 
     @parametrize("ord_val", (float("inf"), float("-inf"), -1, -2.0))
     def test_vector_norm_compile_empty_batch_negative_dim(self, device, ord_val):
+        def eager_fn(t, dim, keepdim):
+            return torch.linalg.vector_norm(t, ord=ord_val, dim=dim, keepdim=keepdim)
+        compiled_fn = torch.compile(
+            eager_fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        x = torch.empty(0, 5, device=device)
+        self.assertEqual(compiled_fn(x, -1, False), eager_fn(x, -1, False))
+
+        x_3d = torch.empty(0, 5, 3, device=device)
+        self.assertEqual(compiled_fn(x_3d, (-1,), True), eager_fn(x_3d, (-1,), True))
+
         error_cases = [
             (
-                (5, 0),
-                -1,
-                RuntimeError,
-                r"cannot compute the .* norm on the dimension -1",
-            ),
-            (
                 (0, 5),
-                (-1, -2),
+                (-1, 0),
                 RuntimeError,
-                r"cannot compute the .* norm on the dimension -2",
+                r"cannot compute the .* norm on the dimension 0",
             ),
             ((3, 0), -3, IndexError, r"Dimension out of range"),
         ]

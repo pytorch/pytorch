@@ -107,6 +107,8 @@ def _check_vector_norm_args(
         return
 
     nonempty = x.numel() != 0
+    # Preserve eager ATen error precedence in make_dim_mask / check_linalg_norm_dtype:
+    # dtype "without narrowing" must win before canonicalize_dim raises IndexError.
     if not statically_known_true(nonempty):
         torch._check(
             sym_or(

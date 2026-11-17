@@ -88,8 +88,8 @@ def sample_inputs_linalg_vector_norm(
         device,
         dtype,
         requires_grad,
-        supports_multiple_dims=True,
-        generate_args_kwargs=sample_kwargs_vector_norm,
+        supports_multiple_dims=op_info.supports_multiple_dims,
+        generate_args_kwargs=op_info.generate_args_kwargs,
         **kwargs,
     )
     yield SampleInput(
@@ -111,9 +111,9 @@ def error_inputs_linalg_vector_norm(op_info, device, **kwargs):
         SampleInput(
             torch.empty(0, 5, device=device, dtype=torch.float32),
             args=(inf,),
-            kwargs=dict(dim=(-1, -2)),
+            kwargs=dict(dim=(-1, 0)),
         ),
-        error_regex=r"linalg.vector_norm cannot compute the .* norm on the dimension -2",
+        error_regex=r"linalg.vector_norm cannot compute the .* norm on the dimension 0",
         error_type=RuntimeError,
     )
     yield ErrorInput(
