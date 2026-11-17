@@ -1368,11 +1368,43 @@ def _view_meta(
         return typing_cast(
             FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy)
         )
-    else:
-        return typing_cast(
-            FakeTensor,
-            torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
-        )
+
+    result = typing_cast(
+        FakeTensor, torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy)
+    )
+    if allow_copy or func not in (aten.view.default, aten._unsafe_view.default):
+        return result
+
+    sizes = result.shape
+    # Keep symbolic result shapes on the existing path: a dynamic size can
+    # change which dimensions are singleton at runtime.
+    if (
+        any(isinstance(size, torch.SymInt) for size in sizes)
+        or 1 not in sizes
+        or 0 in sizes
+    ):
+        return result
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    # ATen assigns singleton dimensions to the contiguous chunk on their right.
+    strides = list(result.stride())
+    changed = False
+    for dim in range(len(sizes) - 1, -1, -1):
+        if sizes[dim] != 1:
+            continue
+        if dim + 1 < len(sizes):
+            stride = sizes[dim + 1] * strides[dim + 1]
+        else:
+            stride = a.stride(-1) if a.ndim else 1
+        if not statically_known_true(strides[dim] == stride):
+            strides[dim] = stride
+            changed = True
+    return (
+        typing_cast(FakeTensor, result.as_strided(sizes, strides))
+        if changed
+        else result
+    )
 
 
 @register_op_impl(aten.view_copy.default)

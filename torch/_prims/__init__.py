@@ -1238,19 +1238,18 @@ zeta = _make_elementwise_binary_prim(
 def _as_strided_meta(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int
 ) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
     if len(size) != len(stride):
         raise AssertionError(f"len(size)={len(size)} != len(stride)={len(stride)}")
-    if statically_known_true(storage_offset < 0):
+    if storage_offset < 0:
         raise AssertionError(f"storage_offset must be >= 0, got {storage_offset}")
     utils.validate_strides(stride)
     utils.validate_shape(size)
 
-    # Empty views do not need storage, and some tensor types have no storage.
-    if isinstance(a, torch.Tensor) and not statically_known_true(
-        reduce(operator.mul, size, 1) == 0
-    ):
+    if reduce(operator.mul, size) == 0:
+        # NOTE: This special case is to avoid having to acquire the storage below
+        # as_strided to shapes with no elements are trivially valid, so it's OK
+        pass
+    elif isinstance(a, torch.Tensor):
         utils.check_in_bounds_for_storage(
             a._typed_storage(), size, stride, storage_offset
         )

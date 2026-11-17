@@ -4133,8 +4133,6 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 def _reshape_view_helper_core_alg(
     a: TensorLikeType, shape, allow_copy: bool
 ) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import is_concrete_bool, sym_eq
-
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
     # the output shape, left to right. It does this by, conceptually, accumulating
@@ -4148,7 +4146,6 @@ def _reshape_view_helper_core_alg(
     # operation below which can create a view or a copy, and while it prefers creating
     # views it may sometimes create a copy if the tensor's strides do not permit a view.
     # As a result, this algorithm tries to minimize flattening.
-    # For views, a final right-to-left pass normalizes singleton strides to match ATen.
     #
     # Note that a better version of this algorithm may exist. Regions which could be
     # flattened without creating a copy can be identified in advance, and that might
@@ -4212,57 +4209,13 @@ def _reshape_view_helper_core_alg(
         )
         a_ = squeeze(a_, idx)
 
-    def select_stride(condition, true_stride, false_stride):
-        if is_concrete_bool(condition):
-            return true_stride if condition else false_stride
-        equal = true_stride == false_stride
-        if is_concrete_bool(equal) and equal:
-            return false_stride
-        # sym_ite requires both branches to have the same type.
-        return false_stride + torch.sym_ite(condition, 1, 0) * (true_stride - false_stride)
-
-    # ATen consumes each size-one dimension with the chunk to its right.
-    original_strides = a_.stride()
-    strides = list(original_strides)
-    for dim in range(len(shape) - 1, -1, -1):
-        singleton = shape[dim] == 1
-        if is_concrete_bool(singleton) and not singleton:
-            continue
-        stride = (
-            a.stride(-1) if dim == len(shape) - 1 else shape[dim + 1] * strides[dim + 1]
-        )
-        strides[dim] = select_stride(singleton, stride, strides[dim])
-
-    same_strides = sym_eq(original_strides, strides)
-    if is_concrete_bool(same_strides) and same_strides:
-        return prims.view_of(a) if a_ is a else a_
-
-    numel = a.numel()
-    if isinstance(numel, torch.SymInt):
-        # Backed symbols can be assumed positive by the shape environment even
-        # though the exported graph can see zero. This is 1 for any nonempty tensor.
-        nonempty = 1 - 1 // (numel + 1)
-        same_shape = sym_eq(a.shape, shape)
-        if is_concrete_bool(same_shape) and same_shape:
-            empty_strides = a.stride()
-        else:
-            # The same arithmetic preserves max(size, 1) at runtime for empty views.
-            empty_strides = utils.make_contiguous_strides_for(
-                tuple(size + 1 // (size + 1) for size in shape)
-            )
-            if not is_concrete_bool(same_shape):
-                empty_strides = tuple(
-                    select_stride(same_shape, orig, contig)
-                    for orig, contig in zip(a.stride(), empty_strides)
-                )
-        strides = [e + nonempty * (s - e) for e, s in zip(empty_strides, strides)]
-
-    return torch.as_strided(a_, a_.shape, strides)
+    if a_ is a:
+        return prims.view_of(a)
+    else:
+        return a_
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
-
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
     # Reshape may be given a shape with a -1 length
@@ -4271,12 +4224,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     # Special-cases tensors with no elements
     if a.numel() == 0:
-        strides = (
-            a.stride()
-            if statically_known_true(sym_eq(a.shape, shape))
-            else utils.make_contiguous_strides_for(shape)
-        )
-        return as_strided(a, shape, strides)
+        return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
     if a.ndim == 0:
@@ -4306,7 +4254,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if is_contiguous_or_false(a) and statically_known_true(a.stride(-1) == 1):
+    if is_contiguous_or_false(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])
@@ -4314,7 +4262,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         if len(shape) == 2 and a.ndim == 1:
             dim0 = shape[0]
             dim1 = shape[1]
-            return torch.as_strided(a, [dim0, dim1], [dim1 + 1 // (dim1 + 1), 1])
+            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
 
     shape_numel = reduce(operator.mul, shape, 1)
     torch._check(

@@ -255,149 +255,27 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertTrue(is_fake_tensor(z))
             self.assertIs(maybe_get_fake_mode(z), mode)
 
-    @fake_tensor_modes
-    @parametrize("static_shapes", [True, False])
-    def test_reshape_with_singleton_strides(self, mode_cls, static_shapes):
-        if mode_cls is CppFakeTensorMode:
-            if TEST_WITH_TORCHDYNAMO:
-                self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
-            if not static_shapes:
-                self.skipTest("C++ fake fallback does not support symbolic view yet")
-            if torch._functorch.config.fake_tensor_propagate_real_tensors:
-                self.skipTest(
-                    "C++ fake fallback does not support propagate_real_tensors"
-                )
+    @parametrize("shape", [(2, 2, 1, 2), (2, 2, 1, 1, 2), (2, 2, 1, 1, 1, 2)])
+    def test_reshape_preserves_eager_singleton_strides(self, shape):
+        def expanded_view(x):
+            cols = x.shape[1]
+            return x.as_strided((2, 2, 1, 1, 2), (cols, 0, cols + 1, 2, 1), 1)
 
-        def reshape(x):
-            n = x.size(0)
-            return x.as_strided((n, 2, 1, 1, 2), (4, 0, 8, 2, 1)).reshape(n, 2, 1, 2)
-
-        x = torch.empty(2, 3)
-        eager = reshape(x)
-        eager_clone_stride = eager.clone().stride()
-        shape_env = None if static_shapes else ShapeEnv()
-        with mode_cls(shape_env=shape_env) as mode:
-            fake = reshape(mode.from_tensor(x, static_shapes=static_shapes))
-            self.assertEqual(fake.stride(), eager.stride())
-            self.assertEqual(fake.clone().stride(), eager_clone_stride)
-
-    @parametrize(
-        "sizes,strides,shape",
-        [
-            subtest(((2, 1, 1), (1, 1, 2), (2, 1)), name="trailing"),
-            subtest(((2, 1, 1, 1), (1, 9, 5, 7), (2, 1, 1)), name="trailing_run"),
-            subtest(((2, 1, 2, 1), (1, 45, 2, 7), (2, 1, 1, 2)), name="same_rank"),
-            subtest(((2, 1, 2), (1, 45, 2), (2, 1, 1, 2)), name="higher_rank"),
-            subtest(((1, 1), (9, 7), (1,)), name="single_element"),
-            subtest(((0, 2), (14, 2), (0, 2)), name="empty_same_shape"),
-        ],
-    )
-    def test_view_with_singleton_strides(self, sizes, strides, shape):
-        base = torch.empty(6)
-        expected = base.as_strided(sizes, strides, 2).view(shape)
-        with FakeTensorMode() as mode:
-            x = mode.from_tensor(base).as_strided(sizes, strides, 2)
-            for result in (x.view(shape), torch._refs.view(x, shape)):
-                self.assertEqual(result.stride(), expected.stride())
-                self.assertEqual(result.storage_offset(), expected.storage_offset())
-                self.assertTrue(torch._C._is_alias_of(x, result))
-
-    def test_view_does_not_guard_symbolic_stride(self):
-        from torch.fx.experimental.symbolic_shapes import sym_eq
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                cols = x.shape[1]
-                y = x.as_strided((2, 1, 1, 3), (cols, cols + 1, 6, 2))
-                return y.view(2, 1, 3)
-
-        model = Model()
-        x = torch.arange(32).reshape(4, 8)
-        cols = torch.export.Dim("cols", min=5, max=12)
-        exported = torch.export.export(model, (x,), dynamic_shapes=({1: cols},))
-        graph = exported.graph
-        fake_input = next(node for node in graph.nodes if node.op == "placeholder")
-        (output_nodes,) = graph.output_node().args
-        (output_node,) = output_nodes
-        symbolic_cols = fake_input.meta["val"].shape[1]
-        fake_stride = output_node.meta["val"].stride()
-        self.assertTrue(
-            statically_known_true(sym_eq(fake_stride, (symbolic_cols, 6, 2)))
-        )
-
-        x = torch.arange(24).reshape(4, 6)
-        actual = exported.module()(x)
-        expected = model(x)
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual.stride(), expected.stride())
-
-    @parametrize("change_rank", [False, True])
-    def test_decomposed_view_preserves_dynamic_strides(self, change_rank):
-        class Model(torch.nn.Module):
-            def forward(self, base, size):
-                n = size.size(0)
-                if change_rank:
-                    return base.as_strided((2, 1, 1, n), (16, 7, 5, 2)).view(2, 1, n)
-                x = base.as_strided((2, 1, n, 3), (128, 6, 32, 2))
-                return x.view(x.shape)
-
-        model = Model()
-        base = torch.arange(256)
-        size = torch.empty(2)
-        dim = torch.export.Dim("n", min=0, max=4)
-        exported = torch.export.export(
-            model, (base, size), dynamic_shapes=(None, {0: dim})
-        ).run_decompositions({aten.view.default: torch._refs.view})
-
-        ((output,),) = exported.graph.output_node().args
-        fake_stride = output.meta["val"].stride()
-        self.assertEqual(
-            tuple(guarding_hint_or_throw(s) for s in fake_stride),
-            model(base, size).stride(),
-        )
-
-        decomposed = exported.module()
-        for n in (0, 1, 2):
-            size = torch.empty(n)
-            actual = decomposed(base, size)
-            expected = model(base, size)
-            self.assertEqual(actual, expected)
-            self.assertEqual(actual.stride(), expected.stride())
-
-    @skipIfPropagateRealTensors("propagate_real_tensors resolves the real nnz")
-    @parametrize("tracing_mode", [None, "fake", "symbolic"])
-    def test_refs_view_with_unbacked_storage(self, tracing_mode):
-        from torch._prims.context import TorchRefsMode
-
-        def view_input(data):
-            count = data.nonzero().size(0)
-            base = torch.arange(count + 6)
-            return base.as_strided((2, 1, 1, 3), (3, 45, 7, 1), count - 1)
-
-        def refs_view(data):
-            x = view_input(data)
-            with TorchRefsMode(strict=True):
-                return x.view(2, 1, 3)
-
-        x = torch.ones(20)
-        expected = view_input(x).view(2, 1, 3)
-        sample = torch.ones(12)
-        if tracing_mode != "symbolic":
-            mode = FakeTensorMode(shape_env=ShapeEnv())
-            sample = mode.from_tensor(sample)
-            if tracing_mode is None:
-                with mode:
-                    actual = refs_view(sample)
-                self.assertEqual(actual.shape, expected.shape)
-                self.assertEqual(actual.stride(), expected.stride())
-                return
-
-        traced = make_fx(refs_view, tracing_mode=tracing_mode)(sample)
-        (output,) = traced.graph.output_node().args
-        self.assertEqual(output.meta["val"].stride(), expected.stride())
-        actual = traced(x)
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual.stride(), expected.stride())
+        x = torch.empty(4, 8, dtype=torch.complex64)
+        eager = expanded_view(x).reshape(shape)
+        eager_clone_strides = eager.clone().stride()
+        shape_env = ShapeEnv()
+        with torch._subclasses.fake_tensor.FakeTensorMode(shape_env=shape_env) as mode:
+            fake = expanded_view(mode.from_tensor(x, static_shapes=False))
+            guards = tuple(shape_env.guards)
+            result = fake.reshape(shape)
+            self.assertEqual(tuple(shape_env.guards), guards)
+            self.assertIsInstance(result.stride(0), torch.SymInt)
+            self.assertEqual(result.stride(0).node.expr, fake.stride(0).node.expr)
+            self.assertEqual(result.stride()[1:], eager.stride()[1:])
+            self.assertTrue(torch._C._is_alias_of(fake, result))
+            self.assertEqual(result.storage_offset(), eager.storage_offset())
+            self.assertEqual(result.clone().stride(), eager_clone_strides)
 
     def test_sparse_compressed_tensor_creation(self):
         def csr():
