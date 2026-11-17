@@ -990,12 +990,21 @@ def create_fx_config(
 ) -> _CompileFxKwargs:
     if compiler_config_extra is None:
         cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+        backward_cudagraphs = cudagraphs
         boxed_forward_device_index = None
     else:
         cudagraphs = compiler_config_extra.cudagraphs
+        # Judged from the pre-AOT graph, since a cache hit never sees the
+        # backward graph. It can overestimate (a region whose inputs don't need
+        # grad has no backward); a cached backward compiled without capture
+        # refuses it in post_compile.
+        backward_cudagraphs = compiler_config_extra.backward_cudagraphs(
+            compiler_config_extra.backward.requested
+        )
         boxed_forward_device_index = compiler_config_extra.forward_device_index
     return {
         "cudagraphs": cudagraphs,
+        "backward_cudagraphs": backward_cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
         "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
