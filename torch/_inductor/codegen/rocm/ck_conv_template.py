@@ -466,14 +466,15 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         return op
 
     def gen_instances_for_rank(self):
+        # CK's ConvParam expects per-group C/K but size_args passes totals,
+        # so grouped convs get wrong descriptors. Decline them for now.
+        if self.groups != 1:
+            return []
         instances = gen_conv_ops_library()
         n_dim_spatial = self.n_spatial_dimensions
         if n_dim_spatial == 2:
             return instances
         if n_dim_spatial not in _CK_CHANNELS_LAST_LAYOUTS:
-            return []
-        if self.groups != 1:
-            # support only non-grouped convolutions.
             return []
         # ck4inductor ships no 3D instances: gen_conv_ops_library() discards
         # what it parsed and returns a hand-built list that hardcodes
