@@ -2346,6 +2346,16 @@ def _get_test_funcs_for_test_class(test_cls):
 
 
 class TestTestParametrization(TestCase):
+    @torch.compiler.disable
+    def _run_fake_tensor_tests(self, *classes):
+        suite = unittest.TestSuite(
+            unittest.TestLoader().loadTestsFromTestCase(cls) for cls in classes
+        )
+        result = unittest.TestResult()
+        suite.run(result)
+        self.assertTrue(result.wasSuccessful(), result.errors + result.failures + result.unexpectedSuccesses)
+        return result
+
     def test_fake_tensor_methods(self):
         from torch._dynamo import config
         from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
@@ -2373,14 +2383,11 @@ class TestTestParametrization(TestCase):
                 self.assertFalse(config.use_cpp_fake_tensor)
 
         original = config.use_cpp_fake_tensor
-        suite = unittest.TestLoader().loadTestsFromTestCase(TestModes)
-        names = [test._testMethodName for test in suite]
+        names = unittest.TestLoader().getTestCaseNames(TestModes)
         self.assertEqual(len(names), 8)
         self.assertIn("test_python_only_cpp", names)
         self.assertIn("test_python_only_python", names)
-        result = unittest.TestResult()
-        suite.run(result)
-        self.assertEqual(result.errors + result.failures, [])
+        result = self._run_fake_tensor_tests(TestModes)
         self.assertEqual(len(result.skipped), 1)
         self.assertEqual(len(result.expectedFailures), 1)
         self.assertEqual(set(seen), {(False, 1), (False, 2), (True, 1), (True, 2)})
@@ -2396,7 +2403,6 @@ class TestTestParametrization(TestCase):
             @classmethod
             def setUpClass(cls):
                 super().setUpClass()
-                cls.backend = config.use_cpp_fake_tensor
                 cls.addClassCleanup(lambda: seen.append(("class_cleanup", config.use_cpp_fake_tensor)))
                 seen.append(("class_setup", config.use_cpp_fake_tensor))
                 if setup_failure:
@@ -2404,14 +2410,14 @@ class TestTestParametrization(TestCase):
 
             def setUp(self):
                 super().setUp()
-                self.assertEqual(config.use_cpp_fake_tensor, self.backend)
+                seen.append(("setup", config.use_cpp_fake_tensor))
                 self.addCleanup(lambda: seen.append(("cleanup", config.use_cpp_fake_tensor)))
 
             def test_mode(self):
                 seen.append(("test", config.use_cpp_fake_tensor))
 
             def tearDown(self):
-                self.assertEqual(config.use_cpp_fake_tensor, self.backend)
+                seen.append(("teardown", config.use_cpp_fake_tensor))
                 super().tearDown()
 
             @classmethod
@@ -2424,12 +2430,10 @@ class TestTestParametrization(TestCase):
         self.assertEqual(set(scope), {"__name__", "TestModes", "CppTestModes"})
         original = config.use_cpp_fake_tensor
         for name in ("TestModes", "CppTestModes"):
-            result = unittest.TestResult()
-            unittest.TestLoader().loadTestsFromTestCase(scope[name]).run(result)
-            self.assertEqual(result.errors + result.failures, [])
+            self._run_fake_tensor_tests(scope[name])
             self.assertEqual(config.use_cpp_fake_tensor, original)
         stages = ("class_setup", "class_cleanup") if setup_failure else (
-            "class_setup", "test", "cleanup", "class_teardown", "class_cleanup")
+            "class_setup", "setup", "test", "teardown", "cleanup", "class_teardown", "class_cleanup")
         self.assertEqual(seen, [(stage, backend) for backend in (False, True) for stage in stages])
 
     def test_fake_tensor_opinfo_composition(self):
@@ -2444,7 +2448,7 @@ class TestTestParametrization(TestCase):
         )
 
         class TestModes(TestCase):
-            @ops([op])
+            @ops([op], skip_if_dynamo=False)
             @fake_tensor_test()
             def test_op(self, device, dtype, op):
                 seen.append(config.use_cpp_fake_tensor)
@@ -2452,11 +2456,8 @@ class TestTestParametrization(TestCase):
 
         scope = {"__name__": __name__, "TestModes": TestModes}
         instantiate_device_type_tests(TestModes, scope, only_for="cpu")
-        suite = unittest.TestLoader().loadTestsFromTestCase(scope["TestModesCPU"])
-        self.assertEqual(len(list(suite)), 2)
-        result = unittest.TestResult()
-        suite.run(result)
-        self.assertEqual(result.errors + result.failures, [])
+        result = self._run_fake_tensor_tests(scope["TestModesCPU"])
+        self.assertEqual(result.testsRun, 2)
         self.assertEqual(len(result.expectedFailures), 1)
         self.assertEqual(sorted(seen), [False, True])
 
@@ -2485,9 +2486,7 @@ class TestTestParametrization(TestCase):
         else:
             instantiate_fake_tensor_tests(scope, processes=True)
         for name in ("TestModes",) if method else ("TestModes", "CppTestModes"):
-            result = unittest.TestResult()
-            unittest.TestLoader().loadTestsFromTestCase(scope[name]).run(result)
-            self.assertEqual(result.errors + result.failures, [])
+            self._run_fake_tensor_tests(scope[name])
             self.assertEqual(os.environ.get("CPP_FAKETENSOR"), previous)
         self.assertCountEqual(seen, ["FakeTensorMode", "CppFakeTensorMode"])
 
@@ -2518,10 +2517,7 @@ class TestTestParametrization(TestCase):
 
         scope = {"__name__": __name__, "TestDerived": TestDerived}
         instantiate_fake_tensor_tests(scope)
-        result = unittest.TestResult()
-        for name in ("TestDerived", "CppTestDerived"):
-            unittest.TestLoader().loadTestsFromTestCase(scope[name]).run(result)
-        self.assertEqual(result.errors + result.failures, [])
+        result = self._run_fake_tensor_tests(scope["TestDerived"], scope["CppTestDerived"])
         self.assertEqual(result.testsRun, 2)
         self.assertEqual(seen, [False, True])
 
