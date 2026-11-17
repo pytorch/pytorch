@@ -1,4 +1,4 @@
-//! The compiler and virtual machine behind `torch.cfg_compile`.
+//! The compiler and virtual machine behind `torch.rewrite`.
 //!
 //! A Python function is turned into a control-flow graph in SSA form
 //! (`frontend`), which a register VM executes (`vm`). Blocks start out in a
@@ -32,7 +32,12 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyapi::register_getattr_shortcut, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::clear_shortcuts, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::profiling_depth, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::frames_offered, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::leave_to_interpreter, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::load_passes, m)?)?;
+    m.add_class::<pyapi::NativePass>()?;
     m.add_function(wrap_pyfunction!(pyapi::plan_changed, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::unsettled, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::module_stamp, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::module_identity, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::tensor_key, m)?)?;

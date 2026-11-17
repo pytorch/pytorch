@@ -53,6 +53,10 @@ pub struct Options {
     /// Time each callee both compiled and interpreted, and leave it to the
     /// interpreter if that is where it runs faster.
     pub demote: bool,
+    /// Compile also the Python functions that are called by C code while a
+    /// compiled function runs, or by a function the interpreter runs (see
+    /// `take_frame`).
+    pub hook: bool,
 }
 
 impl Default for Options {
@@ -69,6 +73,7 @@ impl Default for Options {
             callees: true,
             shortcuts: true,
             demote: true,
+            hook: false,
         }
     }
 }
@@ -134,7 +139,7 @@ struct SettledBlocks {
     blocks: Vec<std::cell::Cell<Settled>>,
     calls: std::cell::Cell<u64>,
     trial: std::cell::Cell<Trial>,
-    /// For the function that was handed to torch.cfg_compile: whether calls
+    /// For the function that was handed to torch.rewrite: whether calls
     /// below its last call were part of a measurement (`watched`), and
     /// whether they took a noticeable part of it (`below`).
     watched: std::cell::Cell<bool>,
@@ -256,6 +261,12 @@ pub fn plan_changed() {
     PLAN_EPOCH.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Counts as a call that is part of a measurement: the samples of the
+/// functions that are running do not count as settled.
+pub fn unsettled() {
+    TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed);
+}
+
 /// The builtins `locals`, `vars` and `dir`, which look for the variables of
 /// the frame that calls them (see `Op::Locals`). Kept for good.
 unsafe fn frame_readers() -> (Obj, Obj, Obj) {
@@ -322,7 +333,7 @@ struct Callee {
 }
 
 /// The Python functions called from a function compiled with
-/// torch.cfg_compile, or from anything compiled under it, each compiled the
+/// torch.rewrite, or from anything compiled under it, each compiled the
 /// first time it is called.
 pub struct Callees {
     table: OpcodeTable,
@@ -339,6 +350,9 @@ pub struct Callees {
     /// Code objects the frontend does not support, by address: their
     /// functions run in the interpreter.
     interpreted: Shared<HashMap<usize, PyObj>>,
+    /// Code objects that are left to the interpreter for where they are
+    /// from (see `leave_to_interpreter`), by address.
+    left: Shared<HashMap<usize, PyObj>>,
     call_name: PyObj,
 }
 
@@ -347,8 +361,12 @@ unsafe impl Sync for Callees {}
 
 const MAX_CALLEES: usize = 4096;
 const RECENT_CALLEES: usize = 256;
-/// Stands for "runs in the interpreter" in the recent-callee slots.
+/// Stands for "runs in the interpreter" in the recent-callee slots: the
+/// frontend turned the function down.
 const INTERPRETED: *const Compiled = 1 as *const Compiled;
+/// The same for a function that is left to the interpreter with all it
+/// calls: it was measured to run faster there, or is one of the compilers'.
+const DEMOTED: *const Compiled = 2 as *const Compiled;
 
 impl Callees {
     pub fn new(table: OpcodeTable) -> Callees {
@@ -357,6 +375,7 @@ impl Callees {
             entries: Shared::new(HashMap::new()),
             recent: (0..RECENT_CALLEES).map(|_| std::cell::Cell::new((0, 0, std::ptr::null()))).collect(),
             interpreted: Shared::new(HashMap::new()),
+            left: Shared::new(HashMap::new()),
             call_name: unsafe {
                 PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__call__".as_ptr()))
             },
@@ -417,7 +436,57 @@ impl Callees {
         let dropped = std::mem::take(&mut *self.entries.borrow_mut());
         drop(dropped);
         self.interpreted.borrow_mut().clear();
+        self.left.borrow_mut().clear();
     }
+}
+
+/// Where the code is that is not compiled: a file, a directory (with a
+/// trailing separator), or one function of a file (`file::qualname`). It is
+/// what compiles and what was compiled: the graph compilers and the wrappers
+/// they put around their graphs, which are reached from a compiled function
+/// when it calls a function that Dynamo compiled, or when autograd runs the
+/// backward of a compiled graph.
+static LEFT: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+/// Leaves the functions whose code is in one of `places` to the
+/// interpreter, with all they call.
+pub fn leave_to_interpreter(places: Vec<String>) {
+    let mut left = LEFT.write().unwrap();
+    for place in places {
+        if !left.contains(&place) {
+            left.push(place);
+        }
+    }
+}
+
+unsafe fn is_left(code: Obj) -> bool {
+    let left = LEFT.read().unwrap();
+    if left.is_empty() {
+        return false;
+    }
+    let filename = ffi::PyObject_GetAttrString(code, c"co_filename".as_ptr());
+    if filename.is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    let name = pyffi::str_to_string(filename);
+    ffi::Py_DECREF(filename);
+    left.iter().any(|place| match place.split_once("::") {
+        Some((file, function)) => {
+            name == file && {
+                let qualname = ffi::PyObject_GetAttrString(code, c"co_qualname".as_ptr());
+                if qualname.is_null() {
+                    ffi::PyErr_Clear();
+                    return false;
+                }
+                let found = pyffi::str_to_string(qualname);
+                ffi::Py_DECREF(qualname);
+                found == function
+            }
+        }
+        None if place.ends_with('/') => name.starts_with(place.as_str()),
+        None => name == *place,
+    })
 }
 
 /// The positional arguments of a call, wherever the caller has them: the
@@ -476,15 +545,19 @@ struct Frame {
     code: *mut u16,
     /// The variables of the frame: an owned reference or null each.
     locals: *mut Obj,
+    /// Where the frame has its frame object: null until something looks at
+    /// the frame (a traceback, a debugger).
+    object: *mut Obj,
 }
 
 impl Frame {
-    const NONE: Frame = Frame { ptr: null_mut(), instr: null_mut(), code: null_mut(), locals: null_mut() };
+    const NONE: Frame =
+        Frame { ptr: null_mut(), instr: null_mut(), code: null_mut(), locals: null_mut(), object: null_mut() };
 
     unsafe fn push(function: Obj) -> Result<Frame, ()> {
         let mut frame = Frame::NONE;
         if let Some(push) = capi::api().and_then(|api| api.frame_push) {
-            frame.ptr = push(function, &mut frame.instr, &mut frame.code, &mut frame.locals);
+            frame.ptr = push(function, &mut frame.instr, &mut frame.code, &mut frame.locals, &mut frame.object);
             if frame.ptr.is_null() {
                 return Err(());
             }
@@ -807,6 +880,8 @@ unsafe fn tick() -> bool {
             }
         }
     }
+    // The interpreter is to run it: the VM would not look at what is pending.
+    let _nobody = Hooked::nobody();
     let result = ffi::PyObject_CallNoArgs(nothing);
     if result.is_null() {
         return false;
@@ -827,6 +902,89 @@ thread_local! {
     /// How many blocks are running in the profiling tier on this thread, one
     /// inside the other.
     static PROFILING_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The function handed to torch.rewrite whose call is running on this
+    /// thread: the frames the interpreter starts meanwhile are offered to it
+    /// (see `take_frame`). Null while what runs is not the function's own
+    /// code but the runtime's: a pass, a region, an import, a call that is
+    /// measured in the interpreter.
+    static HOOKED: std::cell::Cell<*const Compiled> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+/// Says, for as long as it lives, whom the frames that the interpreter
+/// starts on this thread are offered to.
+struct Hooked {
+    outer: *const Compiled,
+}
+
+impl Hooked {
+    #[inline(always)]
+    unsafe fn to(owner: *const Compiled) -> Hooked {
+        let outer = HOOKED.with(|h| h.replace(owner));
+        Hooked::want(outer, owner);
+        Hooked { outer }
+    }
+
+    /// Nobody: the interpreter runs what it starts.
+    #[inline(always)]
+    unsafe fn nobody() -> Hooked {
+        Hooked::to(std::ptr::null())
+    }
+
+    /// The interpreter calls the hook only while a thread wants it to, and
+    /// makes its own calls faster when none does.
+    #[inline(always)]
+    unsafe fn want(from: *const Compiled, to: *const Compiled) {
+        if from.is_null() != to.is_null() {
+            if let Some(want) = capi::api().and_then(|api| api.frame_want) {
+                want(if to.is_null() { -1 } else { 1 });
+            }
+        }
+    }
+}
+
+impl Drop for Hooked {
+    #[inline(always)]
+    fn drop(&mut self) {
+        unsafe {
+            let inner = HOOKED.with(|h| h.replace(self.outer));
+            Hooked::want(inner, self.outer);
+        }
+    }
+}
+
+/// Whether the frames the interpreter starts on this thread are offered to a
+/// compiled function now.
+pub fn frames_offered() -> bool {
+    HOOKED.with(|h| !h.get().is_null())
+}
+
+/// What the interpreter's frame hook offers a frame to: one it made for a
+/// call of the Python function `function`, with the arguments bound and
+/// nothing run yet. These are the calls the VM does not make itself: those
+/// of C code (a constructor, a property, an operator, a callback of
+/// `sorted` or of autograd, `functools.partial`), and those of a function
+/// that the interpreter runs under a compiled one. The function runs as a
+/// callee of the function whose call this is: compiled, in the frame the
+/// interpreter made; or by the interpreter, if the frontend turned it down
+/// (what it calls is offered in turn) or it was measured to run faster
+/// there (with all it calls). Returns 0 if no compiled function is running.
+pub unsafe extern "C" fn take_frame(function: Obj, frame: *mut std::ffi::c_void, result: *mut Obj) -> i32 {
+    let owner = HOOKED.with(|h| h.get());
+    if owner.is_null() {
+        return 0;
+    }
+    let owner = &*owner;
+    let interpret = || (capi::api().unwrap_unchecked().frame_interpret.unwrap_unchecked())(frame);
+    let form = owner.function_form(function);
+    *result = if form == INTERPRETED {
+        interpret()
+    } else if form == DEMOTED {
+        let _nobody = Hooked::nobody();
+        interpret()
+    } else {
+        owner.tiered(form, function, || (*form).enter_frame(function, frame), interpret)
+    };
+    1
 }
 
 /// What a leap is called with in place of a value that is not defined.
@@ -1102,7 +1260,7 @@ impl Compiled {
         if boxed.is_null() {
             // The reference was consumed either way.
             *regs.get_unchecked_mut(v as usize) = null_mut();
-            panic!("cfg_compile: could not create the Python object of a tensor");
+            panic!("torch.rewrite: could not create the Python object of a tensor");
         }
         *regs.get_unchecked_mut(v as usize) = boxed;
         self.boxed_later.fetch_add(1, Ordering::Relaxed);
@@ -1539,17 +1697,7 @@ impl Compiled {
                             }
                         }
                     }
-                    let result = self.exec(&mut regs, frame);
-                    // The traceback of an exception that leaves the function
-                    // refers to its frame, which takes its variables along.
-                    self.settle(frame);
-                    if self.unbound.any.get() {
-                        self.forget(|_| true);
-                    }
-                    // Before the registers are released, as the interpreter
-                    // unlinks a frame before it clears its locals.
-                    frame.pop();
-                    result
+                    self.run(&mut regs, frame)
                 }
                 Err(()) => null_mut(),
             },
@@ -1575,6 +1723,72 @@ impl Compiled {
             ffi::Py_LeaveRecursiveCall();
             DEPTH.with(|d| d.set(d.get() - 1));
         }
+        result
+    }
+
+    /// Runs the function in a frame that has its arguments, and pops the
+    /// frame.
+    #[inline(always)]
+    unsafe fn run(&self, regs: &mut [Obj], frame: Frame) -> Obj {
+        let mut result = self.exec(regs, frame);
+        // A debugger that was entered below this call has its trace function
+        // on the frame, and is told that the function returns.
+        if !frame.object.is_null() && !(*frame.object).is_null() && !result.is_null() {
+            if let Some(returns) = capi::api().and_then(|api| api.frame_returns) {
+                if returns(frame.ptr, result) != 0 {
+                    ffi::Py_DECREF(result);
+                    result = null_mut();
+                }
+            }
+        }
+        // The traceback of an exception that leaves the function refers to
+        // its frame, which takes its variables along.
+        self.settle(frame);
+        if self.unbound.any.get() {
+            self.forget(|_| true);
+        }
+        // Before the registers are released, as the interpreter unlinks a
+        // frame before it clears its locals.
+        frame.pop();
+        result
+    }
+
+    /// `enter` for a call the interpreter has made a frame for (see
+    /// `take_frame`): the arguments are bound in it, as the variables they
+    /// are, and the function runs in it. The frame is gone on return.
+    unsafe fn enter_frame(&self, function: Obj, made: *mut std::ffi::c_void) -> Obj {
+        let api = capi::api().unwrap_unchecked();
+        let mut frame = Frame { ptr: made, ..Frame::NONE };
+        let adopt = api.frame_adopt.unwrap_unchecked();
+        if adopt(made, &mut frame.instr, &mut frame.code, &mut frame.locals, &mut frame.object) == 0 {
+            return null_mut();
+        }
+        let here = std::ptr::addr_of!(frame) as usize;
+        if here < STACK_FLOOR.with(|floor| *floor) {
+            set_error(ffi::PyExc_RecursionError, "maximum recursion depth exceeded".to_string());
+            frame.pop();
+            return null_mut();
+        }
+        // The call may come from any instruction of this same function (an
+        // attribute that is a property, an operator), not only from a call,
+        // before which the variables of its frames have their objects.
+        if self.unbound.any.get() {
+            self.bind();
+        }
+        let nregs = self.func.nvalues as usize + 1;
+        let mut regs = self.frames.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); nregs]);
+        regs[nregs - 1] = new_ref(function);
+        for (slot, v) in self.func.params.iter().enumerate() {
+            let o = *frame.locals.add(slot);
+            if !o.is_null() {
+                regs[*v as usize] = new_ref(o);
+            }
+        }
+        let result = self.run(&mut regs, frame);
+        for r in regs.iter_mut() {
+            capi::release(std::mem::replace(r, null_mut()));
+        }
+        self.frames.borrow_mut().push(regs);
         result
     }
 
@@ -1729,35 +1943,55 @@ impl Compiled {
         self.compiled_function(func).map(|compiled| (compiled, func, receiver))
     }
 
+    #[inline(always)]
     unsafe fn compiled_function(&self, func: Obj) -> Option<*const Compiled> {
+        let form = self.function_form(func);
+        if form == INTERPRETED || form == DEMOTED {
+            None
+        } else {
+            Some(form)
+        }
+    }
+
+    /// What a Python function runs as: its compiled form, or one of
+    /// INTERPRETED and DEMOTED.
+    #[inline(always)]
+    unsafe fn function_form(&self, func: Obj) -> *const Compiled {
         let callees = &self.callees;
         let code = ffi::PyFunction_GetCode(func);
         let globals = ffi::PyFunction_GetGlobals(func);
         let slot = callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
         let (recent_code, recent_globals, recent) = slot.get();
         if recent_code == code as usize && recent_globals == globals as usize {
-            return if recent == INTERPRETED { None } else { Some(recent) };
+            return recent;
         }
-        let found = self
-            .compiled_function_slow(func, code, globals)
-            .filter(|compiled| (**compiled).settled.trial.get().phase != TRIAL_DEMOTED);
-        slot.set((code as usize, globals as usize, found.unwrap_or(INTERPRETED)));
-        found
+        let form = self.function_form_slow(func, code, globals);
+        slot.set((code as usize, globals as usize, form));
+        form
     }
 
-    unsafe fn compiled_function_slow(&self, func: Obj, code: Obj, globals: Obj) -> Option<*const Compiled> {
+    unsafe fn function_form_slow(&self, func: Obj, code: Obj, globals: Obj) -> *const Compiled {
         let callees = &self.callees;
         let key = (code as usize, globals as usize);
         if let Some(c) = callees.entries.borrow().get(&key) {
-            return Some(Arc::as_ptr(&c.compiled));
+            let compiled = Arc::as_ptr(&c.compiled);
+            return if (*compiled).settled.trial.get().phase == TRIAL_DEMOTED { DEMOTED } else { compiled };
+        }
+        if callees.left.borrow().contains_key(&(code as usize)) {
+            return DEMOTED;
         }
         if callees.interpreted.borrow().contains_key(&(code as usize))
             || callees.entries.borrow().len() >= MAX_CALLEES
         {
-            return None;
+            return INTERPRETED;
+        }
+        if is_left(code) {
+            callees.left.borrow_mut().insert(code as usize, PyObj::from_borrowed(code));
+            return DEMOTED;
         }
         let py = pyo3::Python::assume_gil_acquired();
         let bound = pyo3::Bound::from_borrowed_ptr(py, func);
+        let _nobody = Hooked::nobody();
         match lower(py, &callees.table, &bound, &self.options) {
             Ok(function) => {
                 let compiled = Arc::new(Compiled::new(
@@ -1775,12 +2009,12 @@ impl Compiled {
                         compiled,
                     },
                 );
-                Some(pointer)
+                pointer
             }
             // Unsupported by the frontend: the interpreter runs it.
             Err(_) => {
                 callees.interpreted.borrow_mut().insert(code as usize, PyObj::from_borrowed(code));
-                None
+                INTERPRETED
             }
         }
     }
@@ -2070,11 +2304,17 @@ impl Compiled {
         unsafe { self.specialize(block) };
     }
 
-    /// `call` for the function that was handed to torch.cfg_compile, which
+    /// `call` for the function that was handed to torch.rewrite, which
     /// is measured against the interpreter as its callees are.
     pub unsafe fn call_measured(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
+        // While it runs compiled, the frames the interpreter starts are
+        // offered to it.
+        let call = || {
+            let _hooked = self.options.hook.then(|| Hooked::to(self));
+            self.call(function, args, kwargs)
+        };
         if !self.options.demote {
-            return self.call(function, args, kwargs);
+            return call();
         }
         let phase = self.settled.trial.get().phase;
         if phase == TRIAL_COMPILED {
@@ -2083,7 +2323,7 @@ impl Compiled {
             let start = self.settled.watched.get().then(std::time::Instant::now);
             let events = TRIAL_EVENTS.load(Ordering::Relaxed);
             let measured = TRIAL_TIME.load(Ordering::Relaxed);
-            let result = self.call(function, args, kwargs);
+            let result = call();
             let watched = TRIAL_EVENTS.load(Ordering::Relaxed) != events;
             // Without the clock, it is not known how much of the call it was.
             let below = watched
@@ -2097,17 +2337,13 @@ impl Compiled {
         }
         if phase == TRIAL_DEMOTED {
             self.settled.below.set(false);
+            let _nobody = Hooked::nobody();
             return ffi::PyObject_Call(function, args, kwargs);
         }
         // Not known before a call that is not itself part of a measurement.
         self.settled.watched.set(true);
         self.settled.below.set(true);
-        self.trial_call(
-            self,
-            null_mut(),
-            || self.call(function, args, kwargs),
-            || ffi::PyObject_Call(function, args, kwargs),
-        )
+        self.trial_call(self, null_mut(), call, || ffi::PyObject_Call(function, args, kwargs))
     }
 
     /// Whether it is still open which of the two this function is run as,
@@ -2151,6 +2387,12 @@ impl Compiled {
         run_compiled: impl FnOnce() -> Obj,
         run_interpreted: impl FnOnce() -> Obj,
     ) -> Obj {
+        // What is left to the interpreter is left to it with all it calls:
+        // that is what was measured.
+        let run_interpreted = || {
+            let _nobody = Hooked::nobody();
+            run_interpreted()
+        };
         if (*compiled).settled.trial.get().phase == TRIAL_DEMOTED {
             return run_interpreted();
         }
@@ -2256,7 +2498,7 @@ impl Compiled {
                 let globals = ffi::PyFunction_GetGlobals(func);
                 let recent =
                     self.callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
-                recent.set((code as usize, globals as usize, INTERPRETED));
+                recent.set((code as usize, globals as usize, DEMOTED));
             }
         } else if trial.calls >= TRIAL_MAX_CALLS {
             trial.phase = TRIAL_COMPILED;
@@ -2378,6 +2620,9 @@ impl Compiled {
                     self.obj(regs, *fromlist),
                     self.obj(regs, *level),
                 ];
+                // The import system, and the module it runs, are the
+                // interpreter's.
+                let _nobody = Hooked::nobody();
                 checked(ffi::PyObject_Vectorcall(import, args.as_ptr(), 5, null_mut()))
             }
             Op::ImportFrom(module, name) => {
@@ -3173,7 +3418,7 @@ impl Compiled {
                     None => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_size ran without its guard".to_string(),
+                            "torch.rewrite: tensor_size ran without its guard".to_string(),
                         );
                         Err(())
                     }
@@ -3188,7 +3433,7 @@ impl Compiled {
                     _ => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_dim ran without its guard".to_string(),
+                            "torch.rewrite: tensor_dim ran without its guard".to_string(),
                         );
                         Err(())
                     }
@@ -3326,6 +3571,11 @@ impl Compiled {
         // Operands are borrowed from the registers, which the operation does
         // not touch; read them first so a call sees its callee.
         let ptrs_before = self.operand_ptrs(regs, kind, op, &operands);
+        // What the operation calls is the interpreter's while it is looked
+        // at: a Python function under it (`Tensor.__rsub__`) that is one
+        // kernel call makes the operation that call, and compiled it would
+        // be a function with a call site of its own.
+        let nobody = Hooked::nobody();
         (api.capture_begin)();
         // A method call needs the bound method it looked up for the analysis.
         let mut method: Obj = null_mut();
@@ -3344,6 +3594,7 @@ impl Compiled {
             _ => self.exec_op(regs, op),
         };
         let trace = (api.capture_end)();
+        drop(nobody);
         let mut site = null_mut();
         let mut reason = None;
         if !trace.is_null() {
@@ -3599,6 +3850,8 @@ impl Compiled {
     /// pass pipeline over a fresh copy of the block and installs the result
     /// as a new version.
     unsafe fn specialize(&self, b: usize) {
+        // The passes are not the function's code.
+        let _nobody = Hooked::nobody();
         let (slots, obs, speculate, id) = {
             let mut st = self.state.borrow_mut();
             let obs = st.obs.clone();
@@ -3761,7 +4014,10 @@ impl Compiled {
                                     self.bind();
                                 }
                                 let outer = REGION_FRAME.with(|f| f.replace(frame));
-                                let target = self.leap(regs, callee.as_ptr(), args, frame, inst.bc);
+                                let target = {
+                                    let _nobody = Hooked::nobody();
+                                    self.leap(regs, callee.as_ptr(), args, frame, inst.bc)
+                                };
                                 REGION_FRAME.with(|f| f.set(outer));
                                 match target {
                                     Ok(None) => Ok(null_mut()),
@@ -3779,7 +4035,10 @@ impl Compiled {
                                     self.bind();
                                 }
                                 let outer = REGION_FRAME.with(|f| f.replace(frame));
-                                let result = self.exec_op(regs, &inst.op);
+                                let result = {
+                                    let _nobody = Hooked::nobody();
+                                    self.exec_op(regs, &inst.op)
+                                };
                                 REGION_FRAME.with(|f| f.set(outer));
                                 result
                             }

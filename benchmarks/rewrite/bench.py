@@ -1,21 +1,21 @@
-"""Benchmarks for torch.cfg_compile.
+"""Benchmarks for torch.rewrite.
 
 Compares eager execution with the tiers of the cfg VM on small workloads where
 per-operation overhead matters, and prints the results as Markdown tables
 (with Mermaid charts when --charts is given).
 
-    python benchmarks/cfg_compile/bench.py
-    python benchmarks/cfg_compile/bench.py --charts --json results.json > report.md
+    python benchmarks/rewrite/bench.py
+    python benchmarks/rewrite/bench.py --charts --json results.json > report.md
 
 The modes are cumulative, each adding one mechanism to the previous one:
 
     eager          plain Python and the regular bindings
-    generic        the VM running bytecode semantics (specialize=False)
+    generic        the VM running bytecode semantics (no passes over a block)
     sites          + operations call the kernel the dispatcher resolved them to,
                    entering at the top of the chain (skip_autograd=False)
     skip_autograd  + enter below the Autograd kernel when no gradient is tracked
     unboxed        + kernel results get no Python object until Python needs one
-    default        what torch.cfg_compile(fn) gives: all of the above, and what
+    default        what torch.rewrite(fn) gives: all of the above, and what
                    is measured to run faster in the interpreter is left to it
 
 A last section times code that is mostly Python (loops, calls, an nn.Module
@@ -32,11 +32,11 @@ import torch
 
 MODES = ["eager", "generic", "sites", "skip_autograd", "unboxed", "default"]
 # The four mechanisms are measured on the VM itself; "default" is what
-# torch.cfg_compile(fn) gives, which also leaves to the interpreter what
+# torch.rewrite(fn) gives, which also leaves to the interpreter what
 # runs faster there.
 VM = {"demote": False}
 MODE_OPTIONS = {
-    "generic": {"specialize": False, **VM},
+    "generic": {"passes": torch.rewrite.canonical[:3], **VM},
     "sites": {"skip_autograd": False, "unboxed": False, **VM},
     "skip_autograd": {"unboxed": False, **VM},
     "unboxed": VM,
@@ -228,7 +228,7 @@ def compiled_modes(fn, modes=MODES):
     return {
         mode: fn
         if mode == "eager"
-        else torch.cfg_compile(fn, fallback=False, **MODE_OPTIONS[mode])
+        else torch.rewrite(fn, fallback=False, **MODE_OPTIONS[mode])
         for mode in modes
     }
 
@@ -267,7 +267,7 @@ def bench_warmup(device):
     build, calls = [], []
     for _ in range(20):
         start = time.perf_counter_ns()
-        compiled = torch.cfg_compile(for_loop, fallback=False)
+        compiled = torch.rewrite(for_loop, fallback=False)
         build.append(time.perf_counter_ns() - start)
         times = []
         for _ in range(6):
@@ -311,15 +311,16 @@ def bench_autograd(device):
 def bench_narrowing(device):
     """Shape-dependent control flow: everything dynamic versus a range guard
     on the dimension the branch looks at."""
-    pipeline = torch.cfg_compile.Pipeline
+    canonical = list(torch.rewrite.canonical)
+    at = canonical.index("fold")
     y = torch.randn(1, 16, device=device)
     out = {}
     for label, pipe in (
-        ("default", pipeline.default()),
-        ("narrowing", pipeline.narrowing()),
+        ("default", canonical),
+        ("narrowing", [*canonical[:at], "narrow_dims", *canonical[at:]]),
     ):
-        compiled = torch.cfg_compile(
-            shape_branch, pipeline=pipe, fallback=False, demote=False
+        compiled = torch.rewrite(
+            shape_branch, passes=pipe, fallback=False, demote=False
         )
         timings = {}
         for batch in (1, 8):
@@ -345,7 +346,7 @@ def bench_unboxing(device):
         ("chain of 9 ops", chain, args[:2]),
         ("for loop, 10 x (3 ops + branch)", for_loop, args),
     ):
-        compiled = torch.cfg_compile(fn, fallback=False, demote=False)
+        compiled = torch.rewrite(fn, fallback=False, demote=False)
         for _ in range(3):
             compiled(*a)
         before = compiled.stats()
@@ -374,7 +375,7 @@ def bench_python(device):
     def row(name, fn, args, variants, per=1):
         fns = {"eager": fn}
         for label, options in variants.items():
-            fns[label] = torch.cfg_compile(fn, fallback=False, **options)
+            fns[label] = torch.rewrite(fn, fallback=False, **options)
         # Long enough a warm-up for the measurements of callees to settle.
         for compiled in fns.values():
             for _ in range(300 if per == 1 else 60):
@@ -382,20 +383,24 @@ def bench_python(device):
         ns = compare(fns, args, device)
         rows.append({"name": name, "ns": {k: v / per for k, v in ns.items()}})
 
-    plain = {"default": {"unroll": False}, "vm": {"unroll": False, **VM}}
+    def without(*names):
+        return {"passes": [p for p in torch.rewrite.canonical if p not in names]}
+
+    rolled = without("unroll")
+    plain = {"default": rolled, "vm": {**rolled, **VM}}
     row("loop: total += i, per iteration", py_loop, (n,), plain, per=n)
     row("loop with a branch, per iteration", py_branches, (n,), plain, per=n)
     row(
         "loop calling a Python function, per iteration",
         py_calls,
         (n,),
-        {**plain, "vm, not inlined": {"unroll": False, "inline": False, **VM}},
+        {**plain, "vm, not inlined": {**without("unroll", "inline"), **VM}},
         per=n,
     )
     modules = {
         "default": {},
         "vm": VM,
-        "vm, no shortcuts": {"shortcuts": False, **VM},
+        "vm, no shortcuts": {**without("shortcuts"), **VM},
         "vm, callees interpreted": {"callees": False, **VM},
     }
     net = Net().to(device)
@@ -505,9 +510,7 @@ def report(results, charts):
     out.append("### Warm-up (for loop, 64 elements)\n")
     out.append("| step | time (us) |")
     out.append("|---|---:|")
-    out.append(
-        f"| `torch.cfg_compile(fn)`: bytecode to SSA | {warm['build'] / 1e3:,.1f} |"
-    )
+    out.append(f"| `torch.rewrite(fn)`: bytecode to SSA | {warm['build'] / 1e3:,.1f} |")
     for i, t in enumerate(warm["calls"]):
         out.append(f"| call {i + 1} | {t / 1e3:,.1f} |")
     out.append(f"| steady state | {warm['steady'] / 1e3:,.1f} |")
@@ -548,7 +551,7 @@ def report(results, charts):
     if "python" in results:
         out.append("### Python code, calls and modules\n")
         out.append(
-            "Times are ns. `default` is `torch.cfg_compile(fn)`; `vm` is the VM made to run "
+            "Times are ns. `default` is `torch.rewrite(fn)`; `vm` is the VM made to run "
             "everything itself (`demote=False`). Ratios are over eager: below 1 is faster.\n"
         )
         columns = (
@@ -626,7 +629,7 @@ def main():
     )
     args = parser.parse_args()
 
-    if not torch.cfg_compile.is_available():
+    if not torch.rewrite.is_available():
         raise SystemExit(
             "this build has no cfg_compile runtime; build with USE_CFG_COMPILE=1"
         )

@@ -1739,15 +1739,10 @@ void THP_PyThreadState_PopFrame(
     _PyInterpreterFrame* frame);
 }
 
-void* framePush(
-    PyObject* func,
-    uint16_t*** instr,
-    uint16_t** code_start,
-    PyObject*** locals) {
-  PyThreadState* tstate = PyThreadState_Get();
-  // A compiled function is a Python call: it counts against the recursion
-  // limit in the interpreter's own counter, as _Py_EnterRecursivePy does, so
-  // that the limit means the same depth whoever runs the functions.
+// A function that the VM runs is a Python call: it counts against the
+// recursion limit in the interpreter's own counter, as _Py_EnterRecursivePy
+// does, so that the limit means the same depth whoever runs the functions.
+bool enterPythonCall(PyThreadState* tstate) {
   if (tstate->py_recursion_remaining-- <= 0) {
     int depth = tstate->py_recursion_limit - tstate->py_recursion_remaining;
     int limit = Py_GetRecursionLimit();
@@ -1758,21 +1753,26 @@ void* framePush(
     } else {
       ++tstate->py_recursion_remaining;
       PyErr_SetString(PyExc_RecursionError, "maximum recursion depth exceeded");
-      return nullptr;
+      return false;
     }
   }
-  auto* function = reinterpret_cast<PyFunctionObject*>(func);
-  auto* code = reinterpret_cast<PyCodeObject*>(function->func_code);
-  _PyInterpreterFrame* frame =
-      THP_PyThreadState_BumpFramePointerSlow(tstate, code->co_framesize);
-  if (frame == nullptr) {
-    ++tstate->py_recursion_remaining;
-    return nullptr;
-  }
-  Py_INCREF(func);
-  _PyFrame_Initialize(frame, function, nullptr, code, 0);
-  // What COPY_FREE_VARS does. The other variables start out unbound: the VM
-  // fills them in as the function binds them.
+  return true;
+}
+
+// Makes a frame that was initialized for a call the current one of the
+// thread, with the cells of the function's closure in it.
+void frameLink(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame,
+    uint16_t*** instr,
+    uint16_t** code_start,
+    PyObject*** locals,
+    PyObject*** object) {
+  auto* function = reinterpret_cast<PyFunctionObject*>(frame->f_funcobj);
+  PyCodeObject* code = frame->f_code;
+  // What COPY_FREE_VARS does. The other variables are what the caller bound
+  // (the arguments, for a frame the interpreter made) or start out unbound:
+  // the VM fills them in as the function binds them.
   if (PyObject* closure = function->func_closure) {
     Py_ssize_t n = PyTuple_GET_SIZE(closure);
     Py_ssize_t first = code->co_nlocalsplus - n;
@@ -1788,7 +1788,49 @@ void* framePush(
   *instr = reinterpret_cast<uint16_t**>(&frame->prev_instr);
   *code_start = reinterpret_cast<uint16_t*>(_PyCode_CODE(code));
   *locals = frame->localsplus;
+  *object = reinterpret_cast<PyObject**>(&frame->frame_obj);
+}
+
+void* framePush(
+    PyObject* func,
+    uint16_t*** instr,
+    uint16_t** code_start,
+    PyObject*** locals,
+    PyObject*** object) {
+  PyThreadState* tstate = PyThreadState_Get();
+  if (!enterPythonCall(tstate)) {
+    return nullptr;
+  }
+  auto* function = reinterpret_cast<PyFunctionObject*>(func);
+  auto* code = reinterpret_cast<PyCodeObject*>(function->func_code);
+  _PyInterpreterFrame* frame =
+      THP_PyThreadState_BumpFramePointerSlow(tstate, code->co_framesize);
+  if (frame == nullptr) {
+    ++tstate->py_recursion_remaining;
+    return nullptr;
+  }
+  Py_INCREF(func);
+  _PyFrame_Initialize(frame, function, nullptr, code, 0);
+  frameLink(tstate, frame, instr, code_start, locals, object);
   return frame;
+}
+
+int32_t frameAdopt(
+    void* made,
+    uint16_t*** instr,
+    uint16_t** code_start,
+    PyObject*** locals,
+    PyObject*** object) {
+  auto* frame = static_cast<_PyInterpreterFrame*>(made);
+  PyThreadState* tstate = PyThreadState_Get();
+  if (!enterPythonCall(tstate)) {
+    // Whoever is handed a frame to run disposes of it.
+    THP_PyFrame_Clear(frame);
+    THP_PyThreadState_PopFrame(tstate, frame);
+    return 0;
+  }
+  frameLink(tstate, frame, instr, code_start, locals, object);
+  return 1;
 }
 
 int32_t frameHeld(void* held) {
@@ -1818,6 +1860,118 @@ void* frameSwap(void* frame) {
 int32_t frameTraced() {
   PyThreadState* tstate = PyThreadState_Get();
   return tstate->c_tracefunc != nullptr;
+}
+
+int32_t frameReturns(void* returning, PyObject* result) {
+  auto* frame = static_cast<_PyInterpreterFrame*>(returning);
+  PyThreadState* tstate = PyThreadState_Get();
+  PyFrameObject* object = frame->frame_obj;
+  if (object == nullptr || object->f_trace == nullptr ||
+      tstate->c_tracefunc == nullptr || tstate->tracing != 0) {
+    return 0;
+  }
+  // What the interpreter does for a frame that has a trace function when it
+  // returns; the function is not itself traced.
+  Py_INCREF(object);
+  tstate->tracing++;
+  int failed =
+      tstate->c_tracefunc(tstate->c_traceobj, object, PyTrace_RETURN, result);
+  tstate->tracing--;
+  Py_DECREF(object);
+  return failed != 0 ? -1 : 0;
+}
+
+// The frame evaluation function of the interpreter (PEP 523) while a
+// rewritten function runs. The interpreter has one for all threads, and
+// others set theirs too (Dynamo): this one is put in front of what is there
+// when the first thread wants it, hands on to that what it does not take,
+// and is taken out when the last thread is done, unless another one was put
+// in front of it since; then it stays, and hands everything on.
+TcfgTakeFrame hook_take = nullptr;
+_PyFrameEvalFunction hook_below = nullptr;
+bool hook_linked = false;
+int32_t hook_wanted = 0;
+// The frame this thread is handing on to what is below.
+thread_local _PyInterpreterFrame* hook_handing = nullptr;
+// The interpreter the hook was registered in: the only one PyTorch runs in.
+PyInterpreterState* hook_interp = nullptr;
+
+PyObject* handOn(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame,
+    int throwflag) {
+  _PyInterpreterFrame* outer = hook_handing;
+  hook_handing = frame;
+  PyObject* result = hook_below(tstate, frame, throwflag);
+  hook_handing = outer;
+  return result;
+}
+
+PyObject* evalFrame(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame,
+    int throwflag) {
+  // Evaluators that were put in front of one another out of order form a
+  // ring: a frame that comes around is the interpreter's.
+  if (frame == hook_handing) {
+    return _PyEval_EvalFrameDefault(tstate, frame, throwflag);
+  }
+  // Offered: the frame of a call of a function, before its first
+  // instruction. Not the body of a class or a module, which has its
+  // variables in a dict; not a generator or a coroutine, whose frame outlives
+  // the call; nothing while a trace function is set, which the interpreter
+  // tells about the frames it runs; and nothing that is another evaluator's
+  // business: while one is in front of this one, or is running a frame that
+  // this one handed on to it.
+  constexpr int kinds =
+      CO_OPTIMIZED | CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR;
+  if (hook_wanted > 0 && throwflag == 0 &&
+      frame->owner == FRAME_OWNED_BY_THREAD && frame->f_locals == nullptr &&
+      (frame->f_code->co_flags & kinds) == CO_OPTIMIZED &&
+      tstate->c_tracefunc == nullptr && PyFunction_Check(frame->f_funcobj) &&
+      (hook_handing == nullptr || hook_below == &_PyEval_EvalFrameDefault) &&
+      _PyInterpreterState_GetEvalFrameFunc(tstate->interp) == &evalFrame) {
+    PyObject* result = nullptr;
+    if (hook_take(frame->f_funcobj, frame, &result)) {
+      return result;
+    }
+  }
+  return handOn(tstate, frame, throwflag);
+}
+
+void frameHook(TcfgTakeFrame take) {
+  hook_take = take;
+  hook_interp = PyInterpreterState_Get();
+}
+
+void frameWant(int32_t delta) {
+  hook_wanted += delta;
+  // Nothing is done but for the first thread to want the hook and the last
+  // to let go of it.
+  if (hook_wanted > 1 || (hook_wanted == 1 && delta < 0) ||
+      hook_take == nullptr) {
+    return;
+  }
+  PyInterpreterState* interp = hook_interp;
+  _PyFrameEvalFunction current = _PyInterpreterState_GetEvalFrameFunc(interp);
+  if (hook_wanted > 0) {
+    // Not linked in, or taken out by someone who put the interpreter's own
+    // back.
+    if (current != &evalFrame &&
+        (!hook_linked || current == &_PyEval_EvalFrameDefault)) {
+      hook_below = current;
+      _PyInterpreterState_SetEvalFrameFunc(interp, &evalFrame);
+      hook_linked = true;
+    }
+  } else if (current == &evalFrame) {
+    _PyInterpreterState_SetEvalFrameFunc(interp, hook_below);
+    hook_linked = false;
+  }
+}
+
+PyObject* frameInterpret(void* frame) {
+  return handOn(
+      PyThreadState_Get(), static_cast<_PyInterpreterFrame*>(frame), 0);
 }
 #endif
 
@@ -1850,8 +2004,14 @@ const TcfgApi api_table = {
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
     &framePush,       &framePop,          &frameHeld,         &frameSwap,
-    &frameTraced,
+    &frameTraced,     &frameHook,         &frameWant,         &frameAdopt,
+    &frameInterpret,  &frameReturns,
 #else
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
     nullptr,
     nullptr,
     nullptr,

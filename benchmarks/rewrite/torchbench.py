@@ -1,4 +1,4 @@
-"""TorchBench under eager, torch.compile and torch.cfg_compile(backend="inductor").
+"""TorchBench under eager, torch.compile and torch.rewrite with Inductor graphs.
 
 Every model of https://github.com/pytorch/benchmark that loads is run for
 inference and for training, as benchmarks/dynamo/torchbench.py runs it: the
@@ -12,15 +12,15 @@ step in train mode. The same function is given to both compilers. Each
   (the worst relative difference over the outputs of the calls before the
   timed ones; over the losses of the first steps for training);
 - what the calls up to the steady state cost over the steady state itself,
-  which is compile time plus, for cfg_compile, the calls it spends measuring
+  which is compile time plus, for torch.rewrite, the calls it spends measuring
   compiled code against the interpreter; and the compile time alone;
 - the median time of a call in the steady state;
-- for cfg_compile, the same with torch.compile in the same process, the calls
+- for torch.rewrite, the same with torch.compile in the same process, the calls
   of the two taking turns (``paired``): on a machine that is not idle, two
   processes one after the other can differ by more than the compilers do.
 
-    python benchmarks/cfg_compile/torchbench.py --torchbench ~/benchmark resnet18 hf_Bert
-    python benchmarks/cfg_compile/torchbench.py --torchbench ~/benchmark \\
+    python benchmarks/rewrite/torchbench.py --torchbench ~/benchmark resnet18 hf_Bert
+    python benchmarks/rewrite/torchbench.py --torchbench ~/benchmark \\
         --cpus 8-11/12-15 --results results.jsonl > report.md
 
 Without model names, all models are tried; the ones that do not load in the
@@ -38,7 +38,7 @@ and a container that goes over its limit is killed as a whole. No process is
 started while more than ``--memory-start`` of that memory is in use, and
 above ``--memory-stop`` the process that holds the most is stopped and run
 again later, alone. Every result has the most memory its process held
-(``peak_rss_mb``; for cfg_compile before torch.compile joins it for the
+(``peak_rss_mb``; for torch.rewrite before torch.compile joins it for the
 paired calls, and ``process_peak_rss_mb`` with them).
 """
 
@@ -162,6 +162,14 @@ def run_one(args):
         if args.device == "cuda":
             torch.cuda.synchronize()
 
+    def held(key):
+        # What the process held at most: of the machine's memory, and of the
+        # GPU's (what tensors had allocated at once, not what the allocator
+        # has reserved from the driver).
+        out[key + "_rss_mb"] = peak_rss_mb()
+        if args.device == "cuda":
+            out[key + "_cuda_mb"] = torch.cuda.max_memory_allocated() >> 20
+
     try:
         from torchbenchmark import load_model_by_name
 
@@ -227,7 +235,8 @@ def run_one(args):
         elif mode == "compile":
             compiled = torch.compile(fn)
         else:
-            compiled = torch.cfg_compile(fn, backend="inductor", fallback=False)
+            passes = [torch.rewrite.inductor, *torch.rewrite.canonical]
+            compiled = torch.rewrite(fn, passes=passes, fallback=False)
 
         def compiled_so_far():
             # Changes whenever the compiler compiled something.
@@ -236,7 +245,7 @@ def run_one(args):
 
                 return sum(counters["frames"].values())
             if mode == "cfg":
-                regions = torch.cfg_compile.regions(compiled)
+                regions = torch.rewrite.regions(compiled)
                 return len(regions), sum(r.get("variants", 0) for r in regions)
             return None
 
@@ -251,13 +260,13 @@ def run_one(args):
             # Seconds since the last call that stood out.
             quiet = quiet + warm[-1] if warm[-1] < 2.5 * min(warm) else 0.0
             # Inference gives the same result on every call, so every call is
-            # compared: under cfg_compile some of them run in the interpreter.
+            # compared: under torch.rewrite some of them run in the interpreter.
             if reference and (i < len(reference) if training else True):
                 d = difference(r, reference[i] if training else reference[0])
                 worst = float("inf") if d is None else max(worst, d)
             # A JIT is warm when it has stopped compiling and changing its
             # mind: a region gets another graph for inputs it has not seen,
-            # torch.compile recompiles, and cfg_compile goes on measuring
+            # torch.compile recompiles, and torch.rewrite goes on measuring
             # compiled code against the interpreter for a while after it has
             # compiled, the function and what it calls.
             measuring = mode == "cfg" and compiled.stats()["measuring"]
@@ -304,7 +313,7 @@ def run_one(args):
                     totals[1][names.index("_compile.compile_inner")]
                 )
         elif mode == "cfg":
-            regions = torch.cfg_compile.regions(compiled)
+            regions = torch.rewrite.regions(compiled)
             hot = [r for r in regions if r["state"] == "compiled"]
             out["graphs"] = sum(r["variants"] for r in hot)
             out["ops"] = sum(r["ops"] for r in hot)
@@ -319,12 +328,12 @@ def run_one(args):
             ][:6]
             out["demoted"] = bool(compiled.stats()["demoted"])
             # Before torch.compile and its copy of the model share the process.
-            out["peak_rss_mb"] = peak_rss_mb()
+            held("peak")
             if args.paired and out["call_s"] <= args.paired_limit:
                 try:
                     # A copy of its own, also where calls do not change the
                     # model: what Inductor makes asks for writable pointers
-                    # to the weights, which moves the ones cfg_compile has
+                    # to the weights, which moves the ones torch.rewrite has
                     # built into a graph and watches (``freeze=``).
                     other_model = copy.deepcopy(model)
                     other_opt = optimizer(other_model) if training else None
@@ -367,8 +376,10 @@ def run_one(args):
         out["error"] = (
             f"{type(e).__name__}: {text[0][:300]}" if text else type(e).__name__
         )
-    out["process_peak_rss_mb"] = peak_rss_mb()
+    held("process_peak")
     out.setdefault("peak_rss_mb", out["process_peak_rss_mb"])
+    if "process_peak_cuda_mb" in out:
+        out.setdefault("peak_cuda_mb", out["process_peak_cuda_mb"])
     print(MARKER + json.dumps(out))
 
 
@@ -616,10 +627,10 @@ def report(args, results):
         ran = [(n, d) for n, d in rows if d["eager"]["ok"]]
         print(f"\n### {test}: {len(ran)} models\n")
         print(
-            "| model | eager ms | torch.compile ms | cfg_compile ms | speedup: torch.compile | cfg_compile "
-            "| cfg_compile over torch.compile, taking turns "
-            "| compile s: torch.compile | cfg_compile | to steady state s: torch.compile | cfg_compile "
-            "| graphs: torch.compile | cfg_compile | difference: torch.compile | cfg_compile |"
+            "| model | eager ms | torch.compile ms | torch.rewrite ms | speedup: torch.compile | torch.rewrite "
+            "| torch.rewrite over torch.compile, taking turns "
+            "| compile s: torch.compile | torch.rewrite | to steady state s: torch.compile | torch.rewrite "
+            "| graphs: torch.compile | torch.rewrite | difference: torch.compile | torch.rewrite |"
         )
         print(
             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
@@ -681,14 +692,14 @@ def report(args, results):
             print("| " + " | ".join(line) + " |")
         n = len(speed["cfg"])
         print(
-            f"\nRan and gave a result: torch.compile {passed['compile']}, cfg_compile {passed['cfg']} of {len(ran)}; "
+            f"\nRan and gave a result: torch.compile {passed['compile']}, torch.rewrite {passed['cfg']} of {len(ran)}; "
             f"within {args.tolerance:g} of eager: {accurate['compile']} and {accurate['cfg']}. "
             f"Over the {n} models both ran: geometric mean speedup over eager {geomean(speed['compile']):.2f}x "
             f"and {geomean(speed['cfg']):.2f}x; compile time {geomean(compile_s['compile']):.1f} s and "
             f"{geomean(compile_s['cfg']):.1f} s (sum {sum(compile_s['compile']):.0f} s and {sum(compile_s['cfg']):.0f} s); "
             f"time to the steady state over the steady state itself {geomean(warmup_s['compile']):.1f} s and "
             f"{geomean(warmup_s['cfg']):.1f} s. With the calls of the two taking turns in one process, "
-            f"on {len(paired)} models: the time of cfg_compile over that of torch.compile is {geomean(paired):.3f} "
+            f"on {len(paired)} models: the time of torch.rewrite over that of torch.compile is {geomean(paired):.3f} "
             f"(geometric mean), above 1.03 on {sum(r > 1.03 for r in paired)} and below 0.97 on "
             f"{sum(r < 0.97 for r in paired)}."
         )
@@ -730,7 +741,7 @@ def main():
         "--settle",
         type=float,
         default=1500.0,
-        help="seconds to wait for cfg_compile to stop measuring",
+        help="seconds to wait for torch.rewrite to stop measuring",
     )
     parser.add_argument("--calls", type=int, default=20, help="timed calls, at most")
     parser.add_argument(
