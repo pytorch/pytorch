@@ -2952,7 +2952,6 @@ class GraphModuleDeserializer(metaclass=Final):
             log.debug("\n[deserialize]")
             self.shape_env = symbolic_shapes.ShapeEnv(assume_static_by_default=True)
             self.fake_tensor_mode = FakeTensorMode(
-                _force_python=True,
                 allow_fallback_kernels=False,
                 allow_non_fake_inputs=True,
                 shape_env=self.shape_env,
