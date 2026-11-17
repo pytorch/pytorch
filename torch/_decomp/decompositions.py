@@ -5365,9 +5365,6 @@ def _matmul_fold_broadcast_batch(
     m2, p = tensor2.shape[-2:]
     keep_sizes = [sizes1[i] for i in keep]
     fold_sizes = [sizes1[i] for i in fold]
-    # BLAS takes the folded rows as an int
-    if not guard_or_false(prod(fold_sizes) * n <= torch.iinfo(torch.int32).max):
-        return None
     # If expanding tensor2 does not copy it, keep the existing path
     sizes2 = [*sizes1[:-2], m2, p]
     strides2 = [0] * nb + list(tensor2.stride()[-2:])
@@ -5400,6 +5397,11 @@ def _matmul_fold_broadcast_batch(
     if t1_stride is None or not (
         guard_or_false(t1_stride[2] == 1) and guard_or_false(t1_stride[1] >= m1)
     ):
+        return None
+    # BLAS takes the folded rows and the leading dims as int
+    int_max = torch.iinfo(torch.int32).max
+    ints = (t1_shape[1], t1_stride[1], *tensor2.stride()[-2:])
+    if not all(guard_or_false(v <= int_max) for v in ints):
         return None
 
     out = tensor1.permute(perm).view(t1_shape).bmm(tensor2.reshape(t1_shape[0], m2, p))

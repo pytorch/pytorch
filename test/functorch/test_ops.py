@@ -1868,6 +1868,10 @@ class TestOperatorsDevice(TestCase):
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-03, rtol=5e-03)}
             ),
+            # The reference folds broadcast batch dims into bmm rows, the wrapped
+            # tensors do not, so they sum in another order (abs 2e-05 on aarch64)
+            tol1("matmul", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+            tol1("__rmatmul__", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         ),
     )
     def test_jvpvjp(self, device, dtype, op):

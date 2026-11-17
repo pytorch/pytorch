@@ -2058,11 +2058,6 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
   const auto& n = sizes1[nb];
   const auto& m = sizes2[tensor2.dim() - 2];
   const auto& p = sizes2.back();
-  // BLAS takes the folded rows as an int
-  if (!TORCH_GUARD_OR_FALSE(
-          (fold_numel * n).sym_le(std::numeric_limits<int>::max()))) {
-    return std::nullopt;
-  }
   // If expanding tensor2 does not copy it, keep the existing path
   c10::SymDimVector expanded_sizes2(sizes1.begin(), sizes1.end() - 2);
   expanded_sizes2.append({m, p});
@@ -2120,6 +2115,14 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
       !TORCH_GUARD_OR_FALSE((*t1_strides)[2].sym_eq(1)) ||
       !TORCH_GUARD_OR_FALSE((*t1_strides)[1].sym_ge(sizes1.back()))) {
     return std::nullopt;
+  }
+  // BLAS takes the folded rows and the leading dims as int
+  const c10::SymInt int_max = std::numeric_limits<int>::max();
+  for (const auto& v : {t1_shape[1], (*t1_strides)[1], tensor2.sym_stride(-2),
+                        tensor2.sym_stride(-1)}) {
+    if (!TORCH_GUARD_OR_FALSE(v.sym_le(int_max))) {
+      return std::nullopt;
+    }
   }
 
   const auto out = tensor1.permute(perm).view_symint(t1_shape).bmm(

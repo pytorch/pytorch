@@ -1295,7 +1295,8 @@ class DecompOneOffTests(TestCase):
                 self.assertEqual(clones, num_clones)
                 self.assertEqual(gm(x, y), expected)
 
-        # Same for a matrix y and an x that should_fold does not fold into a matrix
+        # Same for a matrix y and a non-contiguous x, which should_fold here does not
+        # fold into a matrix
         x = torch.randn(4, 8, 12, device=device)[..., :6]
         y = torch.randn(6, 5, device=device)
         with enable_python_dispatcher():
@@ -1304,13 +1305,18 @@ class DecompOneOffTests(TestCase):
         self.assertIn(torch.ops.aten.expand.default, targets)
         self.assertEqual(gm(x, y), x.contiguous() @ y)
 
-        # Not folded either when the folded rows do not fit in an int
-        x = torch.empty(2, 2**16, 2**15 + 1, 1, device="meta")
-        y = torch.empty(2, 1, 1, 2, device="meta")
-        with enable_python_dispatcher():
-            gm = make_fx(torch.matmul)(x, y)
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(torch.ops.aten.expand.default, targets)
+        # Not folded either when the folded rows or their stride do not fit in an int
+        big = 2**31 + 8
+        x_rows = torch.empty(2, 2**16, 2**15 + 1, 1, device="meta")
+        x_ld = torch.empty_strided((2, 2, 1, 8), (2 * big, big, 8, 1), device="meta")
+        for x, y in (
+            (x_rows, torch.empty(2, 1, 1, 2, device="meta")),
+            (x_ld, torch.empty(2, 1, 8, 4, device="meta")),
+        ):
+            with enable_python_dispatcher():
+                gm = make_fx(torch.matmul)(x, y)
+            targets = [node.target for node in gm.graph.nodes]
+            self.assertIn(torch.ops.aten.expand.default, targets)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
