@@ -332,24 +332,32 @@ def load_triton_kernel(key: str) -> CachingAutotuner | None:
 
 
 def _load_frozen_triton_kernel(key: str, payload: bytes) -> CachingAutotuner:
-    from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
     from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
 
     record = pickle.loads(payload)
     if not isinstance(record, StaticallyLaunchedAutotuner) or record.cache_key != key:
         raise RuntimeError("Invalid Inductor Triton source identity")
     kernel = record.kernel
-    if len(kernel.compile_results) != 1 or not isinstance(
-        kernel.compile_results[0], StaticTritonCompileResult
-    ):
+    if not kernel.is_statically_launchable():
         raise RuntimeError(
-            "Inductor Triton runtime artifact has no selected static kernel"
+            "Inductor Triton runtime artifact has a kernel that is not static"
         )
-    result = kernel.compile_results[0]
     kernel.restore_after_unpickle(old_values=None)
+    tunes = any(plugin.tunes_prebuilt_launchers(kernel) for plugin in kernel._plugins)
+    if len(kernel.compile_results) > 1 and not tunes:
+        # No plugin in this process chooses between the candidates, so keep the
+        # first.
+        log.warning(
+            "precompile serves %s with the first of its %d frozen candidate configs: "
+            "no autotuner plugin in this process tunes prebuilt launchers",
+            record.kernel_name,
+            len(kernel.compile_results),
+        )
+        kernel.compile_results = kernel.compile_results[:1]
     with kernel.lock:
-        result.reload_cubin_path()
-        # The artifact already selected its config. Rechecking local tuning caches
+        for result in kernel.compile_results:
+            result.reload_cubin_path()
+        # The artifact already selected its configs. Rechecking local tuning caches
         # or running precompile can introduce new rblock/coordesc candidates.
         kernel._make_launchers()
     return kernel
