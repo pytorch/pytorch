@@ -1,6 +1,7 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <c10/util/FileSystem.h>
 #include <c10/util/string_view.h>
 #include <c10/util/tempfile.h>
@@ -478,6 +479,12 @@ void validate_package_device(
         "Cannot load AOTInductor package for device 'cuda' because ",
         backend_name,
         " is not available in this process. Check that this host or container has GPU access, or compile/package the model for CPU.");
+  } else if (device_key_iter->second == "xpu") {
+    TORCH_CHECK(
+        at::detail::getXPUHooks().getNumGPUs() > 0,
+        "Cannot load AOTInductor package for device 'xpu' because XPU is not "
+        "available in this process. Check that this host or container has GPU "
+        "access, or compile/package the model for CPU.");
   }
 }
 
