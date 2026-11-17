@@ -192,7 +192,7 @@ IN_PLACE_DESUGARING_MAP = {
 
 _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     int: frozenset({"__new__", "from_bytes"}),
-    bool: frozenset({"__new__", "from_bytes"}),
+    bool: frozenset({"__new__", "__hash__", "from_bytes"}),
     float: frozenset({"fromhex", "hex"}),
 }
 if sys.version_info >= (3, 14):
@@ -2157,9 +2157,22 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__invert__(4) → ~4
             return pynumber_invert(tx, args[0])
 
-        if name == "__hash__" and len(args) == 1 and not kwargs:
+        if (
+            isinstance(self.fn, type)
+            and name == "__hash__"
+            and len(args) == 1
+            and not kwargs
+        ):
             arg = args[0]
-            generic_hash(tx, arg)
+            unimplemented(
+                gb_type="Unsupported unbound builtin __hash__ call",
+                context=f"{self.fn.__name__}.__hash__({arg})",
+                explanation="Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+                hints=[
+                    "Use hash(x) if calling x's own hash implementation is intended.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -3356,7 +3369,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         left: VariableTracker,
         right: VariableTracker,
     ) -> VariableTracker:
-        from .tensor import supported_tensor_comparison_op_values
+        from .tensor import _richcompare_operand, supported_tensor_comparison_op_values
 
         op = self.fn
 
@@ -3373,16 +3386,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         # must be a type that can participate in a traced numeric comparison.
         # Anything else (classes, DataPtrVariable, etc.) is a different type
         # entirely — the comparison result is known at compile time.
-        non_symnode = right if isinstance(left, SymNodeVariable) else left
-        if not isinstance(
-            non_symnode, (SymNodeVariable, ConstantVariable, TensorVariable)
-        ):
+        if isinstance(left, SymNodeVariable):
+            args = (left.as_proxy(), _richcompare_operand(right))
+        else:
+            args = (_richcompare_operand(left), right.as_proxy())
+        if any(arg is NotImplemented for arg in args):
             # pyrefly: ignore [bad-argument-type]
             return VariableTracker.build(tx, op(object(), None))
 
-        proxy = tx.output.create_proxy(
-            "call_function", op, (left.as_proxy(), right.as_proxy()), {}
-        )
+        proxy = tx.output.create_proxy("call_function", op, args, {})
         return SymNodeVariable.create(
             tx,
             proxy,
@@ -3599,13 +3611,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
         if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
-            storage = (
-                args[0].materialize_keys()
-                if isinstance(args[0], ConstDictVariable)
-                else args[0].items
-            )
             return ConstDictVariable(
-                dict.fromkeys(storage, value),
+                dict.fromkeys(args[0].materialize_keys(), value),
                 mutation_type=ValueMutationNew(),
             )
         return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
