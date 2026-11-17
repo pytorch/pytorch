@@ -1966,19 +1966,30 @@ class MetaConverter(Generic[_TensorT]):
                         torch._C.DispatchKey.ADInplaceOrView, False
                     )
                     try:
-                        if base.dtype == t.dtype:
-                            pass
-                        elif is_c_of_r(base.dtype, t.dtype):
-                            base = self._checked_cast_tensor_t(torch.view_as_real(base))
-                        elif is_c_of_r(t.dtype, base.dtype):
-                            base = self._checked_cast_tensor_t(
-                                torch.view_as_complex(base)
+                        # Native fallback conversion excludes Fake, but dtype
+                        # replay needs fake dispatch to wrap its Meta output.
+                        with (
+                            torch._C._SetExcludeDispatchKeyGuard(
+                                torch._C.DispatchKey.Fake, False
                             )
-                        else:
-                            # This is not guaranteed to succeed.  If it fails, it
-                            # means there is another dtype-converting view function
-                            # that hasn't been handled here
-                            base = self._checked_cast_tensor_t(base.view(t.dtype))
+                            if self.cpp_fakes
+                            else contextlib.nullcontext()
+                        ):
+                            if base.dtype == t.dtype:
+                                pass
+                            elif is_c_of_r(base.dtype, t.dtype):
+                                base = self._checked_cast_tensor_t(
+                                    torch.view_as_real(base)
+                                )
+                            elif is_c_of_r(t.dtype, base.dtype):
+                                base = self._checked_cast_tensor_t(
+                                    torch.view_as_complex(base)
+                                )
+                            else:
+                                # This is not guaranteed to succeed.  If it fails, it
+                                # means there is another dtype-converting view function
+                                # that hasn't been handled here
+                                base = self._checked_cast_tensor_t(base.view(t.dtype))
 
                         # This is very tricky.  Naively, you might expect this
                         # to hold:
