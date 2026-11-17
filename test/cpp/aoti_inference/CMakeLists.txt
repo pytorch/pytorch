@@ -2,8 +2,6 @@ set(AOT_INDUCTOR_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_inference)
 
 # Build custom TorchScript op for AOTInductor
 add_library(aoti_custom_class SHARED aoti_custom_class.cpp)
-set_target_properties(aoti_custom_class PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 if(USE_CUDA)
   target_compile_definitions(aoti_custom_class PRIVATE USE_CUDA)
 elseif(USE_ROCM)
@@ -42,6 +40,7 @@ elseif(USE_ROCM)
 endif()
 target_compile_definitions(test_aoti_inference PRIVATE
     CMAKE_CURRENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+    AOTI_CUSTOM_CLASS_LIB="$<TARGET_FILE:aoti_custom_class>"
 )
 
 target_compile_options_if_supported(test_aoti_inference -Wno-unused-variable)
