@@ -49,6 +49,11 @@ run_tests() {
         fi
     done
 
+    if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
+        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
+        return
+    fi
+
     if [[ "$TEST_CONFIG" == "openreg" ]]; then
         "$SCRIPT_HELPERS_DIR"/test_openreg.bat
         return
