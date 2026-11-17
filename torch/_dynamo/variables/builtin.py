@@ -192,7 +192,7 @@ IN_PLACE_DESUGARING_MAP = {
 
 _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     int: frozenset({"__new__", "from_bytes"}),
-    bool: frozenset({"__new__", "from_bytes"}),
+    bool: frozenset({"__new__", "__hash__", "from_bytes"}),
     float: frozenset({"fromhex", "hex"}),
 }
 if sys.version_info >= (3, 14):
@@ -2152,9 +2152,22 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__invert__(4) → ~4
             return pynumber_invert(tx, args[0])
 
-        if name == "__hash__" and len(args) == 1 and not kwargs:
+        if (
+            isinstance(self.fn, type)
+            and name == "__hash__"
+            and len(args) == 1
+            and not kwargs
+        ):
             arg = args[0]
-            generic_hash(tx, arg)
+            unimplemented(
+                gb_type="Unsupported unbound builtin __hash__ call",
+                context=f"{self.fn.__name__}.__hash__({arg})",
+                explanation="Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+                hints=[
+                    "Use hash(x) if calling x's own hash implementation is intended.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -2669,6 +2682,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], variables.ConstDictVariable):
+            args[0].install_dict_order_guard(tx)
         if isinstance(
             args[0],
             (
@@ -3630,7 +3645,22 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
+            obj = args[0].realize()
+            if name == "__repr__":
+                if not isinstance(obj, ConstDictVariable):
+                    unimplemented(
+                        gb_type="Unsupported builtin dictionary storage operation",
+                        context=f"dict.{name} on {obj.python_type_name()}",
+                        explanation="Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+                        hints=[],
+                    )
+                # Explicit dict slots bypass OrderedDict's linked-order behavior.
+                slotdef = obj.lookup_slotdefs(name)
+                if slotdef is None:
+                    raise AssertionError(f"Missing dict slot for {name}")
+                return slotdef.wrapper(
+                    obj, tx, getattr(ConstDictVariable, slotdef.impl), args[1:], kwargs
+                )
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)

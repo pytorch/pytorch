@@ -9771,6 +9771,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
+    def test_remove_noop_slice_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            a = torch.ops.aten.slice.Tensor(x, 0, -n, n)
+            b = torch.ops.aten.slice.Tensor(x, 0, -n - 1, n)
+            c = torch.ops.aten.slice.Tensor(x, 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
+
+    def test_remove_noop_slice_scatter_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            src = x * 2
+            a = torch.ops.aten.slice_scatter(x, src, 0, -n, n)
+            b = torch.ops.aten.slice_scatter(x, src, 0, -n - 1, n)
+            c = torch.ops.aten.slice_scatter(x, src[1:], 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice_scatter" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/151378",
@@ -20304,7 +20341,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(10, device=GPU_TYPE)
         compiled_fn = torch.compile(f, dynamic=True)
         result, code = run_and_get_code(compiled_fn, x)
-        expected = f(x)
+        # Eager f(x) reads the non-blocking copy without syncing, so it can race.
+        expected = torch.clamp(x, 0.0, x.abs().sum().item())
         self.assertEqual(result, expected)
         wrapper_code = code[0]
         self.assertIn("torch.Event()", wrapper_code)
@@ -24095,6 +24133,151 @@ if RUN_GPU:
             expected = fn(inp)
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
+
+        def test_size_one_innermost_reduction_dim_stays_unsplit(self):
+            # A read that is contiguous along one reduction var and constant along
+            # another (a size-1 or broadcast innermost dim) still votes INNER, so
+            # these stay one unsplit kernel.
+            def fn(x):
+                return x.sum((1, 2))
+
+            def broadcast_sum(x):
+                return x[:, :, None].expand(4096, 8, 32).sum((1, 2))
+
+            for f, x in [
+                (fn, torch.randn(64, 4096, 1, device=GPU_TYPE)),
+                (broadcast_sum, torch.randn(4096, 8, device=GPU_TYPE)),
+            ]:
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
+                self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_small_strided_read_keeps_outer_reduction(self):
+            # Only reads constant across the whole reduction abstain from the
+            # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
+            # including a small-dtype one (guards against weighting votes by
+            # itemsize).
+            def fn(x, mask):
+                return (x * mask.t()).sum(1)
+
+            x = torch.randn(1024, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
+
+        def test_small_broadcast_read_does_not_split_inner_reduction(self):
+            # The per-group mask is constant along the innermost reduction var, so
+            # it must not outvote the contiguous rows being reduced: this stays an
+            # unsplit inner reduction (one kernel).
+            def fn(x, mask):
+                masked = x.view(4096, 8, 32).masked_fill(
+                    mask.unsqueeze(-1), float("-inf")
+                )
+                return masked.flatten(1).amax(-1)
+
+            x = torch.randn(4096, 256, device=GPU_TYPE)
+            mask = torch.rand(4096, 8, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_repeated_strided_read_keeps_outer_reduction(self):
+            # x.t() repeat-interleaved by 2 doesn't move at reduction step 1 but
+            # jumps a full row every other step, so it must still vote OUTER
+            # against the contiguous y.
+            def fn(y, x):
+                xt = x.t()[:, :, None].expand(256, 128, 2).reshape(256, 256)
+                return (y * xt).sum(1)
+
+            y = torch.randn(256, 256, device=GPU_TYPE)
+            x = torch.randn(128, 256, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), y, x)
+            self.assertEqual(result, fn(y, x), atol=1e-4, rtol=1e-4)
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
+
+        @unittest.skipIf(
+            GPU_TYPE != "cuda" or torch.version.hip is not None,
+            "the small-k topk decomposition is CUDA-only",
+        )
+        def test_topk_small_k(self):
+            def reference(x, k, dim):
+                # Stable descending order; as in ATen, NaN ranks highest and
+                # +0 ranks above -0 (float64 keys keep -0 just below +0).
+                key = torch.where(x.isnan(), float("inf"), x.double())
+                key = torch.where((key == 0) & key.signbit(), -1e-300, key)
+                order = torch.sort(key, dim=dim, descending=True, stable=True).indices
+                nan_first = torch.gather(x.isnan().to(torch.int8), dim, order)
+                order = torch.gather(
+                    order,
+                    dim,
+                    torch.sort(
+                        nan_first, dim=dim, descending=True, stable=True
+                    ).indices,
+                )
+                indices = order.narrow(dim, 0, k)
+                return torch.gather(x, dim, indices), indices
+
+            specials = torch.tensor(
+                [
+                    float("inf"),
+                    -float("inf"),
+                    float("nan"),
+                    -float("nan"),
+                    0.0,
+                    -0.0,
+                    1.0,
+                    1.0,
+                ],
+                device=GPU_TYPE,
+            )
+            for shape, k, dim, dtype, special in [
+                ((256, 8, 32), 2, -1, torch.float32, False),
+                ((256, 256), 8, -1, torch.bfloat16, False),
+                ((64, 16), 16, -1, torch.float32, False),
+                ((16, 128, 3), 3, 1, torch.float32, False),
+                ((512, 64), 8, -1, torch.float32, True),
+                ((512, 64), 8, -1, torch.bfloat16, True),
+                ((512, 64), 8, -1, torch.float16, True),
+            ]:
+                x = torch.randn(shape, device=GPU_TYPE)
+                if special:
+                    pick = specials[
+                        torch.randint(0, len(specials), shape, device=GPU_TYPE)
+                    ]
+                    x = torch.where(torch.rand(shape, device=GPU_TYPE) < 0.5, pick, x)
+                x = x.to(dtype)
+                torch._dynamo.reset()
+                (values, indices), code = run_and_get_code(
+                    torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
+                )
+                # Only the last dim decomposes; other dims keep the ATen fallback,
+                # called as aten.topk.default (Python wrapper) or
+                # aoti_torch_*_topk (C++ wrapper).
+                fallback = re.search(
+                    r"aten\.topk\.default\(|aoti_torch_\w+_topk\(", " ".join(code)
+                )
+                if dim in (-1, x.dim() - 1):
+                    self.assertIsNone(fallback)
+                else:
+                    self.assertIsNotNone(fallback)
+                ref_values, ref_indices = reference(x, k, dim)
+                self.assertEqual(indices, ref_indices)
+                bits = torch.int16 if dtype.itemsize == 2 else torch.int32
+                self.assertTrue(torch.equal(values.view(bits), ref_values.view(bits)))
+
+            # As in ATen, +0 ranks above -0; equal values go to the lowest index.
+            x = torch.zeros(64, 32, device=GPU_TYPE)
+            x[:, 0:20:2] = -0.0
+            x[:, 20:] = -1.0
+            torch._dynamo.reset()
+            values, indices = torch.compile(lambda t: torch.topk(t, 4, dim=-1))(x)
+            self.assertEqual(
+                indices, torch.tensor([1, 3, 5, 7], device=GPU_TYPE).expand(64, 4)
+            )
+            self.assertFalse(torch.signbit(values).any())
+            self.assertFalse(torch.signbit(torch.topk(x, 4, dim=-1).values).any())
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
