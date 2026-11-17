@@ -65,6 +65,7 @@ from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    check_aot_cudagraphs,
     cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
     format_default_skip_message,
@@ -959,7 +960,9 @@ def fake_tensor_prop(
     """
     # Ensure that decomps that support symbolic shapes are used
     with enable_python_dispatcher():
-        fake_mode = detect_fake_mode(example_inputs)
+        fake_mode = torch._guards.require_python_fake_mode(
+            detect_fake_mode(example_inputs)
+        )
         if not fake_mode:
             fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
@@ -982,7 +985,11 @@ def get_patched_config_dict(
     config_patches: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with patch_compile_options(config_patches):
-        config_copy = config.get_config_copy()
+        # Entries excluded from saved configs, such as custom passes, can hold
+        # arbitrary state, so they are not deep-copied.
+        config_copy = config.get_serializable_config_copy()
+        for name in config._save_config_ignore:
+            config_copy[name] = getattr(config, name)
         for name in config_patches or {}:
             # core inductor keys take precedence over device namespaces
             if name.replace("-", "_") in config._config:  # type: ignore[attr-defined]
@@ -1037,6 +1044,7 @@ def compile_fx_inner(
     compile_region_name: str | None = None,
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
+    """Compile an AOT-produced FX graph into an OutputCode with Inductor."""
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
@@ -1053,6 +1061,10 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
+        # The only place override_cudagraphs is applied: after torch.compile options,
+        # which may reset it, and before the cpp_wrapper patch, which may turn it off.
+        if isinstance(kwargs["cudagraphs"], BoxedBool):
+            stack.enter_context(cudagraph_annotation_context(kwargs["cudagraphs"]))
         # When cpp_wrapper is enabled, ensure the required triton config
         # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
         # needed because lazy backward compilation may run after the
@@ -1867,6 +1879,8 @@ class _InProcessFxCompile(FxCompile):
                                 output_strides.append(None)
 
                     _check_triton_bf16_support(graph)
+                    if graph.aot_mode and config.aot_inductor.cudagraphs:
+                        check_aot_cudagraphs(graph)
 
                     # TODO: The switching between AOT mode and not here is a bit
                     # messy, but it's localized to the block of code below so I'm
@@ -2964,26 +2978,25 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
-    with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
-        result = inner_compile(
-            gm,
-            example_inputs,
-            static_input_idxs=get_static_input_idxs(fixed),
-            cudagraphs=compiler_config_extra.cudagraphs,
-            graph_id=compiler_config_extra.graph_id,
-            is_inference=is_inference,
-            boxed_forward_device_index=compiler_config_extra.forward_device_index,
-        )
+    result = inner_compile(
+        gm,
+        example_inputs,
+        static_input_idxs=get_static_input_idxs(fixed),
+        cudagraphs=compiler_config_extra.cudagraphs,
+        graph_id=compiler_config_extra.graph_id,
+        is_inference=is_inference,
+        boxed_forward_device_index=compiler_config_extra.forward_device_index,
+    )
 
-        if (
-            not is_inference
-            and isinstance(result, CompiledFxGraph)
-            and result.partition_maps
-            and result.has_uncaptured_partition
-        ):
-            compiler_config_extra.forward_is_cudagraph_partitioned.value = True
+    if (
+        not is_inference
+        and isinstance(result, CompiledFxGraph)
+        and result.partition_maps
+        and result.has_uncaptured_partition
+    ):
+        compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
-        return result
+    return result
 
 
 def compile_fx_backward(
@@ -3049,12 +3062,9 @@ def compile_fx_backward(
         _recursive_record_original_output_strides(gm)
 
         with (
-            (
-                config.patch(get_cpp_wrapper_config())
-                if config.cpp_wrapper
-                else contextlib.nullcontext()
-            ),
-            cudagraph_annotation_context(cudagraphs),
+            config.patch(get_cpp_wrapper_config())
+            if config.cpp_wrapper
+            else contextlib.nullcontext()
         ):
             return inner_compile(
                 gm,
@@ -3230,7 +3240,9 @@ def compile_fx(
                 if isinstance(model_, GraphModule)
                 else example_inputs_
             )
-            fake_mode = detect_fake_mode(inputs_)
+            fake_mode = torch._guards.require_python_fake_mode(
+                detect_fake_mode(inputs_)
+            )
             with _fakify_script_objects(model_, inputs_, {}, fake_mode) as (
                 patched_mod,
                 fake_args,
@@ -3448,8 +3460,8 @@ def _compile_fx_main(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
-        fake_mode = detect_fake_mode(
-            example_inputs_
+        fake_mode = torch._guards.require_python_fake_mode(
+            detect_fake_mode(example_inputs_)
         ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         tracing_context = (
             torch._guards.TracingContext.try_get()
@@ -3784,9 +3796,9 @@ def autograd_cache_key(
     #       torch._guards.tracing, compiled_autograd._disable,
     #       functorch_config.patch
 
-    fake_mode = detect_fake_mode(example_inputs) or torch._subclasses.FakeTensorMode(
-        allow_non_fake_inputs=True
-    )
+    fake_mode = torch._guards.require_python_fake_mode(
+        detect_fake_mode(example_inputs)
+    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
     tracing_context = (
         torch._guards.TracingContext.try_get()
         or torch._guards.TracingContext(fake_mode)
