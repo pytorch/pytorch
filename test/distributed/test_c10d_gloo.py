@@ -1294,26 +1294,49 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @requires_gloo()
-    def test_destroy_process_group_stops_worker_threads(self):
-        """
-        destroy_process_group() must stop the Gloo worker threads even when the
-        process group object is still referenced elsewhere (e.g. captured by a
-        compiled graph). Otherwise the threads outlive the interpreter and can
-        abort the process at exit while releasing Python-owned tensors.
-        """
+    def _gloo_worker_thread_count(self):
+        count = 0
+        for tid in os.listdir("/proc/self/task"):
+            with open(f"/proc/self/task/{tid}/comm") as f:
+                if f.read().strip() == "pt_gloo_runloop":
+                    count += 1
+        return count
+
+    def _test_destroy_process_group_stops_worker_threads(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
         )
+        # Keep a reference, like a compiled graph or DDP reducer would.
         pg = dist.distributed_c10d._get_default_group()
         pg.allreduce(torch.ones(4)).wait()
+        self.assertGreater(self._gloo_worker_thread_count(), 0)
 
         dist.destroy_process_group()
 
-        # With the worker threads stopped, new work must fail instead of hang.
+        # Lingering workers can abort the process at interpreter exit when they
+        # release Python-owned tensors.
+        self.assertEqual(self._gloo_worker_thread_count(), 0)
+        # Without worker threads, new work must fail instead of hang.
         with self.assertRaisesRegex(RuntimeError, "has been shut down"):
             pg.allreduce(torch.ones(4))
+
+    @requires_gloo()
+    @unittest.skipUnless(sys.platform == "linux", "counts threads via /proc")
+    def test_destroy_process_group_stops_worker_threads(self):
+        self._test_destroy_process_group_stops_worker_threads()
+
+    @requires_gloo()
+    @unittest.skipUnless(sys.platform == "linux", "counts threads via /proc")
+    def test_destroy_process_group_stops_worker_threads_debug_wrapper(self):
+        # DETAIL wraps the backend with a separate helper Gloo backend.
+        os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
+        c10d.set_debug_level_from_env()
+        try:
+            self._test_destroy_process_group_stops_worker_threads()
+        finally:
+            os.environ.pop("TORCH_DISTRIBUTED_DEBUG", None)
+            c10d.set_debug_level_from_env()
 
     @requires_gloo()
     def test_scatter_stress(self):

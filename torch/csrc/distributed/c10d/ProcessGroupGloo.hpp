@@ -542,6 +542,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::mutex workMutex_;
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
+  std::mutex shutdownMutex_;
   uint64_t seq_{0};
   mutable std::vector<uint64_t> defaultRanks_;
 };

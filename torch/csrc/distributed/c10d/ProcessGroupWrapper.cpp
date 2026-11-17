@@ -674,6 +674,8 @@ void ProcessGroupWrapper::abort() {
 
 void ProcessGroupWrapper::shutdown() {
   backend_->shutdown();
+  // The helper backend has its own worker threads; stop them as well.
+  glooBackend_->shutdown();
 }
 
 void ProcessGroupWrapper::suspend() {

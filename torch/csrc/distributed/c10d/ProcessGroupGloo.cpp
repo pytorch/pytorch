@@ -679,7 +679,22 @@ ProcessGroupGloo::~ProcessGroupGloo() {
   shutdown();
 }
 
+namespace {
+// The process group whose worker loop is running on the current thread, if
+// any. Used to reject shutdown requests that would have a worker join itself.
+thread_local const ProcessGroupGloo* currentWorkerPg = nullptr;
+} // namespace
+
 void ProcessGroupGloo::shutdown() {
+  // A worker can reach here from a work callback (e.g. a future continuation
+  // calling destroy_process_group()). It cannot drain the queue or join
+  // itself, so fail clearly instead of deadlocking.
+  TORCH_CHECK(
+      currentWorkerPg != this,
+      "ProcessGroupGloo cannot be shut down from one of its own worker threads");
+
+  // Serialize concurrent callers so only one waits on the queue and joins.
+  std::lock_guard<std::mutex> shutdownLock(shutdownMutex_);
   std::unique_lock<std::mutex> lock(workMutex_);
   workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
@@ -774,6 +789,7 @@ std::shared_ptr<::gloo::Context> ProcessGroupGloo::getContext(uint32_t tag) {
 
 void ProcessGroupGloo::runLoop(int workerIndex) {
   c10::setThreadName("pt_gloo_runloop");
+  currentWorkerPg = this;
   std::unique_lock<std::mutex> lock(workMutex_);
 
   while (!stop_) {
