@@ -24,6 +24,7 @@ from torch._inductor.fx_utils import (
     _same_size_stride_and_storage_offset,
     FakeTensorUpdater,
     get_mutated_input_nodes,
+    get_mutated_storages,
     get_node_storage,
     get_storage,
     is_node_realized,
@@ -738,6 +739,16 @@ def reinplace_inplaceable_ops_core(
                 return True
         return False
 
+    def writes_storage(node, storage):
+        if node.target is torch.ops.higher_order.control_deps:
+            subgraph_attr = cast(torch.fx.Node, node.args[1])
+            subgraph = getattr(fake_tensor_updater.gm, cast(str, subgraph_attr.target))
+            return storage in get_mutated_storages(subgraph)
+        return any(
+            get_node_storage(written) == storage
+            for written in get_mutated_input_nodes(node)
+        )
+
     def can_inplace(node, mutated_arg):
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
@@ -788,9 +799,8 @@ def reinplace_inplaceable_ops_core(
                 and user is not removable_copyback
             )
             for mutation in mutations:
-                if any(
-                    get_node_storage(written) == mutated_storage
-                    for written in get_mutated_input_nodes(mutation)
+                if writes_storage(
+                    mutation, mutated_storage
                 ) and any_use_of_views_after_node(
                     mutation,
                     result_views,
@@ -810,10 +820,7 @@ def reinplace_inplaceable_ops_core(
                 for user in alias.users
             )
             for mutation in possible_mutations:
-                if not any(
-                    get_node_storage(written) == mutated_storage
-                    for written in get_mutated_input_nodes(mutation)
-                ):
+                if not writes_storage(mutation, mutated_storage):
                     continue
                 if node_order[mutation] <= node_order[node]:
                     continue
