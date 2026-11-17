@@ -172,7 +172,7 @@ void replace_each_tensor(
         }
       }
       if (copy.has_value()) {
-        ivalue = std::move(*copy);
+        ivalue = *copy;
       }
     }
   }
