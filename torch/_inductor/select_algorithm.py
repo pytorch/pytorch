@@ -2143,6 +2143,7 @@ class TritonTemplateKernel(TritonKernel):
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
         allow_reduction_invariant_indexing=False,
+        allow_cta_uniform_indexing=False,
     ):
         """
         Override the default indexing to use our custom mask and output shape.
@@ -2158,6 +2159,9 @@ class TritonTemplateKernel(TritonKernel):
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
             allow_reduction_invariant_indexing=allow_reduction_invariant_indexing,
+            # Template kernels do not define the pointwise CTA coordinates
+            # required by this projection.
+            allow_cta_uniform_indexing=False,
         )
 
     def codegen_range_tree(self):
