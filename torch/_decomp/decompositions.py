@@ -4127,6 +4127,8 @@ def _rnn_helper(
         else:
             input = fwd_inp
 
+        # Inter-layer dropout applies to the output of every layer except the
+        # last, matching native apply_layer_stack in aten/src/ATen/native/RNN.cpp.
         if dropout != 0 and train and i < num_layers - 1:
             input = torch.dropout(input, dropout, train=True)
 

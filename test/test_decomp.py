@@ -777,15 +777,93 @@ class TestDecomp(TestCase):
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
 
+    def _make_rnn_dropout_model(self, rnn_type, device, dtype, **kwargs):
+        module_kwargs = dict(kwargs)
+        if rnn_type.startswith("RNN"):
+            module_cls = torch.nn.RNN
+            module_kwargs["nonlinearity"] = rnn_type.split("_")[1].lower()
+        else:
+            module_cls = getattr(torch.nn, rnn_type)
+        model = module_cls(3, 5, **module_kwargs).to(device=device, dtype=dtype)
+        return model, module_kwargs
+
+    def _check_rnn_interlayer_dropout(
+        self,
+        device,
+        dtype,
+        rnn_type,
+        *,
+        num_layers,
+        training,
+        bidirectional,
+        batch_first,
+        dropout,
+        use_compile=False,
+        packed=False,
+    ):
+        # https://github.com/pytorch/pytorch/issues/204699
+        model, kwargs = self._make_rnn_dropout_model(
+            rnn_type,
+            device,
+            dtype,
+            num_layers=num_layers,
+            dropout=dropout,
+            bidirectional=bidirectional,
+            batch_first=batch_first,
+        )
+        model.train(training)
+
+        if packed:
+            inp = make_tensor((3, 2, 3), device=device, dtype=dtype, requires_grad=True)
+            forward_input = torch.nn.utils.rnn.pack_padded_sequence(
+                inp, torch.tensor([3, 2], device=device)
+            )
+            grad_inputs = (forward_input.data, *model.parameters())
+        else:
+            shape = (2, 4, 3) if batch_first else (4, 2, 3)
+            inp = make_tensor(shape, device=device, dtype=dtype, requires_grad=True)
+            forward_input = inp
+            grad_inputs = (inp, *model.parameters())
+
+        def forward(module):
+            out = module(forward_input)[0]
+            return out.data if packed else out
+
+        expected = forward(model)
+        expected_grads = torch.autograd.grad(expected.sum(), grad_inputs)
+
+        if use_compile:
+            torch._dynamo.reset()
+            with torch._dynamo.config.patch(allow_rnn=True):
+                compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+                actual = forward(compiled)
+        else:
+            with enable_python_dispatcher():
+                actual = forward(model)
+        actual_grads = torch.autograd.grad(actual.sum(), grad_inputs)
+
+        # Prove the eager oracle actually applies inter-layer dropout; parity
+        # alone would pass if both paths silently skipped it.
+        if num_layers > 1 and training and dropout == 1.0:
+            no_dropout_model, _ = self._make_rnn_dropout_model(
+                rnn_type, device, dtype, **{**kwargs, "dropout": 0.0}
+            )
+            no_dropout_model.load_state_dict(model.state_dict())
+            no_dropout_model.train(training)
+            self.assertNotEqual(expected, forward(no_dropout_model))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_grads, expected_grads)
+
     @onlyCPU
     @dtypes(torch.float64)
     @suppress_warnings
     @parametrize("rnn_type", ["RNN_TANH", "RNN_RELU", "GRU", "LSTM"])
-    @parametrize("backend", ["decomp", "aot_eager"])
     @parametrize(
         "num_layers, training, bidirectional, batch_first, dropout",
         [
-            # dropout=1.0 zeros inter-layer activations (deterministic regression for #204699)
+            # dropout=1.0 is deterministic (it zeroes the input of every layer
+            # after the first) but still exercises the #204699 regression.
             (3, True, False, False, 1.0),
             (3, True, True, True, 1.0),
             (1, True, False, False, 1.0),
@@ -798,72 +876,63 @@ class TestDecomp(TestCase):
         device,
         dtype,
         rnn_type,
-        backend,
         num_layers,
         training,
         bidirectional,
         batch_first,
         dropout,
     ):
-        # https://github.com/pytorch/pytorch/issues/204699
-        kwargs = dict(
+        self._check_rnn_interlayer_dropout(
+            device,
+            dtype,
+            rnn_type,
             num_layers=num_layers,
-            dropout=dropout,
+            training=training,
             bidirectional=bidirectional,
             batch_first=batch_first,
+            dropout=dropout,
         )
-        if rnn_type.startswith("RNN"):
-            module_cls = torch.nn.RNN
-            kwargs["nonlinearity"] = rnn_type.split("_")[1].lower()
-        else:
-            module_cls = getattr(torch.nn, rnn_type)
 
-        model = (
-            module_cls(3, 5, **kwargs).to(device=device, dtype=dtype).train(training)
+    @onlyCPU
+    @dtypes(torch.float64)
+    @suppress_warnings
+    @parametrize("rnn_type", ["RNN_TANH", "RNN_RELU", "GRU", "LSTM"])
+    @parametrize("bidirectional, batch_first", [(False, False), (True, True)])
+    def test_rnn_interlayer_dropout_compile(
+        self, device, dtype, rnn_type, bidirectional, batch_first
+    ):
+        # aot_eager lowers the same py_impl decomposition as the decomp backend,
+        # so only the regression configs need the (expensive) compile path.
+        self._check_rnn_interlayer_dropout(
+            device,
+            dtype,
+            rnn_type,
+            num_layers=3,
+            training=True,
+            bidirectional=bidirectional,
+            batch_first=batch_first,
+            dropout=1.0,
+            use_compile=True,
         )
-        with torch.no_grad():
-            for parameter in model.parameters():
-                parameter.fill_(0.1)
 
-        shape = (2, 4, 3) if batch_first else (4, 2, 3)
-        inp = torch.ones(shape, device=device, dtype=dtype, requires_grad=True)
-        grad_inputs = (inp, *model.parameters())
-
-        with torch.backends.mkldnn.flags(enabled=False):
-            expected = model(inp)
-            expected_grads = torch.autograd.grad(expected[0].sum(), grad_inputs)
-
-            if backend == "decomp":
-                with enable_python_dispatcher():
-                    actual = model(inp)
-            else:
-                torch._dynamo.reset()
-                with torch._dynamo.config.patch(allow_rnn=True):
-                    actual = torch.compile(model, backend="aot_eager", fullgraph=True)(
-                        inp
-                    )
-
-            actual_grads = torch.autograd.grad(actual[0].sum(), grad_inputs)
-
-            # Prove the eager oracle actually applies inter-layer dropout for the
-            # multi-layer training case (parity alone would pass if both paths
-            # silently skipped dropout).
-            if num_layers > 1 and training and dropout == 1.0:
-                no_dropout_model = (
-                    module_cls(3, 5, **{**kwargs, "dropout": 0.0})
-                    .to(device=device, dtype=dtype)
-                    .train(training)
-                )
-                with torch.no_grad():
-                    for src, dst in zip(
-                        model.parameters(), no_dropout_model.parameters()
-                    ):
-                        dst.copy_(src)
-                no_dropout_out = no_dropout_model(inp.detach())
-                self.assertNotEqual(expected[0], no_dropout_out[0])
-
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_grads, expected_grads)
+    @onlyCPU
+    @dtypes(torch.float64)
+    @suppress_warnings
+    @parametrize("rnn_type", ["RNN_TANH", "RNN_RELU", "GRU", "LSTM"])
+    def test_rnn_interlayer_dropout_packed(self, device, dtype, rnn_type):
+        # PackedSequence inputs go through the aten.*.data overloads, which
+        # share _rnn_helper with the .input overloads covered above.
+        self._check_rnn_interlayer_dropout(
+            device,
+            dtype,
+            rnn_type,
+            num_layers=3,
+            training=True,
+            bidirectional=False,
+            batch_first=False,
+            dropout=1.0,
+            packed=True,
+        )
 
     def test_batch_norm_unflatten_weight_bias(self, device):
         # https://github.com/pytorch/pytorch/issues/100970
