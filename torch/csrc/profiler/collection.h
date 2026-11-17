@@ -462,6 +462,8 @@ struct KinetoObserverContext : public at::ObserverContext {
         std::numeric_limits<c10::approx_time_t>::min()};
 
     std::unique_ptr<perf_counters_t> counters_;
+    // Only set for NCCL ops and ops called with kwargs. They're held here
+    // because TorchOpStorage's lists store an entry for every op.
     std::unique_ptr<collective_meta_t> collective_meta_;
     std::unique_ptr<kwinputs_t> kwinputs_;
   };
