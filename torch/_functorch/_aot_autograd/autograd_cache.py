@@ -994,8 +994,12 @@ def create_fx_config(
         boxed_forward_device_index = None
     else:
         cudagraphs = compiler_config_extra.cudagraphs
+        # Judged from the pre-AOT graph, since a cache hit never sees the
+        # backward graph. It can overestimate (a region whose inputs don't need
+        # grad has no backward); a cached backward compiled without capture
+        # refuses it in post_compile.
         backward_cudagraphs = compiler_config_extra.backward_cudagraphs(
-            compiler_config_extra.backward_may_request_cudagraphs
+            compiler_config_extra.backward.requested
         )
         boxed_forward_device_index = compiler_config_extra.forward_device_index
     return {
