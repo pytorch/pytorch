@@ -208,7 +208,9 @@ class Transform(abc.ABC):
         """
         fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
         with unset_fake_temporarily():
-            return torch._dynamo.utils.detect_fake_mode(fake_tensors)
+            return torch._guards.require_python_fake_mode(
+                torch._dynamo.utils.detect_fake_mode(fake_tensors)
+            )
 
     def _maybe_fakefy_args(
         self, fake_mode: fake_tensor.FakeTensorMode | None, *args: Any
