@@ -871,7 +871,6 @@ def _sympy_from_args(
         return cls._from_args(args, is_commutative=is_commutative)  # type: ignore[attr-defined]
 
 
-@lru_cache(256)
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     """
     After canonicalization, supported relations have Ge/Gt rewritten to Le/Lt.
@@ -898,6 +897,15 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
             evaluate=False,
         )
 
+    # Positive integer bounds on a single dimension are already in lowest terms.
+    symbol, bound = (lhs, rhs) if isinstance(rhs, sympy.Integer) else (rhs, lhs)
+    if (
+        type(symbol) is sympy.Symbol
+        and symbol.is_integer is True
+        and isinstance(bound, sympy.Integer)
+        and bound.is_positive
+    ):
+        return expr if t is type(expr) else t(lhs, rhs, evaluate=False)
     rhs = rhs - lhs
 
     def is_neg(t: sympy.Expr) -> bool:
@@ -3243,8 +3251,6 @@ class DimConstraints:
 
         # symbols that are marked dynamic
         self._marked_dynamic = marked_dynamic
-        # Runtime guards use the bounds directly. Build the solver's inequalities on demand.
-        self.size_bounds: list[tuple[type[Relational], sympy.Symbol, sympy.Expr]] = []
 
         # track supported sympy functions and subtract from list of all sympy functions
         self._supported_sympy_functions: set[sympy.Function] = {
@@ -3392,7 +3398,9 @@ class DimConstraints:
             new_n_congruences = len(self._congruences[s])
             if expr == sympy.true:
                 return old_n_congruences == new_n_congruences
-            reduced = expr.xreplace(self._var_to_val)
+            reduced = (
+                orig_reduced if expr is orig_expr else expr.xreplace(self._var_to_val)
+            )
             if reduced == sympy.false:
                 self._inconsistencies.append(
                     f"{expr}, obtained by rewriting {orig_expr} with congruences, "
@@ -3469,9 +3477,6 @@ class DimConstraints:
 
     def solve(self) -> None:
         """Solve the system of constraint equations to find simplified constraints"""
-        for op, symbol, bound in self.size_bounds:
-            self.add(op(symbol, bound))
-        self.size_bounds.clear()
         self._raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
@@ -4304,6 +4309,10 @@ class ShapeEnv:
         # SymNode's binary_magic_impl for why two sites cannot share one. Under
         # proxy tracing binary_magic_impl returns before it reaches this cache,
         # so nothing being traced is served from here.
+        self._implications_cache: dict[
+            SympyBoolean,
+            tuple[tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...],
+        ] = {}
         self._symop_cache: dict[Any, Any] = {}
         self._symop_cache_version = 0
 
@@ -4509,6 +4518,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_replacements_version_counter",
+            "_implications_cache",
             "_symop_cache",
             "_symop_cache_version",
             "_resimplify_floor_div_axioms",
@@ -6029,8 +6039,8 @@ class ShapeEnv:
 
             if isinstance(val, int):
                 if positive:
-                    if self._translation_validation_enabled:
-                        self._add_assertion(sympy_expr > 1)
+                    # Add assertions for the newly created symbols
+                    self._add_assertion(sympy_expr > 1)
 
                     # Apply default range, which assumes not zero-one
                     self.var_to_range[sympy_expr] = self._default_value_range(
@@ -6932,7 +6942,7 @@ class ShapeEnv:
             verbose_expr = ""
             if r.lower not in (-sympy.oo, -int_oo):
                 if any(is_dim(source) for source in sources):
-                    self.dim_constraints.size_bounds.append((sympy.Ge, symbol, r.lower))
+                    self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                 # Only print lower bound in simplified mode if it is not the
                 # default
                 if not _simplified or r.lower != self._default_value_range().lower:
@@ -6940,7 +6950,7 @@ class ShapeEnv:
                 verbose_expr = f"{r.lower} <= {rf}  # {vr_sloc.lower}"
             if r.upper not in (sympy.oo, int_oo):
                 if any(is_dim(source) for source in sources):
-                    self.dim_constraints.size_bounds.append((sympy.Le, symbol, r.upper))
+                    self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
                 bounds.append(sympy.Le(symbol, r.upper, evaluate=False))
                 if verbose_expr:
@@ -6952,8 +6962,7 @@ class ShapeEnv:
                     if lang == "verbose_python":
                         exprs.append(verbose_expr)
                     elif lang == "python" and len(bounds) == 2 and r.is_int:
-                        # Read the source once for both endpoints of the interval.
-                        exprs.append(f"{r.lower} <= {rf} <= {r.upper}")
+                        exprs.append(f"{r.lower} <= {rf} and {rf} <= {r.upper}")
                     else:
                         bound = sympy.And(*bounds, evaluate=False)
                         exprs.append(printer.doprint(bound))
@@ -7361,12 +7370,12 @@ class ShapeEnv:
             )
         return tuple(dict.fromkeys(axioms).keys())
 
-    @staticmethod
-    @lru_cache(256)
     def get_implications(
-        e: SympyBoolean,
+        self, e: SympyBoolean
     ) -> tuple[tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...]:
         """Given a expression, it returns a list of predicates that follow from it"""
+        if (cached := self._implications_cache.get(e)) is not None:
+            return cached
         equiv: dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
 
         def add_expr(expr: SympyBoolean) -> None:
@@ -7401,7 +7410,8 @@ class ShapeEnv:
         elif isinstance(e, sympy.Le):
             add_expr(sympy.Lt(e.lhs, e.rhs + 1, evaluate=False))
 
-        return tuple(equiv.items())
+        self._implications_cache[e] = result = tuple(equiv.items())
+        return result
 
     def _is_nonneg_term(self, term: sympy.Expr) -> bool:
         """Check if a single term is non-negative (symbol with non-neg range or non-neg constant)."""
@@ -8115,7 +8125,7 @@ class ShapeEnv:
             changed = True
         else:
             old = self.var_to_range[symbol]
-            new = vr if vr.is_int and old.is_int and vr.issubset(old) else old & vr
+            new = vr if old.is_int and vr.is_int and vr.issubset(old) else old & vr
             changed = new != old
             if changed:
                 if vr_sloc is None:

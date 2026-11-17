@@ -2613,13 +2613,13 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        _, pycode = _cached_guard_function(tuple(code_parts), make_guard_fn_args)
+        pycode, code = _compile_guard(tuple(code_parts), make_guard_fn_args)
         out: dict[str, Any] = {}
         # The dict the C++ globals tree is rooted at, so a G['NAME'] in a lambda
         # guard and in an accessor guard read the same scope on a loaded artifact.
         globals_for_guard_fn = {"G": self.runtime_global_scope}
         guards_log.debug("Python shape guard function:\n%s", pycode)
-        exec(pycode, globals_for_guard_fn, out)
+        exec(code, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
@@ -3896,8 +3896,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    # Multi-source guard (two inputs aliasing) — not expressible as a
-    # single source → value check.
+    # Alias checks compare both source values, including during nested region reuse.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, values: values[0] is values[1],
@@ -5035,6 +5034,7 @@ def _pickle_state(value: object, *, ordered: bool = False) -> _PickleState:
         )
     ):
         return _PickleState.OPAQUE
+    # A colliding registered type can override metaclass equality.
     if any(cls is registered for registered in copyreg.dispatch_table):
         return _PickleState.OPAQUE
     for base_cls, namespace in iter_mro_static_dicts(cls):
@@ -5232,6 +5232,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # State needed by whole-value guards, custom pickle protocols and keys.
         # Hold references as __tensor_flatten__ may build its ctx afresh.
         self._whole_compared_values: dict[int, Any] = {}
+        self._instance_policies: dict[int, _PickleState] = {}
         self._pruned_dictionary_ids: set[int] = set()
         self._dict_snapshots: dict[int, _DictionaryItemsSnapshot] = {}
         self._collect_required_state()
@@ -5265,6 +5266,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             ordered = issubclass(type(value), collections.OrderedDict)
             policy = _pickle_state(value, ordered=ordered)
+            self._instance_policies[id(value)] = policy
             if policy is _PickleState.OPAQUE:
                 stack.append(value)
             elif policy is _PickleState.MEMBERS:
@@ -5543,14 +5545,45 @@ class GuardsStatePickler(FunctionPicklerBase):
         for value in values:
             if issubclass(type(value), dict):
                 self._retain_required_state(dict.keys(value))
+        dictionaries = tuple(v for v in dictionaries if _can_prune_dict_values(v))
+        self._pruned_dictionary_ids.update(map(id, dictionaries))
+        if dictionaries:
+            self._retain_aliased_dictionaries(self._pruned_dictionary_ids)
         for value in dictionaries:
-            if not _can_prune_dict_values(value):
-                continue
-            self._pruned_dictionary_ids.add(id(value))
             if type(value) is dict:
                 self._dict_snapshots[id(value)] = _DictionaryItemsSnapshot(
                     self._dictionary_items(value)
                 )
+
+    def _retain_aliased_dictionaries(self, dictionaries: set[int]) -> None:
+        # A retained sequence can carry an unguarded object whose constructor
+        # reads a guarded dictionary through a different reference.
+        pending = [(v, False) for v in self.guard_tree_values.values()]
+        seen: set[tuple[int, bool]] = set()
+        while pending:
+            value, whole = pending.pop()
+            key = (id(value), whole)
+            if key in seen:
+                continue
+            seen.add(key)
+            if key[0] in dictionaries:
+                if whole:
+                    self._retain_required_state((value,))
+                continue
+            typ = type(value)
+            visit = issubclass(typ, (list, tuple, set, frozenset, dict))
+            if not whole and not self._keep(value) and self._is_user_instance(value):
+                # Default restoration only assigns this object's members. Its
+                # children can still have constructors that inspect their input.
+                visit = True
+                whole = (
+                    _pickle_state(
+                        value, ordered=issubclass(typ, collections.OrderedDict)
+                    )
+                    is _PickleState.OPAQUE
+                )
+            if visit or (whole and not issubclass(typ, self._STATE_LEAF_TYPES)):
+                pending.extend((child, whole) for child in gc.get_referents(value))
 
     def _can_prune_value(self, value: object) -> bool:
         return (
@@ -5570,23 +5603,32 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     def prune_local_scope(self, local_scope: dict[str, Any]) -> None:
         """Prune unused pytree leaves, retaining dictionaries' key dependencies."""
-        # An item discarded from a dictionary still exists in other objects.
-        # Do not register its id as missing while traversing that same dict.
-        for leaf in pytree.tree_leaves(
-            local_scope, is_leaf=lambda value: id(value) in self._pruned_dictionary_ids
-        ):
-            if id(leaf) in self._pruned_dictionary_ids:
-                continue
-            if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
-                base = leaf.__self__
-                if not self._keep(base):
-                    try:
-                        type(base).__new__(type(base))
-                        self.empty_values[id(base)] = base
-                    except Exception:
-                        pass
-            elif self._can_prune_value(leaf):
-                self.missing_values[id(leaf)] = leaf
+        # A discarded slot may alias a value needed elsewhere. Traverse only
+        # the slots that will be serialized, visiting recursive dictionaries once.
+        pending: list[Any] = [local_scope]
+        seen: set[int] = set()
+        while pending:
+            leaves = pytree.tree_iter(
+                pending.pop(), is_leaf=lambda v: id(v) in self._pruned_dictionary_ids
+            )
+            for leaf in leaves:
+                if id(leaf) in self._pruned_dictionary_ids:
+                    if id(leaf) not in seen:
+                        seen.add(id(leaf))
+                        pending.extend(
+                            v for v in dict.values(leaf) if not self._can_prune_value(v)
+                        )
+                    continue
+                if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
+                    base = leaf.__self__
+                    if self._can_prune_value(base):
+                        try:
+                            type(base).__new__(type(base))
+                            self.empty_values[id(base)] = base
+                        except Exception:
+                            pass
+                elif self._can_prune_value(leaf):
+                    self.missing_values[id(leaf)] = leaf
 
     def _keep_container_verbatim(self, container: object) -> bool:
         """Whether a function container (__defaults__/__dict__/...) is carried whole
@@ -5769,7 +5811,7 @@ class GuardsStatePickler(FunctionPicklerBase):
     # Everything else in missing_values stays on the reducer_override path, and
     # so does a container that is also in empty_values: reducer_override checks
     # empty_values first, so a bound method's receiver is rebuilt empty rather
-    # than as the sentinel, and this hook keeps that precedence.
+    # than as the sentinel. A dictionary snapshot already accounts for its slots.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
     def persistent_id(self, obj: object) -> _DictionaryItemsSnapshot | str | None:
@@ -6179,10 +6221,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
         if (
-            id(obj) in self.guard_tree_values
-            and self._is_user_instance(obj)
+            self._instance_policies.get(id(obj)) is _PickleState.DEFAULT
             and id(obj) not in self._whole_compared_values
-            and _pickle_state(obj) is _PickleState.DEFAULT
             and inspect.getattr_static(type(obj), "__slots__", None) is None
             and hasattr(obj, "__dict__")
         ):
@@ -6942,6 +6982,10 @@ class CheckFunctionManager:
                 if k in used_local_vars or k in self.additional_used_local_vars
             },
             global_scope=global_scope_state,
+            constant_result_names=(
+                output_graph_guards_state.constant_result_names
+                & global_scope_state.keys()
+            ),
             _guards=torch._guards.GuardsSet(
                 OrderedSet(
                     dataclasses.replace(
@@ -7377,8 +7421,9 @@ def build_guard_function(code_parts: list[str], closure_args: str) -> tuple[str,
 
 
 @functools.lru_cache(32)
-def _cached_guard_function(parts: tuple[str, ...], args: str) -> tuple[str, str]:
-    return build_guard_function(list(parts), args)
+def _compile_guard(parts: tuple[str, ...], args: str) -> tuple[str, types.CodeType]:
+    _, source = build_guard_function(list(parts), args)
+    return source, compile(source, "<string>", "exec")
 
 
 def is_recompiles_enabled() -> bool:

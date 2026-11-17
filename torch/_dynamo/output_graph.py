@@ -496,6 +496,8 @@ class OutputGraphGuardsState:
     compile_on_one_rank: bool = False
     # torch.fx.traceback annotation active when the frame started tracing
     fx_annotation: dict[str, Any] | None = None
+    # Names Dynamo minted for constant results, which a loading process lacks.
+    constant_result_names: set[str] = dc_field(default_factory=set)
     # ___unnamed_scope_* key -> source of the namespace it was minted for
     unnamed_scope_sources: dict[str, Source] = dc_field(default_factory=dict)
 
@@ -525,6 +527,7 @@ class OutputGraphGuardsState:
             global_state_guard=self.global_state_guard,
             fx_annotation=self.fx_annotation,
             unnamed_scope_sources=self.unnamed_scope_sources,
+            constant_result_names=self.constant_result_names,
             name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
@@ -681,6 +684,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.compile_on_one_rank,
             fx_annotation=output_graph_guards_state.fx_annotation,
             unnamed_scope_sources=output_graph_guards_state.unnamed_scope_sources,
+            constant_result_names=output_graph_guards_state.constant_result_names,
         )
 
         self.import_sources = import_sources or {}
@@ -2037,6 +2041,7 @@ class OutputGraph(OutputGraphCommon):
             def wrap_name(module_key: str) -> VariableTracker:
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
+                self.constant_result_names.add(module_key)
                 return VariableTracker.build(
                     self,  # type: ignore[arg-type]
                     target,
@@ -4235,6 +4240,7 @@ class SubgraphTracer(fx.Tracer):
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
         self.input_name_to_proxy: dict[str, fx.Proxy] = {}
+        self.reused_subgraph_proxies: dict[str, fx.Proxy] = {}
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: dict[fx.Node, torch.Tensor] = {}
         # [device-as-parameter] the single coor::current_device_index observation

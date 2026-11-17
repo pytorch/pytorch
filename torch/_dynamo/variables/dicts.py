@@ -63,6 +63,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
+    specialize_symnode,
     tracked_repr,
     unpack_iterable,
 )
@@ -427,7 +428,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                     return self._tree_map_with_path_fallback(
                         tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
                     )
-            key_const = key_tracker.vt.as_python_constant()
+            key_const = specialize_symnode(key_tracker.vt).as_python_constant()
             child_keypath = keypath + (MappingKey(key_const),)
             new_items_hashed[key_tracker] = value.call_tree_map_with_path(
                 tx,
@@ -1453,7 +1454,7 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         # Key lookups, mutations and detached copies can observe IDs without
         # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
-            key.vt.realize()
+            specialize_symnode(key.vt.realize())
         return self.items
 
     def clone(self, **kwargs: Any) -> VariableTracker:
