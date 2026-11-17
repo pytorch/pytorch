@@ -1008,6 +1008,7 @@ class <lambda>(torch.nn.Module):
             """\
 
 
+
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     l_x_ = L_x_
     l_y_ = L_y_
@@ -1044,6 +1045,7 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
             """\
 
 
+
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     l_x_ = L_x_
     l_y_ = L_y_
@@ -1072,6 +1074,7 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         self.assertExpectedInline(
             graph_code(graph),
             """\
+
 
 
 def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
