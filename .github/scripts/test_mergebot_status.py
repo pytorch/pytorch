@@ -310,9 +310,10 @@ class TestMergeWorkflowSteps(TestCase):
                 ],
             },
             {
+                "if": "startsWith(github.base_ref, 'gh/') && endsWith(github.base_ref, '/base')",
                 "shell": "bash",
                 "run": [
-                    'BRANCH="${{ github.base_ref }}"',
+                    'BRANCH="${BASE_REF}"',
                     'echo "$BRANCH"',
                     'BRANCH="${BRANCH%/base}/orig"',
                     'echo "$BRANCH"',
@@ -655,7 +656,6 @@ class TestEveryCommentDeclaresItsStatus(TestCase):
         # Refusals, untagged only in a --check-mergeability run
         ("trymerge", "main", 'f"Can\'t merge closed PR #{args.pr_num}"'),
         ("trymerge", "main", "'Cross-repo ghstack merges are not supported'"),
-        ("trymerge", "main", "refusal"),
     ]
 
     def test_untagged_comments_are_the_reviewed_notices(self) -> None:
