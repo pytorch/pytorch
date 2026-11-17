@@ -102,7 +102,7 @@ non-default stream can show that a native handle was not hard-coded. Do not ask
 for exhaustive dtype, shape, device, numerical-edge, or error-case matrices
 unless the stable wrapper itself branches on those cases.
 
-## Before approving, be sure to state
+## Before approving, make sure you can answer
 
 1. which unstable declaration or schema defines the contract;
 2. which shim or dispatcher overload implements the bridge;
