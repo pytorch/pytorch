@@ -107,17 +107,30 @@ __all__ = [
 
 
 def _is_integer_check_safe(expr: sympy.Basic) -> bool:
-    """Trust integer literals, symbols, and integer-valued PyTorch functions.
+    """Return whether rounding an expression is known to be a no-op.
 
-    SymPy's inferred ``expr.is_integer`` can be incorrect for composite
-    expressions, so it is not safe to use for correctness-preserving
-    canonicalization.
+    Trust integer literals and symbols, integer-returning division, indexing,
+    and rounding functions, and modulo functions whose operands are recursively
+    trusted. SymPy assumptions and other PyTorch functions are not sufficient.
     """
 
-    return (
-        isinstance(expr, sympy.Integer)
-        or (isinstance(expr, sympy.Symbol) and expr.is_integer is True)
-        or (expr.func.__module__ == __name__ and expr.func.is_integer is True)
+    if isinstance(expr, sympy.Integer):
+        return True
+    if isinstance(expr, sympy.Symbol):
+        return expr.is_integer is True
+    if isinstance(expr, (Mod, PythonMod)):
+        return all(_is_integer_check_safe(arg) for arg in expr.args)
+    return isinstance(
+        expr,
+        (
+            FloorDiv,
+            CleanDiv,
+            ModularIndexing,
+            CeilToInt,
+            FloorToInt,
+            TruncToInt,
+            RoundToInt,
+        ),
     )
 
 

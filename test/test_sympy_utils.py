@@ -40,6 +40,7 @@ from torch.utils._sympy.functions import (
     RShift,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
+    ToFloat,
     TruncToInt,
 )
 from torch.utils._sympy.interp import sympy_interp
@@ -1165,6 +1166,25 @@ class TestSympyFunctions(TestCase):
             with self.subTest(rounding=rounding):
                 self.assertIs(rounding(integer_symbol), integer_symbol)
 
+    @parametrize("modulo", (Mod, PythonMod))
+    @parametrize("rounding", (CeilToInt, FloorToInt, TruncToInt))
+    def test_rounding_to_int_canonicalizes_integer_modulo(self, modulo, rounding):
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        expr = modulo(integer_symbol, sympy.Integer(3))
+
+        self.assertIs(rounding(expr), expr)
+
+    @parametrize("modulo", (Mod, PythonMod))
+    @parametrize("rounding", (CeilToInt, FloorToInt, TruncToInt))
+    def test_rounding_to_int_does_not_canonicalize_float_modulo(
+        self, modulo, rounding
+    ):
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        value = sympy.Float("0.7") * ToFloat(s0)
+        expr = modulo(value, sympy.Float(2.0))
+
+        self.assertIs(rounding(expr).func, rounding)
+
     def test_rounding_to_int_does_not_canonicalise_expressions_with_incorrect_assumptions(
         self,
     ):
@@ -1409,6 +1429,7 @@ instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
 instantiate_device_type_tests(TestSympyInterpDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSympySolve)
+instantiate_parametrized_tests(TestSympyFunctions)
 
 
 if __name__ == "__main__":
