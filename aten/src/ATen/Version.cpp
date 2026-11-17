@@ -134,7 +134,7 @@ std::string show_config() {
   // Reference:
   // https://blog.kowalczyk.info/article/j/guide-to-predefined-macros-in-c-compilers-gcc-clang-msvc-etc..html
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__clang__)
   {
     ss << "  - GCC " << __GNUC__ << '.' << __GNUC_MINOR__ << '\n';
   }
@@ -173,11 +173,6 @@ std::string show_config() {
 #if AT_BUILD_WITH_LAPACK()
   // TODO: Actually record which one we actually picked
   ss << "  - LAPACK is enabled (usually provided by MKL)\n";
-#endif
-
-#if AT_NNPACK_ENABLED()
-  // TODO: No version; c.f. https://github.com/Maratyszcza/NNPACK/issues/165
-  ss << "  - NNPACK is enabled\n";
 #endif
 
 #ifdef CROSS_COMPILING_MACOSX
