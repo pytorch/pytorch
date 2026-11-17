@@ -8,6 +8,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/dynamo/disable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
@@ -1224,6 +1225,7 @@ bool ConcretePyInterpreterVTable::fake_run_with_mode_entered(
     c10::function_ref<bool()> step) const {
   // Keep threading.local data alive from entry to exit on native threads too.
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
   py_mode.attr("__enter__")();
   bool done = false;
@@ -1249,6 +1251,7 @@ void ConcretePyInterpreterVTable::fake_raise_device_mismatch(
     c10::Device common_device,
     c10::Device device) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   auto error_type = get_fake_tensor_device_mismatch_error();
   auto error = error_type(getTorchApiFunction(op), common_device, device);
   PyErr_SetObject(error_type.ptr(), error.ptr());
@@ -1259,6 +1262,7 @@ void ConcretePyInterpreterVTable::raise_python_error(
     c10::impl::FakePythonError kind,
     const std::string& msg) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   PyObject* type = nullptr;
   switch (kind) {
     case c10::impl::FakePythonError::AssertionError:
@@ -1286,6 +1290,7 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
     bool has_symbolic_sizes,
     bool* has_python_cia) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::handle py_op = getTorchApiFunction(op);
   py::dict py_kernels = py_op.attr("py_kernels");
   py::object cia_key = py::cast(c10::DispatchKey::CompositeImplicitAutograd);
@@ -1371,6 +1376,7 @@ bool ConcretePyInterpreterVTable::fake_try_meta(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::handle py_op = getTorchApiFunction(op);
   py::dict py_kernels = py_op.attr("py_kernels");
   py::object meta_key = py::cast(c10::DispatchKey::Meta);
@@ -1394,6 +1400,7 @@ bool ConcretePyInterpreterVTable::fake_try_custom_op_impl(
     const std::shared_ptr<c10::FakeTensorMode>& mode,
     PyObject* real) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::handle py_op = getTorchApiFunction(op);
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
   py::handle py_real = real ? py::handle(real) : py::none();
@@ -1418,6 +1425,7 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     const std::shared_ptr<c10::FakeTensorMode>& mode,
     std::optional<c10::Device> common_device) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::handle py_op = getTorchApiFunction(op);
   py::object py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
   return run_python_callback(
@@ -1451,6 +1459,7 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::handle py_op = getTorchApiFunction(op);
   if (!py::hasattr(py_op, "prim_meta_impl")) {
     return false;
@@ -1478,6 +1487,7 @@ bool ConcretePyInterpreterVTable::fake_infer_from_real_out(
     torch::jit::Stack* stack,
     PyObject* real) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::handle py_op = getTorchApiFunction(op);
   auto active = get_active_fake_mode();
   if (get_has_fake_kernel()(py_op).cast<bool>()) {
@@ -1502,6 +1512,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
         const std::shared_ptr<c10::FakeTensorMode>& mode,
         const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   // Subclasses with custom dispatch run at Python before Fake.
   if (auto* obj = real_impl->pyobj_slot()->load_pyobj()) {
     auto* type = Py_TYPE(obj);
@@ -1538,6 +1549,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::
 bool ConcretePyInterpreterVTable::allow_non_fake_inputs(
     const std::shared_ptr<c10::FakeTensorMode>& mode) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   py::object override_val =
       get_fake_tensor_tls().attr("allow_non_fake_inputs_override");
   if (!override_val.is_none()) {
@@ -1550,6 +1562,7 @@ PyObject* ConcretePyInterpreterVTable::fake_run_real_op(
     const c10::OperatorHandle& op,
     const torch::jit::Stack& fake_args) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   auto active = get_active_fake_mode();
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, fake_args);
   py::object result = py::module::import("torch._subclasses.fake_tensor")
@@ -1566,6 +1579,7 @@ void ConcretePyInterpreterVTable::propagate_real_tensors(
     PyObject* real,
     torch::jit::Stack* stack) const {
   py::gil_scoped_acquire gil;
+  torch::dynamo::DisableDynamoGuard no_dynamo;
   auto active = get_active_fake_mode();
   auto num_returns = op.schema().returns().size();
   // Pass the outputs the way a Python op returns them: None, the single value,
