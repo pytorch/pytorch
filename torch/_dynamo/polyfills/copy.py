@@ -25,7 +25,9 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
     copyreg.__newobj_ex__ vs __newobj__ based on whether kwargs are present, and
     computes the pickle state (__getstate__ if overridden, else __dict__ if the
     object has one, else None). copy._reconstruct rebuilds the object via
-    cls.__new__(cls, *args) and applies the state.
+    cls.__new__(cls, *args) and applies the state. List subclasses supply
+    iter(obj) as listitems, while dict subclasses supply iter(obj.items()) as
+    dictitems; copy._reconstruct consumes them to restore container contents.
 
     This must not assume the object has a __dict__: tuple/slots objects such as
     namedtuples have __slots__ = () and no __dict__, and reduce to
@@ -34,6 +36,11 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
     import copyreg
 
     cls = type(obj)
+
+    # Mirror object.__reduce_ex__ (Objects/typeobject.c): if the type overrides
+    # __reduce__, defer to it rather than building the copyreg newobj reduction.
+    if getattr(cls, "__reduce__", None) is not object.__reduce__:
+        return obj.__reduce__()  # type: ignore[attr-defined]
 
     args: tuple  # type: ignore[type-arg]
     kwargs: dict  # type: ignore[type-arg]
@@ -62,4 +69,7 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
         except AttributeError:
             state = None
 
-    return (func, newargs, state, None, None)
+    listitems = iter(obj) if isinstance(obj, list) else None
+    dictitems = iter(obj.items()) if isinstance(obj, dict) else None
+
+    return (func, newargs, state, listitems, dictitems)

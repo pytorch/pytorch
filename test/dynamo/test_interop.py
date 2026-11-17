@@ -32,11 +32,11 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         self._common(lambda a, b: fx_fn(a, b) + 1)
 
     def test_script_fn(self):
-        script_fn = torch.jit.script(fn)
+        script_fn = torch.jit._script.script(fn)
         self._common(lambda a, b: script_fn(a, b) + 1)
 
     def test_trace_fn(self):
-        trace_fn = torch.jit.trace(
+        trace_fn = torch.jit._trace.trace(
             fn,
             [torch.zeros(10, device=device_type), torch.zeros(10, device=device_type)],
         )
@@ -45,7 +45,7 @@ class InteropTests(torch._dynamo.test_case.TestCase):
     def test_staticmethod_script_fn(self):
         class Foo:
             @staticmethod
-            @torch.jit.script
+            @torch.jit._script.script
             def _g(a):
                 return a**2
 
