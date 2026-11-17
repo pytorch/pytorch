@@ -1054,8 +1054,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(torch._dynamo.config.use_cpp_fake_tensor)
+    @fake_tensor_test()
     def test_alias_fake_tensor(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
@@ -1437,6 +1436,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(explicit_indexed.device, torch.device("meta"))
         self.assertEqual(explicit_indexed.shape, ())
 
+    @fake_tensor_test()
     @parametrize("device", ("meta", "meta:0"))
     def test_tensor_constructor_meta_device_from_storage(self, device):
         storage = torch.tensor([1.0, 2.0]).storage()
@@ -1451,6 +1451,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertEqual(tensor.device, torch.device("meta"))
         self.assertEqual(tensor.shape, (2,))
 
+    @fake_tensor_test()
     @expectedFailurePropagateRealTensors
     @parametrize(
         "device,expected_device",
@@ -1651,8 +1652,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             result = torch.div(symint, 4, rounding_mode="trunc")
         self.assertIsNone(maybe_get_fake_constant(result))
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(torch._dynamo.config.use_cpp_fake_tensor)
+    @fake_tensor_test()
     def test_parameter_view(self):
         x = torch.nn.Parameter(torch.randn(4))
         x_view = x.view(4)
@@ -1747,6 +1747,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         replay_out = gm(torch.randn(5, 16, 256), weight)
         self.assertEqual(replay_out.shape, (5, 16, 3072))
 
+    @fake_tensor_test()
     def test_view_unbacked_contiguous_relation_from_hints(self):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
@@ -1890,6 +1891,7 @@ def forward(self, x_1):
         self.assertIs(t2.size(1).node.shape_env, t1.size(1).node.shape_env)
         self.assertEqual(str(t2.size(1)), str(t1.size(1)))
 
+    @fake_tensor_test()
     @skipIfCrossRef
     def test_deepcopy(self):
         with FakeTensorMode() as mode:
@@ -2209,6 +2211,7 @@ def forward(self, x_1):
 
         self.assertEqual(t.shape[0], torch.ops.aten.unsqueeze_copy(t, 1).shape[0])
 
+    @fake_tensor_test()
     def test_alias_call(self):
         fwAD = torch.autograd.forward_ad
 
@@ -3726,17 +3729,41 @@ class TestFakeTensorConverter(TestCase):
         with self.assertRaisesRegex(AssertionError, "not fake"):
             converter.from_meta_and_device(mode, cpp_fake, "cpu")
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(torch._dynamo.config.use_cpp_fake_tensor)
-    def test_separate_tensor_storages_view(self):
-        x = torch.rand(2, 2, 2)
-        y = x[0]
+    @fake_tensor_test()
+    @parametrize("requires_grad", [False, True])
+    @parametrize("leaf", [False, True])
+    @parametrize("view_kind", ["slice", "transpose", "real", "complex"])
+    def test_separate_tensor_storages_view(self, requires_grad, leaf, view_kind):
+        dtype = torch.complex64 if view_kind == "real" else torch.float32
+        x = torch.rand(2, 2, 2, dtype=dtype, requires_grad=requires_grad)
+        if not leaf:
+            x = x.sin()
+        y = {
+            "slice": lambda: x[1],
+            "transpose": lambda: x.transpose(0, 1),
+            "real": lambda: torch.view_as_real(x),
+            "complex": lambda: torch.view_as_complex(x),
+        }[view_kind]()
         mode = FakeTensorMode()
         converter = mode.fake_tensor_converter
         x_conv = converter.from_real_tensor(mode, x)
         y_conv = converter.from_real_tensor(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
+        self.assertIs(y_conv._base, x_conv)
+        self.assertIs(mode.from_tensor(y), y_conv)
+        self.assertEqual(y_conv.shape, y.shape)
+        self.assertEqual(y_conv.stride(), y.stride())
+        self.assertEqual(y_conv.storage_offset(), y.storage_offset())
+        self.assertEqual(y_conv.dtype, y.dtype)
+        self.assertEqual(y_conv.requires_grad, y.requires_grad)
+        self.assertEqual(y_conv.is_leaf, y.is_leaf)
+        version = x_conv._version
+        with torch.no_grad():
+            y_conv.add_(1)
+        self.assertEqual(x_conv._version, version + 1)
+        self.assertEqual(y_conv._version, x_conv._version)
 
+    @fake_tensor_test()
     @xfailIfTorchDynamo
     def test_separate_tensor_storages_non_view(self):
         x = torch.rand(2, 2, 2)
@@ -3757,6 +3784,7 @@ class TestFakeTensorConverter(TestCase):
         self.assertEqual(len(converter.tensor_memo), 0)
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
 
+    @fake_tensor_test()
     def test_parameter_views_keep_full_storage(self):
         base = torch.arange(12, dtype=torch.float16)
         x = torch.nn.Parameter(base[:6].view(2, 3))
@@ -3784,6 +3812,7 @@ class TestFakeTensorConverter(TestCase):
             self.assertEqual(x_real, x)
             self.assertEqual(y_real, y)
 
+    @fake_tensor_test()
     def test_parameter_views_keep_full_storage_symbolic_propagate_real(self):
         base = torch.arange(12, dtype=torch.float16)
         x = torch.nn.Parameter(base[:6].view(2, 3))
@@ -3807,6 +3836,7 @@ class TestFakeTensorConverter(TestCase):
         self.assertEqual(x_real, x)
         self.assertEqual(y_real, y)
 
+    @fake_tensor_test()
     def test_strided_parameter_views_keep_real_storage_data(self):
         base = torch.arange(11, dtype=torch.float32)
         x = torch.nn.Parameter(base[::2])
@@ -3823,6 +3853,7 @@ class TestFakeTensorConverter(TestCase):
         self.assertEqual(maybe_get_real_tensor(x_conv), x)
         self.assertEqual(maybe_get_real_tensor(y_conv), y)
 
+    @fake_tensor_test()
     def test_functional_tensor_offset_storage_copy(self):
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
@@ -3843,6 +3874,7 @@ class TestFakeTensorConverter(TestCase):
         self.assertEqual(y_refake.storage_offset(), y.storage_offset())
         self.assertEqual(maybe_get_real_tensor(y_refake), y)
 
+    @fake_tensor_test()
     def test_refake_unbacked_storage_static_shapes(self):
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False):
             shape_env = ShapeEnv()
@@ -3863,15 +3895,12 @@ class TestFakeTensorConverter(TestCase):
         self.assertTrue(free_unbacked_symbols(refake.shape[0]))
         self.assertEqual(refake.shape[1], 3)
 
-    # Conversion of real views to C++ fakes is not implemented.
-    @xfailIf(torch._dynamo.config.use_cpp_fake_tensor)
+    @fake_tensor_test()
     def test_dead_weak_ref(self):
         x = torch.rand(2, 2, 2)
         y = x[0]
         mode = FakeTensorMode()
-        converter = FakeTensorConverter(
-            cpp_fakes=torch._dynamo.config.use_cpp_fake_tensor
-        )
+        converter = mode.fake_tensor_converter
         x_conv = converter.from_real_tensor(mode, x)
         x_conv_storage = x_conv.untyped_storage()
         del x_conv
@@ -3970,6 +3999,7 @@ class TestFakeTensorConverter(TestCase):
         fake_t = mode.from_tensor(t)
         self.assertIsNone(fake_t.grad_dtype)
 
+    @fake_tensor_test()
     def test_grad_dtype_functional_tensor_no_crash(self):
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
@@ -4129,6 +4159,7 @@ class TestFakeTensorOperatorInvariants(TestCase):
                     op, torch._subclasses.fake_tensor._like_tensor_constructors
                 )
 
+    @fake_tensor_test()
     def test_str_storage(self):
         x = torch.zeros(3)
         with FakeTensorMode() as m:
@@ -6090,9 +6121,11 @@ instantiate_device_type_tests(
 )
 
 
+@instantiate_parametrized_tests
 class TestFakeTensorViewCopy(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @fake_tensor_test()
     def test_expand_then_view_copy_matches_eager_mode(self):
         x = torch.arange(7)
         y = x.expand(12, 7)
@@ -6110,6 +6143,7 @@ class TestFakeTensorViewCopy(TestCase):
             self.assertEqual(fake.shape, (84,))
             self.assertIsNone(fake._base)  # non-aliasing
 
+    @fake_tensor_test()
     def test_expand_then_view_still_not_allowed(self):
         with FakeTensorMode():
             xf = torch.arange(7)
@@ -6119,6 +6153,7 @@ class TestFakeTensorViewCopy(TestCase):
             ):
                 _ = yf.view(-1)
 
+    @fake_tensor_test()
     def test_expand_then_view_copy_unbacked_matches_eager_mode(self):
         with torch.fx.experimental._config.patch(backed_size_oblivious=True):
             with FakeTensorMode():
@@ -6128,6 +6163,7 @@ class TestFakeTensorViewCopy(TestCase):
                 self.assertEqual(fake.shape, (84,))
                 self.assertIsNone(fake._base)  # non-aliasing
 
+    @fake_tensor_test()
     def test_expand_then_view_unbacked_still_not_allowed(self):
         with torch.fx.experimental._config.patch(backed_size_oblivious=True):
             with FakeTensorMode():
