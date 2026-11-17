@@ -4,6 +4,8 @@ import copy
 import functools
 import math
 import re
+import subprocess
+import sys
 import unittest
 from importlib import import_module
 from types import SimpleNamespace
@@ -1749,6 +1751,21 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
             torch._dynamo.exc.Unsupported, "User-inserted graph break"
         ):
             opt_fn(x)
+
+    def test_aot_eager_in_checkpoint_does_not_initialize_device(self, device):
+        # Non-reentrant checkpoint raises if its forward initializes the device;
+        # lazy init can't be undone in-process, so check in a fresh one.
+        script = f"""
+import torch
+from torch.utils.checkpoint import checkpoint
+
+fn = torch.compile(lambda x: x.sin() * 2, backend="aot_eager")
+x = torch.randn(8, requires_grad=True)
+checkpoint(fn, x, use_reentrant=False).sum().backward()
+print("initialized:", torch.get_device_module("{torch.device(device).type}").is_initialized())
+"""
+        out = subprocess.check_output([sys.executable, "-c", script], text=True)
+        self.assertIn("initialized: False", out)
 
     def test_list_inputs(self, device):
         class MockModule(torch.nn.Module):

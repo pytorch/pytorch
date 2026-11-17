@@ -11,11 +11,13 @@ from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import (
+    bind_current_stream,
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
     mark_current_stream_used,
     register_current_stream,
     register_graph_created_object,
+    unused_current_stream,
 )
 from ..source import CurrentStreamSource
 from .base import GetSet, Method, readonly_setter, VariableTracker
@@ -272,32 +274,46 @@ class SymbolicStreamState:
     """Track the currently entered stream if any"""
 
     def __init__(self) -> None:
-        from ..source import CurrentStreamSource
+        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque()
+        # Set while the current stream is not queried yet: querying initializes
+        # the accelerator, which tracing CPU-only code must not do.
+        self.unqueried_device_type: str | None = None
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        if accelerator is None:
+            return
 
-        cur_stack: list[StreamVariable] = []
-        if torch.accelerator.is_available():
-            from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+        # Register the current stream so it gets index 0 (each OutputGraph
+        # starts with an empty registry).  The inductor wrapper updates this
+        # entry at runtime so cudagraph capture uses the capture stream
+        # instead of this stale trace-time stream.
+        device_module = torch.get_device_module(accelerator)
+        is_initialized = getattr(device_module, "is_initialized", None)
+        if is_initialized is not None and not is_initialized():
+            source = CurrentStreamSource(torch.device(accelerator.type))
+            register_current_stream(unused_current_stream, source)
+            self.unqueried_device_type = accelerator.type
+            return
+        self._push_current_stream(register_current_stream)
 
-            stream = torch.accelerator.current_stream()
-            device = stream.device
-            if _coor_device_index_is_current(device):
-                # Reconstruct the stream relative to each rank's current device.
-                device = torch.device(device.type)
-            source = CurrentStreamSource(device)
-            # Register the current stream so it gets index 0 (each OutputGraph
-            # starts with an empty registry).  The inductor wrapper updates this
-            # entry at runtime so cudagraph capture uses the capture stream
-            # instead of this stale trace-time stream.
-            register_current_stream(stream, source)
-            stream_var = LazyVariableTracker.create(stream, source=source)
-            # Set user_object_index as an instance attribute so accessing it
-            # does NOT trigger LazyVariableTracker realization.
-            stream_var.user_object_index = CURRENT_STREAM_INDEX  # type: ignore[union-attr]
-            cur_stack = [stream_var]  # type: ignore[list-item]
+    def _push_current_stream(
+        self, register: Callable[[torch.Stream, CurrentStreamSource], None]
+    ) -> torch.Stream:
+        from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 
-        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
-            cur_stack
-        )
+        stream = torch.accelerator.current_stream()
+        device = stream.device
+        if _coor_device_index_is_current(device):
+            # Reconstruct the stream relative to each rank's current device.
+            device = torch.device(device.type)
+        source = CurrentStreamSource(device)
+        register(stream, source)
+        stream_var = LazyVariableTracker.create(stream, source=source)
+        # Set user_object_index as an instance attribute so accessing it
+        # does NOT trigger LazyVariableTracker realization.
+        stream_var.user_object_index = CURRENT_STREAM_INDEX  # type: ignore[union-attr]
+        # Bottom of the stack: streams entered before the query stay above it.
+        self.cur_stream_stack.appendleft(stream_var)  # type: ignore[arg-type]
+        return stream
 
     def enter_stream(self, stream: "StreamVariable") -> None:
         self.cur_stream_stack.append(stream)
@@ -305,8 +321,15 @@ class SymbolicStreamState:
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
-    def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
+    def cur_stream(
+        self, tx: "InstructionTranslatorBase", device: torch.device | None = None
+    ) -> "StreamVariable":
         mark_current_stream_used()
+        if self.unqueried_device_type is not None:
+            # Traced code asks for the stream, so initializing the device is fine.
+            stream = self._push_current_stream(bind_current_stream)
+            tx.output.rekey_input_mutation_stream(id(self), id(stream))
+            self.unqueried_device_type = None
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
@@ -319,17 +342,20 @@ class SymbolicStreamState:
         tracked.  Peeks the value so LazyVariableTrackers on the stack are not
         realized (same pattern as cur_stream_id)."""
         if not self.cur_stream_stack:
-            return None
+            return self.unqueried_device_type
         stream = self.cur_stream_stack[-1]
         if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
             return stream.peek_value().device.type
         return stream.value.device.type
 
     def in_stream_context(self) -> bool:
-        return len(self.cur_stream_stack) > 0
+        return len(self.cur_stream_stack) > 0 or self.unqueried_device_type is not None
 
     def cur_stream_id(self) -> int:
         """Get a Python object id for the current stream without realizing lazy variables."""
+        if not self.cur_stream_stack:
+            # Stands in for the unqueried current stream; cur_stream() rekeys it.
+            return id(self)
         stream = self.cur_stream_stack[-1]
         if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
             return id(stream.peek_value())
@@ -917,7 +943,7 @@ class EventVariable(VariableTracker):
             stream_arg = kwargs.get("stream")
 
         if not stream_arg:
-            stream_var = tx.symbolic_stream_state.cur_stream()
+            stream_var = tx.symbolic_stream_state.cur_stream(tx)
             return stream_var, stream_var.user_object_index  # type: ignore[return-value]
 
         return stream_arg, stream_arg.user_object_index  # type: ignore[return-value]
