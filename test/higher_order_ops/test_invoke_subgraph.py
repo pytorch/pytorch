@@ -46,7 +46,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
 )
-from torch.testing._internal.common_fake_tensor import fake_tensor_test
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -3276,7 +3275,6 @@ _reuse_test_global = None
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @fake_tensor_test()
     @parametrize("tracing_mode", ["fake", "symbolic"])
     @parametrize("noncontiguous_grad", [False, True])
     def test_make_fx_backward(self, device, tracing_mode, noncontiguous_grad):
