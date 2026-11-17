@@ -1583,7 +1583,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             with self.assertRaisesRegex(RuntimeError, error):
                 torch.as_strided(x, (17, 18), (-80, 1), 1)
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     def test_recursive_invocation(self):
         mode = FakeTensorMode()
         with mode:
@@ -3402,6 +3401,11 @@ class TestFakeTensorConstHandling(TestCase):
         for arg in args:
             self.assertTrue(maybe_get_fake_constant(arg) is None)
 
+    def test_simple(self):
+        with FakeTensorMode():
+            x = torch.tensor(4.0)
+            self.assertEqual(x.item(), 4.0)
+
     @parametrize(
         "data",
         [
@@ -3411,12 +3415,10 @@ class TestFakeTensorConstHandling(TestCase):
             subtest([4.0, 5.0], name="two"),
         ],
     )
-    def test_simple(self, data):
+    def test_initial_constants(self, data):
         expected = torch.tensor(data)
         with FakeTensorMode() as mode:
             x = torch.tensor(data)
-            if expected.ndim == 0:
-                self.assertEqual(x.item(), 4.0)
         prims.utils.compare_tensor_meta(x, expected, check_strides=True)
         self.assertIs(maybe_get_fake_mode(x), mode)
         if expected.numel() <= 1:
