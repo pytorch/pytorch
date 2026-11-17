@@ -1211,16 +1211,6 @@
       ]
     }
   ],
-  "GB7728": [
-    {
-      "Gb_type": "DELETE_GLOBAL with a pending module-object write",
-      "Context": "name",
-      "Explanation": "Dynamo cannot order a global delete against a pending write to the module globals through the module object.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0071": [
     {
       "Gb_type": "Inline attempt with __self__",
@@ -1696,16 +1686,6 @@
       "Hints": []
     }
   ],
-  "GB4217": [
-    {
-      "Gb_type": "DELETE_GLOBAL with a materialized module dict",
-      "Context": "name",
-      "Explanation": "The module __dict__ is materialized in the trace, so later accesses to it race the replayed global delete. Eager resume has to order them instead.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0101": [
     {
       "Gb_type": "Storing Tensor hook handle in globals (inline call)",
@@ -2049,6 +2029,17 @@
       "Hints": [
         "Ensure your nn.Module instance has called `super().__init__()`.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3303": [
+    {
+      "Gb_type": "Unsupported unbound builtin __hash__ call",
+      "Context": "{self.fn.__name__}.__hash__({arg})",
+      "Explanation": "Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+      "Hints": [
+        "Use hash(x) if calling x's own hash implementation is intended.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2399,6 +2390,16 @@
       "Explanation": "Expected attribute to be one of {','.join(fields)} but got {name}",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9374": [
+    {
+      "Gb_type": "Reordered OrderedDict input with callback-sensitive keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Dynamo cannot restore an OrderedDict's storage order without potentially invoking user key hashing or equality.",
+      "Hints": [
+        "Construct the OrderedDict inside the compiled function."
       ]
     }
   ],
@@ -4499,6 +4500,26 @@
       ]
     }
   ],
+  "GB3826": [
+    {
+      "Gb_type": "kwargs expansion after iteration slot mutation",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot expand a mapping after changing its type's __iter__.",
+      "Hints": [
+        "Expand the mapping outside the compiled function."
+      ]
+    }
+  ],
+  "GB9653": [
+    {
+      "Gb_type": "Duplicate keyword mapping key",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot trace duplicate keys while expanding a custom mapping.",
+      "Hints": [
+        "Use unique keyword names or expand the mapping outside the compiled function."
+      ]
+    }
+  ],
   "GB0245": [
     {
       "Gb_type": "Attempted to use `nested_tensor` with non-list input",
@@ -5571,6 +5592,14 @@
       ]
     }
   ],
+  "GB9996": [
+    {
+      "Gb_type": "Input OrderedDict linked-order mutation",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo does not yet replay linked order for input OrderedDicts.",
+      "Hints": []
+    }
+  ],
   "GB0297": [
     {
       "Gb_type": "random.Random() with improper arguments",
@@ -6414,19 +6443,9 @@
   ],
   "GB2259": [
     {
-      "Gb_type": "DELETE_GLOBAL followed by a module-object read",
-      "Context": "name: {name}",
-      "Explanation": "The replayed global delete unbinds the name, but this read would consult the real module, which still holds the pre-call value. Eager resume has to run the read instead.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB0876": [
-    {
-      "Gb_type": "DELETE_GLOBAL followed by a module-object write",
-      "Context": "name: {name}",
-      "Explanation": "The replayed global delete runs after this write and unbinds the name. Eager resume has to order them instead.",
+      "Gb_type": "DELETE_GLOBAL with a module namespace access",
+      "Context": "context",
+      "Explanation": "A module object or module __dict__ access in the same trace as a global delete would race the delete, which is replayed after the graph. Eager resume has to order them instead.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -6539,16 +6558,6 @@
       "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
       "Hints": [
         "Avoid using id() on containers in code that may graph-break."
-      ]
-    }
-  ],
-  "GB2210": [
-    {
-      "Gb_type": "DELETE_GLOBAL followed by a module-__dict__ access",
-      "Context": "module __dict__",
-      "Explanation": "The replayed global delete is not reflected in the dict model behind this module __dict__, so any view derived from it would still contain the deleted name. Eager resume has to run the access instead.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -6874,6 +6883,14 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB3043": [
+    {
+      "Gb_type": "Unsupported builtin dictionary storage operation",
+      "Context": "dict.{name} on {obj.python_type_name()}",
+      "Explanation": "Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+      "Hints": []
     }
   ],
   "GB0356": [

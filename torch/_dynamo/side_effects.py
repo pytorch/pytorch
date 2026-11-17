@@ -566,7 +566,7 @@ class SideEffects:
             # No pending on the module VT: the replayed delete races this
             # write. With one (e.g. an inlined delete), the setattr chain
             # orders them.
-            output_graph.check_deleted_global_write(item.value.__dict__, name)
+            output_graph.check_deleted_global_access(item.value.__dict__, name)
         if not self.is_attribute_mutation(item):
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"

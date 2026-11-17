@@ -44,6 +44,7 @@ from typing import (
     cast,
     Literal,
     NamedTuple,
+    NoReturn,
     NotRequired,
     Optional,
     TYPE_CHECKING,
@@ -790,7 +791,7 @@ class OutputGraph(OutputGraphCommon):
         # Names deleted in this trace, keyed by id() of the globals dict they
         # were deleted from; the entry keeps the dict alive so the id cannot
         # be reused. Later module-object or module-__dict__ accesses to those
-        # names graph-break (see check_deleted_global_read/write).
+        # names graph-break (see check_deleted_global_access).
         self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
 
         # TODO: maybe should just pass the entire f_code in here?  Not
@@ -1072,52 +1073,26 @@ class OutputGraph(OutputGraphCommon):
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
         self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
 
-    # TODO(follow-up): replace these breaks with real support, ordering the
+    # TODO(follow-up): replace this break with real support, ordering the
     # module-object access against the replayed global delete.
-    def check_deleted_global_read(self, globals_dict: Any, name: str) -> None:
-        entry = self.deleted_globals_by_dict.get(id(globals_dict))
-        if entry is not None and name in entry[1]:
-            unimplemented(
-                gb_type="DELETE_GLOBAL followed by a module-object read",
-                context=f"name: {name}",
-                explanation=(
-                    "The replayed global delete unbinds the name, but this "
-                    "read would consult the real module, which still holds "
-                    "the pre-call value. Eager resume has to run the read "
-                    "instead."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+    def deleted_global_access_unsupported(self, context: str) -> NoReturn:
+        unimplemented(
+            gb_type="DELETE_GLOBAL with a module namespace access",
+            context=context,
+            explanation=(
+                "A module object or module __dict__ access in the same trace as a "
+                "global delete would race the delete, which is replayed after "
+                "the graph. Eager resume has to order them instead."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
-    def check_deleted_global_dict_handout(self, globals_dict: Any) -> None:
-        # Any view derived from the dict model (iteration, len, copy, items,
-        # unpacking) still contains the deleted name, so handing the dict out
-        # is broken regardless of which key is accessed next.
-        if self.deleted_globals_by_dict.get(id(globals_dict)) is not None:
-            unimplemented(
-                gb_type="DELETE_GLOBAL followed by a module-__dict__ access",
-                context="module __dict__",
-                explanation=(
-                    "The replayed global delete is not reflected in the "
-                    "dict model behind this module __dict__, so any view "
-                    "derived from it would still contain the deleted name. "
-                    "Eager resume has to run the access instead."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-
-    def check_deleted_global_write(self, globals_dict: Any, name: str) -> None:
+    def check_deleted_global_access(self, globals_dict: Any, name: str | None) -> None:
+        """Graph-break if this trace deleted `name` from `globals_dict`; with
+        name=None (a view of the whole dict), if it deleted any name."""
         entry = self.deleted_globals_by_dict.get(id(globals_dict))
-        if entry is not None and name in entry[1]:
-            unimplemented(
-                gb_type="DELETE_GLOBAL followed by a module-object write",
-                context=f"name: {name}",
-                explanation=(
-                    "The replayed global delete runs after this write and "
-                    "unbinds the name. Eager resume has to order them instead."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+        if entry is not None and (name is None or name in entry[1]):
+            self.deleted_global_access_unsupported(f"name: {name}")
 
     def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)

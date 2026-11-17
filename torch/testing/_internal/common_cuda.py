@@ -212,6 +212,8 @@ _CDNA3_ARCHS = ["gfx942", "gfx950"]
 _CDNA5_ARCHS = ["gfx1250"]
 # GFX11 (RDNA 3 and RDNA 3.5)
 _RDNA3_ARCHS = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"]
+# GFX11.7 uses the GFX12-style 128-bit WMMA interface.
+_GFX117X_ARCHS = ["gfx1170", "gfx1171"]
 # GFX12 (RDNA 4)
 _RDNA4_ARCHS = ["gfx1200", "gfx1201"]
 
@@ -225,7 +227,7 @@ def CDNA2OrLater():
     return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
 
 def RDNA3OrLater():
-    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _RDNA4_ARCHS)
+    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _GFX117X_ARCHS + _RDNA4_ARCHS)
 
 # Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
 # lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch

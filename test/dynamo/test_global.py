@@ -701,7 +701,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             mod.__dict__.pop("delete_missing_value", None)
             torch._dynamo.reset()
             with self.assertRaisesRegex(
-                Unsupported, "DELETE_GLOBAL with a materialized module dict"
+                Unsupported, "DELETE_GLOBAL with a module namespace access"
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             torch._dynamo.reset()
@@ -884,7 +884,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
             torch._dynamo.reset()
             with self.assertRaisesRegex(
-                Unsupported, "DELETE_GLOBAL with a pending module-object write"
+                Unsupported, "DELETE_GLOBAL with a module namespace access"
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             torch._dynamo.reset()
@@ -910,7 +910,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             globals()["_dg_a"] = 1
             torch._dynamo.reset()
             with self.assertRaisesRegex(
-                Unsupported, "DELETE_GLOBAL with a materialized module dict"
+                Unsupported, "DELETE_GLOBAL with a module namespace access"
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
             torch._dynamo.reset()
@@ -987,10 +987,10 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             del _dg_a
             return x + (1 if "_dg_a" in me.__dict__ else 0)
 
-        fn, expected, msg = {
-            "hasattr": (fn_hasattr, lambda x: x, "module-object read"),
-            "attr": (fn_attr, lambda x: x - 1, "module-object read"),
-            "contains": (fn_contains, lambda x: x, "module-__dict__ access"),
+        fn, expected = {
+            "hasattr": (fn_hasattr, lambda x: x),
+            "attr": (fn_attr, lambda x: x - 1),
+            "contains": (fn_contains, lambda x: x),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)
@@ -1002,7 +1002,8 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 with self.subTest(fullgraph=fullgraph):
                     if fullgraph:
                         with self.assertRaisesRegex(
-                            Unsupported, f"DELETE_GLOBAL followed by a {msg}"
+                            Unsupported,
+                            "DELETE_GLOBAL with a module namespace access",
                         ):
                             torch.compile(fn, backend="eager", fullgraph=True)(x)
                     else:
@@ -1038,11 +1039,11 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             me.__dict__.setdefault("_dg_a", 5)
             return x + 1
 
-        fn, expected, g_after, msg = {
-            "attr": (fn_attr, lambda x: x + 1, 5, "module-object write"),
-            "setitem": (fn_setitem, lambda x: x + 1, 5, "module-__dict__ access"),
-            "update": (fn_update, lambda x: x + 1, 5, "module-__dict__ access"),
-            "setdefault": (fn_setdefault, lambda x: x + 1, 5, "module-__dict__ access"),
+        fn, expected, g_after = {
+            "attr": (fn_attr, lambda x: x + 1, 5),
+            "setitem": (fn_setitem, lambda x: x + 1, 5),
+            "update": (fn_update, lambda x: x + 1, 5),
+            "setdefault": (fn_setdefault, lambda x: x + 1, 5),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)
@@ -1054,7 +1055,8 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 with self.subTest(fullgraph=fullgraph):
                     if fullgraph:
                         with self.assertRaisesRegex(
-                            Unsupported, f"DELETE_GLOBAL followed by a {msg}"
+                            Unsupported,
+                            "DELETE_GLOBAL with a module namespace access",
                         ):
                             torch.compile(fn, backend="eager", fullgraph=True)(x)
                     else:
@@ -1082,7 +1084,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     if fullgraph:
                         with self.assertRaisesRegex(
                             Unsupported,
-                            "DELETE_GLOBAL followed by a module-__dict__ access",
+                            "DELETE_GLOBAL with a module namespace access",
                         ):
                             torch.compile(fn, backend="eager", fullgraph=True)(x)
                     else:
@@ -1112,7 +1114,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     if fullgraph:
                         with self.assertRaisesRegex(
                             Unsupported,
-                            "DELETE_GLOBAL with a materialized module dict",
+                            "DELETE_GLOBAL with a module namespace access",
                         ):
                             torch.compile(fn, backend="eager", fullgraph=True)(x)
                     else:
