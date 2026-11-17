@@ -485,35 +485,13 @@ class TestLocalizeContract(TestCase):
             with self.assertRaisesRegex(NotImplementedError, "parametrized weight"):
                 torch.cuda.localize(lin)
 
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_localize_graph_module(self):
-        """localize() also accepts a torch.fx.GraphModule (e.g. from
-        torch.export): it walks the graph for _LOCALIZABLE_OPS call sites,
-        resolves each localized-position arg back to its get_attr parameter,
-        and swaps that parameter in place for a _LocalizedTensor without
-        rewriting the graph."""
-        m = _OneLinear(64, 128, bias=True).cuda().eval()
-        x = torch.randn(32, 64, device="cuda")
-        gm = torch.export.export(m, (x,)).module()
-        self.assertIsInstance(gm, torch.fx.GraphModule)
-        # Sanity: export keeps the aten.linear call site the branch keys on;
-        # make_fx / symbolic_trace would decompose or hide it instead.
-        self.assertTrue(
-            any(
-                n.op == "call_function" and n.target is torch.ops.aten.linear.default
-                for n in gm.graph.nodes
-            )
-        )
-        y_ref = gm(x)
+    def test_rejects_graph_module(self):
+        gm = torch.fx.symbolic_trace(_OneLinear(64, 128))
         with torch.inference_mode():
-            ret = torch.cuda.localize(gm)
-        self.assertIs(ret, gm)
-        self.assertTrue(_is_localized_tensor(gm.fc.weight))
-        self.assertTrue(_is_localized_tensor(gm.fc.bias))
-        # The graph is untouched; the subclass takes over at runtime, so the
-        # localized graph must still match the original op-for-op.
-        torch.testing.assert_close(gm(x), y_ref, atol=1e-4, rtol=1e-4)
+            with self.assertRaisesRegex(
+                NotImplementedError, "does not support torch.fx.GraphModule"
+            ):
+                torch.cuda.localize(gm)
 
     @_requires_cuda
     @_requires_green_contexts
@@ -694,35 +672,6 @@ class TestLocalizableOpRegistry(TestCase):
             torch.cuda.localize(m)
         got = F.linear(x, weight=m.fc.weight, bias=m.fc.bias)
         torch.testing.assert_close(got, expected, atol=1e-4, rtol=1e-4)
-
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_graph_module_resolves_keyword_args(self):
-        """The FX path resolves a localized position out of node.kwargs as
-        well as node.args.  torch.export emits all-positional call sites, so
-        the call site here is rewritten to use keywords."""
-        m = _OneLinear(64, 128, bias=True).cuda().eval()
-        x = torch.randn(32, 64, device="cuda")
-        gm = torch.export.export(m, (x,)).module()
-        rewritten = 0
-        for node in gm.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target is torch.ops.aten.linear.default
-            ):
-                inp, weight, bias = node.args
-                node.args = (inp,)
-                node.kwargs = {"weight": weight, "bias": bias}
-                rewritten += 1
-        self.assertEqual(rewritten, 1)
-        gm.recompile()
-        y_ref = gm(x)
-
-        with torch.inference_mode():
-            torch.cuda.localize(gm)
-        self.assertTrue(_is_localized_tensor(gm.fc.weight))
-        self.assertTrue(_is_localized_tensor(gm.fc.bias))
-        torch.testing.assert_close(gm(x), y_ref, atol=1e-4, rtol=1e-4)
 
 
 class _ScaledLinear(nn.Module):
@@ -1999,8 +1948,7 @@ class TestLocalizationRequiresInferenceMode(TestCase):
     Localization is inference-only: the split halves are not set up to
     backprop through the fork/join, so a module localized in a training
     context would look trainable and silently fail to learn.  Rejecting the
-    call is the contract; these pin it for both the ``nn.Module`` and the
-    ``GraphModule`` entry points.
+    call is the contract for supported ``nn.Module`` inputs.
     """
 
     hw_classification = HardwareClassification.CUDA
@@ -2017,16 +1965,6 @@ class TestLocalizationRequiresInferenceMode(TestCase):
             torch.cuda.localize(m)
         # The module is left untouched, so a caller can retry correctly.
         self.assertFalse(_is_localized_tensor(m.fc.weight))
-
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_graph_module_path_raises_outside_inference_mode(self):
-        m = _OneLinear(64, 128, bias=True).cuda().eval()
-        x = torch.randn(32, 64, device="cuda")
-        with torch.inference_mode():
-            gm = torch.export.export(m, (x,)).module()
-        with self.assertRaisesRegex(RuntimeError, "requires inference mode"):
-            torch.cuda.localize(gm)
 
     @_requires_cuda
     @_requires_green_contexts
