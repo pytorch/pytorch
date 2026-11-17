@@ -55,7 +55,11 @@ from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    is_fake_tensor,
+    maybe_get_fake_mode,
+    maybe_get_real_tensor,
+)
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
@@ -1136,7 +1140,9 @@ class TestExport(TestCase):
                 for node in placeholders:
                     val = node.meta["val"]
                     if real:
-                        self.assertIsNotNone(functorch.get_unwrapped(val).real_tensor)
+                        self.assertIsNotNone(
+                            maybe_get_real_tensor(functorch.get_unwrapped(val))
+                        )
                     else:
                         self.assertTrue(is_fake_tensor(val), node.name)
                 for args in (inp, (torch.randn(3, 4), -torch.ones(2))):
