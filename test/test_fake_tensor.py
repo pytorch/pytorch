@@ -1617,7 +1617,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         out_eager = fn(torch.empty((0,)))
         self.checkMetaProps(out_fake, out_eager)
 
-    @fake_tensor_test()
     def test_split_empty_dim(self):
         def fn(x):
             return torch.split(x, 2)[0]
