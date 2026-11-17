@@ -10,6 +10,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
+from torch._guards import require_python_fake_mode
 from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
 from torch._subclasses.fake_tensor import (
@@ -493,7 +494,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     and fake_tensor_mode is not maybe_get_fake_mode(i)
                 ):
                     raise AssertionError("Multiple fake tensor mode detected.")
-                fake_tensor_mode = maybe_get_fake_mode(i)
+                fake_tensor_mode = require_python_fake_mode(maybe_get_fake_mode(i))
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
