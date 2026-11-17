@@ -4,11 +4,11 @@
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/native/mkldnn/Matmul.h>
 
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/irange.h>
 
 #include <climits>
-#include <cmath>
 #include <memory>
 #if !defined(__s390x__ ) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -145,7 +145,7 @@ bool mkl_xf16_gemm(
   // below a column count that grows with the thread count and the size of A.
   // The threshold is measured on AVX2 and AVX-512 without AMX
   const int64_t threads = at::in_parallel_region() ? 1 : at::get_num_threads();
-  const double min_cols_transa = std::max(24.0, 5.0 * threads * std::sqrt(static_cast<double>(m) * k) / 4096);
+  const int64_t min_cols_transa = m * k <= 1024 * 1024 ? 24 : 24 + 6 * threads;
   const bool skinny_transa = transa != TransposeType::NoTranspose &&
       transb == TransposeType::NoTranspose && n < min_cols_transa;
   if (m * n * k <= 16 * 16 * 16 || skinny_transa ||
@@ -166,9 +166,9 @@ bool mkl_xf16_gemm(
   }
   const int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb;
   if constexpr (std::is_same_v<scalar_t, at::BFloat16>) {
-    mkl_gemm_bf16bf16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32.get(), m_);
+    mkl_gemm_bf16bf16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32, m_);
   } else {
-    mkl_gemm_f16f16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32.get(), m_);
+    mkl_gemm_f16f16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32, m_);
   }
   at::parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
     for (const auto j : c10::irange(begin, end)) {
