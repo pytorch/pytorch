@@ -2685,6 +2685,9 @@ def should_prefer_unfused_baddbmm(match):
     # tuned_baddbmm drops the ignored input when beta == 0.
     if match.kwargs.get("beta", 1) == 0:
         return False
+    # Unfusing would propagate matrix NaNs that alpha == 0 ignores.
+    if match.kwargs.get("alpha", 1) == 0:
+        return False
 
     output = match.output_node()
     if not _is_bias_like_addmm_input(inp, output):

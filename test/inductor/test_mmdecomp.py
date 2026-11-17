@@ -445,13 +445,15 @@ class TestDecomp(NNTestCase):
         self.assertEqual(counters["inductor"]["decompose_addmm"], int(decomposed))
 
     @parametrize("m,k", [(1, 4), (4, 1)])
-    def test_addmm_zero_alpha_ignores_nan_matrix(self, device, m, k):
+    @parametrize("op", [torch.addmm, torch.baddbmm])
+    def test_zero_alpha_ignores_nan_matrix(self, device, m, k, op):
         def fn(x, a, b):
-            return torch.addmm(x, a, b, alpha=0).relu()
+            return op(x, a, b, alpha=0).relu()
 
+        batch = (2,) if op is torch.baddbmm else ()
         x = torch.ones(4, device=device)
-        a = torch.full((m, k), float("nan"), device=device)
-        b = torch.ones(k, 4, device=device)
+        a = torch.full((*batch, m, k), float("nan"), device=device)
+        b = torch.ones(*batch, k, 4, device=device)
         with fresh_cache():
             out = torch.compile(fn, fullgraph=True)(x, a, b)
         self.assertEqual(out, fn(x, a, b))
