@@ -7,6 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from collections.abc import Iterator
+from fnmatch import fnmatchcase
 from pathlib import Path
 from types import MethodType
 from typing import Any, TYPE_CHECKING, TypeGuard
@@ -210,6 +211,7 @@ class CppFakeTensorTestSelection:
                 item
                 for item in items
                 if nodeids[item] == selector
+                or fnmatchcase(nodeids[item], selector)
                 or nodeids[item].startswith(selector + "::")
             }
             if not matches:
