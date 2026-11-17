@@ -288,7 +288,8 @@ def should_reinplace_all_reduce(node: torch.fx.Node) -> bool:
     The inplace lowering requires contiguous inputs; other layouts produce a copy.
     The symmetric-memory one-shot all-reduce lowering is out-of-place, so
     reinplacing an all_reduce it may pick only adds a copy back into the input.
-    config.reinplace_whenever_possible accepts that cost after safety checks.
+    Keep the symmetric-memory gate: the in-place one-shot path marks the reused
+    buffer as skip-wait, which can suppress a later collective's wait.
     """
     args = (
         node.args[2:]
@@ -297,7 +298,7 @@ def should_reinplace_all_reduce(node: torch.fx.Node) -> bool:
     )
     if not cast(torch.fx.Node, args[0]).meta["val"].is_contiguous():
         return False
-    if config.reinplace_whenever_possible or not config._collective.auto_select:
+    if not config._collective.auto_select:
         return True
     from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
 

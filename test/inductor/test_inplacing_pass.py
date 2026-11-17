@@ -16,7 +16,7 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
-from torch._inductor import inductor_prims
+from torch._inductor import comm_lowering, inductor_prims, ir, lowering
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.fx_passes.control_dependencies import preserve_node_ordering
 from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
@@ -26,6 +26,7 @@ from torch._inductor.fx_passes.reinplace import (
     reinplace_inplaceable_ops_core,
 )
 from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1139,6 +1140,22 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             compiled = torch.compile(f, fullgraph=True)
             self.assertEqual(compiled(x), (x.sin().sin(), x.cos()))
 
+    @parametrize("disable_decomposition", [False, True])
+    def test_auto_functionalized_decomposition_disabled(self, disable_decomposition):
+        def f(x):
+            out = torch.ones_like(x)
+            sin(x, out)
+            return out.cos()
+
+        x = torch.tensor([0.1, 0.5, 1.0])
+        with inductor_config.patch(
+            enable_auto_functionalized_v2=False,
+            disabled_passes=(
+                "decompose_auto_functionalized" if disable_decomposition else ""
+            ),
+        ):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), x.sin().cos())
+
     @parametrize("post_grad", [False, True])
     @parametrize("enable_v2", [False, True])
     def test_auto_functionalized_without_decomposition(self, enable_v2, post_grad):
@@ -1651,16 +1668,15 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 reinplace_whenever_possible=enabled,
                 **{"_collective.auto_select": auto_select},
             ),
-            mock.patch(
-                "torch.distributed._symmetric_memory.is_symm_mem_enabled_for_group",
-                return_value=symmetric_memory,
+            torch.distributed._symmetric_memory._test_mode(
+                group_names={"test_group"} if symmetric_memory else set(),
             ),
         ):
             reinplace_inplaceable_ops_core(gm.graph)
         gm.graph.lint()
         targets = [node.target for node in gm.graph.nodes]
         should_mutate = not keep_input_live and (
-            enabled or not auto_select or not symmetric_memory
+            not auto_select or not symmetric_memory
         )
         self.assertEqual(
             torch.ops._c10d_functional.all_reduce_.default in targets, should_mutate
@@ -1668,6 +1684,43 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(
             torch.ops._c10d_functional.all_reduce.default in targets, not should_mutate
         )
+
+    @unittest.skipIf(not dist.is_available(), "distributed is not available")
+    @parametrize("second_collective", [("sum", "dp"), ("max", "tp")])
+    def test_aggressive_all_reduce_preserves_wait(self, second_collective):
+        reduce_op, group_name = second_collective
+
+        def f(x):
+            first = torch.ops._c10d_functional.all_reduce(x.sin(), "sum", "tp")
+            first = torch.ops._c10d_functional.wait_tensor(first)
+            second = torch.ops._c10d_functional.all_reduce(first, reduce_op, group_name)
+            return torch.ops._c10d_functional.wait_tensor(second)
+
+        x = torch.randn(4)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with (
+            inductor_config.patch(
+                reinplace_whenever_possible=True,
+                **{"_collective.auto_select": True},
+            ),
+            torch.distributed._symmetric_memory._test_mode(group_names={"tp"}),
+            V.set_fake_mode(fake_mode),
+        ):
+            reinplace_inplaceable_ops_core(gm.graph)
+            gm.graph.lint()
+            graph = GraphLowering(gm, example_inputs=[x])
+            with (
+                V.set_graph_handler(graph),
+                mock.patch.object(
+                    comm_lowering,
+                    "_one_shot_all_reduce",
+                    side_effect=lambda inp, *args: lowering.clone(inp),
+                ),
+            ):
+                graph.run(x)
+            waits = [op for op in graph.operations if isinstance(op, ir._WaitKernel)]
+            self.assertEqual(len(waits), 2)
 
     def test_generalized_scatter(self):
         # This is an integration test for the reinplacing pass.

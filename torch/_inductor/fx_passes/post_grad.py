@@ -690,11 +690,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         if introduced_mutation:
             fake_tensor_updater.incremental_update()
+    auto_functionalized_decomposition = GraphTransformObserver(
+        gm, "decompose_auto_functionalized"
+    )
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(
             reinplace_inplaceable_ops,
             fake_tensor_updater,
-            rewire_auto_functionalized_outputs=True,
+            rewire_auto_functionalized_outputs=(
+                not auto_functionalized_decomposition._check_disable_pass()
+            ),
         ),
     )
 
@@ -708,9 +713,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_user_kernel_wrapper_functional)
-    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
-        decompose_auto_functionalized
-    )
+    auto_functionalized_decomposition.apply_graph_pass(decompose_auto_functionalized)
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
     )
