@@ -14,7 +14,7 @@
 namespace at {
 
 namespace functionalization {
-struct TORCH_API resize__ViewMeta;
+struct resize__ViewMeta;
 }
 
 // Note [Functionalization Pass In Core]
