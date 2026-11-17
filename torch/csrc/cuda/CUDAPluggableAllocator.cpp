@@ -399,6 +399,9 @@ void changeCurrentAllocator(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
   c10::cuda::CUDACachingAllocator::allocator.store(allocator.get());
+  // CUDACachingAllocator uses priority 1 to ensure it has higher priority than
+  // the Caffe2's legacy allocator.
+  c10::SetAllocator(c10::kCUDA, allocator.get(), /*priority=*/1);
   current_custom_allocator = allocator;
 }
 
