@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
 
 import torch
 from torch._inductor import config
@@ -10,16 +9,45 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
     HAS_GPU_AND_TRITON,
     requires_gpu,
 )
 
 
-requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
-
-
 class TestControlDeps(InductorTestCase):
+    def test_control_deps_wraps_fallback_op(self):
+        def fn(x):
+            dependency = x + 1
+            fallback = torch.neg(x)
+            return dependency + fallback
+
+        def add_control_deps(graph):
+            from torch._inductor.fx_passes.control_dependencies import (
+                preserve_node_ordering,
+            )
+            from torch.utils._ordered_set import OrderedSet
+
+            add_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            neg_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.neg.default
+            )
+            if len(add_nodes) != 2 or len(neg_nodes) != 1:
+                raise AssertionError("Unexpected graph structure")
+
+            fallback = neg_nodes[0]
+            fallback.meta["should_fallback"] = True
+            fallback.meta["custom"] = {"fallback_to_eager": True}
+            preserve_node_ordering(graph, {fallback: OrderedSet([add_nodes[0]])})
+            return graph
+
+        x = torch.randn(8)
+        with config.patch(post_grad_custom_post_pass=add_control_deps):
+            actual = torch.compile(fn)(x)
+
+        torch.testing.assert_close(actual, fn(x))
+
     @config.patch(reorder_for_locality=False)
     @requires_gpu()
     def test_control_deps_prevents_fusion(self):
@@ -197,6 +225,88 @@ class TestControlDeps(InductorTestCase):
             result = compiled_fn(a, b, c)
 
             expected = fn(a, b, c)
+            torch.testing.assert_close(result, expected)
+
+    @requires_gpu()
+    def test_control_deps_cat_input_mutated_after_cat(self):
+        # The wrapped cat may compute an input straight into its own storage,
+        # which is only valid if that input is not mutated in place afterwards.
+        def fn(a, b, idx, src):
+            x = a + 1
+            cat_result = torch.cat([x, b * 2], dim=0)
+            x.index_put_((idx,), src)
+            return cat_result, x
+
+        def add_control_deps(graph):
+            from torch.utils._ordered_set import OrderedSet
+
+            cat_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.cat.default
+            )
+            if len(cat_nodes) != 1:
+                raise AssertionError(f"Expected 1 cat node, got {len(cat_nodes)}")
+            add_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            deps_map = {cat_nodes[0]: OrderedSet([add_nodes[0]])}
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, deps_map
+            )
+            return graph
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=add_control_deps,
+        ):
+            a = torch.rand([128, 64], device=GPU_TYPE)
+            b = torch.rand([128, 64], device=GPU_TYPE)
+            idx = torch.arange(64, device=GPU_TYPE)
+            src = torch.ones([64, 64], device=GPU_TYPE)
+
+            result = torch.compile(fn)(a, b, idx, src)
+            expected = fn(a, b, idx, src)
+            torch.testing.assert_close(result, expected)
+
+    @requires_gpu()
+    def test_control_deps_wraps_inplace_op_mutating_cat_input(self):
+        # The bucketing passes wrap ops that are already in place. Such a
+        # mutation must still stop the cat from computing its input in place.
+        def fn(a, b, idx, src):
+            x = a + 1
+            cat_result = torch.cat([x, b * 2], dim=0)
+            x.index_put_((idx,), src)
+            return cat_result, x
+
+        def add_control_deps(graph):
+            from torch._inductor.fx_passes.reinplace import (
+                reinplace_inplaceable_ops_core,
+            )
+            from torch.utils._ordered_set import OrderedSet
+
+            reinplace_inplaceable_ops_core(graph)
+            index_put_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.index_put_.default
+            )
+            if len(index_put_nodes) != 1:
+                raise AssertionError(f"Expected 1 index_put_, got {index_put_nodes}")
+            cat_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.cat.default
+            )
+            deps_map = {index_put_nodes[0]: OrderedSet([cat_nodes[0]])}
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, deps_map
+            )
+            return graph
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=add_control_deps,
+        ):
+            a = torch.rand([128, 64], device=GPU_TYPE)
+            b = torch.rand([128, 64], device=GPU_TYPE)
+            idx = torch.arange(64, device=GPU_TYPE)
+            src = torch.ones([64, 64], device=GPU_TYPE)
+
+            result = torch.compile(fn)(a, b, idx, src)
+            expected = fn(a, b, idx, src)
             torch.testing.assert_close(result, expected)
 
     @config.patch(enable_auto_functionalized_v2=True)
@@ -567,6 +677,8 @@ class TestControlDeps(InductorTestCase):
 
         def fn(x):
             s = torch.Stream(device=GPU_TYPE)
+            # x is produced on the current stream; order the side stream after it.
+            s.wait_stream(torch.accelerator.current_stream())
             e = torch.Event()
             with s:
                 y = x + 1
@@ -621,6 +733,8 @@ class TestControlDeps(InductorTestCase):
 
         def fn(x):
             s = torch.Stream(device=GPU_TYPE)
+            # x is produced on the current stream; order the side stream after it.
+            s.wait_stream(torch.accelerator.current_stream())
             e = torch.Event()
             with s:
                 y = x + 1
@@ -652,7 +766,7 @@ class TestControlDeps(InductorTestCase):
                 "OrderingBarrier is_no_op() must be True",
             )
 
-    @requires_cuda_triton
+    @requires_gpu()
     def test_bidirectional_stream_sync_correctness(self):
         """Regression: passthrough OrderingBarrier must be ordered after all subgraph ops.
 
@@ -665,25 +779,26 @@ class TestControlDeps(InductorTestCase):
         from torch._inductor.utils import run_and_get_code
 
         def fn(x):
-            s1 = torch.cuda.Stream()
-            s2 = torch.cuda.Stream()
-            event_s1 = torch.cuda.Event()
-            event_s2 = torch.cuda.Event()
-            with torch.cuda.stream(s1):
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            event_s1 = torch.Event()
+            event_s2 = torch.Event()
+            s1.wait_stream(torch.accelerator.current_stream())
+            with s1:
                 a = x * 2
                 event_s1.record(s1)
-            with torch.cuda.stream(s2):
+            with s2:
                 event_s1.wait(s2)
                 b = a + 1
                 event_s2.record(s2)
-            with torch.cuda.stream(s1):
+            with s1:
                 event_s2.wait(s1)
                 c = b * 2
             s1.synchronize()
             s2.synchronize()
             return c
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
         expected = fn(x)
         result, _ = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(result, expected)
@@ -756,7 +871,7 @@ class TestControlDeps(InductorTestCase):
             result = torch.compile(fn)(a, b)
             torch.testing.assert_close(result, fn(a, b))
 
-    @requires_cuda_triton
+    @requires_gpu()
     def test_host_to_device_transfer_between_sync_passthroughs(self):
         """The interleaving above, arrived at without touching the graph.
 
@@ -769,19 +884,20 @@ class TestControlDeps(InductorTestCase):
         def fn(x, w):
             meta = torch.tensor(x.shape[-2], dtype=torch.long)
             residual = x.sin()
-            s = torch.cuda.Stream()
-            with torch.cuda.stream(s):
+            s = torch.Stream()
+            s.wait_stream(torch.accelerator.current_stream())
+            with s:
                 out = x @ w
             s.synchronize()
             extra = meta.to(device=out.device, dtype=out.dtype)
             return torch.cat((out, extra.expand(*out.shape[:-1], 1), residual), dim=-1)
 
-        x = torch.randn(8, 128, device="cuda", dtype=torch.bfloat16)
-        w = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(128, 128, device=GPU_TYPE, dtype=torch.bfloat16)
         expected = fn(x, w)
         with torch.no_grad():
             result = torch.compile(fn, mode="reduce-overhead")(x, w)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         torch.testing.assert_close(result, expected)
 
 

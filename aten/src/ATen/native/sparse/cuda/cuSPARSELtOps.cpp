@@ -1,7 +1,5 @@
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <mutex>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include <c10/util/StringUtil.h>
@@ -145,7 +143,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       TORCH_CHECK(
           false,
           "Unsupported dtype for cuSPARSELt/hipSparseLt compressed matrix");
-      break;
   }
 
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
@@ -306,7 +303,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       TORCH_CHECK(
           false,
           "Unsupported dtype for cuSPARSELt compressed matrix multiplication.");
-      break;
   }
   ScalarType out_dtype = dense_B.scalar_type();
 #ifdef USE_ROCM
@@ -340,7 +336,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
           TORCH_CHECK(
               false,
               "Unsupported out_dtype passed, must be one of {fp16, bf16, int32} for int8 inputs");
-          break;
       }
     }
 // cslt 0.6.2+ or hipSparseLt: fp8 output dtype support
@@ -378,7 +373,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
 #else
               "Unsupported out_dtype passed, must be one of {fp8, fp16, bf16, float32} for fp8 inputs");
 #endif
-          break;
       }
     }
 #endif

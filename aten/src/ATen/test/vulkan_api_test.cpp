@@ -3329,7 +3329,7 @@ void test_masked_fill_scalar(
 
       for (int mask_shape_id = mask_dim - 1; mask_shape_id >= 0;
            --mask_shape_id) {
-        // truncate amsk_shape by the proceeding dimensitions
+        // truncate mask_shape by the proceeding dimensitions
         auto curr_mask_shape =
             mask_shape.slice(mask_shape_id, mask_dim - mask_shape_id);
 

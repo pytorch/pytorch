@@ -15,3 +15,7 @@
 ```{eval-rst}
 .. autofunction:: make_tensor
 ```
+
+```{eval-rst}
+.. autofunction:: assert_allclose
+```

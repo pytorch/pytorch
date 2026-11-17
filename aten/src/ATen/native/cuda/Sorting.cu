@@ -178,15 +178,29 @@ __global__ void gatherMedian(
       smem,
       &median);
 
-  valuesSliceStart[0] = median;
+  // Find the first index of the median value; atomicMin makes the choice
+  // among duplicates deterministic.
+  __shared__ unsigned long long minIndexFound;
+  if (threadIdx.x == 0) {
+    minIndexFound = inputSliceSize;
+  }
+  __syncthreads();
 
-  // Find the index of the median value in the slice
   for (index_t i = threadIdx.x; i < inputSliceSize; i += blockDim.x) {
-    scalar_t val = doLdg(&inputSliceStart[i * inputWithinSliceStride]);
-    if (val == median || (at::_isnan(val) && at::_isnan(median))) {
-      indicesSliceStart[0] = i;
+    if (i >= minIndexFound) {
       break;
     }
+    scalar_t val = doLdg(&inputSliceStart[i * inputWithinSliceStride]);
+    if (val == median || (at::_isnan(val) && at::_isnan(median))) {
+      atomicMin(&minIndexFound, static_cast<unsigned long long>(i));
+      break;
+    }
+  }
+  __syncthreads();
+
+  if (threadIdx.x == 0) {
+    valuesSliceStart[0] = median;
+    indicesSliceStart[0] = static_cast<int64_t>(minIndexFound);
   }
 }
 
