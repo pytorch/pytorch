@@ -26,7 +26,6 @@ jobs:
     if: >-
       github.repository_owner == 'pytorch' &&
       github.event.pull_request.state == 'open' &&
-      github.event.pull_request.base.ref == 'main' &&
       !github.event.pull_request.draft &&
       ((github.event.action == 'labeled' &&
         github.event.label.name == 'open source') ||
@@ -134,7 +133,6 @@ jobs:
         id: auto-pr-triage
         uses: ./.github/actions/auto-pr-triage
         with:
-          expected-base-ref: ${{ github.event.pull_request.base.ref }}
           output-dir: ${{ steps.paths.outputs.output-dir }}
           pr-number: ${{ github.event.pull_request.number }}
           repository: ${{ github.repository }}

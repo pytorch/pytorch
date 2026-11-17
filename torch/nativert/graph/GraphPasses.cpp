@@ -64,8 +64,8 @@ bool schemaTypeMatch(const c10::FunctionSchema& schema, const Node& node) {
 // PT2 intentionally broadcast things like aten.sub.Scalar
 // to aten.sub.Tensor. https://github.com/pytorch/pytorch/issues/90923.
 std::string selectScalarOverloadName(const Node& node) {
-  // Copied from torch/csrc/utils/python_arg_parser.cpp
-  // torch::should_allow_numbers_as_tensors() to workaround
+  // Copied from aten/src/ATen/ScalarOps.cpp
+  // at::should_allow_numbers_as_tensors() to workaround
   // some linking issues.
   static std::unordered_set<std::string> allowed = {
       "add",

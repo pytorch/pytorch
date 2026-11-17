@@ -8,27 +8,18 @@ from typing import Any
 
 import torch
 from torch._inductor import inductor_prims, ir
-from torch._inductor.autows_utils import meta_ws_enabled
+from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
 
-from ..codegen.subgraph import (
-    InlinedSubgraphPlan,
-    MultiKernelFusionPlanChoice,
-    SubgraphChoiceCaller,
-    SubgraphTemplate,
-)
+from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
-from ..virtualized import V
 from .bmm import (
     blackwell_ws_persistent_tma_bmm_template,
     BlackwellBMMConfig,
     is_blackwell_bmm_2cta_compatible,
 )
-
-
-USE_META_WS = meta_ws_enabled()
 
 
 # TODO(@jananisriram): Refine the max-autotune search space.
@@ -39,8 +30,12 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 4, 2, 1, True, False),
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
-    BlackwellBMMConfig(128, 128, 64, 3, 8, 1, 1, True, False),
 )
+
+
+def effective_two_ctas(config: BlackwellBMMConfig) -> bool:
+    """Whether a partial config runs as 2CTA: needs Meta autoWS and tl.dot two_ctas."""
+    return config.two_ctas and meta_ws_enabled() and has_two_ctas()
 
 
 def _decompose_k_choice_name(
@@ -72,64 +67,6 @@ def _decompose_k_choice_name(
     if bmm_backend == "triton":
         name = f"{name}_config_{bmm_config_index}"
     return name
-
-
-def get_blackwell_decompose_k_config_indices(m: int, n: int) -> tuple[int, ...]:
-    """Return a bounded shape-appropriate set of partial-BMM configurations."""
-    if m <= 128 and n <= 128:
-        return (6, 0, 3)
-    if m > 128:
-        return (0, 3, 1, 4) if n <= 128 else (0, 3, 2, 5)
-    return (0, 3)
-
-
-def get_cat2_fp32_prologue_sources(input_node) -> tuple[str, str] | None:
-    """Return sources from an explicitly tagged FP32 cat-to-BF16 lowering."""
-    node = input_node
-    while isinstance(node, (ir.TensorBox, ir.StorageBox)):
-        node = node.data
-    if isinstance(node, ir.ComputedBuffer):
-        node = node.data
-    if not isinstance(node, ir.Pointwise):
-        return None
-
-    size = tuple(V.graph.sizevars.simplify(s) for s in node.get_size())
-    if (
-        len(size) != 2
-        or node.get_dtype() != torch.bfloat16
-        or not V.graph.sizevars.statically_known_equals(size[1], 128)
-    ):
-        return None
-
-    source_names = node.annotations.get(ir.CAT2_FP32_TO_BF16_SOURCES)
-    if not (
-        isinstance(source_names, tuple)
-        and len(source_names) == 2
-        and all(isinstance(name, str) for name in source_names)
-        and tuple(node.get_read_names()) == source_names
-    ):
-        return None
-    for source_name in source_names:
-        source = V.graph.try_get_buffer(source_name)
-        if source is None:
-            return None
-        source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
-        source_stride = tuple(V.graph.sizevars.simplify(s) for s in source.get_stride())
-        if (
-            source.get_dtype() != torch.float32
-            or len(source_size) != 2
-            or not V.graph.sizevars.statically_known_equals(source_size[0], size[0])
-            or not V.graph.sizevars.statically_known_equals(source_size[1], 64)
-            or not V.graph.sizevars.statically_known_equals(source_stride[1], 1)
-            or not V.graph.sizevars.statically_known_equals(
-                source_stride[0], source_size[1]
-            )
-            or not V.graph.sizevars.statically_known_equals(
-                source.get_layout().offset, 0
-            )
-        ):
-            return None
-    return source_names
 
 
 def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
@@ -205,192 +142,6 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
 decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
 
-def _aligned_k_part(k: int, k_split: int, block_k: int) -> int:
-    return math.ceil(math.ceil(k / k_split) / block_k) * block_k
-
-
-def get_blackwell_decompose_k_splits(
-    m: int,
-    n: int,
-    k: int,
-    num_sms: int,
-    config: BlackwellBMMConfig,
-    max_workspace_bytes: int = 128 * 1024**2,
-    max_choices: int = 2,
-) -> list[int]:
-    """Return at most one valid split for each requested CTA occupancy wave."""
-    if min(m, n, k, num_sms, max_choices) <= 0:
-        return []
-
-    m_tiles = math.ceil(m / config.block_m)
-    if config.two_ctas:
-        if m_tiles < 2:
-            return []
-        m_tiles = math.ceil(m_tiles / 2) * 2
-
-    output_ctas_per_split = m_tiles * math.ceil(n / config.block_n)
-    if config.two_ctas:
-        wave_numerator = num_sms // 2
-        wave_denominator = output_ctas_per_split // 2
-    else:
-        wave_numerator = num_sms
-        wave_denominator = output_ctas_per_split
-
-    m_pad = m_tiles * config.block_m
-    workspace_bytes_per_split = m_pad * n * torch.float32.itemsize
-    max_workspace_split = max_workspace_bytes // workspace_bytes_per_split
-    max_nonempty_split = math.ceil(k / config.block_k)
-    max_split = min(max_workspace_split, max_nonempty_split)
-
-    candidates: list[int] = []
-    for waves in range(1, max_choices + 1):
-        target = max(2, math.ceil(waves * wave_numerator / wave_denominator))
-        if target > max_split:
-            break
-        search_span = math.ceil(wave_numerator / wave_denominator)
-        search_end = min(max_split, target + search_span)
-        for k_split in range(target, search_end + 1):
-            k_part = _aligned_k_part(k, k_split, config.block_k)
-            if k_part < 8 * config.block_k:
-                return candidates
-            if (k_split - 1) * k_part < k:
-                candidates.append(k_split)
-                break
-    return list(dict.fromkeys(candidates))
-
-
-def get_blackwell_decompose_k_candidates(
-    m: int,
-    n: int,
-    k: int,
-    num_sms: int,
-    *,
-    max_choices: int,
-) -> list[tuple[int, int]]:
-    """Return a bounded list of ``(config_index, k_split)`` candidates."""
-    candidates: list[tuple[int, int]] = []
-    for config_index in get_blackwell_decompose_k_config_indices(m, n):
-        remaining = max_choices - len(candidates)
-        if remaining <= 0:
-            break
-        config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
-        candidates.extend(
-            (config_index, k_split)
-            for k_split in get_blackwell_decompose_k_splits(
-                m,
-                n,
-                k,
-                num_sms,
-                config,
-                max_choices=remaining,
-            )
-        )
-    return candidates
-
-
-def _cat2_mm(a, left, right):
-    return a @ torch.cat((left, right), dim=1).to(torch.bfloat16)
-
-
-def _cat2_decompose_k(
-    a,
-    left,
-    right,
-    *,
-    k_split: int,
-    bmm_config_index: int,
-):
-    b = torch.cat((left, right), dim=1).to(torch.bfloat16)
-    return decomposeK(a, b, k_split, "triton", bmm_config_index)
-
-
-def _cat2_fusion_plan_groups(
-    plan: InlinedSubgraphPlan,
-) -> tuple[tuple[ir.Operation, ...], ...]:
-    """Fuse the cat/cast producer into the partial BMM, then reduce."""
-    template_indices = [
-        index
-        for index, operation in enumerate(plan.operations)
-        if isinstance(operation, ir.TemplateBuffer)
-    ]
-    if len(template_indices) != 1:
-        raise AssertionError(
-            f"expected one partial-BMM template, found {len(template_indices)}"
-        )
-    template_index = template_indices[0]
-    return (
-        plan.operations[: template_index + 1],
-        plan.operations[template_index + 1 :],
-    )
-
-
-class Cat2DecomposeKWholePlanTemplate(SubgraphTemplate):
-    """Complete producer-plus-MM choices for bounded fusion-aware selection."""
-
-    def __init__(self):
-        super().__init__(name="decompose_k_cat2_whole_plan")
-
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        *,
-        k_split: int | None = None,
-        bmm_config_index: int = -1,
-    ) -> SubgraphChoiceCaller:
-        from torch._dispatch.python import enable_python_dispatcher
-
-        from ..decomposition import select_decomp_table
-
-        if k_split is None:
-            name = "decompose_k_cat2_materialized_direct_aten"
-            function = _cat2_mm
-            description = "materialized cat/cast + direct ATen MM"
-        else:
-            name = f"decompose_k_cat2_triton_{k_split}_config_{bmm_config_index}_fused"
-            function = functools.partial(
-                _cat2_decompose_k,
-                k_split=k_split,
-                bmm_config_index=bmm_config_index,
-            )
-            description = (
-                f"fused cat/cast + Triton decompose-K, {k_split=}, {bmm_config_index=}"
-            )
-
-        with enable_python_dispatcher():
-            graph = make_fx(function, select_decomp_table())
-            if k_split is None:
-                choice = SubgraphChoiceCaller(
-                    name=name,
-                    input_nodes=input_nodes,
-                    layout=layout,
-                    make_fx_graph=graph,
-                    description=description,
-                )
-            else:
-                choice = MultiKernelFusionPlanChoice(
-                    name=name,
-                    input_nodes=input_nodes,
-                    layout=layout,
-                    make_fx_graph=graph,
-                    description=description,
-                    group_builder=_cat2_fusion_plan_groups,
-                    fusion_plan_key=(
-                        f"cat2-partial-reduction-split-{k_split}-"
-                        f"config-{bmm_config_index}"
-                    ),
-                )
-            choice.config_patches = {
-                # The choice's nested graph contains the same producer and MM.
-                # Disable recursive whole-plan discovery while compiling it.
-                "triton.enable_blackwell_decompose_k_producer_selection": False
-            }
-            return choice
-
-
-cat2_decompose_k_whole_plan_template = Cat2DecomposeKWholePlanTemplate()
-
-
 def _blackwell_decompose_k_partial_kwargs(
     mat1,
     mat2,
@@ -401,6 +152,9 @@ def _blackwell_decompose_k_partial_kwargs(
     config: BlackwellBMMConfig,
 ) -> dict[str, Any]:
     """Build launch kwargs for the partial-BMM template, not the outer graph."""
+    # Imported here: the heuristics package imports this module's templates.
+    from ..heuristics.template.triton import mm_allow_tf32
+
     m, k = map(int, mat1.get_size())
     k_b, n = map(int, mat2.get_size())
     if k != k_b:
@@ -409,7 +163,7 @@ def _blackwell_decompose_k_partial_kwargs(
         raise NotImplementedError("aligned split leaves an empty final partition")
 
     use_meta_ws = meta_ws_enabled()
-    two_ctas = use_meta_ws and config.two_ctas
+    two_ctas = effective_two_ctas(config)
     if two_ctas and not is_blackwell_bmm_2cta_compatible(
         output_batch_rows=m_pad,
         block_m=config.block_m,
@@ -441,13 +195,15 @@ def _blackwell_decompose_k_partial_kwargs(
         "B_BROADCAST_BATCH": False,
         "VIRTUAL_BATCH": True,
         "OUTPUT_BATCH_ROWS": m_pad,
+        # Even under 2CTA: the kernel strides by NUM_SMS and pairs CTAs.
         "NUM_SMS": min(
-            get_num_sms(),
+            get_num_sms(two_ctas=two_ctas),
             k_split * m_tiles * math.ceil(n / config.block_n),
         ),
         "A_ROW_MAJOR": mat1.get_stride()[1] == 1,
         "B_ROW_MAJOR": mat2.get_stride()[1] == 1,
-        "ALLOW_TF32": False,
+        # Gate TF32 on the full GEMM this plan replaces, as eager mm would.
+        "ALLOW_TF32": mm_allow_tf32(m, n, k, mat1.get_device().type),
         "USE_META_WS": use_meta_ws,
         "WARP_SPECIALIZE": True,
         "FLATTEN": not use_meta_ws,
@@ -476,11 +232,6 @@ def lower_blackwell_decompose_k_partial(
     m_pad: int,
     k_part: int,
 ):
-    is_cat2_fp32_prologue = get_cat2_fp32_prologue_sources(mat2) is not None
-    # TMA admission requires a named, strided input boundary. This is a no-op
-    # for an existing buffer and gives a schedulable producer a boundary that
-    # can subsequently be fused away.
-    mat2 = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(mat2))
     try:
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[int(config_index)]
     except IndexError as error:
@@ -492,12 +243,19 @@ def lower_blackwell_decompose_k_partial(
             "Blackwell decompose-K partial config must be static"
         ) from error
 
+    # The kernel bakes operand strides and layouts into constexprs, so fix the
+    # operand layouts before reading them.
+    mat1, mat2 = (ir.ExternKernel.realize_input(node) for node in (mat1, mat2))
+    for node in (mat1, mat2):
+        if isinstance(node.get_layout(), ir.FlexibleLayout):
+            node.freeze_layout()
+
     m = int(mat1.get_size()[0])
     k = int(mat1.get_size()[1])
     n = int(mat2.get_size()[1])
 
     m_tiles = math.ceil(m / partial_config.block_m)
-    if meta_ws_enabled() and partial_config.two_ctas:
+    if effective_two_ctas(partial_config):
         m_tiles = math.ceil(m_tiles / 2) * 2
 
     expected_m_pad = m_tiles * partial_config.block_m
@@ -509,7 +267,7 @@ def lower_blackwell_decompose_k_partial(
         raise AssertionError("decompose-K plan geometry does not match its config")
 
     layout = ir.FixedLayout(
-        mat1.get_device(),
+        mat1.get_device_or_error(),
         torch.float32,
         [int(k_split) * int(m_pad), n],
         [n, 1],
@@ -537,14 +295,7 @@ def lower_blackwell_decompose_k_partial(
     )
     if choice is None:
         raise NotImplementedError("Blackwell decompose-K partial choice is unavailable")
-    result = choice.output_node()
-    if is_cat2_fp32_prologue:
-        # Final winner emission currently recompiles the selected subgraph, so
-        # preserve this proven producer fusion through ordinary scheduling.
-        result.data.data.annotations[
-            "prologue_fusion_max_input_bytes_to_output_ratio"
-        ] = 4.0
-    return result
+    return choice.output_node()
 
 
 def blackwell_decompose_k_partial(a, b, k_split, config_index):
@@ -555,7 +306,7 @@ def blackwell_decompose_k_partial(a, b, k_split, config_index):
     n = b.shape[1]
 
     m_tiles = (m + config.block_m - 1) // config.block_m
-    if USE_META_WS and config.two_ctas:
+    if effective_two_ctas(config):
         m_tiles = (m_tiles + 1) // 2 * 2
 
     m_pad = m_tiles * config.block_m
