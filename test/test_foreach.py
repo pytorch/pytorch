@@ -21,7 +21,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     OpDTypes,
     ops,
     skipXPU,
@@ -1224,7 +1223,7 @@ class TestForeachDevice(TestCase):
             ),
         )
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.float64)
     def test_foreach_norm_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets:
@@ -1260,7 +1259,7 @@ class TestForeachDevice(TestCase):
                 ]
                 self.assertEqual(expect, actual)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
     def test_foreach_max_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets
@@ -1824,7 +1823,6 @@ class TestForeachDevice(TestCase):
         self.assertEqual(self_tensor, ref_out)
 
     @onlyAccelerator
-    @skipXPU
     @dtypes(torch.uint16, torch.uint32, torch.uint64)
     def test_foreach_copy_barebones_unsigned(self, device, dtype):
         # The fused kernel doesn't instantiate these, so they take the slow path.
@@ -1835,6 +1833,31 @@ class TestForeachDevice(TestCase):
             ref = [torch.empty_like(d).copy_(s) for d, s in zip(dst, src)]
             torch._foreach_copy_(dst, src)
             self.assertEqual(dst, ref)
+
+    @onlyAccelerator
+    @parametrize("op_name", ["add", "sub"])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_binary_op_list_inplace_with_multi_dtypes(self, device, dtype, op_name):
+        foreach_op_ = getattr(torch, f"_foreach_{op_name}_")
+        ref_op_ = getattr(torch.Tensor, f"{op_name}_")
+        # 17 and 645 elements are not multiples of kILP (scalar path), 192 is
+        # vectorized, and 70000 spans two chunks.
+        sizes = ((17,), (64, 3), (5, 129), (70000,))
+        for other_dtype in floating_types_and(torch.half, torch.bfloat16):
+            if other_dtype == dtype:
+                continue
+            dsts = [make_tensor(s, dtype=dtype, device=device) for s in sizes]
+            others = [make_tensor(s, dtype=other_dtype, device=device) for s in sizes]
+            ref = [ref_op_(s.clone(), o, alpha=0.5) for s, o in zip(dsts, others)]
+            ForeachFuncWrapper(foreach_op_)(
+                (dsts, others),
+                device=device,
+                expect_fastpath=other_dtype != torch.float64,
+                alpha=0.5,
+            )
+            self.assertEqual(dsts, ref, atol=0, rtol=0)
+            with self.assertRaisesRegex(RuntimeError, "Boolean alpha"):
+                foreach_op_(dsts, others, alpha=True)
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))

@@ -96,6 +96,7 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
+    dtypes,
     e4m3_type,
     expectedFailureXPU,
     instantiate_device_type_tests,
@@ -265,7 +266,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE in ("xpu", "mtia"):
     test_dtypes.append(torch.bfloat16)
 
 
@@ -8224,6 +8225,14 @@ for dtype in (torch.int32, torch.int64):
         # Unrolled reduction
         self.common(fn, (torch.randn([2, 4]),))
 
+    def test_var_correction_positional(self):
+        # prims.var takes correction positionally, so the traced node can pass it
+        # positionally; the lowering has to accept that form.
+        def fn(x):
+            return torch.ops.prims.var.default(x, [1], 1)
+
+        self.common(fn, (torch.randn([2, 8]),))
+
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
         @torch.compile(backend="inductor", fullgraph=True)
@@ -9761,6 +9770,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+    def test_remove_noop_slice_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            a = torch.ops.aten.slice.Tensor(x, 0, -n, n)
+            b = torch.ops.aten.slice.Tensor(x, 0, -n - 1, n)
+            c = torch.ops.aten.slice.Tensor(x, 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
+
+    def test_remove_noop_slice_scatter_negative_start(self):
+        def f(x):
+            n = x.shape[0]
+            src = x * 2
+            a = torch.ops.aten.slice_scatter(x, src, 0, -n, n)
+            b = torch.ops.aten.slice_scatter(x, src, 0, -n - 1, n)
+            c = torch.ops.aten.slice_scatter(x, src[1:], 0, -n + 1, n)
+            return a + 1, b + 1, c + 1
+
+        x = torch.randn(4, 8, device=self.device)
+        compiled = torch.compile(f)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        post_grad_graph = get_post_grad_graph(compiled, (x,))
+        node_lines = [l for l in post_grad_graph.splitlines() if "# File:" not in l]
+
+        self.assertEqual(sum("aten.slice_scatter" in l for l in node_lines), 1)
+        self.assertEqual(compiled(x), f(x))
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
@@ -16626,6 +16672,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.ones(10),))
 
+    @parametrize("dynamic", [False, True])
+    @parametrize("layout", ["padded", "permuted", "sliced"])
+    @config.patch(
+        comprehensive_padding=True,
+        disable_padding_cpu=False,
+        padding_stride_threshold=0,
+        padding_alignment_bytes=32,
+        pad_outputs=True,
+    )
+    def test_resize_padded_input(self, dynamic, layout):
+        def fn(x, size):
+            return torch.ops.aten.resize(x, size)
+
+        storage = torch.full((208,), -777.0, device=self.device)
+        padded = storage.as_strided((5, 5, 5), (40, 8, 1), storage_offset=3)
+        padded.copy_(torch.arange(125, device=self.device).reshape(5, 5, 5))
+        if layout == "permuted":
+            padded = padded.permute(2, 0, 1)
+        elif layout == "sliced":
+            padded = padded[::2]
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for size in ((5, 5), (padded.numel(),), tuple(padded.shape)):
+            with self.subTest(size=size):
+                expected = fn(padded, size)
+                actual = compiled(padded, size)
+                self.assertEqual(actual, expected)
+
     def test_resize(self):
         def fn(x, size, memory_format):
             # NOTE: Tensor.resize() =/= aten::resize()
@@ -20268,7 +20341,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(10, device=GPU_TYPE)
         compiled_fn = torch.compile(f, dynamic=True)
         result, code = run_and_get_code(compiled_fn, x)
-        expected = f(x)
+        # Eager f(x) reads the non-blocking copy without syncing, so it can race.
+        expected = torch.clamp(x, 0.0, x.abs().sum().item())
         self.assertEqual(result, expected)
         wrapper_code = code[0]
         self.assertIn("torch.Event()", wrapper_code)
@@ -21606,6 +21680,201 @@ def add_test_failures(
             orig_failure.is_skip = orig_failure.is_skip or new_failure.is_skip
         else:
             test_failures[name] = new_failure
+
+
+class _ScalarAddSubPrecisionTestBase(TorchTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(maybe_fresh_cache())
+        stack.enter_context(
+            config.patch(implicit_fallbacks=False, force_disable_caches=True)
+        )
+
+    def _check_precision_configs(self, device, check):
+        configs = (
+            ((False, True),)
+            if torch.device(device).type == "cpu"
+            else ((False, False), (False, True), (True, False), (True, True))
+        )
+        for strict, upcast in configs:
+            with (
+                self.subTest(strict=strict, upcast=upcast),
+                config.patch(
+                    {
+                        "emulate_precision_casts": True,
+                        "strict_pointwise": strict,
+                        "triton.codegen_upcast_to_fp32": upcast,
+                    }
+                ),
+            ):
+                torch._dynamo.reset()
+                check()
+
+
+if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda"):
+
+    class ScalarAddSubPrecisionTest(_ScalarAddSubPrecisionTestBase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
+        @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64)
+        @parametrize("emulate,strict", [(False, False), (True, False), (True, True)])
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_literal(self, device, dtype, emulate, strict, op):
+            x = torch.tensor(
+                [-2048, -256, -0.01, -0.009, 0, 0.009, 0.01, 0.1, 256, 2048],
+                device=device,
+                dtype=dtype,
+            )
+            scalar_op = (
+                torch.ops.aten.add.Scalar
+                if op is operator.add
+                else torch.ops.aten.sub.Scalar
+            )
+
+            def fn(x):
+                result = (
+                    op(x, 0.01),
+                    op(0.01, x),
+                    op(x, 257),
+                    op(x, 2049),
+                    scalar_op(x, 0.01),
+                )
+                if op is operator.sub:
+                    return (*result, torch.ops.aten.rsub.Scalar(x, 0.01))
+                return result
+
+            with config.patch(emulate_precision_casts=emulate, strict_pointwise=strict):
+                self.assertEqual(
+                    torch.compile(fn, fullgraph=True)(x), fn(x), atol=0, rtol=0
+                )
+
+        @dtypes(torch.bfloat16, torch.float16)
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_rounding_and_tensor_constants(self, device, dtype, op):
+            x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
+            divisor = torch.full_like(x, 6.324555320336759)
+
+            def fn(x, divisor):
+                scalar = op(x, 0.01)
+                reverse = op(0.01, x)
+                constant = torch.full_like(x, 0.01)
+                tensor_constant = op(x, constant)
+                reverse_constant = op(constant, x)
+                tensor = op(x, divisor)
+                divided = x / divisor
+                return (
+                    scalar,
+                    scalar.float(),
+                    tensor_constant.float(),
+                    tensor.float(),
+                    divided,
+                    reverse,
+                    reverse.float(),
+                    reverse_constant.float(),
+                )
+
+            def check():
+                actual = torch.compile(fn, fullgraph=True)(x, divisor)
+                expected = fn(x, divisor)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(actual[0].dtype, dtype)
+                self.assertEqual(actual[1].dtype, torch.float32)
+                if torch.device(device).type == "cuda":
+                    self.assertFalse(torch.equal(expected[1], expected[2]))
+                    self.assertFalse(torch.equal(expected[6], expected[7]))
+
+            self._check_precision_configs(device, check)
+
+        @dtypes(torch.bfloat16, torch.float16)
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_gradients(self, device, dtype, op):
+            x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
+
+            def fn(x):
+                y = op(x, 0.01)
+                reverse = op(0.01, x)
+                return y * y, reverse * reverse
+
+            def run(fn):
+                inp = x.detach().clone().requires_grad_()
+                out = fn(inp)
+                grad = torch.autograd.grad(
+                    out, inp, tuple(torch.ones_like(value) for value in out)
+                )[0]
+                return out, grad
+
+            def check():
+                self.assertEqual(
+                    run(torch.compile(fn, fullgraph=True)), run(fn), atol=0, rtol=0
+                )
+
+            self._check_precision_configs(device, check)
+
+    _scalar_add_sub_devices = (("cpu",) if RUN_CPU else ()) + (
+        ("cuda",) if RUN_GPU and GPU_TYPE == "cuda" else ()
+    )
+    instantiate_device_type_tests(
+        ScalarAddSubPrecisionTest, globals(), only_for=_scalar_add_sub_devices
+    )
+
+
+if RUN_GPU and GPU_TYPE == "cuda":
+
+    class CudaScalarAddSubPrecisionTest(_ScalarAddSubPrecisionTestBase):
+        hw_classification = HardwareClassification.CUDA
+
+        @dtypes(torch.bfloat16, torch.float16)
+        def test_add_alpha(self, device, dtype):
+            x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
+
+            def check():
+                for alpha in (0.7, -0.7, 2):
+                    with self.subTest(alpha=alpha):
+
+                        def fn(x):
+                            y = torch.add(x, 0.01, alpha=alpha)
+                            return y, y.float()
+
+                        self.assertEqual(
+                            torch.compile(fn, fullgraph=True)(x), fn(x), atol=0, rtol=0
+                        )
+
+                        def scalar_fn(x):
+                            y = torch.ops.aten.add.Scalar(x, 0.01, alpha)
+                            return (y,)
+
+                        graph = make_fx(scalar_fn)(x)
+                        compiled = compile_fx_inner(graph, [x])
+                        self.assertEqual(
+                            compiled([x])[0], scalar_fn(x)[0], atol=0, rtol=0
+                        )
+
+            self._check_precision_configs(device, check)
+
+        @dtypes(torch.bfloat16, torch.float16)
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_symbolic(self, device, dtype, op):
+            def fn(x):
+                y = op(x, x.shape[0])
+                reverse = op(x.shape[0], x)
+                return y, y.float(), reverse, reverse.float()
+
+            def check():
+                compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+                for length in (257, 2049):
+                    value = -(length - 1) if op is operator.add else length - 1
+                    x = torch.full((length,), value, device=device, dtype=dtype)
+                    self.assertEqual(compiled(x), fn(x), atol=0, rtol=0)
+
+            self._check_precision_configs(device, check)
+
+    instantiate_device_type_tests(
+        CudaScalarAddSubPrecisionTest, globals(), only_for="cuda"
+    )
 
 
 if RUN_CPU:
@@ -23823,7 +24092,7 @@ if RUN_GPU:
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
             for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("ZBLOCK", code[0])
+            self.assertNotIn("Z0_BLOCK", code[0])
             self.assertIn("tl.load", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
@@ -23864,6 +24133,151 @@ if RUN_GPU:
             expected = fn(inp)
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
+
+        def test_size_one_innermost_reduction_dim_stays_unsplit(self):
+            # A read that is contiguous along one reduction var and constant along
+            # another (a size-1 or broadcast innermost dim) still votes INNER, so
+            # these stay one unsplit kernel.
+            def fn(x):
+                return x.sum((1, 2))
+
+            def broadcast_sum(x):
+                return x[:, :, None].expand(4096, 8, 32).sum((1, 2))
+
+            for f, x in [
+                (fn, torch.randn(64, 4096, 1, device=GPU_TYPE)),
+                (broadcast_sum, torch.randn(4096, 8, device=GPU_TYPE)),
+            ]:
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
+                self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_small_strided_read_keeps_outer_reduction(self):
+            # Only reads constant across the whole reduction abstain from the
+            # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
+            # including a small-dtype one (guards against weighting votes by
+            # itemsize).
+            def fn(x, mask):
+                return (x * mask.t()).sum(1)
+
+            x = torch.randn(1024, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
+
+        def test_small_broadcast_read_does_not_split_inner_reduction(self):
+            # The per-group mask is constant along the innermost reduction var, so
+            # it must not outvote the contiguous rows being reduced: this stays an
+            # unsplit inner reduction (one kernel).
+            def fn(x, mask):
+                masked = x.view(4096, 8, 32).masked_fill(
+                    mask.unsqueeze(-1), float("-inf")
+                )
+                return masked.flatten(1).amax(-1)
+
+            x = torch.randn(4096, 256, device=GPU_TYPE)
+            mask = torch.rand(4096, 8, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_repeated_strided_read_keeps_outer_reduction(self):
+            # x.t() repeat-interleaved by 2 doesn't move at reduction step 1 but
+            # jumps a full row every other step, so it must still vote OUTER
+            # against the contiguous y.
+            def fn(y, x):
+                xt = x.t()[:, :, None].expand(256, 128, 2).reshape(256, 256)
+                return (y * xt).sum(1)
+
+            y = torch.randn(256, 256, device=GPU_TYPE)
+            x = torch.randn(128, 256, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), y, x)
+            self.assertEqual(result, fn(y, x), atol=1e-4, rtol=1e-4)
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
+
+        @unittest.skipIf(
+            GPU_TYPE != "cuda" or torch.version.hip is not None,
+            "the small-k topk decomposition is CUDA-only",
+        )
+        def test_topk_small_k(self):
+            def reference(x, k, dim):
+                # Stable descending order; as in ATen, NaN ranks highest and
+                # +0 ranks above -0 (float64 keys keep -0 just below +0).
+                key = torch.where(x.isnan(), float("inf"), x.double())
+                key = torch.where((key == 0) & key.signbit(), -1e-300, key)
+                order = torch.sort(key, dim=dim, descending=True, stable=True).indices
+                nan_first = torch.gather(x.isnan().to(torch.int8), dim, order)
+                order = torch.gather(
+                    order,
+                    dim,
+                    torch.sort(
+                        nan_first, dim=dim, descending=True, stable=True
+                    ).indices,
+                )
+                indices = order.narrow(dim, 0, k)
+                return torch.gather(x, dim, indices), indices
+
+            specials = torch.tensor(
+                [
+                    float("inf"),
+                    -float("inf"),
+                    float("nan"),
+                    -float("nan"),
+                    0.0,
+                    -0.0,
+                    1.0,
+                    1.0,
+                ],
+                device=GPU_TYPE,
+            )
+            for shape, k, dim, dtype, special in [
+                ((256, 8, 32), 2, -1, torch.float32, False),
+                ((256, 256), 8, -1, torch.bfloat16, False),
+                ((64, 16), 16, -1, torch.float32, False),
+                ((16, 128, 3), 3, 1, torch.float32, False),
+                ((512, 64), 8, -1, torch.float32, True),
+                ((512, 64), 8, -1, torch.bfloat16, True),
+                ((512, 64), 8, -1, torch.float16, True),
+            ]:
+                x = torch.randn(shape, device=GPU_TYPE)
+                if special:
+                    pick = specials[
+                        torch.randint(0, len(specials), shape, device=GPU_TYPE)
+                    ]
+                    x = torch.where(torch.rand(shape, device=GPU_TYPE) < 0.5, pick, x)
+                x = x.to(dtype)
+                torch._dynamo.reset()
+                (values, indices), code = run_and_get_code(
+                    torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
+                )
+                # Only the last dim decomposes; other dims keep the ATen fallback,
+                # called as aten.topk.default (Python wrapper) or
+                # aoti_torch_*_topk (C++ wrapper).
+                fallback = re.search(
+                    r"aten\.topk\.default\(|aoti_torch_\w+_topk\(", " ".join(code)
+                )
+                if dim in (-1, x.dim() - 1):
+                    self.assertIsNone(fallback)
+                else:
+                    self.assertIsNotNone(fallback)
+                ref_values, ref_indices = reference(x, k, dim)
+                self.assertEqual(indices, ref_indices)
+                bits = torch.int16 if dtype.itemsize == 2 else torch.int32
+                self.assertTrue(torch.equal(values.view(bits), ref_values.view(bits)))
+
+            # As in ATen, +0 ranks above -0; equal values go to the lowest index.
+            x = torch.zeros(64, 32, device=GPU_TYPE)
+            x[:, 0:20:2] = -0.0
+            x[:, 20:] = -1.0
+            torch._dynamo.reset()
+            values, indices = torch.compile(lambda t: torch.topk(t, 4, dim=-1))(x)
+            self.assertEqual(
+                indices, torch.tensor([1, 3, 5, 7], device=GPU_TYPE).expand(64, 4)
+            )
+            self.assertFalse(torch.signbit(values).any())
+            self.assertFalse(torch.signbit(torch.topk(x, 4, dim=-1).values).any())
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
