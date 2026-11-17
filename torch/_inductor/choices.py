@@ -483,8 +483,9 @@ class InductorChoices:
         return callers
 
     def use_native_matmul(self, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
-        """Lower mat1 @ mat2 to a "dot" reduction, which fuses with its epilogue,
-        instead of an extern kernel or a template. For relu(a @ b):
+        """Lower mat1 @ mat2 to Inductor's ops.dot, which generates a fused matmul
+        natively, instead of an extern kernel or a template. For relu(a @ b) on the
+        Triton backend:
 
             False: extern_kernels.mm(arg0_1, arg1_1, out=buf0)
                    triton_poi_fused_relu_0.run(buf1, ...)
