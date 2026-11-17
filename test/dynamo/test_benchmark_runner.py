@@ -2522,19 +2522,40 @@ class TestTensorParallelPerfCli(TestCase):
         job_id=1,
         conclusion="success",
         config="inductor_huggingface_tp_perf",
+        attempt=1,
+        started_at=None,
     ):
         return {
             "name": f"periodic-dynamo-benchmarks-test / test ({config}, {shard}, 2, {runner})",
-            "databaseId": job_id,
+            "id": job_id,
+            "run_attempt": attempt,
             "conclusion": conclusion,
+            "started_at": started_at,
         }
+
+    @parametrize("attempt", (None, 1))
+    def test_jobs_resolve_to_the_execution_that_ran_them(self, attempt):
+        perf = self.perf_cli
+        # Shard 1 passed in attempt 1 and was copied into attempt 2 under a new ID;
+        # shard 2 failed in attempt 1 and was re-run in attempt 2.
+        jobs = [
+            self._job(shard=1, job_id=1, started_at="t1"),
+            self._job(shard=2, job_id=2, started_at="t1", conclusion="failure"),
+            self._job(shard=1, job_id=3, started_at="t1", attempt=2),
+            self._job(shard=2, job_id=4, started_at="t2", attempt=2),
+        ]
+        output = "\n".join(map(json.dumps, jobs))
+        with mock.patch.object(perf, "gh", return_value=output):
+            selected = perf.get_perf_jobs(perf.get_run_jobs(5, attempt))
+        resolved = [(job["attempt"], job["job_id"]) for job in selected]
+        self.assertEqual(resolved, [(1, 1), (2, 4)] if attempt is None else [(1, 1)])
+        url = perf.s3_artifact_url(5, selected[0])
+        self.assertIn("/5/1/artifact/", url)
+        self.assertTrue(url.endswith("_1.zip"))
 
     def test_periodic_baseline_matches_tp_hardware(self):
         perf = self.perf_cli
-        runs = [
-            {"databaseId": i, "createdAt": "2026-10-15", "attempt": attempt}
-            for i, attempt in ((5, 1), (4, 1), (3, 1), (2, 2))
-        ]
+        runs = [{"databaseId": i, "createdAt": "2026-10-15"} for i in (5, 4, 3, 2)]
         jobs = {
             5: [self._job()],
             4: [self._job(conclusion="failure")],
@@ -2552,8 +2573,7 @@ class TestTensorParallelPerfCli(TestCase):
             ) as gh,
             mock.patch.object(perf, "get_run_jobs", side_effect=jobs.__getitem__),
         ):
-            # Run 2's latest attempt, whose jobs were checked, is the baseline.
-            self.assertEqual(perf.resolve_baseline(5), (2, 2))
+            self.assertEqual(perf.resolve_baseline(5), 2)
         args = gh.call_args.args
         self.assertEqual(args[args.index("--workflow") + 1], "123")
         self.assertEqual(args[args.index("--status") + 1], "completed")
@@ -2574,11 +2594,11 @@ class TestTensorParallelPerfCli(TestCase):
             [2] if performance_status == "success" else [],
         )
 
-    def test_summary_fetches_baseline_attempt(self):
+    def test_summary_reads_latest_baseline_attempt(self):
         perf = self.perf_cli
         config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_decode_tp2"
-        content = "name,speedup,abs_latency\nmodel,1,2\n"
-        data = perf.parse_csvs([(config, content)], device="a10g-4")
+        csvs = [(f"{config}_performance.csv", "name,speedup,abs_latency\nmodel,1,2\n")]
+        jobs = [self._job()]
         args = types.SimpleNamespace(
             attempt=1,
             metric="speedup",
@@ -2590,8 +2610,9 @@ class TestTensorParallelPerfCli(TestCase):
         )
         with (
             mock.patch.object(perf, "_resolve_head_runs", return_value={"a10g-4": 5}),
-            mock.patch.object(perf, "resolve_baseline", return_value=(2, 3)),
-            mock.patch.object(perf, "fetch_run_perf", return_value=data) as fetch,
+            mock.patch.object(perf, "resolve_baseline", return_value=2),
+            mock.patch.object(perf, "get_run_jobs", return_value=jobs) as get_jobs,
+            mock.patch.object(perf, "download_and_extract_csvs", return_value=csvs),
             mock.patch.object(perf, "fetch_run_meta"),
             mock.patch.object(
                 perf, "filter_perf", side_effect=lambda results, args: results
@@ -2600,8 +2621,9 @@ class TestTensorParallelPerfCli(TestCase):
             contextlib.redirect_stdout(io.StringIO()),
         ):
             perf.cmd_summary(args)
-        fetched = [call.args[:2] for call in fetch.call_args_list]
-        self.assertEqual(fetched, [(5, 1), (2, 3)])
+        # --attempt applies to the head run; the baseline uses its latest attempt.
+        calls = [call.args for call in get_jobs.call_args_list]
+        self.assertEqual(calls, [(5, 1), (2, None)])
 
     def test_compare_keeps_nightly_baseline(self):
         perf = self.perf_cli
@@ -2616,7 +2638,7 @@ class TestTensorParallelPerfCli(TestCase):
                 [{"databaseId": 2, "createdAt": "2026-10-15"}],
             ],
         ) as gh:
-            self.assertEqual(perf.resolve_baseline(5), (2, 1))
+            self.assertEqual(perf.resolve_baseline(5), 2)
         args = gh.call_args.args
         self.assertEqual(args[args.index("--workflow") + 1], "42513231")
         self.assertEqual(args[args.index("--status") + 1], "success")
