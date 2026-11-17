@@ -1646,16 +1646,6 @@ def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
 
-@overload
-def require_python_fake_mode(mode: None, /) -> None: ...
-
-
-@overload
-def require_python_fake_mode(
-    mode: FakeTensorMode | CppFakeTensorMode, /
-) -> FakeTensorMode: ...
-
-
 def require_python_fake_mode(
     mode: FakeTensorMode | CppFakeTensorMode | None,
     /,
