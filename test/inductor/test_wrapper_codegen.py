@@ -24,6 +24,7 @@ from torch._inductor.utils import AotOnlyBuffer, IndentedBuffer, make_codegen_bu
 from torch._inductor.virtualized import V
 from torch.fx.experimental._size_hinting import ConsistentHintState
 from torch.fx.experimental.symbolic_shapes import CallMethodKey, ShapeEnv
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1056,6 +1057,8 @@ int64_t s0 = s1;""",
         self.assertIn(f"{first}[] = {{2, 3}};", first_buffer.getvalue())
         self.assertIn(f"{second}[] = {{2, 3}};", second_buffer.getvalue())
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

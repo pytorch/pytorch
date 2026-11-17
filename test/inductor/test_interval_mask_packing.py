@@ -10,6 +10,7 @@ from torch._inductor.kernel.flex.interval_mask_packing import (
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -403,6 +404,8 @@ class TestIntervalMaskPacking(InductorTestCase):
         self.assertIn("aux_tensors[0]", intervals[0].render_upper())
         self.assertIn("cutlass.Int32(32)", intervals[0].render_upper())
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

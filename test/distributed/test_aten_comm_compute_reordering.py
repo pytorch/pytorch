@@ -25,6 +25,7 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     requires_accelerator_dist_backend,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.utils import _pytree as pytree
 
 
@@ -2505,6 +2506,8 @@ class TestManualOverlapBucketing(_ComputeCommReorderingBase):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

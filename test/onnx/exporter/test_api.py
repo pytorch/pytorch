@@ -13,6 +13,7 @@ from onnxscript import FLOAT, opset18 as op
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -604,6 +605,8 @@ class TestCustomTranslationTable(common_utils.TestCase):
         # batch size is not fixed to 1
         self.assertNotEqual(op.model.graph.outputs[0].shape[0], 1)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()

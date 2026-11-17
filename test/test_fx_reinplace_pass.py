@@ -1,4 +1,5 @@
 # Owner(s): ["module: functionalization"]
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 import torch
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -393,6 +394,8 @@ def forward(self, x_1, index_1):
     return clone
     """)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == '__main__':
     run_tests()

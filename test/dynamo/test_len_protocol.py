@@ -18,6 +18,7 @@ import types
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     make_dynamo_test,
@@ -1369,6 +1370,8 @@ class TestFrozenDataclassLen(torch._dynamo.test_case.TestCase):
         self.assertEqual(len1, 3)
         self.assertEqual(len2, 3)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

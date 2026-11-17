@@ -88,6 +88,7 @@ from torch._inductor.select_algorithm import (
 from torch._prims_common import compute_required_storage_length
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     _static_skip_if,
     instantiate_parametrized_tests,
@@ -8510,6 +8511,8 @@ class TestTDMEndToEnd(TestCase):
         self.assertNotIn("tl.make_tensor_descriptor(in_ptr", "\n".join(code))
         torch.testing.assert_close(result, fn(strided), atol=1e-3, rtol=1e-3)
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

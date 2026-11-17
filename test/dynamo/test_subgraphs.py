@@ -6,6 +6,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import unsupported
 from torch._dynamo.utils import ifdynstaticdefault
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -591,6 +592,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 1, ifdynstaticdefault(2, 3))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

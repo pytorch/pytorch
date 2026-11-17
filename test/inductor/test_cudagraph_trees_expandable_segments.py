@@ -16,9 +16,10 @@ sys.path.append(pytorch_test_dir)
 
 if HAS_CUDA_AND_TRITON:
     try:
-        from .test_cudagraph_trees import CudaGraphTreeTests
+        from .test_cudagraph_trees import CppCudaGraphTreeTests, CudaGraphTreeTests
     except ImportError:
         from test_cudagraph_trees import (  # noqa: F401  # @manual=fbcode//caffe2/test/inductor:cudagraph_trees-library
+            CppCudaGraphTreeTests,
             CudaGraphTreeTests,
         )
 

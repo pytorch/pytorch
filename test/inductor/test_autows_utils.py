@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 from torch._inductor.autows_utils import has_meta_ws, meta_ws_enabled
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 
 
 class AutoWSUtilsTests(TestCase):
@@ -17,6 +18,8 @@ class AutoWSUtilsTests(TestCase):
             knobs.nvidia.use_meta_ws = False
             self.assertFalse(meta_ws_enabled())
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

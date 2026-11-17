@@ -6,6 +6,8 @@ import subprocess
 import sys
 import unittest
 
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
+
 
 # Native reductions register during import, so enable the rollout first.
 os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
@@ -1584,6 +1586,8 @@ class PointwiseStrictNumericsTest(TestCase):
 
 
 instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

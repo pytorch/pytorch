@@ -25,6 +25,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -3757,6 +3758,8 @@ class TestBitsetAncestors(TestCase):
         self.assertTrue(ancestors.is_ancestor(nodes[0], nodes[99]))
         self.assertFalse(ancestors.is_ancestor(nodes[99], nodes[0]))
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

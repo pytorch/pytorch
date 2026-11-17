@@ -18,6 +18,7 @@ from torch._subclasses.functional_tensor import (
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -2427,6 +2428,8 @@ class TestViewMetaSerialization(TestCase):
             restored = pickle.loads(pickle.dumps(view_meta))
             self.assertEqual(restored.as_tuple(), view_meta.as_tuple())
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

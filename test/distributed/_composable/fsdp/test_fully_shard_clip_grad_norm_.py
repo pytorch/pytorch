@@ -10,6 +10,7 @@ from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
 from torch.testing._internal.common_utils import (
     MI350_ARCH,
@@ -159,6 +160,8 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
                 0.5, norm_type, ref_model, ref_optim, model, optim, inp, dp_mesh
             )
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

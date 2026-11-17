@@ -9,6 +9,7 @@ from torch._dynamo.output_graph import FakeRootModule
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph, extract_graph_and_tracker, normalize_gm
 from torch.compiler import allow_in_graph
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._ordered_set import OrderedSet
 
@@ -1215,6 +1216,8 @@ graph():
 
         fn_opt(*args)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

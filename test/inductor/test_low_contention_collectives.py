@@ -8,6 +8,7 @@ from torch._inductor import config
 from torch._inductor.fx_passes.low_contention_collectives import (
     replace_collectives_with_low_contention,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -81,6 +82,8 @@ class TestLowContentionCollectives(TestCase):
         self.assertIn(symm_mem._low_contention_all_gather.default, get_targets(graph))
         self.assertNotIn(c10d_fn.all_gather_into_tensor.default, get_targets(graph))
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

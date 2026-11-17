@@ -14,6 +14,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import munge_exc
 
 
@@ -180,6 +181,8 @@ class TestCheckTypeId(torch._dynamo.test_case.TestCase):
         )
         self.assertIn(expected_second_part, second_part)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

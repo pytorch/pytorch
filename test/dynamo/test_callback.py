@@ -7,6 +7,7 @@ import torch
 from torch._dynamo.callback import callback_handler, CallbackArgs, CallbackTrigger
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._guards import CompileId
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON
 
@@ -139,6 +140,8 @@ end=CallbackArgs(callback_trigger=<CallbackTrigger.CUDAGRAPH_RECORDING: 4>, comp
         loss.backward()
         self.assertEqual(len(order), 0)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

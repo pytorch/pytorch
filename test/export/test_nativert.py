@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
     skipIf,
     skipXPUIf,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -417,6 +418,8 @@ if is_fbcode():
 
 instantiate_device_type_tests(TestNativeRTDevice, globals(), allow_xpu=True)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

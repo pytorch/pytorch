@@ -12,6 +12,7 @@ from torch._higher_order_ops.invoke_subgraph import (
 )
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -319,6 +320,8 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(pass_calls, [])
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

@@ -9,6 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     get_func_call,
@@ -946,6 +947,8 @@ if HAS_CPU and not torch.backends.mps.is_available():
         device = "cpu"
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCpuTest, "cpu")
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

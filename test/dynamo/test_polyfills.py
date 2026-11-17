@@ -3,6 +3,7 @@
 import torch
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -239,6 +240,8 @@ class TestGroupTensorsByDeviceAndDtype(TestCase):
         # Verify there was tensor compute (op_count > 0 means tensor ops were traced)
         self.assertGreater(cnts.op_count, 0, "Expected tensor operations to be traced")
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

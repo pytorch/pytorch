@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2211,6 +2212,8 @@ def helper(x):
             "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

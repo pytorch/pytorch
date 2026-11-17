@@ -20,6 +20,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -2866,6 +2867,8 @@ class TestCatLinearFusion(TestCase):
                 self.assertEqual(gr, gs)
             counters.clear()
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()

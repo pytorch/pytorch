@@ -18,6 +18,7 @@ from torch.distributed.fsdp import (
     OffloadPolicy,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -343,6 +344,8 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         del model
         del optim
 
+
+instantiate_fake_tensor_tests(globals(), processes=True)
 
 if __name__ == "__main__":
     run_tests()

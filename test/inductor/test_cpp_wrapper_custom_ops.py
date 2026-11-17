@@ -8,6 +8,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -86,24 +87,31 @@ class TestCppWrapperCustomOps(InductorTestCase):
     @config.patch(cpp_wrapper=True)
     def test_cpp_custom_op_runtime_dispatch_stays_in_cpp(self):
         self._load_issue153478_extension()
+        lib = self.enterContext(
+            torch.library._scoped_library("issue153478_cpp_wrapper", "FRAGMENT")
+        )
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::sum_list")
+        @torch.library.register_fake("issue153478_cpp_wrapper::sum_list", lib=lib)
         def _(xs):
             return torch.empty_like(xs[0])
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::sum_list_with_n")
+        @torch.library.register_fake(
+            "issue153478_cpp_wrapper::sum_list_with_n", lib=lib
+        )
         def _(xs, n):
             return torch.empty_like(xs[0])
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::add_scaled_")
+        @torch.library.register_fake("issue153478_cpp_wrapper::add_scaled_", lib=lib)
         def _(x, y, scale: float):
             return None
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::add_list_return")
+        @torch.library.register_fake(
+            "issue153478_cpp_wrapper::add_list_return", lib=lib
+        )
         def _(x, xs):
             return x
 
-        @torch.library.register_fake("issue153478_cpp_wrapper::optional_first")
+        @torch.library.register_fake("issue153478_cpp_wrapper::optional_first", lib=lib)
         def _(xs):
             return None, torch.empty_like(xs[0])
 
@@ -417,6 +425,8 @@ class TestCppWrapperCustomOps(InductorTestCase):
 
 instantiate_parametrized_tests(TestCppWrapperCustomOps)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests(needs="filelock")

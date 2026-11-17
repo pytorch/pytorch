@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_quantization import (
     _static_quantized_linear_binary_module,
     _static_quantized_linear_module,
@@ -3774,6 +3775,8 @@ instantiate_device_type_tests(
     TestSelectAlgorithmDynamicShapes, globals(), only_for="cpu"
 )
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     from torch.testing._internal.inductor_utils import HAS_CPU

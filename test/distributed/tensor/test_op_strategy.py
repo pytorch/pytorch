@@ -34,7 +34,12 @@ from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -173,6 +178,7 @@ class TestEinsumStrategies(DTensorOpTestBase):
         self.assertEqual(len(all_strats.strategies), 6)
 
 
+@instantiate_parametrized_tests
 class TestCostModel(DTensorOpTestBase):
     @property
     def world_size(self) -> int:
@@ -319,6 +325,7 @@ class TestCostModel(DTensorOpTestBase):
             )
             self.assertFalse(output_sharding.needs_redistribute)
 
+    @fake_tensor_test()
     def test_t_prunes_unproven_unbacked_strided_shard_candidates(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.distributed.tensor._ops.utils import is_tensor_shardable

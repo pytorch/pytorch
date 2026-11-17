@@ -26,10 +26,16 @@ from torch.fx.experimental.symbolic_shapes import (
     optimization_hint,
     ShapeEnv,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_fake_tensor import fake_tensor_test
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    run_tests,
+    TestCase,
+)
 
 
 # Basic functionality test for Placement types.
+@instantiate_parametrized_tests
 class PlacementTypesTestCase(TestCase):
     def test_zero_pad_and_unpad_eager_identity(self):
         tensor = torch.randn(2, 8)
@@ -266,6 +272,7 @@ class PlacementTypesTestCase(TestCase):
                         f"num_chunks={num_chunks}, rank={rank}",
                     )
 
+    @fake_tensor_test()
     def test_select_split_tensor_unbacked_symint_uneven_does_not_raise(self):
         """Unbacked rank + dim_size=5 / 4 chunks used to set last_split=-1 and crash in narrow."""
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
@@ -284,6 +291,7 @@ class PlacementTypesTestCase(TestCase):
         self.assertEqual(result.size(1), 4)
         self.assertIsInstance(result.size(0), torch.SymInt)
 
+    @fake_tensor_test()
     def test_hinted_unbacked_even_shard_skips_padding(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
         shard = Shard(0)
@@ -300,6 +308,7 @@ class PlacementTypesTestCase(TestCase):
         self.assertEqual(padded.shape, local_tensor.shape)
         self.assertEqual(unpadded.shape, full_tensor.shape)
 
+    @fake_tensor_test()
     def test_hinted_unbacked_even_chunk_preserves_symbolic_shard_size(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
 
@@ -320,6 +329,7 @@ class PlacementTypesTestCase(TestCase):
                 free_unbacked_symbols(batch.node.expr),
             )
 
+    @fake_tensor_test()
     def test_strided_shard_preserves_symbolic_split_factor(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
 
@@ -341,6 +351,7 @@ class PlacementTypesTestCase(TestCase):
         ]
         self.assertIn(sympy.Eq(split_factor.node.expr, 4), deferred_asserts)
 
+    @fake_tensor_test()
     def test_unbacked_even_fallback_hint_requires_override(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
 
@@ -351,6 +362,7 @@ class PlacementTypesTestCase(TestCase):
             torch._dynamo.override_optimization_hint(dim_size, 8)
             self.assertTrue(_hint_proves_even_shard(dim_size, 4))
 
+    @fake_tensor_test()
     def test_hinted_unbacked_shardability_adds_runtime_check(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
         mesh = DeviceMesh("cpu", torch.arange(4), _init_backend=False, _rank=0)
@@ -365,6 +377,7 @@ class PlacementTypesTestCase(TestCase):
             torch._dynamo.override_optimization_hint(dim_size, 16)
             self.assertTrue(is_tensor_shardable((2, dim_size), spec))
 
+    @fake_tensor_test()
     def test_strided_shard_unbacked_local_size_avoids_chunk_guard(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
 
@@ -383,6 +396,7 @@ class PlacementTypesTestCase(TestCase):
         self.assertTrue(free_unbacked_symbols(local_size.node.expr))
         self.assertEqual(offsets, [])
 
+    @fake_tensor_test()
     def test_strided_shard_split_tensor_uses_unbacked_safe_chunking(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
 

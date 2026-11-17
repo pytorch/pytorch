@@ -17,6 +17,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.export.pt2_archive import PT2ArchiveReader, PT2ArchiveWriter
 from torch.testing import FileCheck
+from torch.testing._internal.common_fake_tensor import instantiate_fake_tensor_tests
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
@@ -408,6 +409,8 @@ def code_check_count(
             exactly=True,
         ).run(src_code)
 
+
+instantiate_fake_tensor_tests(globals())
 
 if __name__ == "__main__":
     run_tests()
