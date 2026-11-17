@@ -23,12 +23,12 @@ from torch.testing._internal.common_utils import (
     parametrize, serialTest, subtest,
     gradcheck, gradgradcheck,
     skipIfMPS,
-    skipIfTorchDynamo,
+    skipIfTorchDynamo, HardwareClassification,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
-    precisionOverride)
+    precisionOverride, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
@@ -100,7 +100,8 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
 
     return result
 
-class TestReductions(TestCase):
+class TestReductionsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -428,6 +429,8 @@ class TestReductions(TestCase):
         t = make_tensor((32, 2 ** 16), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True)
         self._test_ref(op, t, dim=1)
 
+    # Serial: the host-memory guard doesn't account for concurrent xdist workers.
+    @serialTest()
     @largeTensorTest("8gb")
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
@@ -554,6 +557,15 @@ class TestReductions(TestCase):
         expected = logsumexp(e.cpu().numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
+
+    @parametrize("op", ["cumsum", "cumprod", "logcumsumexp", "cummax", "cummin"])
+    def test_cumulative_ops_size_one_dim_stride(self, device, op):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202600
+        # mT leaves the size-1 dim with stride 1 instead of 5, yet the tensor is still contiguous
+        x = torch.randn(2, 3, 5, 1, device=device).mT
+        out = torch.zeros_like(x), torch.ones_like(x, dtype=torch.long)
+        res = getattr(torch, op)(x, 2, out=out if op.startswith("cumm") else out[0])
+        self.assertEqual(res, getattr(torch, op)(x.cpu(), 2))
 
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
@@ -1250,7 +1262,6 @@ class TestReductions(TestCase):
 
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?
-    @skipIfMPS
     def test_bincount(self, device):
         # negative input throws
         with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):
@@ -1307,7 +1318,7 @@ class TestReductions(TestCase):
             torch.tensor([0, 1, 1, 1, 4], device=device),
             torch.tensor([1, 2, 3, 4, 5], dtype=torch.int8, device=device))
         self.assertEqual(
-            torch.tensor([1, 9, 0, 0, 5], device=device, dtype=torch.float64), byte_counts)
+            torch.tensor([1, 9, 0, 0, 5], device=device, dtype=highest_precision_float(device)), byte_counts)
         # test non-contiguous inputs and weights
         inputs = torch.tensor([[0, 0], [3, 1], [2, 1], [1, 1], [3, 4]], device=device)
         weights = torch.tensor([[.1, 1], [.2, 2], [.3, 3], [.4, 4], [.5, 5]], device=device)
@@ -1408,7 +1419,9 @@ class TestReductions(TestCase):
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:
             pylist = tensor.reshape(-1).tolist()
-            self.assertEqual(tensor.sum(), sum(pylist))
+            # Dynamo would trace the reference sum over each of up to 200000
+            # Python floats, which takes ~17 min under dynamo_wrapped.
+            self.assertEqual(tensor.sum(), torch._dynamo.disable(sum)(pylist))
 
         if dtype != torch.bool:
             check_sum_all(torch.tensor([1, 2, 3, 4, 5], dtype=dtype, device=device))
@@ -1857,6 +1870,7 @@ class TestReductions(TestCase):
 
     @dtypes(torch.int32, torch.int64)
     @skipIfMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5092")
     def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
         # Eager/inductor parity for #183318.
         out_dtype = dtype
@@ -1874,8 +1888,6 @@ class TestReductions(TestCase):
         self.assertEqual(eager, compiled)
 
     @dtypes(*all_types_and(torch.half))
-    @dtypesIfXPU(torch.half, torch.int8, torch.uint8, torch.float32)
-    # Acc issue for other types on xpu, see https://github.com/intel/torch-xpu-ops/issues/2295
     @skipIfMPS
     def test_argminmax_multiple(self, device, dtype):
         # Case: All Ones
@@ -2526,7 +2538,6 @@ class TestReductions(TestCase):
 
     @onlyAccelerator
     @skipIfMPS
-    # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
         def run_test(input_):
@@ -2565,25 +2576,69 @@ class TestReductions(TestCase):
     @serialTest()
     @largeMPSBufferTest("5GB")
     @largeTensorTest("5GB")
+    @parametrize("n", [subtest((1 << 32) + 4096, name="above_uint32"), subtest((1 << 32) - 4096, name="above_int32")])
     @parametrize("fn,expected", [
-        subtest((lambda x: x.max(), 1), name="max"),
-        subtest((lambda x: x.argmax(), (1 << 32) + 4095), name="argmax"),
-        subtest((lambda x: x.min(), 0), name="min"),
-        subtest((lambda x: x.argmin(), 0), name="argmin"),
-        # sum promotes int8 to int64, materializing a 32GB cast of the input on CUDA
-        subtest((lambda x: x.sum(), 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda")]),
-        subtest((lambda x: x.any(), True), name="any"),
-        subtest((lambda x: x.all(), False), name="all"),
-        subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], 1 << 20), name="max_dim"),
+        subtest((lambda x: x.max(), lambda n: 1), name="max"),
+        subtest((lambda x: x.argmax(), lambda n: n - 1), name="argmax"),
+        subtest((lambda x: x.min(), lambda n: 0), name="min"),
+        subtest((lambda x: x.argmin(), lambda n: 0), name="argmin"),
+        # sum promotes int8 to int64, materializing a 32GB cast of the input on CUDA and XPU.
+        subtest((lambda x: x.sum(), lambda n: 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda"), largeTensorTest("36GB", device="xpu")]),
+        subtest((lambda x: x.any(), lambda n: True), name="any"),
+        subtest((lambda x: x.all(), lambda n: False), name="all"),
+        subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], lambda n: n // 4096 - 1), name="max_dim"),
     ])
-    def test_reductions_above_uint32(self, device, fn, expected):
-        x = torch.zeros((1 << 32) + 4096, device=device, dtype=torch.int8)
+    def test_large_reductions(self, device, n, fn, expected):
+        x = torch.zeros(n, device=device, dtype=torch.int8)
         x[-1] = 1
-        # MPS reduction kernels index in 32 bits and should raise
-        if self.device_type == "mps":
-            self.assertRaisesRegex(NotImplementedError, "64-bit indexing", fn, x)
-        else:
-            self.assertEqual(fn(x), expected)
+        self.assertEqual(fn(x), expected(n))
+
+    @onlyAccelerator
+    @serialTest()
+    @largeMPSBufferTest("7GB")
+    @largeTensorTest("7GB")
+    def test_large_reductions_of_views(self, device):
+        # Expanded and strided views whose sizes or strides need 64-bit indexing over small storages
+        base = torch.arange(1 << 17, device=device).view(2, 1 << 16, 1)
+        self.assertEqual(base.expand(-1, -1, 1 << 16).sum((0, 2)), (base[0, :, 0] + base[1, :, 0]) * (1 << 16))
+        r = torch.tensor([[7], [3]], dtype=torch.int8, device=device).expand(2, 1 << 31).amax(0)
+        self.assertEqual((r.amin().item(), r.amax().item()), (7, 7))
+        del r
+        self.assertEqual(tuple(torch.zeros(1, dtype=torch.bool, device=device).expand((1 << 32) + 4096).max(0)), (False, 0))
+        out = torch.zeros((1 << 32) + 4096, dtype=torch.int8, device=device)[:: 1 << 20]
+        torch.amax(torch.full((2, out.numel()), 9, dtype=torch.int8, device=device), 0, out=out)
+        self.assertEqual(out, torch.full_like(out, 9))
+
+    @onlyAccelerator
+    @serialTest()
+    @largeTensorTest("4GB")
+    def test_reductions_many_short_rows(self, device):
+        # A simdgroup or threadgroup per row puts over 2**32 threads in the grid
+        rows = (1 << 27) + 8
+        x = torch.zeros(rows, 2, dtype=torch.int8, device=device)
+        x[:, 1] = 1
+        r = x.argmax(1)
+        self.assertEqual((r.amin().item(), r.amax().item()), (1, 1))
+        del x, r
+        y = torch.zeros(rows, 4, dtype=torch.int8, device=device)
+        y[:, 2] = 7
+        v = y[:, ::2]  # strided, so it is reduced by the generic kernels
+        for r, want in ((v.amax(1), 7), (v.sum(1), 7), (v.argmax(1), 1)):
+            self.assertEqual((r.amin().item(), r.amax().item()), (want, want))
+
+    @onlyAccelerator
+    @serialTest()
+    @largeMPSBufferTest("9GB")
+    @largeTensorTest("9GB")
+    def test_var_mean_above_uint32(self, device):
+        rows = (1 << 20) + 1
+        x = torch.zeros(rows, 4096, device=device, dtype=torch.half)
+        x[::2] = 1
+        p = (rows // 2 + 1) / rows
+        for dim, n in ((0, rows), (None, x.numel())):
+            var, mean = torch.var_mean(x, dim)
+            self.assertEqual(mean, torch.full_like(mean, p))
+            self.assertEqual(var, torch.full_like(var, p * (1 - p) * n / (n - 1)))
 
     def test_argminmax_axis_with_dim_one(self, device):
         # See: https://github.com/pytorch/pytorch/issues/38922
@@ -3086,8 +3141,6 @@ class TestReductions(TestCase):
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     @skipIfMPS
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3100,8 +3153,6 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     @skipIfMPS
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3114,8 +3165,6 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('std', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     @skipIfMPS
     def test_var_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3151,8 +3200,6 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     @skipIfMPS
     def test_std_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3188,9 +3235,6 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat)
-    @skipIfMPS
     def test_std_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -3222,9 +3266,6 @@ class TestReductions(TestCase):
             self.assertEqual(mean1, mean2)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat)
-    @skipIfMPS
     def test_var_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -3418,7 +3459,6 @@ class TestReductions(TestCase):
         test_against_np(linear, bins=20, min=0, max=0.99)
 
     @dtypes(torch.float32, torch.float64)
-    @expectedFailureXPU  # XPU _histc_out_xpu (out-of-tree) does not enforce dtype check yet
     def test_histc_out_dtype(self, device, dtype):
         x = torch.randn(8, dtype=dtype, device=device)
         # Mismatched out dtype should raise
@@ -3780,6 +3820,8 @@ class TestReductions(TestCase):
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
 class TestReductionsOnCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     # TODO: kill map2_ (and similar) uses and update to compare with NumPy
     # only works on CPU since this uses map2_, which is only supported on CPU
     def _testCSelection(self, torchfn, mathfn):
@@ -4223,7 +4265,7 @@ as the input tensor excluding its innermost dimension'):
             values = torch.tensor([float("nan")], device="cpu", dtype=torch.float32)
             torch.histogram(values, 2)
 
-instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()
