@@ -341,7 +341,7 @@ class ModularIndexing(sympy.Function):
     ) -> sympy.Basic | None:
         if base == 0 or modulus == 1:
             return sympy.S.Zero
-        if not base.free_symbols and base.has(Identity):
+        if base.is_number and base.has(Identity):
             base = base.expand(identity=True)
         if (
             isinstance(base, sympy.Integer)
