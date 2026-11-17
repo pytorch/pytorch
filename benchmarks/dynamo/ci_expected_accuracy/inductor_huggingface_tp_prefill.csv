@@ -2,6 +2,10 @@ name,accuracy,graph_breaks,calls_captured,fallbacks_to_eager
 
 
 
+Qwen/Qwen2.5-0.5B-Instruct,pass,0,1748,0
+
+
+
 Qwen/Qwen3-0.6B,pass,0,2480,0
 
 

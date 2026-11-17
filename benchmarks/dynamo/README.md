@@ -94,8 +94,8 @@ As an example, the commands to run first line of the dashboard (performance only
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
 by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
-`google/gemma-2-2b`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed,
-unpadded prompts:
+`google/gemma-2-2b`, `google/gemma-3-1b-it`, `Qwen/Qwen2.5-0.5B-Instruct`,
+`Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed, unpadded prompts:
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -117,9 +117,10 @@ and timed forward. Use `--accuracy` to check correctness or
 (default 1000) and `--batch-size` configure the prefill and decode workloads;
 generation retains its existing `1 x 1000` inputs and rejects `--prompt-length`.
 
-Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
-`Qwen/Qwen3.5-0.8B`. `gemma-2-2b` is excluded because its sliding-window cache
-recompiles on every step.
+Decode is opt-in and supports `meta-llama/Llama-3.2-1B`,
+`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`. The
+Gemma models are excluded because their sliding-window cache recompiles on
+every step.
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -165,8 +166,8 @@ measure TP scaling.
 The peak-memory columns include an extra model-weight copy in single-GPU runs,
 while TP runs share each rank's weights. These columns cannot directly measure
 single-GPU-to-TP memory savings.
-Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
-`Qwen/Qwen3.5-0.8B`.
+Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen2.5-0.5B-Instruct`,
+`Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`.
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -197,7 +198,8 @@ torchrun --nproc-per-node=2 benchmarks/dynamo/huggingface.py --performance \
 Each worker uses `LOCAL_RANK` for its GPU and torchrun's rendezvous settings.
 TP requires `--bfloat16`, `--float16`, or `--float32`, which is passed to
 `from_pretrained`, and `N` must divide the model's attention and KV
-heads (Qwen3.5-0.8B has two KV heads, so it supports at most `--tp-size=2`).
+heads (Qwen2.5-0.5B and Qwen3.5-0.8B have two KV heads, so they support at most
+`--tp-size=2`).
 Ranks broadcast the request tokens from rank 0 and allocate their own
 TP-local static caches. Eager, compiled, and accuracy-reference passes share the
 loaded shards rather than deep-copying the model; each pass gets a fresh cache.
