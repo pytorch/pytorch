@@ -9,29 +9,46 @@ These tests verify that the validation logic correctly detects:
 - Missing rules (ground truth valid but DTensor has no rule)
 """
 
+import itertools
+import math
+import unittest.mock
+
 import torch
 import torch.distributed as dist
-from torch.distributed._local_tensor import LocalTensorMode
+from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
+from torch.distributed._local_tensor._c10d import _local_reduce
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.strategy_validation import (
     _checkerboard_mask,
-    _create_partial_input,
+    _compare_outputs,
+    _constrained_operands,
     _find_opinfo_candidates,
+    _inject_specials,
+    _materialize_inputs,
+    _mismatch,
+    _opinfo_sizes,
+    _partial_pieces,
+    _scalar_variants,
+    _validate_aten_op_for_sample,
+    _validate_captured_call,
+    _Variant,
+    claimed_input_combinations,
+    ComparisonStats,
     extract_tensors_from_sample,
     get_1d_input_placements_for_tensor,
     get_1d_output_placements_for_tensor,
     get_opinfo_by_name,
     is_fully_replicated,
     is_trivial_shard,
-    normalize_combo_key,
-    normalize_placement,
-    normalize_placement_str,
     parse_placement,
-    query_single_dim_strategy,
+    query_runtime_claims,
     resolve_op_names,
     validate_aten_combination,
-    validate_combination,
+    ValidationOptions,
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
 from torch.testing._internal.common_methods_invocations import SampleInput
@@ -71,8 +88,8 @@ class TestPlacementUtilities(TestCase):
         self.assertFalse(is_fully_replicated((Partial("sum"),)))
 
 
-class TestPlacementNormalization(TestCase):
-    """Test placement normalization for trivial shard deduplication."""
+class TestTrivialShard(TestCase):
+    """Test detection of shards on size-1 dimensions."""
 
     def test_is_trivial_shard_size_1(self):
         """Shard on size-1 dimension is trivial."""
@@ -93,122 +110,6 @@ class TestPlacementNormalization(TestCase):
     def test_is_trivial_shard_partial(self):
         """Partial is not a trivial shard."""
         self.assertFalse(is_trivial_shard(Partial("sum"), (1, 4)))
-
-    def test_normalize_placement_trivial_shard(self):
-        """Trivial shards should normalize to Replicate."""
-        result = normalize_placement(Shard(0), (1, 4))
-        self.assertIsInstance(result, Replicate)
-
-        result = normalize_placement(Shard(1), (4, 1))
-        self.assertIsInstance(result, Replicate)
-
-    def test_normalize_placement_normal_shard(self):
-        """Non-trivial shards should stay as Shard."""
-        result = normalize_placement(Shard(0), (4, 3))
-        self.assertIsInstance(result, Shard)
-        self.assertEqual(result.dim, 0)
-
-    def test_normalize_placement_replicate(self):
-        """Replicate should stay as Replicate."""
-        result = normalize_placement(Replicate(), (4, 3))
-        self.assertIsInstance(result, Replicate)
-
-    def test_normalize_placement_partial(self):
-        """Partial should stay as Partial."""
-        result = normalize_placement(Partial("sum"), (4, 3))
-        self.assertIsInstance(result, Partial)
-        self.assertEqual(result.reduce_op, "sum")
-
-    def test_normalize_placement_str_trivial_shard(self):
-        """Trivial shard strings should normalize to 'R'."""
-        result = normalize_placement_str("S(0)", (1, 4))
-        self.assertEqual(result, "R")
-
-        result = normalize_placement_str("S(1)", (4, 1))
-        self.assertEqual(result, "R")
-
-    def test_normalize_placement_str_normal_shard(self):
-        """Non-trivial shard strings should stay unchanged."""
-        result = normalize_placement_str("S(0)", (4, 3))
-        self.assertEqual(result, "S(0)")
-
-    def test_normalize_combo_key_trivial_output(self):
-        """Combo keys with trivial output shard should normalize output to R."""
-        # P(max) -> S(0) on output [1,1,1] should become P(max) -> R
-        combo = (("P(max)",), ("S(0)",))
-        input_shapes = ((4, 3),)
-        output_shapes = ((1, 1, 1),)
-
-        result = normalize_combo_key(combo, input_shapes, output_shapes)
-        self.assertEqual(result, (("P(max)",), ("R",)))
-
-    def test_normalize_combo_key_trivial_input(self):
-        """Combo keys with trivial input shard should normalize input to R."""
-        # S(0),R -> R on input [1,4],[4,4] should become R,R -> R
-        combo = (("S(0)", "R"), ("R",))
-        input_shapes = ((1, 4), (4, 4))
-        output_shapes = ((4, 4),)
-
-        result = normalize_combo_key(combo, input_shapes, output_shapes)
-        self.assertEqual(result, (("R", "R"), ("R",)))
-
-    def test_normalize_combo_key_all_trivial(self):
-        """All-size-1 tensor should normalize all shards to R."""
-        # S(0),S(1) -> S(2) on shape [1,1,1] should become R,R -> R
-        combo = (("S(0)", "S(1)"), ("S(2)",))
-        input_shapes = ((1, 1, 1), (1, 1, 1))
-        output_shapes = ((1, 1, 1),)
-
-        result = normalize_combo_key(combo, input_shapes, output_shapes)
-        self.assertEqual(result, (("R", "R"), ("R",)))
-
-    def test_normalize_combo_key_no_change(self):
-        """Normal-sized tensors should not change."""
-        combo = (("S(0)", "S(1)"), ("S(0)",))
-        input_shapes = ((4, 3), (4, 3))
-        output_shapes = ((4, 3),)
-
-        result = normalize_combo_key(combo, input_shapes, output_shapes)
-        self.assertEqual(result, combo)
-
-    def test_normalize_combo_key_partial_unchanged(self):
-        """Partial placements should never be normalized."""
-        combo = (("P(max)", "P(sum)"), ("P(max)",))
-        input_shapes = ((1, 1), (1, 1))  # Even with all-size-1
-        output_shapes = ((1, 1),)
-
-        result = normalize_combo_key(combo, input_shapes, output_shapes)
-        self.assertEqual(result, combo)  # Partials unchanged
-
-    def test_normalize_deduplicates_equivalent_rules(self):
-        """
-        Verify that normalization deduplicates equivalent rules.
-
-        For squeeze on [1,1,1,1] -> [1,1,1], all of these are equivalent:
-        - P(max) -> S(0)
-        - P(max) -> S(1)
-        - P(max) -> S(2)
-        - P(max) -> R
-
-        After normalization, they should all become P(max) -> R.
-        """
-        input_shapes = ((1, 1, 1, 1),)
-        output_shapes = ((1, 1, 1),)
-
-        normalized_rules = set()
-        for shard_dim in [0, 1, 2]:
-            combo = (("P(max)",), (f"S({shard_dim})",))
-            normalized = normalize_combo_key(combo, input_shapes, output_shapes)
-            normalized_rules.add(normalized)
-
-        # Also add the explicit R version
-        combo_r = (("P(max)",), ("R",))
-        normalized_r = normalize_combo_key(combo_r, input_shapes, output_shapes)
-        normalized_rules.add(normalized_r)
-
-        # All should have normalized to the same rule
-        self.assertEqual(len(normalized_rules), 1)
-        self.assertEqual(normalized_rules.pop(), (("P(max)",), ("R",)))
 
 
 class TestInputPlacements(TestCase):
@@ -318,7 +219,7 @@ class TestExtractTensors(TestCase):
 
 
 class TestValidateCombination(TestCase):
-    """Test the core validate_combination function."""
+    """Test validate_aten_combination on hand-picked placement combinations."""
 
     world_size = 2
 
@@ -341,24 +242,15 @@ class TestValidateCombination(TestCase):
         # igamma(negative, negative) produces NaN
         a = torch.tensor([-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0])
         x = torch.tensor(-1.0)
-        sample = SampleInput(a, args=(x,))
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = torch.igamma(a, x)
-        self.assertTrue(ground_truth.isnan().all(), "Expected all NaN ground truth")
+        self.assertTrue(torch.igamma(a, x).isnan().all(), "Expected all NaN output")
 
         combo = ((Shard(0), Replicate()), (Shard(0),))
 
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
-            is_valid, msg = validate_combination(
-                torch.igamma,
-                sample,
-                tensors,
-                combo,
-                ground_truth,
-                self.world_size,
-                mesh,
-            )
+        is_valid, msg = validate_aten_combination(
+            torch.ops.aten.igamma.default, (a, x), {}, combo, self.world_size, mesh
+        )
         self.assertTrue(is_valid, lambda _m: f"{_m}\nNaN outputs should match: {msg}")
 
     def test_integer_output_includes_partial_sum(self):
@@ -411,7 +303,7 @@ class TestValidateCombination(TestCase):
         # But NOT:
         # - R + P(sum) -> P(sum) for add (R gets added on each rank, then summed)
         VALID_RULES = {
-            torch.add: [
+            torch.ops.aten.add.Tensor: [
                 # Same-dim sharding (chunks match)
                 "S(0),S(0)->S(0)",
                 "S(1),S(1)->S(1)",
@@ -435,7 +327,7 @@ class TestValidateCombination(TestCase):
                 "R,P(max)->P(max)",
                 "R,P(min)->P(min)",
             ],
-            torch.mul: [
+            torch.ops.aten.mul.Tensor: [
                 # Same-dim sharding
                 "S(0),S(0)->S(0)",
                 "S(1),S(1)->S(1)",
@@ -447,7 +339,7 @@ class TestValidateCombination(TestCase):
                 "R,P(avg)->P(avg)",
                 # No P(min)/P(max) rules: negative multiplier flips ordering
             ],
-            torch.div: [
+            torch.ops.aten.div.Tensor: [
                 # Same-dim sharding
                 "S(0),S(0)->S(0)",
                 "S(1),S(1)->S(1)",
@@ -457,7 +349,7 @@ class TestValidateCombination(TestCase):
                 # No R/P(avg) rule: 1/x is not linear
                 # No P(min)/P(max) rules: negative divisor flips ordering
             ],
-            torch.maximum: [
+            torch.ops.aten.maximum.default: [
                 # Same-dim sharding
                 "S(0),S(0)->S(0)",
                 "S(1),S(1)->S(1)",
@@ -494,47 +386,39 @@ class TestValidateCombination(TestCase):
             # Create test tensors
             a = torch.randn(8, 4)
             b = torch.randn(8, 4)
-            sample = SampleInput(a, args=(b,))
-            tensors = extract_tensors_from_sample(sample)
-            ground_truth = op(a, b)
 
             with LocalTensorMode(frozenset(range(self.world_size))):
                 mesh = init_device_mesh("cpu", (self.world_size,))
 
-                # Test all combinations
-                for p1 in ALL_PLACEMENTS:
-                    for p2 in ALL_PLACEMENTS:
-                        # Skip fully replicated inputs (degenerate case: any output works)
-                        if isinstance(p1, Replicate) and isinstance(p2, Replicate):
-                            continue
+            # Test all combinations
+            for p1 in ALL_PLACEMENTS:
+                for p2 in ALL_PLACEMENTS:
+                    # Skip fully replicated inputs (degenerate case: any output works)
+                    if isinstance(p1, Replicate) and isinstance(p2, Replicate):
+                        continue
 
-                        for p_out in ALL_PLACEMENTS:
-                            input_plcs = (p1, p2)
-                            combo = (input_plcs, (p_out,))
+                    for p_out in ALL_PLACEMENTS:
+                        input_plcs = (p1, p2)
+                        combo = (input_plcs, (p_out,))
 
-                            is_valid, msg = validate_combination(
-                                op,
-                                sample,
-                                tensors,
-                                combo,
-                                ground_truth,
-                                self.world_size,
-                                mesh,
+                        is_valid, msg = validate_aten_combination(
+                            op, (a, b), {}, combo, self.world_size, mesh
+                        )
+
+                        # Check if this combo matches any valid rule
+                        should_be_valid = (input_plcs, (p_out,)) in valid_rules
+
+                        if should_be_valid:
+                            self.assertTrue(
+                                is_valid,
+                                lambda _m: f"{_m}\n{op}: {p1},{p2}->{p_out} should be valid but got: {msg}",
                             )
-
-                            # Check if this combo matches any valid rule
-                            should_be_valid = (input_plcs, (p_out,)) in valid_rules
-
-                            if should_be_valid:
-                                self.assertTrue(
-                                    is_valid,
-                                    lambda _m: f"{_m}\n{op.__name__}: {p1},{p2}->{p_out} should be valid but got: {msg}",
-                                )
-                            else:
-                                self.assertFalse(
-                                    is_valid,
-                                    lambda msg: f"{msg}\n{op.__name__}: {p1},{p2}->{p_out} should be invalid",
-                                )
+                        else:
+                            self.assertIs(
+                                is_valid,
+                                False,
+                                lambda msg: f"{msg}\n{op}: {p1},{p2}->{p_out} should be invalid",
+                            )
 
     def test_add_alpha_negates_partial_max_to_min(self):
         """
@@ -548,98 +432,63 @@ class TestValidateCombination(TestCase):
         a = torch.randn(8, 4)
         b = torch.randn(8, 4)
         # add with alpha=-1 computes: a + (-1)*b = a - b
-        sample = SampleInput(a, args=(b,), kwargs={"alpha": -1})
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = torch.add(a, b, alpha=-1)
+        add, args, kwargs = torch.ops.aten.add.Tensor, (a, b), {"alpha": -1}
 
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
 
-            # R + alpha*P(max) where alpha=-1 should produce P(min)
-            # because -max(x) = min(-x)
-            combo_valid = ((Replicate(), Partial("max")), (Partial("min"),))
-            is_valid, msg = validate_combination(
-                torch.add,
-                sample,
-                tensors,
-                combo_valid,
-                ground_truth,
-                self.world_size,
-                mesh,
-            )
-            self.assertTrue(
-                is_valid,
-                lambda _m: f"{_m}\nR,Pmax->Pmin with alpha=-1 should be valid: {msg}",
-            )
+        # R + alpha*P(max) where alpha=-1 should produce P(min)
+        # because -max(x) = min(-x)
+        combo_valid = ((Replicate(), Partial("max")), (Partial("min"),))
+        is_valid, msg = validate_aten_combination(
+            add, args, kwargs, combo_valid, self.world_size, mesh
+        )
+        self.assertTrue(
+            is_valid,
+            lambda _m: f"{_m}\nR,Pmax->Pmin with alpha=-1 should be valid: {msg}",
+        )
 
-            # R + alpha*P(max) where alpha=-1 should NOT produce P(max)
-            combo_invalid = ((Replicate(), Partial("max")), (Partial("max"),))
-            is_valid, msg = validate_combination(
-                torch.add,
-                sample,
-                tensors,
-                combo_invalid,
-                ground_truth,
-                self.world_size,
-                mesh,
-            )
-            self.assertFalse(is_valid, "R,Pmax->Pmax with alpha=-1 should be invalid")
+        # R + alpha*P(max) where alpha=-1 should NOT produce P(max)
+        combo_invalid = ((Replicate(), Partial("max")), (Partial("max"),))
+        is_valid, msg = validate_aten_combination(
+            add, args, kwargs, combo_invalid, self.world_size, mesh
+        )
+        self.assertIs(is_valid, False, "R,Pmax->Pmax with alpha=-1 should be invalid")
 
-            # Similarly, P(max) + alpha*R where alpha=-1 should produce P(max)
-            # because we're subtracting a replicated value from P(max)
-            combo_pmax_minus_r = ((Partial("max"), Replicate()), (Partial("max"),))
-            is_valid, msg = validate_combination(
-                torch.add,
-                sample,
-                tensors,
-                combo_pmax_minus_r,
-                ground_truth,
-                self.world_size,
-                mesh,
-            )
-            self.assertTrue(
-                is_valid,
-                lambda _m: f"{_m}\nPmax,R->Pmax with alpha=-1 should be valid: {msg}",
-            )
+        # Similarly, P(max) + alpha*R where alpha=-1 should produce P(max)
+        # because we're subtracting a replicated value from P(max)
+        combo_pmax_minus_r = ((Partial("max"), Replicate()), (Partial("max"),))
+        is_valid, msg = validate_aten_combination(
+            add, args, kwargs, combo_pmax_minus_r, self.world_size, mesh
+        )
+        self.assertTrue(
+            is_valid,
+            lambda _m: f"{_m}\nPmax,R->Pmax with alpha=-1 should be valid: {msg}",
+        )
 
 
-class TestCreatePartialInput(TestCase):
-    """Test the _create_partial_input helper."""
+class TestPartialPieces(TestCase):
+    """Test the per-rank pieces built for Partial inputs (_partial_pieces)."""
 
     def test_partial_sum_reduces_correctly(self):
         tensor = torch.randn(4, 3)
-        local_tensor = _create_partial_input(tensor, Partial("sum"), world_size=2)
-
-        # Sum of local tensors should equal original
-        total = sum(local_tensor._local_tensors[r] for r in range(2))
-        self.assertTrue(torch.allclose(total, tensor))
+        pieces = _partial_pieces(tensor, Partial("sum"), 2)
+        self.assertTrue(torch.allclose(pieces[0] + pieces[1], tensor))
 
     def test_partial_avg_reduces_correctly(self):
         tensor = torch.randn(4, 3)
-        local_tensor = _create_partial_input(tensor, Partial("avg"), world_size=2)
-
-        # Average of local tensors should equal original
-        total = sum(local_tensor._local_tensors[r] for r in range(2))
-        avg = total / 2
-        self.assertTrue(torch.allclose(avg, tensor))
+        pieces = _partial_pieces(tensor, Partial("avg"), 2)
+        self.assertTrue(torch.allclose((pieces[0] + pieces[1]) / 2, tensor))
 
     def test_partial_min_reduces_correctly(self):
         tensor = torch.randn(4, 3)
-        local_tensor = _create_partial_input(tensor, Partial("min"), world_size=2)
-
-        # Min of local tensors should equal original
-        stacked = torch.stack([local_tensor._local_tensors[r] for r in range(2)])
-        result = stacked.min(dim=0).values
-        self.assertTrue(torch.allclose(result, tensor))
+        pieces = _partial_pieces(tensor, Partial("min"), 2)
+        self.assertEqual(torch.minimum(pieces[0], pieces[1]), tensor, atol=0, rtol=0)
 
     def test_partial_max_reduces_correctly(self):
         tensor = torch.randn(4, 3)
-        local_tensor = _create_partial_input(tensor, Partial("max"), world_size=2)
-
-        # Max of local tensors should equal original
-        stacked = torch.stack([local_tensor._local_tensors[r] for r in range(2)])
-        result = stacked.max(dim=0).values
-        self.assertTrue(torch.allclose(result, tensor))
+        pieces = _partial_pieces(tensor, Partial("max"), 2)
+        self.assertEqual(torch.maximum(pieces[0], pieces[1]), tensor, atol=0, rtol=0)
 
     def test_tensor_idx_produces_different_sum_ratios(self):
         """
@@ -650,27 +499,17 @@ class TestCreatePartialInput(TestCase):
         might accidentally produce correct results.
         """
         tensor = torch.ones(4, 3)
-
-        # Create P(sum) with different tensor_idx values
-        local0 = _create_partial_input(
-            tensor, Partial("sum"), world_size=2, tensor_idx=0
-        )
-        local1 = _create_partial_input(
-            tensor, Partial("sum"), world_size=2, tensor_idx=1
-        )
+        pieces0 = _partial_pieces(tensor, Partial("sum"), 2, tensor_idx=0)
+        pieces1 = _partial_pieces(tensor, Partial("sum"), 2, tensor_idx=1)
 
         # Both should reduce to the same original tensor
-        self.assertTrue(
-            torch.allclose(local0._local_tensors[0] + local0._local_tensors[1], tensor)
-        )
-        self.assertTrue(
-            torch.allclose(local1._local_tensors[0] + local1._local_tensors[1], tensor)
-        )
+        self.assertTrue(torch.allclose(pieces0[0] + pieces0[1], tensor))
+        self.assertTrue(torch.allclose(pieces1[0] + pieces1[1], tensor))
 
         # But the per-rank values should be DIFFERENT
         # (tensor_idx=0 uses ratio 0.6, tensor_idx=1 uses ratio 0.7)
         self.assertFalse(
-            torch.allclose(local0._local_tensors[0], local1._local_tensors[0]),
+            torch.allclose(pieces0[0], pieces1[0]),
             "Different tensor_idx should produce different P(sum) ratios",
         )
 
@@ -683,24 +522,16 @@ class TestCreatePartialInput(TestCase):
         and invalid combinations might appear valid.
         """
         tensor = torch.zeros(4, 3)
-
-        # Create P(max) with different tensor_idx values
-        local0 = _create_partial_input(
-            tensor, Partial("max"), world_size=2, tensor_idx=0
-        )
-        local1 = _create_partial_input(
-            tensor, Partial("max"), world_size=2, tensor_idx=1
-        )
+        pieces0 = _partial_pieces(tensor, Partial("max"), 2, tensor_idx=0)
+        pieces1 = _partial_pieces(tensor, Partial("max"), 2, tensor_idx=1)
 
         # Both should reduce to the same original tensor
-        stacked0 = torch.stack([local0._local_tensors[r] for r in range(2)])
-        stacked1 = torch.stack([local1._local_tensors[r] for r in range(2)])
-        self.assertTrue(torch.allclose(stacked0.max(dim=0).values, tensor))
-        self.assertTrue(torch.allclose(stacked1.max(dim=0).values, tensor))
+        self.assertEqual(torch.maximum(*pieces0), tensor, atol=0, rtol=0)
+        self.assertEqual(torch.maximum(*pieces1), tensor, atol=0, rtol=0)
 
         # The offset patterns should be different (shifted checkerboard)
         self.assertFalse(
-            torch.allclose(local0._local_tensors[0], local1._local_tensors[0]),
+            torch.allclose(pieces0[0], pieces1[0]),
             "Different tensor_idx should produce different P(max) patterns",
         )
 
@@ -753,8 +584,7 @@ class TestCreatePartialInput(TestCase):
         value_range = (tensor.max() - tensor.min()).item()  # 18.0
 
         for reduce_op, sign in [("min", 1), ("max", -1)]:
-            local = _create_partial_input(tensor, Partial(reduce_op), world_size=2)
-            r0, r1 = local._local_tensors[0], local._local_tensors[1]
+            r0, r1 = _partial_pieces(tensor, Partial(reduce_op), 2)
             # The actual offset applied should exceed value_range
             max_offset = (r0 - r1).abs().max().item()
             self.assertGreater(
@@ -796,45 +626,39 @@ class TestPartialCombinationValidity(TestCase):
         P(sum)->P(sum) is NOT valid for abs (or any non-linear elementwise op).
 
         abs(a0 + a1) != abs(a0) + abs(a1) when a0 and a1 have different signs.
-        The _create_partial_input function must create local values with mixed
-        signs to expose this, not just proportional splits (tensor * ratio)
-        that preserve the sign pattern.
+        _partial_pieces must create local values with mixed signs to expose
+        this, not just proportional splits (tensor * ratio) that preserve the
+        sign pattern.
         """
         t = torch.tensor([1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0])
-        sample = SampleInput(t)
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = torch.abs(t)
-
         combo = ((Partial("sum"),), (Partial("sum"),))
 
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
-            is_valid, msg = validate_combination(
-                torch.abs, sample, tensors, combo, ground_truth, self.world_size, mesh
-            )
+        is_valid, msg = validate_aten_combination(
+            torch.ops.aten.abs.default, (t,), {}, combo, self.world_size, mesh
+        )
 
-        self.assertFalse(
+        self.assertIs(
             is_valid,
+            False,
             "abs P(sum)->P(sum) should be invalid (abs is non-linear)",
         )
 
     def test_abs_pavg_pavg_is_invalid(self):
         """P(avg)->P(avg) is NOT valid for abs, same reasoning as P(sum)."""
         t = torch.tensor([1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0])
-        sample = SampleInput(t)
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = torch.abs(t)
-
         combo = ((Partial("avg"),), (Partial("avg"),))
 
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
-            is_valid, msg = validate_combination(
-                torch.abs, sample, tensors, combo, ground_truth, self.world_size, mesh
-            )
+        is_valid, msg = validate_aten_combination(
+            torch.ops.aten.abs.default, (t,), {}, combo, self.world_size, mesh
+        )
 
-        self.assertFalse(
+        self.assertIs(
             is_valid,
+            False,
             "abs P(avg)->P(avg) should be invalid (abs is non-linear)",
         )
 
@@ -843,18 +667,15 @@ class TestPartialCombinationValidity(TestCase):
         All-zero ground truth makes every placement trivially validate.
 
         Zeros are a fixed point of all reduce operations (sum, max, min),
-        so validate_combination cannot distinguish valid from invalid rules.
-        This is a known limitation: compare_operator skips all-zero samples
-        to avoid hundreds of false positive rules.
+        so validate_aten_combination cannot distinguish valid from invalid
+        rules. This is a known limitation: the missing-rule search skips
+        all-zero samples to avoid hundreds of false positive rules.
 
         We use zeros_like as the test op because it always produces zeros
-        regardless of input values, unlike mul(zeros, x) which the offset
-        fix in _create_partial_input now correctly handles.
+        regardless of input values, unlike mul(zeros, x) which the offsets in
+        _partial_pieces handle.
         """
         t = torch.randn(8, 4)
-        sample = SampleInput(t)
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = torch.zeros_like(t)
 
         # P(sum)->P(sum) is NOT valid for zeros_like, but with all-zero
         # output it trivially passes: sum(0,0)=0=ground_truth.
@@ -862,22 +683,16 @@ class TestPartialCombinationValidity(TestCase):
 
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
-            is_valid, msg = validate_combination(
-                torch.zeros_like,
-                sample,
-                tensors,
-                combo,
-                ground_truth,
-                self.world_size,
-                mesh,
-            )
+        is_valid, msg = validate_aten_combination(
+            torch.ops.aten.zeros_like.default, (t,), {}, combo, self.world_size, mesh
+        )
 
-        # This demonstrates the false positive: validate_combination says
+        # This demonstrates the false positive: validate_aten_combination says
         # valid, even though the rule is invalid for non-zero inputs.
         self.assertTrue(
             is_valid,
             "Expected True (false positive) for all-zero output, showing "
-            "why compare_operator must skip such samples",
+            "why the missing-rule search must skip such samples",
         )
 
     def test_argmin_rejects_pmax_input(self):
@@ -898,25 +713,18 @@ class TestPartialCombinationValidity(TestCase):
         """
         # Use a shape where flat-index mask would fail: dim 0 stride = 4 (even)
         t = torch.randn(3, 2, 1, 2)
-        sample = SampleInput(t, kwargs={"dim": 0, "keepdim": True})
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = torch.argmin(t, dim=0, keepdim=True)
+        argmin = torch.ops.aten.argmin.default
 
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
         for reduce_op in ("min", "max"):
             combo = ((Partial(reduce_op),), (Replicate(),))
-            with LocalTensorMode(frozenset(range(self.world_size))):
-                mesh = init_device_mesh("cpu", (self.world_size,))
-                is_valid, msg = validate_combination(
-                    torch.argmin,
-                    sample,
-                    tensors,
-                    combo,
-                    ground_truth,
-                    self.world_size,
-                    mesh,
-                )
-            self.assertFalse(
+            is_valid, msg = validate_aten_combination(
+                argmin, (t, 0, True), {}, combo, self.world_size, mesh
+            )
+            self.assertIs(
                 is_valid,
+                False,
                 lambda _m: f"{_m}\nargmin P({reduce_op})->R should be invalid "
                 f"(index op, ranks disagree): {msg}",
             )
@@ -939,50 +747,32 @@ class TestDecompStrategyPath(TestCase):
 
     def test_decomp_discovers_rules_for_softplus(self):
         """
-        Exercise DecompShardingStrategy.propagate_strategy directly on a unary
-        op (softplus) whose decomposition uses only registered ops.
-
-        Verifies the helper _extract_rules_from_op_strategy correctly extracts
-        elementwise sharding rules from the resulting OpStrategy.
+        Query claims for a unary op (softplus) through the decomposition path,
+        whose decomposition uses only registered ops. softplus's own strategy
+        is removed temporarily to force that path.
         """
         try:
             from torch.distributed.tensor._decompositions import DecompShardingStrategy
         except ImportError:
             self.skipTest("_decompositions module not available")
-        from torch.distributed.tensor._dtensor_spec import TensorMeta
-        from torch.distributed.tensor._op_schema import DTensorSpec, OpSchema
-        from torch.distributed.tensor._ops.strategy_validation import (
-            _extract_rules_from_op_strategy,
-        )
 
         aten_softplus = torch.ops.aten.softplus.default
         propagator = torch.distributed.tensor.DTensor._op_dispatcher.sharding_propagator
         self.assertTrue(DecompShardingStrategy.has_decomp(aten_softplus))
-
-        t = torch.randn(8, 4)
-
-        mesh = init_device_mesh("cpu", (self.world_size,))
-        spec = DTensorSpec(
-            mesh=mesh,
-            placements=(Shard(0),),
-            tensor_meta=TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype),
-        )
-        op_schema = OpSchema(aten_softplus, (spec,), {})
-        propagator.decomp_strategy.ensure_schema_info(aten_softplus)
-        output_strategy = propagator.decomp_strategy.propagate_strategy(
-            op_schema,
-        )
-        self.assertIsNotNone(output_strategy)
-
-        input_shapes = (t.shape,)
-        output_shapes = (tuple(torch.nn.functional.softplus(t).shape),)
-        rules = _extract_rules_from_op_strategy(
-            output_strategy, input_shapes, output_shapes
-        )
-
-        # Should discover elementwise sharding rules for a 2D tensor
-        self.assertIn((("S(0)",), ("S(0)",)), rules)
-        self.assertIn((("S(1)",), ("S(1)",)), rules)
+        with (
+            unittest.mock.patch.dict(propagator.op_single_dim_strategy_funcs),
+            unittest.mock.patch.dict(propagator.op_strategy_funcs),
+        ):
+            propagator.op_single_dim_strategy_funcs.pop(aten_softplus, None)
+            propagator.op_strategy_funcs.pop(aten_softplus, None)
+            t = torch.randn(8, 4)
+            with LocalTensorMode(frozenset(range(self.world_size))):
+                mesh = init_device_mesh("cpu", (self.world_size,))
+            for dim in (0, 1):
+                claims = query_runtime_claims(
+                    aten_softplus, (t,), {}, (Shard(dim),), mesh
+                )
+                self.assertIn((Shard(dim),), [c.output_placements for c in claims])
 
     def test_compare_operator_uses_decomp_path(self):
         """
@@ -1050,8 +840,20 @@ class TestDecompStrategyPath(TestCase):
             ) = orig_sizes
 
 
-class TestQuerySingleDimStrategyKwargs(TestCase):
-    """Test that query_single_dim_strategy forwards kwargs to strategy functions."""
+class TestQueryRuntimeClaimsKwargs(TestCase):
+    """Test that query_runtime_claims forwards kwargs to strategy functions."""
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
     def test_kwargs_forwarded_to_strategy(self):
         """
@@ -1093,19 +895,16 @@ class TestQuerySingleDimStrategyKwargs(TestCase):
         propagator.op_single_dim_strategy_funcs[aten_add] = alpha_aware_add_strategy
         try:
             a, b = torch.randn(4, 3), torch.randn(4, 3)
-
-            # Query with alpha=-1 kwargs
-            result = query_single_dim_strategy(aten_add, (a, b), {"alpha": -1})
-            self.assertIsNotNone(result)
-
-            # The third rule's output should be P(min) for alpha=-1
-            self.assertEqual(len(result), 3)
-            self.assertIsInstance(result[2][0], Partial)
+            with LocalTensorMode(frozenset(range(self.world_size))):
+                mesh = init_device_mesh("cpu", (self.world_size,))
+            claims = query_runtime_claims(
+                aten_add, (a, b), {"alpha": -1}, (Replicate(), Partial("max")), mesh
+            )
             self.assertEqual(
-                result[2][0].reduce_op,
-                "min",
+                [c.output_placements for c in claims],
+                [(Partial("min"),)],
                 "With alpha=-1, the strategy should produce P(min) output "
-                "but got P(max) — kwargs were not forwarded",
+                "but got something else — kwargs were not forwarded",
             )
         finally:
             if original is not None:
@@ -1364,32 +1163,29 @@ class TestAtenLevelValidation(TestCase):
         """S(0), S(0) -> S(0) valid; S(0), S(0) -> R invalid for aten.add."""
         a = torch.randn(8)
         b = torch.randn(8)
-        gt = torch.ops.aten.add.Tensor(a, b)
 
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
 
-            valid, msg = validate_aten_combination(
-                torch.ops.aten.add.Tensor,
-                (a, b),
-                {},
-                gt,
-                ((Shard(0), Shard(0)), (Shard(0),)),
-                self.world_size,
-                mesh,
-            )
-            self.assertTrue(valid, msg)
+        valid, msg = validate_aten_combination(
+            torch.ops.aten.add.Tensor,
+            (a, b),
+            {},
+            ((Shard(0), Shard(0)), (Shard(0),)),
+            self.world_size,
+            mesh,
+        )
+        self.assertTrue(valid, msg)
 
-            valid, _ = validate_aten_combination(
-                torch.ops.aten.add.Tensor,
-                (a, b),
-                {},
-                gt,
-                ((Shard(0), Shard(0)), (Replicate(),)),
-                self.world_size,
-                mesh,
-            )
-            self.assertFalse(valid)
+        valid, _ = validate_aten_combination(
+            torch.ops.aten.add.Tensor,
+            (a, b),
+            {},
+            ((Shard(0), Shard(0)), (Replicate(),)),
+            self.world_size,
+            mesh,
+        )
+        self.assertIs(valid, False)
 
     def test_allow_composite_eliminates_non_1to1_skips(self):
         """allow_composite mode should validate decomposed ops that default mode skips."""
@@ -1422,6 +1218,653 @@ class TestAtenLevelValidation(TestCase):
             )
 
         self._with_even_sizes(run)
+
+
+class TestSpecialValuePartialInput(TestCase):
+    """Partial pieces reduce to inputs with special values and integer extremes.
+
+    Integer and P(min)/P(max) pieces reduce exactly; floating P(sum) pieces
+    reduce up to rounding (the validator uses the reduced value as the input).
+    """
+
+    def test_pieces_reduce_to_input(self):
+        inputs = [
+            torch.tensor([1.0, math.nan, math.inf, -math.inf, -0.0, 2.5, -3.0, 0.0]),
+            torch.randn(3, 5),
+            torch.tensor([127, -128, 0, 5, -7, 100], dtype=torch.int8),
+            torch.tensor([0, 255, 1, 128, 7], dtype=torch.uint8),
+            torch.tensor([2**63 - 1, -(2**63), 0, 12345], dtype=torch.int64),
+        ]
+        for t, reduce_op, world_size, adversarial in itertools.product(
+            inputs, ("sum", "min", "max"), (2, 3, 4), (False, True)
+        ):
+            with self.subTest(
+                dtype=t.dtype, op=reduce_op, ws=world_size, adversarial=adversarial
+            ):
+                pieces = _partial_pieces(
+                    t, Partial(reduce_op), world_size, adversarial=adversarial
+                )
+                self.assertTrue(all(p.dtype == t.dtype for p in pieces))
+                exact = reduce_op != "sum" or not t.is_floating_point()
+                tol = {"atol": 0, "rtol": 0} if exact else {}
+                self.assertEqual(_local_reduce(reduce_op, pieces), t, **tol)
+
+    def test_adversarial_pieces(self):
+        """Losing ranks hold -inf for P(max); NaN under P(sum) becomes +inf/-inf."""
+        t = torch.tensor([1.0, 2.0, math.nan, -1.0])
+        pieces = torch.stack(_partial_pieces(t, Partial("max"), 2, adversarial=True))
+        self.assertEqual(pieces.isneginf().sum(0)[[0, 1, 3]].tolist(), [1, 1, 1])
+        pieces = _partial_pieces(t, Partial("sum"), 2, adversarial=True)
+        self.assertEqual(sorted(p[2].item() for p in pieces), [-math.inf, math.inf])
+
+    def test_wraparound_pieces_leave_the_dtype_range(self):
+        inputs = [
+            torch.tensor([1, 2, -3, 4], dtype=torch.int8),
+            torch.tensor([-100, 0, 5, 127], dtype=torch.int8),
+            torch.tensor([0, 3, 200, 254], dtype=torch.uint8),
+            torch.tensor([7, -(2**63), 2**63 - 1, 0], dtype=torch.int64),
+        ]
+        for t, world_size in itertools.product(inputs, (2, 3, 4)):
+            with self.subTest(dtype=t.dtype, ws=world_size):
+                pieces = _partial_pieces(t, Partial("sum"), world_size, wraparound=True)
+                self.assertEqual(_local_reduce("sum", pieces), t)
+                true_sums = [sum(int(p[i]) for p in pieces) for i in range(t.numel())]
+                self.assertNotEqual(true_sums, t.tolist())
+        # -1 is the one int8 value two in-range pieces cannot wrap to.
+        minus_one = torch.tensor([-1], dtype=torch.int8)
+        pieces = _partial_pieces(minus_one, Partial("sum"), 2, wraparound=True)
+        self.assertIsNone(pieces)
+
+    def test_unconstructible_partials(self):
+        self.assertIsNone(
+            _partial_pieces(torch.ones(4, dtype=torch.int32), Partial("avg"), 2)
+        )
+        self.assertIsNone(_partial_pieces(torch.ones(4), Partial("product"), 2))
+        self.assertIsNone(
+            _partial_pieces(torch.ones(4, dtype=torch.bool), Partial("max"), 2)
+        )
+
+
+class TestInputVariants(TestCase):
+    """Value variants respect operand roles and keep IEEE-policy cases out."""
+
+    def test_specials_skip_other_operands_of_linear_partials(self):
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        tensors = [("a", a), ("b", b)]
+        variant = _Variant("special-nan", specials="nan")
+        inputs, _ = _materialize_inputs(
+            tensors, (Partial("sum"), Replicate()), 2, variant, [False, False]
+        )
+        self.assertTrue(inputs[0].isnan().any())
+        self.assertEqual(inputs[1], b)
+        inputs, _ = _materialize_inputs(
+            tensors, (Partial("max"), Replicate()), 2, variant, [False, False]
+        )
+        self.assertTrue(inputs[1].isnan().any())
+
+    def test_adversarial_keeps_other_operands_finite(self):
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        variant = _Variant("adversarial", specials="nan", adversarial=True)
+        inputs, pieces = _materialize_inputs(
+            [("a", a), ("b", b)],
+            (Partial("max"), Replicate()),
+            2,
+            variant,
+            [False, False],
+        )
+        self.assertEqual(inputs[1], b)
+        self.assertTrue(torch.stack(pieces[0]).isneginf().any())
+
+    def test_constrained_operands_are_not_modified(self):
+        values = torch.tensor([0.5, 1.5, 2.5, 3.5])
+        boundaries = torch.tensor([0.0, 1.0, 2.0, 3.0])
+        constrained = _constrained_operands(
+            torch.ops.aten.bucketize.Tensor, (values, boundaries), {}
+        )
+        self.assertEqual(constrained, [False, True])
+        for variant in (
+            _Variant("finite", negate=True),
+            _Variant("special-nan", specials="nan"),
+        ):
+            inputs, _ = _materialize_inputs(
+                [("v", values), ("b", boundaries)],
+                (Replicate(), Shard(0)),
+                2,
+                variant,
+                constrained,
+            )
+            self.assertEqual(inputs[1], boundaries)
+        self.assertEqual(
+            _constrained_operands(
+                torch.ops.aten.index_select.default,
+                (torch.randn(4, 3), 0, torch.tensor([0, 2])),
+                {},
+            ),
+            [False, True],
+        )
+        ints = torch.ones(4, 4, dtype=torch.int64)
+        self.assertEqual(
+            _constrained_operands(torch.ops.aten.mm.default, (ints, ints), {}),
+            [False, False],
+        )
+
+    def test_random_specials_follow_input_device(self):
+        t = torch.ones(8, device="meta")
+        out = _inject_specials(t, "random", torch.Generator().manual_seed(0))
+        self.assertEqual(out.device, t.device)
+
+    def test_scalar_variants(self):
+        """Directed values cross (value > threshold) and Scalar args also take ints."""
+        x = torch.randn(4)
+        variants = _scalar_variants(
+            torch.ops.aten.threshold.default,
+            (x, 1.0, 0.0),
+            {},
+            ValidationOptions(scalar_variants=6),
+        )
+        labels = [label for label, _, _ in variants]
+        self.assertEqual(len(variants), 6)
+        self.assertIn("scalar:threshold=0.0,value=2.0", labels)
+        self.assertTrue(any(isinstance(args[1], int) for _, args, _ in variants))
+        # Integer tensors take integer directed values (float alpha is rejected).
+        ints = torch.arange(4)
+        alphas = [
+            kwargs["alpha"]
+            for _, _, kwargs in _scalar_variants(
+                torch.ops.aten.add.Tensor,
+                (ints, ints),
+                {},
+                ValidationOptions(scalar_variants=6),
+            )
+        ]
+        self.assertEqual(sorted(alphas), [-2, -1, 0, 1, 2, 3])
+        # Omitted optional float args are passed positionally, as the
+        # dispatcher would pass them.
+        variants = _scalar_variants(
+            torch.ops.aten.nan_to_num.default,
+            (x,),
+            {},
+            ValidationOptions(scalar_variants=2),
+        )
+        _, args, kwargs = variants[0]
+        self.assertEqual(kwargs, {})
+        self.assertEqual(len(args), 4)
+        self.assertTrue(all(isinstance(a, float) for a in args[1:]))
+        # Scale factors and numerical constants are not fuzzed.
+        self.assertEqual(
+            _scalar_variants(
+                torch.ops.aten.native_batch_norm.default,
+                (x, None, None, None, None, True, 0.1, 1e-5),
+                {},
+                ValidationOptions(scalar_variants=2),
+            ),
+            [],
+        )
+
+
+class TestRuntimeClaims(TestCase):
+    """query_runtime_claims and uneven-shard validation follow the runtime."""
+
+    world_size = 4
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _mesh(self, world_size):
+        with LocalTensorMode(frozenset(range(world_size))):
+            return init_device_mesh("cpu", (world_size,))
+
+    def test_mean_partial_avg_only_on_even_shards(self):
+        """The runtime filter rejects mean's S(d) -> P(avg) when shards are uneven."""
+        mesh = self._mesh(2)
+
+        def outputs(t):
+            claims = query_runtime_claims(
+                torch.ops.aten.mean.dim, (t, [0]), {}, (Shard(0),), mesh
+            )
+            return [c.output_placements for c in claims]
+
+        self.assertIn((Partial("avg"),), outputs(torch.randn(8, 4)))
+        self.assertNotIn((Partial("avg"),), outputs(torch.randn(7, 4)))
+
+    def test_view_claim_rewrites_shape_args(self):
+        claims = query_runtime_claims(
+            torch.ops.aten.view.default,
+            (torch.randn(8, 4), [32]),
+            {},
+            (Shard(0),),
+            self._mesh(2),
+        )
+        shard_claims = [c for c in claims if c.output_placements == (Shard(0),)]
+        self.assertEqual(len(shard_claims), 1)
+        self.assertEqual(list(shard_claims[0].local_args[1]), [16])
+
+    def test_uneven_and_empty_shards(self):
+        aten_add = torch.ops.aten.add.Tensor
+        for size, world_size in ((7, 3), (2, 3), (5, 4)):
+            a, b = torch.randn(size, 3), torch.randn(size, 3)
+            mesh = self._mesh(world_size)
+            valid, msg = validate_aten_combination(
+                aten_add,
+                (a, b),
+                {},
+                ((Shard(0), Shard(0)), (Shard(0),)),
+                world_size,
+                mesh,
+            )
+            self.assertTrue(valid, msg)
+            valid, _ = validate_aten_combination(
+                aten_add,
+                (a, b),
+                {},
+                ((Shard(0), Shard(0)), (Partial("sum"),)),
+                world_size,
+                mesh,
+            )
+            self.assertIs(valid, False)
+
+
+class TestSizeProfiles(TestCase):
+    def test_profile_reaches_opinfo_definitions(self):
+        """OpInfo definition modules import S/M/L/XS by value; all of them are patched and restored."""
+        from torch.testing._internal.opinfo.definitions import linalg
+
+        before = linalg.S
+        with _opinfo_sizes("small"):
+            self.assertEqual(linalg.S, 3)
+        self.assertEqual(linalg.S, before)
+
+
+class TestComparator(TestCase):
+    """Non-finite values and dtypes must match exactly."""
+
+    def test_nonfinite_and_dtype_mismatches(self):
+        inf, one = torch.tensor([math.inf]), torch.tensor([1.0])
+        self.assertTrue(_mismatch(inf, one))
+        self.assertTrue(_mismatch(inf, -inf))
+        nan = torch.tensor([math.nan])
+        self.assertEqual(_mismatch(nan, nan.clone()), "")
+        self.assertTrue(_mismatch(torch.tensor([16777216.0]), torch.tensor([16777217])))
+
+    def test_complex_values(self):
+        """Closeness by magnitude as torch.isclose; per component where a component is infinite."""
+        a = torch.tensor([complex(math.inf, 0.5), complex(1.0, -2.0)])
+        self.assertEqual(_mismatch(a.conj(), a.conj()), "")
+        b = torch.tensor([complex(math.inf, 0.5 + 1e-7), complex(1.0, -2.0)])
+        self.assertEqual(_mismatch(a, b), "")
+        self.assertTrue(_mismatch(a, a.conj().resolve_conj()))
+        small_imag = torch.tensor([complex(1e3, 1e-3)])
+        close_imag = torch.tensor([complex(1e3, 1.5e-3)])
+        self.assertEqual(_mismatch(small_imag, close_imag), "")
+        nan = torch.tensor([complex(math.nan, 1.0)])
+        self.assertEqual(_mismatch(nan, torch.tensor([complex(math.nan, 2.0)])), "")
+
+
+@torch.library.custom_op("sv_test::sign_like", mutates_args=())
+def _sign_like(x: torch.Tensor) -> torch.Tensor:
+    return torch.sign(x)
+
+
+@_sign_like.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+@torch.library.custom_op("sv_test::exp_like", mutates_args=())
+def _exp_like(x: torch.Tensor) -> torch.Tensor:
+    return torch.exp(x)
+
+
+@_exp_like.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+@torch.library.custom_op("sv_test::threshold_like", mutates_args=())
+def _threshold_like(x: torch.Tensor, threshold: float, value: float) -> torch.Tensor:
+    return torch.threshold(x, threshold, value)
+
+
+@_threshold_like.register_fake
+def _(x, threshold, value):
+    return torch.empty_like(x)
+
+
+@torch.library.custom_op("sv_test::affine", mutates_args=())
+def _affine(x: torch.Tensor) -> torch.Tensor:
+    return x * 1e7 + 1
+
+
+@_affine.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+@torch.library.custom_op("sv_test::affine_abs", mutates_args=())
+def _affine_abs(x: torch.Tensor) -> torch.Tensor:
+    return x * 1e7 + x.abs()
+
+
+@_affine_abs.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+@torch.library.custom_op("sv_test::floor_like", mutates_args=())
+def _floor_like(x: torch.Tensor) -> torch.Tensor:
+    return torch.floor(x)
+
+
+@_floor_like.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+@torch.library.custom_op("sv_test::step_diff", mutates_args=())
+def _step_diff(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return 256 * (x - y) + (x < y).to(x.dtype)
+
+
+@_step_diff.register_fake
+def _(x, y):
+    return torch.empty_like(x)
+
+
+@torch.library.custom_op("sv_test::copy_like", mutates_args=())
+def _copy_like(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@_copy_like.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+_sv_test_lib = torch.library.Library("sv_test", "FRAGMENT")
+_sv_test_lib.define("neg_max(Tensor x, Tensor y) -> Tensor")
+_sv_test_lib.impl(
+    "neg_max", lambda x, y: torch.maximum(x, -y), "CompositeImplicitAutograd"
+)
+
+
+class TestDetectsIncorrectRules(TestCase):
+    """
+    Custom ops get a P(max) -> P(max) rule: wrong for sign (sign(NaN) = 0) and
+    for threshold with value > threshold, right for exp. affine (x * 1e7 + 1)
+    and affine_abs (x * 1e7 + |x|) get a P(sum) -> P(sum) rule, wrong by
+    amounts much smaller than the pieces. The validator must flag the wrong
+    rules only under the input variant that exposes them. floor_like and
+    step_diff get wrong P(sum) rules whose float32 failures vanish in 64-bit:
+    those must stay unresolved, never correct.
+    """
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+        propagator = torch.distributed.tensor.DTensor._op_dispatcher.sharding_propagator
+        self.ops = [
+            torch.ops.sv_test.sign_like.default,
+            torch.ops.sv_test.exp_like.default,
+            torch.ops.sv_test.threshold_like.default,
+        ]
+        rules = [(op, Partial("max")) for op in self.ops]
+        rules.append((torch.ops.sv_test.affine.default, Partial("sum")))
+        rules.append((torch.ops.sv_test.affine_abs.default, Partial("sum")))
+        rules.append((torch.ops.sv_test.floor_like.default, Partial("sum")))
+        registry = unittest.mock.patch.dict(propagator.op_single_dim_strategy_funcs)
+        registry.start()
+        self.addCleanup(registry.stop)
+        for op, placement in rules:
+            register_single_dim_strategy(op)(
+                lambda op, args, kwargs, p=placement: [[p, p]]
+            )
+        register_single_dim_strategy(torch.ops.sv_test.step_diff.default)(
+            lambda op, args, kwargs: [[Partial("sum")] * 3]
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _audit(self, op, args, options, kwargs=None):
+        stats = ComparisonStats()
+        kwargs = kwargs or {}
+        _validate_captured_call(
+            op,
+            args,
+            kwargs,
+            op(*args, **kwargs),
+            self.world_size,
+            incorrect_only=True,
+            verbose=False,
+            sample_idx=0,
+            variant="",
+            stats=stats,
+            sample=None,
+            options=options,
+        )
+        return stats
+
+    def _incorrect(self, op, args, options):
+        return [d.trigger for d in self._audit(op, args, options).false_positives]
+
+    def test_nan_dependent_rule(self):
+        x = torch.randn(4, 6)
+        sign_like, exp_like, _ = self.ops
+        self.assertEqual(self._incorrect(sign_like, (x,), ValidationOptions()), [])
+        special = ValidationOptions(special_values=True)
+        self.assertEqual(self._incorrect(sign_like, (x,), special), ["nan-partial"])
+        stats = self._audit(exp_like, (x,), special)
+        self.assertEqual(stats.false_positives, [])
+        self.assertGreater(stats.true_positives, 0)
+        # A NaN already in the captured input is classified by the pieces.
+        x[0, 0] = math.nan
+        self.assertEqual(
+            self._incorrect(sign_like, (x,), ValidationOptions()), ["nan-partial"]
+        )
+
+    def test_scalar_dependent_rule(self):
+        threshold_like = self.ops[2]
+        args = (torch.linspace(-3, 3, 24).reshape(4, 6), 1.0, 0.0)
+        self.assertEqual(self._incorrect(threshold_like, args, ValidationOptions()), [])
+        triggers = self._incorrect(
+            threshold_like, args, ValidationOptions(scalar_variants=6)
+        )
+        self.assertIn("scalar:threshold=0.0,value=2.0 finite", triggers)
+
+    def test_rounding_tolerance_does_not_hide_small_errors(self):
+        """The errors are far below the pieces' magnitude, so only the 64-bit recheck of the same pieces can tell them from rounding."""
+        ops = (torch.ops.sv_test.affine.default, torch.ops.sv_test.affine_abs.default)
+        for op, dtype in itertools.product(ops, (torch.float32, torch.float64)):
+            x = torch.zeros(4, 6, dtype=dtype)
+            self.assertEqual(self._incorrect(op, (x,), ValidationOptions()), ["finite"])
+
+    def test_mismatch_that_vanishes_in_64bit_is_unresolved(self):
+        """A float32 mismatch that disappears in 64-bit may be a branch flip, so the rule is not counted correct.
+
+        floor at -19 and a step at x == y: the exact 64-bit sum of the float32
+        pieces moves the reference across the branch.
+        """
+        floor_like = torch.ops.sv_test.floor_like.default
+        step_diff = torch.ops.sv_test.step_diff.default
+        x = torch.tensor([-19.0])
+        for op, args in ((floor_like, (x,)), (step_diff, (x, x.clone()))):
+            with self.subTest(op=str(op)):
+                stats = self._audit(op, args, ValidationOptions())
+                self.assertEqual(stats.true_positives, 0)
+                self.assertEqual(stats.false_positives, [])
+                reason = "unresolved: mismatch vanishes in 64-bit"
+                self.assertEqual(stats.untestable_claims, {reason: 1})
+
+    def test_per_rank_overflow_is_unresolved(self):
+        """P(sum) pieces that overflow when scaled are neither accepted nor reported as incorrect, even when other variants pass."""
+        mul = torch.ops.aten.mul.Scalar
+        cases = (
+            (torch.tensor([2.0]), 1e38),
+            (torch.tensor([0.25], dtype=torch.float16), 1e5),
+            (torch.tensor([2.0], dtype=torch.bfloat16), 1e38),
+        )
+        for (x, scalar), special in itertools.product(cases, (False, True)):
+            with self.subTest(dtype=x.dtype, special_values=special):
+                options = ValidationOptions(special_values=special)
+                stats = self._audit(mul, (x, scalar), options)
+                self.assertEqual(stats.false_positives, [])
+                reason = "unresolved: mismatch vanishes in 64-bit"
+                self.assertIn(reason, stats.untestable_claims)
+
+    def test_64bit_recheck_widens_dtype_arguments(self):
+        """cumsum(dtype=float16) is re-run with dtype=float64, so float16 rounding of its correct linear rules is unresolved, not incorrect."""
+        cumsum = torch.ops.aten.cumsum.default
+        x = torch.randn(4, 4, 4, dtype=torch.float16)
+        kwargs = {"dtype": torch.float16}
+        stats = self._audit(cumsum, (x, 1), ValidationOptions(), kwargs)
+        self.assertEqual(stats.false_positives, [])
+        reason = "unresolved: mismatch vanishes in 64-bit"
+        self.assertEqual(stats.untestable_claims, {reason: 1})
+
+
+class TestClaimDiscovery(TestCase):
+    """Claims of every kind of strategy are found, and failures to query them are reported."""
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=4)
+        with LocalTensorMode(frozenset(range(2))):
+            self.mesh = init_device_mesh("cpu", (2,))
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _audit(self, op, args, world_size=2, incorrect_only=True, options=None):
+        stats = ComparisonStats()
+        _validate_aten_op_for_sample(
+            op,
+            args,
+            {},
+            op(*[a.clone() if isinstance(a, torch.Tensor) else a for a in args]),
+            world_size,
+            incorrect_only=incorrect_only,
+            verbose=False,
+            sample_idx=0,
+            variant="",
+            stats=stats,
+            options=options,
+        )
+        return stats
+
+    def test_uneven_joint_claims_are_discovered(self):
+        """Claims for jointly sharded inputs whose candidates depend on the placements (empty shard on rank 2)."""
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        options = [
+            get_1d_input_placements_for_tensor(t, include_partial=True) for t in (x, y)
+        ]
+        with LocalTensorMode(frozenset(range(3))):
+            mesh = init_device_mesh("cpu", (3,))
+            combos, complete = claimed_input_combinations(
+                torch.ops.aten.add.Tensor, (x, y), {}, options, mesh
+            )
+        self.assertTrue(complete)
+        self.assertIn((Shard(0), Shard(0)), combos)
+
+    def test_missing_rule_search_on_uneven_and_size_one_dims(self):
+        """The full search runs on uneven shards and skips outputs sharded on size-1 dims."""
+        add = torch.ops.aten.add.Tensor
+        stats = self._audit(add, (torch.randn(7), torch.randn(7)), 3, False)
+        self.assertEqual(stats.false_positives, [])
+        self.assertGreater(stats.true_positives, 0)
+        unsqueeze = torch.ops.aten.unsqueeze.default
+        stats = self._audit(unsqueeze, (torch.randn(4, 3), 0), 2, False)
+        self.assertEqual(stats.false_positives, [])
+        self.assertNotIn(
+            "S(0)", {d.output_placements[0] for d in stats.false_negatives}
+        )
+
+    def test_in_place_ops_get_independent_pieces(self):
+        """Wraparound pieces must not alias across ranks: an in-place op would update them once per rank."""
+        special = ValidationOptions(special_values=True)
+        x = torch.arange(-3, 3)
+        stats = self._audit(torch.ops.aten.mul_.Scalar, (x, 3), 3, True, special)
+        self.assertEqual(stats.false_positives, [])
+        self.assertGreater(stats.true_positives, 0)
+
+    def test_decomposition_mixed_placement_claim(self):
+        """maximum(x, -y) keeps P(max) for (P(max), P(min)) inputs, which no single-input seed asks for."""
+        op = torch.ops.sv_test.neg_max.default
+        x, y = torch.randn(4, 6), torch.randn(4, 6)
+        options = [
+            get_1d_input_placements_for_tensor(t, include_partial=True) for t in (x, y)
+        ]
+        with LocalTensorMode(frozenset(range(2))):
+            combos, complete = claimed_input_combinations(
+                op, (x, y), {}, options, self.mesh
+            )
+        self.assertTrue(complete)
+        self.assertIn((Partial("max"), Partial("min")), combos)
+        stats = self._audit(op, (x, y))
+        self.assertEqual(stats.false_positives, [])
+        self.assertGreater(stats.true_positives, 0)
+
+    def test_dtype_mismatch_is_not_a_value_mismatch(self):
+        """A wrong output dtype is reported as such (never re-run in 64-bit as a possible rounding error)."""
+        pieces = {r: torch.zeros(2, dtype=torch.float16) for r in range(2)}
+        with LocalTensorMode(frozenset(range(2))):
+            # pyrefly: ignore [bad-argument-type]
+            out = LocalTensor(pieces)
+            want = torch.zeros(4)
+            valid, msg = _compare_outputs(out, want, (Shard(0),), self.mesh, 2)
+        self.assertIs(valid, False)
+        self.assertTrue(msg.startswith("Dtype mismatch"), msg)
+
+    def test_lazy_conjugate_outputs(self):
+        """Conjugate views are compared like resolved tensors (aten._conj S(0) -> S(0) is correct)."""
+        x = torch.randn(4, 6, dtype=torch.complex64)
+        stats = self._audit(torch.ops.aten._conj.default, (x,))
+        self.assertEqual(stats.false_positives, [])
+        self.assertGreater(stats.true_positives, 0)
+
+    def test_query_failures_are_reported(self):
+        a = [torch.randn(4, 6) for _ in range(2)]
+        b = [torch.randn(4, 6) for _ in range(2)]
+        stats = self._audit(torch.ops.aten._foreach_add.List, (a, b))
+        self.assertIn("query: TupleStrategy is not supported", stats.untestable_claims)
+
+    def test_selected_rewrite_failure_is_incorrect(self):
+        """Only the candidate dispatch selects is reported; the alternative is untestable."""
+        propagator = torch.distributed.tensor.DTensor._op_dispatcher.sharding_propagator
+        op = torch.ops.sv_test.copy_like.default
+        x = torch.randn(8, 4)
+        with (
+            unittest.mock.patch.dict(propagator.op_single_dim_strategy_funcs),
+            unittest.mock.patch.object(
+                propagator, "_rewrite_args_for_local", side_effect=IndexError("boom")
+            ),
+        ):
+            register_single_dim_strategy(op)(
+                lambda op, args, kwargs: [
+                    [Shard(0), Shard(0)],
+                    [Partial("sum"), Shard(0)],
+                ]
+            )
+            claims = query_runtime_claims(op, (x,), {}, (Shard(0),), self.mesh)
+            stats = self._audit(op, (x,))
+        self.assertEqual(sorted(c.selected for c in claims), [False, True])
+        failures = [(d.input_placements, d.trigger) for d in stats.false_positives]
+        self.assertEqual(failures, [(("S(0)",), "rewrite")])
+        self.assertEqual(stats.untestable_claims, {"local arg rewrite raised": 1})
 
 
 class TestMainModule(TestCase):

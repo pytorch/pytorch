@@ -1000,13 +1000,7 @@ def vector_norm_single_dim_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    """Vector norm: linear reduction with NormPartial.
-
-    S(reduction_dim)->_NormPartial(ord) rules appear as false positives in
-    strategy_validation because the validator doesn't enumerate _NormPartial
-    as an output placement. The rules are correct at runtime.
-    TODO: remove this comment when _NormPartial is deprecated.
-    """
+    """Vector norm: linear reduction with NormPartial."""
     input_meta = args_schema[0]
     if not isinstance(input_meta, TensorMeta):
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")

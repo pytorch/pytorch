@@ -745,62 +745,9 @@ class ShardingPropagator:
             "torch.distributed.tensor._sharding_prop.ShardingPropagator.propogate_op_sharding_non_cached"
         )
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
-
-        single_dim_strategy_info = self.op_single_dim_strategy_funcs.get(op_schema.op)
-        op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
-        decomp_exception = None
-        if single_dim_strategy_info is not None or op_strategy_func is not None:
-            # Validate that tensor_meta count matches expected outputs from op schema.
-            # This catches bugs in fake tensor propagation early.
-            if single_dim_strategy_info is not None:
-                _validate_tensor_meta_count(op_schema, out_tensor_meta)
-            """
-            Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
-            for the operator over a single mesh dimension,
-
-            And the OpSchema, which includes information about the runtime input tensor placements, and the mesh,
-
-            Combine single_dim_strategies across mesh dims, also expanding placeholders (ShardPlaceholder) to any real
-            sharding types in op_schema, and find the lowest cost redistribution of inputs to match a valid strategy
-            combination.
-            """
-            # wrap the op_schema with op strategy for sharding strategy propagation
-            strategy_schema = self._wrap_with_op_strategy(op_schema)
-
-            if single_dim_strategy_info is not None:
-                mesh = try_find_mesh_from_args(
-                    op_schema.op,
-                    (*op_schema.args_schema, *op_schema.kwargs_schema.values()),
-                )
-                if not isinstance(mesh, DeviceMesh):
-                    raise AssertionError("Expected to find a valid mesh")
-                # expand to generate the full set of strategy combinations, each one
-                # with a redistribute cost, and then find the min strategy over those costs.
-                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
-                )
-                op_strategy = _expanded_strategy_fn(
-                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
-                )
-            else:
-                if op_strategy_func is None:
-                    raise AssertionError
-                op_strategy = op_strategy_func(strategy_schema)
-
-        else:
-            # try operator decomposition path
-
-            op_strategy = None
-            if DecompShardingStrategy.has_decomp(op_schema.op):
-                # Ensure schema_info is registered for proper cache key computation
-                self.decomp_strategy.ensure_schema_info(op_schema.op)
-                try:
-                    op_strategy = self.decomp_strategy.propagate_strategy(
-                        op_schema,
-                        out_tensor_meta,
-                    )
-                except Exception as e:
-                    decomp_exception = e
+        op_strategy, decomp_exception = self._get_op_strategy(
+            op_schema, out_tensor_meta
+        )
 
         if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
@@ -842,46 +789,17 @@ class ShardingPropagator:
                     )
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
-                # Rewrite shape/stride args from global to local when sharded.
-                # Covers view ops, new factory ops, and upsample backward ops
-                # whose shape args refer to global tensor dimensions.
-                if op_schema.op in self.op_to_shape_and_stride_idx:
-                    if not isinstance(output_strategy.output_spec, DTensorSpec):
-                        raise AssertionError
-                    if any(
-                        isinstance(p, Shard | _StridedShard)
-                        for p in output_strategy.output_spec.placements
-                    ):
-                        schema = suggestion_schema or op_schema
-                        if not isinstance(out_tensor_meta, TensorMeta):
-                            raise AssertionError
-                        suggestion_schema = self._adjust_shape_and_stride_args(
-                            out_tensor_meta, schema, output_strategy.output_spec
-                        )
-                        needs_redistribute = True
-                        use_val_from_redistribute_schema = True
-
-                # adjust individual scalar shape args (e.g. N, C, HxW in group_norm)
-                if op_schema.op in self.op_to_scalar_shape_adjuster:
-                    if any(
-                        isinstance(p, Shard | _StridedShard)
-                        for spec in expected_input_specs
-                        for p in spec.placements
-                    ):
-                        schema = suggestion_schema or op_schema
-                        adjuster = self.op_to_scalar_shape_adjuster[op_schema.op]
-                        suggestion_schema = adjuster(expected_input_specs, schema)
-                        needs_redistribute = True
-                        use_val_from_redistribute_schema = True
-
-                # rewrite squeeze to use only globally-singleton dims
-                if op_schema.op in self.squeeze_op_to_dims_variant:
-                    schema = suggestion_schema or op_schema
-                    adjusted = self._adjust_squeeze_to_global_singletons(schema)
-                    if adjusted is not None:
-                        suggestion_schema = adjusted
-                        needs_redistribute = True
-                        use_val_from_redistribute_schema = True
+                rewritten_schema = self._rewrite_args_for_local(
+                    op_schema,
+                    suggestion_schema,
+                    output_strategy,
+                    expected_input_specs,
+                    out_tensor_meta,
+                )
+                if rewritten_schema is not None:
+                    suggestion_schema = rewritten_schema
+                    needs_redistribute = True
+                    use_val_from_redistribute_schema = True
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():
@@ -1044,6 +962,124 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             ) from decomp_exception
+
+    def _get_op_strategy(
+        self,
+        op_schema: OpSchema,
+        out_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+    ) -> tuple[StrategyType | None, Exception | None]:
+        """
+        Compute the candidate strategies for ``op_schema`` from its registered
+        single-dim strategy, op strategy or decomposition. Returns the strategy
+        (None if there is none) and the decomposition error, if any.
+        """
+        single_dim_strategy_info = self.op_single_dim_strategy_funcs.get(op_schema.op)
+        op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
+        decomp_exception = None
+        if single_dim_strategy_info is not None or op_strategy_func is not None:
+            # Validate that tensor_meta count matches expected outputs from op schema.
+            # This catches bugs in fake tensor propagation early.
+            if single_dim_strategy_info is not None:
+                _validate_tensor_meta_count(op_schema, out_tensor_meta)
+            """
+            Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
+            for the operator over a single mesh dimension,
+
+            And the OpSchema, which includes information about the runtime input tensor placements, and the mesh,
+
+            Combine single_dim_strategies across mesh dims, also expanding placeholders (ShardPlaceholder) to any real
+            sharding types in op_schema, and find the lowest cost redistribution of inputs to match a valid strategy
+            combination.
+            """
+            # wrap the op_schema with op strategy for sharding strategy propagation
+            strategy_schema = self._wrap_with_op_strategy(op_schema)
+
+            if single_dim_strategy_info is not None:
+                mesh = try_find_mesh_from_args(
+                    op_schema.op,
+                    (*op_schema.args_schema, *op_schema.kwargs_schema.values()),
+                )
+                if not isinstance(mesh, DeviceMesh):
+                    raise AssertionError("Expected to find a valid mesh")
+                # expand to generate the full set of strategy combinations, each one
+                # with a redistribute cost, and then find the min strategy over those costs.
+                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                    mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
+                )
+                op_strategy = _expanded_strategy_fn(
+                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
+                )
+            else:
+                if op_strategy_func is None:
+                    raise AssertionError
+                op_strategy = op_strategy_func(strategy_schema)
+
+        else:
+            # try operator decomposition path
+
+            op_strategy = None
+            if DecompShardingStrategy.has_decomp(op_schema.op):
+                # Ensure schema_info is registered for proper cache key computation
+                self.decomp_strategy.ensure_schema_info(op_schema.op)
+                try:
+                    op_strategy = self.decomp_strategy.propagate_strategy(
+                        op_schema,
+                        out_tensor_meta,
+                    )
+                except Exception as e:
+                    decomp_exception = e
+
+        return op_strategy, decomp_exception
+
+    def _rewrite_args_for_local(
+        self,
+        op_schema: OpSchema,
+        suggestion_schema: OpSchema | None,
+        output_strategy: OpSpec,
+        expected_input_specs: list[DTensorSpec],
+        out_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+    ) -> OpSchema | None:
+        """
+        Rewrite non-tensor args that refer to global sizes (shape/stride args,
+        scalar shape args, squeeze dims) into their local values for the chosen
+        strategy. Returns the rewritten schema, or None if nothing is rewritten.
+        """
+        rewritten_schema = None
+        # Rewrite shape/stride args from global to local when sharded.
+        # Covers view ops, new factory ops, and upsample backward ops
+        # whose shape args refer to global tensor dimensions.
+        if op_schema.op in self.op_to_shape_and_stride_idx:
+            if not isinstance(output_strategy.output_spec, DTensorSpec):
+                raise AssertionError
+            if any(
+                isinstance(p, Shard | _StridedShard)
+                for p in output_strategy.output_spec.placements
+            ):
+                schema = suggestion_schema or op_schema
+                if not isinstance(out_tensor_meta, TensorMeta):
+                    raise AssertionError
+                rewritten_schema = self._adjust_shape_and_stride_args(
+                    out_tensor_meta, schema, output_strategy.output_spec
+                )
+
+        # adjust individual scalar shape args (e.g. N, C, HxW in group_norm)
+        if op_schema.op in self.op_to_scalar_shape_adjuster:
+            if any(
+                isinstance(p, Shard | _StridedShard)
+                for spec in expected_input_specs
+                for p in spec.placements
+            ):
+                schema = rewritten_schema or suggestion_schema or op_schema
+                adjuster = self.op_to_scalar_shape_adjuster[op_schema.op]
+                rewritten_schema = adjuster(expected_input_specs, schema)
+
+        # rewrite squeeze to use only globally-singleton dims
+        if op_schema.op in self.squeeze_op_to_dims_variant:
+            schema = rewritten_schema or suggestion_schema or op_schema
+            adjusted = self._adjust_squeeze_to_global_singletons(schema)
+            if adjusted is not None:
+                rewritten_schema = adjusted
+        return rewritten_schema
 
     def _adjust_shape_and_stride_args(
         self,
