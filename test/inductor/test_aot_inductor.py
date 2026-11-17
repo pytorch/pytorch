@@ -108,6 +108,7 @@ from torch.testing._internal.common_utils import (
     runOnRocm,
     set_cwd,
     skipIfCachingAllocatorDisabled,
+    skipIfCppFakeTensor,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -7720,6 +7721,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 3, device=self.device), [3, 4])
         self.check_model(Model(), example_inputs)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_jagged(self):
         class Model(nn.Module):
             def __init__(self) -> None:

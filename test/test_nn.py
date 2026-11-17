@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -2064,6 +2064,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1,)))
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_mask(self):
         N, L, D = 10, 12, 14
 
@@ -2080,6 +2081,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(input, input_convert)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_mask_error(self):
         N, L, D = 10, 12, 14
 
@@ -8570,17 +8572,22 @@ class TestNNDeviceType(NNTestCase):
                     with torch.no_grad():
                         _test_module_empty_input(self, encoder_layer, input, check_size=False, inference=True)
                     if batch_first and not TEST_WITH_CROSSREF:
-                        with torch.no_grad():
-                            # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
-                            # 2, for that matter) so it can't hit the fast path, nor can we give a
-                            # result.
-                            with self.assertRaisesRegex(
-                                    AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
-                                nt = torch.nested.nested_tensor([], device=device)
+                        @skipIfCppFakeTensor("no nested tensor support")
+                        def _test_nested():
+                            with torch.no_grad():
+                                # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
+                                # 2, for that matter) so it can't hit the fast path, nor can we give a
+                                # result.
+                                with self.assertRaisesRegex(
+                                        AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
+                                    nt = torch.nested.nested_tensor([], device=device)
+                                    _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
+
+                                nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device, dtype=torch.double)], device=device)
                                 _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
-                            nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device, dtype=torch.double)], device=device)
-                            _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
+                        with self.subTest(nested_tensor=True):
+                            _test_nested()
                 else:
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
 
@@ -13554,49 +13561,54 @@ class TestNNDeviceType(NNTestCase):
             # currently, which won't be used if training.
             if (batch_first and not training and
                     ('cuda' in str(device) or 'cpu' in str(device)) and not TEST_WITH_CROSSREF):
-                encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
-                mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
-                mask[0][-1] = True
+                @skipIfCppFakeTensor("no nested tensor support")
+                def _test_nested():
+                    encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
+                    mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
+                    mask[0][-1] = True
 
-                nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
-                result = model(nt)
-                ref_output = torch.tensor(
-                    [
+                    nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
+                    result = model(nt)
+                    ref_output = torch.tensor(
                         [
-                            [2.4268184, 0.02042419, -0.603311, -0.08476824],
-                            [2.423306, 0.01889652, -0.6057701, -0.08519465],
-                            [2.431538, 0.02078694, -0.5999354, -0.08746159],
-                            [2.4348664, 0.02212971, -0.5975677, -0.08733892],
-                            [2.423133, 0.02097577, -0.60594773, -0.08113337],
+                            [
+                                [2.4268184, 0.02042419, -0.603311, -0.08476824],
+                                [2.423306, 0.01889652, -0.6057701, -0.08519465],
+                                [2.431538, 0.02078694, -0.5999354, -0.08746159],
+                                [2.4348664, 0.02212971, -0.5975677, -0.08733892],
+                                [2.423133, 0.02097577, -0.60594773, -0.08113337],
+                            ],
+                            [
+                                [2.4279876, 0.02121329, -0.60249615, -0.08410317],
+                                [2.4138637, 0.02221113, -0.6124869, -0.07249016],
+                                [2.4251041, 0.01974815, -0.6045152, -0.08483928],
+                                [2.4335563, 0.0218913, -0.59850943, -0.08683228],
+                                [2.4229012, 0.02418739, -0.6061784, -0.07492948],
+                            ],
                         ],
-                        [
-                            [2.4279876, 0.02121329, -0.60249615, -0.08410317],
-                            [2.4138637, 0.02221113, -0.6124869, -0.07249016],
-                            [2.4251041, 0.01974815, -0.6045152, -0.08483928],
-                            [2.4335563, 0.0218913, -0.59850943, -0.08683228],
-                            [2.4229012, 0.02418739, -0.6061784, -0.07492948],
-                        ],
-                    ],
-                    device=device, dtype=dtype
-                )
-                result = result.to_padded_tensor(0)
-                ref_output[0][-1] = torch.zeros_like(
-                    ref_output[0][-1], device=device, dtype=dtype
-                )
-                result[0][-1] = torch.zeros_like(
-                    result[0][-1], device=device, dtype=dtype
-                )
-                self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-                if 'cuda' in device:
-                    if dtype == torch.float:
-                        atol = 2e-4
-                        rtol = 4e-3
+                        device=device, dtype=dtype
+                    )
+                    result = result.to_padded_tensor(0)
+                    ref_output[0][-1] = torch.zeros_like(
+                        ref_output[0][-1], device=device, dtype=dtype
+                    )
+                    result[0][-1] = torch.zeros_like(
+                        result[0][-1], device=device, dtype=dtype
+                    )
+                    self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+                    if 'cuda' in device:
+                        if dtype == torch.float:
+                            atol = 2e-4
+                            rtol = 4e-3
+                        else:
+                            atol = 7e-4
+                            rtol = 2e-2
+                        torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
                     else:
-                        atol = 7e-4
-                        rtol = 2e-2
-                    torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
-                else:
-                    torch.testing.assert_close(result, ref_output)
+                        torch.testing.assert_close(result, ref_output)
+
+                with self.subTest(nested_tensor=True):
+                    _test_nested()
 
 
         for batch_first in (True, False):
