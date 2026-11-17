@@ -2159,7 +2159,7 @@ class TestForeachMixedDtypeCUDA(TestCase):
 
     @ops(
         filter(lambda op: op.name == "_foreach_sub", foreach_binary_op_db),
-        dtypes=(torch.float32,),
+        dtypes=(torch.float32, torch.float16, torch.bfloat16),
     )
     @parametrize("inplace", [False, True])
     @parametrize("alpha", [0, -(2**63), 2**64 - 1])
@@ -2167,18 +2167,29 @@ class TestForeachMixedDtypeCUDA(TestCase):
         self, device, dtype, op, inplace, alpha
     ):
         foreach_op = op.inplace_variant if inplace else op.method_variant
-        xs = [torch.full((17,), -0.0, device=device, dtype=dtype) for _ in range(2)]
-        ys = [torch.ones_like(x, dtype=torch.bfloat16) for x in xs]
-        # The legacy tensor fallback negates integer Scalars before conversion.
-        # Use floating alpha to check the original mixed-inplace arithmetic.
-        ref = [op.ref(x, y, alpha=float(alpha)) for x, y in zip(xs, ys)]
-        actual = ForeachFuncWrapper(foreach_op)(
-            (xs, ys), device=device, expect_fastpath=True, alpha=alpha
-        )
-        self.assertEqual(
-            [x.view(torch.int32) for x in actual],
-            [x.view(torch.int32) for x in ref],
-        )
+        ref_op = op.ref_inplace if inplace else op.ref
+        for other_dtype in (torch.float32, torch.float16, torch.bfloat16):
+            if other_dtype == dtype:
+                continue
+            xs = [torch.full((17,), -0.0, device=device, dtype=dtype) for _ in range(2)]
+            ys = [torch.ones_like(x, dtype=other_dtype) for x in xs]
+            ref = [ref_op(x.clone(), y, alpha=float(alpha)) for x, y in zip(xs, ys)]
+            tensor = [ref_op(x.clone(), y, alpha=alpha) for x, y in zip(xs, ys)]
+            actual = ForeachFuncWrapper(foreach_op)(
+                (xs, ys),
+                device=device,
+                expect_fastpath=torch.float32 in (dtype, other_dtype),
+                alpha=alpha,
+            )
+            int_dtype = torch.int32 if ref[0].dtype == torch.float32 else torch.int16
+            self.assertEqual(
+                [x.view(int_dtype) for x in actual],
+                [x.view(int_dtype) for x in ref],
+            )
+            self.assertEqual(
+                [x.view(int_dtype) for x in tensor],
+                [x.view(int_dtype) for x in ref],
+            )
 
 
 instantiate_device_type_tests(TestForeachMixedDtypeCUDA, globals(), only_for="cuda")
