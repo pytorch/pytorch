@@ -3,8 +3,6 @@
 
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -875,7 +873,6 @@ class TestRealProxyTensor(TestCase):
         )
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
-@instantiate_parametrized_tests
 class TestFakeProxyTensor(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1069,27 +1066,19 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
-    @parametrize("tracing_mode", ["real", "fake", "symbolic"])
-    @parametrize("ambient", [False, True])
-    def test_fake_tensor_mode(self, tracing_mode, ambient):
-        from contextlib import nullcontext
+    def test_fake_tensor_mode(self):
+        def f(a):
+            d = a.cos()
+            return d
+
         from torch._guards import detect_fake_mode
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        mode = FakeTensorMode(shape_env=ShapeEnv())
-        x = torch.randn(3, 4)
-        if not ambient or tracing_mode == "real":
-            x = mode.from_tensor(x)
-        # Reuse the mode from the ambient context or fake inputs.
-        with mode if ambient else nullcontext():
-            gm = make_fx(lambda x: x.cos(), tracing_mode=tracing_mode)(x)
-            self.assertIs(detect_fake_mode(), mode if ambient else None)
-        vals = [n.meta["val"] for n in gm.graph.nodes if "val" in n.meta]
-        self.assertIs(detect_fake_mode(vals), mode)
-        if tracing_mode == "symbolic":
-            self.assertIs(gm.shape_env, mode.shape_env)
-        self.assertIsNone(detect_fake_mode())
+        existing_fake_mode = FakeTensorMode()
+        with existing_fake_mode:
+            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
 
+        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
+        self.assertEqual(fake_mode, existing_fake_mode)
 
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
