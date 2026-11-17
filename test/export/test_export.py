@@ -18467,43 +18467,15 @@ def forward(self, x):
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
     def test_exception(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-                self.register_buffer("buffer", torch.ones(4, 4))
-                self.register_buffer("param", torch.ones(4, 4))
-
-            def forward(self, x):
-                token_ids = torch.randint(0, 10, (4,), device=x.device)
-                embedded = self.embedding(token_ids).sum()
-                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
-
-        class BarModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if GPU_TYPE in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        class BarBar(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = BarModel()
-
             def forward(self, x):
                 with torch.amp.autocast(device_type=GPU_TYPE):
-                    y = self.mod(x)
-                return y
+                    x.sin()
+                    raise RuntimeError("exception inside autocast")
 
         with torch.no_grad():
-            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
+            with self.assertRaisesRegex(RuntimeError, "exception inside autocast"):
                 _ = torch.export.export(
-                    BarBar(),
+                    Model(),
                     (),
                     {"x": torch.randn(4, 4, 4, device=GPU_TYPE)},
                     strict=False,
