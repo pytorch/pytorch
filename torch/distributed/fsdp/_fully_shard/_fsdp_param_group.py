@@ -179,7 +179,8 @@ class AllGatherState(NamedTuple):
 
 
 class ReduceScatterState(NamedTuple):
-    reduce_scatter_input: torch.Tensor
+    # For a single-rank group, the reduce-dtype copies of the gradients
+    reduce_scatter_input: torch.Tensor | list[torch.Tensor]
     event: torch.Event | None  # last use of the input (see foreach_reduce)
     allocation_stream: torch.Stream  # Owns the input allocation
     param_group: FSDPParamGroup  # Identifies the owning FSDP root
