@@ -417,21 +417,54 @@ class StrictNumericsCompileTest(TestCase):
         compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
         self.assertEqual(compiled(x, divisor), fn(x, divisor))
 
-    @config.patch({"graph_partition": True})
-    @dtypes(torch.float32)
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    def test_div_trunc_cpu_scalar_reciprocal_cudagraphs(self, device, dtype, numerics):
-        # Cover CPU scalar movement under cudagraphs, absent from the generic test.
-        # Non-strict returns 3.0: it divides directly instead of multiplying.
+    @parametrize("other_consumer", (False, True))
+    @parametrize("scalar_input", (False, True))
+    def test_div_trunc_cpu_scalar_reciprocal_cudagraphs(
+        self, device, dtype, numerics, other_consumer, scalar_input
+    ):
         x = torch.tensor([11.4375], device=device, dtype=dtype)
-        divisor = torch.tensor(3.8125, device="cpu")
+        if scalar_input:
+            x = x.squeeze()
 
         def fn(x, divisor):
+            result = torch.div(x, divisor, rounding_mode="trunc")
+            return (result, x + divisor) if other_consumer else result
+
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": numerics,
+                "triton.cudagraphs": True,
+                "graph_partition": True,
+            },
+        )
+        for value in (3.8125, 3.8125, 2.0, 4.0):
+            torch.compiler.cudagraph_mark_step_begin()
+            divisor = torch.tensor(value, dtype=torch.float64, device="cpu")
+            result = compiled(x, divisor)
+            self.assertEqual(result, fn(x, divisor), atol=0, rtol=0)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("view", ("select", "squeeze"))
+    @parametrize("scalar_input", (False, True))
+    def test_div_trunc_cpu_scalar_view(
+        self, device, dtype, numerics, view, scalar_input
+    ):
+        x = torch.tensor([11.4375], device=device, dtype=dtype)
+        if scalar_input:
+            x = x.squeeze()
+        cpu = torch.tensor([2.0, 3.8125], dtype=torch.float64)
+
+        def fn(x, cpu):
+            divisor = cpu[1] if view == "select" else cpu[1:2].squeeze()
             return torch.div(x, divisor, rounding_mode="trunc")
 
-        with config.patch({"numerics": numerics}):
-            compiled = torch.compile(fn, fullgraph=True, mode="reduce-overhead")
-            self.assertEqual(compiled(x, divisor), fn(x, divisor))
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x, cpu), fn(x, cpu), atol=0, rtol=0)
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))

@@ -12275,6 +12275,9 @@ class Scheduler:
         ):
             return "cross-device ops"
 
+        if any(V.graph.is_unspec_arg(dep.name) for dep in node.read_writes.reads):
+            return "CPU scalar inputs"
+
         if isinstance(node.node, ir.Switch):
             return "Switch ops"
 

@@ -8216,6 +8216,8 @@ def _div_trunc_cuda_scalar(
     compute_dtype = get_computation_dtype(a.get_dtype())
     if isinstance(b, (int, float)):
         b = ir.Constant(value=b, dtype=compute_dtype, device=a.get_device_or_error())
+    elif isinstance(b, TensorBox):
+        b = maybe_copy_cpu_scalar(b, a.get_device_or_error())
     b = expand(b, a.get_size())
 
     def fn(value, divisor):
@@ -8397,12 +8399,7 @@ def _strict_reduction_layout_eligible(axis, dtype) -> bool:
     if not isinstance(fx_input, torch.fx.Node):
         return False
     value = fx_input.meta.get("val")
-    if not isinstance(value, torch.Tensor) or value.dtype not in {
-        torch.float16,
-        torch.bfloat16,
-        torch.float32,
-        torch.float64,
-    }:
+    if not isinstance(value, torch.Tensor) or not is_strict_float_dtype(value.dtype):
         return False
     if (
         not value.is_cuda
