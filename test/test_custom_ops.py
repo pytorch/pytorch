@@ -51,7 +51,6 @@ from torch.testing._internal.common_device_type import (
     PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -6824,14 +6823,6 @@ class TestOpProfiles(TestCase):
         )
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
-        unsupported_error, unsupported_message = expectedIfCppFakeTensor(
-            (RuntimeError, "mylib::foo2"),
-            (
-                torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                "mylib.foo2.default",
-            ),
-        )
-
         op_profiles = self.get_sample_op_profile("mylib.foo2.default")
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -6848,8 +6839,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    unsupported_error,
-                    unsupported_message,
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
@@ -6866,8 +6857,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    unsupported_error,
-                    unsupported_message,
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
