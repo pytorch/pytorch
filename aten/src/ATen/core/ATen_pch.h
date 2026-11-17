@@ -8,7 +8,7 @@
 // This list of headers was generated using a script that finds
 // high-impact headers and then manually tweaked to remove OS specific
 // or duplicate headers (e.g. <cassert> and <assert.h>) and to remove
-// "impl" headers (e.g BFloat16-inl.h or complex_math.h in c10).
+// "impl" headers (e.g BFloat16-inl.h or complex_math.h).
 
 // To generate the initial list:
 // 1. Build pytorch from scratch with all build caching disabled
