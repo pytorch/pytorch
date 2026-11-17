@@ -968,6 +968,72 @@ class NoopTests(TestCase):
         inp = T(10, 8, device="cpu")
         self.assertExpectedInline(count_numel(f, inp), """320""")
 
+    def test_noop_slice_scatter_same_slice(self):
+        def f(a):
+            b = aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 3, 5)
+            return unfusible(b)
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """160""")
+
+    def test_noop_slice_scatter_same_slice_kwargs_negative_dim(self):
+        def f(a):
+            s = aten.slice(a, dim=1, start=3, end=5)
+            b = aten.slice_scatter(a, s, dim=-1, start=3, end=5, step=1)
+            return unfusible(b)
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """160""")
+
+    def test_noop_slice_scatter_same_slice_chain(self):
+        def f(a):
+            for _ in range(3):
+                a = aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 3, 5)
+            return unfusible(a)
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """160""")
+
+    def test_slice_scatter_different_slice_is_not_noop(self):
+        def f(a):
+            b = aten.slice_scatter(a, aten.slice(a, 1, 0, 2), 1, 3, 5)
+            return unfusible(b)
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """320""")
+
+    def test_slice_scatter_slice_of_other_tensor_is_not_noop(self):
+        def f(a, c):
+            b = aten.slice_scatter(a, aten.slice(c, 1, 3, 5), 1, 3, 5)
+            return unfusible(b)
+
+        inp = (T(10, 8, device="cpu"), T(10, 8, device="cpu"))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+    def test_noop_slice_scatter_same_slice_numerics(self):
+        # The replacement returns the base, so check the result still matches
+        # eager next to an input mutation and does not alias the input.
+        def f(a, m):
+            m.add_(1)
+            b = aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 3, 5)
+            return b * m
+
+        a, m = T(10, 8, device="cpu"), T(10, 8, device="cpu")
+        a_ref, m_ref = a.clone(), m.clone()
+        out_ref = f(a_ref, m_ref)
+        out = torch.compile(f, backend="inductor", fullgraph=True)(a, m)
+        self.assertEqual(out, out_ref)
+        self.assertEqual(m, m_ref)
+        self.assertEqual(a, a_ref)
+
+        def g(a):
+            return aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 3, 5)
+
+        a = T(10, 8, device="cpu")
+        out = torch.compile(g, backend="inductor", fullgraph=True)(a)
+        self.assertEqual(out, a)
+        self.assertNotEqual(out.data_ptr(), a.data_ptr())
+
     def test_noop_dtype_conversion(self):
         def f(a):
             b = torch.ops.prims.convert_element_type(a, torch.float32)
