@@ -104,7 +104,6 @@
     "test_fake_tensor.py::TestFakeTensor::test_parameter_subclass_with_torch_dispatch_gets_subclass_dispatch",
     "test_fake_tensor.py::TestFakeTensor::test_print_in_fake_mode",
     "test_fake_tensor.py::TestFakeTensor::test_randperm",
-    "test_fake_tensor.py::TestFakeTensor::test_recursive_invocation",
     "test_fake_tensor.py::TestFakeTensor::test_repr",
     "test_fake_tensor.py::TestFakeTensor::test_same_shape_env_preserved",
     "test_fake_tensor.py::TestFakeTensor::test_scalar_tensor_item_memo_invalidates_on_epoch",
