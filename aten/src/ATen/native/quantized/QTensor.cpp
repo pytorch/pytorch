@@ -264,9 +264,6 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   const void* self_data = self_contig.const_data_ptr();
   const void* other_data = other_contig.const_data_ptr();
   auto data_size = self.numel() * self.element_size();
-  // Sub-byte quantized dtypes pack multiple logical elements per storage byte:
-  // QUInt4x2 packs 2, QUInt2x4 packs 4. Itemsize is still 1, so divide by the
-  // packing factor (ceil for a partial trailing byte).
   const int64_t element_per_byte = subByteElementPerByte(self.dtype());
   if (element_per_byte > 1) {
     TORCH_INTERNAL_ASSERT(self.element_size() == 1);
