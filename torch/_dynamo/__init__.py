@@ -8,6 +8,8 @@ compiled backends to get the best of both worlds: usability and performance. Thi
 seamlessly optimize PyTorch programs, including those using modern Python features.
 """
 
+import sys
+
 import torch
 
 from . import (
@@ -177,6 +179,19 @@ def reset() -> None:
 
         kernel_side_table.reset_table()
         inductor_code_side_table.reset_table()
+        # CuTeDSL's table too, as Triton's, if anything has loaded it: importing it
+        # here would register the cutedsl user-kernel DSL.
+        cutedsl = sys.modules.get("torch._higher_order_ops.cutedsl_kernel_wrap")
+        if cutedsl is not None:
+            cutedsl.cutedsl_kernel_side_table.reset_table()
+        # TODO: a graph or exported program captured before this reset still holds
+        # indices into these tables, which now name nothing or whatever is added
+        # next, so it can launch another kernel without an error. Strict export
+        # resets Dynamo itself (_dynamo_graph_capture_for_export), so exporting one
+        # program breaks programs exported earlier. And two programs captured after
+        # separate resets can have the same graph code, which names AOTInductor's
+        # default output directory (code_hash), so packaging one can overwrite the
+        # other. Keep the tables across export's reset, and never reuse an index.
 
         # The fake tensor dispatch cache is process-global (shared across
         # FakeTensorMode instances), so it survives into later compiles. That
