@@ -911,23 +911,39 @@ class DynamoAutogradFunctionTraceHelper:
                     arg is tensor for arg in args if isinstance(arg, torch.Tensor)
                 )
 
+            def is_non_differentiable_tensor(tensor: torch.Tensor) -> bool:
+                non_differentiable = getattr(ctx, "non_differentiable", None)
+                if non_differentiable is None:
+                    return False
+                return any(
+                    tensor is non_differentiable_tensor
+                    for non_differentiable_tensor in non_differentiable
+                    if isinstance(non_differentiable_tensor, torch.Tensor)
+                )
+
             # Handle the case where if the input is passed on directly to the output, we call view_as
             # Refer to https://github.com/pytorch/pytorch/blob/main/torch/csrc/autograd/custom_function.cpp#L254
+            def alias_if_returned_input(out: Any) -> Any:
+                if not isinstance(out, torch.Tensor):
+                    return out
+                if not is_tensor_arg(out) or is_dirty_tensor(out):
+                    return out
+                if is_non_differentiable_tensor(out):
+                    # A returned input marked via ctx.mark_non_differentiable
+                    # comes back as a detached alias instead (set_history in
+                    # custom_function.cpp). The alias is the output now, so
+                    # the mark has to cover it as well.
+                    alias = out.detach()
+                    ctx.mark_non_differentiable(*ctx.non_differentiable, alias)
+                    return alias
+                return out.view_as(out)
+
             if isinstance(outs, torch.Tensor):
-                if is_tensor_arg(outs) and not is_dirty_tensor(outs):
-                    return outs.view_as(outs)
-                else:
-                    return outs
+                return alias_if_returned_input(outs)
 
             new_outs = []
             for out in outs:
-                if isinstance(out, torch.Tensor):
-                    if is_tensor_arg(out) and not is_dirty_tensor(out):
-                        new_outs.append(out.view_as(out))
-                    else:
-                        new_outs.append(out)
-                else:
-                    new_outs.append(out)
+                new_outs.append(alias_if_returned_input(out))
             return tuple(new_outs)
 
             # TODO - there is missing functionality here, where

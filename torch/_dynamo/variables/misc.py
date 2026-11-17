@@ -1288,7 +1288,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         value_type: type | None = None,
         inference: bool = False,
         saved_tensors: Any | None = None,
-        non_differentiable: Any | None = None,
+        non_differentiable: list[VariableTracker] | None = None,
         dirty_tensors: list[VariableTracker] | None = None,
         output_grad_dtypes: tuple[torch.dtype | None, ...] | None = None,
         **kwargs: Any,
@@ -1369,7 +1369,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         no_keywords(tx, "mark_non_differentiable", kwargs)
-        self.non_differentiable = proxy_args_kwargs(args, {})[0]
+        self.non_differentiable = args
         return variables.ConstantVariable.create(None)
 
     def mark_dirty(
@@ -1479,6 +1479,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if self.dirty_tensors is None:
                 return variables.ConstantVariable.create(None)
             return variables.TupleVariable(list(self.dirty_tensors))
+        if name == "non_differentiable":
+            if self.non_differentiable is None:
+                return variables.ConstantVariable.create(None)
+            return variables.TupleVariable(list(self.non_differentiable))
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
 
