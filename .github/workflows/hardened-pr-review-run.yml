@@ -7,7 +7,8 @@ name: In Progress PR Review Run
 # are the trusted versions - never anything from the pull request.
 #
 #   prepare  authenticate the Stage-1 artifact, re-derive pr_number/base_sha,
-#            fetch the PR conversation
+#            fetch the PR conversation (reads with the PR review App's token,
+#            GITHUB_TOKEN if it cannot be minted)
 #   announce marks the newest automated review in progress, or says the PR is
 #            too large to review (GITHUB_TOKEN with pull-requests: write only;
 #            no AWS, no environment, no PR code)
@@ -178,9 +179,37 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # GITHUB_TOKEN shares one hourly API budget with every other workflow in
+      # this repository. When it runs out, the reads below fail with "API rate
+      # limit exceeded for installation" and the PR is never reviewed. This
+      # job's reads use the PR review GitHub App instead, whose budget is its
+      # own. The App's key is a secret of the `bedrock` environment, which the
+      # review job does not declare, so it never reaches a runner holding
+      # pull-request code. If minting fails, the reads fall back to
+      # GITHUB_TOKEN.
+      - name: Mint the PR review app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.PR_REVIEW_APP_ID }}
+          private-key: ${{ secrets.PR_REVIEW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          # The `permissions:` this job grants GITHUB_TOKEN, and no more.
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+
+      # Runs only on a fallback, so its conclusion (success rather than
+      # skipped) marks the runs that used GITHUB_TOKEN.
+      - name: Fall back to GITHUB_TOKEN
+        if: steps.app-token.outcome != 'success'
+        run: echo "::warning::Could not mint the PR review app token; this run uses GITHUB_TOKEN."
+
       - name: Download Stage-1 artifact
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           REPO: ${{ github.repository }}
         run: |
@@ -290,7 +319,7 @@ jobs:
       - name: Corroborate the claimed PR against the trusted API
         id: freshness
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.coords.outputs.pr_number }}
           HEAD_SHA: ${{ steps.coords.outputs.head_sha }}
           TRIGGER_EVENT: ${{ steps.coords.outputs.trigger_event }}
@@ -430,7 +459,7 @@ jobs:
         id: conversation
         if: steps.freshness.outputs.eligible == 'true' && steps.freshness.outputs.fresh == 'true' && steps.freshness.outputs.too_large != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.coords.outputs.pr_number }}
           HEAD_SHA: ${{ steps.coords.outputs.head_sha }}
@@ -843,6 +872,24 @@ jobs:
             --out /tmp/pr-interdiff.txt \
             --max-bytes "${MAX_DIFF_BYTES}"
 
+      # Installs Bun so both model steps skip the action's own "Install Bun".
+      # That step runs setup-bun, which asks api.github.com for Bun's tag list
+      # on every run, even with the version pinned, using this job's
+      # GITHUB_TOKEN: a call on the repository's shared API budget, made before
+      # each stage. An explicit download URL skips that lookup. On failure the
+      # path below is empty and the action installs Bun itself, as before.
+      # Before the AWS credentials, so the download runs without them.
+      # Keep the version equal to the bun-version the pinned action installs.
+      # A download URL also turns setup-bun's cache off (isCacheEnabled in
+      # src/action.ts at this SHA), which this job must not write.
+      - name: Install Bun
+        id: bun
+        if: steps.diff.outputs.too_large == 'false'
+        continue-on-error: true
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip
+
       - name: Configure AWS credentials via OIDC
         id: aws
         if: steps.diff.outputs.too_large == 'false'
@@ -988,6 +1035,8 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
+          # See the Install Bun step; empty makes the action install Bun itself.
+          path_to_bun_executable: ${{ steps.bun.outcome == 'success' && steps.bun.outputs.bun-path || '' }}
           # See stage B for these three.
           allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           github_token: ${{ github.token }}
@@ -1050,6 +1099,8 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
+          # See the Install Bun step; empty makes the action install Bun itself.
+          path_to_bun_executable: ${{ steps.bun.outcome == 'success' && steps.bun.outputs.bun-path || '' }}
           # The actor is whoever triggered Stage 1: on `labeled`, whoever
           # applied `in progress`; on a push, the pusher. The action rejects
           # bot actors unless listed here. pytorch-bot applies the label once
