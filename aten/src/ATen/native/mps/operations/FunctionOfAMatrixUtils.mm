@@ -2,6 +2,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
+#include <utility>
 
 #include <array>
 #include <cstdlib>
@@ -54,9 +55,8 @@ static void _compute_linear_combination_mps_kernel(TensorIterator& iter,
 
   // Base offsets fit int32 now; widen to 64-bit only when the summation reach
   // pushes an input/coeff operand past it (out has no summation reach).
-  const int64_t kMax = std::numeric_limits<int32_t>::max();
-  const bool use32 = clc_max_byte_offset(iter, 1, in_stride, num_summations) <= kMax &&
-      clc_max_byte_offset(iter, 2, coeff_stride, num_summations) <= kMax;
+  const bool use32 = std::in_range<int32_t>(clc_max_byte_offset(iter, 1, in_stride, num_summations)) &&
+      std::in_range<int32_t>(clc_max_byte_offset(iter, 2, coeff_stride, num_summations));
 
   const auto type_str = scalarToMetalTypeString(dtype);
   const auto ndim = static_cast<uint32_t>(iter.ndim());
