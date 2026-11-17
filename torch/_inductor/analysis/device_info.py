@@ -78,25 +78,25 @@ _device_mapping: dict[str, DeviceInfo] = {
     ),
     # Source:
     # @lint-ignore https://www.nvidia.com/en-us/data-center/h100/
-    # Tensor Core values are *with sparsity* per the datasheet.
+    # Tensor Core rows (TF32/BF16/FP16/FP8/INT8) in the datasheet are SPARSE; dense is 1/2.
+    # FP32 and FP64 Tensor Core are already dense. Values below are all DENSE, so no
+    # sparsity factor.
     "NVIDIA H100": DeviceInfo(
         tops={
             torch.float64: 67.0,
             torch.float32: 67.0,
-            "torch.tf32": 989.0,
-            torch.bfloat16: 1979.0,
-            torch.float16: 1979.0,
-            torch.float8_e8m0fnu: 3958.0,
-            torch.float8_e8m0fnu: 3958.0,
-            torch.float8_e4m3fnuz: 3958.0,
-            torch.float8_e5m2: 3958.0,
-            torch.float8_e5m2fnuz: 3958.0,
-            torch.float8_e8m0fnu: 3958.0,
-            torch.int8: 3958.0,
+            "torch.tf32": 494.5,
+            torch.bfloat16: 989.5,
+            torch.float16: 989.5,
+            torch.float8_e4m3fn: 1979.0,
+            torch.float8_e4m3fnuz: 1979.0,
+            torch.float8_e5m2: 1979.0,
+            torch.float8_e5m2fnuz: 1979.0,
+            torch.float8_e8m0fnu: 1979.0,
+            torch.int8: 1979.0,
         },
         dram_bw_gbs=3350,
         dram_gb=80,
-        tops_sparsity_factor=2,
     ),
     # Source:
     # @lint-ignore https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/

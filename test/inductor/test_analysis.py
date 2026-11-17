@@ -408,6 +408,25 @@ class TestUtils(TestCase):
                 ratio = info.tops[torch.float32] / info.tops[torch.float64]
                 self.assertAlmostEqual(ratio, 32.0, delta=0.5)
 
+    def test_h100_datasheet_tops_are_dense(self):
+        # The H100 datasheet marks only the Tensor Core TF32/BF16/FP16/FP8/INT8 rows as
+        # "with sparsity". FP32 and FP64 Tensor Core (67 TFLOPS) are dense and must not
+        # be halved.
+        name = "NVIDIA H100"
+        self.assertEqual(datasheet_tops(torch.float32, device_name=name), 67.0)
+        self.assertEqual(datasheet_tops(torch.float64, device_name=name), 67.0)
+        self.assertEqual(datasheet_tops(torch.float32, True, device_name=name), 494.5)
+        self.assertEqual(datasheet_tops(torch.bfloat16, device_name=name), 989.5)
+        self.assertEqual(datasheet_tops(torch.float16, device_name=name), 989.5)
+        # float8_e4m3fn is the usual H100 fp8 training dtype.
+        for dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.int8,
+        ):
+            with self.subTest(dtype=dtype):
+                self.assertEqual(datasheet_tops(dtype, device_name=name), 1979.0)
+
 
 def has_supported_gpu():
     """Check if any GPU platform with Triton support is available."""
