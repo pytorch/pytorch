@@ -54,6 +54,8 @@ env:
 
 jobs:
   test:
+    env:
+      CPP_FAKETENSOR: ${{ matrix.fake_tensor == 'cpp' && '1' || '0' }}
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
