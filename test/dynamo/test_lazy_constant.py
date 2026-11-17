@@ -16,6 +16,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.lazy import (
     ComputedLazyCache,
     LazyCache,
+    LazySymNodeFormatString,
     LazyVariableTracker,
 )
 from torch.testing._internal.common_utils import (
@@ -26,6 +27,22 @@ from torch.testing._internal.common_utils import (
 
 
 _constant_vt_capture: list[VariableTracker] = []
+
+
+class _StrSubclass(str):  # noqa: SLOT000
+    pass
+
+
+class _IntSubclass(int):
+    pass
+
+
+class _FloatSubclass(float):
+    pass
+
+
+_GLOBAL_STR_SUBCLASS = _StrSubclass("g")
+_GLOBAL_INT_SUBCLASS = _IntSubclass(3)
 
 
 def _capture_constant_vt(ctx) -> None:
@@ -160,6 +177,58 @@ class CachedConstantSourceLocationTests(TestCase):
         self.assertIsNot(lazy.realize(), prototype)
         self.assertEqual(lazy.realize().source_location, location)
         self.assertIsNone(prototype.source_location)
+
+
+@instantiate_parametrized_tests
+class LazyCacheTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("raises", (False, True))
+    def test_init_does_not_access_dunder_class(self, raises):
+        calls = []
+
+        class Cache:
+            @property
+            def __class__(self):
+                calls.append("hook")
+                if raises:
+                    raise RuntimeError("class-hook")
+                return Cache
+
+        def fn(x, values):
+            return x + len(values)
+
+        obj = Cache()
+        values = [obj]
+        x = torch.ones(1)
+        expected = fn(x, values)
+        self.assertEqual(calls, [])
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, values), expected)
+        self.assertEqual(calls, [])
+        self.assertIs(values[0], obj)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_init_source(self):
+        value = object()
+        source = ConstantSource("value")
+        cache = LazyCache(value, source)
+        self.assertIs(cache.value, value)
+        self.assertIs(cache.source, source)
+        with self.assertRaisesRegex(AssertionError, "source is required"):
+            LazyCache(value, None)
+
+        class FormatStringSubclass(LazySymNodeFormatString):
+            pass
+
+        for cls in (LazySymNodeFormatString, FormatStringSubclass):
+            with self.subTest(cls=cls):
+                value = object.__new__(cls)
+                cache = LazyCache(value, None)
+                self.assertIs(cache.value, value)
+                self.assertIsNone(cache.source)
 
 
 class LazyConstantVariableTests(TestCase):
@@ -695,13 +764,67 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager6[2], compiled6[2])
         self.assertEqual(counter_multi.frame_count, 1)
 
+    def test_lazy_constant_before_tensor_in_container_no_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, c: (c, t.sin()), "abc"),
+            (lambda t, c: (t.sin(), (c, 1)), "abc"),
+            (lambda t, c: [c, t.sin()], "abc"),
+            (lambda t, c: {"k": c, "t": t.sin()}, "abc"),
+            (lambda t, c: ((c, 1), t.sin()), [3, 4, 5]),
+        ]
+        for i, (fn, values) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._assert_compile_count(fn, arg_sets, expected_frames=1)
+
+    def test_lazy_constant_in_reconstructed_container_no_recompile(self):
+        t = torch.ones(2)
+
+        def fn_graph_break(t, c):
+            pair = (c, t.sin())
+            torch._dynamo.graph_break()
+            return pair, t.cos()
+
+        # One graph on each side of the break
+        arg_sets = [(t, c) for c in "abc"]
+        self._assert_compile_count(fn_graph_break, arg_sets, expected_frames=2)
+
+        def fn_mutation(t, lst, c):
+            lst.extend([c, t.sin()])
+            return t.cos()
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn_mutation, backend=counter, fullgraph=True)
+        for c in "abc":
+            lst = []
+            self.assertEqual(opt_fn(t, lst, c), t.cos())
+            self.assertEqual(lst, [c, t.sin()])
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_lazy_constant_returned_from_export(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.name = "modattr"
+
+            def forward(self, x):
+                return x.sin(), self.name, (self.name, 1), "p" + self.name
+
+        x = torch.ones(2)
+        gm, _ = torch._dynamo.export(M())(x)
+        self.assertEqual(gm(x), M()(x))
+        ep = torch.export.export(M(), (x,), strict=True)
+        self.assertEqual(ep.module()(x), M()(x))
+
 
 class ComputedLazyConstantTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def _check(self, fn, arg_sets, expected_frames):
+    def _check(self, fn, arg_sets, expected_frames, fullgraph=False):
         counter = CompileCounter()
-        opt_fn = torch.compile(fn, backend=counter)
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=fullgraph)
         for args in arg_sets:
             eager = fn(*args)
             compiled = opt_fn(*args)
@@ -1054,6 +1177,44 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 3, 4), (t, 1.5, 2.5)], expected_frames=2)
 
+    def test_operand_type_change_in_reconstructed_container_recompiles(self):
+        # The tensor ahead of the computed constant keeps the container from
+        # being loaded as a constant, so the constant is recomputed in output bytecode
+        t = torch.ones(2)
+
+        def to_str(a):
+            try:
+                return "p" + a
+            except TypeError:
+                return "int"
+
+        def fn_extend(t, a, lst):
+            lst.extend([t.sin(), to_str(a)])
+            return t.cos()
+
+        def fn_setitem(t, a, d):
+            d["v"] = (t.sin(), to_str(a))
+            return t.cos()
+
+        for fn, make in [(fn_extend, list), (fn_setitem, dict)]:
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                counter = CompileCounter()
+                opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+                for a in ["x", "y", 1]:
+                    eager_out, compiled_out = make(), make()
+                    self.assertEqual(opt_fn(t, a, compiled_out), fn(t, a, eager_out))
+                    self.assertEqual(compiled_out, eager_out)
+                self.assertEqual(counter.frame_count, 2)
+
+        def fn_graph_break(t, a):
+            pair = (t.sin(), to_str(a))
+            torch._dynamo.graph_break()
+            return pair
+
+        torch._dynamo.reset()
+        self._check(fn_graph_break, [(t, "x"), (t, "y"), (t, 1)], expected_frames=2)
+
     def test_chained_computed_constants_do_not_recompile(self):
         t = torch.ones(2)
 
@@ -1105,6 +1266,66 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), a + b
 
         self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
+    def test_sourceless_constant_subclass_operand_realizes(self):
+        # Output bytecode cannot rebuild a subclass instance created in the
+        # frame, so these fall back to guarding the lazy operand's value
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: (t.sin(), _StrSubclass("p") + a), "xyz", 3),
+            (lambda t, a: (t.sin(), a + _StrSubclass("p")), "xyz", 3),
+            (lambda t, a: (t.sin(), (_StrSubclass("p") + a) + a), "xyz", 3),
+            (lambda t, a: (t.sin(), _StrSubclass("p") == a), "xpz", 3),
+            (lambda t, a: (t.sin(), _IntSubclass(2) * a), (5, 6, 7), 2),
+            (lambda t, a: (t.sin(), _FloatSubclass(0.5) + a), (1.5, 2.5, 3.5), 2),
+        ]
+        for i, (fn, values, expected_frames) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames, fullgraph=True)
+
+    def test_sourced_constant_subclass_operand_does_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: (t.sin(), _GLOBAL_STR_SUBCLASS + a), "xyz"),
+            (lambda t, a: (t.sin(), _GLOBAL_INT_SUBCLASS * a), (5, 6, 7)),
+        ]
+        for i, (fn, values) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames=1, fullgraph=True)
+
+    def test_unused_computed_before_tensor_in_container_does_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: ("p" + a, t.sin()), "abc"),
+            (lambda t, a: (t.sin(), ("p" + a, 1)), "abc"),
+            (lambda t, a: ["p" + a, t.sin()], "abc"),
+            (lambda t, a: {"k": "p" + a, "t": t.sin()}, "abc"),
+            (lambda t, a: ((a + 1, 1), t.sin()), [3, 4, 5]),
+        ]
+        for i, (fn, values) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames=1, fullgraph=True)
+
+    def test_unused_computed_in_returned_closure_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            b = "p" + a
+            return (lambda: (a, b)), t.sin()
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for a in "abc":
+            g, out = opt_fn(t, a)
+            self.assertEqual(g(), (a, "p" + a))
+            self.assertEqual(out, t.sin())
+        self.assertEqual(counter.frame_count, 1)
 
     def test_computed_constant_in_branch_recompiles(self):
         t = torch.ones(2)
