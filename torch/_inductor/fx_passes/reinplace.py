@@ -800,6 +800,36 @@ def reinplace_inplaceable_ops_core(
                 ):
                     return False
 
+        result_storage = get_node_storage(node)
+        if result_storage is not None:
+            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
+            mutated_storage = get_node_storage(mutated_arg)
+            possible_mutations = OrderedSet(
+                user
+                for alias in storage_to_nodes[mutated_storage]
+                for user in alias.users
+            )
+            for mutation in possible_mutations:
+                if not any(
+                    get_node_storage(written) == mutated_storage
+                    for written in get_mutated_input_nodes(mutation)
+                ):
+                    continue
+                if node_order[mutation] <= node_order[node]:
+                    continue
+                # Successful reinplacement removes this copyback, so it cannot
+                # overwrite a live functional result. Other later writes still matter.
+                if mutation is removable_copyback:
+                    continue
+                if any_use_of_views_after_node(
+                    mutation,
+                    storage_to_nodes[result_storage],
+                    copy_node=None,
+                    mutated_arg=node,
+                    include_current=True,
+                ):
+                    return False
+
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
             copy_node = copy_nodes.get(mutated_arg)
@@ -1179,13 +1209,12 @@ def reinplace_inplaceable_ops_core(
         for updated in changed_nodes:
             if updated in node_to_storage:
                 old_storage = node_to_storage[updated]
-                if not updated._erased and old_storage == get_node_storage(updated):
-                    continue
-                storage_to_nodes[old_storage].discard(updated)
-                if not storage_to_nodes[old_storage]:
-                    del storage_to_nodes[old_storage]
-                del node_to_storage[updated]
-            if not updated._erased:
+                if updated._erased or old_storage != get_node_storage(updated):
+                    storage_to_nodes[old_storage].discard(updated)
+                    if not storage_to_nodes[old_storage]:
+                        del storage_to_nodes[old_storage]
+                    del node_to_storage[updated]
+            if not updated._erased and updated not in node_to_storage:
                 storage = get_node_storage(updated)
                 node_to_storage[updated] = storage
                 storage_to_nodes[storage].add(updated)
