@@ -39,11 +39,12 @@ from typing import (
     NoReturn,
     overload,
     Protocol,
+    Self,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import deprecated, NamedTuple, Self, TypeIs
+from typing_extensions import deprecated, NamedTuple, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
 
@@ -599,7 +600,10 @@ def _deregister_pytree_node(
     with _NODE_REGISTRY_LOCK:
         del SUPPORTED_NODES[cls]
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
-        del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
+        # A type registered without a name has no entry, and a later
+        # registration may have taken the name.
+        if SERIALIZED_TYPE_TO_PYTHON_TYPE.get(node_def.serialized_type_name) is cls:
+            del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
         CONSTANT_NODES.discard(cls)
 
@@ -683,8 +687,19 @@ def _private_register_pytree_node(
             to_dumpable_context,
             from_dumpable_context,
         )
+        # Registering a type again replaces its name, unless a later
+        # registration took that name.
+        old_def = SUPPORTED_SERIALIZED_TYPES.get(cls)
+        if (
+            old_def is not None
+            and SERIALIZED_TYPE_TO_PYTHON_TYPE.get(old_def.serialized_type_name) is cls
+        ):
+            del SERIALIZED_TYPE_TO_PYTHON_TYPE[old_def.serialized_type_name]
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
-        SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
+        # Every type registered without a name gets the placeholder, so it
+        # cannot name one of them.
+        if serialized_type_name != NO_SERIALIZED_TYPE_NAME_FOUND:
+            SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

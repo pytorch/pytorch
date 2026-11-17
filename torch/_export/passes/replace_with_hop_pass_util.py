@@ -7,6 +7,7 @@ import operator
 from typing import TYPE_CHECKING
 
 import torch
+from torch.fx.graph_module import _assign_attr, _get_attr
 
 from ..utils import node_replace_, nodes_map
 
@@ -16,6 +17,14 @@ if TYPE_CHECKING:
 
     from torch._ops import HigherOrderOperator
     from torch.export.graph_signature import ExportGraphSignature
+
+
+def _first_call_in_sub_mod(subgm: torch.fx.GraphModule) -> torch.fx.Node | None:
+    # sequential_split reads submodules and pytree specs, such as the branches of
+    # a cond, with get_attr nodes before the first call of a region.
+    return next(
+        (n for n in subgm.graph.nodes if n.op not in ("placeholder", "get_attr")), None
+    )
 
 
 def _replace_with_hop_helper(
@@ -187,7 +196,7 @@ def _replace_with_hop_pass_helper(
     # recursively call
     for node in new_gm.graph.nodes:
         if node.op == "get_attr":
-            subgm = getattr(new_gm, node.target)
+            subgm = _get_attr(new_gm, node.target)
             if not isinstance(subgm, torch.fx.GraphModule):
                 continue
             new_subgm, _ = _replace_with_hop_pass_helper(
@@ -195,7 +204,7 @@ def _replace_with_hop_pass_helper(
                 None,
                 sequential_split_and_maybe_inline_subgraphs,
             )
-            setattr(new_gm, node.target, new_subgm)
+            _assign_attr(new_subgm, new_gm, node.target)
 
     new_gm.recompile()
     new_gm.graph.lint()
