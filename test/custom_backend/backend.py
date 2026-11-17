@@ -64,8 +64,8 @@ def main():
 
     # Lower an instance of Model to the custom backend  and export it
     # to the specified location.
-    lowered_module = to_custom_backend(torch.jit.script(Model()))
-    torch.jit.save(lowered_module, options.export_module_to)
+    lowered_module = to_custom_backend(torch.jit._script.script(Model()))
+    torch.jit._serialization.save(lowered_module, options.export_module_to)
 
 
 if __name__ == "__main__":
