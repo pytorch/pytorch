@@ -17,6 +17,7 @@ on:
           - norm
           - scaled_mm
           - scaled_grouped_mm
+          - grouped_mm
       gpu:
         type: choice
         description: GPU to run on
