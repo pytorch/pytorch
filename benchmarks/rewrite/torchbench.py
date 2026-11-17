@@ -1,4 +1,4 @@
-"""TorchBench under eager, torch.compile and torch.rewrite(backend="inductor").
+"""TorchBench under eager, torch.compile and torch.rewrite with Inductor graphs.
 
 Every model of https://github.com/pytorch/benchmark that loads is run for
 inference and for training, as benchmarks/dynamo/torchbench.py runs it: the
@@ -227,7 +227,8 @@ def run_one(args):
         elif mode == "compile":
             compiled = torch.compile(fn)
         else:
-            compiled = torch.rewrite(fn, backend="inductor", fallback=False)
+            passes = [torch.rewrite.inductor, *torch.rewrite.canonical]
+            compiled = torch.rewrite(fn, passes=passes, fallback=False)
 
         def compiled_so_far():
             # Changes whenever the compiler compiled something.

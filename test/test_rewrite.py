@@ -50,7 +50,26 @@ except ImportError:
 os.environ["TORCH_REWRITE_DEMOTE"] = "0"
 
 HAS_RUNTIME = UNDISTURBED and cfg_rs is not None and sys.version_info[:2] == (3, 12)
-Pipeline = torch.rewrite.Pipeline
+canonical = torch.rewrite.canonical
+# The passes over the whole function, which the tests of one pass over a block keep.
+WHOLE = canonical[:3]
+
+
+def without(*names):
+    """The standard passes without some of them."""
+    return [p for p in canonical if p not in names]
+
+
+def with_graphs(backend, **options):
+    """The standard passes behind a graph pass."""
+    return [torch.rewrite.graphs(backend, **options), *canonical]
+
+
+def narrowing():
+    """The standard passes with narrow_dims in front of fold."""
+    passes = list(canonical)
+    passes.insert(passes.index("fold"), "narrow_dims")
+    return passes
 
 
 def call_outcome(fn, *args, **kwargs):
@@ -806,7 +825,7 @@ class TestCfgFrontend(TestCase):
             warnings.simplefilter("always")
             self.assertIs(torch.rewrite(f), f)
         self.assertIn(
-            "left f uncompiled", str(caught[0].message).replace(f.__qualname__, "f")
+            "left f as it is", str(caught[0].message).replace(f.__qualname__, "f")
         )
 
     def test_methods_and_modules(self):
@@ -1213,18 +1232,54 @@ class TestCfgPasses(TestCase):
             self.assertEqual(compiled(torch.ones(shape)), len(shape) + 1)
         self.assertIn("tensor_dim", compiled.dump())
 
-    def test_pipeline_descriptor(self):
-        default = Pipeline.default()
-        self.assertNotIn("narrow_dims", default.passes)
-        narrowing = Pipeline.narrowing()
-        self.assertEqual(
-            narrowing.passes.index("narrow_dims") + 1, narrowing.passes.index("fold")
-        )
-        self.assertEqual(default.remove("dce").append("dce").passes, default.passes)
+    def test_what_passes_takes(self):
+        self.assertNotIn("narrow_dims", canonical)
         with self.assertRaisesRegex(ValueError, "unknown pass 'nope'"):
-            torch.rewrite(lambda x: x, pipeline=Pipeline(["nope"]))
-        with self.assertRaises(TypeError):
-            Pipeline([3])
+            torch.rewrite(lambda x: x, passes=["nope"])
+        with self.assertRaisesRegex(TypeError, "not int"):
+            torch.rewrite(lambda x: x, passes=[3])
+        with self.assertRaisesRegex(ValueError, "comes after 'fold'"):
+            torch.rewrite(lambda x: x, passes=["fold", torch.rewrite.inductor])
+        two = [torch.rewrite.inductor, torch.rewrite.graphs("aot_eager")]
+        with self.assertRaisesRegex(ValueError, "one of them"):
+            torch.rewrite(lambda x: x, passes=two)
+
+    def test_passes_are_applied_in_the_order_of_the_list(self):
+        def f(x):
+            return x * 2 + 1
+
+        def run(place):
+            seen = []
+
+            def look(region):
+                seen.append({i["op"] for i in region.instructions()})
+                return False
+
+            passes = ["resolve_dispatch"]
+            passes.insert(place, look)
+            compiled = torch.rewrite(f, passes=passes, fallback=False)
+            for _ in range(3):
+                self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 3.0))
+            return seen[0]
+
+        # In front of resolve_dispatch a pass sees what the function wrote, and
+        # behind it the kernel calls that those became.
+        self.assertNotIn("dispatch", run(0))
+        self.assertIn("dispatch", run(1))
+
+    def test_a_pass_over_the_whole_function_is_asked_for_by_name(self):
+        def run(passes):
+            compiled = torch.rewrite(inl_shifted, passes=passes, fallback=False)
+            for _ in range(3):
+                self.assertEqual(
+                    compiled(torch.ones(2), torch.ones(2)),
+                    inl_shifted(torch.ones(2), torch.ones(2)),
+                )
+            return compiled.stats()["inlined"]
+
+        self.assertEqual(run(["resolve_dispatch"]), [])
+        self.assertEqual(run(["inline", "resolve_dispatch"]), ["inl_scale"])
+        self.assertEqual(run([]), [])
 
     def test_generic_tier_only(self):
         def f(x, n):
@@ -1232,18 +1287,18 @@ class TestCfgPasses(TestCase):
                 x = x * 2 + 1
             return x
 
-        compiled = torch.rewrite(f, specialize=False, fallback=False)
+        compiled = torch.rewrite(f, passes=[], fallback=False)
         for _ in range(3):
             self.assertEqual(compiled(torch.ones(2), 3), torch.full((2,), 15.0))
         self.assertEqual(sum(block_stats(compiled, "versions")), 0)
         self.assertEqual(sum(block_stats(compiled, "profile_runs")), 0)
         self.assertNotIn("specialized", compiled.dump())
 
-    def test_without_passes_nothing_is_specialized(self):
+    def test_without_passes_over_a_block_nothing_is_specialized(self):
         def f(x):
             return x + 1
 
-        compiled = torch.rewrite(f, pipeline=Pipeline([]), fallback=False)
+        compiled = torch.rewrite(f, passes=WHOLE, fallback=False)
         for _ in range(3):
             self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
         self.assertEqual(block_stats(compiled, "versions"), [0])
@@ -1257,7 +1312,7 @@ class TestCfgPasses(TestCase):
                 z = z * 2 + 1
             return z
 
-        compiled = torch.rewrite(f, pipeline=Pipeline.narrowing(), fallback=False)
+        compiled = torch.rewrite(f, passes=narrowing(), fallback=False)
 
         def run(n):
             x, y = torch.ones(n, 3), torch.ones(1, 3)
@@ -1292,7 +1347,7 @@ class TestCfgPasses(TestCase):
                 return y.sum()
             return y * 2
 
-        compiled = torch.rewrite(f, pipeline=Pipeline.narrowing(), fallback=False)
+        compiled = torch.rewrite(f, passes=narrowing(), fallback=False)
         for n in (3, 4, 1, 5, 2, 1, 7):
             x = torch.randn(2, n)
             self.assertEqual(compiled(x), f(x))
@@ -1316,8 +1371,9 @@ class TestCfgPasses(TestCase):
         def f(x):
             return x.sum() * x.shape[0]
 
-        pipeline = Pipeline.default().insert_after("tensor_accessors", pin_first_dim)
-        compiled = torch.rewrite(f, pipeline=pipeline, fallback=False)
+        passes = list(canonical)
+        passes.insert(passes.index("tensor_accessors") + 1, pin_first_dim)
+        compiled = torch.rewrite(f, passes=passes, fallback=False)
         for n in (3, 3, 5, 3, 5):
             x = torch.ones(n, 2)
             self.assertEqual(compiled(x), f(x))
@@ -1362,7 +1418,7 @@ class TestCfgPasses(TestCase):
             b = a - x
             return a, b * 2
 
-        compiled = torch.rewrite(f, pipeline=Pipeline([replace]), fallback=False)
+        compiled = torch.rewrite(f, passes=[*WHOLE, replace], fallback=False)
         for k in range(6):
             x, y = torch.randn(3), torch.randn(3)
             self.assertEqual(compiled(x, y, k), f(x, y, k), atol=0, rtol=0)
@@ -1400,7 +1456,7 @@ class TestCfgPasses(TestCase):
             b = a @ y
             return b - 1
 
-        compiled = torch.rewrite(f, pipeline=Pipeline([grab]), fallback=False)
+        compiled = torch.rewrite(f, passes=[*WHOLE, grab], fallback=False)
         compiled(torch.ones(2, 3), torch.ones(3, 2))
         ((replay, insts),) = handles
         binary = [i for i, inst in enumerate(insts) if inst["op"] == "binary"]
@@ -1447,7 +1503,7 @@ class TestCfgPasses(TestCase):
             a = x + y
             return a * 2
 
-        compiled = torch.rewrite(f, pipeline=Pipeline([leaping]), fallback=False)
+        compiled = torch.rewrite(f, passes=[*WHOLE, leaping], fallback=False)
         for _ in range(7):
             x, y = torch.randn(3), torch.randn(3)
             self.assertEqual(compiled(x, y), f(x, y), atol=0, rtol=0)
@@ -1473,7 +1529,7 @@ class TestCfgPasses(TestCase):
             return total
 
         compiled = torch.rewrite(
-            f, pipeline=Pipeline([grab]), fallback=False, unroll=False
+            f, passes=["inline", "shortcuts", grab], fallback=False
         )
         self.assertEqual(compiled([1, 2, 3], True), 12)
         (replay,) = handles
@@ -1514,11 +1570,7 @@ class TestCfgPasses(TestCase):
         def f(x):
             return x * 2
 
-        compiled = torch.rewrite(
-            f,
-            pipeline=Pipeline([note_taker, *Pipeline.default().passes]),
-            fallback=False,
-        )
+        compiled = torch.rewrite(f, passes=[note_taker, *canonical], fallback=False)
         for _ in range(3):
             self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
         (note,) = [n for n in seen if n is not None][:1]
@@ -1542,7 +1594,9 @@ class TestCfgPasses(TestCase):
         def outer(x):
             return inner(x) * 2
 
-        compiled = torch.rewrite(outer, fallback=False, inline=False, callees=True)
+        compiled = torch.rewrite(
+            outer, fallback=False, passes=without("inline"), callees=True
+        )
         for _ in range(3):
             compiled(torch.ones(2))
         # The first run of a block is its profiling run: on the first call
@@ -1557,9 +1611,7 @@ class TestCfgPasses(TestCase):
             kept.append(region)
             return False
 
-        compiled = torch.rewrite(
-            lambda x: x + 1, pipeline=Pipeline([keep]), fallback=False
-        )
+        compiled = torch.rewrite(lambda x: x + 1, passes=[*WHOLE, keep], fallback=False)
         compiled(torch.ones(1))
         with self.assertRaisesRegex(RuntimeError, "only valid while its pass runs"):
             kept[0].instructions()
@@ -1571,9 +1623,7 @@ class TestCfgPasses(TestCase):
         def f(x):
             return x * 3
 
-        compiled = torch.rewrite(
-            f, pipeline=Pipeline.default().append(broken), fallback=False
-        )
+        compiled = torch.rewrite(f, passes=[*canonical, broken], fallback=False)
         for _ in range(3):
             self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 3.0))
         stats = compiled.stats()
@@ -1675,7 +1725,7 @@ class TestCfgGraphTransforms(TestCase):
         defaults = torch.rewrite(inl_uses_defaults, fallback=False)
         self.assertEqual(defaults(torch.ones(2)), torch.full((2,), 5.0))
         self.assertEqual(defaults.stats()["inlined"], [])
-        off = torch.rewrite(inl_outer, fallback=False, inline=False)
+        off = torch.rewrite(inl_outer, fallback=False, passes=without("inline"))
         x, y = torch.randn(3), torch.randn(3)
         self.assertEqual(off(x, y), inl_outer(x, y))
         self.assertEqual(off.stats()["inlined"], [])
@@ -1689,7 +1739,7 @@ class TestCfgGraphTransforms(TestCase):
             self.assertEqual(total, expected)
             self.assertEqual(i, expected_i)
         self.assertEqual(compiled.stats()["unrolled_loops"], 1)
-        off = torch.rewrite(unr_loop, fallback=False, unroll=False)
+        off = torch.rewrite(unr_loop, fallback=False, passes=without("unroll"))
         self.assertEqual(off(x, y)[0], unr_loop(x, y)[0])
         self.assertEqual(off.stats()["unrolled_loops"], 0)
 
@@ -1849,7 +1899,7 @@ class TestCfgCallees(TestCase):
         self.assertEqual(len(interpreted), 1)
 
     def test_recursion_and_modules(self):
-        compiled = torch.rewrite(callee_fact, fallback=False, inline=False)
+        compiled = torch.rewrite(callee_fact, fallback=False, passes=without("inline"))
         self.assertEqual(compiled(6), 720)
         self.assertEqual(self.callees(compiled)[0], ["callee_fact"])
 
@@ -2058,7 +2108,7 @@ class TestCfgCallees(TestCase):
         def f(x):
             return callee_raises(x)
 
-        compiled = torch.rewrite(f, fallback=False, inline=False)
+        compiled = torch.rewrite(f, fallback=False, passes=without("inline"))
         try:
             compiled(torch.ones(2))
         except NameError:
@@ -2329,7 +2379,9 @@ class TestCfgExceptions(TestCase):
             except ValueError:  # noqa: TRY203
                 raise
 
-        compiled = torch.rewrite(f, fallback=False, inline=False, callees=False)
+        compiled = torch.rewrite(
+            f, fallback=False, passes=without("inline"), callees=False
+        )
         try:
             compiled(-1)
         except ValueError:
@@ -2445,7 +2497,7 @@ class TestCfgWith(TestCase):
 
         linear = torch.nn.Linear(3, 2)
         # Without the shortcut through Module.__call__, that is compiled too.
-        compiled = torch.rewrite(run, fallback=False, shortcuts=False)
+        compiled = torch.rewrite(run, fallback=False, passes=without("shortcuts"))
         x = torch.randn(4, 3)
         for _ in range(3):
             self.assertEqual(compiled(linear, x), run(linear, x))
@@ -3026,7 +3078,11 @@ class TestCfgFrames(TestCase):
                 tb = e.__traceback__.tb_next
                 return dict(tb.tb_frame.f_locals), dict(tb.tb_next.tb_frame.f_locals)
 
-        compiled = torch.rewrite(frame_calls_fails, fallback=False, inline=inline)
+        compiled = torch.rewrite(
+            frame_calls_fails,
+            passes=canonical if inline else without("inline"),
+            fallback=False,
+        )
         for _ in range(3):
             self.assertEqual(variables(compiled), variables(frame_calls_fails))
         self.assertEqual(variables(compiled), ({"a": 1, "d": 2}, {"b": 2, "c": [2]}))
@@ -3117,7 +3173,11 @@ class TestCfgFrames(TestCase):
 
     @parametrize("inline", (False, True))
     def test_the_stack_shows_compiled_functions(self, inline):
-        compiled = torch.rewrite(frame_outer, fallback=False, inline=inline)
+        compiled = torch.rewrite(
+            frame_outer,
+            passes=canonical if inline else without("inline"),
+            fallback=False,
+        )
         self.assertEqual(compiled(), frame_outer())
         self.assertEqual(compiled()[0][1][:2], ["frame_inner", "frame_outer"])
         stats = compiled.stats()
@@ -3158,7 +3218,11 @@ class TestCfgFrames(TestCase):
                 back = last.tb_frame.f_back.f_code.co_name
                 return [(f.name, f.lineno, f.colno, f.end_colno) for f in frames], back
 
-        compiled = torch.rewrite(frame_calls_divides, fallback=False, inline=inline)
+        compiled = torch.rewrite(
+            frame_calls_divides,
+            passes=canonical if inline else without("inline"),
+            fallback=False,
+        )
         self.assertEqual(entries(compiled), entries(frame_calls_divides))
         self.assertEqual(
             [entry[0] for entry in entries(compiled)[0]],
@@ -3222,7 +3286,11 @@ class TestCfgFrames(TestCase):
 
     @parametrize("inline", (False, True))
     def test_calls_made_under_a_trace_function_run_in_the_interpreter(self, inline):
-        compiled = torch.rewrite(frame_sets_a_trace, fallback=False, inline=inline)
+        compiled = torch.rewrite(
+            frame_sets_a_trace,
+            passes=canonical if inline else without("inline"),
+            fallback=False,
+        )
         for _ in range(4):
             self.assertEqual(compiled(3), frame_sets_a_trace(3))
         events = [event for event, _ in compiled(3)[3]]
@@ -3492,7 +3560,9 @@ class TestCfgLifetimes(TestCase):
                 result = str(e)
             return result, log
 
-        compiled = torch.rewrite(fn, fallback=False, unroll=unroll)
+        compiled = torch.rewrite(
+            fn, passes=canonical if unroll else without("unroll"), fallback=False
+        )
         expected = run(fn)
         self.assertEqual(run(compiled), expected)
         self.assertEqual(run(compiled), expected)
@@ -3627,8 +3697,10 @@ class TestCfgShortcuts(TestCase):
             for got, expected in zip(compiled(net), shortcut_attributes(net)):
                 self.assertIs(got, expected)
         self.assertEqual(self.getattr_calls(compiled, net), 0)
-        without = torch.rewrite(shortcut_attributes, fallback=False, shortcuts=False)
-        self.assertEqual(self.getattr_calls(without, net), 3)
+        plain = torch.rewrite(
+            shortcut_attributes, fallback=False, passes=without("shortcuts")
+        )
+        self.assertEqual(self.getattr_calls(plain, net), 3)
         net.scale = torch.nn.Parameter(torch.zeros(2))
         net.plain = 7
         self.assertIs(compiled(net)[1], net.scale)
@@ -3662,7 +3734,9 @@ class TestCfgShortcuts(TestCase):
 
     def test_without_shortcuts(self):
         net, x = ShortcutNet(), torch.randn(4, 3)
-        compiled = torch.rewrite(shortcut_call, fallback=False, shortcuts=False)
+        compiled = torch.rewrite(
+            shortcut_call, fallback=False, passes=without("shortcuts")
+        )
         self.assertEqual(compiled(net, x), net(x))
         self.assertIn("Module._call_impl", compiled.stats()["compiled_callees"])
 
@@ -3708,7 +3782,7 @@ class TestCfgDemotion(TestCase):
 
     def test_python_callee_is_left_to_the_interpreter(self):
         compiled = torch.rewrite(
-            demote_caller, fallback=False, demote=True, inline=False
+            demote_caller, fallback=False, demote=True, passes=without("inline")
         )
         x = torch.ones(2)
         for _ in range(200):
@@ -3741,7 +3815,7 @@ class TestCfgDemotion(TestCase):
         # Five functions deep. Were each measured from scratch once the one
         # it calls is settled, the outermost would still be at it.
         compiled = torch.rewrite(
-            demote_chain_4, fallback=False, demote=True, inline=False
+            demote_chain_4, fallback=False, demote=True, passes=without("inline")
         )
         for _ in range(150):
             self.assertEqual(compiled(300), demote_python(300))
@@ -3757,7 +3831,7 @@ class TestCfgDemotion(TestCase):
         # as fast as they will be once the callee, a good part of each of
         # them, is with the interpreter.
         compiled = torch.rewrite(
-            demote_tensor_caller, fallback=False, demote=True, inline=False
+            demote_tensor_caller, fallback=False, demote=True, passes=without("inline")
         )
         x = torch.ones(2)
         for _ in range(600):
@@ -3799,7 +3873,7 @@ class TestCfgDemotion(TestCase):
 
     def test_nothing_is_demoted_when_turned_off(self):
         compiled = torch.rewrite(
-            demote_caller, fallback=False, demote=False, inline=False
+            demote_caller, fallback=False, demote=False, passes=without("inline")
         )
         for _ in range(200):
             compiled(300, torch.ones(2))
@@ -3815,7 +3889,9 @@ class TestCfgDemotion(TestCase):
         def caller(x):
             return fails(x)
 
-        compiled = torch.rewrite(caller, fallback=False, demote=True, inline=False)
+        compiled = torch.rewrite(
+            caller, fallback=False, demote=True, passes=without("inline")
+        )
         for x in range(200):
             self.assertEqual(call_outcome(compiled, x), call_outcome(caller, x))
 
@@ -3867,8 +3943,7 @@ class TestCfgEndToEnd(TestCase):
         # An inlined call, an unrolled loop, a branch on a shape that is
         # narrowed under a guard, a loop on tensor data and a Python side
         # effect, in one graph.
-        narrowing = torch.rewrite.Pipeline.narrowing()
-        compiled = torch.rewrite(e2e_program, pipeline=narrowing, fallback=False)
+        compiled = torch.rewrite(e2e_program, passes=narrowing(), fallback=False)
         log, expected_log = [], []
         for batch in (4, 1, 4, 8, 1):
             x, y = torch.randn(batch, 3), torch.randn(3)
@@ -4516,7 +4591,7 @@ class TestCfgWorkspace(TestCase):
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.rewrite runtime not built")
 class TestCfgRegions(TestCase):
-    """Runs of a block compiled as one graph by ``backend=``."""
+    """Runs of a block compiled as one graph by a ``graphs`` pass."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -4535,7 +4610,7 @@ class TestCfgRegions(TestCase):
         # until its graph is made: what they call is called by the function.
         graphs = lambda graph, example: graph  # noqa: E731
         fn = frame_reads_amid_tensor_work
-        compiled = torch.rewrite(fn, backend=graphs, fallback=False)
+        compiled = torch.rewrite(fn, passes=with_graphs(graphs), fallback=False)
         x = torch.ones(3)
         for _ in range(8):
             self.assertEqual(compiled(x), fn(x))
@@ -4549,7 +4624,7 @@ class TestCfgRegions(TestCase):
     )
     def test_region_binds_the_variables_it_gives(self, f, args):
         graphs = lambda graph, example: graph  # noqa: E731
-        compiled = torch.rewrite(f, backend=graphs, fallback=False)
+        compiled = torch.rewrite(f, passes=with_graphs(graphs), fallback=False)
         refs = []
         for i in range(8):
             x = torch.full((3,), float(i))
@@ -4593,7 +4668,7 @@ class TestCfgRegions(TestCase):
             return run
 
         fn = region_accumulates
-        compiled = torch.rewrite(fn, backend=backend, fallback=False)
+        compiled = torch.rewrite(fn, passes=with_graphs(backend), fallback=False)
         x, mine, theirs = torch.ones(3), torch.zeros(3), torch.zeros(3)
         for _ in range(8):
             self.assertEqual(compiled(x, mine), fn(x, theirs))
@@ -4605,7 +4680,9 @@ class TestCfgRegions(TestCase):
     def test_module_call_is_one_graph(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for _ in range(6):
                 x = torch.randn(2, 3, 6, 6)
@@ -4631,7 +4708,9 @@ class TestCfgRegions(TestCase):
                 opt = torch.optim.Adam(model.parameters(), lr=0.01)
             step = region_step
             if compile_step:
-                step = torch.rewrite(step, backend="aot_eager", fallback=False)
+                step = torch.rewrite(
+                    step, passes=with_graphs("aot_eager"), fallback=False
+                )
             losses, nodes = [], []
             for _ in range(10):
                 x, y = torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,))
@@ -4660,7 +4739,9 @@ class TestCfgRegions(TestCase):
     def test_branch_on_data_stays_a_branch(self):
         torch.manual_seed(0)
         model = RegionBranch().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         signs = set()
         with torch.no_grad():
             for i in range(24):
@@ -4687,7 +4768,7 @@ class TestCfgRegions(TestCase):
             return graph
 
         compiled = torch.rewrite(
-            region_chain, backend=backend, fallback=False, region_max_variants=3
+            region_chain, passes=with_graphs(backend, max_variants=3), fallback=False
         )
         f32, f64, i64, i32 = torch.float32, torch.float64, torch.int64, torch.int32
         for dtype in (f32, f32, f32, f32, f64, f32, f64, i64, i32, i64, i32, f32):
@@ -4708,7 +4789,9 @@ class TestCfgRegions(TestCase):
 
         torch.manual_seed(0)
         model = RegionLayers().eval()
-        compiled = torch.rewrite(region_infer, backend=backend, fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs(backend), fallback=False
+        )
         with torch.no_grad():
             for _ in range(8):
                 x = torch.randn(3, 6)
@@ -4730,7 +4813,7 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionLayers().eval()
         compiled = torch.rewrite(
-            region_infer, backend=backend, fallback=False, region_max_variants=2
+            region_infer, passes=with_graphs(backend, max_variants=2), fallback=False
         )
         with torch.no_grad():
             for n in (3, 3, 3, 3, 3, 3, 3, 3, 4, 5, 6, 4, 9):
@@ -4758,7 +4841,9 @@ class TestCfgRegions(TestCase):
             graphs.append(len(inputs))
             return graph
 
-        compiled = torch.rewrite(region_chain, backend=backend, fallback=False)
+        compiled = torch.rewrite(
+            region_chain, passes=with_graphs(backend), fallback=False
+        )
         for _ in range(5):
             x, y = torch.randn(3), torch.randn(3)
             self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
@@ -4766,7 +4851,9 @@ class TestCfgRegions(TestCase):
         self.assertEqual(sorted(graphs), [1, 2])
 
     def test_small_region_is_left_to_the_vm(self):
-        compiled = torch.rewrite(region_small, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_small, passes=with_graphs("aot_eager"), fallback=False
+        )
         for _ in range(6):
             x, y = torch.randn(3), torch.randn(3)
             self.assertEqual(compiled(x, y), x + y, atol=0, rtol=0)
@@ -4780,7 +4867,9 @@ class TestCfgRegions(TestCase):
     def test_module_changes_are_noticed(self):
         torch.manual_seed(0)
         model = RegionNet()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
 
         def check():
             for _ in range(3):
@@ -4816,7 +4905,9 @@ class TestCfgRegions(TestCase):
     def test_frozen_parameter(self):
         torch.manual_seed(0)
         model = RegionNet().train()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         for i in range(8):
             if i == 5:
                 model.conv.weight.requires_grad_(False)
@@ -4829,7 +4920,9 @@ class TestCfgRegions(TestCase):
     def test_effects_on_python_objects_stay_in_the_vm(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_logging, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_logging, passes=with_graphs("aot_eager"), fallback=False
+        )
         log, expected_log = [], []
         with torch.no_grad():
             for n in (2, 2, 2, 3, 2, 2, 4, 2):
@@ -4844,7 +4937,9 @@ class TestCfgRegions(TestCase):
     def test_module_that_sets_an_attribute(self):
         torch.manual_seed(0)
         model = RegionCounting().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for i in range(8):
                 x = torch.randn(2, 3, 6, 6)
@@ -4861,7 +4956,9 @@ class TestCfgRegions(TestCase):
         # does to the module is taken back, and the call is not a region.
         torch.manual_seed(0)
         model = RegionCountingQuietly().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for i in range(8):
                 x = torch.randn(2, 3, 6, 6)
@@ -4893,7 +4990,7 @@ class TestCfgRegions(TestCase):
         }
         backward = vars(torch.Tensor)["backward"]
         model, x = MakesAModule(), torch.randn(2, 4)
-        compiled = torch.rewrite(f, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(f, passes=with_graphs("aot_eager"), fallback=False)
         for _ in range(5):
             self.assertEqual(compiled(model, x), f(model, x), atol=0, rtol=0)
         self.assertEqual(len(self.compiled_regions(compiled)), 1)
@@ -4907,7 +5004,9 @@ class TestCfgRegions(TestCase):
     def test_module_with_a_hook(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         seen = []
         with torch.no_grad():
             for i in range(10):
@@ -4933,7 +5032,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model, reference = RegionNet().train(), RegionNet().train()
         reference.load_state_dict(model.state_dict())
-        compiled = torch.rewrite(region_frozen, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_frozen, passes=with_graphs("aot_eager"), fallback=False
+        )
         for _ in range(8):
             x = torch.randn(2, 3, 6, 6)
             model.zero_grad()
@@ -4953,7 +5054,9 @@ class TestCfgRegions(TestCase):
         # and the block holds them alive: a region must not take them in.
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_loop, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_loop, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for _ in range(8):
                 batches = [torch.randn(2, 3, 6, 6) for _ in range(3)]
@@ -4971,7 +5074,9 @@ class TestCfgRegions(TestCase):
 
             return broken
 
-        compiled = torch.rewrite(region_chain, backend=backend, fallback=False)
+        compiled = torch.rewrite(
+            region_chain, passes=with_graphs(backend), fallback=False
+        )
         for _ in range(6):
             x, y = torch.randn(3), torch.randn(3)
             self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
@@ -4988,7 +5093,9 @@ class TestCfgRegions(TestCase):
             opt = torch.optim.SGD(model.parameters(), lr=0.1)
             step = region_step_plain
             if compile_step:
-                step = torch.rewrite(step, backend="aot_eager", fallback=False)
+                step = torch.rewrite(
+                    step, passes=with_graphs("aot_eager"), fallback=False
+                )
             losses = [step(model, opt, torch.randn(5, 4, 6)).item() for _ in range(8)]
             return model.state_dict(), losses
 
@@ -5000,7 +5107,9 @@ class TestCfgRegions(TestCase):
 
     def test_error_in_a_region(self):
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for shape in [(2, 3, 6, 6)] * 4 + [
                 (2, 3, 5, 5),
@@ -5020,7 +5129,7 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionNet().eval()
         compiled = torch.rewrite(
-            region_infer, backend="aot_eager", fallback=False, demote=True
+            region_infer, passes=with_graphs("aot_eager"), fallback=False, demote=True
         )
         with torch.no_grad():
             x = torch.randn(2, 3, 6, 6)
@@ -5034,7 +5143,9 @@ class TestCfgRegions(TestCase):
     def test_object_made_by_a_region_is_made_on_every_call(self):
         torch.manual_seed(0)
         model = RegionStateful().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         results = []
         with torch.no_grad():
             for _ in range(6):
@@ -5054,7 +5165,9 @@ class TestCfgRegions(TestCase):
     def test_object_that_grows_on_every_call_is_left_to_the_vm(self):
         torch.manual_seed(0)
         model = RegionStateful().eval()
-        compiled = torch.rewrite(region_cached, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_cached, passes=with_graphs("aot_eager"), fallback=False
+        )
         cache, expected_cache = RegionCache(), RegionCache()
         with torch.no_grad():
             for _ in range(14):
@@ -5082,7 +5195,9 @@ class TestCfgRegions(TestCase):
 
         torch.manual_seed(0)
         model = RegionStages().eval()
-        compiled = torch.rewrite(region_stages, backend=backend, fallback=False)
+        compiled = torch.rewrite(
+            region_stages, passes=with_graphs(backend), fallback=False
+        )
         log, expected_log = [], []
         with torch.no_grad():
             for i in range(14):
@@ -5126,7 +5241,7 @@ class TestCfgRegions(TestCase):
 
             return (x.sin().cos() * scale).exp().tanh(), shared
 
-        compiled = torch.rewrite(f, backend=backend, fallback=False)
+        compiled = torch.rewrite(f, passes=with_graphs(backend), fallback=False)
         x = torch.randn(4)
         for scale in (2.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0):
             out, shared = compiled(x, scale)
@@ -5149,7 +5264,7 @@ class TestCfgRegions(TestCase):
         def f(x):
             return x.reshape(2, -1).sin().view(-1, 2).cos().exp().tanh()
 
-        compiled = torch.rewrite(f, backend=backend, fallback=False)
+        compiled = torch.rewrite(f, passes=with_graphs(backend), fallback=False)
         for _ in range(5):
             x = torch.randn(4, 3)
             self.assertEqual(compiled(x), f(x), atol=0, rtol=0)
@@ -5158,7 +5273,9 @@ class TestCfgRegions(TestCase):
         self.assertEqual(len([t for t in targets if "reshape" in t]), 2)
 
     def test_named_tuples_and_sets_of_values_are_inputs(self):
-        compiled = torch.rewrite(region_pair, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_pair, passes=with_graphs("aot_eager"), fallback=False
+        )
         for i in range(12):
             pair = RegionPair(torch.randn(3), torch.randn(3))
             kinds = {"double"} if i % 2 else {"single", "plain"}
@@ -5178,7 +5295,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionRecurrent().eval()
         weights = list(model.lstm._flat_weights)
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for _ in range(6):
                 x = torch.randn(5, 4, 6)
@@ -5190,7 +5309,9 @@ class TestCfgRegions(TestCase):
     def test_tensor_kept_as_a_plain_attribute(self):
         torch.manual_seed(0)
         model = RegionStateful().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for i in range(8):
                 if i == 5:
@@ -5206,7 +5327,9 @@ class TestCfgRegions(TestCase):
     def test_tensor_that_is_not_an_input_is_not_a_constant(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_global, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_global, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for i in range(8):
                 if i == 5:
@@ -5229,7 +5352,9 @@ class TestCfgRegions(TestCase):
             graphs.append(1)
             return graph
 
-        compiled = torch.rewrite(region_counter, backend=backend, fallback=False)
+        compiled = torch.rewrite(
+            region_counter, passes=with_graphs(backend), fallback=False
+        )
         x = torch.randn(4)
         for i in range(40):
             scale = i / 7
@@ -5244,7 +5369,9 @@ class TestCfgRegions(TestCase):
     def test_call_without_tensors_is_not_frozen(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_clock, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_clock, passes=with_graphs("aot_eager"), fallback=False
+        )
         starts = []
         with torch.no_grad():
             for _ in range(8):
@@ -5258,7 +5385,9 @@ class TestCfgRegions(TestCase):
     def test_python_random_is_not_frozen(self):
         torch.manual_seed(0)
         model = RegionRandom().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             x = torch.randn(2, 3, 6, 6)
             outputs = []
@@ -5276,7 +5405,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionNet().train()
         opt = torch.optim.Adam(model.parameters(), lr=0.01)
-        step = torch.rewrite(region_step, backend="aot_eager", fallback=False)
+        step = torch.rewrite(
+            region_step, passes=with_graphs("aot_eager"), fallback=False
+        )
         for _ in range(8):
             step(model, opt, torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,)))
         callees = step.stats()["compiled_callees"]
@@ -5287,11 +5418,9 @@ class TestCfgRegions(TestCase):
         plumbing = ("Adam", "Optimizer", "_single_tensor", "_multi_tensor", "adam")
         self.assertEqual([w for w in where if w.startswith(plumbing)], [])
 
-    def test_backend_needs_specialization(self):
-        with self.assertRaisesRegex(ValueError, "specialize=True"):
-            torch.rewrite(region_infer, backend="aot_eager", specialize=False)
+    def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
-            torch.rewrite(region_infer, backend="nope")
+            torch.rewrite(region_infer, passes=with_graphs("nope"))
 
     def counting(self, graphs):
         from torch._dynamo.backends.debugging import aot_eager
@@ -5309,7 +5438,7 @@ class TestCfgRegions(TestCase):
         model = RegionLinears().eval()
         graphs = []
         compiled = torch.rewrite(
-            region_running, backend=self.counting(graphs), fallback=False
+            region_running, passes=with_graphs(self.counting(graphs)), fallback=False
         )
         stats, expected_stats = RegionAverage(), RegionAverage()
         with torch.no_grad():
@@ -5328,7 +5457,9 @@ class TestCfgRegions(TestCase):
     def test_region_stores_into_a_dict_it_is_given(self):
         torch.manual_seed(0)
         model = RegionLinears().eval()
-        compiled = torch.rewrite(region_remember, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_remember, passes=with_graphs("aot_eager"), fallback=False
+        )
         memory, expected_memory = {}, {}
         with torch.no_grad():
             for _ in range(8):
@@ -5348,7 +5479,9 @@ class TestCfgRegions(TestCase):
     def test_object_made_in_a_region_is_made_on_every_call(self):
         torch.manual_seed(0)
         model = RegionStarts().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         states = []
         with torch.no_grad():
             for _ in range(8):
@@ -5369,7 +5502,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model, reference = RegionMasked().eval(), RegionMasked().eval()
         reference.load_state_dict(model.state_dict())
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for n in (4, 4, 4, 4, 4, 5, 6, 3, 4):
                 x = torch.randn(n, 6)
@@ -5384,7 +5519,9 @@ class TestCfgRegions(TestCase):
     def test_path_ends_before_a_call_that_fails_part_way(self):
         torch.manual_seed(0)
         model = RegionLinears().eval()
-        compiled = torch.rewrite(region_partway, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_partway, passes=with_graphs("aot_eager"), fallback=False
+        )
         log, expected_log = [], []
         with torch.no_grad():
             for n in (4, 4, 4, 4, 4, 4, 5, 6):
@@ -5408,7 +5545,7 @@ class TestCfgRegions(TestCase):
         model = RegionLinears().eval()
         graphs = []
         compiled = torch.rewrite(
-            region_sized, backend=self.counting(graphs), fallback=False
+            region_sized, passes=with_graphs(self.counting(graphs)), fallback=False
         )
         with torch.no_grad():
             for n in (4, 4, 4, 4, 5, 6, 7, 1, 9, 4, 12, 1, 300):
@@ -5432,7 +5569,7 @@ class TestCfgRegions(TestCase):
         model = RegionLinears().eval()
         graphs = []
         compiled = torch.rewrite(
-            region_branching, backend=self.counting(graphs), fallback=False
+            region_branching, passes=with_graphs(self.counting(graphs)), fallback=False
         )
         with torch.no_grad():
             for n in (2, 2, 2, 2, 3, 6, 8, 3, 4, 5, 2, 40):
@@ -5448,7 +5585,7 @@ class TestCfgRegions(TestCase):
     def test_integer_that_varies_is_an_input_of_the_graph(self):
         graphs = []
         compiled = torch.rewrite(
-            region_counter, backend=self.counting(graphs), fallback=False
+            region_counter, passes=with_graphs(self.counting(graphs)), fallback=False
         )
         x = torch.randn(4)
         for i in range(40):
@@ -5462,7 +5599,7 @@ class TestCfgRegions(TestCase):
         model = RegionLinears().eval()
         graphs = []
         compiled = torch.rewrite(
-            region_running, backend=self.counting(graphs), fallback=False
+            region_running, passes=with_graphs(self.counting(graphs)), fallback=False
         )
         stats, expected_stats = RegionRunningMean(), RegionRunningMean()
         with torch.no_grad():
@@ -5491,7 +5628,7 @@ class TestCfgRegions(TestCase):
         model = RegionLinears().eval()
         graphs = []
         compiled = torch.rewrite(
-            region_pick, backend=self.counting(graphs), fallback=False
+            region_pick, passes=with_graphs(self.counting(graphs)), fallback=False
         )
         with torch.no_grad():
             for step in range(30):
@@ -5509,7 +5646,9 @@ class TestCfgRegions(TestCase):
         """Runs a model that asks what a number is, and returns the
         conditions of the open variants of the region around its call."""
         model = RegionAsks(how).eval()
-        compiled = torch.rewrite(region_asked, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_asked, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for rows, n in calls:
                 x = torch.randn(rows, 6)
@@ -5535,7 +5674,9 @@ class TestCfgRegions(TestCase):
     def test_text_of_a_size(self):
         torch.manual_seed(0)
         model = RegionNames().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with torch.no_grad():
             for n in (4, 4, 4, 4, 5, 6, 7, 5):
                 x = torch.randn(n, 6)
@@ -5547,7 +5688,9 @@ class TestCfgRegions(TestCase):
         self.assertEqual(region["open"], [])
 
     def test_strides_select_a_variant(self):
-        compiled = torch.rewrite(region_chain, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_chain, passes=with_graphs("aot_eager"), fallback=False
+        )
         for _ in range(6):
             x, y = torch.randn(4, 4), torch.randn(4, 4)
             self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
@@ -5673,7 +5816,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionNet().eval()
         x = torch.randn(2, 3, 6, 6)
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with self.building_in():
             with torch.no_grad():
                 for _ in range(6):
@@ -5689,7 +5834,9 @@ class TestCfgRegions(TestCase):
             (region,) = self.compiled_regions(compiled)
             self.assertEqual((region["variants"], region["frozen"]), (3, 1))
             off = torch.rewrite(
-                region_infer, backend="aot_eager", fallback=False, freeze=False
+                region_infer,
+                passes=with_graphs("aot_eager", freeze=False),
+                fallback=False,
             )
             with torch.no_grad():
                 model.eval()
@@ -5719,7 +5866,9 @@ class TestCfgRegions(TestCase):
             else:
                 model.load_state_dict(RegionNet().state_dict())
 
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with self.building_in():
             # Compiled again with what changed as an input: for "load", all.
             for compiles in (1, 2, 2, 2):
@@ -5735,7 +5884,9 @@ class TestCfgRegions(TestCase):
     def test_method_of_a_tensor_does_not_keep_the_tensor(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_method, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_method, passes=with_graphs("aot_eager"), fallback=False
+        )
         x = torch.randn(2, 3, 6, 6)
         batches = []
         with torch.no_grad():
@@ -5755,7 +5906,9 @@ class TestCfgRegions(TestCase):
     def test_module_made_for_every_call_ends_the_region(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_loss, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_loss, passes=with_graphs("aot_eager"), fallback=False
+        )
         y = torch.randint(0, 5, (2,))
         with torch.no_grad():
             for _ in range(40):
@@ -5775,7 +5928,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionTwoHeads().eval()
         x = torch.randn(2, 3, 6, 6)
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with self.building_in(), torch.no_grad():
             for i in range(12):
                 if i >= 6:
@@ -5789,7 +5944,9 @@ class TestCfgRegions(TestCase):
     def test_buffer_a_region_writes_is_not_built_in(self):
         torch.manual_seed(0)
         model = RegionCounted().eval()
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with self.building_in():
             with torch.no_grad():
                 for _ in range(8):
@@ -5804,7 +5961,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionNet().eval()
         x = torch.randn(2, 3, 6, 6)
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with self.building_in(), torch.no_grad():
             for i in range(12):
                 if i in (7, 9):
@@ -5829,7 +5988,9 @@ class TestCfgRegions(TestCase):
         array = np.random.rand(4, 3, 3, 3).astype(np.float32)
         model.conv.weight = torch.nn.Parameter(torch.from_numpy(array))
         x = torch.randn(2, 3, 6, 6)
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with self.building_in(), torch.no_grad():
             for i in range(10):
                 if i >= 6:
@@ -5868,7 +6029,9 @@ class TestCfgRegions(TestCase):
         torch.manual_seed(0)
         model = RegionAlike().eval()
         x = torch.randn(2, 3, 6, 6)
-        compiled = torch.rewrite(region_infer, backend="aot_eager", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
         with self.building_in(), torch.no_grad():
             for _ in range(8):
                 self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
@@ -5882,7 +6045,9 @@ class TestCfgRegions(TestCase):
     def test_inductor_folds_built_in_weights(self):
         torch.manual_seed(0)
         model = RegionNet().eval()
-        compiled = torch.rewrite(region_infer, backend="inductor", fallback=False)
+        compiled = torch.rewrite(
+            region_infer, passes=with_graphs("inductor"), fallback=False
+        )
         with torch.no_grad():
             model.bn.running_mean.uniform_(-1, 1)
             model.bn.running_var.uniform_(0.5, 2)
@@ -5903,7 +6068,9 @@ class TestCfgRegions(TestCase):
             opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
             step = region_step
             if compile_step:
-                step = torch.rewrite(step, backend="inductor", fallback=False)
+                step = torch.rewrite(
+                    step, passes=with_graphs("inductor"), fallback=False
+                )
             losses = []
             for _ in range(8):
                 x, y = torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,))

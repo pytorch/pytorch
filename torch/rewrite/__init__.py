@@ -1,15 +1,18 @@
-"""torch.rewrite: a prototype compiler that captures control-flow graphs.
+"""torch.rewrite: a function as a control-flow graph, and a list of rewrites.
 
 .. warning::
     This is an experiment and a temporary API. Everything about it may change.
 
 ``torch.rewrite(fn)`` turns the bytecode of ``fn`` into one control-flow
-graph in SSA form, branches and loops included, and runs it in a small VM.
-There is no symbolic tracing and there are no fake tensors: the first run of
-each basic block is its trace. It runs on the real tensors, with a hook in the
-dispatcher recording which kernel every tensor operation resolved to. The
-block is then specialized so that those operations call their post-dispatch
-kernel directly, guarded on the dispatch keys of their operands::
+graph in SSA form, branches and loops included, runs it in a small VM, and
+applies a list of passes to it. With no passes the function does what
+Python does, instruction for instruction; every pass is a rewrite that
+leaves the result what it was. There is no symbolic tracing and there are no
+fake tensors: the first run of each basic block is its trace. It runs on the
+real tensors, with a hook in the dispatcher recording which kernel every
+tensor operation resolved to. The standard passes then specialize the block
+so that those operations call their post-dispatch kernel directly, guarded
+on the dispatch keys of their operands::
 
     @torch.rewrite
     def f(x, y):
@@ -23,21 +26,21 @@ kernel directly, guarded on the dispatch keys of their operands::
 
 Nothing is specialized on shapes unless a pass asks for it: every dimension is
 dynamic. A pass can narrow a dimension to a range by attaching a guard; when
-such a guard fails, only the basic block that carries it is recompiled.
+such a guard fails, only the basic block that carries it is rewritten again.
 
 Calls are followed. A call of a Python function of the same module is inlined
 under a guard on the function; any other Python function, method or
-``nn.Module`` is compiled the first time compiled code calls it; and
+``nn.Module`` is rewritten the first time rewritten code calls it; and
 ``for i in range(k)`` with a small constant ``k`` is unrolled. Closures,
 ``try``/``except``/``finally``, ``with``, imports and class statements are
-compiled. A compiled function runs under a frame of the interpreter that has
+handled. A rewritten function runs under a frame of the interpreter that has
 its variables, so what looks for them there finds them: ``locals()``,
 ``eval``, ``exec``, ``super()`` without arguments, a traceback, a debugger.
 Generators and coroutines run in the interpreter, and so does what they
 call; so does what is called while a trace function (``sys.settrace``) is
 set. A Python side effect does not split the function: it is
 one more instruction of the graph, between the specialized ones. A whole
-training step can therefore be one compiled function, with the same results
+training step can therefore be one rewritten function, with the same results
 bit for bit as the interpreter::
 
     @torch.rewrite
@@ -52,9 +55,14 @@ bit for bit as the interpreter::
     step(model, opt, x, y)
     step.stats()["compiled_callees"]  # Module._call_impl, Linear.forward, SGD.step, ...
 
-What is compiled is described by a :class:`Pipeline`, an ordered list of
-passes that is run over each block until it stops changing. Passes are
-built-in ones, named by a string, or Python callables taking a ``Region``.
+What is done to a function is its list of passes, ``passes=``, in the order
+they are applied. :data:`canonical` is the standard list;
+:data:`inductor` is the pass that hands tensor work to AOTAutograd and
+Inductor; and a pass of one's own is a Python callable taking a ``Region``,
+or one written in Rust and loaded from a library::
+
+    @torch.rewrite(passes=[torch.rewrite.inductor, *torch.rewrite.canonical])
+    def forward(model, x): ...
 """
 
 import functools
@@ -73,88 +81,161 @@ from . import _regions, _shortcuts
 
 
 __all__ = [
-    "Pipeline",
+    "Graphs",
     "Unsupported",
+    "canonical",
+    "graphs",
+    "inductor",
     "is_available",
     "memory",
     "regions",
     "rewrite",
 ]
 
-Pass = str | Callable[[Any], bool]
-
 
 class Unsupported(RuntimeError):
-    """The function uses something the prototype cannot compile."""
+    """The function uses something the prototype cannot rewrite."""
 
 
-class Pipeline:
-    """An ordered list of CFG passes.
+class Graphs:
+    """The pass that hands tensor work to a graph compiler; see :func:`graphs`."""
 
-    The passes run in order over a region of the graph, and the whole list is
-    repeated until no pass changes the region anymore. A pass is the name of a
-    built-in pass or a callable ``pass_(region) -> bool`` that returns whether
-    it changed the region.
+    __slots__ = ("backend", "freeze", "max_variants", "min_ops")
 
-    Built-in passes:
-
-    - ``resolve_dispatch``: operations the profile found to be a single
-      dispatcher call become direct calls of the post-dispatch kernel.
-    - ``method_calls``: ``x.f(...)`` calls that stay generic are made without
-      creating a bound method object.
-    - ``tensor_accessors``: ``x.shape[i]``, ``x.size(i)``, ``x.dim()`` and
-      ``x.ndim`` on tensors become plain SSA integers.
-    - ``narrow_dims``: a comparison of a dimension with a constant is folded to
-      the outcome last observed, under a guard that pins the dimension to the
-      range of sizes with that outcome. Not part of the default pipeline.
-    - ``fold``: folds truthiness tests and branches on constants.
-    - ``dce``: drops instructions whose result is not needed.
-
-    Pipelines are immutable; the methods return new ones.
-    """
-
-    def __init__(self, passes: Iterable[Pass]) -> None:
-        self.passes: tuple[Pass, ...] = tuple(passes)
-        for p in self.passes:
-            if not isinstance(p, str) and not callable(p):
-                raise TypeError(f"a pass is a name or a callable, not {type(p)}")
-
-    @classmethod
-    def default(cls) -> "Pipeline":
-        """Direct kernel calls, with every dimension left dynamic."""
-        return cls(
-            ["resolve_dispatch", "tensor_accessors", "method_calls", "fold", "dce"]
-        )
-
-    @classmethod
-    def narrowing(cls) -> "Pipeline":
-        """The default pipeline plus ``narrow_dims``."""
-        return cls.default().insert_before("fold", "narrow_dims")
-
-    def append(self, pass_: Pass) -> "Pipeline":
-        """A pipeline with ``pass_`` added at the end."""
-        return Pipeline([*self.passes, pass_])
-
-    def insert_before(self, name: str, pass_: Pass) -> "Pipeline":
-        """A pipeline with ``pass_`` added in front of the pass called ``name``."""
-        i = self.passes.index(name)
-        return Pipeline([*self.passes[:i], pass_, *self.passes[i:]])
-
-    def insert_after(self, name: str, pass_: Pass) -> "Pipeline":
-        """A pipeline with ``pass_`` added behind the pass called ``name``."""
-        i = self.passes.index(name) + 1
-        return Pipeline([*self.passes[:i], pass_, *self.passes[i:]])
-
-    def remove(self, name: str) -> "Pipeline":
-        """A pipeline without the pass called ``name``."""
-        return Pipeline([p for p in self.passes if p != name])
+    def __init__(
+        self,
+        backend: str | Callable[..., Any],
+        min_ops: int = 4,
+        max_variants: int = 32,
+        freeze: bool | None = None,
+    ) -> None:
+        self.backend = backend
+        self.min_ops = min_ops
+        self.max_variants = max_variants
+        self.freeze = freeze
 
     def __repr__(self) -> str:
-        names = [
-            p if isinstance(p, str) else getattr(p, "__name__", repr(p))
-            for p in self.passes
-        ]
-        return f"Pipeline({names})"
+        name = self.backend if isinstance(self.backend, str) else "a callable"
+        return f"torch.rewrite.graphs({name!r})"
+
+
+def graphs(
+    backend: str | Callable[..., Any] = "inductor",
+    *,
+    min_ops: int = 4,
+    max_variants: int = 32,
+    freeze: bool | None = None,
+) -> Graphs:
+    """A pass that hands the tensor work of each basic block to a graph compiler.
+
+    ``"inductor"`` traces every run of instructions of a block that a trace
+    can capture, together with what those instructions call, into one ATen
+    graph, and compiles it with AOTAutograd and Inductor: with gradients
+    enabled, the tensors such a region returns have one compiled autograd
+    function as their ``grad_fn``. The outermost region that traces is the
+    one that is compiled; where an instruction does not trace, the VM runs it
+    and the blocks of what it calls are tried in turn. ``"aot_eager"`` builds
+    the same graphs and runs them with the eager kernels. A callable
+    ``backend(graph_module, example_inputs)`` returning a callable is used as
+    given. ``torch.rewrite.regions(fn)`` reports what was compiled and what
+    was left to the VM, with the reason. See ``torch/rewrite/_regions.py``
+    for what a compiled region checks on every call and what it does not.
+
+    The pass traces the instructions as the function wrote them, so it comes
+    before the passes that rewrite single instructions:
+    ``passes=[torch.rewrite.inductor, *torch.rewrite.canonical]``.
+
+    Args:
+        backend: see above.
+        min_ops: a region with fewer tensor operations than this is left to
+            the VM, whose direct kernel calls are cheaper than entering a
+            compiled graph.
+        max_variants: how many graphs a region gives the backend before
+            further kinds of inputs (dtypes, ranks, modules, modes) run its
+            instructions as they are. Inputs that trace to the same graph, as
+            the layers of a model do when a region is called with one after
+            the other, share what the backend made of it, and sizes that
+            differ from call to call are left open in one graph rather than
+            compiled one by one.
+        freeze: with ``"inductor"``, build the parameters and buffers of the
+            modules a region reads into its graph when the call is one of
+            inference (no gradients recorded, every module in eval mode), so
+            that Inductor folds what follows from them alone (a batch norm
+            into the convolution before it) and lays convolution weights out
+            for the kernels. Such a graph is checked on every call: a tensor
+            that was written to since (in place, through ``.data``, by an
+            optimizer) or replaced makes the region compile again with that
+            tensor as an input of the graph. Not built in: a tensor the
+            region itself writes, the matrix of a matrix product or of an
+            embedding lookup (nothing folds, and it would be a second copy),
+            and memory PyTorch does not see the writes to (shared with
+            another process, or a NumPy array's). ``regions()`` reports
+            ``frozen`` per region. On by default
+            (``TORCH_REWRITE_FREEZE=0`` turns it off).
+    """
+    return Graphs(backend, min_ops, max_variants, freeze)
+
+
+Pass = str | Callable[[Any], bool] | Graphs
+
+# The passes that rewrite the whole function once, before the others see it.
+_WHOLE = ("inline", "unroll", "shortcuts")
+# The built-in passes over a basic block.
+_BLOCK = (
+    "resolve_dispatch",
+    "tensor_accessors",
+    "method_calls",
+    "narrow_dims",
+    "fold",
+    "dce",
+)
+
+canonical: tuple[Pass, ...] = (
+    "inline",
+    "unroll",
+    "shortcuts",
+    "resolve_dispatch",
+    "tensor_accessors",
+    "method_calls",
+    "fold",
+    "dce",
+)
+"""The standard passes, in the order they are applied.
+
+Three rewrite the function as a whole, once:
+
+- ``inline``: calls of Python functions defined in the same module are
+  replaced by their graph, under a guard on the callee; the call itself
+  stays as the other side of that guard.
+- ``unroll``: ``for i in range(k)`` loops with a small constant ``k`` are
+  replaced by ``k`` copies of their body, under a guard on ``range``.
+- ``shortcuts``: the code of ``nn.Module`` that sits in front of every call
+  of a module and every read of a parameter, buffer or submodule is skipped
+  whenever a few checks show what it would do: a call of a module without
+  hooks goes straight to its ``forward``, and the three dicts are looked at
+  without calling ``Module.__getattr__``. ``Module.__call__`` then does not
+  appear on the stack.
+
+The others run over each basic block once it was profiled, in order, and
+the whole list is repeated until no pass changes the block anymore:
+
+- ``resolve_dispatch``: operations the profile found to be a single
+  dispatcher call become direct calls of the post-dispatch kernel.
+- ``tensor_accessors``: ``x.shape[i]``, ``x.size(i)``, ``x.dim()`` and
+  ``x.ndim`` on tensors become plain SSA integers.
+- ``method_calls``: ``x.f(...)`` calls that stay generic are made without
+  creating a bound method object.
+- ``fold``: folds truthiness tests and branches on constants.
+- ``dce``: drops instructions whose result is not needed.
+
+One more built-in pass is not in the list: ``narrow_dims`` folds a comparison
+of a dimension with a constant to the outcome last observed, under a guard
+that pins the dimension to the range of sizes with that outcome. It goes in
+front of ``fold``.
+"""
+
+inductor: Graphs = Graphs("inductor")
+"""``graphs("inductor")``: tensor work goes to AOTAutograd and Inductor."""
 
 
 _runtime: Any = None
@@ -187,61 +268,90 @@ def is_available() -> bool:
     return True
 
 
+def _plan(
+    passes: Iterable[Pass] | None,
+) -> tuple[dict[str, bool], list[Any], Graphs | None]:
+    """Sorts a list of passes into what the engine is given.
+
+    Returns which of the passes over the whole function are asked for, the
+    passes over a block in their order, and which of those is the graph pass.
+    """
+    whole = dict.fromkeys(_WHOLE, False)
+    block: list[Any] = []
+    found: Graphs | None = None
+    for one in canonical if passes is None else passes:
+        if isinstance(one, Graphs):
+            if found is not None:
+                raise ValueError(f"passes= has {found!r} and {one!r}: one of them")
+            builtin = next((p for p in block if isinstance(p, str)), None)
+            if builtin is not None:
+                raise ValueError(
+                    f"{one!r} comes after {builtin!r} in passes=: it traces the "
+                    "instructions as the function wrote them, so it goes in front "
+                    "of the passes that rewrite single instructions"
+                )
+            found = one
+            block.append(one)
+        elif isinstance(one, str):
+            if one in whole:
+                whole[one] = True
+            elif one in _BLOCK:
+                block.append(one)
+            else:
+                names = ", ".join((*_WHOLE, *_BLOCK))
+                raise ValueError(
+                    f"unknown pass {one!r}; the built-in passes are {names}"
+                )
+        elif callable(one):
+            block.append(one)
+        else:
+            raise TypeError(
+                f"a pass is a name, a callable or torch.rewrite.graphs(...), not {type(one).__name__}"
+            )
+    return whole, block, found
+
+
 def rewrite(
     fn: Any = None,
     *,
-    pipeline: Pipeline | None = None,
+    passes: Iterable[Pass] | None = None,
     fallback: bool = True,
-    specialize: bool = True,
     skip_autograd: bool = True,
     unboxed: bool = True,
-    inline: bool = True,
-    unroll: bool = True,
     callees: bool = True,
-    shortcuts: bool = True,
     demote: bool | None = None,
-    backend: str | Callable[..., Any] | None = None,
-    region_min_ops: int = 4,
-    region_max_variants: int = 32,
     max_versions: int = 4,
     max_respecializations: int = 6,
     keep_memory: bool | None = None,
-    freeze: bool | None = None,
 ) -> Any:
-    """Compiles ``fn`` to an SSA control-flow graph that runs in the cfg VM.
+    """Runs ``fn`` as an SSA control-flow graph with a list of rewrites applied.
 
     Args:
         fn: a Python function, a bound method, or an ``nn.Module`` (whose
-            ``forward`` is compiled; calling the result skips module hooks).
+            ``forward`` is rewritten; calling the result skips module hooks).
             Can be omitted to use ``rewrite`` as a decorator with options.
-        pipeline: the passes that specialize the graph. Defaults to
-            :meth:`Pipeline.default`.
+        passes: what is done to the function, in the order it is done.
+            Defaults to :data:`canonical`. An entry is the name of a built-in
+            pass, ``torch.rewrite.graphs(...)``, or a callable
+            ``pass_(region) -> bool`` that looks at the instructions of one
+            basic block and at what was observed of them, rewrites them, and
+            returns whether it changed anything. With an empty list nothing
+            is rewritten: the function runs in the generic tier of the VM,
+            which does what the interpreter does, without profiling and
+            without direct kernel calls.
         fallback: if the function uses something that is not supported, warn
             and return it unchanged instead of raising :class:`Unsupported`.
-        specialize: if ``False``, only run the generic tier of the VM: no
-            profiling, no direct kernel calls.
         skip_autograd: let a call site enter below the Autograd kernel when
             the call it was captured from tracked no gradient. Such a site is
             guarded on that still being the case.
         unboxed: keep the tensors that kernels return without a Python object
             until Python code needs one. A tensor that only flows from one
             kernel call into others then never gets one.
-        inline: replace calls of Python functions defined in the same module
-            by their graph, under a guard on the callee; the call itself stays
-            as the other side of that guard.
-        unroll: replace ``for i in range(k)`` loops with a small constant ``k``
-            by ``k`` copies of their body, under a guard on ``range``.
-        callees: compile the Python functions that the compiled code calls
+        callees: rewrite the Python functions that the rewritten code calls
             (functions, methods, and objects whose ``__call__`` is a Python
             function) the first time each is called, with the same options.
-        shortcuts: skip the code of ``nn.Module`` that sits in front of every
-            call of a module and every read of a parameter, buffer or
-            submodule, whenever a few checks show what it would do: a call of
-            a module without hooks goes straight to its ``forward``, and the
-            three dicts are looked at without calling ``Module.__getattr__``.
-            ``Module.__call__`` then does not appear on the stack.
         demote: measure the function and each of its callees, once warmed up,
-            both compiled and in the interpreter, and leave to the interpreter
+            both rewritten and in the interpreter, and leave to the interpreter
             what runs faster there: the VM gains on tensor operations and loses
             on plain Python, and library code is often mostly the latter.
             ``stats()["demoted_callees"]`` lists the callees that were left,
@@ -252,32 +362,7 @@ def rewrite(
             On by default; the environment variable
             ``TORCH_REWRITE_DEMOTE=0`` turns the default off, for looking
             at the VM itself.
-            A callee the compiler does not support runs in the interpreter.
-        backend: hand the tensor work of each basic block to a graph compiler.
-            ``"inductor"`` traces every run of instructions of a block that a
-            trace can capture, together with what those instructions call,
-            into one ATen graph, and compiles it with AOTAutograd and
-            Inductor: with gradients enabled, the tensors such a region
-            returns have one compiled autograd function as their ``grad_fn``.
-            The outermost region that traces is the one that is compiled;
-            where an instruction does not trace, the VM runs it and the blocks
-            of what it calls are tried in turn. ``"aot_eager"`` builds the
-            same graphs and runs them with the eager kernels. A callable
-            ``backend(graph_module, example_inputs)`` returning a callable is
-            used as given. ``regions()`` on the result reports what was
-            compiled and what was left to the VM, with the reason. See
-            ``torch/rewrite/_regions.py`` for what a compiled region
-            checks on every call and what it does not.
-        region_min_ops: a region with fewer tensor operations than this is
-            left to the VM, whose direct kernel calls are cheaper than
-            entering a compiled graph.
-        region_max_variants: how many graphs a region gives the backend
-            before further kinds of inputs (dtypes, ranks, modules, modes)
-            run its instructions as they are. Inputs that trace to the same
-            graph, as the layers of a model do when a region is called with
-            one after the other, share what the backend made of it, and
-            sizes that differ from call to call are left open in one graph
-            rather than compiled one by one.
+            A callee the frontend does not support runs in the interpreter.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -289,21 +374,6 @@ def rewrite(
             most; what a few calls in a row did not ask for is given back.
             ``torch.rewrite.memory(fn)`` reports it. On by
             default (``TORCH_REWRITE_KEEP_MEMORY=0`` turns it off).
-        freeze: with ``backend="inductor"``, build the parameters and buffers
-            of the modules a region reads into its graph when the call is
-            one of inference (no gradients recorded, every module in eval
-            mode), so that Inductor folds what follows from them alone (a
-            batch norm into the convolution before it) and lays convolution
-            weights out for the kernels. Such a graph is checked on every
-            call: a tensor that was written to since (in place, through
-            ``.data``, by an optimizer) or replaced makes the region compile
-            again with that tensor as an input of the graph. Not built in:
-            a tensor the region itself writes, the matrix of a matrix
-            product or of an embedding lookup (nothing folds, and it would
-            be a second copy), and memory PyTorch does not see the writes
-            to (shared with another process, or a NumPy array's).
-            ``regions()`` reports ``frozen`` per region. On by default
-            (``TORCH_REWRITE_FREEZE=0`` turns it off).
 
     Returns:
         A callable with the signature of ``fn``. It has ``dump()``, returning
@@ -313,26 +383,18 @@ def rewrite(
         demote = os.environ.get("TORCH_REWRITE_DEMOTE", "1") != "0"
     if keep_memory is None:
         keep_memory = os.environ.get("TORCH_REWRITE_KEEP_MEMORY", "1") != "0"
-    if freeze is None:
-        freeze = os.environ.get("TORCH_REWRITE_FREEZE", "1") != "0"
+    if passes is not None:
+        passes = tuple(passes)
     options: dict[str, Any] = {
-        "pipeline": pipeline,
+        "passes": passes,
         "fallback": fallback,
-        "specialize": specialize,
         "skip_autograd": skip_autograd,
         "unboxed": unboxed,
-        "inline": inline,
-        "unroll": unroll,
         "callees": callees,
-        "shortcuts": shortcuts,
         "demote": demote,
-        "backend": backend,
-        "region_min_ops": region_min_ops,
-        "region_max_variants": region_max_variants,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
         "keep_memory": keep_memory,
-        "freeze": freeze,
     }
     if fn is None:
         return functools.partial(rewrite, **options)
@@ -342,29 +404,28 @@ def rewrite(
         return types.MethodType(rewrite(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
         raise TypeError(f"torch.rewrite expects a function, not {type(fn).__name__}")
-    if pipeline is None:
-        pipeline = Pipeline.default()
+    whole, block, found = _plan(passes)
     runtime = _load_runtime()
     regions = None
-    if backend is not None:
-        if not specialize:
-            raise ValueError("backend= needs specialize=True: regions are a pass")
+    if found is not None:
+        freeze = found.freeze
+        if freeze is None:
+            freeze = os.environ.get("TORCH_REWRITE_FREEZE", "1") != "0"
         regions = _regions.make_pass(
-            runtime, backend, region_min_ops, region_max_variants, 0, freeze
+            runtime, found.backend, found.min_ops, found.max_variants, 0, freeze
         )
-        # First, while the instructions are still the ones of the block.
-        pipeline = Pipeline([regions, *pipeline.passes])
+        block = [regions if one is found else one for one in block]
     try:
         compiled = runtime.compile(
             fn,
-            list(pipeline.passes),
-            specialize=specialize,
+            block,
+            specialize=bool(block),
             skip_autograd=skip_autograd,
             unboxed=unboxed,
-            inline=inline,
-            unroll=unroll,
+            inline=whole["inline"],
+            unroll=whole["unroll"],
             callees=callees,
-            shortcuts=shortcuts and _shortcuts.register(runtime),
+            shortcuts=whole["shortcuts"] and _shortcuts.register(runtime),
             demote=demote,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
@@ -377,7 +438,7 @@ def rewrite(
         if not fallback:
             raise Unsupported(f"{fn.__qualname__}: {e}") from None
         warnings.warn(
-            f"torch.rewrite left {fn.__qualname__} uncompiled: {e}", stacklevel=2
+            f"torch.rewrite left {fn.__qualname__} as it is: {e}", stacklevel=2
         )
         return fn
 
@@ -389,7 +450,7 @@ _region_passes: "weakref.WeakKeyDictionary[Any, _regions.Regions]" = (
 
 
 def regions(fn: Any) -> list[dict[str, Any]]:
-    """What ``backend=`` made of a compiled function and of what it calls.
+    """What a ``graphs`` pass made of a rewritten function and of what it calls.
 
     One dict per region, with ``where`` (function, block and instructions),
     ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
@@ -425,7 +486,7 @@ def memory(fn: Any) -> dict[str, int] | None:
 
 class _CallableModule(types.ModuleType):
     # torch.rewrite is both the entry point and the namespace of the
-    # prototype: torch.rewrite(fn) and torch.rewrite.Pipeline.
+    # prototype: torch.rewrite(fn) and torch.rewrite.canonical.
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return rewrite(*args, **kwargs)
 

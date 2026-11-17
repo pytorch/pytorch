@@ -10,7 +10,7 @@ per-operation overhead matters, and prints the results as Markdown tables
 The modes are cumulative, each adding one mechanism to the previous one:
 
     eager          plain Python and the regular bindings
-    generic        the VM running bytecode semantics (specialize=False)
+    generic        the VM running bytecode semantics (no passes over a block)
     sites          + operations call the kernel the dispatcher resolved them to,
                    entering at the top of the chain (skip_autograd=False)
     skip_autograd  + enter below the Autograd kernel when no gradient is tracked
@@ -36,7 +36,7 @@ MODES = ["eager", "generic", "sites", "skip_autograd", "unboxed", "default"]
 # runs faster there.
 VM = {"demote": False}
 MODE_OPTIONS = {
-    "generic": {"specialize": False, **VM},
+    "generic": {"passes": torch.rewrite.canonical[:3], **VM},
     "sites": {"skip_autograd": False, "unboxed": False, **VM},
     "skip_autograd": {"unboxed": False, **VM},
     "unboxed": VM,
@@ -311,15 +311,16 @@ def bench_autograd(device):
 def bench_narrowing(device):
     """Shape-dependent control flow: everything dynamic versus a range guard
     on the dimension the branch looks at."""
-    pipeline = torch.rewrite.Pipeline
+    canonical = list(torch.rewrite.canonical)
+    at = canonical.index("fold")
     y = torch.randn(1, 16, device=device)
     out = {}
     for label, pipe in (
-        ("default", pipeline.default()),
-        ("narrowing", pipeline.narrowing()),
+        ("default", canonical),
+        ("narrowing", [*canonical[:at], "narrow_dims", *canonical[at:]]),
     ):
         compiled = torch.rewrite(
-            shape_branch, pipeline=pipe, fallback=False, demote=False
+            shape_branch, passes=pipe, fallback=False, demote=False
         )
         timings = {}
         for batch in (1, 8):
@@ -382,20 +383,24 @@ def bench_python(device):
         ns = compare(fns, args, device)
         rows.append({"name": name, "ns": {k: v / per for k, v in ns.items()}})
 
-    plain = {"default": {"unroll": False}, "vm": {"unroll": False, **VM}}
+    def without(*names):
+        return {"passes": [p for p in torch.rewrite.canonical if p not in names]}
+
+    rolled = without("unroll")
+    plain = {"default": rolled, "vm": {**rolled, **VM}}
     row("loop: total += i, per iteration", py_loop, (n,), plain, per=n)
     row("loop with a branch, per iteration", py_branches, (n,), plain, per=n)
     row(
         "loop calling a Python function, per iteration",
         py_calls,
         (n,),
-        {**plain, "vm, not inlined": {"unroll": False, "inline": False, **VM}},
+        {**plain, "vm, not inlined": {**without("unroll", "inline"), **VM}},
         per=n,
     )
     modules = {
         "default": {},
         "vm": VM,
-        "vm, no shortcuts": {"shortcuts": False, **VM},
+        "vm, no shortcuts": {**without("shortcuts"), **VM},
         "vm, callees interpreted": {"callees": False, **VM},
     }
     net = Net().to(device)

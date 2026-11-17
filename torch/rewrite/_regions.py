@@ -1,6 +1,6 @@
 """Runs of a basic block compiled by a graph backend.
 
-With ``torch.rewrite(fn, backend="inductor")`` the VM hands the tensor work
+With ``torch.rewrite(fn, passes=[torch.rewrite.inductor, ...])`` the VM hands the tensor work
 of each basic block to AOTAutograd and Inductor. The unit is a *region*: a run
 of consecutive instructions of one block that have no effect a trace cannot
 capture (calls, arithmetic, attribute reads, building containers). A region is
@@ -205,7 +205,7 @@ _WIDE = 1 << 62
 # How many variants of a region may leave sizes open, for inputs that are
 # otherwise alike: one per path that the sizes choose.
 _MOST_OPEN = 4
-# A region may have ``region_max_variants`` graphs. Variants that use the
+# A region may have ``max_variants`` graphs. Variants that use the
 # graph of another (the layers of a model, called in a loop) do not count,
 # up to this many times the limit; and after this many traces whose graph
 # was one too many, no further variant is tried.
