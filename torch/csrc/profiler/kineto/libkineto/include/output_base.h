@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <ostream>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 
@@ -70,6 +71,16 @@ class ActivityLogger {
       const Config& config,
       std::unique_ptr<ActivityBuffers> buffers,
       int64_t endTime) = 0;
+
+  // The error that kept the trace from being written, or an empty error_code
+  // if it was written. Checked after finalizeTrace. Loggers report write
+  // failures here instead of throwing: on-demand traces finalize on Kineto's
+  // profiler thread, where an exception would terminate the process.
+  // ActivityTrace::save turns a reported error into an exception. The default
+  // suits loggers that cannot fail to write.
+  virtual std::error_code writeError() const {
+    return {};
+  }
 
  protected:
   ActivityLogger() = default;
