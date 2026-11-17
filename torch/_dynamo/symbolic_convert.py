@@ -4063,7 +4063,7 @@ class InstructionTranslatorBase(
         ):
             return False
         return (
-            all(b.can_restore() for b in self.block_stack)
+            (not self.block_stack or all(b.can_restore() for b in self.block_stack))
             and not self.one_graph
             # Only the leaf tracer's error_on_graph_break should be used
             and (self.is_child_tracer_active or not self.error_on_graph_break)
