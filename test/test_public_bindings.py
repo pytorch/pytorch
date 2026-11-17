@@ -265,10 +265,10 @@ class TestPublicBindings(TestCase):
         "Inductor/Distributed modules hard fail on windows and macos",
     )
     @skipIfTorchDynamo("Broken and not relevant for now")
-    def test_modules_can_be_imported(self):
+    def test_modules_can_be_imported(self) -> None:
         failures = []
 
-        def onerror(modname):
+        def onerror(modname: str) -> None:
             failures.append(
                 (modname, ImportError("exception occurred importing package"))
             )
@@ -431,6 +431,14 @@ class TestPublicBindings(TestCase):
             # aren't available in CPU-only CI. Registrations are no-ops when the
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
+                "torch._native.ops.pointwise.kernel",
+                "torch._native.ops.pointwise.ops",
+                "torch._native.ops.pointwise.tma",
+                "torch._native.ops.pointwise.transpose_copy",
+                "torch._native.ops.pointwise.transpose_tma",
+                "torch._native.ops.pointwise._packing",
+                "torch._native.ops.pointwise._transpose",
+                "torch._native.ops.rng.cutedsl_kernels",
                 "torch._native.cutedsl.",
                 "torch._native.ops.reductions.traits",
                 "torch._native.ops.foreach_mm.",
