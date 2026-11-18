@@ -1,4 +1,4 @@
-//! The compiler and virtual machine behind `torch.cfg_compile`.
+//! The compiler and virtual machine behind `torch.vm`.
 //!
 //! A Python function is turned into a control-flow graph in SSA form
 //! (`frontend`), which a register VM executes (`vm`). Blocks start out in a
