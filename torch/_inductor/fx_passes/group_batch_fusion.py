@@ -628,7 +628,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     if default is not None and default.namespace == "aten":
                         continue
                 count = 0
-                stack = [user.args]
+                stack: list[Any] = [user.args]
                 while stack:
                     arg = stack.pop()
                     if isinstance(arg, torch.fx.Node):
