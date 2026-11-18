@@ -1,0 +1,32 @@
+# Owner(s): ["module: ci"]
+# Temporary authorized audit. Never merge. No token use or repository writes.
+name: Temporary core CI permission canary
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-token-permissions-canary.yml
+    types: [opened, synchronize, reopened]
+  push:
+    tags: [ciflow/inductor-cu126/205546]
+permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+jobs:
+  check-ci:
+    if: github.repository == 'pytorch/pytorch' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 205546 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.ref == 'ci-token-permissions-20261118' && github.actor == 'ptdbot' && (github.run_attempt == 1 || github.run_attempt == 2)) || (github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205546' && github.actor == 'pytorch-bot[bot]' && github.triggering_actor == 'pytorch-bot[bot]' && github.run_attempt == 1))
+    uses: ./.github/workflows/_check-ci.yml
+    permissions:
+      contents: read
+  permission-canary:
+    needs: check-ci
+    if: github.repository == 'pytorch/pytorch' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 205546 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.ref == 'ci-token-permissions-20261118' && github.actor == 'ptdbot' && (github.run_attempt == 1 || github.run_attempt == 2)) || (github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205546' && github.actor == 'pytorch-bot[bot]' && github.triggering_actor == 'pytorch-bot[bot]' && github.run_attempt == 1))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Fixed permission canary marker
+        shell: bash
+        run: printf 'permission_canary=true\n'
