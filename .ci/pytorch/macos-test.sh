@@ -344,7 +344,7 @@ test_timm_perf() {
 
 if [[ "$TEST_CONFIG" == "fake_tensor" ]]; then
   setup_test_python
-  python test/run_test.py --include test_fake_tensor --verbose
+  NO_TD=1 python test/run_test.py --include test_fake_tensor --verbose
   assert_git_not_dirty
 elif [[ "$TEST_CONFIG" == "default" && "${CPP_FAKETENSOR:-0}" == 1 ]]; then
   setup_test_python
