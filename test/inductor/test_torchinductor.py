@@ -7972,7 +7972,6 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
-    @skipIfRocm(msg="loads before the graph input pointer read back 0 on ROCm")
     def test_as_strided_past_input_extent(self):
         # A graph input aliasing a larger storage may legitimately be
         # as_strided'd past its own extent: Inductor rebases the storage-relative
@@ -23876,6 +23875,9 @@ if RUN_GPU:
             torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
             "Triton does not support fp8 on A100",
         )
+        @unittest.skipIf(
+            not IS_BIG_GPU, "split heuristics depend on SM count; needs a big GPU"
+        )
         def test_red_followed_by_transposed_pointwise(self):
             bs = 26624
             dim = 1024
@@ -24483,6 +24485,9 @@ if RUN_GPU:
                 self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
                 self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
+        @unittest.skipIf(
+            not IS_BIG_GPU, "split heuristics depend on SM count; needs a big GPU"
+        )
         def test_small_strided_read_keeps_outer_reduction(self):
             # Only reads constant across the whole reduction abstain from the
             # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
