@@ -1327,6 +1327,110 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(gm(*actual_inputs), expected)
         self.assertEqual(actual_inputs, expected_inputs)
 
+    def test_input_view_copyback_permission_without_producer_association(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, indices, values, replacement):
+                view = x.view(2, 4)
+                updated = view.index_put((indices,), values)
+                result = updated.square()
+                x.copy_(replacement)
+                return result
+
+        model = Model()
+        x = torch.arange(8, dtype=torch.float32)
+        indices = torch.tensor([0])
+        values = torch.full((4,), 10.0)
+        replacement = torch.full_like(x, -1.0)
+        expected_input = x.clone()
+        expected = model(expected_input, indices, values, replacement)
+        gm = make_fx(model, tracing_mode="fake")(x, indices, values, replacement)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put_.default, targets)
+        self.assertNotIn(aten.index_put.default, targets)
+        self.assertIn(aten.copy_.default, targets)
+        actual_input = x.clone()
+        self.assertEqual(gm(actual_input, indices, values, replacement), expected)
+        self.assertEqual(actual_input, expected_input)
+
+    @parametrize("alias_source", [False, True])
+    def test_input_view_aliased_copyback_keeps_functional(self, alias_source):
+        def f(x, indices, values):
+            source = x.view_as(x) if alias_source else x
+            updated = x.view(2, 4).index_put((indices,), values)
+            result = updated.square()
+            x.copy_(source)
+            return result
+
+        x = torch.arange(8, dtype=torch.float32)
+        indices = torch.tensor([0])
+        values = torch.full((4,), 10.0)
+        expected_input = x.clone()
+        expected = f(expected_input, indices, values)
+        gm = make_fx(f, tracing_mode="fake")(x, indices, values)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+        actual_input = x.clone()
+        self.assertEqual(gm(actual_input, indices, values), expected)
+        self.assertEqual(actual_input, expected_input)
+
+    @parametrize("rewire_outputs", [False, True])
+    def test_input_view_list_copyback_keeps_live_result(self, rewire_outputs):
+        def f(x, replacement):
+            _, updated = auto_functionalized(
+                list_sin_._opoverload, tensors=[x.view(2, 4)]
+            )
+            x.copy_(replacement)
+            return updated[0]
+
+        x = torch.arange(8, dtype=torch.float32)
+        replacement = torch.full_like(x, 9.0)
+        expected_input = x.clone()
+        expected = f(expected_input, replacement)
+        gm = make_fx(f, tracing_mode="fake")(x, replacement)
+        wrapper = next(n for n in gm.graph.nodes if n.target is auto_functionalized)
+        with V.set_fake_mode(
+            detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        ):
+            reinplace_inplaceable_ops_core(
+                gm.graph,
+                fake_tensor_updater=FakeTensorUpdater(gm),
+                rewire_auto_functionalized_outputs=rewire_outputs,
+            )
+            self.assertEqual(wrapper.meta["only_clone_these_tensors"], ["tensors"])
+            decompose_auto_functionalized(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        actual_input = x.clone()
+        self.assertEqual(gm(actual_input, replacement), expected)
+        self.assertEqual(actual_input, expected_input)
+
+    def test_copyback_permission_preserves_earlier_result(self):
+        def f(input_pos, val, cache):
+            view = cache.reshape(4, -1)
+            updated = aten.index_put.default(view, [input_pos], val.reshape(-1))
+            cache.copy_(torch.zeros_like(cache))
+            return updated
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.randn(3, 4, device=device)
+        cache = torch.randn(4, 3, 4, device=device)
+        expected_cache = cache.clone()
+        expected = f(input_pos, val, expected_cache)
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        actual_cache = cache.clone()
+        self.assertEqual(gm(input_pos, val, actual_cache), expected)
+        self.assertEqual(actual_cache, expected_cache)
+
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()
 
