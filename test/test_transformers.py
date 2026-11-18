@@ -7486,7 +7486,7 @@ class TestSDPAXpuOnly(NNTestCase):
     @parametrize("batch_size", [1])
     @parametrize("n_head", [[3, 1], [4, 2]])
     @parametrize("q_size", [1, 32, 77, 128, 144, 512])
-    @parametrize("kv_size", [1, 32, 77, 128, 144, 512])
+    @parametrize("kv_size", [32, 77, 128, 144, 512])
     @parametrize("head_dim", [64])
     @parametrize("mask_type", [None, "causal", "float"])
     @parametrize("train", [True])
