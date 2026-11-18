@@ -1841,7 +1841,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     }
     tp_members: dict[str, Member] = {}
 
-    def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
+    @classmethod
+    def _lookup_tp_table(cls, name: str, *table_attrs: str) -> Any:
         """Resolve *name* in the given declarative tables across the class MRO.
 
         Mirrors CPython method/getset/member inheritance: each class contributes
@@ -1850,7 +1851,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         (rather than replaces) the entries it inherits. Within a class the tables
         are consulted in the order given.
         """
-        for klass in type(self).__mro__:
+        for klass in cls.__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
@@ -1859,10 +1860,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return None
 
     def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
-        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+        return type(self)._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
-        return self._lookup_tp_table(name, "tp_methods")
+        return type(self)._lookup_tp_table(name, "tp_methods")
 
     def lookup_slotdefs(self, name: str) -> SlotDef | None:
         return self._slotdefs.get(name)
