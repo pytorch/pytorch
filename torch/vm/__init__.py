@@ -1,276 +1,351 @@
-"""torch.vm: a function run in a VM, with two lists of passes.
+"""torch.vm: a function run in a VM as a control-flow graph, with an ordered list of passes.
 
 .. warning::
     This is an experiment and a temporary API. Everything about it may change.
 
-``torch.vm`` is the engine of :mod:`torch.rewrite` with the passes where one
-looks for them. A function is turned into one control-flow graph and run in a
-VM; what is done to it is two lists::
+``torch.vm(fn)`` turns the bytecode of ``fn`` into one control-flow graph in
+SSA form, branches and loops included, runs it in a small VM, and applies
+passes to it. With no passes the function does what Python does, instruction
+for instruction; every pass is a rewrite that leaves the result what it was.
+There is no symbolic tracing and there are no fake tensors: the first run of
+each basic block is its trace. It runs on the real tensors, with a hook in the
+dispatcher recording which kernel every tensor operation resolved to. The
+default passes then specialize the block so that those operations call their
+post-dispatch kernel directly, guarded on the dispatch keys of their operands::
 
     @torch.vm
+    def f(x, y):
+        while x.sum() < 10:  # data-dependent control flow stays in the graph
+            x = x * 2 + y
+        return x
+
+
+    f(torch.ones(3), torch.ones(3))
+    print(f.dump())  # the SSA graph and its specialized blocks
+
+**The default never changes a result.** What ``@torch.vm`` returns computes
+what the function computes, bit for bit: the same kernels, on the same values,
+in the same order. A configuration that is faster and may differ from eager in
+the last bits (a graph compiler fuses and reorders arithmetic) is never the
+default: it is asked for, by naming its passes. :func:`is_exact` tells which of
+the two a configuration is.
+
+Nothing is specialized on shapes unless a pass asks for it: every dimension is
+dynamic. A pass can narrow a dimension to a range by attaching a guard; when
+such a guard fails, only the basic block that carries it is rewritten again.
+
+Calls are followed. A call of a Python function of the same module is inlined
+under a guard on the function; any other Python function, method or
+``nn.Module`` is rewritten the first time rewritten code calls it; and
+``for i in range(k)`` with a small constant ``k`` is unrolled. Closures,
+``try``/``except``/``finally``, ``with``, imports and class statements are
+handled. A rewritten function runs under a frame of the interpreter that has
+its variables, so what looks for them there finds them: ``locals()``, ``eval``,
+``exec``, ``super()`` without arguments, a traceback, a debugger. Generators
+and coroutines run in the interpreter, and so does what they call; so does what
+is called while a trace function (``sys.settrace``) is set. A Python side
+effect does not split the function: it is one more instruction of the graph,
+between the specialized ones. A whole training step can therefore be one
+rewritten function, with the same results bit for bit as the interpreter::
+
+    @torch.vm
+    def step(model, opt, x, y):
+        opt.zero_grad()
+        loss = torch.nn.functional.mse_loss(model(x), y)
+        loss.backward()  # the autograd engine, on the tape the forward recorded
+        opt.step()
+        return loss
+
+
+    step(model, opt, x, y)
+    step.stats()["compiled_callees"]  # Module._call_impl, Linear.forward, SGD.step, ...
+
+What is done to a function is one ordered list of passes, ``passes=``, and a
+pass says what it is over. One over the control-flow graph rewrites the
+function once, before it runs: calls are inlined, loops unrolled. One over a
+basic block rewrites a block after its first runs were watched: tensor
+operations become direct calls of their kernels. The bare decorator is the
+default list::
+
+    @torch.vm(passes=torch.vm.DEFAULT_PASSES)
     def forward(model, x): ...
 
+A list of one's own is the default one with more passes; the pass that hands
+tensor work to Inductor is the one to ask for when the last bits of a result
+may differ::
 
-    @torch.vm(
-        cfg_passes=torch.vm.DefaultCFGPasses,
-        block_passes=torch.vm.DefaultBlockPasses,
-    )
-    def forward(model, x): ...
+    passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
 
-``cfg_passes`` rewrite the control-flow graph of the function, once, before
-it runs: calls are inlined, loops unrolled. ``block_passes`` rewrite one
-basic block at a time, after its first runs were watched: tensor operations
-become direct calls of their kernels, or go to a graph compiler. The bare
-decorator is the two default lists.
 
-A preset is the keyword arguments of a configuration, to be unpacked::
-
-    @torch.vm(**torch.vm.FAST)  # the default passes, and Inductor for the tensor work
+    @torch.vm(passes=passes)
     def forward(model, x): ...
 
 A pass that has a setting is made with it::
 
     # loops of up to 16 iterations, where the default is 8
-    cfg_passes = (torch.vm.inlining_pass(), torch.vm.loop_unrolling_pass(16))
+    torch.vm.passes.Unroll(16)
 
-:func:`configure` makes the keyword arguments for the default passes with
-some of them set differently::
+A pass of one's own goes in the list as well, and its signature says what it
+is over. A function of two arguments is a pass over the graph of a region: it
+gets the ``torch.fx.GraphModule`` that was traced from the tensor work of a
+block and the types of its inputs (:class:`TensorType`: dtype, device, and
+per dimension the sizes the graph is for), and returns the graph, rewritten.
+What its rewrite is only right for, it says with :func:`guard`: a call that
+fails a guard runs the code the pass was given::
 
-    passes = torch.vm.configure(loop_unrolling_pass=16)
+    def my_kernel(gm: torch.fx.GraphModule, input_types: list[torch.vm.Type]):
+        x = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        if 32 not in input_types[0].dim(0):
+            return gm  # not the sizes the kernel is for
+        torch.vm.guard(gm, x, torch.vm.Dim(0, range(16, 33)))
+        for node in gm.graph.nodes:
+            if node.target is torch.ops.aten.silu.default:
+                node.target = torch.ops.mylib.silu.default
+        return gm
 
 
-    @torch.vm(**passes)
+    @torch.vm(passes=(*torch.vm.DEFAULT_PASSES, my_kernel))
     def forward(model, x): ...
+
+A callable of one argument is a pass over the instructions of one basic block
+of the VM, a ``Region`` (:func:`swap` makes one that puts a kernel in the
+place of a run of operations); such a pass can also be written in Rust and
+loaded from a library (:func:`load_passes`).
 """
 
+import dataclasses
+import functools
+import importlib
+import inspect
+import os
 import sys
 import types
-from collections.abc import Callable, Iterable, Mapping
+import warnings
+import weakref
+from collections.abc import Iterable
 from typing import Any
 
-from torch.rewrite import (
-    fuse_checked,
-    Graphs,
-    is_available,
-    load_passes,
-    memory,
-    Mismatch,
-    regions,
-    rewrite as _rewrite,
-    swap,
-    Unsupported,
+import torch
+
+from . import _regions, _shortcuts, passes
+from ._passes import fuse_checked, Mismatch, swap
+from ._types import (
+    Aligned,
+    Check,
+    Contiguous,
+    Device,
+    Dim,
+    Dtype,
+    guard,
+    Interval,
+    IntType,
+    materialize,
+    Stride,
+    TensorType,
+    Type,
+    type_of,
 )
-from torch.rewrite._passes import Builtin
+from .passes import BuiltinPass, Graphs, Inline, Unroll
 
 
 __all__ = [
-    "DefaultBlockPasses",
-    "DefaultCFGPasses",
-    "FAST",
+    "Aligned",
+    "Check",
+    "Contiguous",
+    "DEFAULT_PASSES",
+    "Device",
+    "Dim",
+    "Dtype",
+    "IntType",
+    "Interval",
     "Mismatch",
+    "Stride",
+    "TensorType",
+    "Type",
     "Unsupported",
-    "configure",
-    "dce_pass",
-    "fold_pass",
     "fuse_checked",
-    "graphs_pass",
-    "inlining_pass",
+    "guard",
     "is_available",
+    "is_exact",
     "load_passes",
-    "loop_unrolling_pass",
+    "materialize",
     "memory",
-    "method_calls_pass",
-    "module_shortcuts_pass",
-    "narrow_dims_pass",
+    "passes",
     "regions",
-    "resolve_dispatch_pass",
     "swap",
-    "tensor_accessors_pass",
+    "type_of",
     "vm",
 ]
 
 
-# --------------------------------------------------------------------- passes
+class Unsupported(RuntimeError):
+    """The function uses something the prototype cannot rewrite."""
 
 
-def inlining_pass() -> Builtin:
-    """Calls of Python functions defined in the same module are replaced by
-    their graph, under a guard on the callee; the call itself stays as the
-    other side of that guard. Over the control-flow graph."""
-    return Builtin("inline", True, "inlining_pass")
-
-
-def loop_unrolling_pass(max_trip_count: int = 8) -> Builtin:
-    """``for i in range(k)`` with a constant ``k`` of at most
-    ``max_trip_count`` is replaced by ``k`` copies of its body, under a guard
-    on ``range``. A loop whose copies would come to more than 600
-    instructions is left as it is. Over the control-flow graph, after
-    inlining."""
-    if isinstance(max_trip_count, bool) or not isinstance(max_trip_count, int):
-        kind = type(max_trip_count).__name__
-        raise TypeError(f"loop_unrolling_pass takes a number of iterations, not {kind}")
-    if max_trip_count < 1:
-        raise ValueError(
-            f"loop_unrolling_pass({max_trip_count}): at least one iteration; "
-            "to unroll nothing, leave the pass out of cfg_passes"
-        )
-    settings = (("max_trip_count", max_trip_count),)
-    return Builtin("unroll", True, "loop_unrolling_pass", settings)
-
-
-def module_shortcuts_pass() -> Builtin:
-    """The code of ``nn.Module`` in front of every call of a module and every
-    read of a parameter, buffer or submodule is skipped whenever a few checks
-    show what it would do: a call of a module without hooks goes straight to
-    its ``forward``. Over the control-flow graph."""
-    return Builtin("shortcuts", True, "module_shortcuts_pass")
-
-
-class _GraphsPass(Graphs):
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        name = self.backend if isinstance(self.backend, str) else "a callable"
-        return f"torch.vm.graphs_pass({name!r})"
-
-
-def graphs_pass(
-    backend: str | Callable[..., Any] = "inductor",
-    *,
-    min_ops: int = 4,
-    max_variants: int = 32,
-    freeze: bool | None = None,
-) -> Graphs:
-    """The tensor work of a block, with what it calls, goes to a graph
-    compiler: :func:`torch.rewrite.graphs`, which has the arguments. It sees
-    the instructions as the function wrote them, so it is the first of
-    ``block_passes``."""
-    return _GraphsPass(backend, min_ops, max_variants, freeze)
-
-
-def resolve_dispatch_pass() -> Builtin:
-    """Operations that were seen to be one dispatcher call become direct
-    calls of the kernel behind the dispatcher. Over a block."""
-    return Builtin("resolve_dispatch", False, "resolve_dispatch_pass")
-
-
-def tensor_accessors_pass() -> Builtin:
-    """``x.shape[i]``, ``x.size(i)``, ``x.dim()`` and ``x.ndim`` of a tensor
-    become plain integers of the graph. Over a block."""
-    return Builtin("tensor_accessors", False, "tensor_accessors_pass")
-
-
-def method_calls_pass() -> Builtin:
-    """``x.f(...)`` calls that stay generic are made without a bound method
-    object. Over a block."""
-    return Builtin("method_calls", False, "method_calls_pass")
-
-
-def narrow_dims_pass() -> Builtin:
-    """A comparison of a dimension with a constant is folded to the outcome
-    last seen, under a guard that pins the dimension to the sizes with that
-    outcome. Over a block, in front of :func:`fold_pass`; not a default."""
-    return Builtin("narrow_dims", False, "narrow_dims_pass")
-
-
-def fold_pass() -> Builtin:
-    """Truthiness tests and branches on constants are folded. Over a block."""
-    return Builtin("fold", False, "fold_pass")
-
-
-def dce_pass() -> Builtin:
-    """Instructions whose result is not needed are dropped. Over a block."""
-    return Builtin("dce", False, "dce_pass")
-
-
-DefaultCFGPasses: tuple[Builtin, ...] = (
-    inlining_pass(),
-    loop_unrolling_pass(),
-    module_shortcuts_pass(),
+DEFAULT_PASSES: tuple[BuiltinPass, ...] = (
+    passes.Inline(),
+    passes.Unroll(),
+    passes.ModuleShortcuts(),
+    passes.ResolveDispatch(),
+    passes.TensorAccessors(),
+    passes.MethodCalls(),
+    passes.Fold(),
+    passes.DCE(),
 )
-"""What ``@torch.vm`` does to the control-flow graph of a function:
-:func:`inlining_pass`, :func:`loop_unrolling_pass` with its default of 8
-iterations, :func:`module_shortcuts_pass`."""
-
-DefaultBlockPasses: tuple[Builtin, ...] = (
-    resolve_dispatch_pass(),
-    tensor_accessors_pass(),
-    method_calls_pass(),
-    fold_pass(),
-    dce_pass(),
-)
-"""What ``@torch.vm`` does to each basic block, in this order and again until
-nothing changes: :func:`resolve_dispatch_pass`, :func:`tensor_accessors_pass`,
-:func:`method_calls_pass`, :func:`fold_pass`, :func:`dce_pass`."""
-
-FAST: Mapping[str, Any] = types.MappingProxyType(
-    {
-        "cfg_passes": DefaultCFGPasses,
-        "block_passes": (graphs_pass("inductor"), *DefaultBlockPasses),
-    }
-)
-"""The default passes, with the tensor work handed to AOTAutograd and
-Inductor first (:func:`graphs_pass`): ``torch.vm(**torch.vm.FAST)``. It
-compiles for seconds where the default does not compile at all."""
+"""What ``@torch.vm`` does to a function: the passes over its control-flow graph,
+once, and then the passes over each basic block once it was profiled, in this
+order and again until no pass changes the block anymore."""
 
 
-# ------------------------------------------------------------------ the entry
+_runtime: Any = None
 
 
-def _made_by(one: Any) -> str | None:
-    """The name of the function of this module that makes such a pass."""
-    if isinstance(one, Builtin):
-        return one.made_by
-    return "graphs_pass" if isinstance(one, Graphs) else None
+def _load_runtime() -> Any:
+    global _runtime
+    if _runtime is None:
+        try:
+            # Not a static import: the extension only exists in builds made
+            # with USE_TORCH_VM=1.
+            _cfg_rs = importlib.import_module("torch._cfg_rs")
+        except ImportError as e:
+            raise RuntimeError(
+                "torch.vm needs its Rust runtime (torch._cfg_rs), which this build "
+                "of PyTorch does not include. Build PyTorch with USE_TORCH_VM=1 "
+                "(requires cargo)."
+            ) from e
+        _cfg_rs.init(torch._C._cfg_c_api())
+        _cfg_rs.leave_to_interpreter(_compilers())
+        _runtime = _cfg_rs
+    return _runtime
 
 
-def _checked(cfg_passes: Iterable[Any], block_passes: Iterable[Any]) -> list[Any]:
-    """The two lists as the one the engine takes, each pass in its list."""
-    cfg, block = tuple(cfg_passes), tuple(block_passes)
-    for one in cfg:
-        if not (isinstance(one, Builtin) and one.cfg):
-            known = isinstance(one, (Builtin, Graphs))
-            where = "; it goes in block_passes" if known else ""
-            raise TypeError(
-                f"cfg_passes has {one!r}, which is not a pass over the control-flow graph{where}"
-            )
-    for one in block:
-        if isinstance(one, Builtin) and one.cfg:
-            raise TypeError(
-                f"block_passes has {one!r}, which is a pass over the control-flow "
-                "graph; it goes in cfg_passes"
-            )
-        if not (isinstance(one, (Builtin, Graphs)) or callable(one)):
+def _compilers() -> list[str]:
+    """Where the code is that compiles, and that runs what was compiled.
+
+    A rewritten function reaches it when it calls a function that
+    ``torch.compile`` made, or when autograd runs the backward of a compiled
+    graph. It is not rewritten: the interpreter runs it, with all it calls.
+    """
+    places = ["_inductor/", "_functorch/_aot_autograd/", "vm/"]
+    places += ["_functorch/aot_autograd.py", "_functorch/compilers.py"]
+    # What enters Dynamo: the function torch.compile returns.
+    entry = "_TorchDynamoContext.__call__.<locals>.compile_wrapper"
+    places += [f"_dynamo/eval_frame.py::{entry}"]
+    root = os.path.dirname(torch.__file__)
+    return [os.path.join(root, place) for place in places]
+
+
+def load_passes(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Loads passes written in Rust from a library, by name.
+
+    The library is a ``cdylib`` crate that depends on the crate
+    ``torch-vm-pass`` (``torch/csrc/cfg/rust/sdk`` in the source tree),
+    implements its ``Pass`` trait and ends with ``export_passes!``. Such a
+    pass sees a basic block as a Python pass does (the instructions, the
+    kernel each was seen to call, the values they define and use) and can
+    replace a run of them by a call. A library links against neither Python
+    nor PyTorch, so one that was built once keeps working::
+
+        passes = torch.vm.load_passes("target/release/libmine.so")
+        fuse = passes["fuse_rmsnorm"].bind(kernel)  # what the pass puts in
+        torch.vm(fn, passes=[fuse, *torch.vm.DEFAULT_PASSES])
+
+    ``bind`` returns the pass with an object that is handed to it on every
+    run: the kernel, as a rule, which stays a Python callable.
+    """
+    return _load_runtime().load_passes(os.fspath(path))
+
+
+def is_available() -> bool:
+    """Whether this build of PyTorch has the torch.vm runtime."""
+    try:
+        _load_runtime()
+    except RuntimeError:
+        return False
+    return True
+
+
+def _over_graph(one: Any) -> bool:
+    """Whether a pass of one's own is over the graph of a region: its
+    signature says so, ``(gm, input_types) -> gm``."""
+    if isinstance(one, BuiltinPass):
+        return False
+    try:
+        parameters = inspect.signature(one).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    kinds = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    needed = [p for p in parameters if p.kind in kinds and p.default is p.empty]
+    return len(needed) == 2
+
+
+def _plan(
+    given: Iterable[Any],
+) -> tuple[list[Any], dict[str, bool], Graphs | None, dict[str, Any], list[Any]]:
+    """Checks a list of passes, and sorts it into what the engine is given.
+
+    Returns the passes over a block in their order (the engine's own by name),
+    which of the passes over the control-flow graph are asked for, the graph
+    pass if there is one, what the passes were made with, and the passes over
+    the graph of a region.
+    """
+    listed = tuple(given)
+    for one in listed:
+        if not (isinstance(one, BuiltinPass) or callable(one)):
             kind = type(one).__name__
             raise TypeError(
-                f"block_passes has a {kind}: a pass is what a function of torch.vm "
-                "makes (torch.vm.fold_pass()), or a callable taking a region"
+                f"passes has a {kind}: a pass is one of torch.vm.passes "
+                "(torch.vm.passes.Fold()), or a callable taking a region"
             )
-    graphs = [i for i, one in enumerate(block) if isinstance(one, Graphs)]
-    if graphs and any(isinstance(one, Builtin) for one in block[: graphs[0]]):
-        raise ValueError(
-            f"block_passes has {block[graphs[0]]!r} after a pass that rewrites single "
-            "instructions: it sees the instructions as the function wrote them, so it goes first"
-        )
-    names = [_made_by(one) for one in (*cfg, *block) if _made_by(one) is not None]
-    twice = sorted({name for name in names if names.count(name) > 1})
+    own = [type(one) for one in listed if isinstance(one, BuiltinPass)]
+    twice = sorted({kind.__name__ for kind in own if own.count(kind) > 1})
     if twice:
-        raise ValueError(f"{twice[0]} is given more than once")
-    if "inlining_pass" in names and "loop_unrolling_pass" in names:
-        if names.index("loop_unrolling_pass") < names.index("inlining_pass"):
+        raise ValueError(f"torch.vm.passes.{twice[0]} is given more than once")
+    if Inline in own and Unroll in own and own.index(Unroll) < own.index(Inline):
+        raise ValueError(
+            "passes has Unroll in front of Inline: the engine inlines first, so "
+            "that the loops of an inlined function are unrolled too"
+        )
+    whole = dict.fromkeys(("inline", "unroll", "shortcuts"), False)
+    settings: dict[str, Any] = {}
+    for one in listed:
+        if isinstance(one, BuiltinPass) and one.kind == "cfg":
+            whole[one.engine] = True
+            settings.update(dataclasses.asdict(one))
+    found = next((one for one in listed if isinstance(one, Graphs)), None)
+    over_graph = [one for one in listed if _over_graph(one)]
+    if over_graph and found is None:
+        # Regions are made for them, and their graphs run on the eager kernels.
+        found = Graphs("aot_eager")
+        listed = (*listed, found)
+    for one in over_graph:
+        if listed.index(one) > listed.index(found):
+            name = getattr(one, "__name__", type(one).__name__)
             raise ValueError(
-                "cfg_passes has loop_unrolling_pass in front of inlining_pass: "
-                "the engine inlines first, so that the loops of an inlined "
-                "function are unrolled too"
+                f"passes has {name} behind {found!r}: the graph compiler is given what "
+                "the passes over the graph of a region made of it, so they go in front of it"
             )
-    return [*cfg, *block]
+    block = [
+        one
+        for one in listed
+        if not (isinstance(one, BuiltinPass) and one.kind == "cfg")
+    ]
+    block = [one for one in block if all(one is not other for other in over_graph)]
+    # The graph pass sees a block as the function wrote it: it is the first.
+    block = [one for one in block if one is found] + [
+        one for one in block if one is not found
+    ]
+    engine = [
+        one.engine if isinstance(one, BuiltinPass) and one is not found else one
+        for one in block
+    ]
+    return engine, whole, found, settings, over_graph
 
 
 def vm(
     fn: Any = None,
     *,
-    cfg_passes: Iterable[Any] | None = None,
-    block_passes: Iterable[Any] | None = None,
+    passes: Iterable[Any] | None = None,
     fallback: bool = True,
     skip_autograd: bool = True,
     unboxed: bool = True,
@@ -280,37 +355,91 @@ def vm(
     max_respecializations: int = 6,
     keep_memory: bool | None = None,
 ) -> Any:
-    """Runs ``fn`` as a control-flow graph in the VM, with passes applied.
+    """Runs ``fn`` as an SSA control-flow graph in the VM, with passes applied.
 
-    ``torch.vm`` itself is this function: ``@torch.vm``, ``@torch.vm(...)``
-    and ``torch.vm(fn, ...)`` all work.
+    ``torch.vm`` itself is this function: ``@torch.vm``, ``@torch.vm(...)`` and
+    ``torch.vm(fn, ...)`` all work.
 
     Args:
-        fn: a Python function, a bound method, or an ``nn.Module`` (whose
-            ``forward`` is run). Left out when used as a decorator with
-            arguments.
-        cfg_passes: the passes over the control-flow graph of the function,
-            applied once before it runs. Defaults to
-            :data:`DefaultCFGPasses`; an empty list leaves the graph as the
-            bytecode gives it.
-        block_passes: the passes over a basic block, applied in this order,
-            and again until none changes the block, once the block has run
-            and was watched. Defaults to :data:`DefaultBlockPasses`. An entry
-            is what a function of this module makes (``fold_pass()``,
-            ``graphs_pass("inductor")``), or a pass of one's own: a callable
-            ``pass_(region) -> bool`` (see :func:`swap`), or one written in
-            Rust (:func:`load_passes`). With both lists empty the function
-            runs in the generic tier of the VM, which does what the
-            interpreter does.
-        fallback, skip_autograd, unboxed, callees, demote, max_versions,
-        max_respecializations, keep_memory: as for
-            :func:`torch.rewrite.rewrite`.
+        fn: a Python function, a bound method, or an ``nn.Module`` (which is
+            called as ``module(...)`` calls it, hooks included). Can be omitted
+            to use ``torch.vm`` as a decorator with options.
+        passes: what is done to the function: one ordered list. Defaults to
+            :data:`DEFAULT_PASSES`. The passes over the control-flow graph of
+            the function are applied once, before it runs; the passes over a
+            basic block in the order of the list, and again until none changes
+            the block, once the block has run and was watched. An entry is one
+            of :mod:`torch.vm.passes` (``torch.vm.passes.Fold()``), or a pass
+            of one's own, whose signature says what it is over. A function
+            ``pass_(gm, input_types) -> gm`` is a pass over the graph of a
+            region: the ``torch.fx.GraphModule`` of the tensor work of a block,
+            with a :class:`Type` per input, to be returned rewritten, under the
+            guards it adds with :func:`guard`; with such a pass in the list
+            regions are made as for ``torch.vm.passes.Graphs("aot_eager")``,
+            and it goes in front of ``Graphs`` when that is in the list too. A
+            callable ``pass_(region) -> bool`` looks at the instructions of one
+            basic block and at what was observed of them, rewrites them, and
+            returns whether it changed anything; it can be written in Rust
+            (:func:`load_passes`). With an empty list nothing is rewritten: the
+            function runs in the generic tier of the VM, which does what the
+            interpreter does, without profiling and without direct kernel
+            calls.
+        fallback: if the function uses something that is not supported, warn
+            and return it unchanged instead of raising :class:`Unsupported`.
+        skip_autograd: let a call site enter below the Autograd kernel when the
+            call it was captured from tracked no gradient. Such a site is
+            guarded on that still being the case.
+        unboxed: keep the tensors that kernels return without a Python object
+            until Python code needs one. A tensor that only flows from one
+            kernel call into others then never gets one.
+        callees: rewrite the Python functions that are called while the
+            function runs, the first time each is called, with the same
+            options. That is every call of a Python function on the thread,
+            whoever makes it: the rewritten code, C code that it calls (the
+            ``__init__`` of a class that is instantiated, a property, an
+            operator such as ``__add__``, the ``key`` of ``sorted``,
+            ``functools.partial``, a hook of autograd), or a function below it
+            that the interpreter runs, a generator for one. The calls that C
+            code and the interpreter make are caught where the interpreter
+            starts a frame (PEP 523), which it does through this runtime only
+            while a rewritten function is running (``TORCH_VM_EVAL_FRAME=0``
+            leaves those calls to the interpreter). What the runtime itself
+            calls is not rewritten: passes, compiled graphs, imports. A callee
+            the frontend does not support runs in the interpreter.
+        demote: measure the function and each of its callees, once warmed up,
+            both rewritten and in the interpreter, and leave to the interpreter
+            what runs faster there: the VM gains on tensor operations and loses
+            on plain Python, and library code is often mostly the latter.
+            ``stats()["demoted_callees"]`` lists the callees that were left,
+            ``stats()["demoted"]`` says whether the function itself was, and
+            ``stats()["measuring"]`` whether that is still open for the
+            function, or for calls that took a noticeable part (1/64) of its
+            last call. On by default; the environment variable
+            ``TORCH_VM_DEMOTE=0`` turns the default off, for looking at the VM
+            itself.
+        max_versions: how many specialized versions a block can have at once.
+        max_respecializations: how many times a block may be profiled and
+            specialized again before it settles on code without guards.
+        keep_memory: give the function a workspace: the memory of the CPU
+            tensors its calls make stays with it when they are freed, and the
+            next call uses it again instead of having the system map and fault
+            in the same pages. It holds what the tensors of a call hold at
+            their peak and up to half as much again, 256 MB at most; what a few
+            calls in a row did not ask for is given back.
+            ``torch.vm.memory(fn)`` reports it. On by default
+            (``TORCH_VM_KEEP_MEMORY=0`` turns it off).
 
     Returns:
-        A callable with the signature of ``fn``, with ``dump()``, ``stats()``
-        and ``sites()``.
+        A callable with the signature of ``fn``. It has ``dump()``, returning
+        the graph as text, ``stats()`` and ``sites()``.
     """
+    if demote is None:
+        demote = os.environ.get("TORCH_VM_DEMOTE", "1") != "0"
+    if keep_memory is None:
+        keep_memory = os.environ.get("TORCH_VM_KEEP_MEMORY", "1") != "0"
+    passes = DEFAULT_PASSES if passes is None else tuple(passes)
     options: dict[str, Any] = {
+        "passes": passes,
         "fallback": fallback,
         "skip_autograd": skip_autograd,
         "unboxed": unboxed,
@@ -320,106 +449,123 @@ def vm(
         "max_respecializations": max_respecializations,
         "keep_memory": keep_memory,
     }
-    passes = _checked(
-        DefaultCFGPasses if cfg_passes is None else cfg_passes,
-        DefaultBlockPasses if block_passes is None else block_passes,
-    )
-    return _rewrite(fn, passes=passes, **options)
+    if fn is None:
+        return functools.partial(vm, **options)
+    if isinstance(fn, torch.nn.Module):
+        module = fn
 
+        # The module is called, not its forward: its hooks run as they do in
+        # the interpreter.
+        def call(*args: Any, **kwargs: Any) -> Any:
+            return module(*args, **kwargs)
 
-# The passes that configure names, in the place each has in its list.
-_CFG = ("inlining_pass", "loop_unrolling_pass", "module_shortcuts_pass")
-_BLOCK = (
-    "graphs_pass",
-    "resolve_dispatch_pass",
-    "tensor_accessors_pass",
-    "method_calls_pass",
-    "narrow_dims_pass",
-    "fold_pass",
-    "dce_pass",
-)
-_OPTIONS = (
-    "fallback",
-    "skip_autograd",
-    "unboxed",
-    "callees",
-    "demote",
-    "max_versions",
-    "max_respecializations",
-    "keep_memory",
-)
-
-
-def configure(
-    preset: Mapping[str, Any] | None = None, /, **settings: Any
-) -> dict[str, Any]:
-    """The keyword arguments of ``torch.vm`` for the default passes, with
-    some of them set differently::
-
-        passes = torch.vm.configure(loop_unrolling_pass=16)
-
-
-        @torch.vm(**passes)
-        def forward(model, x): ...
-
-    Args:
-        preset: what to start from instead of the defaults: a preset such as
-            :data:`FAST`, or what an earlier call returned.
-        settings: per pass, by the name of the function that makes it, what
-            to make it with: one argument (``loop_unrolling_pass=16``,
-            ``graphs_pass="aot_eager"``), a tuple of arguments, a dict of
-            keyword arguments, ``True`` for the pass as it comes, and
-            ``False`` or ``None`` to leave it out. A pass that is in a list
-            keeps its place there; one that is not goes where it belongs
-            (``graphs_pass`` first, ``narrow_dims_pass`` in front of
-            ``fold_pass``). Any other name is an option of ``torch.vm``
-            (``demote=False``) and is handed through.
-
-    Returns:
-        A dict with ``cfg_passes``, ``block_passes`` and the options given.
-    """
-    found = dict(preset) if preset is not None else {}
-    cfg = list(found.get("cfg_passes", DefaultCFGPasses))
-    block = list(found.get("block_passes", DefaultBlockPasses))
-    module = sys.modules[__name__]
-    for name, value in settings.items():
-        if name in _OPTIONS:
-            found[name] = value
-            continue
-        if name not in _CFG and name not in _BLOCK:
-            known = ", ".join((*_CFG, *_BLOCK, *_OPTIONS))
-            raise TypeError(f"configure() does not know {name!r}; it knows {known}")
-        passes, order = (cfg, _CFG) if name in _CFG else (block, _BLOCK)
-        at = next((i for i, one in enumerate(passes) if _made_by(one) == name), None)
-        if value is None or value is False:
-            if at is not None:
-                del passes[at]
-            continue
-        make = getattr(module, name)
-        if value is True:
-            made = make()
-        elif isinstance(value, tuple):
-            made = make(*value)
-        elif isinstance(value, dict):
-            made = make(**value)
-        else:
-            made = make(value)
-        if at is not None:
-            passes[at] = made
-            continue
-        # In front of the first pass that comes after it in the usual order.
-        later = order[order.index(name) + 1 :]
-        at = next(
-            (i for i, one in enumerate(passes) if _made_by(one) in later), len(passes)
+        return vm(call, **options)
+    if isinstance(fn, types.MethodType):
+        return types.MethodType(vm(fn.__func__, **options), fn.__self__)
+    if not isinstance(fn, types.FunctionType):
+        raise TypeError(f"torch.vm expects a function, not {type(fn).__name__}")
+    block, whole, found, settings, over_graph = _plan(passes)
+    runtime = _load_runtime()
+    regions = None
+    if found is not None:
+        freeze = found.freeze
+        if freeze is None:
+            freeze = os.environ.get("TORCH_VM_FREEZE", "1") != "0"
+        regions = _regions.make_pass(
+            runtime,
+            found.backend,
+            found.min_ops,
+            found.max_variants,
+            0,
+            freeze,
+            tuple(over_graph),
         )
-        passes.insert(at, made)
-    found["cfg_passes"], found["block_passes"] = tuple(cfg), tuple(block)
-    return found
+        block[0] = regions
+    try:
+        compiled = runtime.compile(
+            fn,
+            block,
+            specialize=bool(block),
+            skip_autograd=skip_autograd,
+            unboxed=unboxed,
+            inline=whole["inline"],
+            unroll=whole["unroll"],
+            max_trip_count=settings.get("max_trip_count", 8),
+            callees=callees,
+            shortcuts=whole["shortcuts"] and _shortcuts.register(runtime),
+            demote=demote,
+            max_versions=max_versions,
+            max_respecializations=max_respecializations,
+            workspace=torch._C._cfg_workspace() if keep_memory else None,
+            hook=os.environ.get("TORCH_VM_EVAL_FRAME", "1") != "0",
+        )
+        if regions is not None:
+            _region_passes[compiled] = regions
+        return compiled
+    except NotImplementedError as e:
+        if not fallback:
+            raise Unsupported(f"{fn.__qualname__}: {e}") from None
+        warnings.warn(f"torch.vm left {fn.__qualname__} as it is: {e}", stacklevel=2)
+        return fn
+
+
+# The region pass of each compiled function that has a backend.
+_region_passes: "weakref.WeakKeyDictionary[Any, _regions.Regions]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def regions(fn: Any) -> list[dict[str, Any]]:
+    """What :class:`passes.Graphs` made of a rewritten function and of what it calls.
+
+    One dict per region, with ``where`` (function, block and instructions),
+    ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
+    tried yet), ``variants``, ``compiles`` (how many of the variants went to
+    the backend: the others had the graph of an earlier one), ``open`` (per
+    variant that leaves sizes open, the conditions it holds under), ``frozen``
+    (how many of the variants have the tensors of their modules built in, see
+    ``freeze``), ``ops`` and ``seconds`` spent tracing and compiling; and one
+    per instruction or run of instructions that was left to the VM, with
+    ``state`` ``"vm"`` and the ``reason``.
+    """
+    fn = getattr(fn, "__func__", fn)
+    found = _region_passes.get(fn)
+    return found.report() if found is not None else []
+
+
+def memory(fn: Any) -> dict[str, int] | None:
+    """What a compiled function keeps of the memory of its calls.
+
+    With ``keep_memory`` a compiled function has a workspace: while it runs,
+    the CPU tensors that are made get their memory from it and give it back
+    to it, so that the next call finds blocks of the sizes it needs instead
+    of asking the system for pages again. Returns ``calls``, ``hits`` and
+    ``misses`` (blocks found in the workspace, and blocks malloc had to
+    make), and in bytes ``kept`` (held for the next call), ``live`` (held
+    by tensors now) and ``peak``; or None for a function without one.
+    """
+    fn = getattr(fn, "__func__", fn)
+    workspace = getattr(fn, "workspace", None)
+    return None if workspace is None else torch._C._cfg_workspace_stats(workspace)
+
+
+def is_exact(passes: Iterable[Any] | None = None) -> bool:
+    """Whether a list of passes computes what the interpreter computes, bit for
+    bit: ``torch.vm.is_exact()`` is true, and with ``torch.vm.passes.Graphs()``
+    in the list it is not.
+
+    True when every pass is one of the engine's own that leaves every result
+    what it was: they change how the same kernels are reached, not which ones
+    run or in what order. The graph pass is not such a pass, and a pass of
+    one's own is not taken to be one.
+    """
+    listed = DEFAULT_PASSES if passes is None else tuple(passes)
+    return all(getattr(one, "exact", False) is True for one in listed)
 
 
 class _CallableModule(types.ModuleType):
-    # torch.vm is both the entry point and the namespace: torch.vm(fn) and
-    # torch.vm.FAST.
+    # torch.vm is both the entry point and the namespace of the prototype:
+    # torch.vm(fn) and torch.vm.is_available().
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return vm(*args, **kwargs)
 
