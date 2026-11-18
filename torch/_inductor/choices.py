@@ -493,11 +493,12 @@ class InductorChoices:
             True:  triton_red_fused_mm_relu_0.run(buf1, arg0_1, arg1_1, ...)
 
         use_native_matmul() in kernel/mm_common.py asks this while lowering mm,
-        bmm, addmm, baddbmm and mm_plus_mm, only about matmuls it can lower
-        natively. A dot cannot go back to the extern kernel: the device's
-        scheduling emits it. This default decides for Triton's native matmul
-        codegen; another backend (config.cuda_backend) overrides it in its own
-        InductorChoices.
+        bmm, addmm, baddbmm and mm_plus_mm, after the checks that hold for any
+        backend (BF16x9, unbacked sizes). A dot cannot go back to the extern
+        kernel: the device's scheduling emits it. This default holds the checks
+        of Triton's native matmul codegen. An override replaces them: it returns
+        True only for matmuls its backend's scheduling emits (another
+        config.cuda_backend's), and calls super() for the rest.
         """
         if not config.triton.native_matmul:
             return False
