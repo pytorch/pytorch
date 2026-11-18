@@ -105,6 +105,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.compile_fx import _CompileFxKwargs, CompilerConfigExtra
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
+    from torch.fx.experimental.symbolic_shapes import SympyBoolean
 
 
 log = logging.getLogger(__name__)
@@ -1375,7 +1376,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         return compiled_fn, aot_config
 
     @classmethod
-    def _first_float_guard(cls: type[AOTAutogradCache]) -> Any | None:
+    def _first_float_guard(cls: type[AOTAutogradCache]) -> SympyBoolean | None:
+        """Return the first ShapeEnv guard referencing a float symbol, if any."""
         shape_env = cls._get_shape_env()
         if shape_env is None:
             return None
@@ -1612,9 +1614,14 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(artifact)
             # Key-addressed AOTAutogradCache entries guard only on input SymInts;
-            # BundledAOTAutogradCacheArtifact above is guarded by Dynamo instead.
+            # BundledAOTAutogradCacheArtifact above is guarded by Dynamo, and
+            # callers setting bypass_autograd_cache_key own artifact lookup.
             if (float_guard := AOTAutogradCache._first_float_guard()) is not None:
                 if config.bypass_autograd_cache_key:
+                    log.info(
+                        "Skipping key-addressed autograd cache save due to float guard: %s",
+                        float_guard,
+                    )
                     return None
                 raise BypassAOTAutogradCache(f"guard on float symbol: {float_guard}")
             CacheArtifactRecorder(AOTAutogradCacheArtifact.type(), key).record(content)

@@ -11491,6 +11491,40 @@ from user code:
         finally:
             c10d.destroy_process_group()
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    @torch._inductor.config.patch("fx_graph_remote_cache", False)
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    def test_float_symbol_guard_allows_aot_compile_fullgraph(self):
+        import torch._functorch.config as functorch_config
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, s):
+            if s > 0.5:
+                return x * s + 1.0
+            return x * s - 1.0
+
+        x = torch.ones(2, dtype=torch.float64, requires_grad=True)
+        with (
+            functorch_config.patch({"enable_autograd_cache": True}),
+            fresh_cache(),
+            tempfile.TemporaryDirectory() as tmp_dir,
+        ):
+            torch._dynamo.utils.counters.clear()
+            compiled_fn = torch.compile(
+                fn, backend="inductor", dynamic=True, fullgraph=True
+            ).aot_compile(((x, 0.8), {}))
+            artifact_path = os.path.join(tmp_dir, "compiled_fn.pt")
+            compiled_fn.save_compiled_function(artifact_path)
+            with open(artifact_path, "rb") as f:
+                reloaded = torch.compiler.load_compiled_function(f, f_globals=globals())
+            self.assertEqual(reloaded(x, 0.9), fn(x, 0.9))
+            self.assertEqual(
+                torch._dynamo.utils.counters["aot_autograd"]["autograd_cache_saved"],
+                0,
+            )
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                reloaded(x, 0.2)
+
 
 class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
     def test_pickler_carries_a_docstring(self):
