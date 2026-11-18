@@ -161,7 +161,7 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
 def _capture_cudagraph_config(
     backend: str | torch._TorchCompileInductorWrapper,
 ) -> dict[str, bool]:
-    """The CUDA graph config an Inductor capture's calls compile under.
+    """The CUDA graph config Inductor compiles an Inductor capture's graphs under.
 
     A bundled AOTAutograd entry decides again, when it is post-compiled at load,
     whether and how to wrap its graph in CUDA graphs, so the artifact records
@@ -170,23 +170,33 @@ def _capture_cudagraph_config(
     partitioned, or not, when it compiled.
     """
     import torch._inductor.config as inductor_config
+    from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
 
     config = {
         "triton.cudagraphs": inductor_config.triton.cudagraphs,
         "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
         "graph_partition": inductor_config.graph_partition,
     }
+    cpp_wrapper = inductor_config.cpp_wrapper
     if not isinstance(backend, str):
         config.update((k, v) for k, v in backend.config.items() if k in config)
+        cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
     # Without CUDA graphs the other two decide nothing at load, so the calls
     # compile them as configured.
     if not config["triton.cudagraphs"]:
         return {"triton.cudagraphs": False}
+    # compile_fx compiles such a graph without CUDA graphs whatever the flag says
+    # (get_cpp_wrapper_config), and a graph compiled without them fails to
+    # post-compile with them.
+    if cpp_wrapper and not cpp_wrapper_supports_cudagraphs(config["graph_partition"]):
+        config["triton.cudagraphs"] = False
     return config
 
 
 @contextlib.contextmanager
-def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
+def _capture_config(
+    *, lowers_kernels: bool, traced_under: Mapping[str, bool] | None = None
+) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
 
     Backends serialize into the artifact (``bundled_autograd_cache``) rather
@@ -225,6 +235,8 @@ def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     holds -- with it on, a weakref callback on a value the frame captured does
     not fire when the caller drops its reference (test/dynamo/test_repros.py
     ReproTests.test_weakref_callback).
+    ``traced_under`` is the session's CUDA graph config when Dynamo must trace
+    under it too (see PrecompileSession.__init__).
 
     Every scope patches and restores for itself: ``config.patch`` is re-entrant
     and per-thread, so nested scopes unwind in order and a worker thread sees
@@ -266,6 +278,7 @@ def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
             {
                 **CAPTURE_INDUCTOR_PATCH,
                 **(_frozen_kernel_config() if lowers_kernels else {}),
+                **(traced_under or {}),
             }
         ),
         torch._dynamo.config.patch(allow_empty_graphs=True),
@@ -1426,6 +1439,7 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "NONE_MATCH",
         "NOT_NONE_MATCH",
         "NOT_PRESENT_IN_GENERIC_DICT",
+        "NO_TANGENT_MATCH",
         "ORDERED_DICT_KEYS_MATCH",
         "ORDERED_DICT_ORDER_MATCH",
         "RANGE_ITERATOR_MATCH",
@@ -1977,10 +1991,19 @@ class PrecompileSession(Generic[_P, _R]):
         )
         if not isinstance(backend, str):
             _check_capture_options(backend.config)
-        # What the artifact records as CUDAGRAPH_CONFIG.
+        # What the artifact records as CUDAGRAPH_CONFIG. Inductor compiles every
+        # captured graph under it: __enter__ merges it into the backend's options.
         self._cudagraph_config: dict[str, bool] = {}
+        # Dynamo reads triton.cudagraphs as well: under it a Python float argument
+        # is specialized rather than passed as a CPU scalar tensor, which keeps an
+        # unpartitioned graph out of CUDA graphs. Only such a capture's calls are
+        # traced under the record. A partitioned graph copies the scalar to the
+        # device outside the partition, so the float can stay dynamic.
+        self._traced_under: dict[str, bool] = {}
         if self._backend_name == "inductor":
-            self._cudagraph_config = _capture_cudagraph_config(backend)
+            config = self._cudagraph_config = _capture_cudagraph_config(backend)
+            if config["triton.cudagraphs"] and not config["graph_partition"]:
+                self._traced_under = config
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2078,8 +2101,14 @@ class PrecompileSession(Generic[_P, _R]):
         # Its own cache region: a function captured (or compiled) earlier in
         # this process would otherwise serve its existing cache entries, and
         # this package would record nothing.
+        backend = self._backend
+        if self._cudagraph_config:
+            # As torch.compile's options reach Inductor: around compile_fx only.
+            options = {} if isinstance(backend, str) else backend.config
+            merged = {**options, **self._cudagraph_config}
+            backend = torch._TorchCompileInductorWrapper(None, merged, self._dynamic)
         self._compiled = torch._dynamo.optimize(
-            self._backend,
+            backend,
             package=self._package,
             guard_filter_fn=self._guard_filter_fn,
             dynamic=self._dynamic,
@@ -2098,11 +2127,13 @@ class PrecompileSession(Generic[_P, _R]):
         limit = max(
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
+        lowers_kernels = self._backend_name == "inductor"
         try:
             with (
-                _capture_config(lowers_kernels=self._backend_name == "inductor"),
+                _capture_config(
+                    lowers_kernels=lowers_kernels, traced_under=self._traced_under
+                ),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
-                torch._inductor.config.patch(self._cudagraph_config),
             ):
                 return self._compiled(*args, **kwargs)
         except Exception as e:
@@ -2165,7 +2196,8 @@ class PrecompileSession(Generic[_P, _R]):
                     f"under torch._dynamo.override_cudagraphs(fwd={fwd}, bwd={bwd}), "
                     f"with triton.cudagraphs={flag}: the artifact records the capture's "
                     "CUDA graph config (CUDAGRAPH_CONFIG), not each graph's. Set "
-                    "triton.cudagraphs to match, or remove the override."
+                    "triton.cudagraphs to match (cpp_wrapper under graph_partition "
+                    "compiles without CUDA graphs), or remove the override."
                 )
 
     def _collect_backends(self) -> dict[str, BackendCacheArtifact[Any]]:

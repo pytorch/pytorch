@@ -98,6 +98,7 @@ from .static_triton_launcher import (
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
+from .tiling import block_to_prefix, get_max_block
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -2977,42 +2978,39 @@ class CachingAutotuner(KernelInterface):
             log.warning("Unexpected error building fast launcher", exc_info=True)
             return None
 
+    def _launcher_arg_names(self, cfg: Config) -> list[str]:
+        """Names of the signature args the launcher is called with, in order."""
+        if not triton_version_uses_attrs_dict():
+            return list(self.triton_meta["signature"].keys())
+
+        # constexprs are not passed in as args
+        new_signature: list[str] = []
+        from triton.runtime.interpreter import InterpretedFunction
+
+        for i, x in enumerate(self.triton_meta["signature"].keys()):
+            if isinstance(self.fn, InterpretedFunction):
+                # These are torch compiled triton kernels that definitely
+                # have block size configs. Dynamo does not currently
+                # trace user defined triton kernels when TRITON_INTERPRET=1
+                if x not in cfg.kwargs:
+                    new_signature.append(x)
+            elif i not in get_constexprs(self.fn):
+                # use constexprs rather than just configs since user
+                # defined triton kernels may not have any configs
+                new_signature.append(x)
+
+        return new_signature
+
     def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config
     ) -> tuple[tuple[Any, ...], tuple[int, int, int]]:
-        if triton_version_uses_attrs_dict():
-
-            def filtered_signature() -> list[str]:
-                # constexprs are not passed in as args
-                new_signature: list[str] = []
-                from triton.runtime.interpreter import InterpretedFunction
-
-                for i, x in enumerate(self.triton_meta["signature"].keys()):
-                    if isinstance(self.fn, InterpretedFunction):
-                        # These are torch compiled triton kernels that definitely
-                        # have block size configs. Dynamo does not currently
-                        # trace user defined triton kernels when TRITON_INTERPRET=1
-                        if x not in cfg.kwargs:
-                            new_signature.append(x)
-                    elif i not in get_constexprs(self.fn):
-                        # use constexprs rather than just configs since user
-                        # defined triton kernels may not have any configs
-                        new_signature.append(x)
-
-                return new_signature
-
-        else:
-
-            def filtered_signature() -> list[str]:
-                return list(self.triton_meta["signature"].keys())
-
         grid = GridExpr.from_meta(
             self.inductor_meta, cfg, mode=self.grid_mode
         ).eval_slow(
             dict(
                 zip(
                     [
-                        *filtered_signature(),
+                        *self._launcher_arg_names(cfg),
                         *self.inductor_meta.get("extra_launcher_args", ()),
                     ],
                     args,
@@ -4141,8 +4139,8 @@ def unique_configs(configs: list[Config]):
     return pruned_configs
 
 
-def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
-    for numel, label in zip((xnumel, ynumel, znumel), "XYZ"):
+def check_config(cfg, *, xnumel=None, ynumel=None, z0_numel=None):
+    for numel, label in zip((xnumel, ynumel, z0_numel), ("X", "Y", "Z0_")):
         if numel is None:
             continue
         block = cfg[f"{label}BLOCK"]
@@ -4152,7 +4150,7 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
                     f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
                     f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
                 )
-        max_block = TRITON_MAX_BLOCK[label]
+        max_block = get_max_block(label, TRITON_MAX_BLOCK)
         max_block_str = f'config.triton.max_block["{label}"]'
         if max_block % block != 0:
             raise AssertionError(
@@ -4168,8 +4166,8 @@ def check_max_block(cfg: dict[str, int]):
     for var, val in cfg.items():
         block_suffix = "BLOCK"
         if block_suffix in var:
-            prefix = var.removesuffix(block_suffix)
-            max_block = TRITON_MAX_BLOCK[prefix]
+            prefix = block_to_prefix(var)
+            max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
             if val > max_block:
                 raise AssertionError(
                     f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
@@ -4265,10 +4263,13 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK", "R2_BLOCK")) & cfg.kwargs.keys():
+        if any(
+            key.endswith("BLOCK") and key not in ("XBLOCK", "R0_BLOCK")
+            for key in cfg.kwargs
+        ):
             raise AssertionError(
-                "min_xblock/min_rblock do not support YBLOCK, ZBLOCK, "
-                f"R1_BLOCK, or R2_BLOCK configs: {cfg}"
+                "min_xblock/min_rblock do not support YBLOCK, Z blocks, "
+                f"or reduction blocks other than R0_BLOCK: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
@@ -4309,7 +4310,7 @@ def _enforce_reduction_config_block_minimums(
             cfg.kwargs,
             xnumel=size_hints.get("x") if "XBLOCK" in cfg.kwargs else None,
             ynumel=size_hints.get("y") if "YBLOCK" in cfg.kwargs else None,
-            znumel=size_hints.get("z") if "ZBLOCK" in cfg.kwargs else None,
+            z0_numel=size_hints.get("z0_") if "Z0_BLOCK" in cfg.kwargs else None,
         )
 
     return configs
@@ -4406,7 +4407,7 @@ def triton_config(
     if y:
         y = min(y, size_hints["y"])
     if z:
-        z = min(z, size_hints["z"])
+        z = min(z, size_hints["z0_"])
 
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
@@ -4425,9 +4426,9 @@ def triton_config(
         y *= 2
     while (
         z
-        and z < min(size_hints["z"], TRITON_MAX_BLOCK["Z"])
+        and z < min(size_hints["z0_"], TRITON_MAX_BLOCK["Z0_"])
         and (
-            z * maxGridSize[2] < size_hints["z"]
+            z * maxGridSize[2] < size_hints["z0_"]
             or conditional_product(x, y, z) < target
         )
     ):
@@ -4450,7 +4451,7 @@ def triton_config(
         num_warps = max(num_warps, 4)
     xnumel = size_hints["x"]
     ynumel = size_hints.get("y")
-    znumel = size_hints.get("z")
+    z0_numel = size_hints.get("z0_")
 
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
@@ -4466,9 +4467,9 @@ def triton_config(
     if y:
         cfg["YBLOCK"] = y
     if z:
-        cfg["ZBLOCK"] = z
+        cfg["Z0_BLOCK"] = z
     check_max_block(cfg)
-    check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
+    check_config(cfg, xnumel=xnumel, ynumel=ynumel, z0_numel=z0_numel)
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
     if torch.version.hip:
@@ -4500,7 +4501,7 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
     rnumels = {}
     for idx in range(num_reduction_dims - 1, -1, -1):
         prefix = f"r{idx}_"
-        max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
+        max_size = min(size_hints[prefix], get_max_block(prefix, TRITON_MAX_BLOCK))
         dim = min(max_size, remaining)
         if remaining % dim != 0:
             raise AssertionError(
@@ -4702,9 +4703,10 @@ def _combo_coordesc_meta(
                 continue
             field_order.append(key)
             block_key = key.rsplit("_", 1)[0]
-            prefix = block_key.removesuffix("BLOCK").lower()
-            if (max_block := TRITON_MAX_BLOCK.get(prefix.upper())) is not None:
-                field_limits[key] = min(max_block, size_hints_i.get(prefix, max_block))
+            prefix = block_to_prefix(block_key)
+            if prefix in size_hints_i:
+                max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
+                field_limits[key] = min(max_block, size_hints_i[prefix])
             if block_key in min_block_sizes:
                 field_minimums[key] = min_block_sizes[block_key]
     return field_order, field_limits, field_minimums
@@ -4859,10 +4861,10 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 continue
             combined_key = f"{key}_{i}"
             group_coordesc_fields.add(combined_key)
-            prefix = key.removesuffix("BLOCK").lower()
+            prefix = block_to_prefix(key)
             if prefix in size_hints_i:
                 combo_coordesc_field_limits[combined_key] = min(
-                    TRITON_MAX_BLOCK[prefix.upper()],
+                    get_max_block(prefix, TRITON_MAX_BLOCK),
                     size_hints_i[prefix],
                 )
             if key in min_block_sizes_i:
@@ -5108,7 +5110,7 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     config = {
         "XBLOCK": sizes.get("x"),
         "YBLOCK": sizes.get("y"),
-        "ZBLOCK": sizes.get("z"),
+        "Z0_BLOCK": sizes.get("z0_"),
         "R0_BLOCK": sizes.get("r"),
     }
     # Remove keys with None values (i.e., missing in sizes)
@@ -5146,7 +5148,7 @@ def _config_helper(bmm=False, persistent=False):
         if persistent:
             d.pop("r", None)
         if bmm:
-            d["z"] = 1
+            d["z0_"] = 1
         out.append((d, w, s))
 
     # Deduplicate by converting dicts to immutable frozensets
@@ -5812,7 +5814,7 @@ class GridExpr:
         meta: dict[str, Any] = {
             "XBLOCK": f"{kernel_name}_result.xblocks[0]",
             "YBLOCK": f"{kernel_name}_result.yblocks[0]",
-            "ZBLOCK": f"{kernel_name}_result.zblocks[0]",
+            "Z0_BLOCK": f"{kernel_name}_result.zblocks[0]",
             "R0_BLOCK": f"{kernel_name}_result.r0blocks[0]",
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
@@ -5855,14 +5857,14 @@ class Grid3D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
-        self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+        self.z_grid = self.ceildiv("z0_numel", meta.get("Z0_BLOCK"))
 
 
 class BatchMatmulGrid3D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.z_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
-        self.x_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+        self.x_grid = self.ceildiv("z0_numel", meta.get("Z0_BLOCK"))
 
 
 class Grid2DWithYZOverflow(GridExpr):
