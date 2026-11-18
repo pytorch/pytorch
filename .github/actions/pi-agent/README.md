@@ -98,35 +98,49 @@ probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the al
 
 `.github/workflows/issue-triage-pi.yml` is stage 2 of issue triage, after
 `issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill with
-`global.anthropic.claude-sonnet-5` at medium thinking, preserving the Claude Code triage model.
-Sol remains available through the `model` dispatch input. Distributed triage uses the same default:
+`global.openai.gpt-6.1-sol` at medium thinking. Other allowlisted models remain available
+through the `model` dispatch input:
 
-1. **plan** (`pi-triage-plan.yml`, shared with distributed triage; Bedrock, `issues: read`,
-   egress blocked): the model reads the issue through
+1. **plan** (Bedrock, `issues: read`, egress blocked): the model reads the issue through
    read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
-   `get_issue_comments`, `search_issues`, fixed to this repository) and submits a plan
+   `get_issue_comments`, `search_issues`, fixed to the workflow repository) and submits a plan
    matching `.github/pi/schemas/issue-triage-plan.json`.
 2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
-   dropped), only adds labels, posts only `templates.json` comments the bot has not already
-   posted, closes only usage questions and expected numerical behavior, and adds
-   `bot-triaged`. It then hands the issue to `distributed-triage-pi.yml`.
+   dropped), only adds labels, posts fixed template or related-issue comments the bot
+   has not already posted, and adds `bot-triaged`. It closes usage questions, expected
+   numerical behavior, or covered reports for catalog-enabled closing umbrellas.
+
+Related-issue discovery uses the existing `search_issues` tool with GitHub search syntax,
+with `get_issue` / `get_issue_comments` for candidate evidence. Triage includes checking for
+duplicates and applicable umbrellas, without a prescribed query strategy or tool-call sequence.
+A match requires inspecting candidate context. Before calling GitHub,
+the tool rejects `repo:`, `org:`, and `user:` qualifiers, unquoted `OR`, grouping, and malformed
+quotes. The workflow fixes `TRIAGE_REPO`; it is not a model input. Search responses are also
+filtered to issues in `TRIAGE_REPO`, excluding pull requests, `TRIAGE_SOURCE_ISSUE` (bound
+by the workflow), and the replayed issue. Each call returns at most 10 matches; it does not
+prove absence, decide duplicates, or authorize closure. Search and follow-up reads have no
+separate discovery-specific session budget.
+
+An optional `possible_duplicate` issue number produces a fixed suggestion asking the reporter
+to confirm the match; the source stays open. The apply step validates the same-repository
+source and candidate before writing, never writes to the candidate, and suppresses repeated
+suggestions using a bot-authored target marker. This field cannot invoke an umbrella action
+or be combined with a close decision. Umbrella link/close rules remain separate.
+
+The offline issue-tool tests run against Pi installed from the action lockfile, use its real
+argument validator, and replace only `gh` with controlled fixtures (no GitHub access):
+`PI_TEST_RUNTIME=/absolute/path/to/node_modules/@earendil-works/pi-coding-agent node --test .github/pi/tests/github-issue-tools.mjs`.
 
 Run it manually with `mode`: `replay` shows already-triaged issues as they were before the
 triage bot acted (their labels and human comments from before its first label event) and
-compares each plan with the labels added since; `dry-run` plans against the issues as they
-are now; `apply` writes and accepts exactly one issue per run. `replay` and `dry-run`
+compares each plan with the labels added since. Source titles/bodies and duplicate-candidate
+evidence are current, including candidates filed later; replay is not a frozen historical snapshot.
+`dry-run` plans against the issues as they are now; `apply` writes and accepts exactly one issue per run. `replay` and `dry-run`
 can process batches. Issue transfers become `triage review`. A `request_reproduction` plan
 redacts download/storage links from the current issue body using a fixed policy and posts
 the self-contained-reproduction template. Other issue text is preserved; the model cannot
 supply replacement prose.
 
-## Distributed triage
-
-`.github/workflows/distributed-triage-pi.yml` runs the `distributed-triage` skill on issues
-in the `oncall: distributed` queue: after `issue-triage-pi.yml` hands one off, and when the
-daily sweep (`claude-distributed-triage-cron.yml`) dispatches it. It uses the same
-`pi-triage-plan.yml` model job; `scripts/issue_triage_pi/apply_distributed_plan.py` applies
-the plan and adds the `ptd-bot-triaged` marker that the sweep checks. A model-free `record`
-job appends the result to the daily manifest. Dispatch with `mode: dry-run` to see the
-effects without writing.
+Distributed issues are routed in the same pass: the plan picks one `oncall: distributed`
+sub-queue (and module labels for parallelisms), and the apply step adds the parent queue.

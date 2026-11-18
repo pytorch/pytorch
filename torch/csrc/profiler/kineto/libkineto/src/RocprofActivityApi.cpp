@@ -140,6 +140,12 @@ int RocprofActivityApi::processActivities(
     externalCorrelations.clear();
   }
 
+  // Classify runtime-internal fill/copy kernels (dispatched to implement
+  // hipMemset/hipMemcpy calls) as GPU memsets/memcpies.  Done here, after
+  // the per-thread buffers are merged, so that every memset/memcpy runtime
+  // row is visible to the correlation lookup.
+  detail::classifyRuntimeInternalDispatches(d->rows_);
+
   // Async ops are in CLOCK_MONOTONIC rather than junk clock.
   // Convert these timestamps, poorly.
   // These accurate timestamps will skew when converted to approximate time
@@ -147,13 +153,13 @@ int RocprofActivityApi::processActivities(
   // much better job.
   auto toffset = getTimeOffset();
 
-  const bool logCopies = isLogged(ActivityType::GPU_MEMCPY);
-  const bool logKernels = isLogged(ActivityType::CONCURRENT_KERNEL);
-  if (logCopies || logKernels) {
+  if (isLogged(ActivityType::GPU_MEMCPY) ||
+      isLogged(ActivityType::GPU_MEMSET) ||
+      isLogged(ActivityType::CONCURRENT_KERNEL)) {
     detail::backfillAsyncStreams(
-        d->rows_, [logCopies, logKernels](const rocprofAsyncRow& async) {
-          return (logCopies && isAsyncCopy(async)) ||
-              (logKernels && isAsyncKernel(async));
+        d->rows_, [this](const rocprofAsyncRow& async) {
+          return (isAsyncCopy(async) || isAsyncKernel(async)) &&
+              detail::isAsyncRowLogged(async, activityMaskSnapshot_);
         });
   }
 
@@ -171,8 +177,13 @@ int RocprofActivityApi::processActivities(
           break;
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         default:
-          if (!isLogged(ActivityType::CONCURRENT_KERNEL))
+          if (item->type == ROCTRACER_ACTIVITY_ASYNC) {
+            filtered = !detail::isAsyncRowLogged(
+                *reinterpret_cast<rocprofAsyncRow*>(item),
+                activityMaskSnapshot_);
+          } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
             filtered = true;
+          }
           break;
       }
     }

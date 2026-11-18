@@ -16,7 +16,7 @@ _FILE_PREFIX = "_remote_module_"
 def get_arg_return_types_from_interface(module_interface):
     if not getattr(module_interface, "__torch_script_interface__", False):
         raise AssertionError(
-            "Expect a TorchScript class interface decorated by @torch.jit.interface."
+            "Expect an existing TorchScript class interface for internal use."
         )
     qualified_name = torch._jit_internal._qualified_name(module_interface)
     cu = torch.jit._state._python_cu
@@ -119,8 +119,8 @@ def instantiate_scriptable_remote_module_template(
 ):
     if not getattr(module_interface_cls, "__torch_script_interface__", False):
         raise ValueError(
-            f"module_interface_cls {module_interface_cls} must be a type object decorated by "
-            "@torch.jit.interface"
+            f"module_interface_cls {module_interface_cls} must be an existing "
+            "TorchScript interface type for internal use"
         )
 
     # Generate the template instance name.
@@ -148,7 +148,7 @@ def instantiate_scriptable_remote_module_template(
         arrow_and_future_return_type=arrow_and_future_return_type_str,
         args=args_str,
         kwargs=kwargs_str,
-        jit_script_decorator="@torch.jit.script",
+        jit_script_decorator="@torch.jit._script.script",
     )
     return _do_instantiate_remote_module_template(
         generated_module_name, str_dict, enable_moving_cpu_tensors_to_cuda
