@@ -117,6 +117,20 @@ def wrap_cutedsl(
     unhashable attribute (a set, a numpy array, or a cute layout that a direct
     ``cute.compile`` of it stored on it) is refused.
 
+    Dynamo captures a raw call as the call of ``wrap_cutedsl(host_fn,
+    mutates_args="unknown")``: every tensor argument counts as written, read-only
+    ones included. Each is cloned in the functionalized graph; a graph input passed
+    to the call becomes a mutated input, copied back after the graph runs and listed
+    in ``graph_signature.user_inputs_to_mutate`` by strict ``torch.export``; and the
+    same non-empty tensor passed for two parameters, or views that may overlap,
+    graph-break (two written arguments that share memory cannot be functionalized),
+    although eager runs the call. To give the precise write set, call the kernel
+    through ``wrap_cutedsl(host_fn, mutates_args=[...])`` instead. With
+    ``torch._dynamo.config.capture_cutedsl_raw_calls = False``, Dynamo graph-breaks
+    on a raw call instead of capturing it, and the call runs eagerly, so
+    ``fullgraph=True`` and strict ``torch.export`` refuse it; a call of a wrapper is
+    captured either way.
+
     Examples:
 
         >>> # xdoctest: +SKIP
