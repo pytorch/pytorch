@@ -768,7 +768,7 @@ class TestScheduler(TestCase):
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
 
-    @skipIf(not HAS_GPU, "requires GPU")
+    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
     @inductor_config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
