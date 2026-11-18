@@ -3,6 +3,7 @@
 import functools
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Event
+from unittest.mock import patch
 
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
@@ -283,6 +284,540 @@ class GuardsSetTests(torch._dynamo.test_case.TestCase):
 @instantiate_parametrized_tests
 class GuardContextTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("fullgraph", [False, True])
+    @parametrize("prebuilt", [False, True])
+    def test_context_inside_compiled_function(self, fullgraph, prebuilt):
+        labels = []
+        graphs = []
+        manager = torch.compiler.guard_ctx("outer")
+
+        def check_label(ctx):
+            context = TracingContext.get().guards_context
+            labels.append(context.current_guard_label)
+            self.assertEqual(context.dynamo_guards.guard_labels, {})
+            nested = TracingContext(None)
+            self.assertIsNone(nested.guards_context.current_guard_label)
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return graph.forward
+
+        def fn(x):
+            comptime(check_label)
+            cm = manager if prebuilt else torch.compiler.guard_ctx(label="outer")
+            alias = cm
+            with cm as entered:
+                assert entered is None  # noqa: S101
+                comptime(check_label)
+                with torch.compiler.guard_ctx("inner"):
+                    comptime(check_label)
+                    with alias:
+                        comptime(check_label)
+                        x = x.sin()
+                    comptime(check_label)
+                comptime(check_label)
+            comptime(check_label)
+            return x.cos()
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=fullgraph)
+        x = torch.ones(2)
+        with torch.compiler.guard_ctx("ambient"):
+            with patch.object(torch._guards._GuardContext, "__enter__") as enter:
+                with patch.object(torch._guards._GuardContext, "__exit__") as exit:
+                    self.assertEqual(compiled(x), x.sin().cos())
+                    self.assertEqual(compiled(x), x.sin().cos())
+                    enter.assert_not_called()
+                    exit.assert_not_called()
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "ambient"
+            )
+        self.assertEqual(
+            labels, ["ambient", "outer", "inner", "outer", "inner", "outer", "ambient"]
+        )
+        self.assertEqual(len(graphs), 1)
+        self.assertEqual(
+            [(node.op, node.target) for node in graphs[0].graph.nodes],
+            [
+                ("placeholder", "L_x_"),
+                ("call_method", "sin"),
+                ("call_method", "cos"),
+                ("output", "output"),
+            ],
+        )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("inside", [False, True])
+    def test_decorator_inside_compilation(self, inside):
+        labels = []
+
+        def check_label(ctx):
+            labels.append(TracingContext.get().guards_context.current_guard_label)
+
+        @torch.compiler.guard_ctx("decorated")
+        def decorated(x):
+            comptime(check_label)
+            return x.sin()
+
+        def fn(x):
+            if inside:
+
+                @torch.compiler.guard_ctx("local")
+                def local(x):
+                    comptime(check_label)
+                    return decorated(x).cos()
+
+                return local(x)
+            return decorated(x)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        expected = x.sin().cos() if inside else x.sin()
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(labels, ["local", "decorated"] if inside else ["decorated"])
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("nested_break", [False, True])
+    @parametrize("nested_graph_breaks", [False, True])
+    def test_internal_context_graph_break_resume(
+        self, nested_break, nested_graph_breaks
+    ):
+        labels = []
+
+        def check_label(ctx):
+            labels.append(
+                (
+                    ctx.get_local("_phase").as_python_constant(),
+                    TracingContext.get().guards_context.current_guard_label,
+                )
+            )
+
+        def inner(x):
+            with torch.compiler.guard_ctx("inner"):
+                _phase = "inner_entry"
+                comptime(check_label)
+                x = x.sin()
+                torch._dynamo.graph_break()
+                _phase = "inner_resume"
+                comptime(check_label)
+                x = x.cos()
+            _phase = "inner_exit"
+            comptime(check_label)
+            return x
+
+        def fn(x):
+            with torch.compiler.guard_ctx("outer"):
+                _phase = "outer_entry"
+                comptime(check_label)
+                x = x + 1
+                if nested_break:
+                    x = inner(x)
+                else:
+                    with torch.compiler.guard_ctx("inner"):
+                        _phase = "inner_entry"
+                        comptime(check_label)
+                        x = x.sin()
+                        torch._dynamo.graph_break()
+                        _phase = "inner_resume"
+                        comptime(check_label)
+                        x = x.cos()
+                _phase = "outer_resume"
+                comptime(check_label)
+                torch._dynamo.graph_break()
+                _phase = "outer_second_resume"
+                comptime(check_label)
+                x = x + 2
+            _phase = "outer_exit"
+            comptime(check_label)
+            return x + 3
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        x = torch.ones(2)
+        with (
+            torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks),
+            torch.compiler.guard_ctx("ambient"),
+        ):
+            self.assertEqual(compiled(x), (x + 1).sin().cos() + 5)
+            expected = {
+                ("outer_entry", "outer"),
+                ("inner_entry", "inner"),
+                ("inner_resume", "inner"),
+                ("outer_resume", "outer"),
+                ("outer_second_resume", "outer"),
+                ("outer_exit", "ambient"),
+            }
+            if nested_break:
+                expected.add(("inner_exit", "outer"))
+            self.assertEqual(set(labels), expected)
+            observed = labels.copy()
+            frames = counter.frame_count
+            self.assertGreater(frames, 1)
+            self.assertEqual(compiled(x), (x + 1).sin().cos() + 5)
+            self.assertEqual(labels, observed)
+            self.assertEqual(counter.frame_count, frames)
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "ambient"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("graph_break", [False, True])
+    def test_internal_context_exception_cleanup(self, graph_break):
+        labels = []
+
+        def check_label(ctx):
+            labels.append(TracingContext.get().guards_context.current_guard_label)
+
+        def fn(x):
+            with torch.compiler.guard_ctx("outer"):
+                if graph_break:
+                    with torch.compiler.guard_ctx("inner"):
+                        comptime(check_label)
+                        x = x.sin()
+                        torch._dynamo.graph_break()
+                        comptime(check_label)
+                        raise RuntimeError("internal failure")
+                try:
+                    with torch.compiler.guard_ctx("inner"):
+                        comptime(check_label)
+                        x = x.sin()
+                        comptime(check_label)
+                        raise RuntimeError("internal failure")
+                except RuntimeError:
+                    comptime(check_label)
+                    x = x.cos()
+            comptime(check_label)
+            return x
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=not graph_break)
+        with torch.compiler.guard_ctx("ambient"):
+            if graph_break:
+                with self.assertRaisesRegex(RuntimeError, "internal failure"):
+                    compiled(torch.ones(2))
+                self.assertEqual(set(labels), {"inner"})
+                self.assertGreaterEqual(len(labels), 2)
+            else:
+                self.assertEqual(compiled(torch.ones(2)), torch.ones(2).sin().cos())
+                self.assertEqual(set(labels), {"inner", "outer", "ambient"})
+                self.assertEqual(labels[-2:], ["outer", "ambient"])
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "ambient"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("fullgraph", [False, True])
+    def test_compiled_factory_validation(self, fullgraph):
+        def fn(x, label):
+            try:
+                with torch.compiler.guard_ctx(label):
+                    return x.sin()
+            except TypeError as error:
+                assert str(error) == "guard_ctx label must be a non-empty string"  # noqa: S101
+                return x.cos()
+            except ValueError as error:
+                assert str(error) == "guard_ctx label must be a non-empty string"  # noqa: S101
+                return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+        x = torch.ones(2)
+        for label in (None, 1, [], False, "", "valid"):
+            with self.subTest(label=label):
+                self.assertEqual(compiled(x, label), fn(x, label))
+
+    @parametrize("fullgraph", [False, True])
+    def test_factory_str_subclass_validation_containment(self, fullgraph):
+        events = []
+
+        class Label(str):
+            __slots__ = ()
+
+            def __bool__(self):
+                events.append("validate")
+                return True
+
+        def fn(x, label):
+            with torch.compiler.guard_ctx(label):
+                return x.sin()
+
+        x = torch.ones(2)
+        label = Label("region")
+        for _ in range(2):
+            self.assertEqual(fn(x, label), x.sin())
+        self.assertEqual(events, ["validate", "validate"])
+        events.clear()
+        compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+        if fullgraph:
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "str subclass"):
+                compiled(x, label)
+            self.assertEqual(events, [])
+        else:
+            for _ in range(2):
+                self.assertEqual(compiled(x, label), x.sin())
+            self.assertEqual(events, ["validate", "validate"])
+
+    @parametrize("decorator", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_prebuilt_str_subclass_context_containment(self, decorator, fullgraph):
+        events = []
+
+        class Label(str):
+            __slots__ = ()
+
+            def __bool__(self):
+                events.append("validate")
+                return True
+
+        manager = torch.compiler.guard_ctx(Label("region"))
+        self.assertEqual(events, ["validate"])
+        events.clear()
+
+        def body(x):
+            x = x.sin()
+            torch._dynamo.graph_break()
+            return x.cos()
+
+        def with_context(x):
+            with manager:
+                return body(x)
+
+        fn = manager(body) if decorator else with_context
+        x = torch.ones(2)
+        expected = fn(x)
+        self.assertEqual(events, [])
+        compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+        with (
+            torch._dynamo.config.patch(nested_graph_breaks=True),
+            torch.compiler.guard_ctx("ambient"),
+        ):
+            if fullgraph:
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, "str subclass"
+                ):
+                    compiled(x)
+            else:
+                for _ in range(2):
+                    self.assertEqual(compiled(x), expected)
+            self.assertEqual(events, [])
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "ambient"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    def test_compile_decorated_function(self):
+        labels = []
+
+        def check_label(ctx):
+            labels.append(TracingContext.get().guards_context.current_guard_label)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compiler.guard_ctx("decorated")
+        def fn(x):
+            comptime(check_label)
+            return x.sin()
+
+        self.assertEqual(fn(torch.ones(2)), torch.ones(2).sin())
+        self.assertEqual(fn(torch.ones(2)), torch.ones(2).sin())
+        self.assertEqual(labels, ["decorated"])
+
+    def test_prebuilt_label_rebinding_and_decorator_clone(self):
+        manager = torch.compiler.guard_ctx("first")
+        clone = manager.clone()
+        labels = []
+
+        def check_label(ctx):
+            labels.append(TracingContext.get().guards_context.current_guard_label)
+
+        @manager
+        def decorated(x):
+            comptime(check_label)
+            return x.sin()
+
+        def fn(x):
+            with manager:
+                comptime(check_label)
+                x = x + 1
+            with clone:
+                comptime(check_label)
+                x = x.cos()
+            return decorated(x)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            self.assertEqual(compiled(x), (x + 1).cos().sin())
+        self.assertEqual(labels, ["first", "first", "first"])
+        self.assertEqual(counter.frame_count, 1)
+        manager.label = "second"
+        for _ in range(2):
+            self.assertEqual(compiled(x), (x + 1).cos().sin())
+        self.assertEqual(
+            labels, ["first", "first", "first", "second", "first", "second"]
+        )
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("prebuilt", [False, True])
+    def test_context_label_attribute_read_and_rebinding(self, prebuilt):
+        manager = torch.compiler.guard_ctx("one")
+
+        def fn(x, label):
+            cm = manager if prebuilt else torch.compiler.guard_ctx(label)
+            return x + (1 if cm.label == "one" else 2), cm.label
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for index, label in enumerate(("one", "two"), start=1):
+            manager.label = label
+            argument = "unused" if prebuilt else label
+            for _ in range(2):
+                self.assertEqual(compiled(x, argument), (x + index, label))
+                self.assertEqual(counter.frame_count, index)
+
+    @parametrize("graph_break", [False, True])
+    def test_context_escape_identity_and_reconstruction(self, graph_break):
+        manager = torch.compiler.guard_ctx("prebuilt")
+
+        def fn(x):
+            first = torch.compiler.guard_ctx("created")
+            second = torch.compiler.guard_ctx("created")
+            alias = first
+            prebuilt = manager
+            assert alias is first  # noqa: S101
+            assert type(first) is torch._guards._GuardContext  # noqa: S101
+            if graph_break:
+                x = x.sin()
+                torch._dynamo.graph_break()
+            return x + 1, first, alias, second, prebuilt
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=not graph_break)
+        previous = None
+        for _ in range(2):
+            output, first, alias, second, prebuilt = compiled(torch.ones(2))
+            expected = torch.ones(2).sin() + 1 if graph_break else torch.ones(2) + 1
+            self.assertEqual(output, expected)
+            self.assertIs(type(first), torch._guards._GuardContext)
+            self.assertIs(alias, first)
+            self.assertIsNot(first, second)
+            self.assertIsNot(first, previous)
+            self.assertIs(prebuilt, manager)
+            self.assertEqual(first.label, "created")
+            previous = first
+            with first:
+                self.assertEqual(
+                    TracingContext(None).guards_context.current_guard_label, "created"
+                )
+            self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("prebuilt", [False, True])
+    def test_distinct_context_identity_comparison_containment(self, prebuilt):
+        def fn(x, first, second):
+            if not prebuilt:
+                first = torch.compiler.guard_ctx("created")
+                second = torch.compiler.guard_ctx("created")
+            return x.sin(), first is second
+
+        x = torch.ones(2)
+        first = torch.compiler.guard_ctx("prebuilt")
+        second = torch.compiler.guard_ctx("prebuilt")
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, first, first)
+        compiled = torch.compile(fn, backend="eager")
+        for other in (first, second, first):
+            self.assertEqual(
+                compiled(x, first, other),
+                (x.sin(), first is other if prebuilt else False),
+            )
+
+    def test_private_context_label_mutation_containment(self):
+        labels = []
+
+        def check_label(ctx):
+            labels.append(TracingContext.get().guards_context.current_guard_label)
+
+        def fn(x, manager):
+            manager.label = "after"
+            with manager:
+                comptime(check_label)
+                return x.sin(), manager.label, manager
+
+        manager = torch.compiler.guard_ctx("before")
+        x = torch.ones(2)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "setattr"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, manager)
+        self.assertEqual(manager.label, "before")
+        compiled = torch.compile(fn, backend="eager")
+        with torch.compiler.guard_ctx("ambient"):
+            for _ in range(2):
+                manager.label = "before"
+                output, label, returned = compiled(x, manager)
+                self.assertEqual(output, x.sin())
+                self.assertEqual(label, "after")
+                self.assertEqual(manager.label, "after")
+                self.assertIs(returned, manager)
+                self.assertEqual(
+                    TracingContext(None).guards_context.current_guard_label, "ambient"
+                )
+        self.assertEqual(labels, ["after"])
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("nested_graph_breaks", [False, True])
+    def test_reentrant_prebuilt_context_graph_break(self, nested_graph_breaks):
+        manager = torch.compiler.guard_ctx("shared")
+        labels = []
+
+        def check_label(ctx):
+            labels.append(TracingContext.get().guards_context.current_guard_label)
+
+        def fn(x):
+            with manager:
+                with torch.compiler.guard_ctx("inner"):
+                    with manager:
+                        x = x.sin()
+                        torch._dynamo.graph_break()
+                        comptime(check_label)
+                    comptime(check_label)
+                comptime(check_label)
+            comptime(check_label)
+            return x.cos()
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            compiled = torch.compile(fn, backend=counter)
+            x = torch.ones(2)
+            self.assertEqual(compiled(x), x.sin().cos())
+            self.assertEqual(labels, ["shared", "inner", "shared", None])
+            frames = counter.frame_count
+            self.assertEqual(compiled(x), x.sin().cos())
+            self.assertEqual(counter.frame_count, frames)
+            self.assertEqual(labels, ["shared", "inner", "shared", None])
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    def test_graph_break_eager_execution_uses_pending_bridge(self):
+        labels = []
+
+        @torch._dynamo.disable
+        def observe_eager(x):
+            self.assertIsNone(TracingContext.try_get())
+            labels.append(TracingContext(None).guards_context.current_guard_label)
+            return x.cos()
+
+        def fn(x):
+            with torch.compiler.guard_ctx("compiled"):
+                x = x.sin()
+                x = observe_eager(x)
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager")
+        with torch.compiler.guard_ctx("ambient"):
+            for _ in range(2):
+                self.assertEqual(compiled(torch.ones(2)), torch.ones(2).sin().cos() + 1)
+                self.assertEqual(
+                    TracingContext(None).guards_context.current_guard_label, "ambient"
+                )
+        self.assertEqual(labels, ["compiled", "compiled"])
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
 
     def test_guard_label_nested_and_exception(self):
         context = GuardsContext()
