@@ -115,7 +115,6 @@ __all__ = [
     "UntypedStorage",
     "are_deterministic_algorithms_enabled",
     "autocast",
-    "cfg_compile",
     "chunk",
     "compile",
     "cond",
@@ -162,6 +161,7 @@ __all__ = [
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
+    "vm",
     "vmap",
 ]
 
@@ -3387,7 +3387,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import cfg_compile as cfg_compile, compiler as compiler, fx as fx
+from torch import compiler as compiler, fx as fx, vm as vm
 
 
 class _TritonLibrary:
