@@ -1,0 +1,17 @@
+name: Teardown XPU host
+
+description: Tear down XPU host for CI
+
+runs:
+  using: composite
+  steps:
+    - name: Teardown XPU
+      if: always()
+      shell: bash
+      run: |
+        # Prune all stopped containers.
+        # Ignore errors if another runner is already pruning on this node.
+        docker container prune -f || true
+    - name: Runner diskspace health check
+      uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main
+      if: always()
