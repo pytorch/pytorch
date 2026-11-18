@@ -1526,6 +1526,56 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             eager(torch.ones(1)),
         )
 
+    @parametrize("data", [b"", b"abc", b"\x00\xff"])
+    def test_reduce(self, data):
+        def f(value, x):
+            return value.__reduce__(), x + 1
+
+        @torch._dynamo.disable
+        def eager(value, x):
+            return f(value, x)
+
+        value = bytearray(data)
+        reduced, result = torch.compile(f, backend="eager", fullgraph=True)(
+            value, torch.ones(1)
+        )
+        self.assertEqual((reduced, result), eager(value, torch.ones(1)))
+        restored = reduced[0](*reduced[1])
+        self.assertEqual(restored, value)
+        self.assertIsNot(restored, value)
+        restored.append(1)
+        self.assertEqual(value, data)
+
+    @parametrize("data", [b"", b"abc"])
+    @parametrize("consumed", [0, 1, 3, 4])
+    def test_iterator_reduce(self, data, consumed):
+        def f(x):
+            value = bytearray(data)
+            iterator = iter(value)
+            for _ in range(consumed):
+                next(iterator, None)
+            return iterator.__reduce__(), value, x + 1
+
+        @torch._dynamo.disable
+        def eager(x):
+            return f(x)
+
+        @torch._dynamo.disable(recursive=False)
+        def check_reduction(reduced, value):
+            restored = reduced[0](*reduced[1])
+            if len(reduced) == 3:
+                self.assertIs(reduced[1][0], value)
+                restored.__setstate__(reduced[2])
+                value.append(100)
+                self.assertEqual(list(restored), list(value[consumed:]))
+            else:
+                value.append(100)
+                self.assertEqual(list(restored), [])
+
+        actual = torch.compile(f, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(actual, eager(torch.ones(1)))
+        check_reduction(actual[0], actual[1])
+
     # -- reconstruct: force a graph break with a live bytearray --
 
     def test_reconstruct_graph_break(self):

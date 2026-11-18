@@ -4292,6 +4292,11 @@ class ShapeEnv:
         # to drop entries keyed on old resolved forms.
         self._replacements_version_counter = 0
 
+        self._implications_cache: dict[
+            SympyBoolean,
+            tuple[tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...],
+        ] = {}
+
         # Note [symbolic op memo]
         # Symbolic binary arithmetic is overwhelmingly repetitive: deriving
         # numel and contiguity for every fake tensor recomputes the same
@@ -4309,10 +4314,6 @@ class ShapeEnv:
         # SymNode's binary_magic_impl for why two sites cannot share one. Under
         # proxy tracing binary_magic_impl returns before it reaches this cache,
         # so nothing being traced is served from here.
-        self._implications_cache: dict[
-            SympyBoolean,
-            tuple[tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...],
-        ] = {}
         self._symop_cache: dict[Any, Any] = {}
         self._symop_cache_version = 0
 
