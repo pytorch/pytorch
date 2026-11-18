@@ -596,6 +596,20 @@ class TileReduce:
                 raise ValueError(
                     "the inner-tree order needs a row or general axis and a plan"
                 )
+            wide = wide_count or wide_red or wide_output
+            if axis == "general" and (
+                combine
+                or flat_tail
+                or ragged_chunk
+                or gidx_from != "r"
+                or wide
+                or itree.stage_e
+            ):
+                raise ValueError(
+                    "the general-axis inner-tree order takes only plain 32-bit decoded rows: "
+                    f"{combine=} {flat_tail=} {ragged_chunk=} {gidx_from=} {wide=} "
+                    f"stage_e={itree.stage_e}"
+                )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
@@ -1099,7 +1113,8 @@ class TileReduce:
         else:
             tma_atom = None
         if const_expr(self.order == "inner_tree"):
-            # Split inner-tree writes one partial per (output, batch).
+            # Every inner-tree shape sizes its grid by output count; split's outputs are
+            # (output, batch) partials.
             nout = mOuts[0].shape[0]
             gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
             gy = Int32(1)
@@ -1110,13 +1125,7 @@ class TileReduce:
                 gx = mOuts[0].shape[0]
                 gy = Int32(1)
         elif const_expr(self.axis == "row"):
-            # Split inner-tree writes (row, batch) partials, so count outputs, not input rows.
-            nout = (
-                mOuts[0].shape[0]
-                if const_expr(self.order == "inner_tree")
-                else mIns[0].shape[0]
-            )
-            gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
+            gx = cute.ceil_div(mIns[0].shape[0], const_expr(self.rows_per_block))
             gy = Int32(1)
         else:
             gx = cute.ceil_div(nchunks, const_expr(self.threads_per_block))
@@ -1231,9 +1240,7 @@ class TileReduce:
                 else Int32(bx)
             )
             lane = Int32(tx)
-            alive = (
-                raw < Int64(mOuts[0].shape[0]) if const_expr(self.wide_output) else True
-            )
+            alive = raw < cute.size(mOuts[0]) if const_expr(self.wide_output) else True
         elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
                 tx // const_expr(self.threads_per_row)

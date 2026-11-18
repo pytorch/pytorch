@@ -247,6 +247,43 @@ def fast_kind(red_pairs: Pairs, kept_pairs: Pairs, nouts: int) -> str | None:
     return None
 
 
+def _ti_rows(
+    x: torch.Tensor,
+    red_axes: set[int],
+    red_pairs: Pairs,
+    kept_pairs: Pairs,
+    *,
+    any_order: bool,
+) -> torch.Tensor | None:
+    """View x as TI's (rows, N) reduction, or None: one unit-stride reduced pair and at
+    most one kept pair at a pitch of at least N, so packed, pitched and channels-last
+    rows share one view; overlapping (e.g. expanded) rows decline. Index traits number
+    reduced positions logically, so unless any_order the reduced axes must merge in
+    logical order."""
+    if len(red_pairs) != 1 or red_pairs[0][1] != 1 or len(kept_pairs) > 1:
+        return None
+    if not any_order:
+        strides = [x.stride(a) for a in sorted(red_axes) if x.shape[a] != 1]
+        if strides != sorted(set(strides), reverse=True):
+            return None
+    n = red_pairs[0][0]
+    rows, pitch = kept_pairs[0] if kept_pairs else (1, n)
+    if pitch < n:
+        return None
+    return torch.as_strided(x, (rows, n), (pitch, 1), x.storage_offset())
+
+
+def _logical_red_pairs(x: torch.Tensor, red_axes: set[int]) -> Pairs | None:
+    """Fastest-first (extent, stride) pairs of the reduced axes in logical order, or None
+    when their strides already decrease logically, so TI's storage-ordered merge keeps
+    that order. Index traits number reduced positions logically and decode these."""
+    axes = [a for a in sorted(red_axes) if x.shape[a] != 1]
+    strides = [x.stride(a) for a in axes]
+    if strides == sorted(set(strides), reverse=True):
+        return None
+    return [(x.shape[a], x.stride(a)) for a in reversed(axes)]
+
+
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
 _MAX_ROW_BYTES = 192 * 1024
 # Bound loads when odd or prime N collapses vector width. 64 separates measured wins from
@@ -291,22 +328,13 @@ def _try_fast_row(
         return None
     from . import kernel_rowtile as rt
 
-    # Packed rows floor at one warp (25% utilized at N=32), but inner-tree order owns
-    # its thread map. Forcing threads_per_row=1 changed bits at (524288, 16) and (524288, 128).
-    if (
-        rt.narrow_row(N, x.element_size(), x.shape[0])
-        and not rt.inner_tree_order_enabled()
-    ):
+    # Packed rows floor at one warp (25% utilized at N=32). _reduce resolves the
+    # inner-tree gate before this.
+    if rt.narrow_row(N, x.element_size(), x.shape[0]):
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, threads_per_row=1
         )
     if _oneshot_ok(x):
-        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
-    # Bypass default-order xcta whenever the fold gate has a plan. Otherwise bits differed at
-    # (64, 100000), (8, 200000), and (8, 1000000).
-    if rt.inner_tree_order_enabled() and (
-        rt.itree_plan(N, x.shape[0], x.element_size()) is not None
-    ):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     from . import kernel_xcta as xc
 
@@ -416,7 +444,7 @@ def _try_indexed_itree(
     if plan is None:
         return None
     nbatch = plan.split[0] if plan.shape == "split" else 1
-    if num_o * nbatch >= 2**31:
+    if num_o * nbatch >= _INT32_LIMIT:
         return None
 
     if plan.shape != "split":
@@ -511,12 +539,15 @@ def _reduce(
         and num_o < _INT32_LIMIT
     ):
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
-        kind = fast_kind(red_pairs, kept_pairs, nouts)
-        if x.is_contiguous() and kind in ("row", "all"):
+        index = getattr(trait, "has_index", False)
+        rows = _ti_rows(x, red_axes, red_pairs, kept_pairs, any_order=not index)
+        if index:
+            red_pairs = _logical_red_pairs(x, red_axes) or red_pairs
+        if rows is not None:
             ordered = rt.reduce_row_tile(
                 trait,
                 trait_key,
-                x.reshape(num_o, count),
+                rows,
                 out_dtypes,
                 nouts=nouts,
                 order="inner_tree",
@@ -543,6 +574,8 @@ def _reduce(
         return (_as_shape(out, out_shape),)
 
     red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+    if getattr(trait, "has_index", False):
+        red_pairs = _logical_red_pairs(x, red_axes) or red_pairs
 
     # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
     # the fallback for direct calls and declines.
