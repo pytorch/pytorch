@@ -12982,28 +12982,34 @@ class TestGroupedMM(TestCase):
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16, torch.float32)
     def test_grouped_mm_out_writes_in_place(self, device, dtype):
-        def run(rows, width):
+        # With default settings, bf16 runs the fused CUTLASS kernel on SM90 and SM100, and the rest runs the fallback.
+        fused = dtype == torch.bfloat16 and torch.cuda.get_device_capability(device)[0] in (9, 10)
+
+        def run(rows, width, row_width):
             a = self._make_grouped_mm_matrix((rows, 32), True, device, dtype)
             b = self._make_grouped_mm_matrix((4, width, 32), True, device, dtype).transpose(-2, -1)
             offs = torch.tensor([rows * (i + 1) // 4 for i in range(4)], device=device, dtype=torch.int32)
             expected = torch._grouped_mm(a, b, offs=offs)
-            # Each row of buf is as wide as a kernel row, so out has the kernel's layout.
-            buf = torch.full((rows, expected.stride(0)), 7.0, device=device, dtype=dtype)
-            out = buf[:, :width]
+            # Sentinels fill the rest of each row and 8 elements after the last row.
+            buf = torch.full((rows * row_width + 8,), 7.0, device=device, dtype=dtype)
+            rows_view = buf[:rows * row_width].view(rows, row_width)
+            out = rows_view[:, :width]
             with torch.profiler.profile(record_shapes=True) as prof:
                 torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
             self.assertEqual(out, expected)
-            return buf, [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == [rows, width]]
+            # The fused kernel writes the row padding, so a direct write into this out would change the sentinel.
+            self.assertTrue((rows_view[:, width:] == 7).all() and (buf[-8:] == 7).all())
+            return [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == [rows, width]]
 
-        # An out without row padding is written directly, not through a temporary.
-        _, full_copies = run(64, 16)
-        self.assertEqual(full_copies, [])
-        # The fused kernels also write the row padding, which here belongs to buf, so these outs need a temporary.
-        # The sentinel catches a direct write only where a fused kernel runs; the copy check catches it everywhere.
-        for rows in (64, 1):
-            buf, full_copies = run(rows, 17)
-            self.assertTrue((buf[:, 17:] == 7).all())
-            self.assertNotEqual(full_copies, [])
+        # A width that needs no padding is written directly by every kernel.
+        self.assertEqual(run(64, 16, 16), [])
+        # With padding, the fallback still writes directly, while the fused kernel needs a temporary.
+        for rows, row_width in ((64, 17), (64, 24), (1, 24)):
+            full_copies = run(rows, 17, row_width)
+            if fused:
+                self.assertNotEqual(full_copies, [])
+            else:
+                self.assertEqual(full_copies, [])
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     def test_grouped_mm_out_internal_overlap(self, device):

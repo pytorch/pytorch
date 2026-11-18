@@ -13,6 +13,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/ScaledBlasUtils.h>
@@ -1109,62 +1110,80 @@ c10::ScalarType out_dtype) {
   return layout;
 }
 
-// Writes the grouped GEMM into `out`, a 16-byte aligned tensor laid out as
-// grouped_mm_cuda_output_layout describes. The fused kernels may also write
-// the padding at the end of each row.
-static void _grouped_mm_cuda_impl(const Tensor& mat_a, const Tensor& mat_b,
+enum class GroupedMMKernel { Fallback, CublasLt, Cutlass, CkTile, Ck };
+
+static GroupedMMKernel select_grouped_mm_kernel(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
-const std::optional<at::Tensor>& bias,
-std::optional<c10::ScalarType> out_dtype,
-Tensor& out) {
+std::optional<c10::ScalarType> out_dtype) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   if (should_use_cublaslt_grouped_gemm(mat_a, mat_b, offs, out_dtype)) {
-    grouped_mm_cublaslt(mat_a, mat_b, offs, out);
-    return;
+    return GroupedMMKernel::CublasLt;
   }
 #endif
+#ifndef USE_ROCM
   bool a_b_and_out_are_bf16 = (
     mat_a.dtype() == at::kBFloat16 &&
     mat_b.dtype() == at::kBFloat16 &&
     out_dtype.value_or(at::kBFloat16) == at::kBFloat16
   );
-#ifndef USE_ROCM
-  bool use_fast_path = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true) && a_b_and_out_are_bf16;
-  if (use_fast_path) {
-    // fast path, no d2h sync needed
-    at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
-  } else {
-    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  if (scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true) && a_b_and_out_are_bf16) {
+    return GroupedMMKernel::Cutlass;
   }
-#else
+#elif defined(USE_ROCM_CK_GEMM)
   // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
   // Keep use_fast_path as false till ck kernel perf is optimal.
-  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-#if defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
   const bool supported_ck_tile_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
-
-  const bool use_ck_tile = at::globalContext().rocmAllowGroupGemmCkTile() &&
-      supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs);
-  if (use_ck_tile) {
-    at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
-    return;
+  if (at::globalContext().rocmAllowGroupGemmCkTile() && supported_ck_tile_arch &&
+      ck_tile_group_gemm_supported(mat_a, mat_b, offs)) {
+    return GroupedMMKernel::CkTile;
   }
-#endif //USE_ROCM_CK_GEMM
+  if (at::globalContext().rocmAllowGroupGemmCk() && (supported_ck_tile_arch || at::detail::getCUDAHooks().isGPUArch({"gfx90a"}))) {
+    return GroupedMMKernel::Ck;
+  }
+#endif
+  return GroupedMMKernel::Fallback;
+}
+
+// Writes the grouped GEMM into `out` with `kernel`. The fallback takes any layout. The fused
+// kernels need a 16-byte aligned tensor laid out as grouped_mm_cuda_output_layout describes, and
+// may also write the padding at the end of each row.
+static void _grouped_mm_cuda_impl(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype,
+GroupedMMKernel kernel,
+Tensor& out) {
+#ifdef USE_ROCM
   // ck_tile zeroes the 2D x 2D groups with K == 0 itself; the other paths need a zero-filled output.
-  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
+  if (kernel != GroupedMMKernel::CkTile && mat_a.dim() == 2 && mat_b.dim() == 2) {
     out.zero_();
   }
-#if defined(USE_ROCM_CK_GEMM)
-  if (at::globalContext().rocmAllowGroupGemmCk() && (supported_ck_tile_arch || at::detail::getCUDAHooks().isGPUArch({"gfx90a"}))) {
-    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
-    return;
+#endif
+  switch (kernel) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+    case GroupedMMKernel::CublasLt:
+      grouped_mm_cublaslt(mat_a, mat_b, offs, out);
+      return;
+#endif
+#ifndef USE_ROCM
+    case GroupedMMKernel::Cutlass:
+      // fast path, no d2h sync needed
+      at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+      return;
+#elif defined(USE_ROCM_CK_GEMM)
+    case GroupedMMKernel::CkTile:
+      at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
+      return;
+    case GroupedMMKernel::Ck:
+      at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+      return;
+#endif
+    default:
+      _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
-#endif //USE_ROCM_CK_GEMM
-  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
-#endif //ifndef USE_ROCM
 }
 
 Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
@@ -1175,7 +1194,7 @@ std::optional<c10::ScalarType> out_dtype) {
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   const auto [out_size, out_stride] = grouped_mm_cuda_output_layout(mat_a, mat_b, offs, out_dtype_);
   Tensor out = at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
-  _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, out);
+  _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, select_grouped_mm_kernel(mat_a, mat_b, offs, out_dtype), out);
   return out;
 }
 
@@ -1189,15 +1208,19 @@ Tensor& out) {
   TORCH_CHECK(out.scalar_type() == out_dtype_, "Expected out tensor to have dtype ", out_dtype_, " but got ", out.scalar_type(), " instead");
   const auto [out_size, out_stride] = grouped_mm_cuda_output_layout(mat_a, mat_b, offs, out_dtype_);
   at::native::resize_output(out, out_size);
-  // The fused kernels need this layout and an aligned address, and they also write the row
-  // padding, which may belong to another tensor. So only a layout without padding is written directly.
+  at::assert_no_internal_overlap(out);
+  const auto kernel = select_grouped_mm_kernel(mat_a, mat_b, offs, out_dtype);
+  // The fallback writes any layout. The fused kernels need the padded layout and an aligned address,
+  // and the CUTLASS one was measured on H100 writing the row padding, which may belong to another
+  // tensor. So a fused kernel writes directly only into an `out` whose layout needs no padding.
   const auto unpadded_stride = c10::contiguous_strides(out_size);
-  if (IntArrayRef(out_stride) == IntArrayRef(unpadded_stride) && out.strides() == IntArrayRef(out_stride) &&
-      reinterpret_cast<uintptr_t>(out.const_data_ptr()) % 16 == 0) {
-    _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, out);
+  if (kernel == GroupedMMKernel::Fallback ||
+      (IntArrayRef(out_stride) == IntArrayRef(unpadded_stride) && out.strides() == IntArrayRef(out_stride) &&
+       reinterpret_cast<uintptr_t>(out.const_data_ptr()) % 16 == 0)) {
+    _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, kernel, out);
   } else {
     Tensor result = at::empty_strided(out_size, out_stride, out.options());
-    _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, result);
+    _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, kernel, result);
     out.copy_(result);
   }
   return out;
