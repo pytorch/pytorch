@@ -164,6 +164,25 @@ struct Trial {
 }
 
 impl Trial {
+    /// How many samples of each kind decide it.
+    fn enough(&self) -> u8 {
+        // Until both kinds have been timed, the call counts as a short one.
+        if self.compiled_best == u64::MAX || self.interpreted_best == u64::MAX {
+            return TRIAL_SAMPLES;
+        }
+        let faster = self.compiled_best.min(self.interpreted_best);
+        let fit = trial_calls(faster, TRIAL_SLOW_SAMPLES as u32, TRIAL_SAMPLES as u32) as u8;
+        let behind_by = |shift: u32| {
+            self.settled_best != u64::MAX
+                && self.interpreted_best + (self.interpreted_best >> shift) < self.settled_best
+        };
+        if behind_by(TRIAL_MARGIN_SHIFT) && !behind_by(TRIAL_CLEAR_SHIFT) {
+            fit.max(TRIAL_CLOSE_SAMPLES)
+        } else {
+            fit
+        }
+    }
+
     fn start(epoch: u32) -> Trial {
         Trial {
             phase: TRIAL_WARMUP,
@@ -189,6 +208,23 @@ const TRIAL_SAMPLES: u8 = 10;
 /// the other has won: the rest of the samples would be calls at the speed of
 /// the slower one for nothing.
 const TRIAL_EARLY_SAMPLES: u8 = 3;
+/// A long call is measured with fewer calls: every call of the slower kind
+/// is long, and a time that long varies less from one call to the next. As
+/// many calls of each kind as fit into this much time are taken, and at
+/// least `TRIAL_SLOW_SAMPLES`; as many calls as fit warm up, and at least
+/// `TRIAL_SLOW_WARMUP_CALLS`.
+const TRIAL_BUDGET_NS: u64 = 2_500_000_000;
+const TRIAL_SLOW_WARMUP_CALLS: u32 = 3;
+const TRIAL_SLOW_SAMPLES: u8 = 2;
+/// Compiled code that is behind by less than 1/8 is not given up on fewer
+/// samples than this: a couple of calls differ by that much on their own.
+const TRIAL_CLOSE_SAMPLES: u8 = 5;
+const TRIAL_CLEAR_SHIFT: u32 = 3;
+
+/// How many of `most` calls to spend on calls that take `ns`.
+fn trial_calls(ns: u64, least: u32, most: u32) -> u32 {
+    ((TRIAL_BUDGET_NS / ns.max(1)).min(most as u64) as u32).max(least)
+}
 /// A callee whose measurement never gets quiet enough stays compiled.
 const TRIAL_MAX_CALLS: u32 = 400;
 /// How much faster the interpreter has to be: 1/32, about 3%.
@@ -1886,17 +1922,25 @@ impl Compiled {
         slot.set(trial);
         let events = TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed) + 1;
         if trial.phase == TRIAL_WARMUP {
-            if trial.calls >= TRIAL_WARMUP_CALLS {
+            let start = std::time::Instant::now();
+            let result = run_compiled();
+            let elapsed = start.elapsed().as_nanos() as u64;
+            // The callee may have called itself: what is in the slot counts.
+            let trial = slot.get();
+            let warm = trial.calls
+                >= trial_calls(elapsed, TRIAL_SLOW_WARMUP_CALLS, TRIAL_WARMUP_CALLS);
+            if trial.phase == TRIAL_WARMUP && trial.epoch == epoch && warm {
                 slot.set(Trial { phase: TRIAL_SAMPLING, ..trial });
             }
-            return run_compiled();
+            return result;
         }
+        let enough = trial.enough();
         // Which of the two a call measures is drawn, not alternated: calls
         // often come in a pattern (two layers of a model, one after the
         // other), and alternating would give each side one half of it.
-        let as_compiled = if trial.interpreted_samples >= TRIAL_SAMPLES {
+        let as_compiled = if trial.interpreted_samples >= enough {
             true
-        } else if trial.settled_samples >= TRIAL_SAMPLES {
+        } else if trial.settled_samples >= enough {
             false
         } else {
             let mut state = TRIAL_DRAW.load(Ordering::Relaxed);
@@ -1927,16 +1971,17 @@ impl Compiled {
                 trial.interpreted_samples += 1;
             }
         }
+        let enough = trial.enough();
         let quarter = |t: u64| t + (t >> 2);
         let margin = trial.interpreted_best >> TRIAL_MARGIN_SHIFT;
         let seen = |samples: u8, enough: u8| samples >= enough && trial.interpreted_samples >= enough;
         let won = (seen(trial.compiled_samples, TRIAL_EARLY_SAMPLES)
             && quarter(trial.compiled_best) < trial.interpreted_best)
-            || (seen(trial.compiled_samples, TRIAL_SAMPLES)
+            || (seen(trial.compiled_samples, enough)
                 && trial.interpreted_best + margin >= trial.compiled_best);
         let lost = (seen(trial.settled_samples, TRIAL_EARLY_SAMPLES)
             && quarter(trial.interpreted_best) < trial.settled_best)
-            || (seen(trial.settled_samples, TRIAL_SAMPLES)
+            || (seen(trial.settled_samples, enough)
                 && trial.interpreted_best + margin < trial.settled_best);
         if won {
             trial.phase = TRIAL_COMPILED;

@@ -3373,6 +3373,22 @@ class TestCfgDemotion(TestCase):
         # callers of it, which cost the same either way once it is.
         self.assertTrue(stats["demoted"] or stats["demoted_callees"])
 
+    @slowTest
+    def test_slow_function_is_measured_with_fewer_calls(self):
+        # Over a second per call: three calls to warm up and two of each
+        # kind, not eight and ten.
+        def slow(x):
+            time.sleep(1.3)
+            return x + 1
+
+        compiled = torch.cfg_compile(slow, fallback=False, demote=True)
+        calls = 0
+        while compiled.stats()["measuring"] and calls < 16:
+            self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
+            calls += 1
+        self.assertFalse(compiled.stats()["measuring"])
+        self.assertGreaterEqual(calls, 7)
+
     def test_measurement_starts_over_when_compiled_code_changes(self):
         compiled = torch.cfg_compile(demote_python, fallback=False, demote=True)
         for _ in range(200):
