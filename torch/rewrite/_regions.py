@@ -2022,19 +2022,41 @@ def _static_output(leaf: Any, reachable: set[int]) -> bool:
     return isinstance(leaf, (type, enum.Enum))
 
 
-def _is_plain_instance(obj: Any) -> bool:
-    """Whether ``obj`` is its class and its ``__dict__`` and nothing more, as
-    ``copy.copy`` assumes of an object that does not say otherwise."""
-    cls = type(obj)
+def _is_its_attributes(obj: Any) -> bool:
+    """Whether all that ``obj`` holds is in its ``__dict__``: no class of
+    its has slots or is a type of the interpreter's that keeps something of
+    its own."""
     if isinstance(obj, (nn.Module, BaseException, type)) or not hasattr(
         obj, "__dict__"
     ):
         return False
-    for base in cls.__mro__[:-1]:
+    for base in type(obj).__mro__[:-1]:
         if not base.__flags__ & _HEAPTYPE or vars(base).get("__slots__"):
             return False
+    return True
+
+
+def _is_its_items(obj: Any) -> bool:
+    """Whether ``obj`` is a dict of a class of its own and all that it holds
+    is its items and its ``__dict__``: what a model returns, often."""
+    cls = type(obj)
+    if cls in _DICTS or not isinstance(obj, dict) or not hasattr(obj, "__dict__"):
+        return False
+    for base in cls.__mro__[:-1]:
+        if base not in _DICTS and (
+            not base.__flags__ & _HEAPTYPE or vars(base).get("__slots__")
+        ):
+            return False
+    return True
+
+
+def _is_plain_instance(obj: Any) -> bool:
+    """Whether ``obj`` is its class and its ``__dict__`` and nothing more, as
+    ``copy.copy`` assumes of an object that does not say otherwise."""
+    cls = type(obj)
     return (
-        cls.__reduce_ex__ is object.__reduce_ex__
+        _is_its_attributes(obj)
+        and cls.__reduce_ex__ is object.__reduce_ex__
         and cls.__reduce__ is object.__reduce__
         and cls.__getstate__ is object.__getstate__
         and not hasattr(cls, "__setstate__")
@@ -2042,6 +2064,7 @@ def _is_plain_instance(obj: Any) -> bool:
 
 
 _PLAIN_STATE: dict[type, bool] = {}
+_DICTS = (dict, collections.OrderedDict)
 
 
 def _has_plain_state(obj: Any) -> bool:
@@ -2092,6 +2115,13 @@ class _Recipes:
             self.young = {id(o) for o in gc.get_objects(generation=0)}
         return id(obj) in self.young
 
+    def instance(self, obj: Any) -> bool:
+        """Whether ``obj`` is given back as a new object of its class with
+        the same attributes. One the trace made is, if its attributes are
+        all there is to it: what its class says of copies and pickles (a
+        ``__getstate__`` that leaves a cache out) is about neither."""
+        return _is_plain_instance(obj) or (_is_its_attributes(obj) and self.made(obj))
+
     def number(self, obj: Any) -> list[Any]:
         """A value computed from open sizes. An integer is a result of the
         graph, which gives it back as a plain one; anything else is what it
@@ -2134,13 +2164,22 @@ class _Recipes:
         elif cls is dict or cls is collections.OrderedDict:
             recipe = ["dict", False, cls, list(obj)]
             children = list(obj.values())
-        elif cls in pytree.SUPPORTED_NODES:
+        elif _is_its_items(obj) and self.made(obj):
+            # A new one of its class with the same items and attributes.
+            # Made the way a pytree node is, from what it flattens to, its
+            # ``__init__`` would run on every call.
+            recipe = ["mapping", False, cls, list(obj), list(vars(obj))]
+            children = [*obj.values(), *vars(obj).values()]
+        elif cls in pytree.SUPPORTED_NODES and not self.instance(obj):
             children, context = pytree.SUPPORTED_NODES[cls].flatten_fn(obj)
             recipe = ["node", False, pytree.SUPPORTED_NODES[cls].unflatten_fn, context]
         elif isinstance(obj, tuple) and hasattr(cls, "_fields"):
             recipe = ["sequence", False, cls._make]
             children = list(obj)
-        elif _is_plain_instance(obj):
+        elif self.instance(obj):
+            # Also when its class is a pytree node: what it flattens to is
+            # what its ``__init__`` takes, and making it from that would run
+            # the ``__init__`` on every call, and lose what was set since.
             recipe = ["instance", False, cls, list(vars(obj))]
             children = list(vars(obj).values())
         else:
@@ -2150,7 +2189,19 @@ class _Recipes:
         # Kept alive, so that no other object gets its id while the trace runs.
         self.alive.append(obj)
         if children is not None:
-            parts = [self.of(child, depth + 1) for child in children]
+            try:
+                parts = [self.of(child, depth + 1) for child in children]
+            except Untraceable:
+                if recipe[0] not in ("instance", "mapping"):
+                    raise
+                if cls not in pytree.SUPPORTED_NODES:
+                    raise
+                # It holds something a graph cannot give back: then it is
+                # made the way its class says, from what it flattens to.
+                node = pytree.SUPPORTED_NODES[cls]
+                children, context = node.flatten_fn(obj)
+                recipe[:] = ["node", False, node.unflatten_fn, context]
+                parts = [self.of(child, depth + 1) for child in children]
             recipe.append(parts)
             recipe[1] = any(part[1] for part in parts)
             if recipe[0] == "instance" and not recipe[1] and not self.made(obj):
@@ -2188,6 +2239,16 @@ def _build(
     if kind == "instance":
         value = built[id(recipe)] = object.__new__(recipe[2])
         for name, part in zip(recipe[3], recipe[4]):
+            value.__dict__[name] = _build(part, results, built, flat, held)
+        return value
+    if kind == "mapping":
+        cls, keys, names, parts = recipe[2:]
+        value = built[id(recipe)] = cls.__new__(cls)
+        # Not through what the class makes of storing an item.
+        store = _DICTS[issubclass(cls, collections.OrderedDict)].__setitem__
+        for key, part in zip(keys, parts):
+            store(value, key, _build(part, results, built, flat, held))
+        for name, part in zip(names, parts[len(keys) :]):
             value.__dict__[name] = _build(part, results, built, flat, held)
         return value
     parts = [_build(part, results, built, flat, held) for part in recipe[-1]]
