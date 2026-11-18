@@ -31,6 +31,15 @@ as a line of JSON and skips what the file already has. Every process gets an
 empty directory for Inductor's caches: with a shared one, the compiler that
 runs second finds the kernels the first one built, and both find those of
 earlier runs.
+
+The workers together must fit the memory of the machine, or of the container
+the script runs in: a training step of a large model takes tens of gigabytes,
+and a container that goes over its limit is killed as a whole. No process is
+started while more than ``--memory-start`` of that memory is in use, and
+above ``--memory-stop`` the process that holds the most is stopped and run
+again later, alone. Every result has the most memory its process held
+(``peak_rss_mb``; for cfg_compile before torch.compile joins it for the
+paired calls, and ``process_peak_rss_mb`` with them).
 """
 
 import argparse
@@ -41,6 +50,8 @@ import json
 import math
 import os
 import queue
+import resource
+import signal
 import subprocess
 import sys
 import tempfile
@@ -56,6 +67,10 @@ MODES = ("eager", "compile", "cfg")
 # ----------------------------------------------------------------------
 # One model, one test, one compiler: runs in its own process
 # ----------------------------------------------------------------------
+
+
+def peak_rss_mb():
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
 
 
 def infer(model, inputs):
@@ -303,6 +318,8 @@ def run_one(args):
                 if r["state"] == "vm" and not any(d in r["reason"] for d in dull)
             ][:6]
             out["demoted"] = bool(compiled.stats()["demoted"])
+            # Before torch.compile and its copy of the model share the process.
+            out["peak_rss_mb"] = peak_rss_mb()
             if args.paired and out["call_s"] <= args.paired_limit:
                 try:
                     # A copy of its own, also where calls do not change the
@@ -350,6 +367,8 @@ def run_one(args):
         out["error"] = (
             f"{type(e).__name__}: {text[0][:300]}" if text else type(e).__name__
         )
+    out["process_peak_rss_mb"] = peak_rss_mb()
+    out.setdefault("peak_rss_mb", out["process_peak_rss_mb"])
     print(MARKER + json.dumps(out))
 
 
@@ -358,7 +377,104 @@ def run_one(args):
 # ----------------------------------------------------------------------
 
 
-def run_config(args, name, test, mode, cpus):
+def memory_in_use():
+    """The part of its memory that the container, or the machine, has in use
+    and cannot drop: what counts against its limit, without the page cache."""
+    try:
+        with open("/sys/fs/cgroup/memory.max") as f:
+            limit = f.read().strip()
+        if limit != "max":
+            with open("/sys/fs/cgroup/memory.current") as f:
+                used = int(f.read())
+            with open("/sys/fs/cgroup/memory.stat") as f:
+                stat = dict(line.split() for line in f)
+            used -= int(stat.get("inactive_file", 0)) + int(stat.get("active_file", 0))
+            return used / int(limit)
+    except (OSError, ValueError):
+        pass
+    with open("/proc/meminfo") as f:
+        info = {line.split(":")[0]: int(line.split()[1]) for line in f}
+    return 1 - info["MemAvailable"] / info["MemTotal"]
+
+
+def resident(group):
+    """What the processes of a process group hold, in bytes."""
+    total = 0
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                # After the name, which may have spaces: state, parent, group
+                # and, 21 fields on, the resident pages.
+                fields = f.read().rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        if int(fields[2]) == group:
+            total += int(fields[21]) * resource.getpagesize()
+    return total
+
+
+def stop(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+class Memory:
+    """Keeps the processes of a run within the memory there is."""
+
+    def __init__(self, start, stop):
+        self.start, self.stop = start, stop
+        self.lock = threading.Lock()
+        self.running = {}
+        self.starting = 0
+        self.stopped = set()
+        # The process that is being stopped, until it is gone.
+        self.leaving = None
+        self.last = 0.0
+
+    def admit(self):
+        """Waits until a process may start: not while much is in use, and
+        not right after another, which has yet to take what it takes; unless
+        nothing else runs."""
+        while True:
+            with self.lock:
+                settled = time.time() - self.last > 30
+                idle = not self.running and not self.starting
+                if idle or (settled and memory_in_use() < self.start):
+                    self.last = time.time()
+                    self.starting += 1
+                    return
+            time.sleep(2)
+
+    def watch(self, process):
+        """Waits for a process; True if it had to be stopped for memory. It
+        is the process that holds the most that is stopped, whichever worker
+        notices, and one at a time."""
+        with self.lock:
+            self.starting -= 1
+            self.running[process.pid] = process
+        try:
+            while process.poll() is None:
+                time.sleep(1)
+                with self.lock:
+                    if self.leaving is not None or memory_in_use() < self.stop:
+                        continue
+                    largest = max(self.running.values(), key=lambda p: resident(p.pid))
+                    self.stopped.add(largest.pid)
+                    self.leaving = largest.pid
+                    stop(largest)
+            return process.pid in self.stopped
+        finally:
+            with self.lock:
+                self.running.pop(process.pid, None)
+                if self.leaving == process.pid:
+                    self.leaving = None
+
+
+def run_config(args, name, test, mode, cpus, memory):
     cmd = [sys.executable, os.path.abspath(__file__), "--torchbench", args.torchbench]
     cmd += [
         "--one",
@@ -387,26 +503,36 @@ def run_config(args, name, test, mode, cpus):
     env = dict(
         os.environ, TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS=str(args.threads)
     )
-    try:
-        with tempfile.TemporaryDirectory(prefix="cfg_torchbench_") as caches:
-            env["TORCHINDUCTOR_CACHE_DIR"] = caches
-            r = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=args.timeout, env=env
+    failed = {"name": name, "test": test, "mode": mode, "ok": False}
+    memory.admit()
+    with tempfile.TemporaryDirectory(prefix="cfg_torchbench_") as caches:
+        env["TORCHINDUCTOR_CACHE_DIR"] = caches
+        # Output goes to files: nothing reads a pipe while the process runs.
+        with (
+            open(os.path.join(caches, "out"), "w+") as out,
+            open(os.path.join(caches, "err"), "w+") as err,
+        ):
+            process = subprocess.Popen(
+                cmd, stdout=out, stderr=err, env=env, start_new_session=True
             )
-    except subprocess.TimeoutExpired:
-        return {
-            "name": name,
-            "test": test,
-            "mode": mode,
-            "ok": False,
-            "error": "timed out",
-        }
-    for line in reversed(r.stdout.splitlines()):
+            timer = threading.Timer(args.timeout, stop, [process])
+            timer.start()
+            try:
+                if memory.watch(process):
+                    return None
+            finally:
+                expired = not timer.is_alive()
+                timer.cancel()
+            out.seek(0)
+            err.seek(0)
+            stdout, stderr = out.read(), err.read()
+    if expired:
+        return dict(failed, error="timed out")
+    for line in reversed(stdout.splitlines()):
         if line.startswith(MARKER):
             return json.loads(line[len(MARKER) :])
-    tail = (r.stderr.strip().splitlines() or ["?"])[-1][:200]
-    error = f"crashed (exit {r.returncode}): {tail}"
-    return {"name": name, "test": test, "mode": mode, "ok": False, "error": error}
+    tail = (stderr.strip().splitlines() or ["?"])[-1][:200]
+    return dict(failed, error=f"crashed (exit {process.returncode}): {tail}")
 
 
 def run_all(args, names):
@@ -421,8 +547,11 @@ def run_all(args, names):
         for name in names:
             jobs.put((name, test))
     lock = threading.Lock()
+    memory = Memory(args.memory_start, args.memory_stop)
+    # What was stopped for memory: run again when the workers are through.
+    later = queue.Queue()
 
-    def worker(cpus):
+    def worker(cpus, jobs=jobs, alone=False):
         while True:
             try:
                 name, test = jobs.get_nowait()
@@ -430,14 +559,25 @@ def run_all(args, names):
                 return
             for mode in MODES:
                 if (name, test, mode) not in results:
-                    r = run_config(args, name, test, mode, cpus)
+                    r = run_config(args, name, test, mode, cpus, memory)
+                    if r is None and not alone:
+                        print(
+                            f"{name} {test} {mode}: stopped for memory, runs later",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        later.put((name, test))
+                        break
+                    if r is None:
+                        r = {"name": name, "test": test, "mode": mode, "ok": False}
+                        r["error"] = "takes more memory than there is"
                     with lock:
                         results[(name, test, mode)] = r
                         if args.results:
                             with open(args.results, "a") as f:
                                 f.write(json.dumps(r) + "\n")
                         state = (
-                            f"{r['call_s'] * 1e3:.1f} ms"
+                            f"{r['call_s'] * 1e3:.1f} ms, {r.get('peak_rss_mb', 0)} MB"
                             if r["ok"]
                             else r["error"][:100]
                         )
@@ -455,6 +595,7 @@ def run_all(args, names):
         t.start()
     for t in threads:
         t.join()
+    worker(groups[0], later, alone=True)
     return results
 
 
@@ -618,6 +759,18 @@ def main():
     )
     parser.add_argument(
         "--results", help="file of JSON lines to append to and resume from"
+    )
+    parser.add_argument(
+        "--memory-start",
+        type=float,
+        default=0.5,
+        help="start no process while more than this part of memory is in use",
+    )
+    parser.add_argument(
+        "--memory-stop",
+        type=float,
+        default=0.75,
+        help="above this part, stop the largest process and run it later, alone",
     )
     parser.add_argument("--one", nargs=3, help=argparse.SUPPRESS)
     parser.add_argument("models", nargs="*")
