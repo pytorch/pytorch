@@ -69,6 +69,19 @@ XpuptiScopeProfilerApi::safe_pti_scope_collection_handle_t::
 }
 
 void XpuptiScopeProfilerApi::enableScopeProfiler(const Config& cfg) {
+  const auto& spcfg = XpuptiScopeProfilerConfig::get(cfg);
+
+  // Check the mode before any PTI call, so an unsupported config is reported
+  // as such even where PTI can't enumerate metric devices.
+  pti_metrics_scope_mode_t collectionMode = spcfg.xpuptiProfilerPerKernel()
+      ? PTI_METRICS_SCOPE_AUTO_KERNEL
+      : PTI_METRICS_SCOPE_USER;
+
+  if (collectionMode == PTI_METRICS_SCOPE_USER) {
+    KINETO_THROW(
+        std::runtime_error,
+        "XPUPTI_PROFILER_ENABLE_PER_KERNEL has to be set to 1. Other variants are currently not supported.");
+  }
 #if PTI_VERSION_AT_LEAST(1, 2)
   XPUPTI_CALL(ptiMetricsEnable(nullptr));
   const auto metricsGuard = makeScopeExit([this]() {
@@ -95,7 +108,6 @@ void XpuptiScopeProfilerApi::enableScopeProfiler(const Config& cfg) {
     devicesHandles[i] = devices[i]._handle;
   }
 
-  const auto& spcfg = XpuptiScopeProfilerConfig::get(cfg);
   const auto& activitiesXpuptiMetrics = spcfg.activitiesXpuptiMetrics();
 
   std::vector<const char*> metricNames;
@@ -105,16 +117,6 @@ void XpuptiScopeProfilerApi::enableScopeProfiler(const Config& cfg) {
       activitiesXpuptiMetrics.end(),
       std::back_inserter(metricNames),
       [](const std::string& s) { return s.c_str(); });
-
-  pti_metrics_scope_mode_t collectionMode = spcfg.xpuptiProfilerPerKernel()
-      ? PTI_METRICS_SCOPE_AUTO_KERNEL
-      : PTI_METRICS_SCOPE_USER;
-
-  if (collectionMode == PTI_METRICS_SCOPE_USER) {
-    KINETO_THROW(
-        std::runtime_error,
-        "XPUPTI_PROFILER_ENABLE_PER_KERNEL has to be set to 1. Other variants are currently not supported.");
-  }
 
   scopeHandleOpt_.emplace(exceptFromScopeHandleDestructor_);
 

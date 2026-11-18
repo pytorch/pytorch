@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import contextlib
 import io
 import itertools
 import os
@@ -37,6 +38,7 @@ from torch._library.fake_profile import (
     TensorMetadata,
 )
 from torch._library.infer_schema import tuple_to_list
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -49,7 +51,6 @@ from torch.testing._internal.common_device_type import (
     PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -2341,21 +2342,43 @@ Dynamic shape operator
         with self.assertRaisesRegex(RuntimeError, "already has an implementation"):
             custom_ops.impl(qualname, func=foo_impl)
 
-    def test_abstract_impl_on_existing_op(self):
+    @parametrize("active", [False, True])
+    @parametrize("not_implemented", [False, True])
+    def test_abstract_impl_on_existing_op(self, active, not_implemented):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
         qualname = f"{self.test_ns}::foo"
+        mode = FakeTensorMode()
+        calls = 0
 
         @torch.library.register_fake(qualname, lib=self.lib())
         def foo_impl(x):
+            nonlocal calls
+            calls += 1
+            self.assertIs(torch._guards.active_fake_mode(), mode)
+            self.assertIs(torch.library.get_ctx()._fake_mode, mode)
+            if not_implemented:
+                return NotImplemented
             return x.sin()
 
         op = self.get_op(qualname)
-        with torch._subclasses.FakeTensorMode():
+        with mode:
             x = torch.randn(3)
-            result = op(x)
-            self.assertEqual(result.shape, x.shape)
-            self.assertEqual(result.stride(), x.stride())
+        with mode if active else contextlib.nullcontext():
+            if not_implemented:
+                with self.assertRaisesRegex(RuntimeError, "returned NotImplemented"):
+                    op(x)
+            else:
+                result = op(x)
+                self.assertEqual(result.shape, x.shape)
+                self.assertEqual(result.stride(), x.stride())
+                self.assertEqual(result.dtype, x.dtype)
+                self.assertEqual(result.device, x.device)
+                self.assertIs(
+                    torch._subclasses.fake_tensor.maybe_get_fake_mode(result), mode
+                )
+            self.assertIs(torch._guards.active_fake_mode(), mode if active else None)
+        self.assertEqual(calls, 1)
 
     def test_register_fake_before_define(self):
         qualname = f"{self.test_ns}::foo"
@@ -2781,7 +2804,7 @@ Dynamic shape operator
         # Register fake kernel to foo_impl1
         torch.library.register_fake(op_name, foo_impl1, lib=lib)
 
-        with torch._subclasses.FakeTensorMode():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [3])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
@@ -2795,19 +2818,19 @@ Dynamic shape operator
 
         # Override fake kernel to foo_impl2
         torch.library.register_fake(op_name, foo_impl2, lib=lib)
-        with torch._subclasses.FakeTensorMode():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Fake kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
             torch.library.register_fake(op_name, foo_impl1, lib=lib2)
-            with torch._subclasses.FakeTensorMode():
+            with FakeTensorMode():
                 self.assertEqual(op(torch.ones(3)).shape, [3])
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
         # Fake kernel should go back to foo_impl2
-        with torch._subclasses.FakeTensorMode():
+        with FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
@@ -4879,7 +4902,7 @@ with warnings.catch_warnings(record=True) as w:
                 called = True
                 return torch.empty_like(x)
 
-            with torch._subclasses.fake_tensor.FakeTensorMode():
+            with FakeTensorMode():
                 x = torch.randn(3)
                 y = 3.14
                 z = add(x, y)
@@ -6618,6 +6641,8 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         self.assertEqual(len(gradient_asserts), 1)
 
+    # Nested breaks expose a Dynamo wrapper-protocol hasattr bug here (#201908).
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_aot_autograd_copy_does_not_check_pinned_memory_for_wrapper_subclass(
         self,
     ):
@@ -6798,14 +6823,6 @@ class TestOpProfiles(TestCase):
         )
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
-        unsupported_error, unsupported_message = expectedIfCppFakeTensor(
-            (RuntimeError, "mylib::foo2"),
-            (
-                torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                "mylib.foo2.default",
-            ),
-        )
-
         op_profiles = self.get_sample_op_profile("mylib.foo2.default")
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -6822,8 +6839,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    unsupported_error,
-                    unsupported_message,
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
@@ -6840,8 +6857,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    unsupported_error,
-                    unsupported_message,
+                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
