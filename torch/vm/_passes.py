@@ -170,8 +170,8 @@ def swap(
 
     The pass goes in front of the passes that rewrite single instructions::
 
-        passes = [torch.rewrite.swap(["pow", "mean", "add", "rsqrt", "mul"], kernel)]
-        torch.rewrite(fn, passes=[*passes, *torch.rewrite.canonical])
+        fuse = torch.vm.swap(["pow", "mean", "add", "rsqrt", "mul"], kernel)
+        torch.vm(fn, passes=[fuse, *torch.vm.DEFAULT_PASSES])
     """
     wanted = list(ops)
     if not wanted:
