@@ -191,7 +191,6 @@
   "test/distributed/test_c10d_fr_hook.py",
   "test/distributed/test_c10d_functional_native.py",
   "test/distributed/test_c10d_gloo.py",
-  "test/distributed/test_c10d_logger.py",
   "test/distributed/test_c10d_nan_check.py",
   "test/distributed/test_c10d_nccl2.py",
   "test/distributed/test_c10d_nccl4py.py",
