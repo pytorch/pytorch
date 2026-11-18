@@ -1,13 +1,20 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_MACOS,
+    run_tests,
+)
 from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestTorchbindAOTIDevice(TestCase):
     """Verify that torchbind constants embedded in an AOTI .pt2 are reachable
     via AOTIModelPackageLoader.get_custom_objs() after load.
@@ -119,9 +126,7 @@ class TestTorchbindAOTIDevice(TestCase):
         self.assertEqual(loader.get_custom_objs(), {})
 
 
-instantiate_device_type_tests(
-    TestTorchbindAOTIDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(TestTorchbindAOTIDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

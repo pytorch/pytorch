@@ -70,7 +70,9 @@ def _scaled_mm_scale_placement(
     Handles three cases:
 
     1. Tensor-wise scale (single element): always Replicate.
-    2. 2D (or higher) scale, e.g. row-wise [M,1]: copy data placement directly.
+    2. 2D (or higher) scale, e.g. row-wise [M,1]: copy data placement, except
+       Replicate when the data is Partial or sharded on a dim where the scale
+       has size 1 (the scale broadcasts along it).
     3. 1D blockwise scale, e.g. MX format [M*K/block_size]: map
        non-contracting shard to Shard(0)/_ShardingPlaceholder(0), and reject
        contracting-dim shards (returns None).
@@ -79,6 +81,13 @@ def _scaled_mm_scale_placement(
         return Replicate()
 
     if len(scale_shape) != 1:
+        if isinstance(data_placement, Partial):
+            return Replicate()
+        if (
+            isinstance(data_placement, (_ShardingPlaceholder, Shard))
+            and scale_shape[data_placement.dim] == 1
+        ):
+            return Replicate()
         return data_placement
 
     # 1D blockwise scale: Shard(>=1) is invalid on a 1D tensor, so we need
@@ -1366,3 +1375,21 @@ def grouped_mm_single_dim_strategy(
         )
 
     return strategies
+
+
+# Registered by hand rather than generated from the rule above, because the generated
+# out rules do not carry the stride filter.
+@register_single_dim_strategy(
+    aten._grouped_mm.out,
+    full_mesh_strategy_filter=_valid_grouped_mm_strides,
+)
+def grouped_mm_out_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    # out is the last input and must have the placement of the result.
+    return [
+        [*rule, rule[0]]
+        for rule in grouped_mm_single_dim_strategy(
+            aten._grouped_mm.default, args_schema, kwargs_schema
+        )
+    ]
