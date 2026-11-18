@@ -64,8 +64,8 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx120x"
       "amd-gfx1250"
      )
-  # gfx1250-strict is not a separate AOTriton image. The matcher below
-  # selects amd-gfx1250 for it, including a ':' feature suffix.
+  # gfx1250-strict is not a separate AOTriton image. Only amd-gfx1250
+  # accepts a -strict peer, including a ':' feature suffix.
   set(__AOTRITON_IMAGE_SHA256_LIST
      "42189997e3f44bbcde9d2ce6ebedbeaf373c280299d03ec7933be73e0c6243d3" # amd-gfx90a
      "11f5c0fa8c4b13efcd466261adf1fd6b5bdbe00c03ad35bcf3d53e075dd18846" # amd-gfx942
@@ -321,10 +321,16 @@ if(NOT __AOTRITON_INCLUDED)
     foreach(image ${__AOTRITON_IMAGE_LIST})
       string(SUBSTRING ${image} 7 -1 gfx_pattern)
       string(REPLACE "x" "." gfx_regex ${gfx_pattern})
+      # -strict is a peer of gfx1250 only. Other images stay exact so a
+      # future gfx942-strict does not silently take the base image.
+      # A ':' feature suffix still matches for every image.
+      set(__AOTRITON_STRICT_SUFFIX "")
+      if(gfx_pattern STREQUAL "1250")
+        set(__AOTRITON_STRICT_SUFFIX "(-strict)?")
+      endif()
       foreach(target ${PYTORCH_ROCM_ARCH})
         # Anchor the arch so gfx1250 does not match an unrelated name.
-        # gfx1250-strict uses this same image. A ':' feature suffix still matches.
-        if(target MATCHES "^gfx${gfx_regex}(-strict)?($|:)")
+        if(target MATCHES "^gfx${gfx_regex}${__AOTRITON_STRICT_SUFFIX}($|:)")
           set(__AOTRITON_DOWNLOAD_TARGET aotriton_image_${gfx_pattern})
           aotriton_download_image(${image} ${__AOTRITON_DOWNLOAD_TARGET})
           add_dependencies(${__AOTRITON_CHAINED_IMAGE} ${__AOTRITON_DOWNLOAD_TARGET})
