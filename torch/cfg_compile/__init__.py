@@ -205,6 +205,7 @@ def cfg_compile(
     max_versions: int = 4,
     max_respecializations: int = 6,
     keep_memory: bool | None = None,
+    freeze: bool | None = None,
 ) -> Any:
     """Compiles ``fn`` to an SSA control-flow graph that runs in the cfg VM.
 
@@ -286,6 +287,20 @@ def cfg_compile(
             in use at its peak; what a few calls in a row did not ask for is
             given back. ``torch.cfg_compile.memory(fn)`` reports it. On by
             default (``TORCH_CFG_COMPILE_KEEP_MEMORY=0`` turns it off).
+        freeze: with ``backend="inductor"``, build the parameters and buffers
+            of the modules a region reads into its graph when the call is
+            one of inference (no gradients recorded, every module in eval
+            mode), so that Inductor folds what follows from them alone (a
+            batch norm into the convolution before it) and lays convolution
+            weights out for the kernels. Such a graph is checked on every
+            call: a tensor that was written to in place since (by an
+            optimizer, say) or replaced makes the region compile again with
+            the tensors of that call, and a region this happens to twice
+            takes its weights as inputs from then on. A tensor the region
+            itself writes is not built in. A write through ``.data`` does
+            not count as one to the tensor, and is not seen.
+            ``regions()`` reports ``frozen`` per region. On by default
+            (``TORCH_CFG_COMPILE_FREEZE=0`` turns it off).
 
     Returns:
         A callable with the signature of ``fn``. It has ``dump()``, returning
@@ -295,6 +310,8 @@ def cfg_compile(
         demote = os.environ.get("TORCH_CFG_COMPILE_DEMOTE", "1") != "0"
     if keep_memory is None:
         keep_memory = os.environ.get("TORCH_CFG_COMPILE_KEEP_MEMORY", "1") != "0"
+    if freeze is None:
+        freeze = os.environ.get("TORCH_CFG_COMPILE_FREEZE", "1") != "0"
     options: dict[str, Any] = {
         "pipeline": pipeline,
         "fallback": fallback,
@@ -312,6 +329,7 @@ def cfg_compile(
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
         "keep_memory": keep_memory,
+        "freeze": freeze,
     }
     if fn is None:
         return functools.partial(cfg_compile, **options)
@@ -331,7 +349,7 @@ def cfg_compile(
         if not specialize:
             raise ValueError("backend= needs specialize=True: regions are a pass")
         regions = _regions.make_pass(
-            runtime, backend, region_min_ops, region_max_variants, warmup=0
+            runtime, backend, region_min_ops, region_max_variants, 0, freeze
         )
         # First, while the instructions are still the ones of the block.
         pipeline = Pipeline([regions, *pipeline.passes])
@@ -376,8 +394,10 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
     tried yet), ``variants``, ``compiles`` (how many of the variants went to
     the backend: the others had the graph of an earlier one), ``open`` (per
-    variant that leaves sizes open, the conditions it holds under), ``ops``
-    and ``seconds`` spent tracing and compiling; and one per instruction or
+    variant that leaves sizes open, the conditions it holds under),
+    ``frozen`` (how many of the variants have the tensors of their modules
+    built in, see ``freeze``), ``ops`` and ``seconds`` spent tracing and
+    compiling; and one per instruction or
     run of instructions that was left to the VM, with ``state`` ``"vm"`` and
     the ``reason``.
     """
