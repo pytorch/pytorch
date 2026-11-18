@@ -364,9 +364,20 @@ def rewrite(
         unboxed: keep the tensors that kernels return without a Python object
             until Python code needs one. A tensor that only flows from one
             kernel call into others then never gets one.
-        callees: rewrite the Python functions that the rewritten code calls
-            (functions, methods, and objects whose ``__call__`` is a Python
-            function) the first time each is called, with the same options.
+        callees: rewrite the Python functions that are called while the
+            function runs, the first time each is called, with the same
+            options. That is every call of a Python function on the thread,
+            whoever makes it: the rewritten code, C code that it calls (the
+            ``__init__`` of a class that is instantiated, a property, an
+            operator such as ``__add__``, the ``key`` of ``sorted``,
+            ``functools.partial``, a hook of autograd), or a function below
+            it that the interpreter runs, a generator for one. The calls
+            that C code and the interpreter make are caught where the
+            interpreter starts a frame (PEP 523), which it does through this
+            runtime only while a rewritten function is running
+            (``TORCH_REWRITE_EVAL_FRAME=0`` leaves those calls to the
+            interpreter). What the runtime itself calls is not rewritten:
+            passes, compiled graphs, imports.
         demote: measure the function and each of its callees, once warmed up,
             both rewritten and in the interpreter, and leave to the interpreter
             what runs faster there: the VM gains on tensor operations and loses
@@ -447,6 +458,7 @@ def rewrite(
             max_versions=max_versions,
             max_respecializations=max_respecializations,
             workspace=torch._C._cfg_workspace() if keep_memory else None,
+            hook=os.environ.get("TORCH_REWRITE_EVAL_FRAME", "1") != "0",
         )
         if regions is not None:
             _region_passes[compiled] = regions

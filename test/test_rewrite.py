@@ -3,6 +3,7 @@
 import collections
 import copy
 import dis
+import functools
 import gc
 import importlib
 import math
@@ -1858,31 +1859,10 @@ class TestCfgCallees(TestCase):
         x = torch.randn(3)
         for _ in range(3):
             self.assertEqual(compiled(x), f(x))
-        self.assertEqual(self.callees(compiled), (["dropout"], []))
-
-    def test_a_function_dynamo_compiled_is_dynamo_s(self):
-        graphs = []
-
-        def backend(gm, example_inputs):
-            graphs.append(gm)
-            return gm.forward
-
-        def g(x):
-            return x * 2 + 1
-
-        dynamo = torch.compile(g, backend=backend)
-
-        def f(x):
-            return dynamo(x) + 1
-
-        compiled = torch.rewrite(f, fallback=False)
-        x = torch.arange(3.0)
-        for _ in range(4):
-            self.assertEqual(compiled(x), g(x) + 1)
-        # Dynamo traced it, as it does when the interpreter makes the call:
-        # what torch.compile returns is left to the interpreter.
-        self.assertEqual(len(graphs), 1)
-        self.assertEqual(self.callees(compiled), ([], []))
+        # And the function behind an attribute of torch._VF, which C code calls.
+        self.assertEqual(
+            self.callees(compiled), (["VFModule.__getattr__", "dropout"], [])
+        )
 
     def test_methods_and_callable_objects(self):
         def f(obj, x):
@@ -2010,7 +1990,7 @@ class TestCfgCallees(TestCase):
         self.assertEqual(compiled(20), ([True] * 20, 0))
         self.assertEqual(
             [name.rsplit(".", 1)[-1] for name in self.callees(compiled)[0]],
-            ["outer", "inner"],
+            ["__del__", "__init__", "outer", "inner"],
         )
 
     def test_infinite_recursion(self):
@@ -2140,6 +2120,292 @@ class TestCfgCallees(TestCase):
         else:
             self.fail("expected NameError")
         self.assertEqual([frame.name for frame in frames[-2:]], ["f", "callee_raises"])
+
+
+def hook_bottom(x):
+    return x * 2 + 1
+
+
+class HookPoint:
+    def __init__(self, x):
+        self.x = hook_bottom(x)
+
+    @property
+    def doubled(self):
+        return hook_bottom(self.x)
+
+    def __add__(self, other):
+        return hook_bottom(self.x + other)
+
+    def __getitem__(self, i):
+        return hook_bottom(self.x[i])
+
+
+def hook_constructs(x):
+    return HookPoint(x).x
+
+
+def hook_reads_a_property(x):
+    return HookPoint(x).doubled
+
+
+def hook_adds(x):
+    return HookPoint(x) + 1
+
+
+def hook_subscripts(x):
+    return HookPoint(x)[0]
+
+
+def hook_key(x):
+    return -hook_bottom(x)
+
+
+def hook_sorts(x):
+    return sorted([x[1], x[0], x[2]], key=hook_key)
+
+
+def hook_partial(x):
+    return functools.partial(hook_bottom, x)()
+
+
+def hook_maps(x):
+    return list(map(hook_bottom, [x, x + 1]))
+
+
+def hook_generator(xs):
+    for x in xs:
+        yield hook_bottom(x)
+
+
+def hook_drives_a_generator(x):
+    return list(hook_generator([x, x + 1]))
+
+
+def hook_keywords(a, b=2, *rest, scale, shift=0, **more):
+    return (a + b + sum(rest)) * scale + shift + sum(more.values())
+
+
+def hook_binds_arguments(x):
+    call = functools.partial(hook_keywords, x, scale=3, extra=x)
+    return call(), call(5), call(5, 6, 7, shift=1, other=2)
+
+
+def hook_cell(x):
+    return lambda y: x + y
+
+
+def hook_makes_closures(x):
+    return [add(x) for add in map(hook_cell, [x, x + 1])]
+
+
+class HookFragile:
+    @property
+    def broken(self):
+        return hook_bottom(None)
+
+    @property
+    def endless(self):
+        return self.endless
+
+
+def hook_reads_broken(obj):
+    return obj.broken
+
+
+def hook_reads_endless(obj):
+    return obj.endless
+
+
+def hook_offered(*ignored):
+    return cfg_rs.frames_offered()
+
+
+def hook_asks(x):
+    return hook_offered(), next(map(hook_offered, [x]))
+
+
+def hook_late(x):
+    return x + 1
+
+
+def hook_slow_python(n, late):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    if late:
+        # A Python function that C code calls.
+        total += next(map(hook_late, [0]))
+    return total
+
+
+def hook_calls_slow_python(n, x, late):
+    return hook_slow_python(n, late), x + 1
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.rewrite runtime not built")
+class TestCfgFrameHook(TestCase):
+    """Python functions that C code calls under a compiled function, or that
+    a function the interpreter runs calls, are compiled in turn."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "fn,through",
+        [
+            (hook_constructs, "HookPoint.__init__"),
+            (hook_reads_a_property, "HookPoint.doubled"),
+            (hook_adds, "HookPoint.__add__"),
+            (hook_subscripts, "HookPoint.__getitem__"),
+            (hook_sorts, "hook_key"),
+            (hook_partial, "hook_bottom"),
+            (hook_maps, "hook_bottom"),
+        ],
+        name_fn=lambda fn, through: fn.__name__,
+    )
+    def test_what_c_code_calls_is_compiled(self, fn, through):
+        compiled = torch.rewrite(fn, fallback=False)
+        x = torch.arange(3.0)
+        for _ in range(4):
+            self.assertEqual(compiled(x), fn(x))
+        self.assertIn(through, compiled.stats()["compiled_callees"])
+        self.assertEqual(compiled.stats()["interpreted_callees"], [])
+
+    def test_what_an_interpreted_function_calls_is_compiled(self):
+        compiled = torch.rewrite(hook_drives_a_generator, fallback=False)
+        x = torch.arange(3.0)
+        for _ in range(4):
+            self.assertEqual(compiled(x), hook_drives_a_generator(x))
+        stats = compiled.stats()
+        self.assertEqual(stats["interpreted_callees"], ["hook_generator"])
+        self.assertIn("hook_bottom", stats["compiled_callees"])
+
+    def test_arguments_are_bound_as_the_interpreter_binds_them(self):
+        compiled = torch.rewrite(hook_binds_arguments, fallback=False)
+        for _ in range(4):
+            self.assertEqual(compiled(2), hook_binds_arguments(2))
+        self.assertIn("hook_keywords", compiled.stats()["compiled_callees"])
+        closures = torch.rewrite(hook_makes_closures, fallback=False)
+        for _ in range(4):
+            self.assertEqual(closures(2), hook_makes_closures(2))
+        self.assertIn("hook_cell", closures.stats()["compiled_callees"])
+
+    def test_an_exception_passes_through_the_frames(self):
+        compiled = torch.rewrite(hook_reads_broken, fallback=False)
+
+        def frames(fn):
+            try:
+                fn(HookFragile())
+            except Exception as e:
+                names = [f.name for f in traceback.extract_tb(e.__traceback__)]
+                return type(e), names[:4]
+
+        for _ in range(3):
+            self.assertEqual(frames(compiled), frames(hook_reads_broken))
+        self.assertIn("HookFragile.broken", compiled.stats()["compiled_callees"])
+        endless = torch.rewrite(hook_reads_endless, fallback=False)
+        self.assertEqual(frames(endless)[0], RecursionError)
+        self.assertEqual(frames(compiled), frames(hook_reads_broken))
+
+    def test_frames_are_offered_only_under_the_function(self):
+        compiled = torch.rewrite(hook_asks, fallback=False)
+        self.assertFalse(cfg_rs.frames_offered())
+        # While a block is profiled, what its calls of C functions call is
+        # the interpreter's.
+        for _ in range(4):
+            compiled(1)
+        for _ in range(3):
+            self.assertEqual(compiled(1), (True, True))
+            self.assertFalse(cfg_rs.frames_offered())
+        self.assertEqual(hook_asks(1), (False, False))
+        alone = torch.rewrite(hook_asks, fallback=False, callees=False)
+        for _ in range(6):
+            self.assertEqual(alone(1), (False, False))
+
+    def test_what_the_runtime_calls_is_not_offered(self):
+        seen = []
+
+        def look(region):
+            seen.append(cfg_rs.frames_offered())
+            return False
+
+        def f(x):
+            import colorsys  # noqa: F401
+
+            return x * 2 + 1
+
+        compiled = torch.rewrite(f, passes=[look, *canonical], fallback=False)
+        with unittest.mock.patch("builtins.__import__", wraps=__import__) as imports:
+            imports.side_effect = (
+                lambda *a, **k: seen.append(cfg_rs.frames_offered())
+                or unittest.mock.DEFAULT
+            )
+            for _ in range(3):
+                compiled(torch.ones(2))
+        self.assertGreater(len(seen), 3)
+        self.assertEqual(set(seen), {False})
+
+    def test_what_is_left_to_the_interpreter_is_left_with_what_it_calls(self):
+        compiled = torch.rewrite(
+            hook_calls_slow_python,
+            fallback=False,
+            demote=True,
+            passes=without("inline"),
+        )
+        x = torch.ones(2)
+        for _ in range(200):
+            compiled(300, x, False)
+        self.assertEqual(compiled.stats()["demoted_callees"], ["hook_slow_python"])
+        # Now that the interpreter runs it, what C code calls under it is the
+        # interpreter's too.
+        for _ in range(4):
+            self.assertEqual(compiled(300, x, True)[0], hook_slow_python(300, True))
+        self.assertNotIn("hook_late", compiled.stats()["compiled_callees"])
+
+    def test_the_compilers_are_left_to_the_interpreter(self):
+        torch.manual_seed(0)
+        model = RegionNet().train()
+        opt = torch.optim.SGD(model.parameters(), lr=0.1)
+        passes = with_graphs("aot_eager")
+        step = torch.rewrite(region_step, passes=passes, fallback=False)
+        for _ in range(6):
+            step(model, opt, torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,)))
+        callees = step.stats()["compiled_callees"]
+        # Autograd calls the backward of the graph, which is not the
+        # function's code: neither its wrappers nor what made them.
+        wrappers = [c for c in callees if "CompiledFunction" in c or "AOT" in c]
+        self.assertEqual(wrappers, [])
+        self.assertIn("SGD.step", callees)
+
+    def test_a_function_dynamo_compiled_is_dynamo_s(self):
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        def g(x):
+            return HookPoint(x).doubled
+
+        dynamo = torch.compile(g, backend=backend)
+
+        def f(x):
+            return dynamo(x) + hook_reads_a_property(x)
+
+        compiled = torch.rewrite(f, fallback=False)
+        x = torch.arange(3.0)
+        expected = g(x) + hook_reads_a_property(x)
+        for _ in range(4):
+            self.assertEqual(compiled(x), expected)
+            self.assertFalse(cfg_rs.frames_offered())
+        # Dynamo traced it, as it does when the interpreter makes the call.
+        self.assertGreater(len(graphs), 0)
+        callees = compiled.stats()["compiled_callees"]
+        self.assertIn("HookPoint.doubled", callees)
+        self.assertEqual([c for c in callees if c.endswith(".g")], [])
+
+
+instantiate_parametrized_tests(TestCfgFrameHook)
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.rewrite runtime not built")
@@ -2687,9 +2953,8 @@ class TestCfgMoreBytecodes(TestCase):
         compiled = torch.rewrite(f, fallback=False)
         self.assertEqual(compiled(3), f(3))
         self.assertEqual(compiled(torch.ones(2))[0], torch.full((2,), 2.0))
-        self.assertTrue(
-            compiled.stats()["compiled_callees"][0].endswith("f.<locals>.Point.scaled")
-        )
+        methods = [n.rsplit(".", 1)[-1] for n in compiled.stats()["compiled_callees"]]
+        self.assertEqual(methods, ["__init__", "scaled"])
 
     def test_del_attribute_global_and_closure_variable(self):
         def f(box):
@@ -3364,7 +3629,8 @@ class TestCfgFrames(TestCase):
         names = [
             name.rsplit(".", 1)[-1] for name in compiled.stats()["compiled_callees"]
         ]
-        self.assertEqual(sorted(names), ["fmt", "scale", "scale"])
+        ours = [name for name in names if name in ("fmt", "scale")]
+        self.assertEqual(sorted(ours), ["fmt", "scale", "scale"])
 
 
 def frame_traced_callee(a):
@@ -3724,7 +3990,11 @@ class TestCfgShortcuts(TestCase):
         plain = torch.rewrite(
             shortcut_attributes, fallback=False, passes=without("shortcuts")
         )
-        self.assertEqual(self.getattr_calls(plain, net), 3)
+        # Without the shortcut the function is called, and is compiled as
+        # everything is that is called.
+        self.assertEqual(self.getattr_calls(plain, net), 0)
+        self.assertIn("Module.__getattr__", plain.stats()["compiled_callees"])
+        self.assertNotIn("Module.__getattr__", compiled.stats()["compiled_callees"])
         net.scale = torch.nn.Parameter(torch.zeros(2))
         net.plain = 7
         self.assertIs(compiled(net)[1], net.scale)
