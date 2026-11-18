@@ -12328,6 +12328,9 @@ class Scheduler:
             # checks have to run over the region body rather than the call node.
             if region.subgraph is None:
                 raise AssertionError("expected invoke_subgraph to have a subgraph")
+            patches = region.subgraph.inductor_config_patches
+            if patches and not patches.get("triton.cudagraphs", True):
+                return "invoke_subgraph opts out of cudagraphs"
             if reason := self._subgraph_cudagraph_skip_reason(region.subgraph):
                 return reason
             return self._invoke_subgraph_family_cudagraph_skip_reason(node, region)
