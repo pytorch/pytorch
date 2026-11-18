@@ -122,7 +122,7 @@ def _keep_float(
     f: Callable[[Unpack[_Ts]], _T],
 ) -> Callable[[Unpack[_Ts]], _T | sympy.Float]:
     @functools.wraps(f)
-    def inner(*args: Unpack[_Ts]) -> _T | sympy.Float:
+    def inner(*args: *_Ts) -> _T | sympy.Float:
         r: _T | sympy.Float = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -1312,7 +1312,8 @@ class TruncToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if number.is_integer is True:
+        # Float(0.0).is_integer is True in sympy, but it must become Integer(0)
+        if number.is_integer is True and not number.is_Float:
             return number
         if isinstance(number, IntTrueDiv):
             base, divisor = number.args

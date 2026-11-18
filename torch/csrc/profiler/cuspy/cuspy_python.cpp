@@ -264,6 +264,7 @@ void initCuspyBindings(py::module& m) {
   //       flow: int64_col | None,
   //       gpu_corr: (int32_offsets_col, int64_ids_col) CSR | None,
   //       cat_iid: uint64_col | None)
+  //  - metadata: list of (name, json) top-level trace fields
   // All columns are numpy arrays; they are kept alive for the encode.
   cuspy.def(
       "encode_pftrace",
@@ -274,7 +275,9 @@ void initCuspyBindings(py::module& m) {
          const py::list& groups,
          const py::object& render,
          const py::object& counters,
-         int compression_level) -> py::bytes {
+         int compression_level,
+         const std::vector<std::pair<std::string, std::string>>& metadata)
+          -> py::bytes {
         using torch::profiler::impl::PftraceGfxContext;
         using torch::profiler::impl::PftraceGpuCounter;
         using torch::profiler::impl::PftraceGpuSpec;
@@ -549,7 +552,8 @@ void initCuspyBindings(py::module& m) {
               ctx_vec,
               stages,
               gpu_counters,
-              compression_level);
+              compression_level,
+              metadata);
         }
         return py::bytes(out);
       },
@@ -560,7 +564,8 @@ void initCuspyBindings(py::module& m) {
       py::arg("groups"),
       py::arg("render") = py::none(),
       py::arg("counters") = py::none(),
-      py::arg("compression_level") = 1);
+      py::arg("compression_level") = 1,
+      py::arg("metadata") = std::vector<std::pair<std::string, std::string>>{});
 }
 
 } // namespace torch::profiler::impl
