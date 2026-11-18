@@ -7988,8 +7988,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(len(reasons), 1)
         self.assertIn(expected_guard, reasons[0])
-        expected_hint = "(HINT: Dynamo used a positional default while tracing this function call. The number of defaults determines which parameter receives each one. Adding a default for an argument this call already supplies can trigger recompilation even if its result stays the same. Pass omitted arguments explicitly to avoid this guard.)"  # noqa: B950
-        self.assertIn(expected_hint, reasons[0])
+        self.assertIn("HINT: Dynamo used a positional default", reasons[0])
+        self.assertIn("count determines which parameter", reasons[0])
 
     def test_func_default_torch_args(self):
         """

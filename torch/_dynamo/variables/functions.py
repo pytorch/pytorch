@@ -229,7 +229,9 @@ _POS_DEFAULT_LENGTH_GUARD = functools.partial(
     GuardBuilder.SEQUENCE_LENGTH,
     recompile_hint=(
         "Dynamo used a positional default while tracing this function call. "
-        "The number of defaults determines which parameter receives each one. "
+        "It guards the number of defaults because that count determines which "
+        "parameter receives each value; a different count could change how the "
+        "compiled call assigns arguments. "
         "Adding a default for an argument this call already supplies can trigger "
         "recompilation even if its result stays the same. Pass omitted arguments "
         "explicitly to avoid this guard."
