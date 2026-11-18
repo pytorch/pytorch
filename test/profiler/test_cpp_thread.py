@@ -10,7 +10,12 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 if is_fbcode():
@@ -76,6 +81,8 @@ class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
 
 
 class CppThreadTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     ThreadCount = 20  # set to 2 for debugging
     EventHandler = None
     TraceObject = None
@@ -221,7 +228,7 @@ class CppThreadTest(TestCase):
         )
 
 
-instantiate_device_type_tests(CppThreadTest, globals(), only_for=("cuda", "xpu"))
+instantiate_device_type_tests(CppThreadTest, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
