@@ -1167,9 +1167,7 @@ class TileReduce:
                 else Int32(bx)
             )
             lane = Int32(tx)
-            alive = (
-                raw < Int64(mOuts[0].shape[0]) if const_expr(self.wide_output) else True
-            )
+            alive = raw < cute.size(mOuts[0]) if const_expr(self.wide_output) else True
         elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
                 tx // const_expr(self.threads_per_row)
