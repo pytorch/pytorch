@@ -10,6 +10,7 @@ import json
 import os
 import random
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -3565,6 +3566,98 @@ class TestXPUMultiprocessing(TestCase):
         c2p.get()  # wait for synchronization in child
         self.assertTrue(event.query())
         p.join()
+
+    # A producer process records IPC events; the consumer imports each one, waits
+    # on it, and hands it to another thread that drops the last reference (as a
+    # completion-callback thread does in a serving engine), while the importing
+    # thread keeps launching kernels and copying back to the host.
+    _EVENT_RELEASE_SCRIPT = """\
+import queue
+import sys
+import threading
+
+import torch
+import torch.multiprocessing as mp
+
+
+def producer(p2c, c2p, iters):
+    x = torch.zeros(1024, device="xpu")
+    for _ in range(iters):
+        e = torch.xpu.Event(interprocess=True)
+        x.add_(1)
+        e.record()
+        c2p.put(e.ipc_handle())
+        p2c.get()
+
+
+if __name__ == "__main__":
+    keep, iters = sys.argv[1] == "keep", int(sys.argv[2])
+    ctx = mp.get_context("spawn")
+    p2c, c2p = ctx.SimpleQueue(), ctx.SimpleQueue()
+    p = ctx.Process(target=producer, args=(p2c, c2p, iters), daemon=True)
+    p.start()
+    release_queue, kept = queue.Queue(), []
+
+    def releaser():
+        while (e := release_queue.get()) is not None:
+            if keep:
+                kept.append(e)
+            del e
+
+    t = threading.Thread(target=releaser, daemon=True)
+    t.start()
+    y = torch.zeros(1024, device="xpu")
+    torch.xpu.synchronize()
+    for i in range(iters):
+        e = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), c2p.get())
+        e.wait()
+        release_queue.put(e)
+        del e
+        y.add_(1)
+        y.cpu()
+        torch.xpu.synchronize()
+        p2c.put(i)
+    release_queue.put(None)
+    t.join()
+    p.join()
+    assert torch.equal(y.cpu(), torch.full((1024,), float(iters)))
+    print("PASS", flush=True)
+"""
+
+    @parametrize("keep_event", [False, True])
+    def test_event_ipc_release_on_other_thread(self, keep_event):
+        # keep_event=True is the control: same threads and same work, but the
+        # imported events stay alive until the consumer exits.
+        # The consumer runs in its own process (and session) because a failure
+        # corrupts the heap and can crash, abort, raise or hang the process.
+        with tempfile.TemporaryDirectory() as tmp:
+            script = os.path.join(tmp, "event_release.py")
+            with open(script, "w") as f:
+                f.write(self._EVENT_RELEASE_SCRIPT)
+            with tempfile.TemporaryFile("w+") as out:
+                proc = subprocess.Popen(
+                    [
+                        sys.executable,
+                        script,
+                        "keep" if keep_event else "release",
+                        "200",
+                    ],
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                try:
+                    returncode = proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    returncode = "timeout"
+                finally:
+                    # Also kills the producer, which would otherwise block forever.
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait()
+                out.seek(0)
+                output = out.read()
+        self.assertEqual(returncode, 0, msg=f"consumer output:\n{output[-2000:]}")
 
 
 @contextlib.contextmanager
