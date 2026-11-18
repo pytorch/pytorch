@@ -594,7 +594,9 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             list(range(self.world_size)), backend="cpu:gloo,cuda:ncclx_stub"
         )
 
-        torch._C._distributed_c10d._reset_fr_recording_nccl()
+        # NCCLXStub is not a natively recording backend, so the FlightRecorder
+        # hook records its ops in a recorder keyed by its backend name.
+        torch._C._distributed_c10d._reset_fr_trace(backend="ncclx_stub")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
         symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
@@ -602,15 +604,17 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(symm_mem_hdl.rank, self.rank)
         self.assertEqual(symm_mem_hdl.world_size, self.world_size)
 
-        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())["entries"]
-        ag_entries = [
-            e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
-        ]
+        trace = torch._C._distributed_c10d._dump_fr_trace(backend="ncclx_stub")
+        entries = pickle.loads(trace)["entries"]
+        ag_name = "ncclx_stub:_all_gather_base"
+        ag_entries = [e for e in entries if e["profiling_name"] == ag_name]
         self.assertGreaterEqual(
             len(ag_entries),
             1,
-            lambda msg: f"{msg}\nexpected NCCL _all_gather_base from PG rendezvous, "
-            f"got: {[e['profiling_name'] for e in entries]}",
+            lambda msg: (
+                f"{msg}\nexpected {ag_name} from PG rendezvous, "
+                f"got: {[e['profiling_name'] for e in entries]}"
+            ),
         )
 
         symm_mem_hdl.barrier()

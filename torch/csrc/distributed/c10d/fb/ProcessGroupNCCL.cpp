@@ -27,10 +27,10 @@
 #include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/fb/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
@@ -394,10 +394,8 @@ static void attachAllocatorHooks() {
   }();
 }
 
-static std::
-    unordered_map<std::string, std::unordered_map<std::string, std::string>>
-    getNCCLCommDumpMap() {
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+static nccl_comm_dump_map_t getNCCLCommDumpMap() {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -418,49 +416,15 @@ static std::
     ncclDumpMap[ncclComm->getUniqueHash()] = ncclComm->ncclCommDump();
   }
   return ncclDumpMap;
-#else
-  return std::unordered_map<
-      std::string,
-      std::unordered_map<std::string, std::string>>();
+}
+
+// dump_nccl_trace() (NCCLCommon.cpp) includes every communicator in
+// ncclCommMemPoolMap.
+static const bool kNCCLCommDumpMapRegistered = [] {
+  get_nccl_comm_dump_map_fn() = getNCCLCommDumpMap;
+  return true;
+}();
 #endif // (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
-}
-
-void reset_nccl_trace() {
-  FlightRecorderCUDA::get()->reset_all();
-}
-
-std::string dump_nccl_trace(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive) {
-  auto ncclDumpMap = getNCCLCommDumpMap();
-#if defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
-  for (const auto& [ncclUniqueIDStr, dump] : ncclDumpMap) {
-    printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
-  }
-#endif // defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
-  return FlightRecorderCUDA::get()->dump(
-      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
-}
-
-std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
-  auto ncclDumpMap = getNCCLCommDumpMap();
-  return FlightRecorderCUDA::get()->dump_json(
-      ncclDumpMap, includeCollectives, onlyActive);
-}
-
-std::optional<std::function<void(std::function<void(const std::string&)>)>>&
-get_cpp_trace_dumper() {
-  static std::optional<
-      std::function<void(std::function<void(const std::string&)>)>>
-      dumper(std::nullopt);
-  return dumper;
-}
-
-gil_checker_t& get_gil_checker() {
-  static gil_checker_t gil_checker = nullptr;
-  return gil_checker;
-}
 
 static std::future<bool> launchAsyncGilCheck() {
   std::promise<bool> resultPromise;
@@ -505,36 +469,6 @@ std::ostream& operator<<(
       workNCCL.opTimeout_.count(),
       ")");
   return output << workInfo;
-}
-
-/* Implementation of TensorShelf class */
-
-void TensorShelf::stash(std::vector<at::Tensor>& tensors) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  tVector_.insert(tVector_.end(), tensors.begin(), tensors.end());
-}
-
-void TensorShelf::stash(TensorShelf& other) {
-  std::vector<at::Tensor>& otherVec = other.get();
-  this->stash(otherVec);
-}
-
-void TensorShelf::unstash() {
-  this->clear();
-}
-
-bool TensorShelf::empty() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return tVector_.empty();
-}
-
-void TensorShelf::clear() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  tVector_.clear();
-}
-
-std::vector<at::Tensor>& TensorShelf::get() {
-  return tVector_;
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(
@@ -2436,8 +2370,9 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         // look like, so it is better to let all ranks universally sleep for a
         // short period of time, in this case, 60 seconds, which is also the
         // maximum time we leave for FR dump.
-        std::this_thread::sleep_for(std::chrono::milliseconds(
-            pg_->heartbeatMonitor_->getDumpTimeout() * 4));
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(
+                pg_->heartbeatMonitor_->getDumpTimeout() * 4));
 
         if (SHOULD_CLEAN_UP(pg_->asyncErrorHandling_)) {
           // Abort work and corresponding communicators
@@ -2820,14 +2755,15 @@ void ProcessGroupNCCL::runHookLoop() {
             timeFinished +
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 work.workStartTime_ - std::chrono::steady_clock::now());
-        onCompletionHook_(std::make_shared<WorkInfo>(
-            work.retrieveOpType(), // OpType
-            work.getSequencenumber(), // seq
-            timeStarted, // timeStarted
-            timeFinished, // timeFinished
-            std::chrono::duration<float, std::milli>(
-                work.getDuration()) // activeDuration
-            ));
+        onCompletionHook_(
+            std::make_shared<WorkInfo>(
+                work.retrieveOpType(), // OpType
+                work.getSequencenumber(), // seq
+                timeStarted, // timeStarted
+                timeFinished, // timeFinished
+                std::chrono::duration<float, std::milli>(
+                    work.getDuration()) // activeDuration
+                ));
 
         lock.lock();
         it = completedWorkList_.erase(it);
@@ -3187,10 +3123,12 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // 2. The new comm is not for a point-to-point operation.
   // ncclCommSplit() is a collective call, so it does not work for P2P
   // operations.
-  if (options_->split_from && !singleP2POp) {
+  auto splitFrom = c10::dynamic_intrusive_pointer_cast<ProcessGroupNCCL>(
+      options_->split_from);
+  if (splitFrom && !singleP2POp) {
     // Find a valid, healthy communicator to split from if possible.
-    std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
-    auto& other_comms = options_->split_from->devNCCLCommMap_;
+    std::lock_guard<std::mutex> lock(splitFrom->mutex_);
+    auto& other_comms = splitFrom->devNCCLCommMap_;
     auto dit = other_comms.find(getKeyFromDevice(device));
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
@@ -3653,10 +3591,6 @@ void ProcessGroupNCCL::workEnqueue(
         std::chrono::steady_clock::now());
   }
 }
-
-ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : Backend::Options(NCCL_BACKEND_NAME, kProcessGroupNCCLDefaultTimeout),
-      is_high_priority_stream(is_high_priority_stream) {}
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
@@ -4218,17 +4152,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     /* In eagerInit mode, reuse the parent comm.  Do not lazily create
      * p2p communicators. */
     if (!batchP2P && showSerializationWarning_) {
-      TORCH_WARN_ONCE(c10::str(
-          logPrefix(),
-          "An unbatched P2P op (send/recv) was called on this ProcessGroup with size ",
-          groupRanks().size(),
-          ".  In eager initialization mode, unbatched P2P ops are treated as ",
-          "independent collective ops, and are thus serialized with ",
-          "all other ops on this ProcessGroup, including other P2P ",
-          "ops. To avoid serialization, either create additional ",
-          "independent ProcessGroups for the P2P ops or use batched ",
-          "P2P ops. You can squash this warning by setting the environment variable ",
-          "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING to false."));
+      TORCH_WARN_ONCE(
+          c10::str(
+              logPrefix(),
+              "An unbatched P2P op (send/recv) was called on this ProcessGroup with size ",
+              groupRanks().size(),
+              ".  In eager initialization mode, unbatched P2P ops are treated as ",
+              "independent collective ops, and are thus serialized with ",
+              "all other ops on this ProcessGroup, including other P2P ",
+              "ops. To avoid serialization, either create additional ",
+              "independent ProcessGroups for the P2P ops or use batched ",
+              "P2P ops. You can squash this warning by setting the environment variable ",
+              "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING to false."));
     }
 
     key = getKeyFromDevice(device);

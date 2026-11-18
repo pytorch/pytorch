@@ -3,11 +3,11 @@
 #include <vector>
 
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/fb/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
-#include "CUDATest.hpp"
-#include "TestUtils.hpp"
 #include "c10d/Types.hpp"
+#include "caffe2/test/cpp/c10d/CUDATest.hpp"
+#include "caffe2/test/cpp/c10d/TestUtils.hpp"
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>

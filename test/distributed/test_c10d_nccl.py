@@ -34,6 +34,10 @@ if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+if not c10d.distributed_c10d._NCCL_LEGACY_AVAILABLE:
+    print("c10d legacy NCCL not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 
 import test_c10d_common
 from test_c10d_common import (

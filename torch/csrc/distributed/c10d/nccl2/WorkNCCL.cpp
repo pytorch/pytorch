@@ -8,6 +8,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/StringUtil.h>
 
 #include <iterator>
 #include <thread>
@@ -150,29 +151,34 @@ WorkNCCL::WorkNCCL(
 
 WorkNCCL::~WorkNCCL() = default;
 
-void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
+void WorkNCCL::recordFunctionStart(
+    std::string_view coll_name,
+    at::ArrayRef<at::Tensor> inputs) {
   recordFunction_.emplace(at::RecordScope::USER_SCOPE);
   if (!recordFunction_->isActive()) {
     return;
   }
+  // Matches the legacy ProcessGroupNCCL / c10d::Work events: "nccl:<op>"
+  // names, async flag and input shapes. The event spans enqueue only.
+  recordFunction_->_setAsync();
+  const std::string name = c10::str("nccl:", coll_name);
 
-  std::lock_guard<std::mutex> lock(inputTensors_->mutex);
-  if (!inputTensors_->tensors.empty()) {
-    std::vector<c10::IValue> inputs;
-    inputs.reserve(inputTensors_->tensors.size());
-    for (const auto& tensor : inputTensors_->tensors) {
-      inputs.emplace_back(tensor);
-    }
-    recordFunction_->before(
-        coll_name,
-        c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+  std::vector<c10::IValue> ivalues;
+  if (!inputs.empty()) {
+    ivalues.assign(inputs.begin(), inputs.end());
   } else {
-    recordFunction_->before(coll_name, c10::ArrayRef<const c10::IValue>{});
+    std::lock_guard<std::mutex> lock(inputTensors_->mutex);
+    ivalues.assign(
+        inputTensors_->tensors.begin(), inputTensors_->tensors.end());
   }
+  recordFunction_->before(
+      name, c10::ArrayRef<const c10::IValue>(ivalues.data(), ivalues.size()));
 }
 
-void WorkNCCL::recordStart(std::string_view coll_name) {
-  recordFunctionStart(coll_name);
+void WorkNCCL::recordStart(
+    std::string_view coll_name,
+    at::ArrayRef<at::Tensor> inputs) {
+  recordFunctionStart(coll_name, inputs);
   state_->events->start->record(state_->stream);
 }
 
