@@ -530,8 +530,10 @@ kernel void upsample_nearest2d(
 }
 
 // Like upsample_nearest2d, with the four taps and their weights computed once
-// per (y, x) and reused for every plane.
-template <typename T, typename index_t>
+// per (y, x) and reused for every plane. linear1d runs it on an H=1 view with
+// one_d set, which skips the y blend: its 0 * row1 would turn inf into NaN
+// where linear1d on CPU keeps inf.
+template <typename T, typename index_t, bool one_d>
 kernel void upsample_bilinear2d(
     device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
@@ -570,10 +572,14 @@ kernel void upsample_bilinear2d(
     const index_t in_off = nc.div * input_strides.x + nc.mod * input_strides.y;
     const auto i0 =
         linear_interp(row0[in_off + col0], row0[in_off + col1], t_x);
-    const auto i1 =
-        linear_interp(row1[in_off + col0], row1[in_off + col1], t_x);
+    const auto res = one_d
+        ? i0
+        : linear_interp(
+              i0,
+              linear_interp(row1[in_off + col0], row1[in_off + col1], t_x),
+              t_y);
     output[nc.div * output_strides.x + nc.mod * output_strides.y] =
-        static_cast<T>(linear_interp(i0, i1, t_y));
+        static_cast<T>(res);
   }
 }
 
@@ -982,11 +988,17 @@ kernel void upsample_backward(
       uint3 thread_index [[thread_position_in_grid]],                     \
       uint3 grid_size [[threads_per_grid]])
 
-#define INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE)                    \
-  INSTANTIATE_UPSAMPLE_PLANE_GRID(                              \
-      bilinear2d, DTYPE, u32, upsample_bilinear2d, DTYPE, int); \
-  INSTANTIATE_UPSAMPLE_PLANE_GRID(                              \
-      bilinear2d, DTYPE, u64, upsample_bilinear2d, DTYPE, long)
+#define INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE)                           \
+  INSTANTIATE_UPSAMPLE_PLANE_GRID(                                     \
+      bilinear2d, DTYPE, u32, upsample_bilinear2d, DTYPE, int, false); \
+  INSTANTIATE_UPSAMPLE_PLANE_GRID(                                     \
+      bilinear2d, DTYPE, u64, upsample_bilinear2d, DTYPE, long, false)
+
+#define INSTANTIATE_UPSAMPLE_LINEAR1D(DTYPE)                        \
+  INSTANTIATE_UPSAMPLE_PLANE_GRID(                                  \
+      linear1d, DTYPE, u32, upsample_bilinear2d, DTYPE, int, true); \
+  INSTANTIATE_UPSAMPLE_PLANE_GRID(                                  \
+      linear1d, DTYPE, u64, upsample_bilinear2d, DTYPE, long, true)
 
 #define INSTANTIATE_UPSAMPLE_BICUBIC(DTYPE)                   \
   INSTANTIATE_UPSAMPLE_PLANE_GRID(                            \
@@ -1049,6 +1061,7 @@ kernel void upsample_backward(
       bicubic2d_aa, BicubicFunctor, DTYPE, false);                       \
   INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE, false);             \
   INSTANTIATE_UPSAMPLE_BILINEAR(DTYPE);                                  \
+  INSTANTIATE_UPSAMPLE_LINEAR1D(DTYPE);                                  \
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(bilinear2d, LinearSource, DTYPE); \
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                  \
       nearest2d, NearestSource<false>, DTYPE);                           \
