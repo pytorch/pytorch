@@ -1,6 +1,6 @@
 #pragma once
 
-// C++ side of torch.rewrite.
+// C++ side of torch.vm.
 //
 // The compiler and its VM live in a Rust extension module
 // (torch/csrc/cfg/rust). Everything that has to touch the dispatcher lives
