@@ -1261,6 +1261,9 @@ class TestProvenanceTracingStackTraces(TestCase):
             def get_stack_traces(self):
                 return []
 
+            def get_reads(self):
+                return ()
+
         with (
             config.patch("trace.provenance_tracking_level", 1),
             reset_provenance_globals(),
@@ -1319,6 +1322,9 @@ class TestProvenanceTracingStackTraces(TestCase):
 
             def get_stack_traces(self):
                 return ["File fake.py, line 1"]
+
+            def get_reads(self):
+                return ()
 
         with (
             config.patch("trace.provenance_tracking_level", 1),
@@ -1597,6 +1603,10 @@ class TestProvenanceTracingModuleFqn(TestCase):
             ("L['enc'].fc", "enc.fc"),
             ('G["model"].block', "model.block"),
             ("L['self']._modules_cache.0", "_modules_cache.0"),
+            (
+                "L['self'].layers.0.__dict__['_modules']['_checkpoint_wrapped_module'].fc",
+                "layers.0._checkpoint_wrapped_module.fc",
+            ),
             ("block.fc", "block.fc"),
             ("", ""),
         ):

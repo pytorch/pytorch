@@ -390,36 +390,26 @@ def owning_module_fqns(origins: Iterable[fx.Node]) -> OrderedSet[str]:
     return OrderedSet(fqn for fqn in map(innermost_module_fqn, origins) if fqn)
 
 
-def _maybe_buffer_name(node: ir.IRNode) -> str | None:
-    try:
-        return node.get_name()
-    except (NotImplementedError, AttributeError):
-        return None
-
-
-def read_weight_fqns(buffer_names: Iterable[str | None]) -> OrderedSet[str]:
+def read_weight_fqns(buffer_names: Iterable[str]) -> OrderedSet[str]:
     """FQNs of the parameters and buffers among `buffer_names`; empty outside AOTI."""
     graph = V.graph
     fqns: OrderedSet[str] = OrderedSet()
-    try:
-        for name in buffer_names:
-            fqn = graph.allocated_constant_name.get(name) if name else None
-            # Lifted constants are buffers of the unlifted module; AOTI's
-            # ConstantType also tells them apart by name.
-            if fqn is None or fqn.startswith("_tensor_constant"):
+    for name in buffer_names:
+        fqn = graph.allocated_constant_name.get(name)
+        # Lifted constants are buffers of the unlifted module; AOTI's
+        # ConstantType also tells them apart by name.
+        if fqn is None or fqn.startswith("_tensor_constant"):
+            continue
+        if name in graph.folded_constants:
+            continue
+        for get_state in (graph.orig_gm.get_parameter, graph.orig_gm.get_buffer):
+            try:
+                tensor = get_state(fqn)
+            except AttributeError:
                 continue
-            if name in graph.folded_constants:
-                continue
-            for get_state in (graph.orig_gm.get_parameter, graph.orig_gm.get_buffer):
-                try:
-                    tensor = get_state(fqn)
-                except AttributeError:
-                    continue
-                if not is_frozen_param(tensor):
-                    fqns.add(fqn)
-                break
-    except Exception as e:
-        log.debug("Weight FQN extraction failed: %s", e)
+            if not is_frozen_param(tensor):
+                fqns.add(fqn)
+            break
     return fqns
 
 
@@ -1405,13 +1395,8 @@ def set_kernel_post_grad_provenance_tracing(
                     else node_schedule.origins
                 )
             )
-            weight_fqns.update(
-                read_weight_fqns(
-                    _maybe_buffer_name(inp)
-                    for inp in tree_leaves(node_schedule.inputs)
-                    if isinstance(inp, ir.IRNode)
-                )
-            )
+            reads = node_schedule.get_reads()
+            weight_fqns.update(read_weight_fqns(dep.name for dep in reads))
         else:
             if not isinstance(node_schedule, list):
                 raise AssertionError(f"expected list, got {type(node_schedule)}")

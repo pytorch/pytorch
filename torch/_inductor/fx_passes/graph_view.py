@@ -107,7 +107,7 @@ def _clean_stack_name(stack_name: str) -> str:
         return "" if match.group(2) == "self" else match.group(2)
 
     cleaned = re.sub(r"^[LG]\[(['\"])(.*?)\1\]", frame_root, stack_name, count=1)
-    cleaned = re.sub(r"\._modules(?=\[)", "", cleaned)
+    cleaned = re.sub(r"\.(?:__dict__\['_modules'\]|_modules)(?=\[)", "", cleaned)
     cleaned = re.sub(r"\['([^']+)'\]", r".\1", cleaned)
     return cleaned.lstrip(".")
 
