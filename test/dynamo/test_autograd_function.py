@@ -16,6 +16,7 @@ from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
@@ -4019,6 +4020,7 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, dx), torch.zeros(3, 4))
         self.assertEqual(torch.compile(fn, backend="aot_eager")(x, dx), fn(x, dx))
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_custom_jvp_on_subclass_without_alias(self):
         """A tensor that cannot be unpacked cannot hold a tangent, so it neither
         crashes the tangent check nor fails its own guard."""
