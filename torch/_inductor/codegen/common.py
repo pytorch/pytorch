@@ -341,12 +341,16 @@ class DeviceOpOverrides:
     def get_aten_c_shim_ops(self) -> Mapping[str, AtenCShimOpInfo] | None:
         r"""Return this backend's compile-time ATen C shim table.
 
-        None uses the shared torchgen table; an empty mapping selects runtime
-        lookup for all ATen fallbacks. Keys are overloads such as
+        None uses the shared torchgen table. A mapping replaces it for
+        FallbackKernel dispatch, scalar preparation and ABI version selection:
+        overloads absent from it use runtime lookup, so an empty mapping sends
+        every ATen FallbackKernel there. Keys are overloads such as
         ``aten.mul.Tensor``; values use torchgen's ABI version metadata format.
-        The backend must provide the declared shim symbols. This does not
-        generate shims or modify the shared table. Treat the returned mapping
-        as read-only and keep it stable throughout a compilation.
+        The backend must provide the shim symbols it declares. Other generated
+        shim calls, such as ``get_c_shim_func_name``, are not governed by this
+        table. This does not generate shims or modify the shared table. Treat
+        the returned mapping as read-only and keep it stable throughout a
+        compilation.
         """
         return None
 
@@ -858,7 +862,9 @@ def get_aten_c_shim_ops(device: torch.device | None) -> Mapping[str, AtenCShimOp
     from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
     if device is not None:
-        ops = get_device_op_overrides(device.type).get_aten_c_shim_ops()
+        _initialize_device_op_overrides()
+        overrides = device_op_overrides_dict.get(device.type)
+        ops = overrides.get_aten_c_shim_ops() if overrides is not None else None
         if ops is not None:
             return ops
     return inductor_fallback_ops

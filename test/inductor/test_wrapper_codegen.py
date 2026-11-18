@@ -77,6 +77,81 @@ class TestPythonWrapperCodegen(TestCase):
             self.assertEqual(node.cpp_kernel_name, "at::_ops::mul_Tensor_v2::call")
             self.assertEqual(inductor_fallback_ops, defaults)
 
+    def test_aten_c_shim_ops_device_without_overrides(self):
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        # meta has no registered DeviceOpOverrides but is legal under cpp_wrapper.
+        device = torch.device("meta")
+        op = torch.ops.aten.mul.Tensor
+        node = ir.ExternKernel.__new__(ir.ExternKernel)
+        node.op_overload = op
+        node.layout = ir.FixedLayout(device, torch.float32, [4], [1])
+        with V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)):
+            self.assertIs(get_aten_c_shim_ops(device), inductor_fallback_ops)
+            self.assertFalse(ir.FallbackKernel._uses_aot_proxy_executor(op, device))
+            node.set_cpp_kernel_name()
+            self.assertEqual(node.cpp_kernel_name, "at::_ops::mul_Tensor::call")
+
+    def test_backend_aten_c_shim_ops_per_device(self):
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        mul, sin = torch.ops.aten.mul.Tensor, torch.ops.aten.sin.default
+        ops = {k: v for k, v in inductor_fallback_ops.items() if k != str(mul)}
+        ops[str(sin)] = {}
+        overrides = get_device_op_overrides("cuda")
+        with (
+            mock.patch.object(overrides, "get_aten_c_shim_ops", return_value=ops),
+            V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)),
+        ):
+            for device, table in (("cuda", ops), ("cpu", inductor_fallback_ops)):
+                device = torch.device(device)
+                self.assertIs(get_aten_c_shim_ops(device), table)
+                for op in (mul, sin):
+                    self.assertEqual(
+                        ir.FallbackKernel._uses_aot_proxy_executor(op, device),
+                        str(op) not in table,
+                    )
+
+    @parametrize("backend_table", [False, True])
+    def test_fallback_kernel_missing_shim_warning(self, backend_table):
+        class StopCodegen(Exception):
+            pass
+
+        # sin is absent from the shared table; mul is absent from the empty one.
+        op = torch.ops.aten.mul.Tensor if backend_table else torch.ops.aten.sin.default
+        node = ir.FallbackKernel.__new__(ir.FallbackKernel)
+        node.op_overload = op
+        node.use_runtime_dispatch = False
+        node.layout = ir.FixedLayout(torch.device("cpu"), torch.float32, [4], [1])
+        overrides = get_device_op_overrides("cpu")
+        ops = {} if backend_table else None
+        assert_logs = self.assertNoLogs if backend_table else self.assertLogs
+        with (
+            mock.patch.object(overrides, "get_aten_c_shim_ops", return_value=ops),
+            mock.patch.object(node, "codegen_comment", side_effect=StopCodegen),
+            V.set_graph_handler(SimpleNamespace(cpp_wrapper=True)),
+            assert_logs("torch._inductor.ir", "WARNING"),
+            self.assertRaises(StopCodegen),
+        ):
+            node.codegen(None)
+        self.assertTrue(node.use_runtime_dispatch)
+
+    def test_materialize_scalar_tensor_args_without_cpp_wrapper(self):
+        x = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="x",
+                layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [4], [1]),
+            )
+        )
+        materialize = ir.FallbackKernel._materialize_scalar_tensor_args
+        with (
+            V.set_graph_handler(SimpleNamespace(cpp_wrapper=False)),
+            mock.patch.object(ir.IRNode, "get_dtype") as get_dtype,
+        ):
+            result = materialize(torch.ops.aten.mul.Tensor, (x, 2), {})
+        self.assertEqual(result, ((x, 2), {}, False))
+        get_dtype.assert_not_called()
+
     @parametrize("has_shim", [False, True])
     def test_backend_aten_c_shim_scalar_materialization(self, has_shim):
         op = torch.ops.aten.mul.Tensor

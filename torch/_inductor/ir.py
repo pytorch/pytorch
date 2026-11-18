@@ -10142,10 +10142,19 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
-            if V.graph.cpp_wrapper and self._uses_aot_proxy_executor(
-                kernel, self.get_device()
-            ):
-                self.use_runtime_dispatch = True
+            if V.graph.cpp_wrapper:
+                device = self.get_device()
+                if self._uses_aot_proxy_executor(kernel, device):
+                    self.use_runtime_dispatch = True
+                    from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+                    if get_aten_c_shim_ops(device) is inductor_fallback_ops:
+                        # C shim v2 is torchgen-ed, which should cover all aten ops.
+                        # If you do hit a missed op, please update fallback_ops.py.
+                        log.warning(
+                            "%s is missing a c-shim implementation, using proxy executor as fallback",
+                            kernel,
+                        )
         elif kernel.namespace == "_quantized":
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
@@ -10356,7 +10365,7 @@ class FallbackKernel(ExternKernelAlloc):
         # Returns the rewritten (args, kwargs) plus whether anything was materialized;
         # the caller needs to know because process_kernel feeds graph constants back in
         # as *real* tensors (see the V.graph.constants branch there).
-        if not isinstance(kernel, torch._ops.OpOverload):
+        if not V.graph.cpp_wrapper or not isinstance(kernel, torch._ops.OpOverload):
             return args, kwargs, False
 
         tensor_dtypes: list[torch.dtype] = []
