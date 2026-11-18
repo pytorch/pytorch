@@ -6161,6 +6161,7 @@ class TestLiveViewBase(TestCase):
         )
         self.assertIs(_live_view_base(view), wrapped)
 
+    @skipIfTorchDynamo("test inspects private view metadata directly")
     def test_live_view_base_keeps_wrapper_subclass_base(self):
         class _PlainViewTwoTensor(TwoTensor):
             @classmethod
