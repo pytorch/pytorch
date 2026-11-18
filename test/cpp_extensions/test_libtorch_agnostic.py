@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     install_cpp_extension,
     parametrize,
     run_tests,
@@ -1313,6 +1314,79 @@ for warning in w:
         for name in ("conj", "neg", "inference"):
             actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
             self.assertEqual(actual, name == flag)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "size,stride",
+        [
+            ((2, 3), (3, 1)),
+            ((2, 3), (1, 2)),
+            ((2, 3), (1, 4)),
+            ((2, 3, 4, 5), (60, 1, 15, 3)),
+            ((0, 3), (1, 4)),
+            ((), ()),
+        ],
+    )
+    @parametrize("layout", [None, torch.strided])
+    def test_my_empty_strided(self, device, size, stride, layout):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        cases = [
+            {} if layout is None else {"layout": layout},
+            {"dtype": torch.float32, "layout": layout},
+            {"dtype": torch.float64, "layout": layout, "device": device},
+            {
+                "dtype": torch.int32,
+                "layout": layout,
+                "device": device,
+                "pin_memory": False,
+            },
+        ]
+        if torch.device(device).type == "cuda" and (size, stride, layout) == (
+            (2, 3),
+            (1, 4),
+            None,
+        ):
+            cases.append({"dtype": torch.float32, "device": "cpu", "pin_memory": True})
+
+        with DeterministicGuard(True):
+            for options in cases:
+                actual = libtorch_agnostic.ops.my_empty_strided(size, stride, **options)
+                expected = torch.empty_strided(size, stride, **options)
+                self.assertEqual(actual, expected, exact_device=True, exact_layout=True)
+                self.assertEqual(actual.stride(), expected.stride())
+                self.assertEqual(actual.is_contiguous(), expected.is_contiguous())
+                if len(size) == 4:
+                    self.assertTrue(
+                        actual.is_contiguous(memory_format=torch.channels_last)
+                    )
+                if options.get("pin_memory"):
+                    self.assertTrue(actual.is_pinned())
+
+        if (size, stride, layout) == ((2, 3), (3, 1), None):
+            for empty_strided in (
+                torch.empty_strided,
+                libtorch_agnostic.ops.my_empty_strided,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "dimensionality of strides"):
+                    empty_strided(size, (3,))
+                with self.assertRaisesRegex(RuntimeError, "Storage size calculation"):
+                    empty_strided(size, (-3, 1))
+                with self.assertRaisesRegex(RuntimeError, "SparseCPU"):
+                    empty_strided(size, stride, layout=torch.sparse_coo, device="cpu")
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_slice(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        x = torch.arange(12, device=device).reshape(2, 6)
+        self.assertEqual(libtorch_agnostic.ops.my_slice(x), x[:])
+        view = libtorch_agnostic.ops.my_slice(x, -1, 1, 6, 2)
+        self.assertEqual(view, x[:, 1:6:2])
+        expected = x.clone()
+        expected[:, 1:6:2] = -1
+        view.fill_(-1)
+        self.assertEqual(x, expected)
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])

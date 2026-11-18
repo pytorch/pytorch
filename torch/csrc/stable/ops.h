@@ -524,6 +524,40 @@ inline torch::stable::Tensor select(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+/// Stable version of the slice.Tensor op.
+///
+/// Returns a view of the input tensor sliced along the specified dimension.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to slice. Defaults to 0.
+/// @param start The inclusive start index. Defaults to the start of the
+/// dimension.
+/// @param end The exclusive end index. Defaults to the end of the dimension.
+/// @param step The positive step between elements. Defaults to 1.
+/// @return A sliced view of the input tensor.
+inline torch::stable::Tensor slice(
+    const torch::stable::Tensor& self,
+    int64_t dim = 0,
+    std::optional<int64_t> start = std::nullopt,
+    std::optional<int64_t> end = std::nullopt,
+    int64_t step = 1) {
+  std::array<StableIValue, 5> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(start),
+      torch::stable::detail::from(end),
+      torch::stable::detail::from(step)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::slice", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+#endif
+
 /// Stable version of the matmul op.
 ///
 /// Performs matrix multiplication between two tensors. The behavior depends on
@@ -631,6 +665,39 @@ inline torch::stable::Tensor empty(
       torch::stable::detail::from(memory_format)};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::empty", "memory_format", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the empty_strided op.
+///
+/// Creates an uninitialized tensor with the specified sizes and strides.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @param size The size of each dimension of the output tensor.
+/// @param stride The stride of each dimension, in elements.
+/// @param dtype Optional scalar type for the tensor elements.
+/// @param layout Optional memory layout, which must be strided for this op.
+/// @param device Optional device to place the tensor on.
+/// @param pin_memory Optional flag to allocate the CPU tensor in pinned memory.
+/// @return A new uninitialized tensor with the specified properties.
+inline torch::stable::Tensor empty_strided(
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    torch::headeronly::IntHeaderOnlyArrayRef stride,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  std::array<StableIValue, 6> stack{
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(stride),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::empty_strided", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
