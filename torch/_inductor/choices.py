@@ -565,15 +565,15 @@ class InductorChoices:
         of loop variables (True) or must use the affine alternative: realizing
         a dim-merging view, splitting a reduction at a dim boundary, lowering
         repeat/roll/strided slice_scatter without modular arithmetic, keeping
-        %, // index arithmetic behind an indirect variable, or skipping a loop
-        reindexing during fusion. kind names the construct; a callable kind
-        (View.create classifies a view by tracing its loads) is only called
-        when the answer depends on it. Every call site passes numel, the
-        number of elements the affected kernel touches (an int or an
-        expression of the graph's size variables); the reduction kinds also
-        pass reduction_numel, the number of elements reduced into each
+        %, // index arithmetic behind an indirect variable, or undoing a loop
+        reindexing during fusion that leaves a non-affine index. kind names
+        the construct and device is the device of the affected kernel. Every
+        call site passes numel, the number of elements that kernel touches
+        (an int or an expression of the graph's size variables); a reduction
+        also passes reduction_numel, the number of elements reduced into each
         output, so that an override can tell 64 sums of 4097 elements from
-        4097 sums of 64. The heuristic below only uses numel, for views.
+        4097 sums of 64. A callable kind (View.create classifies a view by
+        tracing its loads) is only called when the answer depends on it.
 
         config.avoid_modular_indexing forces the answer. Otherwise backends
         that declare BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas) get
@@ -596,7 +596,8 @@ class InductorChoices:
         every backend; with the heuristic, the reductions that split at a dim
         boundary on Triton GPUs regroup partial sums and no longer match the
         previous release bitwise, except under config.batch_invariant, which
-        keeps the flat split.
+        keeps the flat split. Of the sizes, the heuristic only uses numel, for
+        views.
         """
         from .codegen.common import BackendFeature
         from .ir import get_device_type, is_triton

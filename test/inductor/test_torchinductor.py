@@ -23229,7 +23229,7 @@ if RUN_GPU:
 
             if not V.choices.use_modular_indexing(GPU_TYPE, kind="reindex"):
                 # the pointwise dim expansion that fuses rope indexes the
-                # expanded dim with Mod and is skipped
+                # expanded dim with Mod and is undone
                 return
 
             # make sure that rope is fused into 1 kernel

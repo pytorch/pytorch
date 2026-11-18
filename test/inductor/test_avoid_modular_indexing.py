@@ -66,6 +66,25 @@ instantiate_parametrized_tests(AffineIndexingPredicateTest)
 class ModularIndexingDecisionTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("avoid", [False, True])
+    def test_config_decides(self, avoid):
+        # the option, when set, is the answer for every device and construct
+        with config.patch(avoid_modular_indexing=avoid):
+            for device in ("cpu", "cuda", None):
+                for kind in (
+                    "view",
+                    "reduction",
+                    "repeat",
+                    "roll",
+                    "slice_scatter",
+                    "index",
+                    "reindex",
+                ):
+                    self.assertEqual(
+                        V.choices.use_modular_indexing(device, numel=8, kind=kind),
+                        not avoid,
+                    )
+
     def test_config_overrides_backend(self):
         with config.patch(avoid_modular_indexing=True):
             self.assertFalse(
@@ -554,9 +573,9 @@ class AvoidModularIndexingTest(TestCase):
     def test_fusion_does_not_reindex_loops(self, device):
         # RMS norm over a reshape: fusion would reindex the pointwise's
         # [256, 8192] loops to the reduction's [16384, 128], which turns the
-        # per-row bias read into FloorDiv(t0, 64); the detector also runs
-        # after every loop transformation, so on GPUs (the CPU backend never
-        # reindexes) this fails if the reindex happens
+        # per-row bias read into FloorDiv(t0, 64), so the reindex is undone;
+        # the detector also runs after every loop transformation, so on GPUs
+        # (the CPU backend never reindexes) this fails if the reindex is kept
         def fn(x, b, w):
             h = (x + b[:, None]).view(-1, 128)
             var = (h * h).mean(-1, keepdim=True)
@@ -566,6 +585,20 @@ class AvoidModularIndexingTest(TestCase):
         b = torch.randn(256, device=device)
         w = torch.randn(128, device=device)
         self.check(fn, x, b, w)
+
+    def test_fusion_keeps_affine_loop_reindexing(self, device):
+        # the normalized rows are realized at [1024, 128] (their merge back to
+        # [16, 8192] would load the variance through a FloorDiv) and the
+        # pointwise after the merge only reads that contiguous buffer, so
+        # reindexing its [16, 8192] loops to [1024, 128] leaves the affine
+        # 128 * t0 + t1 and is kept: it fuses with the reduction
+        def fn(x):
+            h = x.view(-1, 128)
+            var = (h * h).mean(-1, keepdim=True)
+            return (h * torch.rsqrt(var + 1e-6)).view(x.shape) + 1
+
+        x = torch.randn(16, 8192, device=device)
+        self.check(fn, x, kernel_count=1)
 
     def test_roll_noop_does_not_alias(self, device):
         def fn(x):
