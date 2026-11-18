@@ -4426,7 +4426,10 @@ class TestCfgWorkspace(TestCase):
         x = torch.randn(64, 1024)
         expected = temporaries(x, 3)
         kept = [compiled(x, 3) for _ in range(3)]
-        self.assertEqual(torch.cfg_compile.memory(compiled)["live"], 3 * x.numel() * 4)
+        # What they asked for, rounded up to pages.
+        live = torch.cfg_compile.memory(compiled)["live"]
+        self.assertGreaterEqual(live, 3 * x.numel() * 4)
+        self.assertLess(live, 3 * (x.numel() * 4 + 8192))
         # The function goes first: its results still own their memory.
         del compiled
         gc.collect()
@@ -4463,6 +4466,35 @@ class TestCfgWorkspace(TestCase):
         for _ in range(6):
             compiled(small, 6)
         self.assertEqual(torch.cfg_compile.memory(compiled)["kept"], 0)
+
+    def test_memory_is_cut_to_the_size_that_is_asked_for(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        large, small = torch.ones(8 << 20), torch.ones(1 << 20)
+        for _ in range(2):
+            compiled(large, 3)
+        before = torch.cfg_compile.memory(compiled)
+        # An eighth of what a large tensor left behind serves a small one.
+        compiled(small, 3)
+        after = torch.cfg_compile.memory(compiled)
+        self.assertEqual(after["misses"], before["misses"])
+        self.assertGreater(after["hits"], before["hits"])
+        # What comes back is one piece again with the memory around it.
+        compiled(large, 3)
+        self.assertEqual(torch.cfg_compile.memory(compiled)["misses"], before["misses"])
+
+    def test_holds_little_more_than_its_tensors_did_at_their_most(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        # Every call needs pieces larger than any the calls before it left.
+        for n in (1, 2, 6, 15, 37):
+            compiled(torch.ones(n << 20), 3)
+            memory = torch.cfg_compile.memory(compiled)
+            # Half as much again, 256 MB at most; and 64 MB whatever its
+            # tensors held.
+            spare = min(memory["peak"] // 2, 1 << 28)
+            limit = max(memory["peak"] + spare, 1 << 26)
+            self.assertLessEqual(memory["live"] + memory["kept"], limit)
+        # The memory of the last call is all there for the next.
+        self.assertGreaterEqual(memory["kept"], 2 * (37 << 22))
 
     def test_without_a_workspace(self):
         compiled = torch.cfg_compile(temporaries, fallback=False, keep_memory=False)
