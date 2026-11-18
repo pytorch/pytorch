@@ -2,7 +2,7 @@
 import contextlib
 import io
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -28,6 +28,7 @@ from ._cache import CacheInfo
 
 if TYPE_CHECKING:
     from torch._dynamo.eval_frame import StanceStr
+    from torch._dynamo.types import GuardFilterEntry
     from torch._guards import _GuardContext
 
 
@@ -44,6 +45,7 @@ __all__ = [
     "set_default_backend",
     "get_default_backend",
     "guard_ctx",
+    "register_guard_filter",
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
@@ -71,6 +73,11 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 FuncType = Callable[..., Any]
 F = TypeVar("F", bound=FuncType)
+
+_guard_filter_registry: dict[
+    str, Callable[[Sequence["GuardFilterEntry"]], Sequence[bool]]
+] = {}
+_guard_filter_registry_lock = threading.RLock()
 
 
 def compile(*args, **kwargs):
@@ -107,6 +114,36 @@ def guard_ctx(label: str) -> "_GuardContext":
     if not label:
         raise ValueError("guard_ctx label must be a non-empty string")
     return _GuardContext(label)
+
+
+def register_guard_filter(label: str) -> Callable[[F], F]:
+    """Register a compile-time guard filter for a non-empty context label.
+
+    The callback receives only entries carrying this label, before guard
+    construction, and must return one bool per entry. Matching callbacks are
+    ORed; guards with no registered label are kept. The global guard_filter_fn
+    subsequently applies to the survivors. Dropping guards is unsafe unless
+    the caller guarantees the assumptions they would have checked.
+
+    Regional entries have has_value=False and empty derived_guard_types and
+    code_parts because they precede guard construction. Registrations persist
+    for this process; registering the same label twice raises ValueError.
+    """
+    if not isinstance(label, str):
+        raise TypeError("register_guard_filter label must be a non-empty string")
+    if not label:
+        raise ValueError("register_guard_filter label must be a non-empty string")
+
+    def register(fn: F) -> F:
+        if not callable(fn):
+            raise TypeError("guard filter must be callable")
+        with _guard_filter_registry_lock:
+            if label in _guard_filter_registry:
+                raise ValueError(f"A guard filter is already registered for {label!r}")
+            _guard_filter_registry[label] = fn
+        return fn
+
+    return register
 
 
 def allow_in_graph(fn):
