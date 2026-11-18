@@ -1,6 +1,6 @@
 """Stateless PRNG APIs.
 
-These are experimental and subject to change without notice.
+These are a prototype and subject to change without notice.
 Access via ``torch.func._random``.
 """
 
@@ -41,7 +41,8 @@ def key(
     Args:
         seed (int): The seed value for the PRNG.
         device (:class:`torch.device`, optional): The desired device for the
-            returned key. Default: ``cpu``.
+            returned key. Default: the current default device (see
+            :func:`torch.set_default_device`).
         impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
             supported.
 
@@ -390,7 +391,8 @@ def randint_(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
 
     Returns:
@@ -399,9 +401,9 @@ def randint_(
     .. note::
 
         Values are reduced into ``[low, high)`` with a modulo, which is exactly
-        uniform only when ``high - low`` is a power of two. Ranges of ``2 ** 28``
-        or more are rejected for 32-bit dtypes; use a 64-bit dtype if you need a
-        range that large. See :func:`randint` for the bias in detail.
+        uniform only when ``high - low`` is a power of two. Other ranges of
+        ``2 ** 28`` or more are rejected for 32-bit dtypes; use a 64-bit dtype if
+        you need a range that large. See :func:`randint` for the bias in detail.
 
     Example::
 
@@ -481,7 +483,8 @@ def randint(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
         dtype (:class:`torch.dtype`, optional): The desired dtype: any integer
             dtype other than ``torch.bool``. Default: ``torch.int32``.
