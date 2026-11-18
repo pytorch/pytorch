@@ -2693,7 +2693,9 @@ del _LegacyStorage
 # needs to be before the submodule imports to avoid circular dependencies
 def _assert(condition: object, message: object) -> None:
     r"""A wrapper around Python's assert which is symbolically traceable."""
-    if overrides.has_torch_function((condition,)):
+    if type(condition) is not torch.Tensor and overrides.has_torch_function(
+        (condition,)
+    ):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
         )

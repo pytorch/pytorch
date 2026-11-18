@@ -75,7 +75,7 @@ static c10::SymInt get_nbytes(const Tensor& value) {
     // and lazy tensor (LTC/XLA).
     // LTC hasn't implemented SymInt support yet though
     // Once it does, we should remove this check.
-    if (value.key_set().has(c10::DispatchKey::Python) || value.is_fake()) {
+    if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
     }
     return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(),static_cast<int64_t>(value.dtype().itemsize()), value.sym_storage_offset());

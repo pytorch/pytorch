@@ -2,7 +2,6 @@ from typing import Any
 
 import torch.fx
 from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
     FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_device,
@@ -34,9 +33,7 @@ class FakeTensorProp(torch.fx.Interpreter):
     """
 
     def __init__(
-        self,
-        module: torch.fx.GraphModule,
-        mode: FakeTensorMode | CppFakeTensorMode | None = None,
+        self, module: torch.fx.GraphModule, mode: FakeTensorMode | None = None
     ) -> None:
         super().__init__(module)
         if mode is None:

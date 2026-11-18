@@ -3174,14 +3174,23 @@ class ErrorMessagesAcceleratorTest(LoggingTestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
 
         msg = str(cm.exception)
-        self.assertIn("Tensor device mismatch", msg)
+        self.assertIn(
+            expectedIfCppFakeTensor(
+                "RuntimeError when making fake tensor call", "Tensor device mismatch"
+            ),
+            msg,
+        )
         self.assertIn("Expected all tensors to be on the same device", msg)
         self.assertIn("cpu", msg)
         self.assertIn(self.device_type, msg)
-        for unexpected in (
-            "Dynamo failed to run FX node with fake tensors",
-            "Unhandled FakeTensor Device Propagation",
-        ):
+        unexpected_messages = expectedIfCppFakeTensor(
+            ("Unhandled FakeTensor Device Propagation",),
+            (
+                "Dynamo failed to run FX node with fake tensors",
+                "Unhandled FakeTensor Device Propagation",
+            ),
+        )
+        for unexpected in unexpected_messages:
             self.assertNotIn(unexpected, msg)
 
 

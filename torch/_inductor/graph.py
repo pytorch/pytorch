@@ -40,11 +40,7 @@ from torch._prims_common import (
     compute_required_storage_length,
     make_channels_last_strides_for,
 )
-from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
-    FakeTensorMode,
-    is_fake_tensor,
-)
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -1102,7 +1098,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.device_node_mapping[device] = V.graph.current_node
 
     @property
-    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode:
+    def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
         return V.fake_mode
 
     @property

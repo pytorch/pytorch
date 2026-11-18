@@ -15,6 +15,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -1722,7 +1723,7 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
 
             if torch._dynamo.config.assume_static_by_default:
                 if _dynamic:
-                    expected = """\
+                    cpp_expected = """\
 def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
         clone: "f32[s77][1]cpu" = torch.ops.aten.clone.default(arg0_1)
         nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(clone);  clone = None
@@ -1737,9 +1738,12 @@ def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
         alias_1: "f32[s77][1]cpu" = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
         slice_2: "f32[u0, 1][1, u0]cpu" = torch.ops.aten.slice.Tensor(getitem_2);  getitem_2 = None
         return (alias_1, slice_2)"""
+                    python_expected = cpp_expected.replace(
+                        "sym_size_int_1", "sym_size_int"
+                    )
                     self.assertExpectedInline(
                         graph_aot,
-                        expected,
+                        expectedIfCppFakeTensor(cpp_expected, python_expected),
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
@@ -1770,7 +1774,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             # 2. Run with inductor backend
             if torch._dynamo.config.assume_static_by_default:
                 if _dynamic:
-                    expected = """\
+                    cpp_expected = """\
 def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
         clone: "f32[s77][1]cpu" = torch.ops.aten.clone.default(arg0_1)
         nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(clone);  clone = None
@@ -1784,9 +1788,12 @@ def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
         copy_: "f32[s77][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
         slice_2: "f32[u0, 1][1, u0]cpu" = torch.ops.aten.slice.Tensor(convert_element_type);  convert_element_type = None
         return (arg0_1, slice_2)"""
+                    python_expected = cpp_expected.replace(
+                        "sym_size_int_1", "sym_size_int"
+                    )
                     self.assertExpectedInline(
                         graph_inductor,
-                        expected,
+                        expectedIfCppFakeTensor(cpp_expected, python_expected),
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )

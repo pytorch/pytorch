@@ -303,7 +303,7 @@ def wrap_compiler_debug(
         compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses import FakeTensorMode
 
         is_inference = kwargs.get("is_inference", False)
         compiler_fn = functools.partial(

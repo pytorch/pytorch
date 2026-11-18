@@ -894,7 +894,6 @@ class TestFakeProxyTensor(TestCase):
         # no real tensor. A value whose real tensor is kept keeps its wrapper,
         # which carries it.
         from torch._functorch.vmap import vmap_increment_nesting
-        from torch._subclasses.fake_tensor import maybe_get_real_tensor
 
         functorch = torch._C._functorch
         real = torch.randn(4, 3, 5)[1:]
@@ -910,7 +909,7 @@ class TestFakeProxyTensor(TestCase):
                     val = snapshot_fake(batched)
                     kept = snapshot_fake(batched, include_real=True)
                 self.assertTrue(is_fake_tensor(val))
-                self.assertIsNone(maybe_get_real_tensor(val))
+                self.assertIsNone(val.real_tensor)
                 self.assertEqual(
                     StorageWeakRef(val.untyped_storage()),
                     StorageWeakRef(fake.untyped_storage()),
@@ -922,7 +921,7 @@ class TestFakeProxyTensor(TestCase):
                 # With no real tensor to keep, include_real records the view too.
                 self.assertEqual(is_fake_tensor(kept), not propagate)
                 if propagate:
-                    self.assertIsNotNone(maybe_get_real_tensor(functorch.get_unwrapped(kept)))
+                    self.assertIsNotNone(functorch.get_unwrapped(kept).real_tensor)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False)
@@ -2480,7 +2479,6 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
             )
 
 instantiate_device_type_tests(TestUnbackedSymbolicTracingDevice, globals(), except_for="cpu")
-
 
 if __name__ == '__main__':
     run_tests()

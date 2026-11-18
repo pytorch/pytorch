@@ -617,9 +617,8 @@ class FakeTensorUpdater:
         with V.fake_mode, enable_python_dispatcher():
             if node.target is torch.ops.higher_order.with_effects:
                 # Post-reinplace wrappers can contain a mutable inner operator.
-                # Bypass the alias check while retaining normal HOP dispatch.
-                return torch._ops.HigherOrderOperator.__call__(
-                    node.target, *args, **kwargs
+                return node.target.dispatch(
+                    torch._C.DispatchKey.Python, *args, **kwargs
                 )
             return cast(Callable[..., Any], node.target)(*args, **kwargs)
 

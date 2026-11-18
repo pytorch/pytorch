@@ -26,7 +26,7 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.utils import patch_subprocess_env
-from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+from torch._subclasses import FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -185,14 +185,12 @@ class _LoweringSerializerContextManager(contextlib.ExitStack):
 class _FakeTensorModeSerializer:
     allow_non_fake_inputs: bool
 
-    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode) -> None:
         self.allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
         self.shape_env = fake_mode.shape_env
 
     @contextlib.contextmanager
-    def patch(
-        self, fake_mode: FakeTensorMode | CppFakeTensorMode
-    ) -> Generator[None, None, None]:
+    def patch(self, fake_mode: FakeTensorMode) -> Generator[None, None, None]:
         saved_allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
         fake_mode.allow_non_fake_inputs = self.allow_non_fake_inputs
 
@@ -236,7 +234,7 @@ class _WireProtocolInput:
         return _WireProtocolPickledInput(GraphPickler.dumps(self))
 
 
-def _current_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
+def _current_fake_mode() -> FakeTensorMode:
     fake_mode = None
     if context := torch._guards.TracingContext.try_get():
         fake_mode = context.fake_mode

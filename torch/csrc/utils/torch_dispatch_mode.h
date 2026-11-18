@@ -1,7 +1,5 @@
 #pragma once
 
-#include <c10/core/impl/FakeTensorModeTLS.h>
-#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
 namespace torch::torch_dispatch_mode {
@@ -47,11 +45,7 @@ struct StashTorchDispatchModeGuard {
 
 struct StashTorchDispatchStackGuard {
  public:
-  StashTorchDispatchStackGuard()
-      : saved_fake_mode_(c10::impl::FakeTensorModeTLS::get_state()),
-        saved_fake_included_(
-            c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake)) {
-    c10::impl::FakeTensorModeTLS::reset_state();
+  StashTorchDispatchStackGuard() {
     auto old = c10::impl::TorchDispatchModeTLS::get_state();
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
     saved_state_ = std::move(old);
@@ -65,16 +59,10 @@ struct StashTorchDispatchStackGuard {
 
   ~StashTorchDispatchStackGuard() {
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
-    auto old_fake_mode =
-        c10::impl::FakeTensorModeTLS::create_state(std::move(saved_fake_mode_));
-    c10::impl::tls_set_dispatch_key_included(
-        c10::DispatchKey::Fake, saved_fake_included_);
   }
 
  private:
   c10::impl::TorchDispatchModeTLS saved_state_;
-  std::shared_ptr<c10::FakeTensorMode> saved_fake_mode_;
-  bool saved_fake_included_;
 };
 
 } // namespace torch::torch_dispatch_mode

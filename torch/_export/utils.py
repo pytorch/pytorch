@@ -14,12 +14,8 @@ from inspect import ismethod, Parameter
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
-    FakeTensorMode,
-    is_fake_tensor,
-)
+from torch._guards import detect_fake_mode, require_python_fake_mode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
@@ -1286,7 +1282,7 @@ def remove_proxy_from_state_dict(
 
 def _detect_fake_mode_from_gm(
     gm: torch.fx.GraphModule,
-) -> FakeTensorMode | CppFakeTensorMode | None:
+) -> torch._subclasses.fake_tensor.FakeTensorMode | None:
     """
     For a given graph module, we look at the "val" of placeholder nodes to find the fake inputs.
     Additionally, if gm doesn't have placeholders, we further look at the "example_value" or "val" of other nodes.
@@ -1311,7 +1307,7 @@ def _detect_fake_mode_from_gm(
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_vals.append(fake_val)
 
-    return detect_fake_mode(fake_inps + fake_vals)
+    return require_python_fake_mode(detect_fake_mode(fake_inps + fake_vals))
 
 
 @contextmanager
@@ -1506,7 +1502,7 @@ def _compiling_state_context() -> AbstractContextManager[None]:
 
 
 def _fakify_params_buffers(
-    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    fake_mode: FakeTensorMode,
     mod: torch.nn.Module,
 ) -> dict[str, torch.Tensor | torch.nn.Parameter]:
     params_buffers = {
@@ -1515,7 +1511,7 @@ def _fakify_params_buffers(
     }
 
     faked_params_buffers = {}
-    memo: dict[int, torch.Tensor] = {}
+    memo: dict[int, FakeTensor] = {}
     for key, value in params_buffers.items():
         if id(value) in memo:
             fake_tensor = memo[id(value)]

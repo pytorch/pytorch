@@ -78,11 +78,7 @@ from .sets import DictKeySetVariable, FrozensetVariable, OrderedSetVariable, Set
 if TYPE_CHECKING:
     from torch._dynamo.output_graph import SubgraphTracer
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._subclasses.fake_tensor import (
-        CppFakeTensorMode,
-        FakeTensor,
-        FakeTensorMode,
-    )
+    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from . import AutogradFunctionContextVariable
 
 from collections.abc import Generator, Iterable
@@ -1034,10 +1030,7 @@ def _call_while_loop(
 
 
 def are_same_graph_modules(
-    fn_name: str,
-    a_mod: GraphModule,
-    b_mod: GraphModule,
-    fake_mode: "FakeTensorMode | CppFakeTensorMode",
+    fn_name: str, a_mod: GraphModule, b_mod: GraphModule, fake_mode: "FakeTensorMode"
 ) -> bool:
     from torch._subclasses._fake_tensor_utils import _CacheKeyState
     from torch._subclasses.fake_tensor import extract_tensor_metadata
