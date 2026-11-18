@@ -666,9 +666,15 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
-def _iter_graph_referenced_submodules(
+def _iter_referenced_subgraphs(
     gm: GraphModule,
 ) -> Generator[GraphModule, None, None]:
+    """Yield each GraphModule that gm's graph reads through a get_attr node.
+
+    These are the bodies of its higher-order ops (invoke_subgraph, cond,
+    while_loop, ...), one level down and each once. A dotted get_attr target is
+    resolved too, unlike in _get_subgraph_names, which matches direct children.
+    """
     visited: OrderedSet[int] = OrderedSet()
     for node in gm.graph.find_nodes(op="get_attr"):
         if not isinstance(node.target, str):
@@ -682,9 +688,11 @@ def _iter_graph_referenced_submodules(
             yield subgraph
 
 
-def _get_invoke_subgraph_graph_module(
+def _get_invoke_subgraph_body(
     gm: GraphModule, node: torch.fx.Node
 ) -> GraphModule | None:
+    """Return the body of node, an invoke_subgraph call in gm's graph, or None
+    if its subgraph argument is not a GraphModule attribute of gm."""
     subgraph_node = node.args[0]
     if (
         not isinstance(subgraph_node, torch.fx.Node)
@@ -699,7 +707,10 @@ def _get_invoke_subgraph_graph_module(
     return subgraph if isinstance(subgraph, GraphModule) else None
 
 
-def _region_cudagraphs_setting(node: torch.fx.Node) -> bool | None:
+def _get_region_cudagraphs_setting(node: torch.fx.Node) -> bool | None:
+    """Return the triton.cudagraphs value that the nested compile region called
+    by the invoke_subgraph node sets in its forward options, or None if it sets
+    none. The forward value covers the backward too."""
     nested_config = node.meta.get("custom", {}).get("nested_region_config")
     patches = getattr(nested_config, "inductor_config_patches", None)
     if patches is None or "triton.cudagraphs" not in patches:
@@ -707,7 +718,9 @@ def _region_cudagraphs_setting(node: torch.fx.Node) -> bool | None:
     return bool(patches["triton.cudagraphs"])
 
 
-def _validate_region_cudagraphs(gm: GraphModule, *, annotated: bool) -> None:
+def _validate_region_cudagraphs(
+    gm: GraphModule, *, cudagraphs_overridden: bool
+) -> None:
     """Reject the per-region triton.cudagraphs settings that are not supported.
 
     Only opting out is: under graph_partition=True, a first-level region set to
@@ -716,6 +729,11 @@ def _validate_region_cudagraphs(gm: GraphModule, *, annotated: bool) -> None:
     Opting in, and combining a region setting with
     torch._dynamo.override_cudagraphs, are not supported either. AOT compilation
     does not use triton.cudagraphs, so only the structural checks apply there.
+
+    gm is the graph Dynamo hands over, before AOTAutograd, so activation
+    checkpointing is still a wrapper and does not open a region.
+    cudagraphs_overridden says whether gm carries an override_cudagraphs
+    annotation that sets fwd or bwd.
     """
     visited: OrderedSet[tuple[int, bool]] = OrderedSet()
 
@@ -735,7 +753,7 @@ def _validate_region_cudagraphs(gm: GraphModule, *, annotated: bool) -> None:
                 "it is nested inside another region; only first-level regions can "
                 "set triton.cudagraphs",
             )
-        if annotated:
+        if cudagraphs_overridden:
             reject(
                 node,
                 "torch._dynamo.override_cudagraphs also applies; set the top level "
@@ -764,12 +782,12 @@ def _validate_region_cudagraphs(gm: GraphModule, *, annotated: bool) -> None:
         for node in module.graph.find_nodes(
             op="call_function", target=torch.ops.higher_order.invoke_subgraph
         ):
-            if (setting := _region_cudagraphs_setting(node)) is not None:
+            if (setting := _get_region_cudagraphs_setting(node)) is not None:
                 check(node, setting, in_region)
-            if (body := _get_invoke_subgraph_graph_module(module, node)) is not None:
+            if (body := _get_invoke_subgraph_body(module, node)) is not None:
                 region_bodies.add(id(body))
                 visit(body, True)
-        for child in _iter_graph_referenced_submodules(module):
+        for child in _iter_referenced_subgraphs(module):
             if id(child) not in region_bodies:
                 visit(child, in_region)
 
@@ -2935,7 +2953,7 @@ def create_compiler_config_extra(
         annotation = (dynamo_graph_metadata or {}).get("cudagraph_annotation")
         _validate_region_cudagraphs(
             pre_aot_graph,
-            annotated=annotation is not None
+            cudagraphs_overridden=annotation is not None
             and (annotation.fwd is not None or annotation.bwd is not None),
         )
 
