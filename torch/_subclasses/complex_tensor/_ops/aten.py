@@ -4,6 +4,7 @@ import warnings
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._refs.nn.functional import Tensor
 
 from .._core import ComplexTensor, InterleavedComplexTensor
 from .common import (
@@ -64,10 +65,12 @@ def register_binary_linear_inplace(
     op: OpType, out_of_place_impl: Callable[..., Any]
 ) -> Callable[..., Any]:
     def impl(
-        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
-    ) -> ComplexTensor:
+        lhs: ComplexTensor | torch.Tensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+    ) -> ComplexTensor | torch.Tensor:
         if not lhs.dtype.is_complex:
-            raise TypeError("result type can't be cast to the desired output type")
+            raise RuntimeError(
+                f"result type {torch.result_type(lhs, rhs)} can't be cast to the desired output type {lhs.dtype}"
+            )
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
@@ -190,7 +193,8 @@ def resize__impl(
     # E.g. `from_interleaved` of an empty tensor leaves both components viewing one
     # storage, so they would overlap once resized.
     if self._re.untyped_storage()._cdata == self._im.untyped_storage()._cdata:
-        aten.set_.source_Tensor(self._im, self._im.clone())
+        self._re = self._re.clone()
+        self._im = self._im.clone()
     self._re = aten.resize_(aten.alias(self._re), size, memory_format=memory_format)
     self._im = aten.resize_(aten.alias(self._im), size, memory_format=memory_format)
     _set_wrapper_metadata(self, self._re)
@@ -1408,7 +1412,8 @@ def view_dtype_impl(
     if not dtype.is_complex:
         if self.is_conj():
             raise RuntimeError("Cannot take a real view of conjugated tensor.")
-
+        if isinstance(self, ComplexTensor):
+            raise AssertionError("Unreachable due to condition above.")
         data = self._data.view(dtype).reshape(self.shape[:-1] + (-1,))
         if self.is_neg():
             data = aten._neg_view(data)
