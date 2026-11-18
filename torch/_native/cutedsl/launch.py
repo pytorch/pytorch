@@ -42,6 +42,19 @@ def fake_compact(
     )
 
 
+def fake_rows(
+    dtype: type[cutlass.Numeric], cols: int | cute.SymInt, divisor: int, *, align: int
+) -> cute.Tensor:
+    """Describe (rows, cols) rows at a runtime 64-bit pitch divisible by `divisor`, so
+    packed and pitched rows share one compiled kernel."""
+    return cute.runtime.make_fake_tensor(
+        dtype,
+        (sym(), cols),
+        (cute.sym_int64(divisibility=divisor), 1),
+        assumed_align=align,
+    )
+
+
 def supported_alignment(tensor: torch.Tensor, maximum: int) -> int:
     """Return the largest power-of-two alignment up to `maximum` supported by `tensor`."""
     ptr = const_data_ptr(tensor)

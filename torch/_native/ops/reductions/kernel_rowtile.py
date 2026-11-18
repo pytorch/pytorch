@@ -102,11 +102,16 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
+# 0.92-1.41x the rolled fold and requires per-N compilation. Column layouts take the
+# general axis's decoded-gather tree ahead of coltile: x.sum(0) of fp32 (65536, 256) took
+# 68.4us against 17.2us (B200 CUDA graphs, L2-cold). Its independent env var avoids
 # affecting upstream kernels, which register first. `1` prefers the order and warns once when
 # a call cannot use it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 _INNER_TREE_STRICT = "strict"
+# Reasons a dispatcher cannot serve an inner-tree request.
+_INNER_TREE_WIDE = "inner-tree reduction requires 32-bit logical extents"
+_INNER_TREE_GEOMETRY = "inner-tree reduction cannot serve this geometry"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
@@ -197,9 +202,20 @@ _ITREE_BLOCK_THREADS = 256
 _ITREE_STAGE_E = 32
 
 
+def _inner_tree_env() -> str:
+    """The validated gate value; "" when unset."""
+    value = os.environ.get(_INNER_TREE_ENV, "")
+    if value not in ("", "0", "1", _INNER_TREE_STRICT):
+        raise ValueError(
+            f"{_INNER_TREE_ENV} must be unset, '0', '1' or '{_INNER_TREE_STRICT}', "
+            f"got {value!r}"
+        )
+    return value
+
+
 def inner_tree_order_enabled() -> bool:
     """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
-    return os.environ.get(_INNER_TREE_ENV, "") not in ("", "0")
+    return _inner_tree_env() not in ("", "0")
 
 
 def reduction_order(
@@ -215,9 +231,12 @@ def reduction_order(
 _warned_inner_tree_reasons: set[str] = set()
 
 
-def inner_tree_fallback(reason: str) -> None:
-    """Fall back from the env gate: raise if strict, else warn once per reason."""
-    if os.environ.get(_INNER_TREE_ENV, "") == _INNER_TREE_STRICT:
+def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
+    """Fall back from an unservable inner-tree request: raise for an explicit order= or
+    the strict env gate, else warn once per reason."""
+    if explicit:
+        raise ValueError(reason)
+    if _inner_tree_env() == _INNER_TREE_STRICT:
         raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
     if reason not in _warned_inner_tree_reasons:
         _warned_inner_tree_reasons.add(reason)
@@ -884,6 +903,12 @@ def reduce_row_tile(
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
+    if M == 1:
+        x = x.as_strided((1, N), (N, 1))  # one row's pitch is free
+    if tile.align_bytes(x.stride(0), x.element_size()) < tile.align_bytes(
+        N, x.element_size()
+    ):
+        raise ValueError(f"rows need a pitch of whole vectors, got {N=} {x.stride(0)=}")
     cfg = row_config(N, x.element_size() * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
     # the measured optimum across 4/8/16/32.
@@ -948,7 +973,8 @@ def reduce_row_tile(
     )
 
     def _fake():
-        # TMA bakes N; runtime folds share a vector class.
+        # TMA bakes N; runtime folds share a vector class at any pitch of whole vectors,
+        # so packed and pitched rows run one kernel.
         if use_tma:
             fake_in = cute.runtime.make_fake_tensor(
                 dt,
@@ -960,12 +986,7 @@ def reduce_row_tile(
                 assumed_align=align,
             )
         else:
-            fake_in = _L.fake_compact(
-                dt,
-                (_L.sym(), _L.sym(op.vec)),
-                stride_order=(1, 0),
-                align=align,
-            )
+            fake_in = _L.fake_rows(dt, _L.sym(op.vec), op.vec, align=align)
         return _row_args(
             [fake_in],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
