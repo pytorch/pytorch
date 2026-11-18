@@ -1424,6 +1424,16 @@
       ]
     }
   ],
+  "GB5754": [
+    {
+      "Gb_type": "guard_ctx label is a str subclass",
+      "Context": "",
+      "Explanation": "A str subclass guard label may invoke user-defined truthiness and cannot be reconstructed as constant metadata.",
+      "Hints": [
+        "Use a plain str label with torch.compiler.guard_ctx."
+      ]
+    }
+  ],
   "GB0081": [
     {
       "Gb_type": "Missing attribute when running call_method node",

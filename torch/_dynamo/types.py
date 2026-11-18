@@ -53,6 +53,7 @@ class GuardFilterEntry:
     # yields whatever the last build that included the guard emitted; a
     # dropped guard is never rebuilt, so for it the snapshot is only defensive.
     code_parts: tuple[str, ...] = ()
+    labels: frozenset[str] = frozenset()
 
 
 class GuardFn(Protocol):

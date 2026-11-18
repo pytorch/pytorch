@@ -956,6 +956,22 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Please fix your call to patch_dynamo_config by using simpler inputs. "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch.compiler.guard_ctx:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                label = bound.arguments["label"].as_python_constant()
+            except (TypeError, ValueError) as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            if not isinstance(label, str):
+                raise_observed_exception(
+                    TypeError, tx, args=["guard_ctx label must be a non-empty string"]
+                )
+            context = variables.GuardContextVariable((label,))  # noqa: RVT001
+            if not label:
+                raise_observed_exception(
+                    ValueError, tx, args=["guard_ctx label must be a non-empty string"]
+                )
+            return context
         elif self.fn is torch._dynamo.error_on_graph_break:
             try:
                 bound = inspect.signature(self.fn).bind(*args, **kwargs)
