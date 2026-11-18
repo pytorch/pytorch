@@ -866,11 +866,10 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         """regional_inductor_invoke_subgraph compiles a region on its own, which
         would capture it without pairing its forward and backward."""
         from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch.aot_autograd import make_boxed_func
         from torch.fx.passes.regional_inductor_invoke_subgraph import (
             regional_inductor_invoke_subgraph,
         )
-
-        from torch._functorch.aot_autograd import make_boxed_func
 
         options = get_invoke_subgraph_compile_options(
             fw_inductor_config_patches={"triton.cudagraphs": False},
