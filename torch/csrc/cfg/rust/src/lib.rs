@@ -1,4 +1,4 @@
-//! The compiler behind `torch.cfg_compile`.
+//! The compiler behind `torch.vm`.
 //!
 //! So far: the IR a Python function is compiled to (`ir`), a control-flow
 //! graph in SSA form, and the decoder for the bytecode it is built from
