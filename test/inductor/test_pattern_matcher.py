@@ -2136,6 +2136,25 @@ class TestPatternMatcher(TestCase):
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
 
+    @unittest.skipIf(
+        GPU_TYPE != "cuda" or torch.version.hip is not None, "needs CUDA mm.dtype"
+    )
+    def test_mm_fp32_out_dtype(self):
+        def fn(a, b):
+            return torch.mm(a, b).float()
+
+        a = torch.randn(64, 32, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(32, 48, device=GPU_TYPE, dtype=torch.bfloat16)
+        out = torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["mm_fp32_out_dtype"], 1)
+        self.assertEqual(out, torch.mm(a, b, out_dtype=torch.float32))
+        counters.clear()
+        torch._dynamo.reset()
+        with inductor_config.patch(emulate_precision_casts=True):
+            out = torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["mm_fp32_out_dtype"], 0)
+        self.assertEqual(out, fn(a, b))
+
     def test_unfuse_bias_addmm(self):
         args = [
             torch.randn(20, device=GPU_TYPE),

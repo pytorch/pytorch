@@ -10,6 +10,8 @@
     {%- if TWO_CTAS %}
     # even M-tile count so CTAs pair into clusters; must match blackwell_persistent_mm_grid
     grid_m = (grid_m + 1) // 2 * 2
+    # paired CTAs must get adjacent M tiles of the same N tile, which needs an even GROUP_M
+    tl.static_assert(GROUP_M % 2 == 0, "TWO_CTAS requires an even GROUP_M")
     {%- endif %}
     grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
