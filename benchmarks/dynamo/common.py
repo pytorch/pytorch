@@ -1060,22 +1060,27 @@ def rewritten(model_iter_fn):
     return found
 
 
-def settle_rewritten(fn, model, example_inputs, most=400, seconds=600.0):
+def settle_rewritten(fn, model, example_inputs, most=1000, seconds=600.0, calm=16):
     """Calls what ``rewritten`` returned until it has stopped compiling and
     measuring: ``torch.rewrite`` compiles a region after some calls of it, and
     then times the function and what it calls against the interpreter for a
-    while. Returns the number of calls that took."""
-    calm, before, start, calls = 0, None, time.perf_counter(), 0
+    while, one level of calls after the other: a training step, which goes
+    through an optimizer, takes some hundred calls where a model's forward
+    takes twenty. Over when ``calm`` calls in a row changed nothing; a call
+    that is slow is given fewer. Returns the number of calls that took."""
+    quiet, before, start, calls = 0, None, time.perf_counter(), 0
     while calls < most:
         fn(model, example_inputs)
         calls += 1
         regions = torch.rewrite.regions(fn)
         now = (len(regions), sum(r.get("variants", 0) for r in regions))
-        calm = 0 if fn.stats()["measuring"] or now != before else calm + 1
+        quiet = 0 if fn.stats()["measuring"] or now != before else quiet + 1
         before = now
         elapsed = time.perf_counter() - start
         enough = calls >= 12 or (calls >= 6 and elapsed > 60)
-        if enough and (calm >= 3 or elapsed > seconds):
+        # At a second a call, three calm ones are what there is time for.
+        needed = max(3, min(calm, int(calm * calls / max(elapsed, 1e-9) / 16)))
+        if enough and (quiet >= needed or elapsed > seconds):
             break
     return calls
 
