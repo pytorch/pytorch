@@ -1322,6 +1322,24 @@ class TestStatelessRNGInteger(TestCase):
             self.assertEqual(ref[expected_shift:], result[:-expected_shift])
 
     @parametrize("dtype", all_int_dtypes)
+    @parametrize("full_range", [False, True])
+    def test_offset_overflow(self, device, dtype, full_range):
+        seed = 42
+        n = 100
+        bounds = {"low": None, "high": None} if full_range else {"high": 100}
+        last_offset_before_wrap = (1 << 64) - 1
+        key = torch.tensor(
+            [seed, last_offset_before_wrap], dtype=torch.uint64, device=device
+        )
+        result = random.randint(key, (n,), dtype=dtype, **bounds)
+
+        # ensure offset wraps around to 0 by comparing with 0-offset key results
+        key0 = random.key(seed, device=device)
+        result0 = random.randint(key0, (n,), dtype=dtype, **bounds)
+        elems_per_call = 2 if dtype.itemsize == 8 else 4
+        self.assertEqual(result[elems_per_call:], result0[:-elems_per_call])
+
+    @parametrize("dtype", all_int_dtypes)
     def test_different_keys_produce_different_values(self, device, dtype):
         a = random.randint(random.key(1, device=device), (1000,), low=None, dtype=dtype)
         b = random.randint(random.key(2, device=device), (1000,), low=None, dtype=dtype)
