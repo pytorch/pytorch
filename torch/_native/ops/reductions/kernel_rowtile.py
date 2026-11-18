@@ -112,11 +112,16 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var,
+# 0.92-1.41x the rolled fold and requires per-N compilation. Column layouts take the
+# general axis's decoded-gather tree ahead of coltile: x.sum(0) of fp32 (65536, 256) took
+# 68.4us against 17.2us (B200 CUDA graphs, L2-cold). Its independent env var,
 # inner_tree_plan._INNER_TREE_ENV (PYTORCH_NATIVE_INNER_TREE), avoids affecting upstream
 # kernels, which register first. `1` prefers the order and warns once when a call cannot use
 # it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_STRICT = "strict"
+# Reasons a dispatcher cannot serve an inner-tree request.
+_INNER_TREE_WIDE = "inner-tree reduction requires 32-bit logical extents"
+_INNER_TREE_GEOMETRY = "inner-tree reduction cannot serve this geometry"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
@@ -298,9 +303,20 @@ _ITREE_BLOCK_THREADS = 256
 _ITREE_STAGE_E = 32
 
 
+def _inner_tree_env() -> str:
+    """The validated gate value; "" when unset."""
+    value = os.environ.get(_INNER_TREE_ENV, "")
+    if value not in ("", "0", "1", _INNER_TREE_STRICT):
+        raise ValueError(
+            f"{_INNER_TREE_ENV} must be unset, '0', '1' or '{_INNER_TREE_STRICT}', "
+            f"got {value!r}"
+        )
+    return value
+
+
 def inner_tree_order_enabled() -> bool:
     """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
-    return os.environ.get(_INNER_TREE_ENV, "") not in ("", "0")
+    return _inner_tree_env() not in ("", "0")
 
 
 def reduction_order(
@@ -316,9 +332,12 @@ def reduction_order(
 _warned_inner_tree_reasons: set[str] = set()
 
 
-def inner_tree_fallback(reason: str) -> None:
-    """Fall back from the env gate: raise if strict, else warn once per reason."""
-    if os.environ.get(_INNER_TREE_ENV, "") == _INNER_TREE_STRICT:
+def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
+    """Fall back from an unservable inner-tree request: raise for an explicit order= or
+    the strict env gate, else warn once per reason."""
+    if explicit:
+        raise ValueError(reason)
+    if _inner_tree_env() == _INNER_TREE_STRICT:
         raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
     if reason not in _warned_inner_tree_reasons:
         _warned_inner_tree_reasons.add(reason)
@@ -1032,12 +1051,15 @@ def reduce_row_tile(
 ) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
 
-    x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
-    edges (one kernel per N) and rejects empty rows, order="inner_tree" and use_tma=True
-    for every N. Rows of whole 16-byte vectors otherwise fall through to normal path
-    selection; ragged rows need a contiguous, 16-byte aligned input and raise ValueError
-    on any other rather than fall back. For ragged N, a row's scalar prefix depends on
-    its index, so identical rows can round differently.
+    x's device must be current. Rows may be pitched. `ragged_vector` asks for aligned wide
+    loads with scalar edges (one kernel per launch class) and rejects empty rows,
+    order="inner_tree" and use_tma=True for every N. Rows of whole 16-byte vectors at a
+    pitch of whole vectors otherwise fall through to normal path selection; ragged rows
+    need a 16-byte aligned base and raise ValueError on any other rather than fall back.
+    Other rows need a pitch of whole N-wide vectors. A ragged row's scalar prefix depends
+    on its start, so identical rows can round differently. Callers must pre-check a
+    16-byte base for ragged rows: whole rows at a misaligned base take narrow loads, but
+    ragged rows raise.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
@@ -1050,11 +1072,11 @@ def reduce_row_tile(
     # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
-    # Rows of whole vectors have no edges; normal path selection folds them with one
-    # kernel per vector class rather than one per width.
+    # Rows of whole vectors at a pitch of whole vectors have no edges; normal path
+    # selection folds them with one kernel per vector class.
     if ragged_vector:
         vec = tile.ragged_vector_width(N, x.element_size(), order, use_tma)
-        ragged_vector = N % vec != 0
+        ragged_vector = N % vec != 0 or (M > 1 and x.stride(0) % vec != 0)
     itree, arch = None, None
     if order == "inner_tree" and final and threads_per_row is None:
         arch = _full_itree_arch(trait, x, out_dtypes[:nouts])
@@ -1068,22 +1090,24 @@ def reduce_row_tile(
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts, arch=arch)
-    # Row edges come from the logical row offset, so rows must start at r * N from a
-    # 16-byte aligned base.
+    if M == 1:
+        x = x.as_strided((1, N), (N, 1))  # one row's pitch is free
+    # Ragged rows take their edges from each row's own start, so they need only a 16-byte
+    # aligned base; other rows load N's vector width from every row start.
     full_align = _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
-    if ragged_vector and not x.is_contiguous():
-        raise ValueError(
-            f"ragged vectors require rows packed at stride N (a contiguous input), got {x.stride()=}"
-        )
     if ragged_vector and full_align != tile.TRANSFER_ALIGNMENT:
         raise ValueError(
             f"ragged vectors require a {tile.TRANSFER_ALIGNMENT}-byte aligned base, "
             f"got {full_align}-byte alignment"
         )
     isz = x.element_size()
+    whole_pitch = tile.align_bytes(x.stride(0), isz) >= tile.align_bytes(N, isz)
+    if not ragged_vector and not whole_pitch:
+        raise ValueError(f"rows need a pitch of whole vectors, got {N=} {x.stride(0)=}")
     cfg = row_config(N, isz * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
-    # the measured optimum across 4/8/16/32. Single-field one-thread rows ignore it.
+    # the measured optimum across 4/8/16/32. Single-field non-ragged one-thread rows and
+    # TMA ignore it.
     if unroll is None:
         unroll = 16 if not ragged_vector and tile.vec_size(N, isz) == 1 else 4
     threads_per_row = (
@@ -1138,8 +1162,7 @@ def reduce_row_tile(
     nchunks = None if ragged_vector else Int32(nvec)
     nwaves = None if ragged_vector else Int32(math.ceil(nvec / threads_per_row))
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
-    # outside TMA and ragged vectors. Both bake N; other runtime folds share a vector
-    # class.
+    # outside TMA and ragged vectors (which align each row's interior themselves).
     align = (
         tile.TRANSFER_ALIGNMENT
         if use_tma or ragged_vector
@@ -1147,7 +1170,8 @@ def reduce_row_tile(
     )
 
     def _fake():
-        # TMA and ragged vectors bake N; other runtime folds share a vector class.
+        # TMA bakes N. Other folds take a runtime pitch, and ragged rows a runtime width
+        # too, so packed and pitched rows of a vector class (or any ragged row) share a kernel.
         if use_tma:
             fake_in = cute.runtime.make_fake_tensor(
                 dt,
@@ -1158,11 +1182,10 @@ def reduce_row_tile(
                 ),
                 assumed_align=align,
             )
+        elif ragged_vector:
+            fake_in = _L.fake_rows(dt, _L.sym(), 1, align=align)
         else:
-            cols = N if ragged_vector else _L.sym(op.vec)
-            fake_in = _L.fake_compact(
-                dt, (_L.sym(), cols), stride_order=(1, 0), align=align
-            )
+            fake_in = _L.fake_rows(dt, _L.sym(op.vec), op.vec, align=align)
         return _row_args(
             [fake_in],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
