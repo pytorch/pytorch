@@ -33,6 +33,7 @@ from torch.distributed.tensor._collective_utils import (
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import (
     ACCELERATOR_DIST_BACKENDS,
+    requires_nccl,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -231,6 +232,8 @@ class DeviceMeshTest(DTensorTestBase):
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
+    # XCCL does not support process group splitting: https://github.com/intel/torch-xpu-ops/issues/5385
+    @xfailIf(TEST_XPU)
     @with_comms(eager_init=True)
     def test_device_mesh_preserve_rank_order_eager(self):
         mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
