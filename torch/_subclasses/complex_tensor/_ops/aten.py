@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cmath
 import warnings
 from typing import Any, TYPE_CHECKING
 
@@ -1255,6 +1256,10 @@ def to_dtype_layout(
         return self
     re, im = split_complex_arg(self)
     if dtype is not None and dtype not in COMPLEX_TO_REAL:
+        warnings.warn(
+            "Casting complex values to real discards the imaginary part",
+            category=UserWarning,
+        )
         return _op(re, device=device, dtype=dtype, **kwargs)
 
     dtype = COMPLEX_TO_REAL.get(dtype)  # type: ignore[no-matching-overload]
@@ -1402,3 +1407,77 @@ def view_copy_dtype_impl(self: ComplexTensor, dtype: torch.dtype) -> torch.Tenso
 
     real_view = interleaved.view(COMPLEX_TO_REAL[dtype])
     return view_as_complex_impl(real_view.unflatten(-1, (-1, 2)))
+
+
+def register_space(
+    op: torch._ops.OpOverloadPacket,
+    complex_parts: Callable[..., tuple[torch.Tensor, torch.Tensor]],
+) -> Callable[..., Any]:
+    """Register all overloads of `linspace`-like ops, including Tensor endpoints and `out=`."""
+
+    def impl(
+        start: Any,
+        end: Any,
+        steps: int,
+        *args: Any,
+        dtype: torch.dtype | None = None,
+        layout: torch.layout | None = None,
+        device: torch.device | None = None,
+        pin_memory: bool | None = None,
+        out: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # Like eager, Tensor endpoints are reduced to Scalars.
+        start = start.item() if isinstance(start, torch.Tensor) else start
+        end = end.item() if isinstance(end, torch.Tensor) else end
+        if out is not None:
+            dtype, device = out.dtype, out.device
+        if dtype is None:
+            dtype = torch.get_default_dtype()
+            if is_complex(start) or is_complex(end):
+                dtype = REAL_TO_COMPLEX[dtype]
+
+        kwargs = {"layout": layout, "device": device, "pin_memory": pin_memory}
+        if dtype.is_complex:
+            re, im = complex_parts(
+                complex(start),
+                complex(end),
+                steps,
+                *args,
+                dtype=COMPLEX_TO_REAL[dtype],
+                **kwargs,
+            )
+            result = ComplexTensor(re, im)
+        else:
+            result = op.default(start, end, steps, *args, dtype=dtype, **kwargs)
+
+        return result if out is None else out.copy_(result)
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return register_complex(op, impl)
+
+
+def _linspace_parts(
+    start: complex, end: complex, steps: int, **kwargs: Any
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # `linspace` is linear, so each component is the `linspace` of its endpoints.
+    re = aten.linspace.default(start.real, end.real, steps, **kwargs)
+    im = aten.linspace.default(start.imag, end.imag, steps, **kwargs)
+    return re, im
+
+
+def _logspace_parts(
+    start: complex, end: complex, steps: int, base: float = 10.0, **kwargs: Any
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # base ** z == exp(z * log(base))
+    x, y = _linspace_parts(start, end, steps, **kwargs)
+    log_base = cmath.log(base)
+    magnitude = torch.exp(x * log_base.real - y * log_base.imag)
+    angle = x * log_base.imag + y * log_base.real
+    return magnitude * torch.cos(angle), magnitude * torch.sin(angle)
+
+
+linspace_impl = register_space(aten.linspace, _linspace_parts)
+logspace_impl = register_space(aten.logspace, _logspace_parts)
