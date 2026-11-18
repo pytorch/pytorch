@@ -391,21 +391,26 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
     )
 
 
-def _method_identity_guards_filtered(tx: InstructionTranslatorBase) -> bool:
+def _method_identity_guards_filtered(
+    tx: InstructionTranslatorBase, *, binding_only: bool = False
+) -> bool:
+    if tx.output.package is not None:
+        return True
+    guards = tx.output.tracing_context.guards_context
+    if guards.skip_install:
+        return not (binding_only and guards.tracing_reuse_hash)
+    if tx.export or torch.compiler.is_exporting():
+        # Export can call a bound method on the captured module. Its graph
+        # still cannot preserve observations of process-local wrapper identities.
+        return not binding_only
     context = CompileContext.try_get()
-    return (
-        context is not None
-        and context.is_aot_capture
-        or config.caching_precompile
-        or tx.export
-        or TracingContext.get().guards_context.skip_install
-    )
+    return context is not None and context.is_aot_capture
 
 
 def install_builtin_method_guard(
     tx: InstructionTranslatorBase, source: Source, value: object = None
 ) -> None:
-    filtered = _method_identity_guards_filtered(tx)
+    filtered = _method_identity_guards_filtered(tx, binding_only=True)
     if value is None:
         value = tx.output.resolve_source_value(source)
     expected = _native_method_metadata(value, portable=filtered)
@@ -2042,11 +2047,7 @@ class GuardBuilder(GuardBuilderBase):
                 if not issubclass(example_type, dict):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-        if (
-            self.save_guards
-            and guard_manager_enum == GuardManagerType.DICT_GUARD_MANAGER
-        ):
-            # Only the manager identity is needed to filter key-order metadata.
+        if self.save_guards and self.manager_guards_on_keys(guard_manager_enum):
             self.dict_guard_manager_ids.add(id(example_value))
         return guard_manager_enum
 
@@ -3672,7 +3673,8 @@ class GuardBuilder(GuardBuilderBase):
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
         if self.save_guards and type(expected.receiver) is tuple:
             raise torch._dynamo.exc.PackageError(
-                "Instance methods need receiver identity; bind them in the saved function."
+                f"Instance method {expected.name!r} at {guard.name} needs receiver identity. "
+                "Bind it in the saved function."
             )
         last_match: weakref.ReferenceType[object] | None = None
 
@@ -3685,15 +3687,16 @@ class GuardBuilder(GuardBuilderBase):
             last_match = weakref.ref(value)
             return True
 
-        owner = cast(
-            type,
-            expected.receiver[0]
-            if type(expected.receiver) is tuple
-            else expected.receiver,
-        )
+        binding = expected.receiver
+        owner = cast(type, binding[0] if type(binding) is tuple else binding)
         method = f"{owner.__module__}.{owner.__qualname__}.{expected.name}"
         code = f"___check_native_method({self.arg_ref(guard)}, {method})"
         self._set_guard_export_info(guard, [code])
+        token = (id(owner), binding[1] if type(binding) is tuple else None)
+        key = f"{code} {token}"
+        if key in self.already_added_code_parts:
+            return
+        self.already_added_code_parts.add(key)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
@@ -4967,16 +4970,6 @@ def _pickle_state(value: object, *, base: type = object) -> _PickleState:
             or (desc.__objclass__ is not object and desc.__objclass__ is not base_cls)
         ):
             return _PickleState.OPAQUE
-    reducer = collections.OrderedDict.__reduce__ if ordered else object.__reduce__
-    protocols = (
-        ("__reduce__", reducer),
-        ("__reduce_ex__", object.__reduce_ex__),
-        ("__getstate__", getattr(base, "__getstate__", None)),
-        ("__setstate__", getattr(base, "__setstate__", None)),
-        ("__getnewargs_ex__", None),
-        # An attribute hook can synthesize __setstate__.
-        ("__getattr__", getattr(base, "__getattr__", None)),
-    )
     if (
         base is object
         and inspect.getattr_static(cls, "__slots__", None) is not None
@@ -4991,11 +4984,12 @@ def _pickle_state(value: object, *, base: type = object) -> _PickleState:
             for name in methods
         ):
             return _PickleState.OPAQUE
-    if any(
-        inspect.getattr_static(value, name, None) is not attr
-        for name, attr in protocols
-    ):
-        return _PickleState.OPAQUE
+    protocol_base = collections.OrderedDict if ordered else base
+    hooks = ("__getstate__", "__setstate__", "__getnewargs_ex__", "__getattr__")
+    for name in ("__reduce__", "__reduce_ex__", *hooks):
+        expected = getattr(protocol_base, name, None)
+        if inspect.getattr_static(value, name, None) is not expected:
+            return _PickleState.OPAQUE
     if base is object:
         if not is_generic_getattr(cls):
             return _PickleState.OPAQUE
@@ -5129,12 +5123,18 @@ class GuardsStatePickler(FunctionPicklerBase):
                     stack.append(element)
                 elif isinstance(element, dict):
                     stack.append([*element.keys(), *element.values()])
-        # Keep whole state alive, including ctx freshly built by __tensor_flatten__.
+        # Everything reachable from a value a guard compares whole: a constant
+        # or opaque value type under EQUALS_MATCH, and what __tensor_unflatten__
+        # gets back through a traceable wrapper subclass's ctx under
+        # TENSOR_SUBCLASS_METADATA_MATCH. A pruned field anywhere inside would
+        # fail the guard after load. Held, not just ids, since
+        # __tensor_flatten__ may build the ctx afresh.
         self._whole_compared_values: dict[int, Any] = {}
         self._instance_policies: dict[int, _PickleState] = {}
         self._pruned_dictionary_ids: set[int] = set()
         self._dict_snapshots: dict[int, _DictionaryItemsSnapshot] = {}
         self._dropped_state: set[int] = set()
+        self._function_reductions: dict[types.FunctionType, Any] = {}
         self._collect_required_state()
 
     @classmethod
@@ -5453,7 +5453,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._pruned_dictionary_ids.update(map(id, dictionaries))
         self._prune_local_scope(local_scope)
         if any(
-            type(d) is not dict or any(not self._is_literal(v) for v in dict.values(d))
+            type(d) is not dict or any(self._can_prune_value(v) for v in dict.values(d))
             for d in dictionaries
         ):
             self._retain_dict_aliases(
@@ -5468,7 +5468,10 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _retain_dict_aliases(
         self, roots: collections.abc.Iterable[Any], *, checking_copy: bool = False
     ) -> None:
-        # Follow only saved scope edges. A guarded function's original globals are not all saved.
+        """Find saved reducers first, then retain dictionaries their constructors can inspect.
+
+        A custom proxy copy can introduce new dependencies after snapshots have been made.
+        """
         retained = self.guard_tree_values.keys() | self._verbatim_elements
         opaque: list[Any] = []
         for whole, pending in ((False, list(roots)), (True, opaque)):
@@ -5499,15 +5502,20 @@ class GuardsStatePickler(FunctionPicklerBase):
                         state = self._dictionary_state(value, attrs, record=False)
                         pending.extend((attrs,) if state is attrs else state.values())
                 elif typ is types.MappingProxyType:
-                    backing = gc.get_referents(value)[0]
+                    backing = _mapping_proxy_mapping(value)
                     if (
                         issubclass(type(backing), dict)
                         and is_generic_getattr(type(backing))
                         and inspect.getattr_static(backing, "copy") is dict.copy
                     ):
-                        pending.extend(
-                            itertools.chain.from_iterable(dict.items(backing))
-                        )
+                        items = dict.items(cast(dict[object, object], backing))
+                        pending.extend(itertools.chain.from_iterable(items))
+                elif typ is types.FunctionType:
+                    # Inspect exactly what will be pickled, evaluating lazy annotations only once.
+                    reduced = self.reducer_override(value)
+                    self._function_reductions[value] = reduced
+                    if reduced is not NotImplemented:
+                        pending.extend(reduced[1:3])
                 elif typ is dict or typ is list or typ is tuple:
                     pending.extend(gc.get_referents(value))
                 elif issubclass(typ, torch.nn.Module):
@@ -5540,6 +5548,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                     types.MethodType,
                     types.BuiltinMethodType,
                     types.MethodWrapperType,
+                    types.SimpleNamespace,
+                    types.CellType,
                 ):
                     pending.extend(gc.get_referents(value))
 
@@ -5553,7 +5563,8 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     def _dictionary_state(self, obj: Any, state: Any, *, record: bool = True) -> Any:
         if (
-            id(obj) in self._pruned_dictionary_ids
+            state is not None
+            and id(obj) in self._pruned_dictionary_ids
             and state is vars(obj)
             and not self._keep(state)
         ):
@@ -5569,7 +5580,7 @@ class GuardsStatePickler(FunctionPicklerBase):
     ) -> collections.abc.Iterator[tuple[Any, Any]]:
         for key, item in dict.items(value):
             if id(value) in self._pruned_dictionary_ids and self._can_prune_value(item):
-                self._dropped_state.add(id(item))
+                self._dropped_state.add(id(value))
                 item = self._missing("unguarded dictionary value")
             yield key, item
 
@@ -5876,18 +5887,6 @@ class GuardsStatePickler(FunctionPicklerBase):
                 type(self)._restore_ordered_dict_state,
             )
 
-        if (
-            type(obj) is collections.defaultdict
-            and id(obj) in self._pruned_dictionary_ids
-        ):
-            return (
-                collections.defaultdict,
-                (obj.default_factory,),
-                None,
-                None,
-                self._dictionary_items(obj),
-            )
-
         if id(obj) in self._pruned_dictionary_ids:
             reduced = obj.__reduce_ex__(_GUARDS_PROTOCOL)
             state = self._dictionary_state(obj, reduced[2])
@@ -6116,6 +6115,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
+            if obj in self._function_reductions:
+                return self._function_reductions[obj]
             if "<locals>" in obj.__qualname__.split("."):
                 # Rebuilt whether or not a guard is rooted at it, as before this
                 # change: it can never be found by name, and unlike a wraps
@@ -6884,24 +6885,46 @@ class CheckFunctionManager:
             if id(builder.get(source)) in builder.dict_guard_manager_ids
         }
 
-        def is_mro_entry(source: Source) -> bool:
-            return isinstance(source, GetItemSource) and isinstance(
-                source.base, TypeMROSource
-            )
+        def tuple_example(value: tuple[Any, ...]) -> tuple[Any, ...]:
+            # Keep the shape and the guarded paths without pickling unread members.
+            if id(value) in builder.value_guarded_containers:
+                return value
+            items = []
+            for item in value:
+                if id(item) not in builder.guard_tree_values:
+                    item = None
+                elif type(item) is tuple:
+                    item = tuple_example(item)
+                items.append(item)
+            return tuple(items)
 
         mro_guard_values: dict[Source, object] = {}
         for guard in sorted_guards:
             source = guard.originating_source
-            if guard.create_fn is GuardBuilder.CLASS_MATCH and is_mro_entry(source):
-                mro_guard_values[source] = builder.get(guard)
-            elif (
-                guard.create_fn is GuardBuilder.CONSTANT_MATCH
-                and isinstance(source, DictGetItemSource)
-                and isinstance(source.base, TypeDictSource)
-                and is_mro_entry(source.base.base)
+            if (
+                guard.create_fn is GuardBuilder.CLASS_MATCH
+                and isinstance(source, GetItemSource)
+                and isinstance(source.base, TypeMROSource)
             ):
+                mro_guard_values[source] = builder.get(guard)
+            elif isinstance(source, DictGetItemSource) and isinstance(
+                source.base, TypeDictSource
+            ):
+                # A direct owner has no intervening TypeMROSource. The class is
+                # loaded by reference, so its dictionary can have changed at load.
                 value = builder.get(guard)
-                if FunctionPicklerBase._is_literal(value):
+                if type(value) is tuple and guard.create_fn in (
+                    GuardBuilder.SEQUENCE_LENGTH,
+                    GuardBuilder.CONSTANT_MATCH,
+                    GuardBuilder.EQUALS_MATCH,
+                ):
+                    mro_guard_values[source] = tuple_example(value)
+                elif (
+                    guard.create_fn is GuardBuilder.CONSTANT_MATCH
+                    and FunctionPicklerBase._is_literal(value)
+                    or guard.create_fn is GuardBuilder.ID_MATCH
+                    and isinstance(value, enum.Enum)
+                ):
                     mro_guard_values[source] = value
             if isinstance(guard.originating_source, ShapeEnvSource):
                 if not self.shape_code_parts:
@@ -7042,6 +7065,8 @@ class CheckFunctionManager:
             guard_filter_fn=guard_filter_fn,
         )
 
+        # Descendant sources must also rebuild their guards against the capture-time
+        # example. Their runtime accessors still read the live class and its attributes.
         if output_graph.mro_guard_values:
             builder.src_get_value_cache.update(output_graph.mro_guard_values)
 
@@ -7955,7 +7980,7 @@ def record_lexical_alias(
     if scopes:
         endpoints = (source, canonical)
         reads.update((s, scope) for s in endpoints for scope in scopes)
-        # Mixed local/global aliases have no DUPLICATE_INPUT guard.
+        # Pin both identities: DUPLICATE_INPUT cannot express a mixed local/global alias.
         if is_from_local_source(source) != is_from_local_source(canonical):
             install_guard(*(s.make_guard(GuardBuilder.ID_MATCH) for s in endpoints))
 

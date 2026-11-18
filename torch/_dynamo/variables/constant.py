@@ -31,7 +31,6 @@ from .base import (
     GetSet,
     Member,
     Method,
-    NO_SUCH_SUBOBJ,
     readonly_setter,
     SourceLocation,
     ValueMutationNew,
@@ -1084,6 +1083,11 @@ class FakeIdVariable(VariableTracker):
 
     def as_python_constant(self) -> int:
         if self.kind is FakeValueKind.HASH:
+            return super().as_python_constant()
+        return self.value
+
+    def guard_as_python_constant(self) -> int:
+        if self.kind is FakeValueKind.HASH:
             unimplemented(
                 gb_type="Conversion of compile-time-only hash value",
                 context="FakeIdVariable",
@@ -1091,10 +1095,6 @@ class FakeIdVariable(VariableTracker):
                 hints=["Compute the hash outside the compiled function."],
             )
         return self.value
-
-    def get_real_python_backed_value(self) -> object:
-        # Internal hash integers have no observable runtime identity.
-        return NO_SUCH_SUBOBJ if self.kind is FakeValueKind.HASH else self.value
 
     def is_python_constant(self) -> bool:
         return False
@@ -1106,16 +1106,10 @@ class FakeIdVariable(VariableTracker):
         return hash(self.value), True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
-        # decimal string. The distinct-but-compile-time-only identity carried by
-        # the fake id is preserved in the resulting string, matching how
-        # FakeIdVariable already resolves same-kind id()/hash() comparisons.
-        return ConstantVariable.create(repr(self.as_python_constant()))
+        return ConstantVariable.create(repr(self.guard_as_python_constant()))
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        # Mirrors long_bool. The fake value is only meaningful at compile time,
-        # but its truthiness is, like tp_repr_impl, a plain function of it.
-        return ConstantVariable.create(bool(self.as_python_constant()))
+        return ConstantVariable.create(bool(self.guard_as_python_constant()))
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
