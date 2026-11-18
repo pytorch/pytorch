@@ -508,6 +508,14 @@ enum Node {
     /// it flattens to, and what it holds.
     Flat(Py<PyAny>, Py<PyAny>, String, Vec<Node>),
     Module(Box<Looked>),
+    /// A bound method: its function, and what it is bound to.
+    Method(Py<PyAny>, Box<Node>),
+    /// An object that is its class and its attributes: the class, the names
+    /// in order, and what they hold.
+    Instance(Py<PyAny>, Vec<Py<PyAny>>, Vec<Node>),
+    /// A list, a dict, a cell or such an object that the call had before:
+    /// which of the ones it holds.
+    Again(usize),
 }
 
 /// A module whose tensors were found as a look had left them.
@@ -531,7 +539,7 @@ struct Looked {
 /// way. `look` tells whether a call is one, in one pass and without the
 /// interpreter, and gives what describing it the long way would give: its
 /// key and what the region is handed. What it does not know (a set, a
-/// method, an object with attributes) the long way is for.
+/// method of a builtin, a pytree node met twice) the long way is for.
 #[pyclass(module = "torch._cfg_rs", name = "Usual", frozen)]
 pub struct Usual {
     positions: Vec<usize>,
@@ -560,6 +568,9 @@ fn node(spec: &Bound<'_, PyAny>) -> PyResult<Node> {
     let nodes = |items: Bound<'_, PyAny>| -> PyResult<Vec<Node>> {
         items.try_iter()?.map(|item| node(&item?)).collect()
     };
+    let keys = |items: Bound<'_, PyAny>| -> PyResult<Vec<Py<PyAny>>> {
+        items.try_iter()?.map(|key| Ok(key?.unbind())).collect()
+    };
     Ok(match kind.as_str() {
         "tensor" => Node::Tensor(spec.get_item(1)?.extract()?),
         "int" => Node::Int,
@@ -568,10 +579,10 @@ fn node(spec: &Bound<'_, PyAny>) -> PyResult<Node> {
         "tuple" => Node::Tuple(nodes(spec.get_item(1)?)?),
         "list" => Node::List(nodes(spec.get_item(1)?)?),
         "cell" => Node::Cell(Box::new(node(&spec.get_item(1)?)?)),
-        "dict" => {
-            let keys = spec.get_item(1)?.try_iter()?.map(|key| Ok(key?.unbind())).collect::<PyResult<_>>()?;
-            Node::Dict(keys, nodes(spec.get_item(2)?)?)
-        }
+        "dict" => Node::Dict(keys(spec.get_item(1)?)?, nodes(spec.get_item(2)?)?),
+        "method" => Node::Method(spec.get_item(1)?.unbind(), Box::new(node(&spec.get_item(2)?)?)),
+        "instance" => Node::Instance(spec.get_item(1)?.unbind(), keys(spec.get_item(2)?)?, nodes(spec.get_item(3)?)?),
+        "again" => Node::Again(spec.get_item(1)?.extract()?),
         "node" => Node::Flat(
             spec.get_item(1)?.unbind(),
             spec.get_item(2)?.unbind(),
@@ -631,6 +642,22 @@ impl<'a> Walk<'a> {
         self.flattened.iter().any(|(o, _)| *o == obj)
     }
 
+    /// Whether a dict has these keys, in this order, and what is expected
+    /// under them.
+    unsafe fn items(&mut self, dict: Obj, keys: &'a [Py<PyAny>], values: &'a [Node]) -> bool {
+        if ffi::PyDict_CheckExact(dict) == 0 || ffi::PyDict_Size(dict) as usize != keys.len() {
+            return false;
+        }
+        let (mut at, mut key, mut value) = (0, std::ptr::null_mut(), std::ptr::null_mut());
+        let mut items = Vec::with_capacity(keys.len());
+        while ffi::PyDict_Next(dict, &mut at, &mut key, &mut value) != 0 {
+            items.push((key, value));
+        }
+        items.len() == keys.len()
+            && items.iter().zip(keys).all(|((key, _), expected)| same_value(*key, expected.as_ptr()))
+            && items.iter().zip(values).all(|((_, value), node)| self.visit(node, *value))
+    }
+
     unsafe fn visit(&mut self, node: &'a Node, obj: Obj) -> bool {
         match node {
             Node::Tensor(expected) => {
@@ -685,22 +712,33 @@ impl<'a> Walk<'a> {
                 })
             }
             Node::Dict(keys, values) => {
-                if ffi::PyDict_CheckExact(obj) == 0
-                    || ffi::PyDict_Size(obj) as usize != keys.len()
-                    || self.held.contains(&obj)
-                {
+                if ffi::PyDict_CheckExact(obj) == 0 || self.held.contains(&obj) {
                     return false;
                 }
                 self.held.push(obj);
-                let (mut at, mut key, mut value) = (0, std::ptr::null_mut(), std::ptr::null_mut());
-                let mut items = Vec::with_capacity(keys.len());
-                while ffi::PyDict_Next(obj, &mut at, &mut key, &mut value) != 0 {
-                    items.push((key, value));
-                }
-                items.len() == keys.len()
-                    && items.iter().zip(keys).all(|((key, _), expected)| same_value(*key, expected.as_ptr()))
-                    && items.iter().zip(values).all(|((_, value), node)| self.visit(node, *value))
+                self.items(obj, keys, values)
             }
+            Node::Method(function, receiver) => {
+                ffi::Py_TYPE(obj) == &raw mut pyffi::PyMethod_Type
+                    && pyffi::PyMethod_Function(obj) == function.as_ptr()
+                    && self.visit(receiver, pyffi::PyMethod_Self(obj))
+            }
+            Node::Instance(class, names, values) => {
+                if ffi::Py_TYPE(obj) as Obj != class.as_ptr() || self.held.contains(&obj) {
+                    return false;
+                }
+                self.held.push(obj);
+                // A new reference to its `__dict__`, kept until the walk is
+                // over.
+                let state = ffi::PyObject_GenericGetDict(obj, std::ptr::null_mut());
+                if state.is_null() {
+                    ffi::PyErr_Clear();
+                    return false;
+                }
+                self.flattened.push((obj, state));
+                self.items(state, names, values)
+            }
+            Node::Again(index) => self.held.get(*index) == Some(&obj),
             Node::Cell(inner) => {
                 if ffi::Py_TYPE(obj) != &raw mut pyffi::PyCell_Type || self.held.contains(&obj) {
                     return false;
@@ -828,7 +866,10 @@ impl Usual {
     /// of. `spec`: per position, what was there, as a tuple that begins
     /// with `"tensor"` (and which one of the call), `"int"`, `"value"` or
     /// `"object"` (and the object), `"tuple"` or `"list"` (and the items),
-    /// `"cell"` (what it holds), `"dict"` (the keys, the values), `"node"` (the class of a pytree
+    /// `"cell"` (what it holds), `"dict"` (the keys, the values), `"method"` (the function of a bound
+    /// method, what it is bound to), `"instance"` (the class of an object that is its attributes,
+    /// their names, their values), `"again"` (which of the lists, dicts, cells and objects the call
+    /// has met it is), `"node"` (the class of a pytree
     /// node, what flattens it, the text of its context, its children) or
     /// `"module"` (the module, its state, what its tensors were found to
     /// be, the first one's place in the call). `parts` and `modes` are those of the key, `known` is
