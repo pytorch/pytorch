@@ -1718,6 +1718,20 @@ class TestLRScheduler(TestCase):
         self.assertIs(scheduler._scale_fn_custom, scale_fn)
         self.assertIs(restored_scheduler._scale_fn_custom, scale_fn)
 
+    def test_cycle_lr_load_state_dict_does_not_mutate_input(self):
+        scheduler = CyclicLR(
+            self.opt, base_lr=0.1, max_lr=0.5, step_size_up=2, cycle_momentum=False
+        )
+        state = scheduler.state_dict()
+        expected_state = copy.deepcopy(state)
+
+        scheduler.load_state_dict(state)
+        self.assertEqual(state, expected_state)
+
+        # The same checkpoint must stay loadable a second time
+        scheduler.load_state_dict(state)
+        self.assertEqual(scheduler.state_dict(), expected_state)
+
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):
             scheduler = OneCycleLR(
