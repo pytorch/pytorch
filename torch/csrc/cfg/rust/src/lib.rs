@@ -40,6 +40,8 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyapi::plan_changed, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::unsettled, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::module_stamp, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::module_look, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::module_epoch, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::module_identity, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::tensor_key, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::tensor_stamp, m)?)?;
