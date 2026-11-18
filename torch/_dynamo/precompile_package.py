@@ -2098,15 +2098,15 @@ class PrecompileSession(Generic[_P, _R]):
                 "PrecompileSession cannot be re-entered; start a new capture."
             )
         self._entered = True
-        # Its own cache region: a function captured (or compiled) earlier in
-        # this process would otherwise serve its existing cache entries, and
-        # this package would record nothing.
         backend = self._backend
         if self._cudagraph_config:
             # As torch.compile's options reach Inductor: around compile_fx only.
             options = {} if isinstance(backend, str) else backend.config
             merged = {**options, **self._cudagraph_config}
             backend = torch._TorchCompileInductorWrapper(None, merged, self._dynamic)
+        # Its own cache region: a function captured (or compiled) earlier in
+        # this process would otherwise serve its existing cache entries, and
+        # this package would record nothing.
         self._compiled = torch._dynamo.optimize(
             backend,
             package=self._package,
