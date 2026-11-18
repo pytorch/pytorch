@@ -40,28 +40,6 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-# Under CPP_FAKETENSOR=1 this whole suite exercises the C++ FakeTensor mode:
-# make_fx builds a CppFakeTensorMode for tracing_mode="fake"/"symbolic" natively.
-
-# Mirror test_fake_tensor.py: under the C++ fake path, make bare FakeTensorMode()
-# construction build a CppFakeTensorMode so the suite exercises it end to end.
-if torch._dynamo.config.use_cpp_fake_tensor:
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorConverter
-
-    def FakeTensorMode(
-        *,
-        shape_env=None,
-        allow_fallback_kernels=True,
-        allow_non_fake_inputs=False,
-        **kwargs,
-    ):
-        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
-            FakeTensorConverter(), shape_env
-        )
-        mode.set_allow_fallback_kernels(allow_fallback_kernels)
-        mode.allow_non_fake_inputs = allow_non_fake_inputs
-        return mode
-
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -945,6 +923,25 @@ class TestFakeProxyTensor(TestCase):
                 if propagate:
                     self.assertIsNotNone(functorch.get_unwrapped(kept).real_tensor)
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False)
+    def test_snapshot_fake_of_mkldnn_batched_tensor(self):
+        real = torch.randn(2, 3).to_mkldnn()
+        gm = make_fx(
+            torch.vmap(lambda x: x.detach()), tracing_mode="fake", pre_dispatch=True
+        )(real)
+        detach = next(n for n in gm.graph.nodes if n.target == aten.detach.default)
+        val = detach.meta["val"]
+        input_val = next(n for n in gm.graph.nodes if n.op == "placeholder").meta["val"]
+        self.assertFalse(torch._C._functorch.is_batchedtensor(val))
+        self.assertTrue(is_fake_tensor(val))
+        self.assertEqual(val.layout, torch._mkldnn)
+        self.assertEqual(val.shape, (3,))
+        self.assertEqual(
+            StorageWeakRef(val.untyped_storage()),
+            StorageWeakRef(input_val.untyped_storage()),
+        )
+
     def test_snapshot_fake_of_grad_tracking_tensor(self):
         # A grad tracking wrapper, as inside jvp, is recorded as a view of the
         # fake tensor it wraps, with the same layout.
@@ -966,6 +963,22 @@ class TestFakeProxyTensor(TestCase):
             (val.shape, val.stride(), val.storage_offset()),
             (fake.shape, fake.stride(), fake.storage_offset()),
         )
+
+    def test_snapshot_fake_of_sparse_batched_tensor(self):
+        from torch._functorch.vmap import vmap_increment_nesting
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.eye(3).to_sparse())
+        with vmap_increment_nesting(3, "error") as level:
+            with mode:
+                batched = functorch._add_batch_dim(fake, 0, level)
+                val = snapshot_fake(batched)
+            self.assertTrue(functorch.is_batchedtensor(val))
+            self.assertTrue(is_fake_tensor(functorch.get_unwrapped(val)))
+            self.assertEqual(val.layout, torch.sparse_coo)
+            self.assertEqual(val.shape, (3,))
 
     def test_use_fake_and_tensor(self):
         def f(x, y):

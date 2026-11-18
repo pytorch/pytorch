@@ -1,4 +1,4 @@
-"""The TD scorer model file: validation and evaluation.
+"""The TD scorer model file: validation, evaluation and the test budget rule.
 
 Standard library only and free of repo imports: the TD job has only boto3, and
 pytorch/test-infra loads this file by path to validate a model and check its
@@ -35,9 +35,14 @@ Y_MIN = 1e-6
 Y_MAX = 1 - 1e-6
 
 SCHEMA = 2
+MIN_SHARE = 0.10
+MAX_SHARE = 1.0
+
 TOP_KEYS = frozenset(
     {"schema", "version", "enabled", "start_up_seconds", "scorer", "risk"}
 )
+OPTIONAL_TOP_KEYS = frozenset({"budget"})
+BUDGET_KEYS = frozenset({"share", "spread", "cost_exponent"})
 SCORER_KEYS = frozenset(
     {"intercept", "cost_weight", "heuristics", "build_env", "test_config"}
 )
@@ -154,9 +159,32 @@ def _validate_start_up(value: Any) -> None:
                 )
 
 
+def _validate_budget(budget: Any) -> None:
+    _dict(budget, "budget", BUDGET_KEYS)
+    share = _number(budget["share"], "budget share")
+    spread = _number(budget["spread"], "budget spread")
+    exponent = _number(budget["cost_exponent"], "budget cost_exponent")
+    if not 0 <= spread < 1:
+        raise ModelError("budget spread is outside [0, 1)")
+    if not 0 <= exponent <= 1:
+        raise ModelError("budget cost_exponent is outside [0, 1]")
+    if share * (1 - spread) < MIN_SHARE:
+        raise ModelError(f"budget share * (1 - spread) is below {MIN_SHARE}")
+    if share > MAX_SHARE:
+        raise ModelError(f"budget share is above {MAX_SHARE}")
+
+
 def validate_model(value: Any) -> dict[str, Any]:
-    """Return value if it is a valid model; raise ModelError otherwise."""
-    obj = _dict(value, "model", TOP_KEYS)
+    """Return value if it is a valid model; raise ModelError otherwise.
+
+    "budget" is the one optional top-level key; every other key is required.
+    """
+    obj = _dict(value, "model")
+    if not TOP_KEYS <= set(obj) <= TOP_KEYS | OPTIONAL_TOP_KEYS:
+        raise ModelError(
+            f"model keys {sorted(obj)} != {sorted(TOP_KEYS)} (+ optional "
+            f"{sorted(OPTIONAL_TOP_KEYS)})"
+        )
     schema = obj["schema"]
     if isinstance(schema, bool) or schema != SCHEMA:
         raise ModelError(f"schema {schema!r} is not {SCHEMA}")
@@ -196,6 +224,8 @@ def validate_model(value: Any) -> dict[str, Any]:
         raise ModelError(f"risk quantiles length {len(q)} != {N_QUANTILES}")
     if any(a > b for a, b in pairwise(q)):
         raise ModelError("risk quantiles are not non-decreasing")
+    if "budget" in obj:
+        _validate_budget(obj["budget"])
     return obj
 
 
@@ -286,3 +316,75 @@ def risk_score(model: Mapping[str, Any], features: Mapping[str, int]) -> float:
         frac = (i + (raw - q[i]) / (q[i + 1] - q[i])) / (N_QUANTILES - 1)
         frac = min(max(frac, 0.0), 1.0)
     return 2 * frac - 1
+
+
+def clamped_risk(risk: Any) -> float | None:
+    """risk clamped to [-1, 1], or None when it is not a finite number."""
+    if isinstance(risk, bool) or not isinstance(risk, (int, float)):
+        return None
+    try:
+        r = float(risk)
+    except OverflowError:
+        return None
+    if not math.isfinite(r):
+        return None
+    return max(-1.0, min(1.0, r))
+
+
+def budget_share(
+    model: Mapping[str, Any], build_files: Any, risk: Any
+) -> tuple[float | None, str]:
+    """The share of a job's total test cost to spend, and the mode that set it.
+
+    None means no budget block ("none"): the cut spends what TD's own cut
+    costs. A change that touches build paths, or whose count of them is unknown
+    ("build_paths"), and one whose risk score is unknown ("unknown_risk") get
+    the top of the window, as if r were 1.
+    """
+    if "budget" not in model:
+        return None, "none"
+    budget = model["budget"]
+    top = max(MIN_SHARE, min(MAX_SHARE, budget["share"] * (1 + budget["spread"])))
+    if type(build_files) is not int or build_files > 0:
+        return top, "build_paths"
+    r = clamped_risk(risk)
+    if r is None:
+        return top, "unknown_risk"
+    share = budget["share"] * (1 + budget["spread"] * r)
+    return max(MIN_SHARE, min(MAX_SHARE, share)), "share"
+
+
+def job_budget(
+    model: Mapping[str, Any],
+    build_files: Any,
+    risk: Any,
+    budget_reason: Any,
+    td_ms: int,
+    total_ms: int,
+) -> dict[str, Any]:
+    """The budget of one job, from the block's build_files, risk and budget_reason.
+
+    td_ms is the cost of TD's include list and total_ms that of all the job's
+    files, in integer milliseconds. Without a share, the budget is td_ms and the
+    cost exponent 1 ("stale" when the TD job dropped the budget); with one, it
+    is round(share * total_ms) and the block's cost_exponent. risk is the
+    clamped r the share used, None outside "share" mode.
+    """
+    share, mode = budget_share(model, build_files, risk)
+    if share is None:
+        if isinstance(budget_reason, str) and budget_reason.startswith("stale"):
+            mode = "stale"
+        return {
+            "share": None,
+            "mode": mode,
+            "risk": None,
+            "cost_exponent": 1.0,
+            "budget_ms": td_ms,
+        }
+    return {
+        "share": share,
+        "mode": mode,
+        "risk": clamped_risk(risk) if mode == "share" else None,
+        "cost_exponent": float(model["budget"]["cost_exponent"]),
+        "budget_ms": round(share * total_ms),
+    }
