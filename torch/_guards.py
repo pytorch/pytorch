@@ -286,6 +286,7 @@ class Guard:
     # serialize_guards refuses it.
     _unserializable: type | None = None
     _force_dict_keys_match: bool = False
+    creation_label: str | None = dataclasses.field(default=None, compare=False)
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -739,8 +740,15 @@ class GuardsSet:
         self._clear_guard_labels()
 
     def add(
-        self, guard: Guard, *, collect_debug_stack: bool = True, skip: int = 0
+        self,
+        guard: Guard,
+        *,
+        label: str | None = None,
+        collect_debug_stack: bool = True,
+        skip: int = 0,
     ) -> None:
+        if label is not None:
+            self._add_guard_labels(GuardKey.from_guard(guard), (label,))
         if guard in self.inner:
             return
         if collect_debug_stack:
@@ -1612,7 +1620,10 @@ class Source:
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
         if self.guard_source is GuardSource.CONSTANT:
             raise NotImplementedError
-        return Guard(self, fn)
+        creation_label = None
+        if tracing_context := TracingContext.try_get():
+            creation_label = tracing_context.guards_context.current_guard_label
+        return Guard(self, fn, creation_label=creation_label)
 
     def is_specialized_nn_module(self) -> bool:
         return self.guard_source.is_specialized_nn_module()
