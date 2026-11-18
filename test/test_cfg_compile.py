@@ -2087,6 +2087,18 @@ class TestCfgMoreBytecodes(TestCase):
                 compiled(bad)
             self.assertEqual(str(got.exception), str(expected.exception))
 
+    def test_jump_to_an_instruction_with_extended_arg(self):
+        # A loop long enough that its header takes an EXTENDED_ARG prefix,
+        # which is what the jump back to it then names.
+        body = "".join(f"        x = x + {k}\n" for k in range(120))
+        namespace = {}
+        exec(f"def big(x, n):\n    for i in range(n):\n{body}    return x\n", namespace)
+        big = namespace["big"]
+        self.assertIn("EXTENDED_ARG", [ins.opname for ins in dis.get_instructions(big)])
+        compiled = torch.cfg_compile(big, fallback=False)
+        self.assertEqual(compiled(0, 3), big(0, 3))
+        self.assertEqual(compiled(torch.zeros(2), 2), big(torch.zeros(2), 2))
+
     def test_optimizer_step_is_compiled(self):
         def step(opt):
             opt.zero_grad()
