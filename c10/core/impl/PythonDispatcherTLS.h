@@ -8,7 +8,6 @@ namespace c10::impl {
 struct C10_API PythonDispatcherTLS {
   static void set_state(PyInterpreter* state);
   static PyInterpreter* get_state();
-  static PyInterpreter* get_state_for_pre_dispatch();
   static void reset_state();
 };
 
