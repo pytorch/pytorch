@@ -2,6 +2,7 @@
 
 import operator
 import unittest
+from unittest import mock
 
 import torch
 import torch._inductor.config as inductor_config
