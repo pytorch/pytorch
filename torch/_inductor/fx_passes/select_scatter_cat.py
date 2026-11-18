@@ -1,5 +1,16 @@
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.pattern_matcher import (
+    CallFunction,
+    FailedMatch,
+    Ignored,
+    Match,
+    MatchContext,
+    MatchResult,
+    MULTIPLE,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .reinplace import graph_call_function
@@ -66,20 +77,31 @@ def _validate_chain(
     return base, sources
 
 
-def select_scatter_cat_pass(graph: torch.fx.Graph) -> bool:
-    aten = torch.ops.aten
-    rewrites = 0
-    for tail in list(graph.nodes):
-        if tail.target is not aten.select_scatter.default or any(
+class _SelectScatterChainPattern(CallFunction):
+    def __init__(self) -> None:
+        super().__init__(
+            torch.ops.aten.select_scatter.default,
+            Ignored(),
+            Ignored(),
+            0,
+            Ignored(),
+            _users=MULTIPLE,
+        )
+
+    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
+        match = super()._match(node, ctx)
+        if not isinstance(match, Match):
+            return match
+        aten = torch.ops.aten
+        if any(
             user.target is aten.select_scatter.default
             and user.args
-            and user.args[0] is tail
-            for user in tail.users
+            and user.args[0] is node
+            for user in node.users
         ):
-            continue
+            return FailedMatch("not a scatter chain tail")
 
         chain = []
-        node = tail
         while node.target is aten.select_scatter.default and node.args:
             chain.append(node)
             base = node.args[0]
@@ -90,26 +112,37 @@ def select_scatter_cat_pass(graph: torch.fx.Graph) -> bool:
             ):
                 break
             node = base
-        if not chain or (validated := _validate_chain(chain)) is None:
-            continue
+        if (validated := _validate_chain(chain)) is None:
+            return FailedMatch("unsupported scatter chain")
 
         base, sources = validated
-        with graph.inserting_before(tail):
-            pieces = [
-                graph_call_function(graph, aten.unsqueeze.default, sources[index], 0)
-                if index in sources
-                else graph_call_function(
-                    graph, aten.slice.Tensor, base, 0, index, index + 1
-                )
-                for index in range(base.meta["val"].shape[0])
-            ]
-            result = graph_call_function(graph, aten.cat.default, pieces, 0)
-        tail.replace_all_uses_with(result)
-        for node in chain:
-            if not node.users:
-                graph.erase_node(node)
-        rewrites += 1
+        match.nodes = list(reversed(chain))
+        match.kwargs = {"base": base, "sources": sources}
+        return match
 
+
+_patterns = PatternMatcherPass(pass_name="select_scatter_cat")
+
+
+@register_graph_pattern(_SelectScatterChainPattern(), pass_dict=_patterns)
+def _rewrite_chain(
+    match: Match, *, base: torch.fx.Node, sources: dict[int, torch.fx.Node]
+) -> None:
+    graph = match.graph
+    aten = torch.ops.aten
+    pieces = [
+        graph_call_function(graph, aten.unsqueeze.default, sources[index], 0)
+        if index in sources
+        else graph_call_function(graph, aten.slice.Tensor, base, 0, index, index + 1)
+        for index in range(base.meta["val"].shape[0])
+    ]
+    result = graph_call_function(graph, aten.cat.default, pieces, 0)
+    match.output_node().replace_all_uses_with(result)
+    match.erase_nodes()
+
+
+def select_scatter_cat_pass(graph: torch.fx.Graph) -> bool:
+    rewrites = _patterns.apply(graph)
     if rewrites:
         graph.eliminate_dead_code()
         graph.lint()

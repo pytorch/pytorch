@@ -1089,11 +1089,15 @@ class TestSelectScatterCat(InductorTestCase):
         before = sum(n.target is aten.select_scatter.default for n in gm.graph.nodes)
         self.assertGreater(before, 0)
         count = counters["inductor"]["select_scatter_cat"]
+        pattern_count = counters["inductor"]["pattern_matcher_count"]
         fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
         with V.set_fake_mode(fake_mode):
             changed = select_scatter_cat_pass(gm.graph)
             FakeTensorUpdater(gm).incremental_update()
         self.assertEqual(changed, expected)
+        self.assertEqual(
+            counters["inductor"]["pattern_matcher_count"] - pattern_count, int(expected)
+        )
         self.assertEqual(
             counters["inductor"]["select_scatter_cat"] - count, int(expected)
         )
@@ -1156,6 +1160,60 @@ class TestSelectScatterCat(InductorTestCase):
             return result
 
         self._check_fx(fn, args, True)
+
+    def test_interleaved_producers(self, device):
+        def fn(a, b):
+            base = torch.zeros((2, 3, 2), device=device)
+            first = aten.select_scatter.default(base, a.sin(), 0, 0)
+            source = b.cos()
+            return aten.select_scatter.default(first, source, 0, 1)
+
+        args = (torch.randn(3, 2, device=device), torch.randn(3, 2, device=device))
+        self._check_fx(fn, args, True)
+
+    def test_multiple_chains(self, device):
+        def fn(a, b):
+            base = torch.zeros((2, 3, 2), device=device)
+            first = aten.select_scatter.default(base, a, 0, 0)
+            first = aten.select_scatter.default(first, b, 0, 1)
+            second = aten.select_scatter.default(base, b, 0, 0)
+            second = aten.select_scatter.default(second, a, 0, 1)
+            return first, second
+
+        args = (torch.randn(3, 2, device=device), torch.randn(3, 2, device=device))
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        count = counters["inductor"]["select_scatter_cat"]
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            self.assertTrue(select_scatter_cat_pass(gm.graph))
+        self.assertEqual(counters["inductor"]["select_scatter_cat"] - count, 2)
+        self.assertEqual(sum(n.target is aten.cat.default for n in gm.graph.nodes), 2)
+        self.assertFalse(
+            any(n.target is aten.select_scatter.default for n in gm.graph.nodes)
+        )
+        gm.recompile()
+        self.assertEqual(gm(*args), fn(*args))
+
+    def test_mutation_barrier(self, device):
+        def fn(a, b):
+            base = torch.zeros((2, 3, 2), device=device)
+            first = aten.select_scatter.default(base, a, 0, 0)
+            a.add_(1)
+            return aten.select_scatter.default(first, b, 0, 1)
+
+        args = (torch.randn(3, 2, device=device), torch.randn(3, 2, device=device))
+        reference_args = tuple(arg.clone() for arg in args)
+        reference = fn(*reference_args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            self.assertFalse(select_scatter_cat_pass(gm.graph))
+        self.assertEqual(
+            sum(n.target is aten.select_scatter.default for n in gm.graph.nodes), 2
+        )
+        gm.recompile()
+        self.assertEqual(gm(*args), reference)
+        self.assertEqual(args, reference_args)
 
     def test_input_base(self, device):
         def fn(base, a, b):

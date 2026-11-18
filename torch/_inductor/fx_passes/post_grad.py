@@ -681,12 +681,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             gm, "replace_collectives_with_low_contention"
         ).apply_graph_pass(replace_collectives_with_low_contention)
 
-    if config.pattern_matcher:
-        rewritten = GraphTransformObserver(gm, "select_scatter_cat").apply_graph_pass(
-            select_scatter_cat_pass
-        )
-        if rewritten:
-            fake_tensor_updater.incremental_update()
+    if config.pattern_matcher and select_scatter_cat_pass(gm.graph):
+        fake_tensor_updater.incremental_update()
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
