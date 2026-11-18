@@ -75,6 +75,10 @@ _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
         # them. False cannot turn off tuning that max_autotune enables, or
         # pointwise multi-config tuning that triton.autotune_pointwise enables.
         "max_autotune_pointwise",
+        # Unlike the keys above, read outside the region: by compile_fx, and by
+        # the enclosing graph's scheduler, which gives a first-level region set
+        # to False its own uncaptured partition (see _validate_region_cudagraphs
+        # for what is rejected). Forward options only; it covers the backward too.
         "triton.cudagraphs",
     }
 )
@@ -99,6 +103,12 @@ def _validate_nested_region_inductor_config_patches(
             raise ValueError(
                 f"Inductor config key '{key}' is not supported in {context}"
                 "nested compile-region options"
+            )
+        if key == "triton.cudagraphs" and direction == "backward":
+            raise ValueError(
+                "Inductor config key 'triton.cudagraphs' is not supported in "
+                "backward nested compile-region options: the forward setting "
+                "applies to both directions"
             )
 
 

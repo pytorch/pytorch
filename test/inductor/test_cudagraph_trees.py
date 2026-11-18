@@ -991,8 +991,7 @@ if HAS_CUDA_AND_TRITON:
                 config.patch("triton.cudagraphs", not cudagraphs_per_partition),
                 _force_partition_plan(
                     GraphPartitionPlan(
-                        GraphPartitionMode.CONFIG,
-                        cudagraphs_top_level=cudagraphs_per_partition,
+                        GraphPartitionMode.FROM_CONFIG,
                         cudagraphs_per_partition=cudagraphs_per_partition,
                     )
                 ),
@@ -1020,7 +1019,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @parametrize(
-            "split_into_partitions,cudagraphs_per_partition",
+            "uses_graph_partition,cudagraphs_per_partition",
             [(False, False), (True, False), (True, True)],
         )
         @parametrize("cudagraphs", [False, True])
@@ -1033,7 +1032,7 @@ if HAS_CUDA_AND_TRITON:
         )
         def test_partition_reorder_follows_graph_lowering(
             self,
-            split_into_partitions,
+            uses_graph_partition,
             cudagraphs_per_partition,
             cudagraphs,
             graph_partition,
@@ -1056,10 +1055,9 @@ if HAS_CUDA_AND_TRITON:
                 ),
                 _force_partition_plan(
                     GraphPartitionPlan(
-                        GraphPartitionMode.CONFIG
-                        if split_into_partitions
+                        GraphPartitionMode.FROM_CONFIG
+                        if uses_graph_partition
                         else GraphPartitionMode.NONE,
-                        cudagraphs_top_level=cudagraphs,
                         cudagraphs_per_partition=cudagraphs_per_partition,
                     )
                 ),
