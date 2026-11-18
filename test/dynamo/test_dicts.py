@@ -152,6 +152,148 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    def test_lazy_dict_get_return(self, mapping_type):
+        def fn(x, d):
+            return x + 1, d.get("x", 10)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = mapping_type()
+        d.update({"mask": torch.ones(1), "x": 1})
+        self.assertEqual(opt_fn(x, d), (x + 1, 1))
+        self.assertEqual(counter.frame_count, 1)
+        d["x"] = 5
+        self.assertEqual(opt_fn(x, d), (x + 1, 5))
+        self.assertEqual(counter.frame_count, 1)
+        del d["x"]
+        self.assertEqual(opt_fn(x, d), (x + 1, 10))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("use_lazy_get", [True, False])
+    def test_lazy_source_guard_registration(self, use_lazy_get):
+        from torch._dynamo.guards import GuardBuilder
+
+        if use_lazy_get:
+
+            def fn(x, d):
+                return x + 1, d.get("x", 10)
+        else:
+
+            def fn(x, d):
+                return x + 1, d["x"]
+
+        observed_guards = []
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_export_fn=observed_guards.extend
+        )(fn)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x, {"x": 1}), (x + 1, 1))
+        self.assertEqual(
+            sum(
+                guard.inner_create_fn() is GuardBuilder.DICT_CONTAINS
+                for guard in observed_guards
+            ),
+            1 if use_lazy_get else 0,
+        )
+
+    @parametrize("consumer", ["nested", "computed"])
+    def test_lazy_dict_lookup_consumers(self, consumer):
+        def fn(x, d):
+            if consumer == "after_write":
+                d["unrelated"] = None
+            value = d.get("x", 10)
+            if consumer == "store":
+                d["out"] = value
+                return x + 1
+            if consumer == "nested":
+                temporary = {"out": [value]}
+                return x + 1, temporary["out"][0]
+            if consumer == "computed":
+                value = value + 1
+            return x + 1, value
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"mask": torch.ones(1), "x": 1}
+        for value in (1, 5, None):
+            if value is None:
+                del d["x"]
+            else:
+                d["x"] = value
+            expected = 10 if value is None else value
+            result = opt_fn(x, d)
+            if consumer == "store":
+                self.assertEqual(result, x + 1)
+                self.assertEqual(d["out"], expected)
+            else:
+                self.assertEqual(result, (x + 1, expected + (consumer == "computed")))
+            self.assertEqual(counter.frame_count, 2 if value is None else 1)
+
+    def test_lazy_dict_get_lookup_argument(self):
+        def fn(x, d, lookup):
+            return x + 1, d.get(lookup, 10)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"mask": torch.ones(1), "a": 1, "b": 5}
+        self.assertEqual(opt_fn(x, d, "a"), (x + 1, 1))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(opt_fn(x, d, "b"), (x + 1, 5))
+        self.assertEqual(counter.frame_count, 2)
+        del d["b"]
+        self.assertEqual(opt_fn(x, d, "b"), (x + 1, 10))
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_lazy_dict_get_inserted_key(self):
+        def fn(x, d):
+            d["new"] = d["x"]
+            return x + 1, d.get("new", 10)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"x": 1}
+        self.assertEqual(opt_fn(x, d), (x + 1, 1))
+        self.assertEqual(d, {"x": 1, "new": 1})
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("consumer", ["lazy_constant", "computed", "lazy_variable"])
+    def test_discarded_dict_get_does_not_guard_membership(self, consumer):
+        def fn(x, d):
+            if consumer == "computed":
+                d.get("unused", 10) + 1
+            else:
+                d.get("unused", 10)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"unused": {torch.ones(1)} if consumer == "lazy_variable" else 1}
+        self.assertEqual(opt_fn(x, d), x + 1)
+        del d["unused"]
+        self.assertEqual(opt_fn(x, d), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_lazy_dict_get_graph_break(self):
+        def fn(x, d):
+            value = d.get("x", 10)
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y + 1, value
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        d = {"mask": torch.ones(1), "x": 1}
+        self.assertEqual(opt_fn(x, d), (x + 2, 1))
+        del d["x"]
+        self.assertEqual(opt_fn(x, d), (x + 2, 10))
+
     def test_ordered_dict_input_move_preserves_writeback_order(self):
         def fn(x, mapping):
             mapping["c"], mapping["d"] = 1, 2
