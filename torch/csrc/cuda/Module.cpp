@@ -2063,8 +2063,8 @@ PyObject* THCPModule_cuda_tunableop_wildcard_fallback_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_tunableop_nearest_match_enable(
-    PyObject* _unused,
+static PyObject* THCPModule_cuda_tunableop_nearest_match_enable(
+    PyObject* /* unused */,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -2077,9 +2077,9 @@ PyObject* THCPModule_cuda_tunableop_nearest_match_enable(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_tunableop_nearest_match_is_enabled(
-    PyObject* _unused,
-    PyObject* noarg) {
+static PyObject* THCPModule_cuda_tunableop_nearest_match_is_enabled(
+    PyObject* /* unused */,
+    PyObject* /* noarg */) {
   HANDLE_TH_ERRORS
   if (at::cuda::tunable::getTuningContext()->IsNearestMatchEnabled()) {
     Py_RETURN_TRUE;
@@ -2089,8 +2089,8 @@ PyObject* THCPModule_cuda_tunableop_nearest_match_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_tunableop_record_borrowed_enable(
-    PyObject* _unused,
+static PyObject* THCPModule_cuda_tunableop_record_borrowed_enable(
+    PyObject* /* unused */,
     PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -2103,9 +2103,9 @@ PyObject* THCPModule_cuda_tunableop_record_borrowed_enable(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_tunableop_record_borrowed_is_enabled(
-    PyObject* _unused,
-    PyObject* noarg) {
+static PyObject* THCPModule_cuda_tunableop_record_borrowed_is_enabled(
+    PyObject* /* unused */,
+    PyObject* /* noarg */) {
   HANDLE_TH_ERRORS
   if (at::cuda::tunable::getTuningContext()->IsRecordBorrowedEnabled()) {
     Py_RETURN_TRUE;
