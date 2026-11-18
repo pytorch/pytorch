@@ -250,6 +250,7 @@ class TestComplexTensorGeneric(TestCase):
     @parametrize(
         "start_is_tensor, end_is_tensor", [(True, True), (True, False), (False, True)]
     )
+    @unMarkDynamoStrictTest  # `.item()` isn't supported for complex yet.
     def test_space_complex_endpoints(self, op_name, start_is_tensor, end_is_tensor):
         from torch._subclasses.complex_tensor import ComplexTensor
 
