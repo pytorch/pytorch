@@ -5,6 +5,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/flat_hash_map.h>
@@ -26,6 +27,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 #include <utility>
 
@@ -245,6 +247,8 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   post_process_t eventPostProcessCb;
 };
 
+void closeGlobalCallbackSession();
+
 // Coordinates one global RecordFunction callback session (KINETO_ONDEMAND, or
 // KINETO with profile_all_threads) against teardown. Those callbacks fire on
 // every thread and touch the profiler state while disableProfiler() finalizes
@@ -280,9 +284,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 class GlobalCallbackSession {
  public:
   GlobalCallbackSession() = default;
-  ~GlobalCallbackSession() = default;
+  ~GlobalCallbackSession() = delete;
 
-  // Single, static instance only: neither copyable nor movable.
+  // Single, leaked instance only: neither copyable nor movable.
   GlobalCallbackSession(const GlobalCallbackSession&) = delete;
   GlobalCallbackSession& operator=(const GlobalCallbackSession&) = delete;
   GlobalCallbackSession(GlobalCallbackSession&&) = delete;
@@ -305,6 +309,10 @@ class GlobalCallbackSession {
                       "operations.";
       return;
     }
+    // Registering after Kineto and the global profiler state exist makes the
+    // handler run before their static destructors.
+    static c10::once_flag exit_hook;
+    c10::call_once(exit_hook, [] { std::atexit(closeGlobalCallbackSession); });
     if (new_session) {
       generation_.fetch_add(1);
     }
@@ -397,6 +405,13 @@ class GlobalCallbackSession {
 // Intentionally leaked: callbacks on other threads still check it during
 // static destruction at exit.
 GlobalCallbackSession& global_callback_session = *new GlobalCallbackSession();
+
+void closeGlobalCallbackSession() {
+  global_callback_session.markClosed();
+  if (!global_callback_session.drain()) {
+    LOG(ERROR) << "Timed out draining global profiler callbacks at exit.";
+  }
+}
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
@@ -878,13 +893,6 @@ void enableProfiler(
     state_info_ptr->state_ptr = std::move(state_ptr);
     state_info_ptr->scopes = scopes;
     profilerStateInfo() = std::move(state_info_ptr);
-  }
-}
-
-void closeGlobalCallbackSession() {
-  global_callback_session.markClosed();
-  if (!global_callback_session.drain()) {
-    LOG(ERROR) << "Timed out draining global profiler callbacks at exit.";
   }
 }
 
