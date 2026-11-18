@@ -1789,6 +1789,53 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         return DynamoConfigPatchProxy
 
 
+class GuardContextVariable(ContextWrappingVariable):
+    """Compile-time guard labels, with one cleanup scope per context entry."""
+
+    def __init__(self, target_values: tuple[str], **kwargs: Any) -> None:
+        if type(target_values[0]) is not str:
+            unimplemented(
+                gb_type="guard_ctx label is a str subclass",
+                context="",
+                explanation="A str subclass guard label may invoke user-defined truthiness and cannot be reconstructed as constant metadata.",
+                hints=["Use a plain str label with torch.compiler.guard_ctx."],
+            )
+        super().__init__(target_values, **kwargs)
+        self.state: list[ContextWrappingVariable] = []
+
+    def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        context = tx.output.tracing_context.guards_context
+        previous = context.current_guard_label
+        context.current_guard_label = self.target_values[0]
+        entry = ContextWrappingVariable(None)  # noqa: RVT001
+        entry.set_cleanup_hook(
+            tx, lambda: setattr(context, "current_guard_label", previous)
+        )
+        self.state.append(entry)
+        return variables.ConstantVariable.create(None)
+
+    def exit(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+    ) -> VariableTracker:
+        return self.state.pop().exit(tx, *args)
+
+    def module_name(self) -> str:
+        return "torch.compiler"
+
+    def fn_name(self) -> str:
+        # WithExitFunctionVariable reconstructs this factory for resume reentry.
+        return "guard_ctx"
+
+    def python_type(self) -> type:
+        return torch._guards._GuardContext
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "label":
+            return variables.ConstantVariable.create(self.target_values[0])
+        return super().tp_getattro_impl(tx, name)
+
 class ErrorOnGraphBreakVariable(ContextWrappingVariable):
     """represents torch._dynamo.error_on_graph_break"""
 
