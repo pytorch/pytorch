@@ -111,16 +111,25 @@ def export(
     An autocast that is already active when :func:`export` is called is not
     recorded in the graph. Export still traces under it, so the dtypes in the
     graph follow it, but the graph has none of the casts that autocast inserts.
-    To keep the autocast, do one of these:
+    To keep the autocast when you export with the default ``strict=False``, do
+    one of these:
 
     - Enter :class:`torch.autocast` inside ``forward``. Export records it as a
-      region of the graph. Modules called inside the region are not visible to
-      :func:`~torch.export.unflatten.unflatten`, so for a model you plan to
-      unflatten, enter the autocast inside the submodules instead.
-    - Run the module returned by :meth:`ExportedProgram.module`, or lower the
-      program with :meth:`ExportedProgram.run_decompositions` or
-      :func:`torch._inductor.aoti_compile_and_package`, under the same
-      autocast.
+      region of the graph. A submodule called inside the region cannot be
+      swapped or preserved by :func:`~torch.export.unflatten.unflatten`, so for
+      a model you plan to unflatten, enter the autocast inside the submodules
+      instead.
+    - Call the module returned by :meth:`ExportedProgram.module` inside the
+      same autocast. This adds nothing to the program, so every caller has to
+      enter the autocast.
+    - Lower the program inside the same autocast with
+      :meth:`ExportedProgram.run_decompositions` or
+      :func:`torch._inductor.aoti_compile_and_package`. This adds the casts to
+      the lowered program, so run the lowered program outside the autocast.
+
+    With ``strict=True``, export currently traces an autocast region in
+    ``forward`` without its autocast, so dtypes in and after that region can be
+    wrong.
 
     Args:
         mod: We will trace the forward method of this module.

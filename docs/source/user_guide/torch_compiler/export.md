@@ -657,16 +657,25 @@ it, so the dtypes in the graph follow the autocast, but the graph has none of
 the casts that autocast inserts. When the exported program runs outside that
 autocast, it gives different results, or fails with a dtype mismatch.
 
-To keep the autocast, do one of these:
+To keep the autocast when you export with the default `strict=False`, do one
+of these:
 
 - Enter {class}`torch.autocast` inside `forward`. Export records it as a region
-  of the graph. Modules called inside the region are not visible to
-  {func}`~torch.export.unflatten.unflatten`, so for a model you plan to
-  unflatten, enter the autocast inside the submodules instead.
-- Run or lower the exported program under the same autocast: call the module
-  returned by {meth}`~torch.export.ExportedProgram.module`, or call
+  of the graph. A submodule called inside the region cannot be swapped or
+  preserved by {func}`~torch.export.unflatten.unflatten`, so for a model you
+  plan to unflatten, enter the autocast inside the submodules instead.
+- Call the module returned by
+  {meth}`ExportedProgram.module() <torch.export.ExportedProgram.module>` inside
+  the same autocast. This adds nothing to the program, so every caller has to
+  enter the autocast, and a saved copy runs without it.
+- Lower the program inside the same autocast with
   {meth}`~torch.export.ExportedProgram.run_decompositions` or
-  {func}`torch._inductor.aoti_compile_and_package`, inside it.
+  {func}`torch._inductor.aoti_compile_and_package`. This adds the casts to the
+  lowered program, so run the lowered program outside the autocast.
+
+With `strict=True`, export currently traces an autocast region in `forward`
+without its autocast. Dtypes in and after that region can then be wrong, and
+the exported program can fail with a dtype mismatch.
 
 In this example the autocast starts inside `forward`, so the program returns
 bfloat16 even outside any autocast:
@@ -683,6 +692,9 @@ x, y = torch.randn(4, 4), torch.randn(4, 4)
 ep = torch.export.export(M(), (x, y))
 print(ep.module()(x, y).dtype)  # torch.bfloat16
 ```
+
+Recording an outer autocast in the exported program is tracked in
+[#205461](https://github.com/pytorch/pytorch/issues/205461).
 
 ## Read More
 

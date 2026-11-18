@@ -15759,6 +15759,10 @@ def forward(self, x, b_t, y):
         x, y = torch.randn(4, 4), torch.randn(4, 4)
         with torch.autocast("cpu", dtype=torch.bfloat16):
             ep = export(Model(), (x, y))
+        out = ep.graph.find_nodes(op="output")[0].args[0][0]
+        self.assertEqual(out.meta["val"].dtype, torch.bfloat16)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(ep.module()(x, y).dtype, torch.bfloat16)
         expected = torch.float32
         if is_training_ir_test(self._testMethodName):
             # These variants lower inside the autocast, which records the casts.
