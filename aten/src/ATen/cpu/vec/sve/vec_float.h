@@ -812,6 +812,12 @@ inline void convert(const float* src, float* dst, int64_t n) {
   }
 }
 
+// The Half conversions below access Half values as their only member.
+static_assert(
+    std::is_standard_layout_v<at::Half> &&
+    std::is_same_v<decltype(at::Half::x), uint16_t> &&
+    sizeof(at::Half) == sizeof(uint16_t));
+
 template <>
 inline void convert(const float* src, at::Half* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<float>::size();
