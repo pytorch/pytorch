@@ -250,8 +250,7 @@ inline typename std::enable_if_t<std::is_floating_point_v<T>, T> calc_erfinv(
  * Library].
  */
 template <typename scalar_t, bool is_cuda = false>
-C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q)
-    __ubsan_ignore_float_divide_by_zero__ {
+C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
   using acc_t = acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
@@ -351,7 +350,7 @@ C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
   return result;
 }
 
-inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
+inline double trigamma(double x) {
   double sign = +1;
   double result = 0;
   if (x < 0.5) {
@@ -371,7 +370,7 @@ inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   return sign * result;
 }
 
-inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
+inline float trigamma(float x) {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {
