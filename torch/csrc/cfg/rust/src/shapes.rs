@@ -32,7 +32,7 @@ pub fn tensor_key<'py>(
     ints: &Bound<'py, PyList>,
 ) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
     let api = capi::api()
-        .ok_or_else(|| PyRuntimeError::new_err("torch.rewrite is not initialized"))?;
+        .ok_or_else(|| PyRuntimeError::new_err("torch.vm is not initialized"))?;
     let count = tensors.len();
     let mut kinds: Vec<u8> = Vec::with_capacity(count * 24);
     let mut numbers: Vec<i64> = Vec::with_capacity(count * 8 + ints.len());
@@ -77,7 +77,7 @@ pub fn tensor_key<'py>(
 #[pyfunction]
 pub fn tensor_stamp(tensors: &Bound<'_, PyList>) -> PyResult<Option<u64>> {
     let api = capi::api()
-        .ok_or_else(|| PyRuntimeError::new_err("torch.rewrite is not initialized"))?;
+        .ok_or_else(|| PyRuntimeError::new_err("torch.vm is not initialized"))?;
     let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
     let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
     for tensor in tensors.iter() {
