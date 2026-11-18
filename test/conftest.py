@@ -186,9 +186,17 @@ class CppFakeTensorTestSelection:
     def __init__(self, path: str) -> None:
         with open(path) as f:
             self.selectors = json.load(f)["tests"]
+        self.selected_count = 0
 
     def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
         if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED:
+            pruned = session.config.pluginmanager.get_plugin("prune_skips_plugin")
+            if (
+                pruned is not None
+                and self.selected_count
+                and sum(pruned.reasons.values()) == self.selected_count
+            ):
+                return
             stepcurrent = session.config.pluginmanager.get_plugin("stepcurrentplugin")
             if stepcurrent is None or not stepcurrent.exhausted:
                 session.exitstatus = pytest.ExitCode.TESTS_FAILED
@@ -221,6 +229,7 @@ class CppFakeTensorTestSelection:
                     f"C++ FakeTensor selector matched no tests: {selector}"
                 )
             selected.update(matches)
+        self.selected_count = len(selected)
         config.hook.pytest_deselected(
             items=[item for item in items if item not in selected]
         )
