@@ -68,8 +68,8 @@ class DTensorTestBaseUtilCPUTest(DTensorTestBase):
     working as expected on CPU, regardless of the presence of CUDA devices.
     """
 
-    @property
-    def backend(self):
+    @classmethod
+    def backend_str(cls, device) -> str:
         return "gloo"
 
     @property
