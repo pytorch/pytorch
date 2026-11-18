@@ -1,0 +1,106 @@
+#pragma once
+#include <c10/metal/common.h>
+
+#ifdef __METAL_VERSION__
+// Must match at::native::detail::GridSamplerInterpolation
+enum class GridSamplerInterpolation : int32_t {
+  Bilinear = 0,
+  Nearest = 1,
+  Bicubic = 2,
+};
+
+// Must match at::native::detail::GridSamplerPadding
+enum class GridSamplerPadding : int32_t {
+  Zeros = 0,
+  Border = 1,
+  Reflection = 2,
+};
+#else
+#include <ATen/native/GridSamplerUtils.h>
+#include <c10/util/safe_conv.h>
+using at::native::GridSamplerInterpolation;
+using at::native::GridSamplerPadding;
+#endif
+
+template <unsigned N = 5, typename idx_t = int32_t>
+struct GridSamplerParams {
+  int32_t sampler_dims;
+  ::c10::metal::array<idx_t, N> output_sizes;
+  ::c10::metal::array<idx_t, N> output_strides;
+  ::c10::metal::array<idx_t, N> input_sizes;
+  ::c10::metal::array<idx_t, N> input_strides;
+  ::c10::metal::array<idx_t, N> grid_sizes;
+  ::c10::metal::array<idx_t, N> grid_strides;
+  bool align_corners;
+
+#ifndef __METAL_VERSION__
+  GridSamplerParams(
+      const at::TensorBase& output,
+      const at::TensorBase& input,
+      const at::TensorBase& grid,
+      bool align_corners_,
+      const char* output_size_name = "output size",
+      const char* output_stride_name = "output stride")
+      : sampler_dims(N - 2), align_corners(align_corners_) {
+    // A size-one dimension contributes no offset, even if its stride exceeds
+    // idx_t.
+    for (unsigned dim = 0; dim < N; dim++) {
+      output_sizes[dim] =
+          c10::safe_conv<idx_t>(output.size(dim), output_size_name);
+      output_strides[dim] = c10::safe_conv<idx_t>(
+          output.size(dim) == 1 ? 0 : output.stride(dim), output_stride_name);
+      input_sizes[dim] = c10::safe_conv<idx_t>(input.size(dim), "input size");
+      input_strides[dim] = c10::safe_conv<idx_t>(
+          input.size(dim) == 1 ? 0 : input.stride(dim), "input stride");
+      grid_sizes[dim] = c10::safe_conv<idx_t>(grid.size(dim), "grid size");
+      grid_strides[dim] = c10::safe_conv<idx_t>(
+          grid.size(dim) == 1 ? 0 : grid.stride(dim), "grid stride");
+    }
+  }
+#endif
+};
+
+template <unsigned N = 5, typename idx_t = int32_t>
+struct GridSamplerBackwardParams {
+  GridSamplerParams<N, idx_t> forward;
+  ::c10::metal::array<idx_t, N> grad_output_strides;
+  ::c10::metal::array<idx_t, N> grad_input_strides;
+  ::c10::metal::array<idx_t, N> grad_grid_strides;
+  GridSamplerPadding padding_mode;
+  GridSamplerInterpolation interpolation_mode;
+  bool compute_grad_input;
+  bool compute_grad_grid;
+
+#ifndef __METAL_VERSION__
+  GridSamplerBackwardParams(
+      const at::TensorBase& grad_output,
+      const at::TensorBase& input,
+      const at::TensorBase& grid,
+      const at::TensorBase& grad_input,
+      const at::TensorBase& grad_grid,
+      bool align_corners,
+      GridSamplerPadding padding_mode_,
+      GridSamplerInterpolation interpolation_mode_)
+      : forward(
+            grad_output,
+            input,
+            grid,
+            align_corners,
+            "grad_output size",
+            "grad_output stride"),
+        padding_mode(padding_mode_),
+        interpolation_mode(interpolation_mode_),
+        compute_grad_input(grad_input.defined()),
+        compute_grad_grid(
+            interpolation_mode_ != GridSamplerInterpolation::Nearest) {
+    for (unsigned dim = 0; dim < N; dim++) {
+      grad_output_strides[dim] = forward.output_strides[dim];
+      grad_input_strides[dim] = grad_input.defined()
+          ? c10::safe_conv<idx_t>(grad_input.stride(dim), "grad_input stride")
+          : 0;
+      grad_grid_strides[dim] =
+          c10::safe_conv<idx_t>(grad_grid.stride(dim), "grad_grid stride");
+    }
+  }
+#endif
+};

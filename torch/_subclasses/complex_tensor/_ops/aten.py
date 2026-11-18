@@ -178,7 +178,8 @@ def resize__impl(
     # E.g. `from_interleaved` of an empty tensor leaves both components viewing one
     # storage, so they would overlap once resized.
     if self._re.untyped_storage()._cdata == self._im.untyped_storage()._cdata:
-        aten.set_.source_Tensor(self._im, self._im.clone())
+        self._re = self._re.clone()
+        self._im = self._im.clone()
     self._re = aten.resize_(aten.alias(self._re), size, memory_format=memory_format)
     self._im = aten.resize_(aten.alias(self._im), size, memory_format=memory_format)
     _set_wrapper_metadata(self, self._re)

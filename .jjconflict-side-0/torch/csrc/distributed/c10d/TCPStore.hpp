@@ -1,0 +1,189 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+
+#include <torch/csrc/distributed/c10d/Store.hpp>
+
+namespace c10d {
+namespace detail {
+
+// TCPStore is a key-value store used by PyTorch mainly for distributed
+// rendezvous, but for other purposes as well. (e.g., a centralized storage for
+// synchronization among different processes.)
+//
+// It is run via a classic client-server architecture, where the server runs
+// a separate background thread (alternatively we call it daemon thread). The
+// client and server communicate via TCP sockets.
+//
+// The server is an event-driven asynchronous stream processor built on libuv
+// (https://github.com/libuv/libuv).
+//
+// Code structure:
+// ├── TCPStore client side API and server setup code:
+// │   TCPStore.hpp/TCPStore.cpp
+// ├── Server background thread base class:
+// │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
+// ├── LibUVTCPStoreBackend
+// │   TCPStoreLibUvBackend.cpp
+// |   (actual class: `LibUVStoreDaemon`)
+
+class TCPServer;
+
+class TCPClient;
+
+struct SocketAddress {
+  std::string host;
+  std::uint16_t port{};
+};
+
+} // namespace detail
+
+struct TCPStoreOptions {
+  static constexpr std::uint16_t kDefaultPort = 29500;
+
+  std::uint16_t port = kDefaultPort;
+  bool isServer = false;
+  std::optional<std::size_t> numWorkers = std::nullopt;
+  bool waitWorkers = true;
+  std::chrono::milliseconds timeout = Store::kDefaultTimeout;
+
+  // A boolean value indicating whether multiple store instances can be
+  // initialized with the same host:port pair.
+  bool multiTenant = false;
+
+  // If specified, and if isServer is true, the underlying TCPServer will take
+  // over the bound socket associated to this fd. This option is useful to avoid
+  // port assignment races in certain scenarios.
+  std::optional<int> masterListenFd = std::nullopt;
+
+  // Deprecated since 2.16 and ignored; libuv is the only server backend.
+  // Setting it to false warns.
+  bool useLibUV = true;
+
+  // TLS with mutual certificate authentication: PEM certificate (chain),
+  // private key and CA bundle, all three required. Alternatively, TLS 1.3 with
+  // a pre-shared key value of 32 to 256 random bytes, which cannot
+  // be combined with the certificate options. If no tls* option is set, the
+  // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK,PSK_FILE} environment
+  // variables are used instead. All empty/unset settings disable TLS; otherwise
+  // empty values are rejected. TORCH_TCPSTORE_TLS_REQUIRE=1 forbids disabled
+  // TLS. NUL bytes are rejected. Never log the PSK value.
+  std::optional<std::string> tlsCert = std::nullopt;
+  std::optional<std::string> tlsKey = std::nullopt;
+  std::optional<std::string> tlsCa = std::nullopt;
+  std::optional<std::string> tlsPsk = std::nullopt;
+  // Owner-only regular file containing the raw PSK; exclusive with tlsPsk.
+  std::optional<std::string> tlsPskFile = std::nullopt;
+};
+
+class TORCH_API TCPStore : public Store {
+ public:
+  static constexpr std::chrono::milliseconds kConnectRetryDelay{1000};
+
+  explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
+
+  ~TCPStore() override;
+
+  c10::intrusive_ptr<Store> clone() override;
+
+  void set(const std::string& key, const std::vector<uint8_t>& value) override;
+
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& expectedValue,
+      const std::vector<uint8_t>& desiredValue) override;
+
+  std::vector<uint8_t> get(const std::string& key) override;
+
+  int64_t add(const std::string& key, int64_t value) override;
+
+  bool deleteKey(const std::string& key) override;
+
+  bool check(const std::vector<std::string>& keys) override;
+
+  int64_t getNumKeys() override;
+
+  void wait(const std::vector<std::string>& keys) override;
+
+  void wait(
+      const std::vector<std::string>& keys,
+      const std::chrono::milliseconds& timeout) override;
+
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override;
+
+  void multiSet(
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override;
+
+  bool hasExtendedApi() const override;
+
+  void queuePush(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
+
+  int64_t queueLen(const std::string& key) override;
+
+  std::vector<std::string> listKeys() override;
+
+  void barrier(
+      const std::string& key,
+      int64_t world_size,
+      const std::chrono::milliseconds& timeout) override;
+
+  // Waits for all workers to join.
+  void waitForWorkers();
+
+  // Returns the hostname used by the TCPStore.
+  const std::string& getHost() const noexcept {
+    return addr_.host;
+  }
+
+  // Returns the port used by the TCPStore.
+  std::uint16_t getPort() const noexcept {
+    return addr_.port;
+  }
+
+  // Always true; libuv is the only server backend.
+  bool isLibUvBackend() const noexcept {
+    return true;
+  }
+
+  // note(xilunwu): this function is only for internal testing
+  void _splitSet(const std::string& key, const std::vector<uint8_t>& data);
+
+  std::string repr() const;
+
+ private:
+  int64_t incrementValueBy(const std::string& key, int64_t delta);
+
+  void ping();
+  void validate();
+
+  std::vector<uint8_t> doGet(const std::string& key);
+
+  void doWait(
+      c10::ArrayRef<std::string> keys,
+      std::chrono::milliseconds timeout);
+
+  detail::SocketAddress addr_;
+  std::shared_ptr<detail::TCPServer> server_;
+  std::unique_ptr<detail::TCPClient> client_;
+  std::optional<std::size_t> numWorkers_;
+
+  const std::string initKey_ = "init/";
+  const std::string keyPrefix_ = "/";
+  std::mutex activeOpLock_;
+  std::optional<std::string> tlsCert_;
+  std::optional<std::string> tlsKey_;
+  std::optional<std::string> tlsCa_;
+  std::optional<std::string> tlsPsk_;
+};
+
+} // namespace c10d
