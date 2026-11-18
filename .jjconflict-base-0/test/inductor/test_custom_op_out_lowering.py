@@ -1,0 +1,294 @@
+# Owner(s): ["module: inductor"]
+"""
+Tests for inductor lowering of functional custom ops to out-variant via ExternKernelOut.
+"""
+
+import torch
+from torch._C import FileCheck
+from torch._inductor import config
+from torch._inductor.codegen import common
+from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
+
+DEVICES = ("cpu", GPU_TYPE) if HAS_GPU else ("cpu",)
+
+
+@instantiate_parametrized_tests
+class TestCustomOpOutLowering(InductorTestCase):
+    """Tests for lowering functional custom ops to out-variant ExternKernelOut."""
+
+    def _register_add_one_ops(self, lib):
+        """Register a simple add_one op with functional + .out overloads."""
+        lib.define("add_one(Tensor x) -> Tensor")
+        lib.define(
+            "add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=(torch.Tag.out,),
+        )
+
+        def _add_one_impl(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        def _add_one_out_impl(x: torch.Tensor, *, out: torch.Tensor) -> torch.Tensor:
+            out.copy_(x + 1)
+            return out
+
+        lib.impl("add_one", _add_one_impl, "CompositeExplicitAutograd")
+        lib.impl("add_one.out", _add_one_out_impl, "CompositeExplicitAutograd")
+
+        @torch.library.register_fake("mylib::add_one", lib=lib)
+        def _add_one_fake(x):
+            return x.new_empty(x.shape)
+
+        return torch.ops.mylib.add_one, torch.ops.mylib.add_one.out
+
+    @parametrize("device", DEVICES)
+    def test_add_one_lowered_to_out(self, device):
+        """Test that a simple functional op gets lowered to its out-variant."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            self._register_add_one_ops(lib)
+
+            def f(x):
+                return torch.ops.mylib.add_one(x)
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+
+            FileCheck().check(".out(").check_not(".default(").run(code)
+
+    @parametrize("device", DEVICES)
+    def test_add_one_lowered_to_out_dynamic_shape(self, device):
+        """Out-variant lowering with symbolic output shape (see #185503)."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            self._register_add_one_ops(lib)
+
+            def f(x):
+                return torch.ops.mylib.add_one(x)
+
+            x = torch.randn(4, 8, device=device)
+            torch._dynamo.mark_dynamic(x, 0)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True, dynamic=True),
+                x,
+            )
+            self.assertEqual(compiled_out, eager_out)
+            FileCheck().check(".out(").check_not(".default(").run(code)
+
+    def _register_split_add_ops(self, lib):
+        """Register a split_add op returning two tensors with functional + .out overloads."""
+        lib.define("split_add(Tensor x, float a, float b) -> (Tensor, Tensor)")
+        lib.define(
+            "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
+            tags=(torch.Tag.out,),
+        )
+
+        def _split_add_impl(x, a, b):
+            return (x + a, x + b)
+
+        def _split_add_out_impl(x, a, b, *, out0, out1):
+            out0.copy_(x + a)
+            out1.copy_(x + b)
+            return (out0, out1)
+
+        lib.impl("split_add", _split_add_impl, "CompositeExplicitAutograd")
+        lib.impl("split_add.out", _split_add_out_impl, "CompositeExplicitAutograd")
+
+        @torch.library.register_fake("mylib::split_add", lib=lib)
+        def _split_add_fake(x, a, b):
+            return (x.new_empty(x.shape), x.new_empty(x.shape))
+
+        return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
+
+    @parametrize("device", DEVICES)
+    def test_multi_output_lowered_to_out(self, device):
+        """Test a two-output functional op gets lowered to its .out variant."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_split_add_ops(lib)
+
+            def f(x):
+                a, b = torch.ops.mylib.split_add(x, 1.0, 2.0)
+                return a + b
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+            FileCheck().check(".out(").check("out0=").check("out1=").run(code)
+
+    @parametrize("device", DEVICES)
+    def test_op_without_out_variant_falls_through(self, device):
+        """Test that ops without an out-variant fall through to FallbackKernel."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("no_out_op(Tensor x) -> Tensor")
+
+            def _impl(x):
+                return x + 1
+
+            lib.impl("no_out_op", _impl, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::no_out_op", lib=lib)
+            def _fake(x):
+                return x.new_empty(x.shape)
+
+            def f(x):
+                return torch.ops.mylib.no_out_op(x)
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+
+    def test_cpp_wrapper_runtime_dispatch_single_output_fallback(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("no_out_op(Tensor x) -> Tensor")
+
+            def _impl(x):
+                return x + 1
+
+            lib.impl("no_out_op", _impl, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::no_out_op", lib=lib)
+            def _fake(x):
+                return x.new_empty(x.shape)
+
+            def f(x):
+                return torch.ops.mylib.no_out_op(x)
+
+            x = torch.randn(4, 4)
+            eager_out = f(x)
+
+            with config.patch(
+                cpp_wrapper=True, size_asserts=True, force_disable_caches=True
+            ):
+                compiled_out, code = run_and_get_code(
+                    torch.compile(f, backend="inductor", fullgraph=True), x
+                )
+            self.assertEqual(compiled_out, eager_out)
+            source_code = "\n".join(code)
+            FileCheck().check("aoti_torch_call_dispatcher").run(source_code)
+            output_assert = r'assert_size_stride\([^,]+,\s*\{4L?L?,\s*4L?L?\},\s*\{4L?L?,\s*1L?L?\},\s*"torch.ops.mylib.no_out_op.default"(, .*)?\)'
+            wrapper_codegen = common.get_wrapper_codegen_for_device(
+                "cpu", cpp_wrapper=True
+            )
+            if wrapper_codegen.__name__ == "CppWrapperCpuArrayRef":
+                # ArrayRef wrapper tensors are not AtenTensorHandle, so that wrapper
+                # path intentionally does not emit assert_size_stride.
+                self.assertNotRegex(source_code, output_assert)
+            else:
+                FileCheck().check_regex(output_assert).run(source_code)
+            self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
+
+    @parametrize("device", DEVICES)
+    def test_tensorless_op_falls_back_to_cpu(self, device):
+        """An op with no tensor in or out has no device to inherit, so it gets CPU.
+
+        find_device only comes back empty in that case, and there is nothing for the
+        kernel to sit on but the host. It used to be an allowlist of the ops that had
+        hit the assert so far.
+        """
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("tensorless() -> SymInt")
+            lib.impl("tensorless", lambda: 3, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::tensorless", lib=lib)
+            def _tensorless_fake():
+                ctx = torch.library.get_ctx()
+                sym = ctx._shape_env.create_unbacked_symint()
+                constrain_range(sym, min=0)
+                return sym
+
+            def f(x):
+                return x + torch.ops.mylib.tensorless()
+
+            x = torch.zeros(4, device=device)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), torch.full_like(x, 3))
+
+    @parametrize("device", DEVICES)
+    def test_find_device_walks_dict_outputs(self, device):
+        """find_device has to see every container generate_output does.
+
+        generate_output builds a MultiOutput leaf per dict value, so a device it
+        cannot find in a dict is not "no device" -- it is a packed device that
+        contradicts the leaves hanging off it.
+        """
+        from torch._inductor.ir import FallbackKernel
+
+        t = torch.empty(4, device=device)
+        self.assertEqual(FallbackKernel.find_device(None, {"a": t}), t.device)
+        # Nested, because the list branch recurses back through find_device.
+        self.assertEqual(FallbackKernel.find_device(None, [{"a": t}]), t.device)
+        # No tensor anywhere still means no device, leaving the caller's default.
+        self.assertIsNone(FallbackKernel.find_device(None, {"a": 1}))
+
+    def test_dict_output_packs_buffers_not_keys(self):
+        """packed.outputs holds the MultiOutputs, the way the list branch does.
+
+        Iterating a dict yields its keys, so the values have to be asked for
+        explicitly. Dynamo rejects a dict return, so lower an fx graph directly.
+        """
+        from unittest import mock
+
+        from torch._inductor.ir import FallbackKernel, IRNode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        packed = []
+        create = FallbackKernel.create.__func__
+
+        def spy(cls, kernel, *args, **kwargs):
+            out = create(cls, kernel, *args, **kwargs)
+            if isinstance(out, dict):
+                packed.append(next(iter(out.values())).inputs[0])
+            return out
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("dict_out(Tensor x) -> Dict(str, Tensor)")
+            lib.impl(
+                "dict_out",
+                lambda x: {"a": x + 1, "b": x + 2},
+                "CompositeExplicitAutograd",
+            )
+
+            @torch.library.register_fake("mylib::dict_out", lib=lib)
+            def _dict_out_fake(x):
+                return {"a": torch.empty_like(x), "b": torch.empty_like(x)}
+
+            def f(x):
+                d = torch.ops.mylib.dict_out(x)
+                return d["a"] + d["b"]
+
+            x = torch.randn(4)
+            gm = make_fx(f, tracing_mode="fake")(x)
+            with mock.patch.object(FallbackKernel, "create", classmethod(spy)):
+                compiled = torch._inductor.compile(gm, [x])
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(len(packed), 1)
+        for output in packed[0].outputs:
+            self.assertIsInstance(output, IRNode)
+
+
+if __name__ == "__main__":
+    from torch._inductor.test_case import run_tests
+
+    run_tests()

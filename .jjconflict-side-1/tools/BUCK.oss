@@ -1,0 +1,10 @@
+load("//:buckbuild.bzl", "third_party")
+load(":BUCK.bzl", "define_tools_targets")
+
+define_tools_targets(
+    python_binary = python_binary,
+    python_library = python_library,
+    python_test = python_test,
+    third_party = third_party,
+    torchgen_deps = "//torchgen:torchgen",
+)
