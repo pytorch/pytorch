@@ -1110,14 +1110,18 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             # The state depends on which attributes an input has, and the
             # __dict__ VT does not guard on its keys.
             dict_source = self.source and AttrSource(self.source, "__dict__")
-            if dict_source:
+            if dict_source and not is_constant_source(self.source):
                 install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             if istype(self, OrderedDictVariable):
                 # Dynamo does not model the __dict__ of a plain OrderedDict
                 # (setattr on one graph-breaks), so only an input can have one.
-                unmodeled_state = bool(
-                    dict_source and tx.output.resolve_source_value(dict_source)
-                )
+                try:
+                    unmodeled_state = bool(
+                        dict_source and tx.output.resolve_source_value(dict_source)
+                    )
+                except Exception:
+                    # Sources that need guard-scope helpers can't be resolved here.
+                    unmodeled_state = True
             else:
                 unmodeled_state = bool(copyreg._slotnames(py_type))  # type: ignore[attr-defined]
                 state = generic_getattr(tx, self, "__dict__")

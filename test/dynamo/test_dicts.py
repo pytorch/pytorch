@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 
+import copy
 import enum
 import itertools
 import operator
@@ -485,6 +486,26 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_ordered_dict_reduce_constant_result(self):
+        @torch._dynamo.assume_constant_result
+        def constant_mapping():
+            return OrderedDict(a=1, b=2)
+
+        def fn(x):
+            reduced = constant_mapping().__reduce__()
+            return x + 1, reduced[:4], list(reduced[4])
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_ordered_dict_copy_from_tuple_iterator(self):
+        def fn(x, it):
+            return x + 1, copy.copy(next(it))
+
+        x = torch.ones(1)
+        actual = torch.compile(fn, backend="eager")(x, iter((OrderedDict(a=1),)))
+        self.assertEqual(actual, fn(x, iter((OrderedDict(a=1),))))
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("operation", ["repr", "reversed", "enum"])
