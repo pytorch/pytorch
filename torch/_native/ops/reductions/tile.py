@@ -176,30 +176,7 @@ def fold_decoded(
     base_r = tidx
     for _ in cutlass.range(n_full):
         # Inline offsets to avoid a spurious loop-carried value.
-        if const_expr(gidx == "flat"):
-            acc = reduce_fn(
-                acc,
-                acc_dt(
-                    mX[
-                        obase
-                        + _decode_offset(
-                            _rotate(base_r, shift, rb),
-                            rdivs,
-                            rstrides,
-                            npairs,
-                            native_div,
-                        )
-                    ]
-                ),
-                Int32(
-                    obase
-                    + _decode_offset(
-                        _rotate(base_r, shift, rb), rdivs, rstrides, npairs, native_div
-                    )
-                ),
-                True,
-            )
-        elif const_expr(gidx == "chunk"):
+        if const_expr(gidx == "chunk"):
             acc = reduce_fn(
                 acc,
                 acc_dt(
@@ -243,8 +220,6 @@ def fold_decoded(
     )
     off_s = off if valid else in_base
     val = acc_dt(mX[off_s])
-    if const_expr(gidx == "flat"):
-        return reduce_fn(acc, val, Int32(off_s), valid)
     if const_expr(gidx == "chunk"):
         return reduce_fn(acc, val, chunk_base + _rotate(base_r, shift, rb), valid)
     return reduce_fn(acc, val, _rotate(base_r, shift, rb), valid)
@@ -581,7 +556,8 @@ def fold_cols_rolled(
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
-    # A group stages at most 32 elements (vec columns x group rows) in registers.
+    # A group stages vec columns x group rows in registers, at most 32 elements while
+    # vec <= 32.
     group = const_expr(min(16, max(1, 32 // vec)))
     online = nrows
     if const_expr(trait.nfields == 1):
@@ -667,6 +643,20 @@ class TileReduce:
             if axis not in ("row", "general") or itree is None:
                 raise ValueError(
                     "the inner-tree order needs a row or general axis and a plan"
+                )
+            wide = wide_count or wide_red or wide_output
+            if axis == "general" and (
+                combine
+                or flat_tail
+                or ragged_chunk
+                or gidx_from != "r"
+                or wide
+                or itree.stage_e
+            ):
+                raise ValueError(
+                    "the general-axis inner-tree order takes only plain 32-bit decoded rows: "
+                    f"{combine=} {flat_tail=} {ragged_chunk=} {gidx_from=} {wide=} "
+                    f"stage_e={itree.stage_e}"
                 )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
@@ -1365,7 +1355,8 @@ class TileReduce:
         else:
             tma_atom = None
         if const_expr(self.order == "inner_tree"):
-            # Split inner-tree writes one partial per (output, batch).
+            # Every inner-tree shape sizes its grid by output count; split's outputs are
+            # (output, batch) partials.
             nout = mOuts[0].shape[0]
             gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
             gy = Int32(1)
@@ -1376,13 +1367,7 @@ class TileReduce:
                 gx = mOuts[0].shape[0]
                 gy = Int32(1)
         elif const_expr(self.axis == "row"):
-            # Split inner-tree writes (row, batch) partials, so count outputs, not input rows.
-            nout = (
-                mOuts[0].shape[0]
-                if const_expr(self.order == "inner_tree")
-                else mIns[0].shape[0]
-            )
-            gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
+            gx = cute.ceil_div(mIns[0].shape[0], const_expr(self.rows_per_block))
             gy = Int32(1)
         else:
             gx = cute.ceil_div(nchunks, const_expr(self.threads_per_block))
@@ -1452,7 +1437,7 @@ class TileReduce:
         bx, by, _ = cute.arch.block_idx()
         grid_x = cute.arch.grid_dim()[0] if const_expr(self.wide_output) else Int32(0)
         trait = self.trait
-        chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
+        chunk_base = Int32(0)  # set by ragged_chunk and flat_tail, for gidx "chunk"
         shift = None  # set only under rotate_chunks
         batch_idx = None  # split shape only: which batch of the row this block folds
         # Inner-tree thread map, set from its plan.
@@ -1504,9 +1489,7 @@ class TileReduce:
                 else Int32(bx)
             )
             lane = Int32(tx)
-            alive = (
-                raw < Int64(mOuts[0].shape[0]) if const_expr(self.wide_output) else True
-            )
+            alive = raw < cute.size(mOuts[0]) if const_expr(self.wide_output) else True
         elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
                 tx // const_expr(self.threads_per_row)

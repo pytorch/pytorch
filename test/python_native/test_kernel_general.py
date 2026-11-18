@@ -11,6 +11,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
@@ -146,6 +147,20 @@ class TestKernelGeneral(TestCase):
             kg._launch(wide_output, ("wide", "wide_output"), [x], [out])
         self.assertEqual(out, x)
 
+    @largeTensorTest("24GB", device="cuda")
+    def test_wide_outputs_store_every_output(self):
+        """Bound 2^31 outputs by the output's full 64-bit size: a 64-bit extent's
+        shape[0] reads back as Int32 and wraps negative, which stored nothing."""
+        x = torch.ones(2**31, 2, device="cuda", dtype=torch.float16)
+        out = torch.empty(2**31, device="cuda")
+        red, kept = kg._ti_pairs(x, kg._probe(x, {1}))
+        trait = T.SumOps(acc=cutlass.Float32)
+        op = kg.ReduceBlock(trait, count=2, num_o=2**31, red_pairs=red, kept_pairs=kept)
+        kg._launch(op, ("wide", "wide_outputs"), [kg._flat(x)], [out])
+        with torch.backends.python_native.cutedsl.disabled():
+            lo, hi = out.aminmax()
+        self.assertEqual((lo.item(), hi.item()), (2.0, 2.0))
+
     def test_two_stage_row_ragged_split(self):
         # A prime row requires ragged stage-1 chunks that stop at row boundaries.
         x = torch.randn(8, 65537, device="cuda")
@@ -226,7 +241,16 @@ class TestKernelGeneral(TestCase):
             want = x.double().sum((1, 2))
             ours += (got.double() - want).abs().mean().item()
             aten += (ref.double() - want).abs().mean().item()
+        self.assertEqual(_plan_tags("broadcast_split"), {"gensplit1", "gensplit2"})
         self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+        # At 132-148 SMs, 8 outputs split the 301 broadcast steps into 61 chunks of 5, the
+        # last ragged.
+        x = torch.randn(8, 1, 257, device="cuda").expand(8, 301, 257)
+        got = kg.reduce_dim(trait, "broadcast_split_ragged", x, [1, 2], torch.float32)
+        tags = _plan_tags("broadcast_split_ragged")
+        self.assertEqual(tags, {"gensplit1", "gensplit2"})
+        # The worst error over 32 seeds on B200 was 1.1e-3.
+        self.assertEqual(got.double(), x.double().sum((1, 2)), atol=5e-3, rtol=0)
 
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"
@@ -247,6 +271,9 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(lo, expected_lo)
         self.assertEqual(hi, expected_hi)
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_reduce_all_grid_stride_index_and_cache_key(self):
         """Carry global indices and separate fp32/fp64 stage-2 kernels."""
         n = (1 << 20) + 3
@@ -266,6 +293,7 @@ class TestKernelGeneral(TestCase):
             )
             with self.subTest(dtype=dtype):
                 self.assertEqual(out, winner)
+        self.assertEqual(_plan_tags("index_cache_key"), {"all1", "all2"})
 
     def test_noncontiguous_reduce_all_index_is_logical(self):
         """Report row-major logical indices for non-contiguous inputs."""
@@ -279,17 +307,136 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(out, 1)
 
-    def test_empty_inner_tree_reduce_all(self):
-        """Use the reduction identity when an empty input has no tree order."""
-        x = torch.empty(0, device="cuda")
-        with mock.patch.object(rt, "inner_tree_order_enabled", return_value=True):
-            out = kg.reduce_all(
-                T.SumOps(acc=cutlass.Float32),
-                "empty_inner_tree",
-                x,
-                torch.float32,
-            )
-        self.assertEqual(out, torch.zeros((), device="cuda"))
+    def test_ti_row_and_column_views_take_the_fast_kernels(self):
+        """TI views pitched, offset and channels-last layouts as rows or columns at a
+        runtime pitch, so they run the row and column kernels, not the general decode."""
+        from torch._native.ops.reductions import kernel_coltile as ct
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        base = torch.randn(256, 1032, device="cuda")
+        cl = torch.randn(8, 64, 14, 14, device="cuda")
+        cl = cl.contiguous(memory_format=torch.channels_last)
+        cases = (
+            ("pitched_rows", base[:, :1024], [1], rt._CACHE, "rowtile"),
+            ("offset_rows", base[:, 8:], [1], rt._CACHE, "rowtile"),
+            ("channels_last_c", cl, [1], rt._CACHE, "rowtile"),
+            ("pitched_cols", base[:, :1024], [0], ct._CACHE, "coltile"),
+            ("channels_last_nhw", cl, [0, 2, 3], ct._CACHE, "coltile"),
+        )
+        for name, x, dims, cache, tag in cases:
+            with self.subTest(name):
+                key = f"ti_view_{name}"
+                got = kg.reduce_dim(trait, key, x, dims, torch.float32)
+                want = x.double().sum(dims).float()
+                self.assertEqual(got, want, atol=1e-4, rtol=1e-5)
+                self.assertIn(tag, {k[0] for k in cache if k[1] == key})
+
+    def test_overlapping_ti_views_keep_the_general_path(self):
+        """Expanded rows and columns overlap: rows would pick TMA at a zero row stride and
+        columns would lose the general split's broadcast rotation, so both decline."""
+        from torch._native.ops.reductions import kernel_coltile as ct
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        t = torch.randn(64, device="cuda")
+        for name, x, dim in (
+            ("rows", t.expand(16384, 64), 1),
+            ("cols", t.expand(4096, 64), 0),
+        ):
+            with self.subTest(name):
+                key = f"ti_overlap_{name}"
+                got = kg.reduce_dim(trait, key, x, [dim], torch.float32)
+                self.assertEqual(got, x.double().sum(dim).float(), atol=1e-3, rtol=1e-5)
+                self.assertFalse({k[1] for k in (*rt._CACHE, *ct._CACHE)} & {key})
+
+    def test_dense_permuted_full_reduction_takes_the_reduce_all_route(self):
+        """TI flattens a transposed full reduction to the storage's unit-stride run."""
+        y = torch.randn(1024, 1024, device="cuda")
+        trait = T.SumOps(acc=cutlass.Float32)
+        got = kg.reduce_dim(trait, "ti_flat_all", y.t(), [0, 1], torch.float32)
+        want = kg.reduce_all(trait, "ti_flat_all_ref", y, torch.float32)
+        self.assertEqual(got.view(torch.int32), want.view(torch.int32))
+        self.assertFalse(_plan_tags("ti_flat_all") & {"reduce", "gensplit1"})
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_split_index_is_relative_to_an_offset_view(self):
+        """Split an offset view's strided run with a ragged last chunk; indices count
+        from the view."""
+        base = torch.randn(3, 2 * 100003 + 1, device="cuda")
+        x = base[1:, 1::2]
+        x[0, -1] = 100.0  # in the ragged last chunk
+        x[1, 12345] = 100.0
+        got = kg.reduce_dim(
+            T.ArgMaxOps(acc=cutlass.Float32), "split_view_index", x, [1], torch.int32
+        )
+        self.assertEqual(_plan_tags("split_view_index"), {"gensplit1", "gensplit2"})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.argmax(1)
+        self.assertEqual(got, want.to(torch.int32))
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_grid_stride_reduce_all_of_a_sliced_input(self):
+        """Grid-stride a prime-length slice; indices count from the slice."""
+        x = torch.randn(1048583 + 3, device="cuda")[3:]
+        x[-5] = 100.0
+        total = kg.reduce_all(
+            T.SumOps(acc=cutlass.Float32), "all_slice_sum", x, torch.float32
+        )
+        idx = kg.reduce_all(
+            T.ArgMaxOps(acc=cutlass.Float32), "all_slice_index", x, torch.int32
+        )
+        self.assertEqual(_plan_tags("all_slice_sum"), {"all1", "all2"})
+        self.assertEqual(_plan_tags("all_slice_index"), {"all1", "all2"})
+        with torch.backends.python_native.cutedsl.disabled():
+            want_total, want_idx = x.double().sum().float(), x.argmax()
+        self.assertEqual(total, want_total, atol=1e-2, rtol=1e-5)
+        self.assertEqual(idx, want_idx.to(torch.int32))
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_non_dense_full_reduction_splits(self):
+        """Split a full reduction of a strided view, which has no kept pairs."""
+        x = torch.randn(64, 4096, device="cuda")[:, ::2]
+        got = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32), "split_non_dense_all", x, None, torch.float32
+        )
+        self.assertEqual(_plan_tags("split_non_dense_all"), {"gensplit1", "gensplit2"})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.double().sum().float()
+        self.assertEqual(got, want, atol=1e-3, rtol=1e-5)
+
+    def test_oneshot_load_bound(self):
+        """16-bit N = 4097 takes 65 scalar loads at 64 threads and stays one-shot;
+        N = 4161 takes 66."""
+
+        def row(n):
+            return torch.empty(1, n, device="meta", dtype=torch.float16)
+
+        self.assertTrue(kg._oneshot_ok(row(4097)))
+        self.assertFalse(kg._oneshot_ok(row(4161)))
+
+    @largeTensorTest("24GB", device="cuda")
+    def test_wide_rows_skip_the_row_kernels(self):
+        """2^31 outputs or 2^31-element rows skip the fast row path, whose kernels need
+        32-bit extents."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        for key, shape, tags in (
+            ("wide_rows_outputs", (2**31, 2), {"reduce"}),
+            ("wide_rows_count", (2, 2**31), {"gensplit1", "gensplit2"}),
+        ):
+            with self.subTest(shape=shape):
+                x = torch.ones(shape, device="cuda", dtype=torch.float16)
+                got = kg.reduce_dim(trait, key, x, [1], torch.float32)
+                self.assertEqual(_plan_tags(key), tags)
+                with torch.backends.python_native.cutedsl.disabled():
+                    lo, hi = got.aminmax()
+                self.assertEqual(lo.item(), shape[1], atol=0, rtol=1e-4)
+                self.assertEqual(hi.item(), shape[1], atol=0, rtol=1e-4)
+                del x, got
 
     def test_int64_mixed_radix_decode(self):
         """Decode logical indices beyond INT32_MAX without truncating strides or extents."""
@@ -340,8 +487,8 @@ class TestKernelGeneral(TestCase):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
         # check on its documented invalid input.
         trait = T.SumOps(acc=cutlass.Float32)
-        # reduce-all has no flat view of a transposed input, so it ROUTES that through the general
-        # path (which addresses via the TI decode) rather than refusing it.
+        # reduce-all has no flat view of a transposed input, so it routes it through _reduce
+        # (TI's flat view of this dense run) rather than refusing it.
         xt = torch.randn(64, 128, device="cuda").t()
         (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1)
         with torch.backends.python_native.cutedsl.disabled():

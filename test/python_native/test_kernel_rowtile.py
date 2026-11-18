@@ -423,8 +423,8 @@ class TestKernelRowTile(TestCase):
             )
 
     def test_forced_tma_rejects_misaligned_row_stride(self):
-        n = 32
-        x = torch.randn(256, n + 1, device="cuda")[:, :n]
+        # Whole 8-byte vectors at a pitch that is not 16-byte aligned.
+        x = torch.randn(256, 38, device="cuda")[:, :34]
         with self.assertRaisesRegex(ValueError, "16-byte aligned row stride"):
             rt.reduce_row_tile(
                 self._sum_trait(),
