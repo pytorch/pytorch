@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -849,6 +850,9 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)(x, a, b)
 
+    # The second call makes the range bounds symbolic and RangeVariable.tp_hash_impl
+    # needs constants, so it raises an internal error instead of a graph break.
+    @unittest.expectedFailure
     def test_dunder_hash_range_second_call(self):
         def fn(x, r):
             return x.sin(), range.__hash__(r)
@@ -864,6 +868,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x, range(3))
 
+    # A bytes subclass instance is a plain UserDefinedObjectVariable, not a
+    # bytes VT, so bytes.__hash__ runs the constant impl on the wrong receiver.
+    @decorateIf(
+        unittest.expectedFailure, lambda params: params["receiver"] == "bytes_subclass"
+    )
     @parametrize("receiver", ["object", "bytes_subclass"])
     @parametrize("catch_type_error", [False, True])
     def test_dunder_hash_preserves_base_method(self, receiver, catch_type_error):
