@@ -44,6 +44,12 @@ class Arithmetic(NativeCoverage):
         self.STRUCTURED: bool = op not in _UNSTRUCTURED
         self.EXACT: bool = op == "round"
 
+    def _presets(self, dtype: str) -> tuple[tuple[int, int, int], ...]:
+        bits = 64 if dtype == "float64" else 32 if dtype == "float32" else 16
+        return _CFG.pointwise_presets(
+            self.ATEN_OP, max(bits, 32), bits, self.nin, dtype=dtype
+        )
+
     def kernel_precompile_grid(self) -> list[dict[str, Any]]:
         common: dict[str, Any] = {
             "op": self.ATEN_OP,
@@ -55,42 +61,43 @@ class Arithmetic(NativeCoverage):
                 common, dtype=dtype, layout="dense", ept=ept, vec_bits=bits, transpose=0
             )
             for dtype in _DTYPES
-            for ept, bits in (
-                ((1, 128), (2, 128), (4, 128), (4, 256))
-                if dtype == "float64"
-                else ((1, 128), (4, 256))
-                if self.nin == 1 and dtype != "float32"
-                else ((1, 128), (2, 128))
-            )
+            for ept, bits in dict.fromkeys((e, b) for _, e, b in self._presets(dtype))
         ]
         if self.ATEN_OP != "rsub.Tensor":
-            grid.append(
-                dict(
-                    common,
-                    dtype=["float16", "bfloat16", "float32"],
-                    layout="tma",
-                    ept=1,
-                    vec_bits=128,
-                    transpose=list(range(1 << self.nin)),
-                    shape=list(range(len(_CFG.POINTWISE_TMA_SHAPES) + 1)),
+            for shape in range(len(_CFG.POINTWISE_TMA_SHAPES) + 1):
+                first = int(
+                    shape > 0
+                    and _CFG.POINTWISE_TMA_SHAPES[shape - 1][0]
+                    * _CFG.POINTWISE_TMA_SHAPES[shape - 1][1]
+                    < _CFG.POINTWISE_PADDED_TMA_MIN
                 )
-            )
+                grid.append(
+                    dict(
+                        common,
+                        dtype=["float16", "bfloat16", "float32"],
+                        layout="tma",
+                        ept=1,
+                        vec_bits=128,
+                        transpose=list(range(first, 1 << self.nin)),
+                        shape=shape,
+                    )
+                )
         return grid
 
     def cpp_includes(self) -> str:
         return "#include <cmath>\n#include <initializer_list>\n#include <c10/core/impl/COW.h>\n#include <ATen/native/CanUse32BitIndexMath.h>"
 
     def cpp_helpers(self) -> str:
-        high, low = _CFG.POINTWISE_EPT_SCHEDULE[:2]
         shapes = "\n".join(
             f"  if (rows == {r} && cols == {c}) m.shape = {i + 1};"
             for i, (r, c) in enumerate(_CFG.POINTWISE_TMA_SHAPES)
         )
         return f"""
 struct PointwiseAotMatch {{ int layout=0, ept=1, vec_bits=128, transpose=0, shape=0; }};
+struct PointwiseAotPreset {{ at::ScalarType dtype; int64_t min_n; int ept, vec_bits; }};
 inline PointwiseAotMatch pointwise_aot_match(
     std::initializer_list<const at::Tensor*> ins, const at::Tensor* out,
-    const cudaDeviceProp* props) {{
+    const cudaDeviceProp* props, std::initializer_list<PointwiseAotPreset> presets) {{
   const auto& ref = **ins.begin();
   PointwiseAotMatch m;
   if (!ref.is_cuda() || ref.layout() != at::kStrided) return m;
@@ -114,14 +121,8 @@ inline PointwiseAotMatch pointwise_aot_match(
   if (dense) {{
     const auto bits = ref.scalar_type() == at::kDouble ? 64 : 32;
     const double fill = props->multiProcessorCount * props->maxThreadsPerMultiProcessor / double({_CFG.POINTWISE_REFERENCE_LANES});
-    if (bits == 32) {{
-      const bool large = n >= {_CFG.POINTWISE_DENSE_MIN} * fill;
-      const bool narrow_unary = ref.element_size() < 4 && ins.size() == 1;
-      m.ept = large ? (narrow_unary ? 4 : 2) : 1;
-      m.vec_bits = large && narrow_unary ? 256 : 128;
-    }} else {{
-      m.ept = n / (bits / 16) >= {high[0]} * fill ? {high[1]} : n / (bits / 16) >= {low[0]} * fill ? {low[1]} : 1;
-      m.vec_bits = n >= {_CFG.POINTWISE_VEC256_MIN[1]} * fill ? 256 : 128;
+    for (const auto& p : presets) if (p.dtype == ref.scalar_type() && n >= p.min_n * fill) {{
+      m.ept = p.ept; m.vec_bits = p.vec_bits;
     }}
     if (n % (m.vec_bits / bits) == 0) m.layout = 1;
     return m;
@@ -141,7 +142,7 @@ inline PointwiseAotMatch pointwise_aot_match(
     if (trans) {{ m.transpose |= 1 << index; ++transposed; }}
     ++index;
   }}
-  if (transposed == 0 && n < 16 * 1024 * 1024) return m;
+  if (transposed == 0 && n < {_CFG.POINTWISE_PADDED_TMA_MIN}) return m;
   const bool rows_first = transposed > int(ins.size()) - transposed + 1;
   const auto groups = (cols + {_CFG.TMA_TILE * _CFG.TMA_STAGES - 1}) / {_CFG.TMA_TILE * _CFG.TMA_STAGES};
   if ((rows_first ? groups : rows / {_CFG.TMA_TILE}) > 65535) return m;
@@ -161,6 +162,15 @@ inline PointwiseAotMatch pointwise_aot_match(
             if arg.type == expected
         ]
 
+    def _match_call(self, out: str) -> str:
+        inputs = ", ".join("&" + n for n in self._argument_names("Tensor"))
+        presets = ", ".join(
+            f"{{{ctype}, {n}, {e}, {b}}}"
+            for dtype, ctype in _DTYPES.items()
+            for n, e, b in self._presets(dtype)
+        )
+        return f"pointwise_aot_match({{{inputs}}}, {out}, _naot_props, {{{presets}}})"
+
     def _checks(self) -> str:
         check = ""
         for scalar in self._argument_names("Scalar"):
@@ -171,7 +181,6 @@ inline PointwiseAotMatch pointwise_aot_match(
 
     def cpp_covers(self) -> str:
         names = self._argument_names("Tensor")
-        inputs = ", ".join("&" + n for n in names)
         types = " || ".join(
             f"{names[0]}.scalar_type() == {v}" for v in _DTYPES.values()
         )
@@ -179,15 +188,14 @@ inline PointwiseAotMatch pointwise_aot_match(
         layouts = "== 1" if self.ATEN_OP == "rsub.Tensor" else "!= 0"
         return (
             self._checks()
-            + f"if (!({types})) return false;\nreturn pointwise_aot_match({{{inputs}}}, {out}, _naot_props).layout {layouts};"
+            + f"if (!({types})) return false;\nreturn {self._match_call(out)}.layout {layouts};"
         )
 
     def cpp_dispatch_prelude(self) -> str:
-        inputs = ", ".join("&" + n for n in self._argument_names("Tensor"))
         out = "&out" if self.STRUCTURED else "nullptr"
         return (
             self._checks()
-            + f"const auto match = pointwise_aot_match({{{inputs}}}, {out}, _naot_props);\nif (!match.layout) return false;"
+            + f"const auto match = {self._match_call(out)};\nif (!match.layout) return false;"
         )
 
     def cpp_dispatch(self, spec: dict[str, Any]) -> str:

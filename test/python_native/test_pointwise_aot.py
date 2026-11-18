@@ -32,7 +32,7 @@ def _probe(case: str, device: str) -> None:
             torch.bfloat16 if case == "tma_arithmetic_specialized" else torch.float32
         )
         if case.startswith("dense"):
-            dtype = getattr(torch, case.removeprefix("dense_"))
+            dtype = getattr(torch, case.removeprefix("dense_").removesuffix("_large"))
         if case.startswith("tma_arithmetic"):
             rows = 1024 if case == "tma_arithmetic_specialized" else 64
             cols = (
@@ -50,7 +50,8 @@ def _probe(case: str, device: str) -> None:
             else:
                 y = torch.randn(x.shape, device=device)
         else:
-            x = torch.randn(4096, device=device, dtype=dtype)
+            size = 4 * 1024**2 if case.endswith("_large") else 4096
+            x = torch.randn(size, device=device, dtype=dtype)
             y = torch.randn_like(x)
         target = torch.full(x.shape, -127.0, device=device, dtype=dtype)
         with disabled():
@@ -148,6 +149,14 @@ def _fallback(case: str, device: str) -> None:
         check.assertEqual(generator.get_state(), expected_state)
 
 
+def _default_aot_probe(case: str, device: str) -> None:
+    from torch._native.ops.pointwise import transpose_copy
+
+    count = len(transpose_copy._PLANS)
+    _probe(case, device)
+    TestCase().assertEqual(len(transpose_copy._PLANS), count)
+
+
 def _invalid_rng(case: str, device: str) -> None:
     from test.python_native.test_rng_dsl import TestCuTeDSLRngCUDA
 
@@ -188,12 +197,14 @@ class TestPointwiseAot(TestCase):
         if coverage is None or not coverage.is_available(torch.device(device)):
             self.skipTest("AOT artifacts do not cover this CUDA device")
 
-    def _run_probe(self, name: str, *args: object) -> None:
+    def _run_probe(self, name: str, *args: object, jit_enabled: bool = False) -> None:
         source = (
             f"from test.python_native.test_pointwise_aot import {name}; {name}{args!r}"
         )
         env = dict(
-            os.environ, TORCH_DISABLE_NATIVE_JIT="1", TORCH_DISABLE_NATIVE_AOT="0"
+            os.environ,
+            TORCH_DISABLE_NATIVE_JIT="0" if jit_enabled else "1",
+            TORCH_DISABLE_NATIVE_AOT="0",
         )
         code = shell([sys.executable, "-c", source], env=env, timeout=300)
         self.assertEqual(code, 0)
@@ -204,6 +215,7 @@ class TestPointwiseAot(TestCase):
             "dense_float16",
             "dense_bfloat16",
             "dense_float32",
+            "dense_float64_large",
             "tma_arithmetic",
             "tma_arithmetic_square",
             "tma_arithmetic_both",
@@ -220,6 +232,13 @@ class TestPointwiseAot(TestCase):
         op = "copy_" if case.startswith(("copy", "packed")) else "add.Tensor"
         self._require_coverage(op, device)
         self._run_probe("_probe", case, device)
+
+    @parametrize("case", ("copy_payload", "packed2", "packed4"))
+    def test_default_aot_copy_does_not_compile_jit(
+        self, device: str, case: str
+    ) -> None:
+        self._require_coverage("copy_", device)
+        self._run_probe("_default_aot_probe", case, device, jit_enabled=True)
 
     @parametrize("distribution", ("uniform_", "normal_"))
     @parametrize("capture", (False, True))

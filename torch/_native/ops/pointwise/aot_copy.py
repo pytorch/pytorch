@@ -128,7 +128,7 @@ inline at::Tensor transpose_aot_words(const at::Tensor& t, int word, int pack = 
 """
 
     def cpp_covers(self) -> str:
-        return "const auto p = transpose_aot_match(self, src, _naot_props);\nreturn p.layout > 0 && p.layout < 4;"
+        return "const auto p = transpose_aot_match(self, src, _naot_props);\nreturn p.layout > 0;"
 
     def cpp_dispatch_prelude(self) -> str:
         return "const auto p = transpose_aot_match(self, src, _naot_props);\nif (!p.layout) return false;"
