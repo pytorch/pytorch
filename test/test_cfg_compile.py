@@ -26,6 +26,9 @@ class TestDispatchCapture(TestCase):
     def trace(self, fn):
         return torch._C._cfg_dispatch_trace(fn)[1]
 
+    def detail(self, fn):
+        return torch._C._cfg_dispatch_trace(fn, detail=True)[1]
+
     def test_call_and_redispatch_chain(self):
         x, y = torch.randn(3), torch.randn(3)
         self.assertEqual(
@@ -56,6 +59,54 @@ class TestDispatchCapture(TestCase):
         result, records = torch._C._cfg_dispatch_trace(lambda: x * 2)
         self.assertEqual(result, torch.full((3,), 2.0))
         self.assertEqual(records[0][0], "aten::mul.Tensor")
+
+    def test_detail_links_kernels_to_their_callers(self):
+        x, y = torch.randn(3), torch.randn(3)
+        records = self.detail(lambda: x.add_(y))
+        self.assertEqual(
+            [(r["key"], r["parent"]) for r in records],
+            [("AutogradCPU", -1), ("ADInplaceOrView", 0), ("CPU", 1)],
+        )
+        x, w = torch.randn(2, 3), torch.randn(4, 3)
+        records = self.detail(lambda: torch.nn.functional.linear(x, w))
+        self.assertEqual(records[0]["parent"], -1)
+        for r in records[1:]:
+            self.assertEqual(records[r["parent"]]["depth"], r["depth"] - 1)
+
+    def test_detail_marks_kernels_that_raised(self):
+        x, bad = torch.ones(3), torch.ones(4)
+
+        def fn():
+            with self.assertRaisesRegex(RuntimeError, "must match"):
+                torch.add(x, bad)
+            return torch.add(x, x)
+
+        records = self.detail(fn)
+        self.assertEqual([r["threw"] for r in records], [True, True, False, False])
+        self.assertEqual(records[0]["outputs"], ())
+
+    def test_detail_has_the_thread_local_key_sets(self):
+        x, y = torch.randn(3), torch.randn(3)
+        top, backend = self.detail(lambda: torch.add(x, y))
+        excluded = str(torch._C._dispatch_tls_local_exclude_set())
+        self.assertNotIn("AutogradOther", excluded)
+        self.assertEqual(top["tls_excluded"], excluded)
+        # The Autograd kernel excludes the autograd keys before it redispatches.
+        self.assertIn("AutogradOther", backend["tls_excluded"])
+        self.assertEqual(top["tls_included"], backend["tls_included"])
+
+    def test_detail_keeps_inputs_and_outputs_of_top_level_calls(self):
+        x, y = torch.randn(3), torch.randn(3)
+        result, (top, backend) = torch._C._cfg_dispatch_trace(
+            lambda: torch.add(x, y), detail=True
+        )
+        self.assertIs(top["inputs"][0], x)
+        self.assertIs(top["inputs"][1], y)
+        # alpha, a default the argument parser filled in
+        self.assertEqual(top["inputs"][2:], (1,))
+        self.assertEqual(len(top["outputs"]), 1)
+        self.assertIs(top["outputs"][0], result)
+        self.assertEqual((backend["inputs"], backend["outputs"]), (None, None))
 
     def test_exception_propagates(self):
         x = torch.ones(3)
