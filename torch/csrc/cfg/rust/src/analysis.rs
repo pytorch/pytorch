@@ -169,7 +169,19 @@ pub fn analyze(func: &Function) -> Analysis {
         kill.push(k);
     }
 
-    let succs: Vec<Vec<B>> = func.blocks.iter().map(|b| b.term.successors()).collect();
+    // An exception can leave a block at any instruction, so what its handler
+    // needs stays live throughout: the handler counts as a successor.
+    let succs: Vec<Vec<B>> = func
+        .blocks
+        .iter()
+        .map(|b| {
+            let mut succs = b.term.successors();
+            if b.handler != NONE {
+                succs.push(b.handler);
+            }
+            succs
+        })
+        .collect();
     let mut live_in: Vec<BitSet> = gen.clone();
     let mut live_out: Vec<BitSet> = (0..nblocks).map(|_| BitSet::new(n)).collect();
     let mut changed = true;
