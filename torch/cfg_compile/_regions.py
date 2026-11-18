@@ -2624,8 +2624,14 @@ class _Region:
             same = (graph.code, key[1], bytes(tensors), key[3], opened, left)
         # What this trace needed of the sizes, before the backend adds to it.
         own = opening.conditions() if opening is not None else None
+        whose: set[int] = set()
         watch: list[torch.Tensor] = []
         if frozen and self.compiles < options.max_variants:
+            # Layers that are built alike share one graph, which takes their
+            # weights: the graph of the second is not one more to compile.
+            whose = {id(inputs.flat[i]) for i in frozen}
+            if same in options.compiled or not options.built.get(same, whose) & whose:
+                frozen = []
             frozen, watch = _watched(inputs.flat, frozen)
         if frozen and self.compiles < options.max_variants:
             example = opening.example() if opening is not None else list(inputs.flat)
@@ -2640,6 +2646,8 @@ class _Region:
             if compiled is not None:
                 options.frozen += 1
                 self.compiles += 1
+                if same is not None:
+                    options.built.setdefault(same, set()).update(whose)
                 conditions = opening.conditions() if opening is not None else None
                 return compiled, conditions, (frozen, watch)
         made = options.compiled.get(same)
@@ -3258,8 +3266,10 @@ class Regions:
         # What the backend made of each graph, by the code of the graph and
         # what its inputs are like.
         self.compiled: dict[Any, Any] = {}
-        # How many graphs have the tensors of their modules built in.
+        # How many graphs have the tensors of their modules built in, and
+        # per graph that others could share, which tensors those are.
         self.frozen = 0
+        self.built: dict[Any, set[int]] = {}
         # Per function: the regions that were surveyed and are compiled at
         # their next call, in the order they were surveyed, and how often
         # another region waited for each.

@@ -4078,6 +4078,30 @@ class RegionTwoHeads(torch.nn.Module):
         return self.used(x) + self.cache
 
 
+class RegionAlike(torch.nn.Module):
+    # Layers that are built alike, with data deciding what comes between.
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([RegionNormed() for _ in range(3)])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+            if x.sum() > 1e6:
+                x = x / 2
+        return x
+
+
+class RegionNormed(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 3, 3, padding=1)
+        self.bn = torch.nn.BatchNorm2d(3)
+
+    def forward(self, x):
+        return torch.tanh(torch.relu(self.bn(self.conv(x))) + x)
+
+
 def temporaries(x, steps):
     # Every step frees what the step before it made.
     for _ in range(steps):
@@ -5436,6 +5460,20 @@ class TestCfgRegions(TestCase):
         # The table is also looked up at built-in positions: that folds.
         self.assertEqual(worth(graph, [0, 1, 2, 3, 4]), [1, 2, 3, 4])
         self.assertEqual(worth(graph, [0, 1, 2, 4]), [1, 4])
+
+    def test_layers_built_alike_share_a_graph_that_takes_their_weights(self):
+        torch.manual_seed(0)
+        model = RegionAlike().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        with self.building_in(), torch.no_grad():
+            for _ in range(8):
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        regions = self.compiled_regions(compiled)
+        self.assertEqual(sum(r["variants"] for r in regions), 3)
+        # One for the first layer, one for all that came after it.
+        self.assertEqual(sum(r["compiles"] for r in regions), 2)
+        self.assertEqual(sum(r["frozen"] for r in regions), 1)
 
     @slowTest
     def test_inductor_folds_built_in_weights(self):
