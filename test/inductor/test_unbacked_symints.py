@@ -1526,7 +1526,6 @@ class TestUnbackedSymints(InductorTestCase):
         self.assertEqual(asserts, [sympy.Eq(1, u0)])
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @parametrize("concat_targets", [False, True])
     @parametrize("reduction", ["none", "sum", "mean"])
@@ -1553,6 +1552,10 @@ class TestUnbackedSymints(InductorTestCase):
 
             target_shape = (int(target_lengths.sum()),) if concat_targets else (N, S)
             targets = torch.randint(1, C, target_shape, device=device)
+            # TODO: drop once _use_cudnn_ctc_loss.Tensor has a fake impl; without
+            # one, a dynamic targets size makes it unsupported under fake tensors
+            if self.device_type == "cuda":
+                torch._dynamo.mark_static(targets)
 
             args = (targets, input_lengths, target_lengths)
 

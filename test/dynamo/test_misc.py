@@ -7507,6 +7507,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
+    @parametrize("fullgraph", [False, True])
+    @parametrize("capture", [False, True])
+    def test_ctc_loss_output_capture(self, fullgraph, capture):
+        def fn(log_probs, targets, input_lengths, target_lengths):
+            loss = F.ctc_loss(log_probs * 1.0, targets, input_lengths, target_lengths)
+            return loss + 1
+
+        T, N, C, S = 50, 2, 20, 10
+        args = (
+            torch.randn(T, N, C).log_softmax(-1),
+            torch.randint(1, C, (N, S)),
+            torch.full((N,), T),
+            torch.full((N,), S),
+        )
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=capture):
+            actual = torch.compile(fn, backend=cnts, fullgraph=fullgraph)(*args)
+
+        self.assertEqual(actual, fn(*args))
+        self.assertEqual(cnts.frame_count, 1 if fullgraph or capture else 2)
+
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
             if input == 0:

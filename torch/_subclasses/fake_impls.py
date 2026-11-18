@@ -1423,7 +1423,6 @@ def ctc_loss_tensor(
 
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-    # The output shapes and the targets.size(-1) bound below rely on these
     torch._check(log_probs.dim() == 3, lambda: "log_probs must be 3-D")
     torch._check(targets.dim() in (1, 2), lambda: "targets must be 1-D or 2-D")
 
