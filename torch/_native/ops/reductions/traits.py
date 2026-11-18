@@ -173,6 +173,7 @@ class WelfordOps:
     # the weight in its slot. The flags are not inherited: a subclass that keeps leaf,
     # combine and their helpers must set each flag it supports.
     nfields = 3
+    nouts = 1
     has_combine_equal = True
     has_combine_uniform = True
 
@@ -187,7 +188,6 @@ class WelfordOps:
         self.return_mean = bool(return_mean)
         self.acc = acc
         self.fdtypes = (acc, acc, acc)
-        self.split_grid_mult = 8 if acc.width == 32 else 4
 
     def init(self):
         z = self.acc(0.0)
@@ -835,7 +835,7 @@ def welford_outputs(trait) -> int:
     """Outputs of a variance-returning Welford trait, or 0 for any other trait."""
     if not isinstance(trait, WelfordOps) or trait.return_mean:
         return 0
-    return getattr(trait, "nouts", 1)
+    return trait.nouts
 
 
 class MaxDimOps(ArgMaxOps):

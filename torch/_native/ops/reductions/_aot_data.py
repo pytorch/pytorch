@@ -31,6 +31,14 @@ XCTA_SUBROW = 8192
 _XCTA_MAX_PARTIALS = 1 << 22
 
 
+def _ladder(n, itemsize):
+    """kernel_rowtile.row_config's (threads per row, threads per block)."""
+    if n * itemsize >= 16 * 1024:
+        return 256, 256
+    tpr = 32 if n <= 3072 else 64 if n <= 6144 else 128 if n <= 16384 else 256
+    return tpr, max(tpr, 128 if n <= 16384 else 256)
+
+
 def row_class(dtype, n, m, reduce_all=False):
     """Select the one-shot row launch class, or None to retain JIT routing."""
     itemsize = DTYPE_BYTES.get(dtype)
@@ -55,20 +63,7 @@ def row_class(dtype, n, m, reduce_all=False):
     if narrow and not reduce_all:
         return None
 
-    if n * itemsize >= 16 * 1024:
-        threads_per_row, threads_per_block = 256, 256
-    else:
-        if n <= 3072:
-            threads_per_row = 32
-        elif n <= 6144:
-            threads_per_row = 64
-        elif n <= 16384:
-            threads_per_row = 128
-        else:
-            threads_per_row = 256
-        threads_per_block = 128 if n <= 16384 else 256
-        threads_per_block = max(threads_per_row, threads_per_block)
-
+    threads_per_row, threads_per_block = _ladder(n, itemsize)
     if reduce_all:
         feedable = min(256, n // vec)
         wider = max(
@@ -97,3 +92,35 @@ def xcta_ok(dtype, n, m):
         return False
     partials = n // XCTA_SUBROW
     return partials <= _XCTA_MAX_PARTIALS and m * partials < 2**31
+
+
+# One runtime-width ragged row kernel per launch class serves rows whose width or pitch
+# is not whole 16-byte vectors, in the JIT's B200 band
+# (kernel_general._ragged_rows_ok for these traits) with row_config's ladder.
+RAGGED_CLASSES = {
+    "t32_b128": (32, 128),
+    "t64_b128": (64, 128),
+    "t128_b128": (128, 128),
+    "t256_b256": (256, 256),
+}
+RAGGED_MIN_N = 255
+RAGGED_EVEN_MIN_N = 1023
+RAGGED_MAX_N = 16383
+
+
+def ragged_class(dtype, n, m, pitch):
+    """Select the ragged launch class for m rows of n at a pitch, or None."""
+    itemsize = DTYPE_BYTES.get(dtype)
+    # Single rows take the JIT's reduce_all instead.
+    if itemsize is None or m < 2 or m >= 2**31:
+        return None
+    vec = 16 // itemsize
+    if n % vec == 0 and pitch % vec == 0:
+        return None  # whole vectors: the row classes serve it
+    # Even widths start later where a JIT vector-class kernel serves them.
+    align = min(16, (pitch * itemsize) & -(pitch * itemsize))
+    late = n % 2 == 0 and align >= min(16, (n * itemsize) & -(n * itemsize))
+    min_n = RAGGED_EVEN_MIN_N if late else RAGGED_MIN_N
+    if not min_n <= n <= RAGGED_MAX_N:
+        return None
+    return "t{}_b{}".format(*_ladder(n, itemsize))

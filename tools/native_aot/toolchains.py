@@ -212,6 +212,19 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         return None
 
     def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
+        # validate_abi requires 64-bit stride fields, but the DSL declares them 64-bit
+        # even for a 32-bit stride SymInt, whose kernel then wraps a pitch past 2^31.
+        for arg in b["fake_args"]:
+            for fake in arg if isinstance(arg, list) else (arg,):
+                stride = getattr(fake, "stride", None)
+                if isinstance(stride, tuple) and any(
+                    getattr(s, "width", 64) != 64 for s in stride
+                ):
+                    raise RuntimeError(
+                        f"native-AOT export: {b['prefix']} has a 32-bit dynamic stride "
+                        f"in {stride}, but the launcher passes aten's int64 strides. "
+                        f"Declare it with cute.sym_int64."
+                    )
         import cutlass.cute as cute
 
         # Optional compile options (e.g. --enable-assertions). These must match what
