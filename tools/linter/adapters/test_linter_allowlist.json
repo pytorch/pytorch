@@ -33,7 +33,6 @@
   "test/distributed/_composable/test_checkpoint.py",
   "test/distributed/_composable/test_composability/test_2d_composability.py",
   "test/distributed/_composable/test_composability/test_pp_composability.py",
-  "test/distributed/_composable/test_replicate.py",
   "test/distributed/_composable/test_replicate_mixed_precision.py",
   "test/distributed/_composable/test_replicate_training.py",
   "test/distributed/_composable/test_replicate_with_compiler.py",
