@@ -1542,9 +1542,10 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
-    # The stack has since merged, so pin the state this test describes: the two
-    # bottom PRs merged, the top two open. The merge-rule check is mocked; the
-    # tests below cover how its errors and waivers are handled.
+    # Pin the stack's state: the two bottom PRs merged, the top two open. The
+    # merge-rule check and the lower PR's checks are mocked; the tests below cover
+    # how their errors and waivers are handled.
+    @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
     @mock.patch.object(
         GitHubPR,
         "is_closed",
@@ -1562,6 +1563,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         mock_find_matching_merge_rule: mock.MagicMock,
         mock_can_skip_internal_checks: mock.MagicMock,
         _mock_is_closed: mock.MagicMock,
+        _mock_get_checkrun_conclusions: mock.MagicMock,
         *args: Any,
     ) -> None:
         """
@@ -1582,6 +1584,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
 
         mock_repo.cherry_pick.return_value = None
         mock_repo.amend_commit_message.return_value = None
+        mock_find_matching_merge_rule.return_value = (None, [], [], {})
 
         # Call the method under test
         res = pr.merge_ghstack_into(mock_repo, False, comment_id=7)
@@ -1601,6 +1604,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
             skip_mandatory_checks=False,
             skip_internal_checks=True,
             ignore_current_checks=None,
+            classification_wait=None,
         )
         mock_can_skip_internal_checks.assert_called_once_with(pr, 7)
 
@@ -1730,6 +1734,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
             skip_mandatory_checks=True,
             skip_internal_checks=False,
             ignore_current_checks=waivers,
+            classification_wait=None,
         )
 
     @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
