@@ -48,7 +48,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import python_constant_repr_impl
+from .object_protocol import mro_lookup, python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -258,7 +258,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
         vt_cls = _vt_cls_modeling(obj, objclass)
         sd = _compute_slotdefs(objclass).get(name)
-        if vt_cls is not None and sd is not None and isinstance(obj, vt_cls):
+        if vt_cls is not None and sd is not None:
             impl = getattr(vt_cls, sd.impl)
             return sd.wrapper(obj, tx, impl, rest, kwargs)
         return self.owner.call_method(
@@ -458,19 +458,25 @@ class MethodDescriptorVariable(DescriptorVariable):
                 tx, f"unbound method {self.descriptor.__qualname__}() needs an argument"
             )
         obj, *rest = args
-        name = self.descriptor.__name__
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
-        if isinstance(obj, UserDefinedObjectVariable):
-            base_methods = obj._base_methods
-            if base_methods is not None and self.descriptor in base_methods:
-                return obj.call_base_method(tx, name, rest, kwargs)
-        method = obj.lookup_tp_method(name)
-        if method is not None:
-            result = method(obj, tx, name, rest, kwargs)
-            if result is not None:
-                return result
-        return obj.call_method(tx, name, rest, kwargs)
+
+        if vt_cls := _vt_cls_modeling(obj, objclass):
+            if meth := vt_cls._lookup_tp_table(name, "tp_methods"):
+                result = meth(obj, tx, name, rest, kwargs)
+                if result is not None:
+                    return result
+        if mro_lookup(obj.python_type(), name) is self.descriptor:
+            # Nothing overrides it, so name lookup reaches the same C method.
+            return obj.call_method(tx, name, rest, kwargs)
+        unimplemented(
+            gb_type="Unbound method descriptor call with unmodeled owner",
+            context=f"{self.descriptor.__qualname__}({obj}, ...)",
+            explanation=f"Dynamo has no model of {objclass.__qualname__}.{name} for a "
+            f"{obj.python_type().__qualname__} receiver.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def tp_descr_get_impl(
         self,
