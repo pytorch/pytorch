@@ -3060,6 +3060,17 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("fake"),
       py::arg("constant"));
 
+  py_module.def(
+      "_invalidate_fake_constant_aliases",
+      [](py::object mode, const at::Tensor& tensor) {
+        TORCH_CHECK(tensor.defined(), "Expected a defined tensor");
+        auto fake_mode = torch::fake_tensor::getCppFakeTensorMode(mode.ptr());
+        fake_mode->invalidate_constant_aliases(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("mode"),
+      py::arg("tensor"));
+
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
@@ -3175,6 +3186,12 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
       "_set_storage_data_ptr_access_error_msg",
       [](size_t storage_impl_ptr, std::string s) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -3187,6 +3204,19 @@ Call this whenever a new thread is created in order to propagate values from
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->clear_data_ptr_access_error_msg_();
+      });
+
+  py_module.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }
+        }
+        return true;
       });
 
   ASSERT_TRUE(
