@@ -43,9 +43,8 @@ def get_source(stacklevel: int) -> str:
     Use stacklevel=2 to get the caller's caller's source
     etc.
     """
-    # inspect.getframeinfo can import unrelated lazy modules while locating source.
-    frame = sys._getframe(stacklevel)
-    source = f"{frame.f_code.co_filename}:{frame.f_lineno}"
+    frame = inspect.getframeinfo(sys._getframe(stacklevel))
+    source = f"{frame.filename}:{frame.lineno}"
     return source
 
 
