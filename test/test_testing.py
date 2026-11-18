@@ -4327,6 +4327,16 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
+    def test_import_aot_runtime_wrappers_before_dynamo(self):
+        self._check_python_output(textwrap.dedent("""
+            import sys
+            import torch
+
+            if "torch._dynamo" in sys.modules:
+                raise AssertionError("Dynamo was loaded before runtime_wrappers")
+            import torch._functorch._aot_autograd.runtime_wrappers
+        """))
+
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
@@ -4351,11 +4361,16 @@ class TestImports(TestCase):
         self.assertEqual(out.strip(), "True")
 
     def test_not_import_dynamo_from_user_kernel_hops(self) -> None:
-        # torch._dynamo and torch._inductor are imported lazily: importing
-        # triton_kernel_wrap, as an eager wrap_triton launch does, must import neither.
+        # Importing the Triton and CuTeDSL user-kernel HOP modules, the CuTeDSL eager
+        # launcher and its compile lock imports neither torch._dynamo nor
+        # torch._inductor. A launch needs a GPU and cutlass:
+        # test/inductor/test_cutedsl_kernels.py checks one.
         out = self._check_python_output(
             "import sys;import torch._higher_order_ops.triton_kernel_wrap;"
-            "print([m for m in ('torch._dynamo', 'torch._inductor') if m in sys.modules])"
+            "import torch._higher_order_ops.cutedsl_kernel_wrap;"
+            "import torch._native.cutedsl.user_kernel;"
+            "import torch._native.cutedsl.compile_lock;"
+            "print(sorted({'torch._dynamo', 'torch._inductor'} & set(sys.modules)))"
         )
         # The last line: fbcode's interpreter can print warnings first.
         self.assertEqual(out.strip().splitlines()[-1], "[]")
