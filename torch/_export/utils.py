@@ -840,10 +840,17 @@ def _is_free_attr_name(model: torch.nn.Module, name: str) -> bool:
     return not hasattr(owner, field)
 
 
-def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
+def node_inline_(
+    call_mod_node: torch.fx.Node, *, recompile: bool = True
+) -> torch.fx.GraphModule | None:
     """
     Inline the submodule of the given node into the parent module.
     Note: we only support the case where submodule takes tensors inputs.
+    A caller that inlines many nodes of one module can pass ``recompile=False``
+    and recompile the module once at the end. Until then the module's code is
+    stale: it can call a submodule that is gone, or a reused name that now holds
+    a different object. So nothing may run the module or read its code before it
+    is recompiled.
     """
     if call_mod_node.op != "call_module":
         raise AssertionError(f"expected call_module op, got {call_mod_node.op}")
@@ -950,7 +957,8 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
             call_mod_node.graph.erase_node(call_mod_node)
 
     gm.delete_all_unused_submodules()
-    gm.recompile()
+    if recompile:
+        gm.recompile()
     return gm
 
 
