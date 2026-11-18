@@ -134,6 +134,19 @@ pub enum Op {
     /// Whether v is the function object consts[func] and still has the code
     /// object consts[code]: the guard of an inlined call.
     IsFunction { v: V, func: u32, code: u32 },
+    /// len(v) as an int: what a sequence pattern of `match` compares.
+    GetLen(V),
+    /// Whether the type of v is a sequence (false) or a mapping (true) for
+    /// the purposes of `match`.
+    MatchKind(V, bool),
+    /// The values the subject has for the keys of a mapping pattern, as a
+    /// tuple, or None if it lacks one.
+    MatchKeys(V, V),
+    /// What a class pattern binds: the attributes named by the class's
+    /// `__match_args__` for its `nargs` positional sub-patterns and by
+    /// `names` for the keyword ones, as a tuple, or None if the subject is
+    /// not an instance or lacks one.
+    MatchClass { subject: V, class: V, nargs: u32, names: V },
     /// Where an inlined function starts: pushes an interpreter frame for the
     /// function (a constant), so that the stack shows the call the inlining
     /// removed.
@@ -266,6 +279,8 @@ impl Op {
             | Op::ListToTuple(a)
             | Op::Unpack(a, _)
             | Op::UnpackEx(a, _, _)
+            | Op::GetLen(a)
+            | Op::MatchKind(a, _)
             | Op::TupleGet(a, _)
             | Op::GetIter(a)
             | Op::IterNext(a)
@@ -286,6 +301,7 @@ impl Op {
             | Op::DictUpdate(a, b)
             | Op::DictMerge(a, b)
             | Op::ExcMatch(a, b)
+            | Op::MatchKeys(a, b)
             | Op::WithExceptStart { exit: a, exc: b }
             | Op::CellSet(a, b) => {
                 f(*a);
@@ -313,6 +329,11 @@ impl Op {
             Op::Format { val, spec, .. } => {
                 f(*val);
                 opt(*spec, &mut f)
+            }
+            Op::MatchClass { subject, class, names, .. } => {
+                f(*subject);
+                f(*class);
+                f(*names)
             }
             Op::BuildTuple(vs)
             | Op::BuildList(vs)
@@ -602,6 +623,14 @@ impl Function {
             Op::ListToTuple(a) => format!("list_to_tuple {}", n(a)),
             Op::Unpack(a, k) => format!("unpack {} {}", n(a), k),
             Op::UnpackEx(a, before, after) => format!("unpack_ex {} {} {}", n(a), before, after),
+            Op::GetLen(a) => format!("get_len {}", n(a)),
+            Op::MatchKind(a, mapping) => {
+                format!("match_{} {}", if *mapping { "mapping" } else { "sequence" }, n(a))
+            }
+            Op::MatchKeys(a, keys) => format!("match_keys {} {}", n(a), n(keys)),
+            Op::MatchClass { subject, class, nargs, names } => {
+                format!("match_class {} {} {} {}", n(subject), n(class), nargs, n(names))
+            }
             Op::TupleGet(a, i) => format!("tuple_get {} {}", n(a), i),
             Op::Call { callee, args, kwnames } => {
                 format!("call {}({})", n(callee), self.call_args(args, *kwnames))
