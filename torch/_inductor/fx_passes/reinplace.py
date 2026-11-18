@@ -534,7 +534,10 @@ def _is_control_deps_ordering_only_use(
 
 
 def reinplace_inplaceable_ops_core(
-    graph: torch.fx.Graph, *, fake_tensor_updater: FakeTensorUpdater | None = None
+    graph: torch.fx.Graph,
+    *,
+    fake_tensor_updater: FakeTensorUpdater | None = None,
+    rewire_auto_functionalized_outputs: bool = False,
 ) -> None:
     """
     Reinplaces in-placeable operations.
@@ -561,6 +564,8 @@ def reinplace_inplaceable_ops_core(
     without metadata providers remain functional.
     Equivalent mutable results redirect data users to their inputs, while collective
     result references are retained because their lowering may realize input copies.
+    Auto-functionalized output rewiring requires subsequent decomposition and is
+    enabled explicitly by callers that guarantee it.
     """
 
     if fake_tensor_updater is None:
@@ -1002,8 +1007,27 @@ def reinplace_inplaceable_ops_core(
 
         return replacements if visit(current_node, replacement) else None
 
+    def get_mutated_output_indices(node, mutated_args):
+        """Map mutable outputs that do not alias ordinary operator results."""
+        if not rewire_auto_functionalized_outputs:
+            return {}
+        outputs = node.meta.get("val")
+        if not isinstance(outputs, tuple) or len(outputs) < len(mutated_args):
+            return {}
+        offset = len(outputs) - len(mutated_args)
+        original_storages = FakeTensorUpdater._storage_ids(outputs[:offset])
+        if original_storages is None:
+            return {}
+        original_storages = OrderedSet(original_storages)
+        indices = {}
+        for index, arg in enumerate(mutated_args, offset):
+            storages = FakeTensorUpdater._storage_ids(outputs[index])
+            if storages is not None and not original_storages.intersection(storages):
+                indices[arg] = index
+        return indices
+
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, trigger, replacements
+        old_tensors_to_clone, kwargs, node_name, trigger, replacements, output_indices
     ):
         tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[int | None]()
@@ -1025,19 +1049,25 @@ def reinplace_inplaceable_ops_core(
                 raise AssertionError(f"expected {arg} to be in kwargs")
 
             mutated_arg = kwargs[arg]
+            output_index = output_indices.get(arg)
             replacement_users = [
                 user
                 for user in node.users
-                if trigger != ReInplaceTrigger.AUTO_FUNC_V2
+                if output_index is not None
                 and user.target is operator.getitem
-                and user.args[1] == arg
+                and user.args[1] == output_index
             ]
             output_replacements: dict[torch.fx.Node, torch.fx.Node] = {}
-            can_rewire_outputs = True
+            outputs_safe = True
             for user in replacement_users:
                 planned = resolve_getitem_replacements(user, mutated_arg)
                 if planned is None:
-                    can_rewire_outputs = False
+                    # Unrewired auto-functionalized outputs remain valid after decomposition.
+                    output_replacements.clear()
+                    outputs_safe = trigger in (
+                        ReInplaceTrigger.AUTO_FUNC_V1,
+                        ReInplaceTrigger.AUTO_FUNC_V2,
+                    )
                     break
                 output_replacements.update(planned)
 
@@ -1053,7 +1083,7 @@ def reinplace_inplaceable_ops_core(
             # should not reinplace into op(x, x[0]).
             should_attempt_reinplace = (
                 not tensor_with_same_storage_already_reinplaced(mutated_arg)
-                and can_rewire_outputs
+                and outputs_safe
             )
             if should_attempt_reinplace and can_inplace(node, mutated_arg):
                 # In general, we probably do not need those optimizations.
@@ -1260,6 +1290,7 @@ def reinplace_inplaceable_ops_core(
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V2,
                 replacements,
+                get_mutated_output_indices(node, bases_to_clone),
             )
             if replacements:
                 changed_nodes.add(node)
@@ -1271,17 +1302,16 @@ def reinplace_inplaceable_ops_core(
             _mutable_op = node.args[0]
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
 
-            tensors_to_clone, _ = get_mutable_args(_mutable_op)
+            mutable_args, _ = get_mutable_args(_mutable_op)
             # Don't try to reinplace Tensor | None args that are None.
-            tensors_to_clone = [
-                t for t in tensors_to_clone if node.kwargs[t] is not None
-            ]
+            tensors_to_clone = [t for t in mutable_args if node.kwargs[t] is not None]
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
                 tensors_to_clone,
                 node.kwargs,
                 _mutable_op._name,
                 ReInplaceTrigger.AUTO_FUNC_V1,
                 replacements,
+                get_mutated_output_indices(node, mutable_args),
             )
             if replacements:
                 changed_nodes.add(node)
@@ -1386,6 +1416,7 @@ def reinplace_inplaceable_ops_core(
                 kernel_name,
                 user_kernel_hop.reinplace_trigger,
                 replacements,
+                {arg: arg for arg in old_tensors_to_clone},
             )
 
             kwargs = dict(node.kwargs)
@@ -1439,12 +1470,19 @@ def reinplace_inplaceable_ops_core(
 def reinplace_inplaceable_ops(
     fake_tensor_updater: torch._inductor.fx_utils.FakeTensorUpdater,
     graph: torch.fx.Graph,
+    *,
+    rewire_auto_functionalized_outputs: bool = False,
 ) -> None:
+    """Enable auto-functionalized output rewiring only when decomposition follows."""
     with enable_python_dispatcher():
         canonicalize_view_scatter_ops(graph)
         # canonicalize_view_scatter_ops adds new operations to the graph.
         # We run fake_tensor_updater to update the alias information.
         # Correct alias information is required for `reinplace_inplaceable_ops_core`.
         fake_tensor_updater.incremental_update()
-        reinplace_inplaceable_ops_core(graph, fake_tensor_updater=fake_tensor_updater)
+        reinplace_inplaceable_ops_core(
+            graph,
+            fake_tensor_updater=fake_tensor_updater,
+            rewire_auto_functionalized_outputs=rewire_auto_functionalized_outputs,
+        )
         decompose_generalized_scatter(graph)
