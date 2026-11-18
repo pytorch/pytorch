@@ -7191,6 +7191,7 @@
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda_v2_out
+    XPU: _scaled_grouped_mm_xpu_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -7199,6 +7200,13 @@
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
     MPS: _grouped_mm_mps
+    XPU: _grouped_mm_xpu
+
+- func: _grouped_mm.out(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _grouped_mm_out
+    CUDA: _grouped_mm_out_cuda
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -9466,7 +9474,7 @@
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
   dispatch:
-    CPU, CUDA: triangular_solve_out
+    CPU, CUDA, XPU: triangular_solve_out
     MPS: triangular_solve_mps_out
     SparseCsrCPU: triangular_solve_out_sparse_csr_cpu
     SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda

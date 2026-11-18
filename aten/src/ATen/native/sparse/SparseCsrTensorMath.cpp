@@ -606,6 +606,9 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
+    return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { addmm_out_sparse_compressed_cpu(self, mat1, mat2, beta, alpha, r); });
+  }
   check_mm_shapes(mat1, mat2, "addmm");
 
   c10::MaybeOwned<at::Tensor> self_;
@@ -991,6 +994,10 @@ Tensor& add_out_sparse_compressed_cpu(
 
     if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
       return out;
+    }
+
+    if (at::sparse_csr::has_noncontiguous_values(out)) {
+      return at::sparse_csr::run_on_contiguous_clone(out, [&](Tensor& r) { add_out_sparse_compressed_cpu(self, other, alpha, r); });
     }
 
     // out is resized in place, so operate on clones of any input aliasing it.
