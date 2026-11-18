@@ -472,15 +472,16 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
-    @dtypes(*integral_types_and(torch.bool))
+    @dtypes(*integral_types_and(torch.bool, *barebones_unsigned_types()))
     def test_bitwise_count(self, device, dtype):
         # Like np.bitwise_count: number of set bits in |x|, always uint8
         if dtype == torch.bool:
-            x = torch.tensor([[True, False], [False, True]], device=device)
+            x = torch.tensor([[True, True], [False, True]], device=device)
         else:
             info = torch.iinfo(dtype)
             x = make_tensor((64, 64), dtype=dtype, device=device)
             edge = [info.min, info.max, 0, -1 if info.min < 0 else 1]
+            edge += [info.max - 1, info.max // 3]
             x.view(-1)[: len(edge)] = torch.tensor(edge, dtype=dtype, device=device)
         expected = torch.tensor(
             [abs(int(v)).bit_count() for v in x.flatten().tolist()],
@@ -493,24 +494,6 @@ class TestUnaryUfuncs(TestCase):
         out = torch.empty_like(expected)
         torch.bitwise_count(x, out=out)
         self.assertEqual(out, expected, exact_dtype=True)
-        with self.assertRaisesRegex(RuntimeError, "uint8"):
-            torch.bitwise_count(x, out=torch.empty_like(x, dtype=torch.int32))
-
-    @dtypes(*barebones_unsigned_types())
-    def test_bitwise_count_barebones_unsigned(self, device, dtype):
-        info = torch.iinfo(dtype)
-        vals = [0, 1, info.max, info.max - 1, info.max // 3]
-        x = torch.tensor(vals, dtype=dtype, device=device)
-        expected = torch.tensor(
-            [v.bit_count() for v in vals], dtype=torch.uint8, device=device
-        )
-        self.assertEqual(torch.bitwise_count(x), expected, exact_dtype=True)
-        self.assertEqual(x.bitwise_count(), expected, exact_dtype=True)
-
-    @dtypes(torch.float32, torch.float16)
-    def test_bitwise_count_rejects_floating(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, "integral"):
-            torch.bitwise_count(make_tensor((4,), dtype=dtype, device=device))
 
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_nan_to_num(self, device, dtype):

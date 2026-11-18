@@ -275,7 +275,7 @@ TORCH_META_FUNC(sign) (const Tensor& self) {
 
 // bitwise_count (population count) always produces uint8, like np.bitwise_count
 TORCH_META_FUNC(bitwise_count) (const Tensor& self) {
-  TORCH_CHECK(at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
+  TORCH_CHECK_NOT_IMPLEMENTED(at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
               "bitwise_count only supports integral and boolean inputs, but got ", self.scalar_type());
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kByte : true,
               "bitwise_count does not support non-uint8 outputs.");
