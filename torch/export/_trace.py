@@ -1084,6 +1084,7 @@ def _export_to_torch_ir(
                     # Once we delete the old strict export, we can use this fake mode in the
                     # subsequent logic when lowering to aten IR.
                     del gm_torch_level.meta["fake_mode"]
+                    gm_torch_level.meta.pop("tracing_context", None)
 
                 else:
                     if is_shapes_spec:
