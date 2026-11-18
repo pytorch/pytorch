@@ -4,10 +4,11 @@
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
 use crate::ir::*;
-use crate::pyffi::PyObj;
+use crate::pyffi::{self, Obj, PyObj};
 use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
 use crate::vm::{self, Callees, Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
+use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyCapsule, PyDict, PyList, PyTuple};
 use std::cell::Cell;
@@ -883,6 +884,152 @@ pub fn plan_changed() {
 #[pyfunction]
 pub fn profiling_depth() -> usize {
     vm::profiling_depth()
+}
+
+/// A number that stays what it is for as long as an `nn.Module` and the
+/// modules below it hold what they hold: which of their attributes are
+/// tensors (objects of one of the types in `tensors`), lists with tensors or
+/// None, their `training` flags, the names of their parameters, buffers and
+/// submodules, which of those are None, the submodules themselves, and
+/// whether they have hooks. Which tensor an attribute holds is not part of
+/// it. Reading it costs a walk over the dicts of the modules, and nothing
+/// has to be told when one of them changes.
+#[pyfunction]
+pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> PyResult<u64> {
+    static NAMES: std::sync::OnceLock<[PyObj; 8]> = std::sync::OnceLock::new();
+    let names = NAMES.get_or_init(|| {
+        let intern = |name: &std::ffi::CStr| unsafe {
+            PyObj::from_owned(ffi::PyUnicode_InternFromString(name.as_ptr()))
+        };
+        [
+            intern(c"training"),
+            intern(c"_parameters"),
+            intern(c"_buffers"),
+            intern(c"_modules"),
+            intern(c"_forward_hooks"),
+            intern(c"_forward_pre_hooks"),
+            intern(c"_backward_hooks"),
+            intern(c"_backward_pre_hooks"),
+        ]
+    });
+    let types: Vec<usize> = tensors.iter().map(|t| t.as_ptr() as usize).collect();
+    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+    let mut pending = vec![module.as_ptr()];
+    let mut seen = 0usize;
+    unsafe {
+        let is_tensor = |o: Obj| types.contains(&(ffi::Py_TYPE(o) as usize));
+        let none = ffi::Py_None();
+        while let Some(m) = pending.pop() {
+            seen += 1;
+            if seen > 1_000_000 {
+                return Err(pyo3::exceptions::PyRecursionError::new_err(
+                    "a module that contains itself",
+                ));
+            }
+            mix(m as u64);
+            let slot = pyffi::_PyObject_GetDictPtr(m);
+            if slot.is_null() || (*slot).is_null() {
+                continue;
+            }
+            let (mut pos, mut key, mut value) = (0, null_mut(), null_mut());
+            while ffi::PyDict_Next(*slot, &mut pos, &mut key, &mut value) != 0 {
+                let which = names.iter().position(|n| n.as_ptr() == key);
+                let kind: u64 = match which {
+                    Some(0) => 2 + (value == ffi::Py_True()) as u64,
+                    Some(1..=3) if ffi::PyDict_Check(value) != 0 => {
+                        let (mut p, mut k, mut v) = (0, null_mut(), null_mut());
+                        let mut held = 4u64;
+                        while ffi::PyDict_Next(value, &mut p, &mut k, &mut v) != 0 {
+                            held = held.wrapping_mul(31).wrapping_add(k as u64);
+                            if which == Some(3) {
+                                held = held.wrapping_mul(31).wrapping_add(v as u64);
+                                if v != none {
+                                    pending.push(v);
+                                }
+                            } else {
+                                held = held.wrapping_mul(31).wrapping_add((v == none) as u64);
+                            }
+                        }
+                        held
+                    }
+                    Some(4..) => 5 + (ffi::PyObject_IsTrue(value) != 0) as u64,
+                    _ if value == none => 7,
+                    _ if is_tensor(value) => 8,
+                    _ if ffi::PyList_CheckExact(value) != 0 => {
+                        let n = ffi::PyList_GET_SIZE(value);
+                        let mut held = 9u64.wrapping_add((n as u64) << 32);
+                        for i in 0..n {
+                            let item = is_tensor(ffi::PyList_GET_ITEM(value, i));
+                            held = held.wrapping_mul(31).wrapping_add(item as u64);
+                        }
+                        held
+                    }
+                    _ => continue,
+                };
+                mix(key as u64);
+                mix(kind);
+            }
+        }
+        if !ffi::PyErr_Occurred().is_null() {
+            return Err(PyErr::fetch(module.py()));
+        }
+    }
+    Ok(stamp)
+}
+
+/// A number that changes when an `nn.Module` or a module below it is given
+/// another object for anything it holds: an attribute, a parameter, a
+/// buffer, a submodule, a hook. Unlike `module_stamp` it is about the very
+/// objects, so it says whether a stretch of code left the modules as they
+/// were. Attributes named in `skip` are not looked at.
+#[pyfunction]
+pub fn module_identity(module: &Bound<'_, PyAny>, skip: &Bound<'_, PyTuple>) -> PyResult<u64> {
+    let skipped: Vec<usize> = skip.iter().map(|name| name.as_ptr() as usize).collect();
+    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+    let mut pending = vec![module.as_ptr()];
+    let mut seen = 0usize;
+    unsafe {
+        let modules = ffi::PyUnicode_InternFromString(c"_modules".as_ptr());
+        let none = ffi::Py_None();
+        while let Some(m) = pending.pop() {
+            seen += 1;
+            if seen > 1_000_000 {
+                ffi::Py_XDECREF(modules);
+                return Err(pyo3::exceptions::PyRecursionError::new_err(
+                    "a module that contains itself",
+                ));
+            }
+            mix(m as u64);
+            let slot = pyffi::_PyObject_GetDictPtr(m);
+            if slot.is_null() || (*slot).is_null() {
+                continue;
+            }
+            let (mut pos, mut key, mut value) = (0, null_mut(), null_mut());
+            while ffi::PyDict_Next(*slot, &mut pos, &mut key, &mut value) != 0 {
+                if skipped.contains(&(key as usize)) {
+                    continue;
+                }
+                mix(key as u64);
+                mix(value as u64);
+                // The dicts of parameters, buffers, submodules and hooks are
+                // changed in place.
+                if ffi::PyDict_Check(value) != 0 {
+                    let (mut p, mut k, mut v) = (0, null_mut(), null_mut());
+                    while ffi::PyDict_Next(value, &mut p, &mut k, &mut v) != 0 {
+                        mix(k as u64);
+                        mix(v as u64);
+                        if key == modules && v != none {
+                            pending.push(v);
+                        }
+                    }
+                }
+            }
+        }
+        ffi::Py_XDECREF(modules);
+    }
+    Ok(stamp)
 }
 
 pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {

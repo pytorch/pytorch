@@ -79,7 +79,7 @@ from typing import Any
 
 import torch
 from torch import nn
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
 from torch.utils import _pytree as pytree
 
 
@@ -111,11 +111,10 @@ class _State(threading.local):
     # Regions that are running their instructions while it is still open
     # whether they will be compiled.
     pending = 0
-    # Ids of the modules whose tensors the trace in progress replaced.
+    # Ids of the modules whose tensors the trace in progress replaced, and
+    # what they held when it began.
     traced: set[int] | None = None
-    # Attributes of those modules that the trace set and that are put back:
-    # (the module's dict, the name, the value before or this object for none).
-    derived: list[tuple[dict[str, Any], str, Any]] = []
+    watch: "_Watch | None" = None
 
 
 _state = _State()
@@ -159,6 +158,7 @@ _PLAIN = frozenset(
     }
 )
 _TENSORS = frozenset({torch.Tensor, nn.Parameter})
+_TENSOR_TYPES = tuple(_TENSORS)
 _HEAPTYPE = 1 << 9
 
 
@@ -385,10 +385,6 @@ def _note_local(
 # Modules: what they hold, and noticing when that changes
 # ----------------------------------------------------------------------
 
-# Bumped whenever a module gets or loses a parameter, buffer or submodule, or
-# changes its training flag. What is known about a module holds for one epoch.
-_epoch = 0
-_hooked = False
 # Hooks are code that runs at a call of a module and is not in its forward: a
 # graph of the call would not hold what they do.
 _HOOK_DICTS = (
@@ -410,71 +406,128 @@ _GLOBAL_HOOK_DICTS = tuple(
 # What an RNN computes from its parameters and keeps: its weights in a list,
 # with weak references to notice when one is replaced. It rebuilds both when
 # that happens, as it does in a trace.
-_DERIVED = frozenset({"_flat_weights", "_flat_weight_refs"})
+_DERIVED = (sys.intern("_flat_weights"), sys.intern("_flat_weight_refs"))
 
 
-def _install_module_hooks() -> None:
-    """Makes ``nn.Module`` report changes of its structure, once per process."""
-    global _hooked
-    if _hooked:
-        return
-    _hooked = True
-    module = nn.Module
-
-    def reporting(name: str, structural: Callable[..., bool]) -> None:
-        original = getattr(module, name)
-
-        def method(self: nn.Module, *args: Any, **kwargs: Any) -> Any:
-            global _epoch
-            traced = _state.traced
-            if traced is not None and id(self) in traced:
-                derived = isinstance(self, nn.RNNBase) and args[0] in _DERIVED
-                if name != "__setattr__" or not derived:
-                    raise Untraceable(f"{name} on a module the region was given")
-                # Derived from the parameters, which the trace replaced: put
-                # back when the trace is over.
-                _state.derived.append(
-                    (vars(self), args[0], vars(self).get(args[0], _state))
-                )
-            if structural(*args, **kwargs):
-                _epoch += 1
-            return original(self, *args, **kwargs)
-
-        method.__name__ = original.__name__
-        method.__qualname__ = original.__qualname__
-        method.__doc__ = original.__doc__
-        setattr(module, name, method)
-
-    def setattr_is_structural(name: str, value: Any) -> bool:
-        return (
-            name == "training"
-            or value is None
-            or isinstance(value, (torch.Tensor, nn.Module, list))
-        )
-
-    reporting("__setattr__", setattr_is_structural)
+# The dicts of a module that are changed in place.
+_MODULE_DICTS = ("_parameters", "_buffers", "_modules", *_HOOK_DICTS)
+# The methods that change a module. A trace of a region that was given the
+# module must not run one: the instructions will, when they run for real.
+_MODULE_CHANGES = {
+    getattr(nn.Module, name).__code__: name
     for name in (
+        "__setattr__",
         "__delattr__",
         "register_buffer",
         "register_parameter",
         "add_module",
         *_HOOK_REGISTRATIONS,
-    ):
-        reporting(name, lambda *args, **kwargs: True)
-    module.register_module = module.add_module  # type: ignore[method-assign]
+    )
+}
+# The tool of sys.monitoring that sees them start: -1 if there is none to
+# have, None before the first trace.
+_monitor: int | None = None
+
+
+def _module_change_started(code: types.CodeType, offset: int) -> None:
+    traced = _state.traced
+    if traced is None:
+        return
+    arguments = sys._getframe(1).f_locals
+    module = arguments.get("self")
+    if id(module) not in traced:
+        return
+    name = _MODULE_CHANGES[code]
+    if name == "__setattr__" and isinstance(module, nn.RNNBase):
+        if arguments.get("name") in _DERIVED:
+            # Derived from the parameters, which the trace replaced: put
+            # back when the trace is over (see ``_Watch``).
+            return
+    raise Untraceable(f"{name} on a module the region was given")
+
+
+def _watch_module_changes(on: bool) -> None:
+    """Has the methods that change a module report to the trace, or stops it.
+
+    The methods themselves stay what they are: replacing them on nn.Module,
+    even for the time of a trace, takes the caches of attribute lookups from
+    every module class, and what else runs in the process (torch.compile
+    traces Module.__setattr__) would find something it does not know.
+    """
+    global _monitor
+    monitoring: Any = getattr(sys, "monitoring", None)
+    if monitoring is None:
+        return
+    if _monitor is None:
+        _monitor = -1
+        for tool in (4, 3):
+            try:
+                monitoring.use_tool_id(tool, "torch.cfg_compile")
+            except ValueError:
+                continue
+            start = monitoring.events.PY_START
+            monitoring.register_callback(tool, start, _module_change_started)
+            _monitor = tool
+            break
+    if _monitor >= 0:
+        events = monitoring.events.PY_START if on else 0
+        for code in _MODULE_CHANGES:
+            monitoring.set_local_events(_monitor, code, events)
+
+
+class _Watch:
+    """What the modules of a trace hold, to see whether a step of the trace
+    gave one of them something else, and to put everything back.
+
+    A trace runs code on the modules themselves. An attribute it stores, a
+    buffer it registers or a hook it adds would be there twice once the
+    instructions run for real, and is not in the graph. The methods that do
+    such things report to the trace (``_watch_module_changes``); this is
+    for what is done without them, and for what they are allowed to do.
+    """
+
+    def __init__(self, modules: dict[int, nn.Module]) -> None:
+        self.modules = list(modules.values())
+        self.saved: list[tuple[dict[Any, Any], dict[Any, Any]]] = []
+        for module in self.modules:
+            for m in module.modules():
+                attributes = vars(m)
+                self.saved.append((attributes, dict(attributes)))
+                for name in _MODULE_DICTS:
+                    held = attributes.get(name)
+                    if isinstance(held, dict):
+                        self.saved.append((held, dict(held)))
+        self.saved.extend((held, dict(held)) for held in _GLOBAL_HOOK_DICTS)
+        self.before = self.stamp()
+
+    def stamp(self) -> tuple[int, ...]:
+        hooks = [len(held) for held in _GLOBAL_HOOK_DICTS]
+        return (*(_runtime.module_identity(m, _DERIVED) for m in self.modules), *hooks)
+
+    def changed(self) -> bool:
+        return self.stamp() != self.before
+
+    def restore(self) -> None:
+        for held, saved in self.saved:
+            same = len(held) == len(saved) and all(
+                held.get(key, self) is value for key, value in saved.items()
+            )
+            if not same:
+                held.clear()
+                held.update(saved)
 
 
 class _ModuleState:
-    """The tensors of a module and of its submodules, for one epoch."""
+    """The tensors of a module and of its submodules, for one stamp."""
 
-    __slots__ = ("accessors", "epoch", "hooked", "ids", "module", "token")
+    __slots__ = ("accessors", "hooked", "ids", "module", "stamp", "token")
 
-    def __init__(self, module: nn.Module) -> None:
+    def __init__(self, module: nn.Module, stamp: int) -> None:
         self.module = weakref.ref(module)
-        self.refresh(module)
+        self.refresh(module, stamp)
 
-    def refresh(self, module: nn.Module) -> None:
-        self.epoch = _epoch
+    def refresh(self, module: nn.Module, stamp: int) -> None:
+        self.stamp = stamp
         # Where each tensor is kept: the dicts are read again on every call,
         # so a parameter that was replaced by another tensor is picked up.
         self.accessors: list[tuple[Any, Any]] = []
@@ -514,12 +567,16 @@ def _forget_module(key: int) -> None:
 
 
 def _module_state(module: nn.Module) -> _ModuleState:
+    # What is known about a module holds while its stamp is what it was: a
+    # parameter, buffer, submodule or hook more or less, a tensor attribute
+    # that was none, another training flag all change it.
+    stamp = _runtime.module_stamp(module, _TENSOR_TYPES)
     state = _module_states.get(id(module))
     if state is None or state.module() is not module:
-        state = _module_states[id(module)] = _ModuleState(module)
+        state = _module_states[id(module)] = _ModuleState(module, stamp)
         weakref.finalize(module, _forget_module, id(module))
-    elif state.epoch != _epoch:
-        state.refresh(module)
+    elif state.stamp != stamp:
+        state.refresh(module, stamp)
     return state
 
 
@@ -577,8 +634,8 @@ def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
                     seen[id(tensor)] = len(flat)
                     flat.append(tensor)
         except LookupError:
-            # Changed behind the back of the hooks.
-            state.refresh(obj)
+            # Changed since the stamp was taken.
+            state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
             return _describe(obj, flat, seen)
         return ("module", id(obj), state.token)
     if cls is types.MethodType:
@@ -770,14 +827,16 @@ def _traps(modules: dict[int, nn.Module]) -> Any:
     reachable: set[int] = set()
     for module in modules.values():
         reachable |= _module_state(module).ids
+    # Nothing of torch.Tensor or nn.Module is replaced: see
+    # ``_watch_module_changes``.
     patches = [
-        (torch.Tensor, "backward", _refuse("calls backward")),
         (torch.autograd, "backward", _refuse("calls torch.autograd.backward")),
         (torch.autograd, "grad", _refuse("calls torch.autograd.grad")),
         (torch.autograd.Variable, "_execution_engine", _NoEngine()),
         (torch._C, "_set_grad_enabled", _set_grad_enabled_checked),
     ]
     saved = [(owner, name, owner.__dict__.get(name)) for owner, name, _ in patches]
+    watch: _Watch | None = None
     refuse_grad = _refuse("reads or sets the .grad of a tensor")
     real_grad = torch._C.TensorBase.grad.__get__  # type: ignore[attr-defined]
 
@@ -791,22 +850,25 @@ def _traps(modules: dict[int, nn.Module]) -> Any:
     try:
         for owner, name, replacement in patches:
             setattr(owner, name, replacement)
-        # Shadows the attribute of the base class for the time of the trace.
-        torch.Tensor.grad = property(read_grad, refuse_grad, refuse_grad)  # type: ignore[assignment,method-assign]
+        # Shadows the attribute of torch.Tensor for the tensors of the trace.
+        FakeTensor.grad = property(read_grad, refuse_grad, refuse_grad)  # type: ignore[assignment,method-assign]
         _state.traced = reachable
+        _state.watch = watch = _Watch(modules)
+        _watch_module_changes(True)
         # Library code that asks torch.compiler.is_compiling() takes the path
         # it takes under torch.compile.
         with torch.compiler._compile_session_context():
             yield
     finally:
         _state.traced = None
-        for attributes, name, before in reversed(_state.derived):
-            if before is _state:
-                attributes.pop(name, None)
-            else:
-                attributes[name] = before
-        _state.derived = []
-        del torch.Tensor.grad
+        _state.watch = None
+        _watch_module_changes(False)
+        if watch is not None:
+            # Also what a module derives from its parameters and keeps, as an
+            # RNN does with its weights.
+            watch.restore()
+        if "grad" in vars(FakeTensor):
+            del FakeTensor.grad
         for owner, name, original in saved:
             if original is None:
                 delattr(owner, name)
@@ -1251,6 +1313,8 @@ class _Region:
                     if reason is not None:
                         raise _Failed(i, reason)
                     replay.run(i, i + 1, env, True)
+                    if _state.watch is not None and _state.watch.changed():
+                        raise _Failed(i, "changes a module the region was given")
                     _note_local(insts[i], env, local)
                     if _is_outside_tensor(env.get(insts[i]["dst"])):
                         # Read from a global, a closure or a plain object. Left
@@ -1399,6 +1463,14 @@ class _Walk:
                 except Exception:
                     if inside:
                         raise
+                    outside = True
+                watch = _state.watch
+                if watch is not None and watch.changed():
+                    if inside:
+                        raise _Failed(
+                            self.index, "changes a module the region was given"
+                        )
+                    watch.restore()
                     outside = True
                 if outside:
                     if inside:
@@ -1938,5 +2010,4 @@ def make_pass(
             raise ValueError(f"unknown backend {backend!r}; known: {sorted(_BACKENDS)}")
         backend = _BACKENDS[backend]
     _runtime = runtime
-    _install_module_hooks()
     return Regions(backend, min_ops, max_variants, warmup)
