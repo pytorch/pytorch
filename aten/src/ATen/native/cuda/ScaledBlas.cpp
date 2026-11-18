@@ -180,6 +180,23 @@ static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, Swizzle
       swizzle_a != SwizzleType::SWIZZLE_32_8 || prefers_swizzle_32_8(t),
       "SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)");
 }
+
+#if ROCM_VERSION >= 70000
+static void check_mx_problem_size(
+    int64_t m, int64_t n, int64_t k_unpacked, SwizzleType swizzle) {
+  if (swizzle == SwizzleType::SWIZZLE_32_8) {
+    TORCH_CHECK_VALUE(
+        k_unpacked % 32 == 0,
+        "K must be a multiple of 32 for SWIZZLE_32_8 block-wise scaling, got K=",
+        k_unpacked);
+    return;
+  }
+  TORCH_CHECK_VALUE(
+      m % 16 == 0 && n % 16 == 0 && k_unpacked % 128 == 0,
+      "M, N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE block-wise scaling, got M=",
+      m, ", N=", n, ", K=", k_unpacked);
+}
+#endif
 #endif
 
 // Number of 1x32 e8m0 block scales in the layout v1 `_scaled_mm` accepts: rows
@@ -294,7 +311,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 }
 
 bool
-_tunable_scaled_gemm_rocm(
+_tunable_scaled_gemm(
           cublasCommonArgs& args,
           const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a, const Tensor& scale_b,
@@ -302,9 +319,11 @@ _tunable_scaled_gemm_rocm(
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
           const at::ScalarType out_dtype,
-          Tensor& out) {
-#ifdef USE_ROCM
+          Tensor& out,
+          const std::optional<Tensor>& alpha) {
   bool dispatched = false;
+#ifdef USE_ROCM
+  (void)alpha;
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
       if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
         if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
@@ -362,6 +381,24 @@ _tunable_scaled_gemm_rocm(
           dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
         }                                                             \
       }
+#else
+      // CUDA cuBLASLt dispatches on runtime dtypes in ScaledGemmParams, whose
+      // signature also keys the tuning cache by dtype. AT/BT are placeholders.
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                         \
+      static at::cuda::tunable::ScaledGemmTunableOp<                 \
+          at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,            \
+          BLASOP_A, BLASOP_B> scaledgemm{};                          \
+      dispatched = scaledgemm(&params) == at::cuda::tunable::OK;
+#endif
+#ifdef USE_ROCM
+#define TUNABLE_SCALED_GEMM_TYPES \
+  kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES)
+#define TUNABLE_SET_ALPHA(params, alpha_val)
+#else
+#define TUNABLE_SCALED_GEMM_TYPES \
+  kHalf, kBFloat16, kFloat, AT_EXPAND(AT_FLOAT8_TYPES)
+#define TUNABLE_SET_ALPHA(params, alpha_val) (params).alpha = (alpha_val)
+#endif
   AT_DISPATCH_V2(out_dtype, "_tunable_scaled_gemm", AT_WRAP([&] {
     bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
     bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
@@ -389,7 +426,6 @@ _tunable_scaled_gemm_rocm(
     params.k = args.k;
     params.a = args.mata->data_ptr();
     params.a_scale_ptr = args.scale_mata_ptr;
-    params.a_scale_dtype = args.scale_mata_dtype.value();
     params.lda = args.lda;
     params.a_dtype = args.mata->scalar_type();
     params.a_scale_dtype = args.scale_mata_dtype.value();
@@ -397,7 +433,6 @@ _tunable_scaled_gemm_rocm(
     params.a_swizzle_type = args.swizzle_mata_type;
     params.b = args.matb->data_ptr();
     params.b_scale_ptr = args.scale_matb_ptr;
-    params.b_scale_dtype = args.scale_matb_dtype.value();
     params.ldb = args.ldb;
     params.b_dtype = args.matb->scalar_type();
     params.b_scale_dtype = args.scale_matb_dtype.value();
@@ -410,6 +445,7 @@ _tunable_scaled_gemm_rocm(
     params.ldc = args.result_ld;
     params.c_dtype = out_dtype;
     params.use_fast_accum = use_fast_accum;
+    TUNABLE_SET_ALPHA(params, alpha);
     // `dispatched` stays false if the selected kernel reports a non-OK status,
     // or if no branch of TUNABLE_DISPATCH matches this dtype pair; either way
     // the caller re-dispatches at::cuda::blas::scaled_gemm.
@@ -429,12 +465,11 @@ _tunable_scaled_gemm_rocm(
       TORCH_CHECK(false, "unreachable");
     }
   }),
-  kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES));
+  TUNABLE_SCALED_GEMM_TYPES);
+#undef TUNABLE_SET_ALPHA
+#undef TUNABLE_SCALED_GEMM_TYPES
 #undef TUNABLE_DISPATCH
   return dispatched;
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_gemm_rocm only callable on ROCM devices");
-#endif
 }
 
 struct ScaledGemmEpilogue {
@@ -467,9 +502,26 @@ _scaled_gemm(
       swizzle_choice_a,
       swizzle_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
-  if (scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false)) {
-    TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+  if (swizzle_choice_a == SwizzleType::SWIZZLE_MN_K4 || swizzle_choice_b == SwizzleType::SWIZZLE_MN_K4) {
+    TORCH_CHECK_VALUE(
+        args.transa == 't' && args.transb == 'n',
+        "packed MNxK4 scaling requires row-major mat_a and column-major mat_b");
+  }
+#ifdef USE_ROCM
+  // hipBLASLt only has solutions for every layout permutation with tensorwise scaling;
+  // row-wise and block-wise bind their scale vectors to the operand orientation and are
+  // TN-only on all gfx archs. scaled_mm_arch_allowed() ignores sm90_only/sm100_only on
+  // ROCm, so it cannot express this.
+  const bool tn_only = scaling_choice_a != ScalingType::TensorWise ||
+      scaling_choice_b != ScalingType::TensorWise;
+  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by hipBLASLt for non-tensorwise scaling";
+#else
+  // H100 only supports row-major x column-major, but all permutations are supported on Blackwells
+  const bool tn_only = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false);
+  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by cuBLASLt";
+#endif
+  if (tn_only) {
+    TORCH_CHECK(args.transa == 't' && args.transb == 'n', tn_only_msg);
   }
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.
@@ -483,21 +535,20 @@ _scaled_gemm(
           (effective_accumulator->stride(0) == args.result_ld &&
            effective_accumulator->scalar_type() == out_dtype_),
       "scaled_addmm: input and output must have the same dtype and leading dimension");
-// ROCM enables the TunableOp path only
-// but can fallback to at::cuda::blas::scaled_gemm
-#ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  bool tunable_op_enabled = tuning_ctx->IsTunableOpEnabled();
-#else
-  bool tunable_op_enabled = false;
-#endif
+  // TunableOp's ScaledGemmParams cannot represent the addmm accumulator/alpha/beta
+  // yet, so bypass it for epilogues (ROCm blocks the accumulator upstream, CUDA-only).
+  const bool tunable_supports_epilogue = !effective_accumulator &&
+      epilogue.alpha == 1.0f && epilogue.beta == 0.0f;
+  bool tunable_op_enabled =
+      tuning_ctx->IsTunableOpEnabled() && tunable_supports_epilogue;
   if (tunable_op_enabled) {
-      // Only available on ROCM. Returns false when the tunable dispatch did
+      // Returns false when the tunable dispatch did
       // not run the GEMM -- the selected kernel reported a non-OK status, or
       // no TUNABLE_DISPATCH branch matched this dtype pair. Both cases fall
       // through to the non-tunable scaled_gemm below. Matches the addmm
       // fallback in launchGemmAndBiasCublasLt.
-      if (_tunable_scaled_gemm_rocm(
+      if (_tunable_scaled_gemm(
               args,
               mat1, mat2,
               scale_a, scale_b,
@@ -505,7 +556,8 @@ _scaled_gemm(
               bias,
               use_fast_accum,
               out_dtype_,
-              out)) {
+              out,
+              device_alpha)) {
         return out;
       }
   }
@@ -578,7 +630,8 @@ _scaled_rowwise_rowwise(
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
-//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only row-major mat1 x column-major mat2 is supported on CUDA SM90, and on ROCm for
+//    every scaling recipe other than tensorwise
 //  - Only works if matrices sizes are divisible by 32
 //  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
 //    and scale_b should have size = to mat2.size(1)
@@ -761,9 +814,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       // effectively packing two elements into one byte.
       packed_factor = 2;
     }
-    TORCH_CHECK_VALUE(mat1.size(0) % 16 == 0 && (mat1.size(1) * packed_factor) % 128 == 0 &&
-                mat2.size(1) % 16 == 0,
-                "M, N must be multiples of 16 and K must be multiple of 128 for block-wise scaling");
+    check_mx_problem_size(
+        mat1.size(0),
+        mat2.size(1),
+        mat1.size(1) * packed_factor,
+        SwizzleType::NO_SWIZZLE);
 
     TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
                 out.scalar_type() == ScalarType::Half,
@@ -797,7 +852,7 @@ namespace {
 
 using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 11> scale_kernel_dispatch = {{
   { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "block_1x128_128x128", std::bind_front(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
@@ -806,6 +861,10 @@ std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
     ScaledGemmImplementation::BLOCK_128x128_1x128},
   { "block_1x128_1x128", std::bind_front(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
     ScaledGemmImplementation::BLOCK_1x128_1x128},
+  { "mnk4_1x32_1x32", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x32),
+    ScaledGemmImplementation::MNK4_1x32_1x32},
+  { "mnk4_1x128_1x128", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x128),
+    ScaledGemmImplementation::MNK4_1x128_1x128},
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
   { "nvfp4_nvfp4_single_scale", scaled_blas::check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
@@ -935,6 +994,40 @@ _check_deepseek_support() {
     "DeepSeek style (1x128, 128x128) scaling requires cublasLt >= 12.9"
   );
 #endif
+}
+
+Tensor& _scaled_mnk4_blockwise(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    ScalingType scaling_type,
+    const std::optional<Tensor>& bias,
+    bool use_fast_accum,
+    Tensor& out,
+    const ScaledGemmEpilogue& epilogue = {}) {
+  scaled_blas::check_mnk4_support();
+  TORCH_CHECK_VALUE(
+      out.scalar_type() == kBFloat16 || out.scalar_type() == kHalf || out.scalar_type() == kFloat,
+      "packed MNxK4 output dtype must be BFloat16, Float16, or Float32, got ", out.scalar_type());
+  const auto packed_k = scaling_type == ScalingType::BlockWise1x32 ? 128 : 512;
+  // Min block size 16, M/N padded to 4, K padded to 128 for 1x32 mode or 512 for 1x128 mode
+  const auto expected_a_elems = 16 * ceil_div<int64_t>(mat_a.size(0), 4) * ceil_div<int64_t>(mat_a.size(1), packed_k);
+  const auto expected_b_elems = 16 * ceil_div<int64_t>(mat_b.size(1), 4) * ceil_div<int64_t>(mat_b.size(0), packed_k);
+  TORCH_CHECK_VALUE(
+      scale_a.scalar_type() == kFloat8_e8m0fnu && scale_a.is_contiguous() && scale_a.numel() == expected_a_elems,
+      "For packed MNxK4 scaling scale_a must be a contiguous float8_e8m0fnu tensor with ", expected_a_elems, " elements");
+  TORCH_CHECK_VALUE(
+      scale_b.scalar_type() == kFloat8_e8m0fnu && scale_b.is_contiguous() && scale_b.numel() == expected_b_elems,
+      "For packed MNxK4 scaling scale_b must be a contiguous float8_e8m0fnu tensor with ", expected_b_elems, " elements");
+  TORCH_CHECK_VALUE(
+      reinterpret_cast<uintptr_t>(scale_a.const_data_ptr()) % 16 == 0,
+      "For packed MNxK4 scaling scale_a must have a 16-byte aligned data pointer");
+  TORCH_CHECK_VALUE(
+      reinterpret_cast<uintptr_t>(scale_b.const_data_ptr()) % 16 == 0,
+      "For packed MNxK4 scaling scale_b must have a 16-byte aligned data pointer");
+  return _scaled_gemm(
+      mat_a, mat_b, scale_a, scale_b, scaling_type, scaling_type, SwizzleType::SWIZZLE_MN_K4, SwizzleType::SWIZZLE_MN_K4, bias, use_fast_accum, out, epilogue);
 }
 
 Tensor&
@@ -1192,7 +1285,7 @@ _scaled_mxfp8_mxfp8(
 #ifdef USE_ROCM
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
-  const char* scale_layout;
+  [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
     scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), mat_a.size(1));
     scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), mat_b.size(0));
@@ -1205,7 +1298,7 @@ _scaled_mxfp8_mxfp8(
 #else
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4);
-  const char* scale_layout = "SWIZZLE_32_4_4";
+  [[maybe_unused]] const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
   TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
@@ -1229,9 +1322,7 @@ _scaled_mxfp8_mxfp8(
 #if ROCM_VERSION >= 70000
   check_blockwise_e8m0fnu_arch_supported();
 
-  TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
-              mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
-              "Matrix dimensions must be multiples of 32 for block-wise scaling");
+  check_mx_problem_size(mat_a.size(0), mat_b.size(1), mat_a.size(1), swizzle_a);
 
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
@@ -1282,7 +1373,7 @@ _scaled_mxfp4_mxfp4(
   // AMD
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
-  const char* scale_layout;
+  [[maybe_unused]] const char* scale_layout;
   if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
     scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), K_multiplier * mat_a.size(1));
     scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), K_multiplier * mat_b.size(0));
@@ -1296,7 +1387,7 @@ _scaled_mxfp4_mxfp4(
   // NVIDIA
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_b.size(0), 32), 4);
-  const char* scale_layout = "SWIZZLE_32_4_4";
+  [[maybe_unused]] const char* scale_layout = "SWIZZLE_32_4_4";
 #endif
   TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling with ", scale_layout, " scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
@@ -1322,9 +1413,7 @@ _scaled_mxfp4_mxfp4(
 #if ROCM_VERSION >= 70000
   check_blockwise_e8m0fnu_arch_supported();
 
-  TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
-              mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
-              "Matrix dimensions must be multiples of 32 for block-wise scaling");
+  check_mx_problem_size(mat_a.size(0), mat_b.size(1), K_multiplier * mat_a.size(1), swizzle_a);
 
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
@@ -1403,15 +1492,17 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
   // Store implementations that care about swizzling, and how many swizzle arguments
   // they have to have
   // NOTE(slayton): auto here is unable to deduce the correct type..
-  std::array<std::tuple<ScaledGemmImplementation, unsigned int>, 4> swizzled_impl = {{
+  std::array<std::tuple<ScaledGemmImplementation, unsigned int>, 6> swizzled_impl = {{
     // {implementation, # required arguments}
     {ScaledGemmImplementation::MXFP8_MXFP8, 1},
     {ScaledGemmImplementation::NVFP4_NVFP4, 2},
     {ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE, 1},
-    {ScaledGemmImplementation::MXFP4_MXFP4, 1}
+    {ScaledGemmImplementation::MXFP4_MXFP4, 1},
+    {ScaledGemmImplementation::MNK4_1x32_1x32, 1},
+    {ScaledGemmImplementation::MNK4_1x128_1x128, 1}
   }};
 
-  // Only check MX/NVFP formats on NVIDIA
+  // Check implementations that consume swizzle metadata.
   for (auto [check_impl, num_args] : swizzled_impl) {
     if (impl != check_impl) {
       continue;
@@ -1605,9 +1696,11 @@ void scaled_mm_cuda_v2_impl(
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
   TORCH_CHECK_VALUE(
     gemm_impl != ScaledGemmImplementation::NONE,
     "Invalid scaling configuration.\n"
@@ -1617,6 +1710,7 @@ void scaled_mm_cuda_v2_impl(
     "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div<int64_t>(mat_a.size(0), 128), ", ", ceil_div<int64_t>(mat_a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(mat_b.size(0), 128), ", ", ceil_div<int64_t>(mat_b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
     "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4), " elements and scale_b should have ", round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4), " elements, and both should be contiguous.\n"
     "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
+    "- For BlockWise1x32 or BlockWise1x128 packed MNxK4 scaling, a and b should be float8 and both scales should be contiguous float8_e8m0fnu tensors with SWIZZLE_MN_K4.\n"
     "Got mat_a.dtype()=", mat_a.scalar_type(), ", scale_a[0].dtype()=", scale_a[0].scalar_type(), ", scale_a[0].size()=", scale_a[0].sizes(), ", scale_a[0].stride()=", scale_a[0].strides(), ", ",
     "mat_b.dtype()=", mat_b.scalar_type(), ", scale_b[0].dtype()=", scale_b[0].scalar_type(), ", scale_b[0].size()=", scale_b[0].sizes(), " and scale_b[0].stride()=", scale_b[0].strides()
   );
@@ -1639,6 +1733,10 @@ void scaled_mm_cuda_v2_impl(
         gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128 ||
         gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128) {
       _check_deepseek_support();
+    }
+    if (gemm_impl == ScaledGemmImplementation::MNK4_1x32_1x32 ||
+        gemm_impl == ScaledGemmImplementation::MNK4_1x128_1x128) {
+      scaled_blas::check_mnk4_support();
     }
     epilogue.beta = beta.to<float>();
     epilogue.alpha = alpha.to<float>();
@@ -1712,6 +1810,10 @@ void scaled_mm_cuda_v2_impl(
         use_fast_accum,
         out_mut,
         epilogue);
+  } else if (gemm_impl == ScaledGemmImplementation::MNK4_1x32_1x32) {
+    _scaled_mnk4_blockwise(mat_a, mat_b, scale_a[0], scale_b[0], ScalingType::BlockWise1x32, bias, use_fast_accum, out_mut, epilogue);
+  } else if (gemm_impl == ScaledGemmImplementation::MNK4_1x128_1x128) {
+    _scaled_mnk4_blockwise(mat_a, mat_b, scale_a[0], scale_b[0], ScalingType::BlockWise1x128, bias, use_fast_accum, out_mut, epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
     _scaled_mxfp8_mxfp8(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out_mut, epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {

@@ -1,26 +1,35 @@
 # Owner(s): ["module: mps"]
+import contextlib
 import importlib
 import os
+import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 import torch
+import torch._inductor.ir as ir
+from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
+from torch._inductor.exc import InductorError
+from torch._inductor.select_algorithm import PartialRender
+from torch._inductor.utils import Placeholder, run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
-    MACOS_VERSION,
     parametrize,
 )
-
-
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + (
-    [torch.bfloat16] if MACOS_VERSION < 14.0 else []
+from torch.testing._internal.inductor_utils import (
+    MockExternalTemplateBuffer,
+    patch_lowering,
 )
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
+from torch.utils._ordered_set import OrderedSet
+
 
 importlib.import_module("filelock")
 
@@ -41,11 +50,13 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 @instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
     device = "mps"
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_add(self, dtype):
         self.common(
             lambda a, b: a + b,
@@ -56,8 +67,145 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
+    @contextlib.contextmanager
+    def _lower_to_external_template(
+        self, op, source, *, multi_output=False, allow_fusion=False
+    ):
+        # Lowers op to a mock Helion kernel. As in real Helion kernels, a
+        # multi-output kernel returns its outputs as MultiOutput children.
+        # allow_fusion sets both template fusion flags (Helion sets them to False
+        # on Metal); None leaves them unset, so the global fusion configs apply.
+        def render(buf, kernel):
+            kernel._setup_fusion_hooks()
+            kernel._call_args = [inp.get_name() for inp in buf.inputs]
+            if not multi_output:
+                kernel._call_args.append(buf.name)
+            return PartialRender(source, kernel.render_hooks)
+
+        class MultiOutputTemplateBuffer(MockExternalTemplateBuffer):
+            def should_allocate(self):
+                return False
+
+            def get_size(self):
+                return next(iter(self._multi_output_children.values())).get_size()
+
+        def lowering(a, b, alpha=None):
+            a = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(a))
+            b = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(b))
+            if multi_output:
+                layout = ir.MultiOutputLayout(device=a.get_device())
+                buf = MultiOutputTemplateBuffer(layout, [a, b], render)
+                example = V.graph.current_node.meta["val"]
+                outputs = ir.TemplateBuffer.build_multi_outputs(buf, example)
+                out_names = list(buf._multi_output_children)
+            else:
+                layout = ir.FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+                buf = MockExternalTemplateBuffer(layout, [a, b], render)
+                outputs = ir.TensorBox.create(buf)
+                out_names = [buf.name]
+            if allow_fusion is not None:
+                buf.allow_epilogue_fusion = buf.allow_prologue_fusion = allow_fusion
+            if allow_fusion:
+                fusable = {name: f"out{i}" for i, name in enumerate(out_names)}
+                buf.epilogue_fusable_outputs = fusable
+                buf.load_input_fusion_allowed_inputs = OrderedSet([a.get_name()])
+            return outputs
+
+        # The patched lowering is not part of the FX graph cache key.
+        with (
+            inductor_config.patch(force_disable_caches=True),
+            patch_lowering({op: (lowering, False, None, False)}),
+        ):
+            yield
+
+    def _lower_add_to_external_template(self, allow_fusion=False):
+        source = (
+            f"def {Placeholder.KERNEL_NAME}(A, B, result):\n"
+            "    torch.add(A, B, out=result)\n"
+            "    return result\n"
+        )
+        return self._lower_to_external_template(
+            torch.ops.aten.add.Tensor, source, allow_fusion=allow_fusion
+        )
+
+    def test_external_template_kernel(self):
+        def f(a, b):
+            return (a.sin() + b) * 2
+
+        a = torch.randn(64, device=self.device)
+        b = torch.randn(64, device=self.device)
+        with self._lower_add_to_external_template(allow_fusion=True):
+            result, (code,) = run_and_get_code(torch.compile(f), a, b)
+        self.assertEqual(result, f(a, b))
+        self.assertIn("torch.add(A, B, out=result)", code)
+        self.assertEqual(code.count("def generated_kernel_"), 1)
+        # The template advertises fusion, but MPS keeps sin and * 2 as separate
+        # Metal kernels.
+        self.assertEqual(code.count("async_compile.metal("), 2)
+
+    @parametrize(
+        "allow_fusion", [False, None, True], name_fn=lambda f: f"fusion_{f}".lower()
+    )
+    def test_external_template_kernel_multi_output(self, allow_fusion):
+        source = (
+            f"def {Placeholder.KERNEL_NAME}(A, B):\n"
+            "    return torch.add(A, B), torch.sub(A, B)\n"
+        )
+        with torch.library._scoped_library("mps_test", "FRAGMENT") as lib:
+            lib.define("add_sub(Tensor a, Tensor b) -> (Tensor, Tensor)")
+            lib.impl(
+                "add_sub", lambda a, b: (a + b, a - b), "CompositeExplicitAutograd"
+            )
+            add_sub = torch.ops.mps_test.add_sub.default
+
+            def f(a, b):
+                x, y = add_sub(a.sin(), b)
+                return x * 2, y * 3
+
+            a = torch.randn(64, device=self.device)
+            b = torch.randn(64, device=self.device)
+            with self._lower_to_external_template(
+                add_sub, source, multi_output=True, allow_fusion=allow_fusion
+            ):
+                result, (code,) = run_and_get_code(torch.compile(f), a, b)
+            self.assertEqual(result, f(a, b))
+        self.assertEqual(code.count("def generated_kernel_"), 1)
+        # The MultiOutput children are fused into the template and unpacked
+        # from its return value by call_kernel.
+        FileCheck().check("= generated_kernel_").check("[0]").check("[1]").run(code)
+        # sin, * 2 and * 3 stay separate Metal kernels whether the fusion flags
+        # are off, unset or advertise fusion.
+        self.assertEqual(code.count("async_compile.metal("), 3)
+
+    def test_external_template_kernel_reuse(self):
+        def f(a, b, c, d):
+            return (a + b) * (c + d)
+
+        args = [torch.randn(64, device=self.device) for _ in range(4)]
+        with self._lower_add_to_external_template():
+            result, (code,) = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(result, f(*args))
+        self.assertEqual(code.count("def generated_kernel_"), 1)
+        self.assertEqual(code.count("= generated_kernel_"), 2)
+
+    @inductor_config.patch(cpp_wrapper=True)
+    def test_external_template_kernel_cpp_wrapper(self):
+        a = torch.randn(64, device=self.device)
+        with self._lower_add_to_external_template():
+            with self.assertRaisesRegex(
+                InductorError, "not supported on MPS with cpp_wrapper"
+            ):
+                torch.compile(lambda a, b: a + b)(a, a)
+
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
+
+    def test_prims_nextafter(self):
+        x = torch.tensor([0.0, 1.0], device=self.device)
+        y = torch.tensor([1.0, 2.0], device=self.device)
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
 
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
@@ -123,7 +271,7 @@ class MPSBasicTests(TestCase):
 
         self.common(foo, (torch.rand(1024),))
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
@@ -229,6 +377,13 @@ class MPSBasicTests(TestCase):
                 b,
             ),
         )
+
+    def test_argmax_bf16(self):
+        def fn(x):
+            return x.argmax(-1)
+
+        x = torch.randn(1, 65536, dtype=torch.bfloat16)
+        self.common(fn, (x,), check_lowp=False)
 
     @parametrize("shape", [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)])
     def test_welford_reduction_dynamic_shape(self, shape):
@@ -358,9 +513,30 @@ class MPSBasicTests(TestCase):
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
+    def test_assert_async_message(self):
+        def fn(x):
+            torch._assert_async((x > 0).all(), "x must be positive")
+            return x * 2
+
+        with self.assertRaisesRegex(torch.AcceleratorError, "x must be positive"):
+            torch.compile(fn, fullgraph=True)(-torch.ones(3, device="mps"))
+            torch.mps.synchronize()
+
+    def test_error_header_not_shared_across_kernels(self):
+        def with_assert(x):
+            torch._assert_async((x > 0).all(), "x must be positive")
+            return x * 2
+
+        x = torch.ones(3, device="mps")
+        torch.compile(with_assert)(x)
+        _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2), x)
+        self.assertNotIn("error_buf", code)
+
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 class MPSBasicTestsAOTI(TestCase):
+    hw_classification = HardwareClassification.MPS
+
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)
         ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
@@ -502,6 +678,102 @@ class MPSBasicTestsAOTI(TestCase):
                 target_count,
                 exactly=True,
             ).run(src_code)
+
+    def test_shader_compile_error_raises(self):
+        # A shader that fails to compile must surface as an exception rather
+        # than killing the process. The shader library is built lazily inside
+        # the generated handle getter, so the failure lands on the first run,
+        # not at compile time. Without AOTI_TORCH_ERROR_CODE_CHECK the null
+        # library handle reaches aoti_torch_mps_get_kernel_function, which
+        # dereferences it and segfaults.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        ep = torch.export.export(M().to("mps"), inp)
+
+        with patch(
+            "torch._inductor.codegen.mps._embed_headers",
+            return_value="__DELIBERATE_MSL_SYNTAX_ERROR__;",
+        ):
+            path = torch._inductor.aoti_compile_and_package(ep)
+
+        m = torch._inductor.aoti_load_package(path)
+        # The Metal compiler diagnostic must reach Python, not just some error.
+        with self.assertRaisesRegex(RuntimeError, "__DELIBERATE_MSL_SYNTAX_ERROR__"):
+            m(*inp)
+
+    def test_kernel_function_lookup_error_raises(self):
+        # Covers the second shim call, which the test above never reaches
+        # because it fails at the first. Renaming the kernel symbol leaves a
+        # library that compiles but contains no "generated_kernel", so the
+        # lookup fails. Without AOTI_TORCH_ERROR_CODE_CHECK the null function
+        # handle reaches aoti_torch_mps_run_command_block and segfaults.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        ep = torch.export.export(M().to("mps"), inp)
+
+        headers = (
+            "#include <metal_stdlib>\n"
+            "using namespace metal;\n"
+            "#define generated_kernel renamed_kernel\n"
+        )
+        with patch("torch._inductor.codegen.mps._embed_headers", return_value=headers):
+            path = torch._inductor.aoti_compile_and_package(ep)
+
+        m = torch._inductor.aoti_load_package(path)
+        with self.assertRaisesRegex(
+            RuntimeError, "Failed to create function state object"
+        ):
+            m(*inp)
+
+    def test_compiled_model_does_not_depend_on_unused_openmp(self):
+        # An MPS model runs on the GPU and calls no OpenMP function, but
+        # _get_openmp_args asks for OpenMP on every macOS build, so without
+        # -dead_strip_dylibs the library ends up in the load commands under the
+        # absolute path it had on this machine. The artifact then loads nowhere
+        # else. Reading the load commands rather than the link line is what
+        # makes this fail if the flag stops having the effect it is added for.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(8, device="mps"),)
+        ep = torch.export.export(Model(), example_inputs)
+        # Without libtorch is the configuration the stray dependency actually
+        # hurts, an artifact meant to be opened somewhere else, and it is the
+        # only one the flag is added for. At the default the flag does not
+        # apply and this would be asserting against a build it says nothing
+        # about.
+        with inductor_config.patch({"aot_inductor.link_libtorch": False}):
+            so_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        listed = subprocess.run(
+            ["otool", "-L", so_path], capture_output=True, check=True
+        ).stdout.decode()
+        deps = [
+            line.split(" (compatibility", 1)[0].strip()
+            for line in listed.splitlines()
+            if " (compatibility" in line
+        ]
+        if not deps:
+            raise AssertionError(f"otool reported no dependencies for {so_path}")
+
+        # Named rather than counted, because a bare count tells whoever reads
+        # the failure nothing about which library came back.
+        openmp = [d for d in deps if "omp" in os.path.basename(d).lower()]
+        if openmp:
+            raise AssertionError(f"unused OpenMP dependency in {so_path}: {openmp}")
+
+        # The other half of the property: a library the model does reach has to
+        # survive. Every Mach-O object links libSystem, so if that is gone the
+        # flag is stripping things it should not.
+        if not any(os.path.basename(d).startswith("libSystem") for d in deps):
+            raise AssertionError(f"expected libSystem among {deps}")
 
 
 if __name__ == "__main__":

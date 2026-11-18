@@ -118,8 +118,8 @@ void validate_scaled_mm_meta_inputs(
 //  - `scale_b`/`recipe_b`/`swizzle_b`: as above, for `mat_b`
 //  - `bias`: optional bias, `torch.float16` or `torch.bfloat16`
 //  - `out_dtype`: optional output dtype; defaults to `mat_a.dtype()`
-//  - `contraction_dim`: optional pair `(a_dim, b_dim)` overriding the default `(1, 0)`
-//    contraction; useful for packed formats (e.g. NVFP4 x2) where cheap `.t()` is unavailable
+//  - `contraction_dim`: only the default `(1, 0)` contraction and its negative-index
+//    equivalents are supported by the implementations
 //  - `use_fast_accum`: enables fast tensor-core accumulation (Hopper+ only); ignored otherwise
 TORCH_META_FUNC(_scaled_mm_v2)(
     const Tensor& self,
@@ -134,6 +134,12 @@ TORCH_META_FUNC(_scaled_mm_v2)(
     std::optional<c10::ScalarType> out_dtype,
     at::IntArrayRef contraction_dim,
     bool use_fast_accum) {
+  TORCH_CHECK_VALUE(
+      contraction_dim.empty() ||
+          (contraction_dim.size() == 2 &&
+           (contraction_dim[0] == 1 || contraction_dim[0] == -1) &&
+           (contraction_dim[1] == 0 || contraction_dim[1] == -2)),
+      "torch._scaled_mm_v2 only supports contraction_dim=(1, 0)");
   validate_scaled_mm_meta_inputs(
       self,
       mat2,
@@ -218,11 +224,12 @@ TORCH_META_FUNC(_scaled_addmm)(
       self.options());
 }
 
-// V2: Grouped scaled matrix multiply. Shape inference + output allocation runs
-// here; recipe-independent input validation runs here too (in eager, before
-// TORCH_IMPL_FUNC, and during `torch.compile` tracing). Per-recipe scale-shape
-// checks, the device-capability gate, and kernel dispatch live in the CUDA
-// TORCH_IMPL_FUNC. Output is bf16 only.
+// V2: Grouped scaled matrix multiply. Shape inference, output allocation,
+// and recipe-specific output-dtype validation run here in eager mode.
+// FakeTensor and torch.compile use Python meta for shape inference, output
+// dtype checks, and offset contiguity; other checks run during execution.
+// Scale layouts, device capabilities, and backend selection are checked in
+// the CUDA implementation.
 //
 // `self`/`mat2` may be 2D or 3D; `offs` carries group boundaries when either
 // operand is 2D. The output size/stride mirror `create_grouped_gemm_output_tensor`.
@@ -241,7 +248,7 @@ TORCH_META_FUNC(_scaled_grouped_mm_v2)(
     at::IntArrayRef contraction_dim,
     bool use_fast_accum) {
   scaled_blas::validate_scaled_grouped_mm_v2_inputs(
-      self, mat2, offs, bias, contraction_dim, out_dtype);
+      self, mat2, recipe_a, swizzle_a, recipe_b, swizzle_b, offs, bias, contraction_dim, out_dtype);
 
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   std::optional<Tensor> offs_opt =
@@ -612,9 +619,11 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
 
   if (gemm_impl == ScaledGemmImplementation::NONE) {
     const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
