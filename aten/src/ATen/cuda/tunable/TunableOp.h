@@ -52,6 +52,12 @@ class TunableOp {
       ResultEntry result = ResultEntry::Null();
       TuningContext* ctx = getTuningContext();
 
+      // TUNABLE_LOG evaluates its arguments before checking the level, so the
+      // failure log below reuses these rather than recomputing them. Empty
+      // while TunableOp is disabled: there is no resolved solution to name.
+      std::string op_sig;
+      std::string concrete_sig;
+
       // Callers already gate on this; skipping the resolve here avoids
       // params->Signature() and manager init for any caller that does not.
       if (!ctx->IsTunableOpEnabled()) {
@@ -59,8 +65,8 @@ class TunableOp {
       }
       else {
         auto& mgr = ctx->GetTuningResultsManager();
-        const auto op_sig = Signature();
-        const auto concrete_sig = params->Signature();
+        op_sig = Signature();
+        concrete_sig = params->Signature();
         const bool has_dynamic_dim = params->dynamic_dims_mask.any();
 
         result = mgr.Lookup(op_sig, concrete_sig);
@@ -115,7 +121,17 @@ class TunableOp {
         op = GetOp(result.GetKey());
       }
       TORCH_CHECK(op != nullptr);
-      return op->Call(params);
+      const auto status = op->Call(params);
+      if (status != OK && !op_sig.empty()) {
+        // No retry on Default: every caller already treats a non-OK status as
+        // "use my own non-tunable path", so retrying here would duplicate the
+        // fallback and hide which candidate failed. Level 2 like the other
+        // per-call messages above -- a solution that keeps failing would
+        // otherwise log on every GEMM at verbosity 1.
+        TUNABLE_LOG2("solution ", result, " failed for ", op_sig, "(",
+            concrete_sig, "), returning non-OK for caller fallback");
+      }
+      return status;
     }
 
     virtual std::string Signature() {
@@ -200,6 +216,9 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
 
       auto borrowed = ResultEntry::Null();
+      // Read once and reused below: the scan and the fallback have to agree
+      // on whether the wildcard is in play.
+      const bool wildcard_enabled = ctx->IsWildcardFallbackEnabled();
       if (ctx->IsNearestMatchEnabled()) {
         borrowed = mgr.LookupNearest(op_sig, concrete_sig);
         if (borrowed != ResultEntry::Null() && !DonorIsUsable(borrowed, params)) {
@@ -209,7 +228,7 @@ class TunableOp {
         // the worker measures Default while runtime runs the wildcard and
         // autotune ranks a kernel that never runs. Validated like any borrow;
         // Default wildcards skipped, as profiling the fallback twice is moot.
-        if (borrowed == ResultEntry::Null() && ctx->IsWildcardFallbackEnabled()) {
+        if (borrowed == ResultEntry::Null() && wildcard_enabled) {
           auto wildcard = mgr.LookupWildcardFallback(op_sig, concrete_sig);
           if (wildcard != ResultEntry::Null() &&
               wildcard != ResultEntry::Default() &&
@@ -221,8 +240,8 @@ class TunableOp {
       const bool will_validate = (borrowed != ResultEntry::Null());
 
       // Only a validated donor persists this shape, leaving offline tuning
-      // nothing to find. Report unless a persisted verdict is coming; the
-      // capture path re-reports when validation is skipped, so the shape
+      // nothing to find. Report unless a persisted verdict is coming; every
+      // path that then fails to record one re-reports instead, so the shape
       // cannot drop out of both files. After the lookup: it needs that.
       if (ctx->IsRecordUntunedEnabled() &&
           !(will_validate && ctx->IsRecordBorrowedEnabled())) {
@@ -232,10 +251,20 @@ class TunableOp {
       }
 
       if (will_validate) {
+        // The report above was suppressed on the promise that RecordBorrowed
+        // would cover this shape. Every exit from here that does not record
+        // has to make good on it, or the shape reaches neither file.
+        auto report_untuned = [&] {
+          if (ctx->IsRecordUntunedEnabled()) {
+            mgr.RecordUntuned(
+                ctx->GetUntunedFile(), op_sig, concrete_sig,
+                params->BLASSignature());
+          }
+        };
         // Tuning under stream capture is forbidden (see the tuning path
         // above): FindFastestAmong allocates, memcpys and synchronizes events,
-        // any of which invalidates the capture. While capturing, report
-        // untuned (unless reported above) and return Default unvalidated.
+        // any of which invalidates the capture. Returns Default unvalidated,
+        // the same answer every other exit that measures nothing gives.
         bool can_validate = true;
 #ifndef USE_ROCM
         can_validate =
@@ -243,11 +272,7 @@ class TunableOp {
             c10::cuda::CaptureStatus::None;
 #endif
         if (!can_validate) {
-          if (ctx->IsRecordUntunedEnabled() && ctx->IsRecordBorrowedEnabled()) {
-            mgr.RecordUntuned(
-                ctx->GetUntunedFile(), op_sig, concrete_sig,
-                params->BLASSignature());
-          }
+          report_untuned();
           return ResultEntry::Default();
         }
         try {
@@ -263,12 +288,15 @@ class TunableOp {
         catch (const c10::AcceleratorError&) {
           // Not a failed validation but an unusable device: tunableop.py
           // relies on this reaching Python so the worker is torn down.
+          // Reported first: nothing is recorded on the way out.
+          report_untuned();
           throw;
         }
         catch (const c10::OutOfMemoryError&) {
           // FindFastestAmong frees its copies only on the normal path, so
           // swallowing a repeatable OOM leaks again on every later dispatch
           // of this signature. Fail the job; the caller then times inline.
+          report_untuned();
           throw;
         }
         catch (const c10::Error& e) {
@@ -276,29 +304,27 @@ class TunableOp {
           // copies, so it can throw. Nothing was measured, so the promise
           // above -- that RecordBorrowed would cover this shape -- does not
           // hold, and without this the shape reaches neither file and offline
-          // tuning can never find it. Report it untuned and serve what
-          // runtime will serve: runtime has nearest match off, so it takes
-          // the wildcard tail below, and Null becomes Default.
+          // tuning can never find it. Report it untuned and return Default,
+          // the same answer the capture branch and the tail give: while the
+          // pass is on, a donor that was not measured is never served.
           TUNABLE_LOG2(
               "borrow validation failed for ", op_sig, '(', concrete_sig,
               "), recording untuned: ", e.what());
-          if (ctx->IsRecordUntunedEnabled()) {
-            mgr.RecordUntuned(
-                ctx->GetUntunedFile(), op_sig, concrete_sig,
-                params->BLASSignature());
-          }
-          return ctx->IsWildcardFallbackEnabled()
-              ? mgr.LookupWildcardFallback(op_sig, concrete_sig)
-              : ResultEntry::Null();
+          report_untuned();
+          return ResultEntry::Default();
         }
       }
       // Nearest match takes precedence: once it is on, a miss with no usable
       // donor of either kind (nearest or wildcard) is a miss rather than a
-      // reason to return an unvalidated wildcard hint.
+      // reason to return an unvalidated wildcard hint. One rule for every
+      // exit that measures no donor -- no usable donor, stream capture, a
+      // failed validation. Runtime runs with nearest match off and does
+      // take the wildcard below; that is the difference between the pass and
+      // runtime, not a split between these branches.
       if (ctx->IsNearestMatchEnabled()) {
         return ResultEntry::Default();
       }
-      if (ctx->IsWildcardFallbackEnabled()) {
+      if (wildcard_enabled) {
         return mgr.LookupWildcardFallback(op_sig, concrete_sig);
       }
       return ResultEntry::Null();
