@@ -3855,6 +3855,17 @@ class RegionAverage:
         return self.mean
 
 
+class RegionRunningMean(RegionAverage):
+    def __init__(self):
+        super().__init__()
+        self.count = 0
+
+    def update(self, value):
+        self.count = self.count + 1
+        self.mean = self.mean + (value.mean(0) - self.mean) / self.count
+        return self.mean
+
+
 def region_running(model, x, stats):
     out = model(x)
     return out - stats.update(out)
@@ -3922,6 +3933,10 @@ def region_branching(model, x):
     if x.shape[0] > 4:
         out = out * 2
     return out.sin()
+
+
+def region_pick(model, x, i):
+    return model.layers[i](x).sin().cos()
 
 
 class RegionAsks(torch.nn.Module):
@@ -4656,7 +4671,10 @@ class TestCfgRegions(TestCase):
         compiled = torch.cfg_compile(region_counter, backend=backend, fallback=False)
         x = torch.randn(4)
         for i in range(40):
-            self.assertEqual(compiled(x, i), region_counter(x, i), atol=0, rtol=0)
+            scale = i / 7
+            self.assertEqual(
+                compiled(x, scale), region_counter(x, scale), atol=0, rtol=0
+            )
         self.assertLessEqual(len(graphs), 3)
         self.assertEqual(self.compiled_regions(compiled), [])
         (reason,) = self.left_to_vm(compiled, "region_counter")
@@ -4869,6 +4887,66 @@ class TestCfgRegions(TestCase):
         (region,) = self.compiled_regions(compiled)
         below, above = region["open"]
         self.assertNotEqual(below, above)
+
+    def test_integer_that_varies_is_an_input_of_the_graph(self):
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_counter, backend=self.counting(graphs), fallback=False
+        )
+        x = torch.randn(4)
+        for i in range(40):
+            self.assertEqual(compiled(x, i), region_counter(x, i), atol=1e-6, rtol=0)
+        self.assertLessEqual(len(graphs), 2)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(len(region["open"]), 1)
+
+    def test_integer_kept_in_an_object_is_an_input_of_the_graph(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_running, backend=self.counting(graphs), fallback=False
+        )
+        stats, expected_stats = RegionRunningMean(), RegionRunningMean()
+        with torch.no_grad():
+            for _ in range(10):
+                x = torch.randn(4, 6)
+                expected = region_running(model, x, expected_stats)
+                self.assertEqual(compiled(model, x, stats), expected, atol=1e-6, rtol=0)
+                self.assertEqual(stats.mean, expected_stats.mean, atol=1e-6, rtol=0)
+        # The count is another integer on every call: the graph takes it,
+        # and what the graph makes of it is stored as a plain int.
+        self.assertEqual(stats.count, 10)
+        self.assertIs(type(stats.count), int)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_running"))
+        self.assertLessEqual(len(graphs), 3)
+
+    def test_code_that_asks_what_an_integer_is(self):
+        torch.manual_seed(0)
+        calls = [(4, n) for n in (1, 1, 1, 1, 2, 3, 4, 5, 6, 7)]
+        self.assertEqual(len(self.asked("isinstance", calls)), 1)
+        self.assertEqual(self.asked("type", calls), [])
+        self.assertEqual(self.asked("text", calls), [])
+
+    def test_integer_that_picks_a_layer_is_not_left_open(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.cfg_compile(
+            region_pick, backend=self.counting(graphs), fallback=False
+        )
+        with torch.no_grad():
+            for step in range(30):
+                x, i = torch.randn(3, 6), step % 5
+                self.assertEqual(
+                    compiled(model, x, i), region_pick(model, x, i), atol=0, rtol=0
+                )
+        # An index is the number it is: no graph is good for another one,
+        # and there is no end to them.
+        self.assertLessEqual(len(graphs), 4)
+        reasons = " / ".join(self.left_to_vm(compiled, "region_pick"))
+        self.assertIn("ever new values", reasons)
 
     def asked(self, how, calls):
         """Runs a model that asks what a number is, and returns the
