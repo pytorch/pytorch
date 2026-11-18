@@ -659,6 +659,7 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm", f64): {"atol": 1e-6, "rtol": 1e-6},
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
+    ("nn.functional.bilinear", f16): {"atol": 3e-3, "rtol": 3e-3},
     ("nn.functional.conv1d", f16): {"atol": 1e-5, "rtol": 6e-3},
     ("nn.functional.conv3d", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("nn.functional.conv_transpose2d", f16): {"atol": 1e-5, "rtol": 2e-3},
