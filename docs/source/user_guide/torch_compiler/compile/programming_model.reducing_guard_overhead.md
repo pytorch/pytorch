@@ -152,6 +152,8 @@ including across graph breaks and exceptions. Nested traces start without the
 outer trace's label unless they explicitly enter their own context. Use
 non-empty, exact built-in `str` labels for uninterrupted `fullgraph=True`
 tracking. String subclasses work eagerly but require fallback when traced.
+A graph break may reconstruct a `guard_ctx` object from its label, so object
+identity and aliasing are not guaranteed.
 
 You can also enter a context before a compiled call starts tracing:
 
