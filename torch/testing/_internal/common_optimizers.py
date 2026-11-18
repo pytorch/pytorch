@@ -19,6 +19,7 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    Echelon,
     LBFGS,
     Muon,
     NAdam,
@@ -139,6 +140,8 @@ class OptimizerInfo:
         has_capturable_arg: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
+        # the optim only accepts 2D parameters, see Muon
+        only_supports_2d_params: bool = False,
         # Tuple of (optimizer kwargs, schedulers_constructors) specifically for sparse tests,
         # with especially tuned hyperparameters. These only apply if the optimizer supports
         # sparse parameters or grads.
@@ -165,6 +168,7 @@ class OptimizerInfo:
         self.has_capturable_arg = has_capturable_arg
         self.metadata_for_sparse = metadata_for_sparse
         self.only_supports_sparse_grads = only_supports_sparse_grads
+        self.only_supports_2d_params = only_supports_2d_params
         self.supports_complex = supports_complex
         self.step_requires_closure = step_requires_closure
         self.supports_param_groups = supports_param_groups
@@ -896,6 +900,100 @@ def optim_inputs_func_lbfgs(device, dtype=None):
 
 def optim_error_inputs_func_lbfgs(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    return error_inputs
+
+
+def optim_inputs_func_echelon(device, dtype=None):
+    return [
+        OptimizerInput(
+            params=None, kwargs={}, desc="default (full-rank fallback on small weights)"
+        ),
+        OptimizerInput(
+            params=None, kwargs={"lr": 0.01, "rank": 2}, desc="low-rank non-default lr"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": torch.tensor(0.001), "rank": 1},
+            desc="rank-1 Tensor lr",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.2, "rank": 2},
+            desc="low-rank non-default weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"momentum": 0.8, "nesterov": False, "rank": 1},
+            desc="rank-1 momentum without nesterov",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"rank": 1, "tau_iters": 3, "margin": 1.1},
+            desc="rank-1 custom tail settings",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "match_rms_adamw", "rank": 2},
+            desc="match_rms_adamw lr adjustment",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "spectral_unclamped", "rank": 2},
+            desc="spectral_unclamped lr adjustment",
+        ),
+    ]
+
+
+def optim_error_inputs_func_echelon(device, dtype):
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+    complex_param.grad = torch.rand_like(complex_param)
+    non_2d_param = torch.rand(2, 3, 4, device=device, dtype=dtype)
+    non_2d_param.grad = torch.rand_like(non_2d_param)
+    param = torch.rand(2, 3, device=device, dtype=dtype)
+    param.grad = torch.rand_like(param)
+    error_inputs += [
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[non_2d_param],
+                kwargs=dict(),
+                desc="only support 2D parameters",
+            ),
+            error_type=ValueError,
+            error_regex="Echelon only supports 2D parameters",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"rank": 0},
+                desc="invalid rank",
+            ),
+            error_type=ValueError,
+            error_regex="rank must be an integer >= 1",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"adjust_lr_fn": "arbitrary"},
+                desc="unsupported adjust_lr_fn",
+            ),
+            error_type=ValueError,
+            error_regex="Adjust learning rate function arbitrary is not supported",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[complex_param],
+                kwargs=dict(),
+                desc="does not support complex parameters",
+            ),
+            error_type=RuntimeError,
+            error_regex="Echelon does not support complex parameters",
+            error_on=OptimizerErrorEnum.STEP_ERROR,
+        ),
+    ]
     return error_inputs
 
 
@@ -1995,12 +2093,42 @@ optim_db: list[OptimizerInfo] = [
         ),
     ),
     OptimizerInfo(
+        Echelon,
+        optim_inputs_func=optim_inputs_func_echelon,
+        optim_error_inputs_func=optim_error_inputs_func_echelon,
+        supported_impls=(),
+        not_og_supported_flags=(),
+        supports_complex=False,
+        only_supports_2d_params=True,
+        decorators=(
+            # Copied from Muon's XPU tolerance for the same test (see the Muon entry below) as a
+            # precaution: Echelon has not been run on XPU.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1.3e-6)}),
+                "TestOptimRenewed",
+                "test_state_dict_cross_device",
+                device_type="xpu",
+            ),
+            # The rank-1 test inputs leave Echelon's tail at float32 roundoff, which compiled and
+            # eager kernels round differently; the error grows with lr and varies between runs (up
+            # to 6e-4 on A100 under the gamma=100 LR schedulers). The compiled update itself is
+            # checked by test_echelon_full_rank_gradients_match_eager in test_compiled_optimizers.py.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-3, rtol=1e-3)}),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+            ),
+        ),
+        skips=(),
+    ),
+    OptimizerInfo(
         Muon,
         optim_inputs_func=optim_inputs_func_muon,
         optim_error_inputs_func=optim_error_inputs_func_muon,
         supported_impls=(),
         not_og_supported_flags=(),
         supports_complex=False,
+        only_supports_2d_params=True,
         decorators=(
             # XPU backend kernels accumulate float32 rounding differently from CPU,
             # resulting in small but tolerable numerical drift in state_dict parity.

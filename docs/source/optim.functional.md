@@ -19,6 +19,7 @@ parameters and optimizer-state tensors in place. See
     adamax
     adamw
     asgd
+    echelon
     muon
     nadam
     radam

@@ -238,7 +238,8 @@ class TestOptimRenewed(TestCase):
                     )
                 input = torch.randn(5, device=device, dtype=dtype)
 
-                params = [weight, bias] if optim_cls.__name__ != "Muon" else [weight]
+                is_2d_only = optim_info.only_supports_2d_params
+                params = [weight] if is_2d_only else [weight, bias]
                 optimizer = optim_cls(params, **optim_input.kwargs)
                 schedulers = [
                     s(optimizer)
@@ -253,11 +254,7 @@ class TestOptimRenewed(TestCase):
 
                 def closure():
                     optimizer.zero_grad()
-                    wo = (
-                        weight.mv(input)
-                        if optim_cls.__name__ == "Muon"
-                        else weight.mv(input) + bias
-                    )
+                    wo = weight.mv(input) if is_2d_only else weight.mv(input) + bias
                     loss = wo.pow(2).sum()
                     if lbfgs_maximize:
                         loss = -loss
@@ -311,7 +308,8 @@ class TestOptimRenewed(TestCase):
                 bias = Parameter(torch.randn((10), device=devices[1], dtype=dtype))
                 inpt = torch.randn(5, device=devices[0], dtype=dtype)
 
-                params = [weight, bias] if optim_cls.__name__ != "Muon" else [weight]
+                is_2d_only = optim_info.only_supports_2d_params
+                params = [weight] if is_2d_only else [weight, bias]
                 optimizer = optim_cls(params, **optim_input.kwargs)
                 schedulers = [
                     s(optimizer)
@@ -322,7 +320,7 @@ class TestOptimRenewed(TestCase):
                     optimizer.zero_grad()
                     wo = (
                         weight.mv(inpt).to(devices[1])
-                        if optim_cls.__name__ == "Muon"
+                        if is_2d_only
                         else weight.mv(inpt).to(devices[1]) + bias
                     )
                     loss = wo.pow(2).sum()
@@ -412,7 +410,8 @@ class TestOptimRenewed(TestCase):
             if "lr" in kwargs:
                 del kwargs["lr"]
 
-            params = [weight, bias] if optim_cls.__name__ != "Muon" else [weight]
+            is_2d_only = optim_info.only_supports_2d_params
+            params = [weight] if is_2d_only else [weight, bias]
             kwargs["lr"] = 1.0 if optim_info.step_requires_closure else 1e-3
             optimizer_r = optim_cls(params, **kwargs)
 
@@ -420,9 +419,7 @@ class TestOptimRenewed(TestCase):
                 kwargs["lr"] = (
                     torch.tensor(kwargs["lr"]).reshape([1] * num_dim).to(lr_device)
                 )
-                params_c = [weight_c, bias_c]
-                if optim_cls.__name__ == "Muon":
-                    params_c = [weight_c]
+                params_c = [weight_c] if is_2d_only else [weight_c, bias_c]
                 optimizer = optim_cls(params_c, **kwargs)
             except ValueError as e:
                 self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")
@@ -434,7 +431,7 @@ class TestOptimRenewed(TestCase):
 
             def closure(optim, w, b, i):
                 optim.zero_grad()
-                wo = w.mv(i) if optim_cls.__name__ == "Muon" else w.mv(i) + b
+                wo = w.mv(i) if is_2d_only else w.mv(i) + b
                 loss = wo.pow(2).sum()
                 if lbfgs_maximize:
                     loss = -loss
@@ -461,7 +458,7 @@ class TestOptimRenewed(TestCase):
                     optimizer.step()
 
                 self.assertEqual(weight, weight_c)
-                if optim_cls.__name__ != "Muon":
+                if not is_2d_only:
                     self.assertEqual(bias, bias_c)
 
     @parametrize("with_lrsched", [True, False])
@@ -1503,7 +1500,8 @@ class TestOptimRenewed(TestCase):
             irrelevant = Parameter(torch.randn((2, 2), device=device, dtype=dtype))
             irrelevant_clone = irrelevant.clone()
             input = torch.randn(5, device=device, dtype=dtype)
-            params = [weight, bias] if optim_cls.__name__ != "Muon" else [weight]
+            is_2d_only = optim_info.only_supports_2d_params
+            params = [weight] if is_2d_only else [weight, bias]
             optimizer = optim_cls(
                 [
                     dict(params=params, **optim_input.kwargs),
@@ -1512,20 +1510,12 @@ class TestOptimRenewed(TestCase):
                 **outer_kwargs,
             )
 
-            wo = (
-                weight.mv(input)
-                if optim_cls.__name__ == "Muon"
-                else weight.mv(input) + bias
-            )
+            wo = weight.mv(input) if is_2d_only else weight.mv(input) + bias
             loss = wo.pow(2).sum()
             initial_value = loss.item()
             for _ in range(20):
                 optimizer.zero_grad()
-                wo = (
-                    weight.mv(input)
-                    if optim_cls.__name__ == "Muon"
-                    else weight.mv(input) + bias
-                )
+                wo = weight.mv(input) if is_2d_only else weight.mv(input) + bias
                 loss = wo.pow(2).sum()
                 loss.backward()
                 irrelevant.grad = torch.rand_like(irrelevant)
@@ -1582,9 +1572,9 @@ class TestOptimRenewed(TestCase):
             if kwargs.get("weight_decay", 0) != 0:
                 continue
 
-            # AdamW and Muon have a nonzero default weight_decay, which decays
+            # AdamW, Muon, and Echelon have a nonzero default weight_decay, which decays
             # params even with zero grads; override it so the step is a true no-op.
-            if optim_cls.__name__ in ("AdamW", "Muon"):
+            if optim_cls.__name__ in ("AdamW", "Muon", "Echelon"):
                 kwargs["weight_decay"] = 0
 
             param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
@@ -1679,9 +1669,8 @@ class TestOptimRenewed(TestCase):
         )
         bias = Parameter(torch.randn(2, requires_grad=True, device=device, dtype=dtype))
         input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
-        params = [weight, bias]
-        if optim_cls.__name__ == "Muon":
-            params = [weight]
+        is_2d_only = optim_info.only_supports_2d_params
+        params = [weight] if is_2d_only else [weight, bias]
 
         def make_named_param(param, is_named):
             if not is_named:
@@ -1696,7 +1685,7 @@ class TestOptimRenewed(TestCase):
 
         def fwd_bwd(optim, w, b, i):
             optim.zero_grad()
-            wo = w.mv(i) if optim_cls.__name__ == "Muon" else w.mv(i) + b
+            wo = w.mv(i) if is_2d_only else w.mv(i) + b
             loss = wo.pow(2).sum()
             loss.backward()
             if optim_info.only_supports_sparse_grads:
@@ -1723,9 +1712,7 @@ class TestOptimRenewed(TestCase):
             with torch.no_grad():
                 weight_c = Parameter(weight.clone())
                 bias_c = Parameter(bias.clone())
-            params_c_list = (
-                [weight_c, bias_c] if optim_cls.__name__ != "Muon" else [weight_c]
-            )
+            params_c_list = [weight_c] if is_2d_only else [weight_c, bias_c]
             params_c = make_named_param(params_c_list, is_named=is_named_optim1)
             optimizer_c = optim_cls(params_c, **optim_input.kwargs)
             closure_c = functools.partial(fwd_bwd, optimizer_c, weight_c, bias_c, input)
@@ -1745,7 +1732,7 @@ class TestOptimRenewed(TestCase):
                     optimizer_c.step()
 
                 self.assertEqual(weight, weight_c)
-                if optim_cls.__name__ != "Muon":
+                if not is_2d_only:
                     self.assertEqual(bias, bias_c)
 
             # Make sure state dict is deterministic with equal (not identical) parameters
@@ -1930,8 +1917,7 @@ class TestOptimRenewed(TestCase):
         )
 
         def _get_model_and_input_tensor(device, dtype, optim_cls):
-            if optim_cls.__name__ == "Muon":
-                # Muon only accepts 2D parameter.
+            if optim_info.only_supports_2d_params:
                 model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
@@ -1995,8 +1981,7 @@ class TestOptimRenewed(TestCase):
         )
 
         def _get_model_and_input_tensor(device, dtype, optim_cls):
-            if optim_cls.__name__ == "Muon":
-                # Muon only accepts 2D parameter.
+            if optim_info.only_supports_2d_params:
                 model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
@@ -2071,7 +2056,8 @@ class TestOptimRenewed(TestCase):
         )
         bias = Parameter(torch.randn(2, requires_grad=True, device=device, dtype=dtype))
         input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
-        params = [weight, bias] if optim_cls.__name__ != "Muon" else [weight]
+        is_2d_only = optim_info.only_supports_2d_params
+        params = [weight] if is_2d_only else [weight, bias]
 
         def make_named_param(param, is_named):
             if not is_named:
@@ -2080,7 +2066,7 @@ class TestOptimRenewed(TestCase):
 
         def fwd_bwd(optim, w, b, i):
             optim.zero_grad()
-            wo = w.mv(i) if optim_cls.__name__ == "Muon" else w.mv(i) + b
+            wo = w.mv(i) if is_2d_only else w.mv(i) + b
             loss = wo.pow(2).sum()
             loss.backward()
             if optim_info.only_supports_sparse_grads:
@@ -2975,6 +2961,398 @@ class TestOptimRenewed(TestCase):
             optimizer.state[param]["momentum_buffer"],
             expected,
         )
+
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize("nesterov", [False, True])
+    def test_echelon_orthogonalization_does_not_alias_momentum_buffer(
+        self, device, dtype, nesterov
+    ):
+        momentum = 0.9
+        param = Parameter(torch.zeros(8, 5, device=device, dtype=dtype))
+        param.grad = torch.ones_like(param)
+        optimizer = torch.optim.Echelon(
+            [param],
+            lr=0,
+            weight_decay=0,
+            momentum=momentum,
+            nesterov=nesterov,
+            rank=2,
+        )
+        expected = torch.zeros_like(param)
+        expected.lerp_(param.grad, 1 - momentum)
+        optimizer.step()
+        self.assertEqual(
+            optimizer.state[param]["momentum_buffer"],
+            expected,
+        )
+
+    @dtypes(torch.float32)
+    def test_echelon_exact_frame_matches_spectral_clip(self, device, dtype):
+        # Independent scalar quintic recurrence p_{k+1}(x) = a*x + b*x^3 + c*x^5
+        ns_coeffs = (3.4445, -4.7750, 2.0315)
+
+        def scalar_ns5(val: float) -> float:
+            a, b, c = ns_coeffs
+            for _ in range(5):
+                val = a * val + b * (val**3) + c * (val**5)
+            return val
+
+        # Diagonal spectrum [4.0, 2.0, 0.5, 0.2] with exact top-2 frame U = [e_1, e_2], z = e_3
+        sig = torch.tensor([4.0, 2.0, 0.5, 0.2], device=device, dtype=dtype)
+        g = torch.zeros(4, 6, device=device, dtype=dtype)
+        g[:, :4] = torch.diag(sig)
+        p = Parameter(torch.zeros_like(g))
+        buf = torch.zeros_like(g)
+        u = torch.eye(4, 2, device=device, dtype=dtype)
+        z = torch.zeros(6, 1, device=device, dtype=dtype)
+        z[2, 0] = 1.0
+
+        with torch.no_grad():
+            torch.optim.functional.echelon(
+                [p],
+                [g],
+                [buf],
+                [u],
+                [z],
+                lr=1.0,
+                weight_decay=0.0,
+                momentum=0.0,
+                nesterov=False,
+                rank=2,
+                tau_iters=2,
+                margin=1.05,
+                ns_coefficients=ns_coeffs,
+                ns_steps=5,
+                eps=1e-7,
+                adjust_lr_fn="original",
+                has_complex=False,
+            )
+
+        head_norm = (4.0**2 + 2.0**2) ** 0.5
+        expected_diag = torch.tensor(
+            [
+                -scalar_ns5(4.0 / head_norm),
+                -scalar_ns5(2.0 / head_norm),
+                -1.0 / 1.05,
+                -(0.2 / 0.5) / 1.05,
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        self.assertEqual(p[:, :4], torch.diag(expected_diag), atol=1e-5, rtol=1e-5)
+        self.assertEqual(
+            u.T @ u, torch.eye(2, device=device, dtype=dtype), atol=1e-5, rtol=1e-5
+        )
+
+    @dtypes(torch.float32)
+    def test_echelon_full_rank_and_sub_eps_consistency(self, device, dtype):
+        torch.manual_seed(0)
+        g = torch.randn(16, 32, device=device, dtype=dtype)
+        p_ech = Parameter(torch.zeros_like(g))
+        p_ech.grad = g.clone()
+        torch.optim.Echelon([p_ech], lr=0.02, weight_decay=0.0, rank=16).step()
+        # rank >= 16 is Muon's quintic Newton-Schulz in float32; Muon itself iterates in
+        # bfloat16, so compare with a float64 reference instead.
+        a, b, c = (3.4445, -4.7750, 2.0315)
+        g64 = g.cpu().double()
+        x = g64 / g64.norm()
+        for _ in range(5):
+            A = x @ x.T
+            x = a * x + (b * A + c * A @ A) @ x
+        self.assertEqual(p_ech.cpu(), -0.02 * x.to(dtype), atol=1e-6, rtol=1e-4)
+
+        # Sub-eps momentum with empty true tail gives identical updates across low-rank and full-rank branches
+        g_sub = torch.diag(torch.tensor([2e-11, 0.0], device=device, dtype=dtype))
+        p_low = Parameter(torch.zeros_like(g_sub))
+        p_full = Parameter(torch.zeros_like(g_sub))
+        with torch.no_grad():
+            torch.optim.functional.echelon(
+                [p_low],
+                [g_sub],
+                [torch.zeros_like(g_sub)],
+                [torch.tensor([[1.0], [0.0]], device=device, dtype=dtype)],
+                [torch.tensor([[0.0], [1.0]], device=device, dtype=dtype)],
+                lr=1.0,
+                weight_decay=0.0,
+                momentum=0.0,
+                nesterov=False,
+                rank=1,
+                tau_iters=2,
+                margin=1.05,
+                ns_coefficients=(3.4445, -4.7750, 2.0315),
+                ns_steps=5,
+                eps=1e-7,
+                adjust_lr_fn="original",
+                has_complex=False,
+            )
+            torch.optim.functional.echelon(
+                [p_full],
+                [g_sub],
+                [torch.zeros_like(g_sub)],
+                [None],
+                [None],
+                lr=1.0,
+                weight_decay=0.0,
+                momentum=0.0,
+                nesterov=False,
+                rank=2,
+                tau_iters=2,
+                margin=1.05,
+                ns_coefficients=(3.4445, -4.7750, 2.0315),
+                ns_steps=5,
+                eps=1e-7,
+                adjust_lr_fn="original",
+                has_complex=False,
+            )
+        self.assertEqual(p_low, p_full, atol=1e-7, rtol=1e-5)
+
+    @dtypes(torch.float32)
+    def test_echelon_transpose_symmetry_and_functional_parity(self, device, dtype):
+        torch.manual_seed(1)
+        p_wide = Parameter(torch.zeros(12, 20, device=device, dtype=dtype))
+        p_tall = Parameter(torch.zeros(20, 12, device=device, dtype=dtype))
+        g_wide = torch.randn(12, 20, device=device, dtype=dtype)
+        p_wide.grad = g_wide.clone()
+        p_tall.grad = g_wide.T.clone()
+        opt_wide = torch.optim.Echelon(
+            [p_wide], lr=0.05, weight_decay=0.0, rank=3, adjust_lr_fn="match_rms_adamw"
+        )
+        opt_tall = torch.optim.Echelon(
+            [p_tall], lr=0.05, weight_decay=0.0, rank=3, adjust_lr_fn="match_rms_adamw"
+        )
+        opt_wide.step()
+        opt_tall.step()
+        self.assertEqual(p_tall, p_wide.T, atol=1e-5, rtol=1e-5)
+
+        # Functional API matches class step
+        p_fn = Parameter(p_wide.detach().clone())
+        buf_fn = opt_wide.state[p_wide]["momentum_buffer"].clone()
+        u_fn = opt_wide.state[p_wide]["subspace_frame"].clone()
+        z_fn = opt_wide.state[p_wide]["tail_vec"].clone()
+        g_next = torch.randn_like(p_wide)
+        p_wide.grad = g_next.clone()
+        opt_wide.step()
+        with torch.no_grad():
+            torch.optim.functional.echelon(
+                [p_fn],
+                [g_next.clone()],
+                [buf_fn],
+                [u_fn],
+                [z_fn],
+                lr=0.05,
+                weight_decay=0.0,
+                momentum=0.95,
+                nesterov=True,
+                rank=3,
+                tau_iters=2,
+                margin=1.05,
+                ns_coefficients=(3.4445, -4.7750, 2.0315),
+                ns_steps=5,
+                eps=1e-7,
+                adjust_lr_fn="match_rms_adamw",
+                has_complex=False,
+            )
+        self.assertEqual(p_fn, p_wide)
+
+    @dtypes(torch.float32)
+    def test_echelon_rank_change_reinitializes_frame(self, device, dtype):
+        torch.manual_seed(3)
+        p = Parameter(torch.randn(16, 24, device=device, dtype=dtype))
+        q = Parameter(torch.randn(16, 24, device=device, dtype=dtype))
+        opt = torch.optim.Echelon([p, q], rank=4)
+        p.grad = torch.randn_like(p)
+        q.grad = torch.randn_like(q)
+        opt.step()
+        state = opt.state[p]
+        frame = state["subspace_frame"].clone()
+        for bad_rank in (0, -1):
+            opt.param_groups[0]["rank"] = bad_rank
+            with self.assertRaisesRegex(ValueError, "rank must be an integer >= 1"):
+                opt.step()
+        self.assertEqual(state["subspace_frame"], frame)
+
+        # rank >= the short side drops the frames, also for a parameter without a grad;
+        # a smaller rank then re-initializes them.
+        q.grad = None
+        opt.param_groups[0]["rank"] = 16
+        opt.step()
+        self.assertNotIn("subspace_frame", state)
+        self.assertNotIn("subspace_frame", opt.state[q])
+        opt.param_groups[0]["rank"] = 6
+        opt.step()
+        u = state["subspace_frame"]
+        eye = torch.eye(6, device=device, dtype=dtype)
+        self.assertEqual(u.T @ u, eye, atol=1e-5, rtol=0)
+        self.assertTrue(torch.isfinite(p).all())
+
+    @dtypes(torch.float32)
+    def test_echelon_invalid_group_option_steps_no_group(self, device, dtype):
+        p0 = Parameter(torch.randn(8, 12, device=device, dtype=dtype))
+        p1 = Parameter(torch.randn(8, 12, device=device, dtype=dtype))
+        opt = torch.optim.Echelon([{"params": [p0]}, {"params": [p1]}], rank=2)
+        p0.grad, p1.grad = torch.randn_like(p0), torch.randn_like(p1)
+        before = p0.detach().clone()
+        opt.param_groups[1]["rank"] = 0
+        with self.assertRaisesRegex(ValueError, "rank must be an integer >= 1"):
+            opt.step()
+        self.assertEqual(p0, before)
+        self.assertEqual(len(opt.state), 0)
+
+    @dtypes(torch.bfloat16)
+    def test_echelon_state_returns_to_float32_after_load(self, device, dtype):
+        torch.manual_seed(5)
+        p = Parameter(torch.randn(16, 24, device=device, dtype=dtype))
+        opt = torch.optim.Echelon([p], rank=4)
+        p.grad = torch.randn_like(p)
+        opt.step()
+        p_loaded = Parameter(p.detach().clone())
+        opt_loaded = torch.optim.Echelon([p_loaded], rank=4)
+        # deepcopy: load_state_dict keeps same-dtype tensors such as momentum_buffer shared.
+        with torch.optim.preserve_state_dtype_on_load(False):
+            opt_loaded.load_state_dict(deepcopy(opt.state_dict()))
+        self.assertEqual(opt_loaded.state[p_loaded]["subspace_frame"].dtype, dtype)
+
+        # The loaded run continues from the saved state, rounded once to the parameter dtype.
+        for key in ("subspace_frame", "tail_vec"):
+            opt.state[p][key] = opt.state[p][key].to(dtype).float()
+        p.grad = torch.randn_like(p)
+        p_loaded.grad = p.grad.clone()
+        opt.step()
+        opt_loaded.step()
+        self.assertEqual(p_loaded, p)
+        for key in ("subspace_frame", "tail_vec"):
+            loaded = opt_loaded.state[p_loaded][key]
+            self.assertEqual(loaded.dtype, torch.float32)
+            self.assertEqual(loaded, opt.state[p][key])
+
+    @dtypes(torch.float32)
+    def test_echelon_zero_and_empty_params_are_noops(self, device, dtype):
+        p_zero = Parameter(torch.ones(8, 12, device=device, dtype=dtype))
+        p_empty = Parameter(torch.empty(0, 4, device=device, dtype=dtype))
+        p_zero.grad = torch.zeros_like(p_zero)
+        p_empty.grad = torch.empty_like(p_empty)
+        opt = torch.optim.Echelon([p_zero, p_empty], lr=0.01, weight_decay=0.0, rank=2)
+        opt.step()
+        self.assertEqual(p_zero, torch.ones_like(p_zero))
+        self.assertNotIn("subspace_frame", opt.state[p_empty])
+
+    @dtypes(torch.float32)
+    def test_echelon_zero_first_update_keeps_cold_frame(self, device, dtype):
+        # A zero update cannot warm up the frame, but it is stored so the state keys match a
+        # normal first step (torch.distributed.checkpoint creates optimizer state with zero grads).
+        torch.manual_seed(7)
+        p = Parameter(torch.randn(8, 12, device=device, dtype=dtype))
+        opt = torch.optim.Echelon([p], weight_decay=0.0, rank=2)
+        p.grad = torch.zeros_like(p)
+        opt.step()
+        u = opt.state[p]["subspace_frame"]
+        eye = torch.eye(2, device=device, dtype=dtype)
+        self.assertEqual(u.T @ u, eye, atol=1e-5, rtol=0)
+        p.grad = torch.randn_like(p)
+        opt.step()
+        self.assertTrue(torch.isfinite(p).all())
+
+    @dtypes(torch.float32)
+    def test_echelon_init_under_default_device(self, device, dtype):
+        with torch.device(device):
+            p = Parameter(torch.randn(8, 12, dtype=dtype))
+            p.grad = torch.randn_like(p)
+            opt = torch.optim.Echelon([p], rank=2)
+            opt.step()
+        self.assertEqual(opt.state[p]["subspace_frame"].device, p.device)
+
+    @dtypes(torch.float32)
+    def test_echelon_state_is_contiguous(self, device, dtype):
+        p = Parameter(torch.randn(16, 24, device=device, dtype=dtype))
+        opt = torch.optim.Echelon([p], rank=4)
+        for _ in range(2):
+            p.grad = torch.randn_like(p)
+            opt.step()
+            for key in ("subspace_frame", "tail_vec"):
+                self.assertTrue(opt.state[p][key].is_contiguous())
+
+    @dtypes(torch.float32)
+    def test_echelon_deepcopy_before_first_step_matches_fresh_optimizer(
+        self, device, dtype
+    ):
+        torch.manual_seed(4)
+        p = Parameter(torch.randn(8, 12, device=device, dtype=dtype))
+        p_fresh = Parameter(p.detach().clone())
+        p_copy, opt_copy = deepcopy((p, torch.optim.Echelon([p], lr=0.01, rank=2)))
+        opt_fresh = torch.optim.Echelon([p_fresh], lr=0.01, rank=2)
+        p_copy.grad = torch.randn_like(p)
+        p_fresh.grad = p_copy.grad.clone()
+        opt_copy.step()
+        opt_fresh.step()
+        self.assertEqual(p_copy, p_fresh)
+        u_copy = opt_copy.state[p_copy]["subspace_frame"]
+        self.assertEqual(u_copy, opt_fresh.state[p_fresh]["subspace_frame"])
+
+    @dtypes(torch.float32)
+    def test_echelon_rank_deficient_momentum_damps_roundoff_tail(self, device, dtype):
+        torch.manual_seed(4)
+        q_l, _ = torch.linalg.qr(torch.randn(12, 12, dtype=dtype))
+        q_r, _ = torch.linalg.qr(torch.randn(16, 16, dtype=dtype))
+        sig = torch.diag(torch.tensor([4.0, 1.2], dtype=dtype))
+        p = Parameter(torch.zeros(12, 16, device=device, dtype=dtype))
+        p.grad = (q_l[:, :2] @ sig @ q_r[:, :2].T).to(device)
+        torch.optim.Echelon(
+            [p], lr=1.0, weight_decay=0.0, rank=4, adjust_lr_fn="spectral_unclamped"
+        ).step()
+        # Without the roundoff floor this singular value is about 0.82.
+        self.assertLessEqual(torch.linalg.svdvals(p)[2].item(), 0.1)
+
+    @dtypes(torch.float32)
+    def test_echelon_ignores_ambient_autocast(self, device, dtype):
+        dev_type = torch.device(device).type
+        if not torch.amp.autocast_mode.is_autocast_available(dev_type):
+            self.skipTest(f"autocast is not available on {dev_type}")
+        torch.manual_seed(6)
+        g = torch.randn(12, 16, device=device, dtype=dtype)
+        p_ref = Parameter(torch.zeros_like(g))
+        p_ac = Parameter(torch.zeros_like(g))
+        p_ref.grad = g.clone()
+        p_ac.grad = g.clone()
+        torch.optim.Echelon([p_ref], lr=1.0, rank=4).step()
+        opt_ac = torch.optim.Echelon([p_ac], lr=1.0, rank=4)
+        with torch.autocast(device_type=dev_type, dtype=torch.bfloat16):
+            opt_ac.step()
+        self.assertEqual(p_ac, p_ref)
+
+
+class TestEchelonArgumentValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_echelon_add_param_group_rejects_invalid_groups(self):
+        opt = torch.optim.Echelon([Parameter(torch.zeros(4, 4))])
+        bad_groups = {
+            "Echelon only supports 2D parameters": {},
+            "match_rms_adam is not supported": {"adjust_lr_fn": "match_rms_adam"},
+            "rank must be an integer >= 1": {"rank": 0},
+        }
+        for regex, options in bad_groups.items():
+            w = Parameter(torch.zeros((4,) if not options else (4, 4)))
+            with self.assertRaisesRegex(ValueError, regex):
+                opt.add_param_group({"params": [w], **options})
+            self.assertEqual(len(opt.param_groups), 1)
+
+    def test_functional_echelon_rejects_unknown_adjust_lr_fn(self):
+        p = torch.zeros(4, 4)
+        kwargs = {
+            "lr": 0.01,
+            "weight_decay": 0.0,
+            "momentum": 0.9,
+            "nesterov": True,
+            "ns_coefficients": (3.4445, -4.7750, 2.0315),
+            "ns_steps": 5,
+            "eps": 1e-7,
+            "adjust_lr_fn": "match_rms_adam",
+            "has_complex": False,
+        }
+        args = ([p], [p.clone()], [torch.zeros_like(p)])
+        extra = {"rank": 4, "tau_iters": 2, "margin": 1.05}
+        with self.assertRaisesRegex(ValueError, "match_rms_adam is not supported"):
+            torch.optim.functional.echelon(*args, [None], [None], **kwargs, **extra)
 
 
 class TestOptimizerLoadStateDictContext(TestCase):

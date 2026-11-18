@@ -71,6 +71,13 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
+def _validate_adjust_lr_fn(adjust_lr_fn: str | None) -> None:
+    if adjust_lr_fn not in (None, "original", "match_rms_adamw", "spectral_unclamped"):
+        raise ValueError(
+            f"Adjust learning rate function {adjust_lr_fn} is not supported"
+        )
+
+
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
@@ -108,14 +115,7 @@ class Muon(Optimizer):
             raise ValueError(f"momentum should be >= 0 but is: {momentum}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"weight decay should be >= 0 but is: {weight_decay}")
-        if adjust_lr_fn is not None and adjust_lr_fn not in [
-            "original",
-            "match_rms_adamw",
-            "spectral_unclamped",
-        ]:
-            raise ValueError(
-                f"Adjust learning rate function {adjust_lr_fn} is not supported"
-            )
+        _validate_adjust_lr_fn(adjust_lr_fn)
 
         defaults = {
             "lr": lr,

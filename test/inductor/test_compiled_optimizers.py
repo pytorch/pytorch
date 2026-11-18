@@ -25,6 +25,7 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    Echelon,
     NAdam,
     RAdam,
     RMSprop,
@@ -435,12 +436,16 @@ def check_optim(
     self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 
     for p_eager, p_compiled in zip(params_eager, params_compiled):
-        self.assertEqual(
-            state_eager[p_eager],
-            state_compiled[p_compiled],
-            atol=atol,
-            rtol=rtol,
-        )
+        state_e, state_c = state_eager[p_eager], state_compiled[p_compiled]
+        if optim_cls is Echelon and "subspace_frame" in state_e:
+            # The rank-1 gradients here fix only the first subspace_frame column, up to
+            # sign; the other columns are an arbitrary orthonormal completion.
+            u_e = state_e["subspace_frame"][:, :1]
+            u_c = state_c["subspace_frame"][:, :1]
+            self.assertEqual(u_e @ u_e.T, u_c @ u_c.T, atol=atol, rtol=rtol)
+            state_e = {k: v for k, v in state_e.items() if k != "subspace_frame"}
+            state_c = {k: v for k, v in state_c.items() if k != "subspace_frame"}
+        self.assertEqual(state_e, state_c, atol=atol, rtol=rtol)
 
 
 def make_test(
@@ -919,6 +924,54 @@ class CompiledOptimizerTests(TestCase):
         loop(optimizer_c, closure_c)
 
         self.assertEqual(param, param_c)
+
+    @requires_gpu
+    def test_echelon_full_rank_gradients_match_eager(self):
+        # The parity tests' rank-1 gradients leave Echelon's tail at float32 roundoff. The
+        # default rank takes the Newton-Schulz-only branch here; the others are low-rank.
+        optim_info = next(o for o in optim_db if o.optim_cls is Echelon)
+        for optim_input in optim_info.optim_inputs_func(device=GPU_TYPE):
+            with self.subTest(optim_input.desc):
+                self._check_echelon_compiled_matches_eager(optim_input.kwargs)
+
+    @requires_gpu
+    def test_echelon_zero_first_grad_matches_eager(self):
+        # A zero first update leaves the frame at its random start; compiled must store it too.
+        kwargs = {"lr": 0.01, "rank": 2}
+        self._check_echelon_compiled_matches_eager(kwargs, zero_first=True)
+
+    def _check_echelon_compiled_matches_eager(self, kwargs, zero_first=False):
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        torch.manual_seed(0)
+        shapes = [(16, 24), (24, 16), (4, 12)]
+        params = [torch.nn.Parameter(torch.randn(s, device=GPU_TYPE)) for s in shapes]
+        params_c = [torch.nn.Parameter(p.detach().clone()) for p in params]
+        opt = Echelon(params, **deepcopy(kwargs))
+        opt_c = Echelon(params_c, **deepcopy(kwargs))
+
+        @torch.compile(fullgraph=True)
+        def step_c():
+            opt_c.step()
+
+        for i in range(3):
+            for p, p_c in zip(params, params_c):
+                zero = zero_first and i == 0
+                p.grad = torch.zeros_like(p) if zero else torch.randn_like(p)
+                p_c.grad = p.grad.clone()
+            opt.step()
+            step_c()
+
+        self.assertGreater(torch._dynamo.utils.counters["stats"]["unique_graphs"], 0)
+        self.assertEqual(params, params_c, atol=1e-5, rtol=1e-5)
+        for p, p_c in zip(params, params_c):
+            low_rank = opt.param_groups[0]["rank"] < min(p.shape)
+            for key in ("subspace_frame", "tail_vec"):
+                self.assertEqual(key in opt.state[p], low_rank)
+                self.assertEqual(key in opt_c.state[p_c], low_rank)
+                if low_rank:
+                    v, v_c = opt.state[p][key], opt_c.state[p_c][key]
+                    self.assertEqual(v @ v.T, v_c @ v_c.T, atol=1e-5, rtol=1e-5)
 
     def test_get_value_on_static_address(self):
         from torch._dynamo.decorators import mark_static_address

@@ -8,6 +8,7 @@ future.
 
 from torch.optim import lr_scheduler as lr_scheduler, swa_utils as swa_utils
 from torch.optim._adafactor import Adafactor as Adafactor
+from torch.optim._echelon import Echelon as Echelon
 from torch.optim._muon import Muon as Muon
 from torch.optim._stateless import (
     swap_in_optimizer_params_and_state as swap_in_optimizer_params_and_state,
@@ -35,6 +36,7 @@ from torch.optim import functional as functional  # usort: skip
 
 
 Adafactor.__module__ = "torch.optim"
+Echelon.__module__ = "torch.optim"
 Muon.__module__ = "torch.optim"
 preserve_state_dtype_on_load.__module__ = "torch.optim"
 swap_in_optimizer_params_and_state.__module__ = "torch.optim"
@@ -63,6 +65,7 @@ __all__ = [
     "Adamax",
     "AdamW",
     "ASGD",
+    "Echelon",
     "functional",
     "LBFGS",
     "lr_scheduler",

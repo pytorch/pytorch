@@ -164,6 +164,7 @@ for input, target in dataset:
     SparseAdam
     Adamax
     ASGD
+    Echelon
     LBFGS
     Muon
     NAdam
@@ -210,6 +211,7 @@ Below is a table showing the available and default implementations of each algor
     :class:`SparseAdam`;for-loop;no;no
     :class:`Adamax`;foreach;yes;no
     :class:`ASGD`;foreach;yes;no
+    :class:`Echelon`;for-loop;no;no
     :class:`LBFGS`;for-loop;no;no
     :class:`Muon`;for-loop;no;no
     :class:`NAdam`;foreach;yes;no
@@ -234,6 +236,7 @@ Below table is showing the stability status for fused implementations:
     :class:`SparseAdam`;unsupported;unsupported;unsupported
     :class:`Adamax`;unsupported;unsupported;unsupported
     :class:`ASGD`;unsupported;unsupported;unsupported
+    :class:`Echelon`;unsupported;unsupported;unsupported
     :class:`LBFGS`;unsupported;unsupported;unsupported
     :class:`Muon`;unsupported;unsupported;unsupported
     :class:`NAdam`;unsupported;unsupported;unsupported
@@ -280,6 +283,7 @@ The public functional optimizer APIs are exposed uniformly from
 | {class}`Adamax` | {func}`torch.optim.functional.adamax` |
 | {class}`AdamW` | {func}`torch.optim.functional.adamw` |
 | {class}`ASGD` | {func}`torch.optim.functional.asgd` |
+| {class}`Echelon` | {func}`torch.optim.functional.echelon` |
 | {class}`Muon` | {func}`torch.optim.functional.muon` |
 | {class}`NAdam` | {func}`torch.optim.functional.nadam` |
 | {class}`RAdam` | {func}`torch.optim.functional.radam` |

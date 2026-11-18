@@ -5,6 +5,7 @@ from functools import wraps as _wraps
 from typing import ParamSpec as _ParamSpec, TypeVar as _TypeVar
 
 from torch.optim._adafactor import adafactor as _adafactor
+from torch.optim._echelon import echelon as _echelon
 from torch.optim._functional import sparse_adam as _sparse_adam
 from torch.optim._muon import muon as _muon
 from torch.optim.adadelta import adadelta as _adadelta
@@ -28,6 +29,7 @@ __all__ = [
     "adamax",
     "adamw",
     "asgd",
+    "echelon",
     "muon",
     "nadam",
     "radam",
@@ -62,6 +64,7 @@ adam = _wrap_functional(_adam)
 adamax = _wrap_functional(_adamax)
 adamw = _wrap_functional(_adamw)
 asgd = _wrap_functional(_asgd)
+echelon = _wrap_functional(_echelon)
 muon = _wrap_functional(_muon)
 nadam = _wrap_functional(_nadam)
 radam = _wrap_functional(_radam)
