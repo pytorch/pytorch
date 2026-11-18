@@ -10235,6 +10235,14 @@ class TestPagedAttention(InductorTestCase):
         ref_error = (golden_out - ref_out).abs().mean()
         if torch.isnan(compiled_error).any() or torch.isnan(ref_error).any():
             self.assertTrue(False, "Output/Grad with NaN")
+        # On XPU oneDNN's tf32 fpmath mode is a permission, not a commitment: the
+        # eager reference keeps a plain f32 kernel for memory-bound shapes (here
+        # N = head_dim = 16), while inductor's Triton kernel always obeys
+        # FLOAT32_PRECISION='tf32'. A bit-exact reference would then turn the
+        # relative bound below into a bit-exactness requirement, so floor it at one
+        # tf32 rounding (2**-11 relative) of the output.
+        if compiled_out.dtype == torch.float32 and torch._C._get_onednn_allow_tf32():
+            ref_error = torch.maximum(ref_error, golden_out.abs().mean() * 2**-11)
         if compiled_error > ref_error * fudge_factor:
             name = tensor_name if tensor_name is not None else ""
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
