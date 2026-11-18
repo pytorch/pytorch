@@ -62,6 +62,10 @@ static void signbit_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "signbit", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
 }
 
+static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps) {
+  lib.exec_unary_kernel(iter, "logit", eps);
+}
+
 static void polygamma_kernel(TensorIteratorBase& iter, int64_t order) {
   if (order == 0) {
     return lib.exec_unary_kernel(iter, "digamma");
@@ -194,6 +198,7 @@ REGISTER_UNARY_TI_DISPATCH(sigmoid);
 REGISTER_DISPATCH(frexp_stub, frexp_kernel_mps);
 REGISTER_DISPATCH(logical_not_stub, logical_not_kernel);
 REGISTER_DISPATCH(signbit_stub, signbit_kernel);
+REGISTER_DISPATCH(logit_stub, logit_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, pow_tensor_scalar_kernel);

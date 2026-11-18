@@ -14,9 +14,8 @@
 #include <c10/util/irange.h>
 #include <array>
 #include <c10/util/Exception.h>
-#include <c10/util/string_view.h>
-
 #include <algorithm>
+#include <string_view>
 #include <vector>
 
 #if AT_CUDNN_ENABLED()
@@ -67,8 +66,8 @@
 namespace sdp {
 namespace {
 
-constexpr long kMinCuDNNFrontendVersionForD256 = 12400;
 #if AT_CUDNN_ENABLED() && defined(CUDNN_FRONTEND_VERSION)
+constexpr long kMinCuDNNFrontendVersionForD256 = 12400;
 constexpr bool kCuDNNFrontendSupportsD256 =
     CUDNN_FRONTEND_VERSION >= kMinCuDNNFrontendVersionForD256;
 #else
@@ -169,7 +168,7 @@ inline int aotriton_max_hdim() {
     // Do not lift the cap on an AOTriton bump alone; hdim > 256 has to be
     // revalidated on gfx11xx hardware first.
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    const c10::basic_string_view<char> arch(dprops->gcnArchName);
+    const std::string_view arch(dprops->gcnArchName);
     if (arch.starts_with("gfx11")) {
       return 256;
     }
@@ -611,6 +610,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
 bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     sdp_params const& params,
     bool debug) {
+#if USE_ROCM
+  return true;
+#else
   // Flash Attention will raise an error in the backward pass if the head_dim
   // is unsupported on SM86-SM89 or SM120-SM121.
   using sm86 = SMVersion<8, 6>;
@@ -642,6 +644,7 @@ bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     return false;
   }
   return true;
+#endif
 }
 
 bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
@@ -1287,16 +1290,20 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
   if (has_only_dense_inputs(params)) {
 #ifdef USE_ROCM
-    constexpr bool supports_gqa = false;
-    constexpr bool supports_mqa = false;
+    // AOTriton infers Hq/Hk from the tensors; the CK backend requires Hq == Hk.
+    const bool is_ck =
+        at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck;
+    const auto check_num_heads = is_ck
+        ? check_batch_size_and_num_heads_dense<false, true, false>
+        : check_batch_size_and_num_heads_dense<true, true, true>;
 #else
-    constexpr bool supports_gqa = true;
-    constexpr bool supports_mqa = true;
+    const auto check_num_heads =
+        check_batch_size_and_num_heads_dense<true, true, true>;
 #endif
-    constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
+    const auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
-        check_batch_size_and_num_heads_dense<supports_gqa, true, supports_mqa>,
+        check_num_heads,
         check_data_ptr_alignment_mem_efficient});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {

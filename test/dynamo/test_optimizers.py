@@ -5,11 +5,13 @@ with test_adam in OptimizerTests)
 """
 
 import functools
+from copy import deepcopy
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.variables.optimizer import OptimizerVariable
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import HardwareClassification
 
@@ -128,6 +130,61 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
                     compiled_step()
                 self.assertFalse(torch.equal(p, before))
                 torch._dynamo.reset()
+
+    def test_capturable_optim_on_privateuse1(self):
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if (
+            backend_name == "privateuseone"
+            or not getattr(torch, backend_name).is_available()
+        ):
+            self.skipTest("no PrivateUse1 accelerator available")
+
+        dev = backend_name
+        p = torch.randn(8, device=dev).requires_grad_(True)
+        p.grad = torch.full_like(p, 1.0)
+        opt = torch.optim.Adam([p], lr=1e-2)
+
+        original_capturable = opt.param_groups[0]["capturable"]
+        self.assertFalse(original_capturable)
+
+        ov = OptimizerVariable(opt)
+        self.assertTrue(ov._safe_to_set_capturable(opt.param_groups[0]))
+
+        opt.step()
+        self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
+
+        sd = deepcopy(opt.state_dict())
+        self.assertEqual(
+            sd["param_groups"][0].get("capturable", False),
+            original_capturable,
+        )
+
+    def test_capturable_predicate_covers_runtime_devices(self):
+        from torch.optim.optimizer import _get_capturable_supported_devices
+
+        class FakeParam:
+            def __init__(self, device_type):
+                self.device = type("Device", (), {"type": device_type})()
+
+        opt = torch.optim.Adam([torch.randn(2)], lr=1e-2)
+        ov = OptimizerVariable(opt)
+
+        def fake_group(device_type):
+            return {"params": [FakeParam(device_type)], "capturable": False}
+
+        for device_type in _get_capturable_supported_devices(supports_xla=True):
+            with self.subTest(device=device_type):
+                self.assertTrue(
+                    ov._safe_to_set_capturable(fake_group(device_type)),
+                    f"{device_type} should be capturable",
+                )
+
+        for device_type in ("cpu", "mps"):
+            with self.subTest(device=device_type):
+                self.assertFalse(
+                    ov._safe_to_set_capturable(fake_group(device_type)),
+                    f"{device_type} should NOT be capturable",
+                )
 
 
 if __name__ == "__main__":
