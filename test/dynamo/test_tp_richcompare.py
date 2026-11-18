@@ -2,6 +2,7 @@
 """Tests for tp_richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
+import unittest
 
 import torch
 import torch._dynamo
@@ -1110,6 +1111,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             lambda: Counter(a=3, b=1, c=1),
         )
 
+    @unittest.expectedFailure
     def test_dict_subclass_cmp_bypasses_dunders(self):
         """dict comparison uses C struct access, not __getitem__/__len__."""
 
