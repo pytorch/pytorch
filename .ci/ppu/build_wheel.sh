@@ -41,6 +41,7 @@ ln -sf /usr/local/bin/cmake /usr/bin/cmake
 pip install --upgrade pybind11
 echo "[build_wheel] cmake=$(cmake --version | head -1)"
 pip install -r requirements.txt
+pip install numpy==2.1.0
 
 if [[ -z "$MAX_JOBS" || "$MAX_JOBS" == "0" ]]; then
     MAX_JOBS=$(nproc)

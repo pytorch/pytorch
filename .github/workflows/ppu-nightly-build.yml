@@ -1,107 +1,124 @@
-name: ppu-nightly-build
+name: Nightly Build Pytorch
 
 on:
+  schedule:
+    # Daily at 11:30 UTC (19:30 Beijing time)
+    - cron: '30 11 * * *'
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+    inputs:
+      package_name:
+        description: 'Name of the package to build and upload'
+        required: true
+        type: string
+        default: torch
+      framework:
+        description: 'Name of the dependent framework, e.g. torch'
+        required: true
+        type: string
+        default: ''
+      python_versions:
+        description: 'JSON array; allowed values: 38, 310, 312'
+        required: true
+        type: string
+        default: '["312"]'
+      os_versions:
+        description: 'JSON array; allowed values: ubuntu2004, ubuntu2204, ubuntu2404, alios7u2'
+        required: true
+        type: string
+        default: '["ubuntu2404"]'
+      runtime_versions:
+        description: 'JSON array; allowed HGGCRT versions: 13.0.0'
+        required: true
+        type: string
+        default: '["13.0.0"]'
+      torch_versions:
+        description: 'JSON array; allowed values: 2.10.0, 2.13.0; [""] skips Torch installation'
+        required: true
+        type: string
+        default: '[""]'
+      sdk_versions:
+        description: 'JSON array; allowed values: 2.1.1, 2.2.0'
+        required: true
+        type: string
+        default: '["2.2.0"]'
+      branch:
+        description: 'Source branch, tag, or full commit SHA; leave empty to use the commit that triggered the workflow'
+        required: false
+        type: string
+      package_version:
+        description: 'Artifactory package version and automatic upload directory prefix; does not override the wheel version'
+        required: true
+        type: string
+        default: '2.12.0'
+      package_edition:
+        description: 'Artifactory package edition; defaults to oe, matching the release workflow'
+        required: true
+        type: string
+        default: oe
+      package_type:
+        description: 'Artifactory package type; defaults to pypi'
+        required: false
+        type: string
+        default: pypi
+      runs_on:
+        description: 'Runner for all template jobs; a single label, or a JSON array such as ["self-hosted","x86-ubuntu2404-8-32"]'
+        required: true
+        type: string
+        default: x86-ubuntu2404-8-32
+      build_command:
+        description: 'Custom Bash build command; leave empty to use the default; only trusted configuration is accepted'
+        required: false
+        type: string
 
 permissions:
   contents: read
-  actions: read
+  actions: write
+
+concurrency:
+  group: nightly-build-${{ inputs.branch || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    if: contains(fromJSON('["v2.10.0", "v2.11.0", "v2.12.0", "v2.13.0"]'), github.ref_name)
-    uses: ./.github/workflows/_ppu_build.yml
+    uses: flytiger-eco/shared-workflows/.github/workflows/nightly-build.yml@main
+    secrets:
+      template_token: ${{ secrets.TEMPLATE_TOKEN }}
+      release_username: ${{ secrets.RELEASE_USERNAME }}
+      release_token: ${{ secrets.RELEASE_TOKEN }}
     with:
-      board: mixed
-      upload-wheel: true
-      force-rebuild: true
-      timeout-minutes: 400
-
-  publish:
-    name: Publish wheel to the nightly-build release
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 400
-    permissions:
-      contents: write
-      actions: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: nightly-build
-      ARTIFACT_DIR: dist
-      WHEEL_NAME: ${{ needs.build.outputs.wheel-name }}
-      SOURCE_BRANCH: ${{ github.ref_name }}
-      SOURCE_COMMIT: ${{ github.sha }}
-
-    steps:
-      - name: Download wheel from this build
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.build.outputs.artifact-name }}
-          path: ${{ env.ARTIFACT_DIR }}
-
-      - name: Prepare branch-specific wheel asset
-        id: prepare
-        shell: bash
-        run: |
-          set -euo pipefail
-          wheel_asset="${ARTIFACT_DIR}/${WHEEL_NAME}"
-          shopt -s nullglob
-          wheels=("${ARTIFACT_DIR}"/torch-*.whl)
-          if [[ "${WHEEL_NAME}" == */* || ! -f "${wheel_asset}" || ${#wheels[@]} -ne 1 ]]; then
-            echo "::error::Expected exactly one wheel from this build: ${WHEEL_NAME}"
-            exit 1
-          fi
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          branch = os.environ["SOURCE_BRANCH"]
-          if not re.fullmatch(r"v2\.(10|11|12|13)\.0", branch):
-              raise SystemExit(f"Unsupported release branch: {branch}")
-          wheel = Path(os.environ["ARTIFACT_DIR"]) / os.environ["WHEEL_NAME"]
-          parts = wheel.stem.split("-")
-          if wheel.suffix != ".whl" or len(parts) not in (5, 6):
-              raise SystemExit(f"Invalid wheel filename: {wheel.name}")
-          build_tag = "1ppumixed" + branch.replace(".", "_")
-          asset_name = "-".join(parts[:2] + [build_tag] + parts[-3:]) + ".whl"
-          wheel.rename(wheel.with_name(asset_name))
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write(f"asset-name={asset_name}\n")
-          PY
-
-      - name: Upload asset to the nightly-build release
-        shell: bash
-        env:
-          ASSET_NAME: ${{ steps.prepare.outputs.asset-name }}
-        run: |
-          set -euo pipefail
-          wheel_asset="${ARTIFACT_DIR}/${ASSET_NAME}"
-          if [[ ! -f "${wheel_asset}" ]]; then
-            echo "::error::Wheel to publish not found: ${wheel_asset}"
-            exit 1
-          fi
-          if ! gh release view "${RELEASE_TAG}" > /dev/null 2>&1; then
-            if ! gh release create "${RELEASE_TAG}" \
-              --target "${SOURCE_COMMIT}" \
-              --title "Nightly Build" \
-              --notes "Rolling release holding the latest nightly PPU wheels (8.0a;8.9)." \
-              --prerelease; then
-              gh release view "${RELEASE_TAG}" > /dev/null
-            fi
-          fi
-          gh release upload "${RELEASE_TAG}" "${wheel_asset}" --clobber
-          {
-            echo "### Nightly PPU wheel"
-            echo "- Branch: \`${SOURCE_BRANCH}\`"
-            echo "- Commit: \`${SOURCE_COMMIT}\`"
-            echo "- Architectures: \`8.0a;8.9\`"
-            echo "- Asset: \`${ASSET_NAME}\`"
-            echo "- Release: ${GITHUB_SERVER_URL}/${GH_REPO}/releases/tag/${RELEASE_TAG}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+      # Scheduled and push runs have no inputs; use the same defaults as manual runs.
+      package_name: ${{ inputs.package_name || 'torch' }}
+      framework: ${{ inputs.framework || '' }}
+      template_repository: flytiger-eco/shared-workflows
+      template_ref: main
+      runs_on: ${{ inputs.runs_on || 'x86-ubuntu2404-64-256' }}
+      python_versions: ${{ inputs.python_versions || '["312"]' }}
+      os_versions: ${{ inputs.os_versions || '["ubuntu2404"]' }}
+      runtime_versions: ${{ inputs.runtime_versions || '["13.0.0"]' }}
+      torch_versions: ${{ inputs.torch_versions || '[""]' }}
+      sdk_versions: ${{ inputs.sdk_versions || '["2.2.0"]' }}
+      branch: ${{ inputs.branch || '' }}
+      package_version: ${{ inputs.package_version || '2.12.0' }}
+      package_edition: ${{ inputs.package_edition || 'oe' }}
+      package_type: ${{ inputs.package_type || 'pypi' }}
+      build_command: |
+        ${{ inputs.build_command || 'unset PIP_INDEX_URL
+        source /usr/local/PPU_SDK/envsetup.sh || true
+        pip install setuptools-scm==9.2.2
+        pip install numpy==2.1.0
+        pip install --upgrade setuptools wheel typing_extensions
+        python3 -m pip show setuptools setuptools-scm packaging wheel typing_extensions
+        export NCCL_INCLUDE_DIR="/usr/local/pccl/nccl_wrapper/include"
+        export NCCL_LIB_DIR="/usr/local/pccl/nccl_wrapper/lib"
+        export PYTORCH_VERSION="2.12.0"
+        export PYTORCH_BUILD_VERSION="2.12.0"
+        export PYTORCH_BUILD_NUMBER=0
+        export USE_FLASH_ATTENTION=True
+        export USE_MEM_EFF_ATTENTION=True
+        export USE_NCCL=True
+        export USE_DISTRIBUTED=True
+        export USE_SYSTEM_NCCL=1
+        export BUILD_CAFFE2=False
+        export BUILD_TEST=True
+        export TORCH_CUDA_ARCH_LIST="8.0a;8.9"
+        python3 setup.py bdist_wheel' }}
