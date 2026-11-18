@@ -9,6 +9,7 @@
     "export/test_torchbind.py::TestExportTorchbind::test_torchbind_op_register_fallthrough",
     "functorch/test_control_flow.py::TestControlFlow::test_scan_xs_none_length_zero_output_*",
     "functorch/test_control_flow.py::TestControlFlowTraced::test_merge_output",
+    "test_custom_ops.py::TestCustomOpAPI::test_library_register_fake_profile_op_*",
     "test_custom_ops.py::TestOpProfiles",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test__adaptive_avg_pool2d_backward_*",
     "test_fake_tensor.py::PropagateRealTensorsTestFakeTensor::test_alias_call_*",
