@@ -847,7 +847,7 @@ class AOTCompiledFunction:
     def _seed_guard_scope(
         self, guard_scope: dict[str, Any], guards_state: "GuardsState"
     ) -> None:
-        # Dynamo mints __import_* aliases, a __builtins_dict___N key and the
+        # Dynamo mints constant-result names, __import_* aliases, a builtins key and the
         # ___unnamed_scope_<id>_c<n> key of an inlined frame's globals into the
         # TRACING process's globals and roots guards at them; a process that only
         # loads never traced. Each name is gated on the artifact showing a kept
