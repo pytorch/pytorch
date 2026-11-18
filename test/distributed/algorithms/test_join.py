@@ -109,7 +109,9 @@ class AllReducer(Joinable):
         All-reduces a dim-1 one tensor ``num_allreduces``-many times, and
         returns the total result.
         """
-        Join.notify_join_context(self)
+        work = Join.notify_join_context(self)
+        if work is not None:
+            work.wait()
         device = self.device
         total = 0
         for _ in range(num_allreduces):

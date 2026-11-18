@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import (
@@ -176,6 +176,7 @@ class TestFFT(TestCase):
         torch.chalf : tol(1e-2, 1e-2),
     })
     @dtypes(torch.half, torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
+    @dtypesIfCPU(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fft_round_trip(self, device, dtype):
         skip_helper_for_fft(device, dtype)
         # Test that round trip through ifft(fft(x)) is the identity
@@ -257,19 +258,20 @@ class TestFFT(TestCase):
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
-        with self.assertRaisesRegex(RuntimeError, "rfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfft expects a real input tensor"):
             torch.fft.rfft(t)
 
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
-        with self.assertRaisesRegex(RuntimeError, "ihfft expects a real input tensor"):
+        with self.assertRaisesRegex(TypeError, "ihfft expects a real input tensor"):
             torch.fft.ihfft(t)
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
+    @dtypesIfCPU(torch.int8, torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -344,7 +346,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.bfloat16])
     def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
@@ -422,6 +424,7 @@ class TestFFT(TestCase):
     })
     @dtypes(torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
+    @dtypesIfCPU(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fftn_round_trip(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -494,6 +497,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCPU(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_fftn_noop_transform(self, device, dtype):
         skip_helper_for_fft(device, dtype)
         RESULT_TYPE = {
@@ -522,6 +526,7 @@ class TestFFT(TestCase):
         torch.half : tol(1e-2, 1e-2),
     })
     @dtypes(torch.half, torch.float, torch.double)
+    @dtypesIfCPU(torch.float, torch.double)
     def test_hfftn(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -562,6 +567,7 @@ class TestFFT(TestCase):
         torch.half : tol(1e-2, 1e-2),
     })
     @dtypes(torch.half, torch.float, torch.double)
+    @dtypesIfCPU(torch.float, torch.double)
     def test_ihfftn(self, device, dtype):
         skip_helper_for_fft(device, dtype)
 
@@ -629,24 +635,18 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: list[int] | None, dim: list[int] = (-2, -1), norm: str | None = None):
-                    return torch_fn(t, s, dim, norm)
-
-                torch_fns = (torch_fn, torch.jit.script(fn))
 
                 # Once with dim defaulted
                 input_np = input.cpu().numpy()
                 expected = numpy_fn(input_np, s, norm=norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, norm=norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, norm=norm)
+                self.assertEqual(actual, expected)
 
                 # Once with explicit dims
                 dim = (1, 0)
                 expected = numpy_fn(input_np, s, dim, norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, dim, norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, dim, norm)
+                self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
@@ -706,7 +706,7 @@ class TestFFT(TestCase):
                 func(a, dim=(2, 3))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
+        with self.assertRaisesRegex(TypeError, "rfftn expects a real-valued input"):
             torch.fft.rfft2(c)
 
     # Helper functions
@@ -965,6 +965,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
+    @unittest.skipIf(not TEST_LIBROSA, 'librosa not found')
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
             raise unittest.SkipTest('librosa not found')
@@ -1039,6 +1040,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
+    @unittest.skipIf(not TEST_LIBROSA, 'librosa not found')
     def test_istft_against_librosa(self, device, dtype):
         if not TEST_LIBROSA:
             raise unittest.SkipTest('librosa not found')
@@ -1316,6 +1318,38 @@ class TestFFT(TestCase):
         _ = torch.fft.irfftn(half_spectrum_copy, s=(2, 2), dim=(-2, -1))
         self.assertEqual(half_spectrum, half_spectrum_copy)
 
+        # A backend only overwrites its input buffer for large enough
+        # transforms, so the signal above passes whether or not the contract
+        # holds. "prime" forces a Bluestein decomposition, and the strided
+        # layouts reach the backend as embedded strides rather than being
+        # copied to a contiguous buffer first.
+        frames, n_fft, hop = 200, 1024, 256
+        layouts = (
+            ("pow2", 2 ** 15, lambda t: t),
+            ("prime", 32771, lambda t: t),
+            ("overlapping_frames", (frames - 1) * hop + n_fft,
+             lambda t: t.as_strided((frames, n_fft), (hop, 1))),
+            ("stride_2", 2 ** 16, lambda t: t[::2]),
+        )
+        transforms = (
+            ("fft", torch.fft.fft, False),
+            ("rfft", torch.fft.rfft, False),
+            ("fftn", lambda t: torch.fft.fftn(t, dim=(-1,)), False),
+            ("rfftn", lambda t: torch.fft.rfftn(t, dim=(-1,)), False),
+            ("ifft", torch.fft.ifft, True),
+            ("irfft", torch.fft.irfft, True),
+            ("ifftn", lambda t: torch.fft.ifftn(t, dim=(-1,)), True),
+            ("irfftn", lambda t: torch.fft.irfftn(t, dim=(-1,)), True),
+        )
+        for case, size, view in layouts:
+            real = view(torch.randn(size, device=device))
+            cplx = view(torch.randn(size, device=device, dtype=torch.complex64))
+            for name, transform, complex_input in transforms:
+                x = cplx if complex_input else real
+                original = x.clone()
+                transform(x)
+                self.assertEqual(x, original, msg=f"{case}: {name} modified its input")
+
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
     def test_fft_plan_repeatable(self, device):
@@ -1485,7 +1519,7 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     def test_istft_throws(self, device):
         """istft should throw exception for invalid parameters"""
-        stft = torch.zeros((3, 5, 2), device=device)
+        stft = torch.zeros((3, 5, 2), device=device, dtype=torch.cfloat)
         # the window is size 1 but it hops 20 so there is a gap which throw an error
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4,
@@ -1495,8 +1529,8 @@ class TestFFT(TestCase):
         self.assertRaises(
             RuntimeError, torch.istft, stft, n_fft=4, win_length=4, window=invalid_window)
         # Input cannot be empty
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
-        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2), device=device, dtype=torch.cfloat), 2)
+        self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2), device=device, dtype=torch.cfloat), 2)
 
     @skipIfTorchDynamo("Failed running call_function")
     @onlyNativeDeviceTypes

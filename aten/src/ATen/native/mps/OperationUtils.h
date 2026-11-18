@@ -14,11 +14,13 @@
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <c10/metal/common.h>
+#include <c10/util/SmallVector.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -54,6 +56,7 @@ struct MPSScalar {
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
+    c10::Float8_e4m3fn f8;
   } value{};
 };
 
@@ -103,15 +106,8 @@ inline void mtlDispatchByIndexWidth(bool use32, Fn&& fn) {
 
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
-std::string getMPSShapeString(MPSShape* shape);
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true, bool exclude_shape = false);
-std::string to_hex_key(float);
 std::string getArrayRefString(const IntArrayRef s);
-// use has_storage() on the returned tensor to determine if src actually is a view
-Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
-Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
 
 MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
@@ -122,7 +118,7 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 // Determines whether a tensor is too large to use MPSGraph
-bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true, bool checkLinearOffset = false);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
@@ -410,7 +406,7 @@ struct MPSGraphCache {
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       auto it = cache_.find(hash);
       if (it != cache_.end()) {
         auto& entry = it->second;
@@ -428,7 +424,7 @@ struct MPSGraphCache {
   }
 
   void clear() {
-    dispatch_sync(serialQueue_, ^() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       for (const auto& i : cache_) {
         delete i.second.cachedGraph_;
       }
@@ -468,9 +464,6 @@ inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(M
   });
 }
 
-// Common math operations
-MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
-
 /**
  * Returns distance from lowest to highest element offset in given tensor.
  */
@@ -487,16 +480,16 @@ template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
 static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
-  if (C10_UNLIKELY(t.device().type() == kCPU)) {
+  if (t.device().type() == kCPU) [[unlikely]] {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
       // MPS does not support doubles, silently downcast CPU scalar to float
-      if (C10_UNLIKELY(t.scalar_type() == kDouble)) {
+      if (t.scalar_type() == kDouble) [[unlikely]] {
         auto val = static_cast<float>(*reinterpret_cast<const double*>(t.const_data_ptr()));
         [encoder setBytes:&val length:sizeof(val) atIndex:idx];
         return;
       }
-      if (C10_UNLIKELY(t.scalar_type() == kComplexDouble)) {
+      if (t.scalar_type() == kComplexDouble) [[unlikely]] {
         auto val = static_cast<c10::complex<float>>(*reinterpret_cast<const c10::complex<double>*>(t.const_data_ptr()));
         [encoder setBytes:&val length:sizeof(val) atIndex:idx];
         return;
@@ -546,7 +539,7 @@ static inline void bind_iter_tensors(id<MTLComputeCommandEncoder> encoder,
   for (auto idx : c10::irange(ntensors.value_or(iter.ntensors()))) {
     auto& t = iter.tensor_base(idx);
     // Handle CPU scalars
-    if (C10_UNLIKELY(t.device().type() == kCPU)) {
+    if (t.device().type() == kCPU) [[unlikely]] {
       mtl_setBuffer(encoder, t, idx);
       continue;
     }
@@ -608,6 +601,8 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
                                      NSUInteger length) {
   static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
+  // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
+  TORCH_CHECK(std::in_range<uint32_t>(length), "MPS 1D dispatch of ", length, " threads exceeds 2^32");
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::clamp(length, 1UL, maxThreadsPerGroup), 1, 1);
@@ -622,12 +617,17 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
 // vs the 1D dispatch. The kernel reads thread_position_in_grid as uint
 // per-axis, so each dim must fit in uint32; the product can exceed UINT32_MAX
 // (i.e. >4G total threads are fine as long as neither inner nor outer alone
-// overflow). Like mtl_dispatch1DJob, caller is responsible for the per-axis
-// bound; TensorIterator's 32-bit decomposition keeps both within range today.
+// overflow).
 static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
                                      NSUInteger inner_len,
                                      NSUInteger outer_len) {
+  TORCH_CHECK(std::in_range<uint32_t>(inner_len) && std::in_range<uint32_t>(outer_len),
+              "MPS 2D dispatch of ",
+              inner_len,
+              "x",
+              outer_len,
+              " threads exceeds 2^32 along one axis");
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(inner_len, outer_len, 1);
   auto tg_x = std::min(maxThreadsPerGroup, inner_len);
@@ -636,9 +636,32 @@ static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index = false);
+static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     NSUInteger dim0,
+                                     NSUInteger dim1,
+                                     NSUInteger dim2) {
+  TORCH_CHECK(std::in_range<uint32_t>(dim0) && std::in_range<uint32_t>(dim1) && std::in_range<uint32_t>(dim2),
+              "MPS 3D dispatch of ",
+              dim0,
+              "x",
+              dim1,
+              "x",
+              dim2,
+              " threads exceeds 2^32 along one axis");
+  const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto tg_x = std::min(maxThreadsPerGroup, dim0);
+  auto tg_y = std::clamp(dim1, 1UL, maxThreadsPerGroup / tg_x);
+  auto tg_z = std::clamp(dim2, 1UL, maxThreadsPerGroup / (tg_x * tg_y));
+  [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
+}
+
+// Threadgroups that keep every GPU core busy: 4 x 1024 threads cover the ~3072 resident threads per core
+static inline int64_t occupancy_threadgroups() {
+  constexpr int64_t threadgroups_per_core = 4;
+  static const int64_t cores = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  return threadgroups_per_core * cores;
+}
 
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
   return @{p1.getMPSGraphTensor() : p1.getMPSGraphTensorData()};
@@ -691,11 +714,6 @@ inline bool supportedFloatingOrComplexType(const TensorBase& t) {
   return supportedFloatingOrComplexType(t.scalar_type());
 }
 
-inline bool needsGather(const TensorBase& t) {
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset());
-}
-
 template <typename T>
 void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
                                                        const std::string& name,
@@ -734,10 +752,10 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
     auto cplState = getPipelineStateForFunc(kernel_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
-      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
+      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
@@ -758,9 +776,18 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
         mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
 
-      getMPSProfiler().endProfileKernel(cplState);
+      getMPSProfiler().endProfileKernel(cplState, mpsStream);
     });
   }
+}
+
+// Per-dim magic divisors for the strided kernels; 32-bit chunking keeps every size below 2^31.
+inline c10::SmallVector<c10::metal::DimDivider, 5> dimDividers(IntArrayRef sizes) {
+  c10::SmallVector<c10::metal::DimDivider, 5> dividers;
+  for (const auto size : sizes) {
+    dividers.push_back({c10::IntDivider<uint32_t>(static_cast<uint32_t>(size))});
+  }
+  return dividers;
 }
 
 template <typename T>
@@ -822,7 +849,7 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
       auto computeEncoder = mpsStream->commandEncoder();
       auto binaryPSO = getPipelineStateForFunc(kernel_name);
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other}, mpsStream);
       [computeEncoder setComputePipelineState:binaryPSO];
       // Set input and output tensors
       bind_iter_tensors(computeEncoder, iter);
@@ -845,11 +872,12 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
                                              static_cast<int>(input.scalar_type()),
                                              static_cast<int>(other.scalar_type()),
                                              static_cast<int>(out.scalar_type())};
+        const auto sizes = dimDividers(iter.shape());
         mtl_setArgs<3>(
-            computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+            computeEncoder, params, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
-      getMPSProfiler().endProfileKernel(binaryPSO);
+      getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
   });
 }

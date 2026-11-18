@@ -12,15 +12,20 @@ import torch.distributed as dist
 from torch._inductor import codecache
 
 
+# Detect device type and backend dynamically
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = dist.get_default_backend_for_device(device_type)
+
+
 @torch.compile
 def myfn(x: torch.Tensor) -> torch.Tensor:
     return x + x
 
 
-dist.init_process_group(backend="nccl")
+dist.init_process_group(backend=backend)
 
-local_rank = int(os.environ.get("LOCAL_RANK", "cuda:0"))
-torch.cuda.set_device(local_rank)
+local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+torch.accelerator.set_device_index(local_rank)
 
 
 def print_output_code(original_fn):
@@ -32,7 +37,7 @@ def print_output_code(original_fn):
     return wrapper
 
 
-x = torch.rand(2, 2, device="cuda")
+x = torch.rand(2, 2, device=device_type)
 
 with patch.object(
     codecache.output_code_log,

@@ -101,7 +101,9 @@ struct cublasCommonArgs {
       const std::optional<Tensor>& scale_b = std::nullopt,
       const std::optional<Tensor>& scale_result = std::nullopt,
       const std::optional<ScalingType>& scaling_choice_a = std::nullopt,
-      const std::optional<ScalingType>& scaling_choice_b = std::nullopt) {
+      const std::optional<ScalingType>& scaling_choice_b = std::nullopt,
+      SwizzleType swizzle_choice_a = SwizzleType::NO_SWIZZLE,
+      SwizzleType swizzle_choice_b = SwizzleType::NO_SWIZZLE) {
     bool transpose_result = false, transpose_a = false, transpose_b = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
     mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, transpose_result);
@@ -114,9 +116,11 @@ struct cublasCommonArgs {
       scale_mata_ptr = transpose_result ? scale_b->data_ptr() : scale_a->data_ptr();
       scale_mata_dtype = transpose_result ? scale_b->scalar_type() : scale_a->scalar_type();
       scaling_mata_type = transpose_result ? scaling_choice_b : scaling_choice_a;
+      swizzle_mata_type = transpose_result ? swizzle_choice_b : swizzle_choice_a;
       scale_matb_ptr = transpose_result ? scale_a->data_ptr() : scale_b->data_ptr();
       scale_matb_dtype = transpose_result ? scale_a->scalar_type() : scale_b->scalar_type();
       scaling_matb_type = transpose_result ? scaling_choice_a : scaling_choice_b;
+      swizzle_matb_type = transpose_result ? swizzle_choice_a : swizzle_choice_b;
     }
 
     if (scale_result) {
@@ -142,6 +146,13 @@ struct cublasCommonArgs {
     transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
     transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
 
+    // Record whether PyTorch's BLAS dispatch swapped inductor's
+    // (M, N) -> (n, m) when computing C^T = B^T @ A^T in column-major
+    // cuBLAS. Consumers that need to translate an inductor-frame
+    // dynamic-dims mask (e.g. TunableOp wildcard signatures) into the
+    // BLAS frame read this flag and swap the M and N bits when set.
+    swapped_mn = transpose_result;
+
     // cuBLAS expects unpacked values of `k`, `lda` and `ldb`, adjust for 4x2 packing
     // if the gemm operands are in packed float4
     if (mat1.dtype() == at::kFloat4_e2m1fn_x2 && mat2.dtype() == at::kFloat4_e2m1fn_x2) {
@@ -156,6 +167,11 @@ struct cublasCommonArgs {
   int64_t m, n, k;
   int64_t lda, ldb, result_ld;
   c10::MaybeOwned<Tensor> mata, matb, result;
+  // True iff PyTorch's BLAS dispatch swapped inductor's (M, N) into
+  // BLAS's (n, m). Used by TunableOp consumers to translate a dynamic
+  // -dims mask captured in inductor frame into the BLAS frame stamped
+  // onto `params.dynamic_dims_mask`.
+  bool swapped_mn = false;
 
   // Scale members
   void* scale_mata_ptr = nullptr;
@@ -163,8 +179,10 @@ struct cublasCommonArgs {
   void* scale_result_ptr = nullptr;
   std::optional<c10::ScalarType> scale_mata_dtype;
   std::optional<ScalingType> scaling_mata_type;
+  SwizzleType swizzle_mata_type = SwizzleType::NO_SWIZZLE;
   std::optional<c10::ScalarType> scale_matb_dtype;
   std::optional<ScalingType> scaling_matb_type;
+  SwizzleType swizzle_matb_type = SwizzleType::NO_SWIZZLE;
   std::optional<c10::ScalarType> scale_result_dtype;
 };
 

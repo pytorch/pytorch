@@ -3,7 +3,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
 #include <optional>
-#include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
@@ -825,49 +824,6 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   }
 )ESCAPE";
 
-static void replace_all(std::string& s, const std::string& to_replace, const std::string& replace_with) {
-  std::ostringstream oss;
-  std::size_t pos = 0;
-  std::size_t prev_pos = pos;
-
-  while (true) {
-    prev_pos = pos;
-    pos = s.find(to_replace, pos);
-    if (pos == std::string::npos)
-      break;
-    oss << s.substr(prev_pos, pos - prev_pos);
-    oss << replace_with;
-    pos += to_replace.size();
-  }
-
-  oss << s.substr(prev_pos);
-  s = std::move(oss).str();
-}
-
-// hipify replaces certain device math functions, e.g., std::max -> ::max
-// See torch/utils/hipify/cuda_to_hip_mappings.py.
-// Replace them back. Search for " ::<name>" to avoid duplicate replacements.
-static std::string unhipify_math_functions(const std::string &original) {
-  static std::vector<std::pair<std::string,std::string>> mappings = {
-    {" std::max", " ::max"},
-    {" std::min", " ::min"},
-    {" std::ceil", " ::ceil"},
-    {" std::floor", " ::floor"},
-    {" std::exp", " ::exp"},
-    {" std::log", " ::log"},
-    {" std::pow", " ::pow"},
-    {" std::fabs", " ::fabs"},
-    {" std::fmod", " ::fmod"},
-    {" std::remainder", " ::remainder"},
-    {" std::frexp", " ::frexp"}
-  };
-  std::string ret = original;
-  for (const auto& mapping : mappings) {
-    replace_all(ret, mapping.second, mapping.first);
-  }
-  return ret;
-}
-
 // The following is copied from fused_kernel.cpp
 // TODO: refactor codegenOutputQuery into its own file
 //   that can be included by both files
@@ -1157,11 +1113,6 @@ std::string generate_code(
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
-#ifdef USE_ROCM
-    // unhipify math functions, but only if std::complex is used.
-    func = unhipify_math_functions(func);
-    env.s("functor", func);
-#endif
   } else if (dynamic_casting) {
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
@@ -1430,10 +1381,6 @@ std::string generate_reduction_code(
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
         env.s("complex", std::to_string(1));
-#ifdef USE_ROCM
-        // unhipify math functions, but only if std::complex is used.
-        func = unhipify_math_functions(func);
-#endif
       } else {
         env.s("traits_string", "");
         env.s("complex_body_string", "");
@@ -1582,11 +1529,24 @@ NvrtcFunction jit_pwise_function(
     } else {
       // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
       std::vector<char> buffer(std::istreambuf_iterator<char>(read_stream), {});
-      AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
-      AT_CUDA_DRIVER_CHECK(
-        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
       read_stream.close();
-      return compiled_kernel_;
+      try {
+        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+        AT_CUDA_DRIVER_CHECK(
+          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+        return compiled_kernel_;
+      } catch (const c10::Error& e) {
+        if (compiled_kernel_.module != nullptr) {
+          (void)nvrtc.cuModuleUnload(compiled_kernel_.module);
+        }
+        std::remove(file_path.c_str());
+        TORCH_WARN_ONCE(
+            "Ignoring invalid CUDA kernel cache file and recompiling.",
+            " File path was ", file_path, ".",
+            " Error was ", e.what_without_backtrace(), ".",
+            " This warning will only appear once per process.");
+        compiled_kernel_ = NvrtcFunction();
+      }
     }
   }
 
@@ -1685,12 +1645,17 @@ NvrtcFunction jit_pwise_function(
                       " This warning will only appear once per process.");
     } else {
       std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
-      if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
-        // Removes tmp file if the rename failed
+      cubin.close();
+      if (cubin.fail()) {
+        TORCH_WARN_ONCE("Failed to write kernel cache file!",
+                        " File path was ", tmp_file_path, ".",
+                        " This warning will only appear once per process.");
+        std::remove(tmp_file_path.c_str());
+      } else if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+        // Remove the temporary file if it could not be renamed into place.
         std::remove(tmp_file_path.c_str());
       }
     }
-    cubin.close();
   }
 
   return compiled_kernel_;
