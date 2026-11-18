@@ -52,6 +52,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import aot_autograd, config as functorch_config
+from torch._functorch._aot_autograd.schemas import OutputType
 from torch._functorch._aot_autograd.subclass_parametrization import (
     unwrap_tensor_subclass_parameters,
 )
@@ -2905,16 +2906,17 @@ def compile_fx_forward(
     clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
     model_outputs = None
     user_visible_output_idxs: list[int] = []
+    context = torch._guards.TracingContext.try_get()
+    fw_metadata = (
+        context.fw_metadata if context is not None and not is_inference else None
+    )
     if config.keep_output_stride or clone_live_user_outputs:
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
-        context = torch._guards.TracingContext.try_get()
         # See Note [User Outputs in the inductor graph]
-        if context is not None and context.fw_metadata and not is_inference:
-            original_output_start_index = (
-                context.fw_metadata.num_mutated_inp_runtime_indices
-            )
+        if fw_metadata is not None:
+            original_output_start_index = fw_metadata.num_mutated_inp_runtime_indices
         else:
             original_output_start_index = 0
 
@@ -2952,10 +2954,35 @@ def compile_fx_forward(
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
 
-    if config.keep_output_stride or clone_live_user_outputs:
-        model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
-    else:
-        model_outputs_node.meta["user_visible_output_idxs"] = []
+    # AOTAutograd regenerates output aliases using both output and base layouts.
+    if fw_metadata is not None:
+        num_mutated_inputs = fw_metadata.num_mutated_inp_runtime_indices
+        intermediate_base_start = num_mutated_inputs + fw_metadata.num_outputs
+        user_visible_output_idxs.extend(
+            range(
+                intermediate_base_start,
+                intermediate_base_start + fw_metadata.num_intermediate_bases,
+            )
+        )
+        alias_of_output = OutputType.alias_of_intermediate_base_is_user_output
+        alias_types = (
+            OutputType.alias_of_intermediate,
+            OutputType.alias_of_intermediate_save_as_output,
+            alias_of_output,
+        )
+        for idx, info in enumerate(fw_metadata.output_info):
+            if info.output_type in alias_types:
+                output_idx = num_mutated_inputs + idx
+                if output_idx not in user_visible_output_idxs:
+                    user_visible_output_idxs.append(output_idx)
+            if info.output_type == alias_of_output:
+                if info.base_idx is None:
+                    raise AssertionError("Expected a user output base index")
+                base_idx = num_mutated_inputs + info.base_idx
+                if base_idx not in user_visible_output_idxs:
+                    user_visible_output_idxs.append(base_idx)
+
+    model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
 
     # We also mark the invoke_subgraph outputs as user_visible to
     # force the outputs of invoke_subgraph subgraph to follow the
