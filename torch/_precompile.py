@@ -4132,13 +4132,17 @@ def capture(
 
     ``CUDAGRAPH_CONFIG`` reaches Inductor as ``options`` do, so Dynamo traces
     the captured calls under ``torch._inductor.config``, as under
-    :func:`torch.compile`: a Python float argument that changes between calls
-    becomes one dynamic input, which a partitioned graph copies to the device
-    outside its CUDA graph. The exception is a capture with CUDA graphs on and
-    ``graph_partition`` off, where that CPU scalar would keep the graph out of
-    CUDA graphs: its calls are traced under ``CUDAGRAPH_CONFIG`` too, so Dynamo
-    specializes every Python float argument, and each distinct value is its
-    own captured variant.
+    :func:`torch.compile`. When CUDA graphs are turned on by ``mode`` or
+    ``options`` (the flag is off there), a Python float argument that changes
+    between calls becomes one dynamic input, which a partitioned graph copies
+    to the device outside its CUDA graph. Dynamo specializes every Python
+    float argument, making each distinct value its own captured variant, in
+    two cases: when the flag is on in ``torch._inductor.config``, as under
+    :func:`torch.compile`, and in a capture with CUDA graphs on and
+    ``graph_partition`` off, whose calls are traced under ``CUDAGRAPH_CONFIG``
+    too, because that CPU scalar would keep an unpartitioned graph out of CUDA
+    graphs.
+
     As under :func:`torch.compile`, a graph's outputs are overwritten by its
     next replay, so clone what you keep across calls or call
     :func:`torch.compiler.cudagraph_mark_step_begin` between iterations; a
