@@ -311,7 +311,7 @@ class CUDAGraphTreeAllocatorInterface(GraphTreeAllocatorInterface):
 
 
 class XPUGraphTreeGraphInterface(GraphTreeGraphInterface):
-    def create_graph(self, _num_rng_states: int = 8) -> GraphTreeGraph:
+    def create_graph(self, *, num_generators: int = 0) -> GraphTreeGraph:
         return torch.xpu.XPUGraph()
 
     def create_stream(self, device_index: int) -> torch.xpu.Stream:
@@ -352,6 +352,15 @@ class XPUGraphTreeGraphInterface(GraphTreeGraphInterface):
 
 
 class XPUGraphTreeAllocatorInterface(GraphTreeAllocatorInterface):
+    def create_storage(self, metadata: dict[str, Any]) -> torch.types.Storage:
+        if metadata["data_ptr"] == 0:
+            return cast(
+                torch.types.Storage, torch.UntypedStorage(0, device=metadata["device"])
+            )
+        return torch._C._construct_storage_from_data_pointer(
+            metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+        )
+
     def begin_allocate_to_pool(self, device: int, pool: tuple[int, int]) -> None:
         torch._C._xpu_beginAllocateCurrentThreadToPool(device, pool)
 
