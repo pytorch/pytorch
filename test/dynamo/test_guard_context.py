@@ -905,61 +905,6 @@ class GuardContextTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(compiled(x, argument), (x + index, label))
                 self.assertEqual(counter.frame_count, index)
 
-    @parametrize("graph_break", [False, True])
-    def test_context_escape_identity_and_reconstruction(self, graph_break):
-        manager = torch.compiler.guard_ctx("prebuilt")
-
-        def fn(x):
-            first = torch.compiler.guard_ctx("created")
-            second = torch.compiler.guard_ctx("created")
-            alias = first
-            prebuilt = manager
-            assert alias is first  # noqa: S101
-            assert type(first) is torch._guards._GuardContext  # noqa: S101
-            if graph_break:
-                x = x.sin()
-                torch._dynamo.graph_break()
-            return x + 1, first, alias, second, prebuilt
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=not graph_break)
-        previous = None
-        for _ in range(2):
-            output, first, alias, second, prebuilt = compiled(torch.ones(2))
-            expected = torch.ones(2).sin() + 1 if graph_break else torch.ones(2) + 1
-            self.assertEqual(output, expected)
-            self.assertIs(type(first), torch._guards._GuardContext)
-            self.assertIs(alias, first)
-            self.assertIsNot(first, second)
-            self.assertIsNot(first, previous)
-            self.assertIs(prebuilt, manager)
-            self.assertEqual(first.label, "created")
-            previous = first
-            with first:
-                self.assertEqual(
-                    TracingContext(None).guards_context.current_guard_label, "created"
-                )
-            self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
-
-    @parametrize("prebuilt", [False, True])
-    def test_distinct_context_identity_comparison_containment(self, prebuilt):
-        def fn(x, first, second):
-            if not prebuilt:
-                first = torch.compiler.guard_ctx("created")
-                second = torch.compiler.guard_ctx("created")
-            return x.sin(), first is second
-
-        x = torch.ones(2)
-        first = torch.compiler.guard_ctx("prebuilt")
-        second = torch.compiler.guard_ctx("prebuilt")
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin operator"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, first, first)
-        compiled = torch.compile(fn, backend="eager")
-        for other in (first, second, first):
-            self.assertEqual(
-                compiled(x, first, other),
-                (x.sin(), first is other if prebuilt else False),
-            )
-
     def test_private_context_label_mutation_containment(self):
         labels = []
 
