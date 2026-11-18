@@ -1665,6 +1665,40 @@ class TestCfgCallees(TestCase):
             ["outer", "inner"],
         )
 
+    def test_infinite_recursion(self):
+        def forever():
+            return forever()
+
+        def guarded():
+            try:
+                return guarded()
+            except ValueError:
+                return -1
+
+        for fn in (forever, guarded):
+            compiled = torch.cfg_compile(fn, fallback=False)
+            with self.assertRaisesRegex(
+                RecursionError, "maximum recursion depth exceeded"
+            ):
+                compiled()
+
+    def test_recursion_deeper_than_the_native_stack(self):
+        def depth(n):
+            return 0 if n == 0 else 1 + depth(n - 1)
+
+        compiled = torch.cfg_compile(depth, fallback=False)
+        limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(1_000_000)
+        try:
+            self.assertEqual(compiled(500), 500)
+            with self.assertRaisesRegex(
+                RecursionError, "maximum recursion depth exceeded"
+            ):
+                compiled(200_000)
+        finally:
+            sys.setrecursionlimit(limit)
+        self.assertEqual(compiled(100), 100)
+
     def test_callees_off(self):
         def f(obj, x):
             return obj.twice(x)
