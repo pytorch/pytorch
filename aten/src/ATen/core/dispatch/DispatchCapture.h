@@ -22,7 +22,7 @@ class TORCH_API OperatorHandle;
 // backend) reports the DispatchKeySet it was handed. The last redispatch of a
 // chain is therefore the post-dispatch kernel, which is what a compiler needs
 // to record in order to replay the operator without dispatching again (see
-// torch.cfg_compile).
+// torch.vm).
 //
 // Enter/exit calls are properly nested, so a sink can rebuild the call tree.
 // RecordFunction observers see a call as they do without a sink. inputs and
