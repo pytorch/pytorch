@@ -1,6 +1,6 @@
 """Runs of a basic block compiled by a graph backend.
 
-With ``torch.rewrite(fn, passes=[torch.rewrite.inductor, ...])`` the VM hands the tensor work
+With ``torch.vm.passes.Graphs()`` in its list of passes the VM hands the tensor work
 of each basic block to AOTAutograd and Inductor. The unit is a *region*: a run
 of consecutive instructions of one block that have no effect a trace cannot
 capture (calls, arithmetic, attribute reads, building containers). A region is
@@ -602,7 +602,7 @@ def _watch_module_changes(on: bool) -> None:
         _monitor = -1
         for tool in (4, 3):
             try:
-                monitoring.use_tool_id(tool, "torch.rewrite")
+                monitoring.use_tool_id(tool, "torch.vm")
             except ValueError:
                 continue
             start = monitoring.events.PY_START
