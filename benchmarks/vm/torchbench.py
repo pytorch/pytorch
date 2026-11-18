@@ -1,4 +1,4 @@
-"""TorchBench under eager, torch.compile and torch.cfg_compile(backend="inductor").
+"""TorchBench under eager, torch.compile and torch.vm with Inductor graphs.
 
 Every model of https://github.com/pytorch/benchmark that loads is run for
 inference and for training, as benchmarks/dynamo/torchbench.py runs it: the
@@ -12,12 +12,12 @@ step in train mode. The same function is given to both compilers. Each
   (the worst relative difference over the outputs of the calls before the
   timed ones; over the losses of the first steps for training);
 - what the calls up to the steady state cost over the steady state itself,
-  which is compile time plus, for cfg_compile, the calls it spends measuring
+  which is compile time plus, for torch.vm, the calls it spends measuring
   compiled code against the interpreter; and the compile time alone;
 - the median time of a call in the steady state.
 
-    python benchmarks/cfg_compile/torchbench.py --torchbench ~/benchmark resnet18 hf_Bert
-    python benchmarks/cfg_compile/torchbench.py --torchbench ~/benchmark \\
+    python benchmarks/vm/torchbench.py --torchbench ~/benchmark resnet18 hf_Bert
+    python benchmarks/vm/torchbench.py --torchbench ~/benchmark \\
         --cpus 8-11/12-15 --results results.jsonl > report.md
 
 Without model names, all models are tried; the ones that do not load in the
@@ -193,7 +193,8 @@ def run_one(args):
         elif mode == "compile":
             compiled = torch.compile(fn)
         else:
-            compiled = torch.cfg_compile(fn, backend="inductor", fallback=False)
+            passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+            compiled = torch.vm(fn, passes=passes, fallback=False)
 
         opt = optimizer(model) if training else None
         warm, worst, quiet = [], 0.0, 0.0
@@ -206,11 +207,11 @@ def run_one(args):
             # Seconds since the last call that stood out.
             quiet = quiet + warm[-1] if warm[-1] < 2.5 * min(warm) else 0.0
             # Inference gives the same result on every call, so every call is
-            # compared: under cfg_compile some of them run in the interpreter.
+            # compared: under torch.vm some of them run in the interpreter.
             if reference and (i < len(reference) if training else True):
                 d = difference(r, reference[i] if training else reference[0])
                 worst = float("inf") if d is None else max(worst, d)
-            # A JIT is warm when it has stopped changing its mind: cfg_compile
+            # A JIT is warm when it has stopped changing its mind: torch.vm
             # goes on measuring compiled code against the interpreter for a
             # while after it has compiled.
             measuring = mode == "cfg" and compiled.stats()["measuring"]
@@ -254,7 +255,7 @@ def run_one(args):
                     totals[1][names.index("_compile.compile_inner")]
                 )
         elif mode == "cfg":
-            regions = torch.cfg_compile.regions(compiled)
+            regions = torch.vm.regions(compiled)
             hot = [r for r in regions if r["state"] == "compiled"]
             out["graphs"] = sum(r["variants"] for r in hot)
             out["ops"] = sum(r["ops"] for r in hot)
@@ -396,9 +397,9 @@ def report(args, results):
         ran = [(n, d) for n, d in rows if d["eager"]["ok"]]
         print(f"\n### {test}: {len(ran)} models\n")
         print(
-            "| model | eager ms | torch.compile ms | cfg_compile ms | speedup: torch.compile | cfg_compile "
-            "| compile s: torch.compile | cfg_compile | to steady state s: torch.compile | cfg_compile "
-            "| graphs: torch.compile | cfg_compile | difference: torch.compile | cfg_compile |"
+            "| model | eager ms | torch.compile ms | torch.vm ms | speedup: torch.compile | torch.vm "
+            "| compile s: torch.compile | torch.vm | to steady state s: torch.compile | torch.vm "
+            "| graphs: torch.compile | torch.vm | difference: torch.compile | torch.vm |"
         )
         print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         speed = {"compile": [], "cfg": []}
@@ -451,7 +452,7 @@ def report(args, results):
             print("| " + " | ".join(line) + " |")
         n = len(speed["cfg"])
         print(
-            f"\nRan and gave a result: torch.compile {passed['compile']}, cfg_compile {passed['cfg']} of {len(ran)}; "
+            f"\nRan and gave a result: torch.compile {passed['compile']}, torch.vm {passed['cfg']} of {len(ran)}; "
             f"within {args.tolerance:g} of eager: {accurate['compile']} and {accurate['cfg']}. "
             f"Over the {n} models both ran: geometric mean speedup over eager {geomean(speed['compile']):.2f}x "
             f"and {geomean(speed['cfg']):.2f}x; compile time {geomean(compile_s['compile']):.1f} s and "
@@ -497,7 +498,7 @@ def main():
         "--settle",
         type=float,
         default=300.0,
-        help="seconds to wait for cfg_compile to stop measuring",
+        help="seconds to wait for torch.vm to stop measuring",
     )
     parser.add_argument("--calls", type=int, default=20, help="timed calls, at most")
     parser.add_argument(
