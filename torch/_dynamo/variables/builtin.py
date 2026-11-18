@@ -3266,7 +3266,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        format_string = _format_string.as_python_constant()
+        format_string = _format_string.guard_as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(tx, format_string, list(args), kwargs)
 
@@ -3654,6 +3654,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
+            if isinstance(obj, ConstDictVariable):
+                obj.check_base_dict_mutation(tx, name)
             if name == "__repr__":
                 if not isinstance(obj, ConstDictVariable):
                     unimplemented(
