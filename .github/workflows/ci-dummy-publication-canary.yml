@@ -1,0 +1,406 @@
+# Owner(s): ["module: ci"]
+# Temporary authorized dummy-wheel handoff check. Never merge.
+name: Temporary core dummy-wheel handoff check
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-dummy-publication-canary.yml
+    types: [opened, synchronize, reopened]
+  push:
+    tags: [ciflow/inductor-cu126/205554]
+permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+jobs:
+  check-ci:
+    if: (github.repository == 'pytorch/pytorch' && github.event_name == 'pull_request' && github.event.pull_request.number == 205554 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.ref == 'ci-dummy-publication-20261118' && github.actor == 'ptdbot' && (github.run_attempt == 1 || github.run_attempt == 2)) || (github.repository == 'pytorch/pytorch' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205554' && github.actor == 'pytorch-bot[bot]' && github.triggering_actor == 'pytorch-bot[bot]' && github.run_attempt == 1)
+    uses: ./.github/workflows/_check-ci.yml
+    permissions:
+      contents: read
+  produce-wheel:
+    name: Produce fixed audit wheel
+    needs: check-ci
+    if: github.repository == 'pytorch/pytorch' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205554' && github.actor == 'pytorch-bot[bot]' && github.triggering_actor == 'pytorch-bot[bot]' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: Generate fixed audit wheel
+        shell: python
+        run: |
+          """Build the single frozen, metadata-only audit wheel."""
+
+          import base64
+          import csv
+          import hashlib
+          import io
+          import os
+          import pathlib
+          import re
+          import zipfile
+
+
+          PR_NUMBER = 205554
+          DISTRIBUTION = "zz_pytorch_ci_audit_4a16fcd06ca814d791625ae68c3c039a"
+          FILENAME = DISTRIBUTION + "-0.0.0-py3-none-any.whl"
+          EXPECTED_SHA256 = "fed507d752b59da4ccf211650147d73471de05bfdba8ab573c4dd811f4d09144"
+          EXPECTED_SIZE = 1280
+
+
+          def require(condition, reason):
+              if not condition:
+                  raise RuntimeError(reason)
+
+
+          def wheel_bytes():
+              info_dir = DISTRIBUTION + "-0.0.0.dist-info"
+              members = {
+                  info_dir + "/METADATA": (
+                      f"Metadata-Version: 2.1\nName: {DISTRIBUTION}\nVersion: 0.0.0\n"
+                      "Summary: Temporary authorized PyTorch CI audit marker\n\n"
+                  ).encode(),
+                  info_dir + "/WHEEL": b"Wheel-Version: 1.0\nGenerator: pytorch-ci-audit\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+              }
+              records = []
+              for name, data in members.items():
+                  digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip("=")
+                  records.append([name, "sha256=" + digest, str(len(data))])
+              records.append([info_dir + "/RECORD", "", ""])
+              record_file = io.StringIO(newline="")
+              csv.writer(record_file, lineterminator="\n").writerows(records)
+              members[info_dir + "/RECORD"] = record_file.getvalue().encode()
+              output = io.BytesIO()
+              with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+                  for name, data in members.items():
+                      info = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
+                      info.create_system = 3
+                      info.external_attr = 0o100644 << 16
+                      info.compress_type = zipfile.ZIP_STORED
+                      archive.writestr(info, data)
+              data = output.getvalue()
+              require(len(data) == EXPECTED_SIZE <= 65536, "wheel_size")
+              require(hashlib.sha256(data).hexdigest() == EXPECTED_SHA256, "wheel_digest")
+              return data
+
+
+          def main():
+              require(PR_NUMBER > 0, "inert_bootstrap")
+              expected = {
+                  "GITHUB_REPOSITORY": "pytorch/pytorch",
+                  "GITHUB_EVENT_NAME": "push",
+                  "GITHUB_REF": f"refs/tags/ciflow/inductor-cu126/{PR_NUMBER}",
+                  "GITHUB_ACTOR": "pytorch-bot[bot]",
+                  "GITHUB_TRIGGERING_ACTOR": "pytorch-bot[bot]",
+                  "GITHUB_RUN_ATTEMPT": "1",
+              }
+              require(all(os.environ.get(key) == value for key, value in expected.items()), "producer_identity")
+              head = os.environ.get("GITHUB_SHA", "")
+              require(re.fullmatch("[0-9a-f]{40}", head) is not None and os.environ.get("GITHUB_WORKFLOW_SHA") == head, "producer_source")
+              destination = pathlib.Path(os.environ["RUNNER_TEMP"]) / "audit-wheel"
+              destination.mkdir(mode=0o700, exist_ok=False)
+              with (destination / FILENAME).open("xb") as stream:
+                  stream.write(wheel_bytes())
+              print("wheel_sha256=" + EXPECTED_SHA256, flush=True)
+
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except RuntimeError as error:
+                  raise SystemExit(str(error)) from None
+              except Exception:
+                  raise SystemExit("unexpected_wheel_generation_error") from None
+      - name: Upload fixed audit wheel
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flash-attn-3-wheel-cu128-windows_amd64
+          path: ${{ runner.temp }}/audit-wheel/zz_pytorch_ci_audit_4a16fcd06ca814d791625ae68c3c039a-0.0.0-py3-none-any.whl
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+          archive: true
+  publish-check:
+    needs: produce-wheel
+    if: github.repository == 'pytorch/pytorch' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205554' && github.actor == 'pytorch-bot[bot]' && github.triggering_actor == 'pytorch-bot[bot]' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Hand fixed artifact to unchanged publisher
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWN_ARTIFACT_ID: ${{ needs.produce-wheel.outputs.artifact-id }}
+          OWN_ARTIFACT_DIGEST: ${{ needs.produce-wheel.outputs.artifact-digest }}
+        run: |
+          """Hand one finalized, fixed audit-wheel artifact to the unchanged publisher."""
+
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import stat
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import zipfile
+
+
+          PR_NUMBER = 205554
+          REPO = "pytorch/pytorch"
+          REPO_ID = 65600975
+          API = "https://api.github.com"
+          ROOT = f"/repos/{REPO}"
+          SENDER = ".github/workflows/ci-dummy-publication-canary.yml"
+          BRANCH = "ci-dummy-publication-20261118"
+          WORKFLOW_ID = 234072282
+          WORKFLOW = ".github/workflows/_binary-upload-flash-attention-wheel.yml"
+          UPLOADER = ".ci/pytorch/binary_upload.sh"
+          WORKFLOW_BLOB = "2d4e971bd3d2f35ef8f1b02f5369927af3f28a7e"
+          UPLOADER_BLOB = "a0ca32be72852ba5246cefa2730d7e7c2a360091"
+          ARTIFACT = "flash-attn-3-wheel-cu128-windows_amd64"
+          DISTRIBUTION = "zz_pytorch_ci_audit_4a16fcd06ca814d791625ae68c3c039a"
+          FILENAME = DISTRIBUTION + "-0.0.0-py3-none-any.whl"
+          WHEEL_SHA256 = "fed507d752b59da4ccf211650147d73471de05bfdba8ab573c4dd811f4d09144"
+          WHEEL_SIZE = 1280
+          DISPATCH = f"{ROOT}/actions/workflows/{WORKFLOW_ID}/dispatches"
+          MAX_JSON = 2 * 1024 * 1024
+          MAX_ZIP = 256 * 1024
+
+
+          def require(condition, reason):
+              if not condition:
+                  raise RuntimeError(reason)
+
+
+          def positive_integer(value, reason):
+              require(isinstance(value, str) and re.fullmatch("[1-9][0-9]{0,18}", value) is not None, reason)
+              result = int(value)
+              require(result < 2**63, reason)
+              return result
+
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+
+          class Client:
+              def __init__(self):
+                  self.token = os.environ.get("GH_TOKEN", "")
+                  require(bool(self.token), "missing_job_token")
+                  self.opener = urllib.request.build_opener(NoRedirect())
+
+              def request(self, method, path, body=None):
+                  require(path == ROOT or path.startswith(ROOT + "/"), "api_scope")
+                  require(method in ("GET", "POST"), "api_method")
+                  if method == "POST":
+                      require(path == DISPATCH or re.fullmatch(ROOT + r"/actions/runs/[1-9][0-9]*/cancel", path) is not None, "mutation_scope")
+                  headers = {
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {self.token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "pytorch-owned-audit-canary",
+                  }
+                  data = None if body is None else json.dumps(body).encode()
+                  if data is not None:
+                      headers["Content-Type"] = "application/json"
+                  return urllib.request.Request(API + path, data=data, headers=headers, method=method)
+
+              def json(self, method, path, body=None, expected=200):
+                  try:
+                      with self.opener.open(self.request(method, path, body), timeout=20) as response:
+                          require(response.status == expected, "unexpected_api_status")
+                          raw = response.read(MAX_JSON + 1)
+                          require(len(raw) <= MAX_JSON, "oversize_json")
+                  except urllib.error.HTTPError as error:
+                      raise RuntimeError(f"github_http_{error.code}") from None
+                  except (OSError, urllib.error.URLError):
+                      raise RuntimeError("github_transport_error") from None
+                  if not raw:
+                      return None
+                  try:
+                      return json.loads(raw)
+                  except (UnicodeDecodeError, json.JSONDecodeError):
+                      raise RuntimeError("invalid_api_json") from None
+
+              def artifact_zip(self, artifact_id):
+                  location = None
+                  try:
+                      with self.opener.open(self.request("GET", f"{ROOT}/actions/artifacts/{artifact_id}/zip"), timeout=20):
+                          raise RuntimeError("artifact_redirect_required")
+                  except urllib.error.HTTPError as error:
+                      require(error.code == 302, "unexpected_artifact_status")
+                      location = error.headers.get("Location", "")
+                  except (OSError, urllib.error.URLError):
+                      raise RuntimeError("artifact_api_transport_error") from None
+                  parts = urllib.parse.urlsplit(location)
+                  require(parts.scheme == "https" and parts.username is None and parts.password is None and parts.port is None, "artifact_url_scheme")
+                  require(re.fullmatch(r"[a-z0-9]{3,24}\.blob\.core\.windows\.net", parts.hostname or "") is not None, "artifact_url_host")
+                  require(bool(parts.path) and bool(parts.query) and not parts.fragment, "artifact_url_shape")
+                  request = urllib.request.Request(location, headers={"User-Agent": "pytorch-owned-audit-canary"})
+                  try:
+                      with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
+                          require(response.status == 200, "artifact_blob_status")
+                          raw = response.read(MAX_ZIP + 1)
+                          require(0 < len(raw) <= MAX_ZIP, "artifact_blob_size")
+                          return raw
+                  except urllib.error.HTTPError as error:
+                      raise RuntimeError(f"artifact_blob_http_{error.code}") from None
+                  except (OSError, urllib.error.URLError):
+                      raise RuntimeError("artifact_blob_transport_error") from None
+
+              def check_dummy_namespace(self):
+                  for folder in ("cu126", "cu128", "cu129"):
+                      for suffix in ("", ".metadata"):
+                          url = f"https://pytorch.s3.amazonaws.com/whl/test/{folder}/{FILENAME}{suffix}"
+                          request = urllib.request.Request(url, headers={"User-Agent": "pytorch-owned-audit-canary"}, method="HEAD")
+                          try:
+                              with urllib.request.build_opener(NoRedirect()).open(request, timeout=20):
+                                  raise RuntimeError("dummy_key_already_readable")
+                          except urllib.error.HTTPError as error:
+                              require(error.code in (403, 404), "unexpected_dummy_key_status")
+                          except (OSError, urllib.error.URLError):
+                              raise RuntimeError("dummy_key_transport_error") from None
+                  print("dummy_namespace_not_publicly_readable=true", flush=True)
+
+
+          def check_repo(value):
+              require(value.get("id") == REPO_ID and value.get("full_name") == REPO, "wrong_repository")
+
+
+          def check_blob(client, path, head, expected):
+              value = client.json("GET", f"{ROOT}/contents/{path}?ref={head}")
+              require(value.get("type") == "file" and value.get("sha") == expected, "source_drift")
+
+
+          def validate_archive(raw, digest):
+              require(0 < len(raw) <= MAX_ZIP, "archive_size")
+              require(hashlib.sha256(raw).hexdigest() == digest, "archive_digest")
+              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                  items = archive.infolist()
+                  require(len(items) == 1, "archive_members")
+                  item = items[0]
+                  require(item.filename == FILENAME and not item.is_dir(), "archive_path")
+                  require(not item.flag_bits & 1 and item.file_size == WHEEL_SIZE, "archive_member_size")
+                  require(stat.S_IFMT(item.external_attr >> 16) in (0, stat.S_IFREG), "archive_member_type")
+                  wheel = archive.read(item)
+              require(len(wheel) == WHEEL_SIZE and hashlib.sha256(wheel).hexdigest() == WHEEL_SHA256, "wheel_digest")
+              expected = [DISTRIBUTION + "-0.0.0.dist-info/" + name for name in ("METADATA", "WHEEL", "RECORD")]
+              with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
+                  items = archive.infolist()
+                  require([item.filename for item in items] == expected, "wheel_members")
+                  require(all(stat.S_IFMT(item.external_attr >> 16) == stat.S_IFREG and not item.flag_bits & 1 for item in items), "wheel_member_type")
+                  require(all(item.file_size <= WHEEL_SIZE for item in items), "wheel_member_size")
+                  require(archive.read(expected[0]).startswith(f"Metadata-Version: 2.1\nName: {DISTRIBUTION}\nVersion: 0.0.0\n".encode()), "wheel_metadata")
+
+
+          def main(client=None):
+              require(PR_NUMBER > 0, "inert_bootstrap")
+              tag = f"ciflow/inductor-cu126/{PR_NUMBER}"
+              expected_env = {
+                  "GITHUB_REPOSITORY": REPO,
+                  "GITHUB_EVENT_NAME": "push",
+                  "GITHUB_REF": "refs/tags/" + tag,
+                  "GITHUB_WORKFLOW_REF": f"{REPO}/{SENDER}@refs/tags/{tag}",
+                  "GITHUB_ACTOR": "pytorch-bot[bot]",
+                  "GITHUB_TRIGGERING_ACTOR": "pytorch-bot[bot]",
+                  "GITHUB_RUN_ATTEMPT": "1",
+              }
+              require(all(os.environ.get(key) == value for key, value in expected_env.items()), "sender_identity")
+              head = os.environ.get("GITHUB_SHA", "")
+              require(re.fullmatch("[0-9a-f]{40}", head) is not None and os.environ.get("GITHUB_WORKFLOW_SHA") == head, "sender_source")
+              run_id = positive_integer(os.environ.get("GITHUB_RUN_ID", ""), "sender_run_id")
+              artifact_id = positive_integer(os.environ.get("OWN_ARTIFACT_ID", ""), "artifact_id")
+              digest = os.environ.get("OWN_ARTIFACT_DIGEST", "")
+              require(re.fullmatch("[0-9a-f]{64}", digest) is not None, "artifact_digest_shape")
+              client = client or Client()
+              check_repo(client.json("GET", ROOT))
+              pr = client.json("GET", f"{ROOT}/pulls/{PR_NUMBER}")
+              check_repo(pr.get("base", {}).get("repo", {}))
+              require(pr.get("number") == PR_NUMBER and pr.get("state") == "open" and pr.get("draft") is True and pr.get("merged") is False, "owned_pr_state")
+              require(pr.get("user", {}).get("login") == "ptdbot" and pr.get("base", {}).get("ref") == "main" and pr.get("maintainer_can_modify") is False, "owned_pr_actor")
+              require(pr.get("head", {}).get("repo", {}).get("full_name") == "ptdbot/pytorch" and pr.get("head", {}).get("ref") == BRANCH and pr.get("head", {}).get("sha") == head, "owned_pr_head")
+              labels = [value.get("name", "") for value in pr.get("labels", [])]
+              require([value for value in labels if value.startswith("ciflow/")] == ["ciflow/inductor-cu126"] and not pr.get("title", "").startswith("[no-ci]"), "owned_pr_label")
+              ref = client.json("GET", f"{ROOT}/git/ref/tags/{tag}")
+              require(ref.get("object", {}).get("type") == "commit" and ref.get("object", {}).get("sha") == head, "owned_tag")
+              own_run = client.json("GET", f"{ROOT}/actions/runs/{run_id}")
+              check_repo(own_run.get("repository", {}))
+              expected_run = {"id": run_id, "path": SENDER, "event": "push", "head_branch": tag, "head_sha": head, "run_attempt": 1, "status": "in_progress"}
+              require(all(own_run.get(key) == value for key, value in expected_run.items()), "own_run_identity")
+              require(own_run.get("actor", {}).get("login") == "pytorch-bot[bot]" and own_run.get("triggering_actor", {}).get("login") == "pytorch-bot[bot]", "own_run_actor")
+              source = client.json("GET", f"{ROOT}/contents/{SENDER}?ref={head}")
+              require(source.get("type") == "file" and re.fullmatch("[0-9a-f]{40}", source.get("sha", "")) is not None, "sender_source_blob")
+              jobs = client.json("GET", f"{ROOT}/actions/runs/{run_id}/attempts/1/jobs?per_page=100")
+              require(jobs.get("total_count", 101) <= 100, "job_inventory_truncated")
+              producer = [job for job in jobs.get("jobs", []) if job.get("name") == "Produce fixed audit wheel"]
+              require(len(producer) == 1 and producer[0].get("run_id") == run_id and producer[0].get("status") == "completed" and producer[0].get("conclusion") == "success", "producer_job")
+              steps = {step.get("name"): step.get("conclusion") for step in producer[0].get("steps", [])}
+              require(steps.get("Generate fixed audit wheel") == "success" and steps.get("Upload fixed audit wheel") == "success", "producer_steps")
+              inventory = client.json("GET", f"{ROOT}/actions/runs/{run_id}/artifacts?per_page=100")
+              require(inventory.get("total_count") == 1 and len(inventory.get("artifacts", [])) == 1, "artifact_inventory")
+              require(inventory["artifacts"][0].get("id") == artifact_id and inventory["artifacts"][0].get("name") == ARTIFACT, "sole_artifact")
+              artifact = client.json("GET", f"{ROOT}/actions/artifacts/{artifact_id}")
+              require(artifact.get("id") == artifact_id and artifact.get("name") == ARTIFACT and artifact.get("expired") is False, "artifact_identity")
+              require(artifact.get("digest") == "sha256:" + digest and 0 < artifact.get("size_in_bytes", 0) <= MAX_ZIP, "artifact_metadata")
+              origin = artifact.get("workflow_run", {})
+              require(origin.get("id") == run_id and origin.get("repository_id") == REPO_ID and origin.get("head_sha") == head and origin.get("head_branch") == tag, "artifact_origin")
+              validate_archive(client.artifact_zip(artifact_id), digest)
+              print(f"producer_run_id={run_id}", flush=True)
+              print("producer_run_attempt=1", flush=True)
+              print(f"producer_artifact_id={artifact_id}", flush=True)
+              print(f"producer_artifact_sha256={digest}", flush=True)
+              print("wheel_sha256=" + WHEEL_SHA256, flush=True)
+              print("sender_source_blob=" + source["sha"], flush=True)
+              workflow = client.json("GET", f"{ROOT}/actions/workflows/{WORKFLOW_ID}")
+              require(workflow.get("id") == WORKFLOW_ID and workflow.get("path") == WORKFLOW and workflow.get("state") == "active", "receiver_identity")
+              main_ref = f"{ROOT}/git/ref/heads/main"
+              main_head = client.json("GET", main_ref).get("object", {}).get("sha", "")
+              require(re.fullmatch("[0-9a-f]{40}", main_head) is not None, "invalid_main_sha")
+              check_blob(client, WORKFLOW, main_head, WORKFLOW_BLOB)
+              check_blob(client, UPLOADER, main_head, UPLOADER_BLOB)
+              client.check_dummy_namespace()
+              require(client.json("GET", main_ref).get("object", {}).get("sha") == main_head, "main_moved_before_dispatch")
+              result = client.json("POST", DISPATCH, {"ref": "main", "return_run_details": True, "inputs": {"linux_run_id": "", "windows_run_id": str(run_id)}})
+              require(isinstance(result, dict), "unknown_dispatch_result")
+              receiver_id = result.get("workflow_run_id")
+              require(type(receiver_id) is int and 0 < receiver_id < 2**63, "unknown_receiver_id")
+              run_path = f"{ROOT}/actions/runs/{receiver_id}"
+              require(result.get("run_url") == API + run_path and result.get("html_url") == f"https://github.com/{REPO}/actions/runs/{receiver_id}", "receiver_urls")
+              print(f"receiver_run_id={receiver_id}", flush=True)
+              print(f"receiver_expected_head={main_head}", flush=True)
+              receiver = client.json("GET", run_path)
+              check_repo(receiver.get("repository", {}))
+              expected_receiver = {"id": receiver_id, "workflow_id": WORKFLOW_ID, "path": WORKFLOW, "event": "workflow_dispatch", "head_branch": "main", "run_attempt": 1}
+              require(all(receiver.get(key) == value for key, value in expected_receiver.items()), "returned_receiver_identity")
+              require(receiver.get("actor", {}).get("login") == "github-actions[bot]" and receiver.get("triggering_actor", {}).get("login") == "github-actions[bot]", "receiver_actor")
+              if receiver.get("head_sha") != main_head:
+                  client.json("POST", run_path + "/cancel", expected=202)
+                  raise RuntimeError("receiver_head_drift_cancel_requested")
+              print(f"receiver_head={main_head}", flush=True)
+              print("dummy_publication_dispatched=true", flush=True)
+
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except RuntimeError as error:
+                  category = str(error)
+                  if re.fullmatch("[a-z0-9_]+", category) is None:
+                      category = "unexpected_client_error"
+                  print("dummy_publication_error=" + category, flush=True)
+                  raise SystemExit(1) from None
+              except Exception:
+                  print("dummy_publication_error=unexpected_client_error", flush=True)
+                  raise SystemExit(1) from None
