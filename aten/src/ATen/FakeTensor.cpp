@@ -5,7 +5,6 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
-#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
 
@@ -95,7 +94,7 @@ bool may_turn_const(const Tensor& t) {
 }
 
 Tensor fake_detach(const Tensor& self) {
-  return fake_tensor_data(
+  return fake_shallow_copy(
       self, /*version_counter=*/0, /*allow_tensor_metadata_change=*/false);
 }
 
@@ -106,8 +105,7 @@ Tensor fake_tensor_data(
   const bool python_hook =
       !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Python) &&
       (c10::impl::TorchDispatchModeTLS::stack_len() > 0 ||
-       self.key_set().has(c10::DispatchKey::Python) ||
-       c10::impl::PythonDispatcherTLS::get_state_for_pre_dispatch() != nullptr);
+       self.key_set().has(c10::DispatchKey::Python));
   auto result =
       fake_shallow_copy(self, version_counter, allow_tensor_metadata_change);
   if (!python_hook) {
