@@ -666,6 +666,116 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _iter_graph_referenced_submodules(
+    gm: GraphModule,
+) -> Generator[GraphModule, None, None]:
+    visited: OrderedSet[int] = OrderedSet()
+    for node in gm.graph.find_nodes(op="get_attr"):
+        if not isinstance(node.target, str):
+            continue
+        try:
+            subgraph = attrgetter(node.target)(gm)
+        except AttributeError:
+            continue
+        if isinstance(subgraph, GraphModule) and id(subgraph) not in visited:
+            visited.add(id(subgraph))
+            yield subgraph
+
+
+def _get_invoke_subgraph_graph_module(
+    gm: GraphModule, node: torch.fx.Node
+) -> GraphModule | None:
+    subgraph_node = node.args[0]
+    if (
+        not isinstance(subgraph_node, torch.fx.Node)
+        or subgraph_node.op != "get_attr"
+        or not isinstance(subgraph_node.target, str)
+    ):
+        return None
+    try:
+        subgraph = attrgetter(subgraph_node.target)(gm)
+    except AttributeError:
+        return None
+    return subgraph if isinstance(subgraph, GraphModule) else None
+
+
+def _region_cudagraphs_setting(node: torch.fx.Node) -> bool | None:
+    nested_config = node.meta.get("custom", {}).get("nested_region_config")
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    if patches is None or "triton.cudagraphs" not in patches:
+        return None
+    return bool(patches["triton.cudagraphs"])
+
+
+def _validate_region_cudagraphs(gm: GraphModule, *, annotated: bool) -> None:
+    """Reject the per-region triton.cudagraphs settings that are not supported.
+
+    Only opting out is: under graph_partition=True, a first-level region set to
+    False gets its own uncaptured partition. A region nested in another one
+    cannot have its own setting, since a region's body is never partitioned.
+    Opting in, and combining a region setting with
+    torch._dynamo.override_cudagraphs, are not supported either. AOT compilation
+    does not use triton.cudagraphs, so only the structural checks apply there.
+    """
+    visited: OrderedSet[tuple[int, bool]] = OrderedSet()
+
+    def reject(node: torch.fx.Node, problem: str) -> Never:
+        region_name = node.args[1] if len(node.args) > 1 else node.name
+        stack_trace = node.meta.get("stack_trace")
+        called_from = f". Called from:\n{stack_trace}" if stack_trace else ""
+        raise ValueError(
+            f"nested compile region {region_name!r} sets triton.cudagraphs, but "
+            f"{problem}{called_from}"
+        )
+
+    def check(node: torch.fx.Node, setting: bool, in_region: bool) -> None:
+        if in_region:
+            reject(
+                node,
+                "it is nested inside another region; only first-level regions can "
+                "set triton.cudagraphs",
+            )
+        if annotated:
+            reject(
+                node,
+                "torch._dynamo.override_cudagraphs also applies; set the top level "
+                "with torch._inductor.config.triton.cudagraphs instead",
+            )
+        if V.aot_compilation:
+            return
+        if setting and not config.triton.cudagraphs:
+            reject(
+                node,
+                "opting in to CUDA Graphs while triton.cudagraphs is off is not "
+                "supported",
+            )
+        if not setting and config.triton.cudagraphs and not config.graph_partition:
+            reject(
+                node,
+                "opting out of CUDA Graphs requires "
+                "torch._inductor.config.graph_partition=True",
+            )
+
+    def visit(module: GraphModule, in_region: bool) -> None:
+        if (id(module), in_region) in visited:
+            return
+        visited.add((id(module), in_region))
+        region_bodies: OrderedSet[int] = OrderedSet()
+        for node in module.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            if (setting := _region_cudagraphs_setting(node)) is not None:
+                check(node, setting, in_region)
+            if (body := _get_invoke_subgraph_graph_module(module, node)) is not None:
+                region_bodies.add(id(body))
+                visit(body, True)
+        for child in _iter_graph_referenced_submodules(module):
+            if id(child) not in region_bodies:
+                visit(child, in_region)
+
+    visit(gm, False)
+
+
 def _get_nested_region_inductor_config_patches(
     gm: GraphModule,
 ) -> dict[str, Any] | None:
@@ -1829,7 +1939,7 @@ class _InProcessFxCompile(FxCompile):
                 # graph while config.triton.cudagraphs stays on.
                 partition_plan = (
                     GraphPartitionPlan(
-                        GraphPartitionMode.CONFIG,
+                        GraphPartitionMode.FROM_CONFIG,
                         cudagraphs_per_partition=bool(cudagraphs)
                         or _unstable_customized_partition_wrapper.wrapper is not None,
                     )
@@ -2807,6 +2917,15 @@ def create_compiler_config_extra(
 ) -> CompilerConfigExtra:
     """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
+    pre_aot_graph = gm.gm if isinstance(gm, GmWrapper) else gm
+    # inductor.compile also takes a bare nn.Module: no FX graph, so no regions.
+    if isinstance(pre_aot_graph, GraphModule):
+        annotation = (dynamo_graph_metadata or {}).get("cudagraph_annotation")
+        _validate_region_cudagraphs(
+            pre_aot_graph,
+            annotated=annotation is not None
+            and (annotation.fwd is not None or annotation.bwd is not None),
+        )
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may

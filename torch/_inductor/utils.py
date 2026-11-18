@@ -669,7 +669,7 @@ class GraphPartitionMode(enum.Enum):
     # AOT) or unwanted (subgraph bodies, benchmark-only lowerings).
     NONE = "none"
     # config.graph_partition=True.
-    CONFIG = "config"
+    FROM_CONFIG = "from_config"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -692,11 +692,11 @@ class GraphPartitionPlan:
     cudagraphs_per_partition: bool = False
 
     def __post_init__(self) -> None:
-        if self.cudagraphs_per_partition and not self.split_into_partitions:
+        if self.cudagraphs_per_partition and not self.uses_graph_partition:
             raise ValueError("cudagraphs_per_partition=True requires partitioning")
 
     @property
-    def split_into_partitions(self) -> bool:
+    def uses_graph_partition(self) -> bool:
         """Whether codegen emits partition functions and a Runner."""
         return self.mode is not GraphPartitionMode.NONE
 
@@ -712,7 +712,7 @@ class GraphPartitionPlan:
         if not config.graph_partition:
             return GraphPartitionPlan.no_partition()
         return GraphPartitionPlan(
-            GraphPartitionMode.CONFIG,
+            GraphPartitionMode.FROM_CONFIG,
             cudagraphs_per_partition=config.triton.cudagraphs
             or _unstable_customized_partition_wrapper.wrapper is not None,
         )

@@ -2877,7 +2877,7 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline("args.clear()")
 
     def write_launcher_fn_call_get_indent(self) -> int:
-        if V.graph.partition_plan.split_into_partitions:
+        if V.graph.partition_plan.uses_graph_partition:
             self.prefix.splice(
                 """
                 class Runner:
@@ -3340,7 +3340,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if V.graph.partition_plan.split_into_partitions:
+        if V.graph.partition_plan.uses_graph_partition:
             all_partition_name_list = ", ".join(self.all_partition_names) + (
                 "," if len(self.all_partition_names) == 1 else ""
             )
@@ -3609,7 +3609,7 @@ class PythonWrapperCodegen(CodeGen):
             return self._generate(is_inference)
 
     def get_wrapper_call_indent(self) -> int:
-        if V.graph.partition_plan.split_into_partitions:
+        if V.graph.partition_plan.uses_graph_partition:
             return 2
         else:
             return 1
@@ -3971,7 +3971,7 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         else:
-            if V.graph.partition_plan.split_into_partitions:
+            if V.graph.partition_plan.uses_graph_partition:
                 pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
