@@ -27,9 +27,16 @@ getMemoryTracer() {
 
 void initMemoryProfiler() {
   if (at::detail::isMTIAHooksBuilt()) {
-    fprintf(stderr, "Initializing MTIA Memory Tracer\n");
-    torch::profiler::impl::python_tracer::registerMemoryTracer(
-        &getMemoryTracer);
+    // MTIA hooks are linked into builds that also run on hosts without MTIA
+    // devices, where this tracer would replace the CUDA one. Check only after
+    // registration: getMTIAHooks() keeps the first hooks it creates.
+    if (at::globalContext()
+            .getAcceleratorHooksInterface(at::kMTIA)
+            .isAvailable()) {
+      fprintf(stderr, "Initializing MTIA Memory Tracer\n");
+      torch::profiler::impl::python_tracer::registerMemoryTracer(
+          &getMemoryTracer);
+    }
   }
 }
 } // namespace torch::mtia
