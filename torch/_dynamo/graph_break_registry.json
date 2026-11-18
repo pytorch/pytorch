@@ -3578,6 +3578,16 @@
       ]
     }
   ],
+  "GB8630": [
+    {
+      "Gb_type": "DELETE_GLOBAL in module with __getattr__",
+      "Context": "name",
+      "Explanation": "Dynamo cannot safely replay global deletes for a module that defines __getattr__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB5491": [
     {
       "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
@@ -4699,16 +4709,6 @@
       ]
     }
   ],
-  "GB3039": [
-    {
-      "Gb_type": "OrderedDict subclass allocation",
-      "Context": "{obj.python_type_name()}.{name}",
-      "Explanation": "Dynamo cannot trace allocating operations on OrderedDict subclasses.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB8982": [
     {
       "Gb_type": "Unsupported callable in torch.autograd.Function staticmethod",
@@ -5438,6 +5438,16 @@
       "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
       "Hints": [
         "Use constant arguments of type str or int for __getitem__"
+      ]
+    }
+  ],
+  "GB1943": [
+    {
+      "Gb_type": "Copying an OrderedDict with instance attributes",
+      "Context": "OrderedDict.__reduce_ex__",
+      "Explanation": "The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
+      "Hints": [
+        "Copy the OrderedDict outside the compiled region."
       ]
     }
   ],
@@ -6580,6 +6590,16 @@
       "Hints": []
     }
   ],
+  "GB2259": [
+    {
+      "Gb_type": "DELETE_GLOBAL with a module namespace access",
+      "Context": "context",
+      "Explanation": "A module object or module __dict__ access in the same trace as a global delete would race the delete, which is replayed after the graph. Eager resume has to order them instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0335": [
     {
       "Gb_type": "hints_wrapper: improper args/kwargs",
@@ -7449,6 +7469,26 @@
       "Hints": [
         "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB4909": [
+    {
+      "Gb_type": "DELETE_GLOBAL in non-module globals",
+      "Context": "module_name: {self.f_globals.get('__name__')}",
+      "Explanation": "Dynamo cannot safely replay global deletes for a frame whose globals dict is not the registered module __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3039": [
+    {
+      "Gb_type": "OrderedDict subclass allocation",
+      "Context": "{obj.python_type_name()}.{name}",
+      "Explanation": "Dynamo cannot trace allocating operations on OrderedDict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

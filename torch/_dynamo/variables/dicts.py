@@ -858,7 +858,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         from .iter import DictIterator
 
         ConstDictVariable.install_dict_order_guard(self, tx)
-        return DictIterator.create(self.items, use_dict_storage=True)
+        return DictIterator.create(self.items)
 
     def tp_init_impl(
         self,
@@ -1098,14 +1098,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
         *,
         method_name: str = "update",
-        fast_ordered_arg: bool = False,
+        can_fast_merge: bool = False,
     ) -> VariableTracker:
         check_positional(tx, method_name, len(args), 0, 1)
         self.install_dict_keys_match_guard()
         if args or kwargs:
             tx.output.side_effects.mutation(self)
         if args:
-            self.dict_update_arg(tx, args[0], fast_ordered_arg=fast_ordered_arg)
+            self.dict_update_arg(tx, args[0], can_fast_merge=can_fast_merge)
         if kwargs:
             items = {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
             self.dict_merge(tx, ConstDictVariable(items))
@@ -1116,15 +1116,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
         *,
-        fast_ordered_arg: bool = False,
+        can_fast_merge: bool = False,
     ) -> None:
-        # OrderedDict already checked the source and keys before selecting this path.
-        if fast_ordered_arg and isinstance(other, ConstDictVariable):
+        if can_fast_merge and isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
             self._update_items(other.materialize_keys())
             return
         # Probe subclass keys before dict_merge considers its raw-storage fast path.
-        if not fast_ordered_arg and (
+        if not can_fast_merge and (
             pydict_checkexact(other) or generic_hasattr_str(tx, other, "keys")
         ):
             self.dict_merge(tx, other)
@@ -1133,7 +1132,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             pairs = lazily_unpack(
                 tx,
                 other,
-                allow_fast_path=fast_ordered_arg or self._can_fast_merge(other),
+                allow_fast_path=can_fast_merge or self._can_fast_merge(other),
             )
             for idx, item in enumerate(pairs):
                 pair = _unpack_dict_update_pair(tx, item, idx)
@@ -1460,7 +1459,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         fast_keywords = all(type(key) is str for key in kwargs)
         exact_mutable = pyodict_checkexact(self) and fast_keywords and self.is_mutable()
         if exact_mutable and (not args or self._can_fast_merge(args[0])):
-            return self.dict_update_common(tx, args, kwargs, fast_ordered_arg=True)
+            return self.dict_update_common(tx, args, kwargs, can_fast_merge=bool(args))
         update = VariableTracker.build(tx, polyfills.odict_update)
         if exact_mutable and args:
             source = args[0].realize()
@@ -1491,7 +1490,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         from .iter import DictIterator
 
         self.install_dict_order_guard(tx)
-        return DictIterator.create(self.items)
+        return DictIterator.create(self.items, ordered=True)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -1518,6 +1517,44 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     def python_type(self) -> type:
         return collections.OrderedDict
+
+    def reduce_ex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        from .iter import OrderedDictIterator
+
+        if type(self) is not OrderedDictVariable or not self.is_python_constant():
+            return None
+
+        if self.source and not is_constant_source(self.source):
+            instance_dict = AttrSource(self.source, "__dict__")
+            effects = tx.output.side_effects
+            # A pending write to another input dict could alias self.__dict__
+            # on a cache hit, even if the inputs did not alias during tracing.
+            if tx.output.resolve_source_value(instance_dict) or any(
+                var is not self
+                and isinstance(var, ConstDictVariable)
+                and var.source is not None
+                and effects.is_modified(var)
+                for var in effects.id_to_variable.values()
+            ):
+                unimplemented(
+                    gb_type="Copying an OrderedDict with instance attributes",
+                    context="OrderedDict.__reduce_ex__",
+                    explanation="The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
+                    hints=["Copy the OrderedDict outside the compiled region."],
+                )
+            install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            self.install_dict_order_guard(tx)
+
+        reduced = self.as_python_constant().__reduce_ex__(args[0].as_python_constant())
+        return variables.TupleVariable(
+            [VariableTracker.build(tx, item) for item in reduced[:-1]]
+            + [OrderedDictIterator.create(self.items)]
+        )
 
     def move_to_end(
         self: "OrderedDictVariable",
@@ -1636,9 +1673,8 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictKeysVariable.create(self, is_ordered=True).dict_view_reversed(
-            tx, args, kwargs
-        )
+        keys = DictKeysVariable.create(self, is_ordered=True)
+        return keys.dict_view_reversed(tx, args, kwargs)
 
     def dict_copy(
         self,
@@ -1670,6 +1706,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "__reduce_ex__": Method(reduce_ex),
         "copy": Method(dict_copy),
         "update": Method(odict_update),
         "move_to_end": Method(move_to_end),
@@ -1967,7 +2004,7 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         # Key lookups, mutations and detached copies can observe IDs without
         # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
-            specialize_symnode(key.vt.realize())
+            key.vt = specialize_symnode(key.vt.realize())
         return self.items
 
     def clone(self, **kwargs: Any) -> VariableTracker:
@@ -2293,9 +2330,7 @@ class DictKeysVariable(DictViewVariable):
         from .iter import DictKeysIterator
 
         self.install_order_guard(tx)
-        return DictKeysIterator.create(
-            self.dv_dict.items, use_dict_storage=not self.is_ordered
-        )
+        return DictKeysIterator.create(self.dv_dict.items, ordered=self.is_ordered)
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -2404,9 +2439,7 @@ class DictValuesVariable(DictViewVariable):
         from .iter import DictValuesIterator
 
         self.install_order_guard(tx)
-        return DictValuesIterator.create(
-            self.dv_dict.items, use_dict_storage=not self.is_ordered
-        )
+        return DictValuesIterator.create(self.dv_dict.items, ordered=self.is_ordered)
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -2494,9 +2527,7 @@ class DictItemsVariable(DictViewVariable):
         from .iter import DictItemsIterator
 
         self.install_order_guard(tx)
-        return DictItemsIterator.create(
-            self.dv_dict.items, use_dict_storage=not self.is_ordered
-        )
+        return DictItemsIterator.create(self.dv_dict.items, ordered=self.is_ordered)
 
 
 kV = HashableTracker | str

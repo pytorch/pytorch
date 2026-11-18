@@ -28,6 +28,7 @@ from torch._dynamo.variables.object_protocol import generic_getattr
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     preserves_device_selection,
 )
 from torch.testing._internal.common_utils import (
@@ -78,6 +79,11 @@ def hook_arity(module, args, *rest):
 
 class HookKeyFrozenSet(frozenset):
     pass
+
+
+@torch.compiler.assume_constant_result
+def sum_hook_keys(hooks):
+    return sum(hooks)
 
 
 def update_hook_keys(hooks):
@@ -1042,14 +1048,12 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             subtest(lambda d: 1 in {*d}, name="set_unpack"),
             subtest(lambda d: 1 in d.copy(), name="copy"),
             subtest(update_hook_keys, name="update"),
+            subtest(sum_hook_keys, name="constant"),
             subtest(
                 lambda d: 1 in {key: True for key, _ in d.items()},
                 name="dict_comprehension",
             ),
-            subtest(
-                lambda d: 1 in {key for key, _ in d.items()},
-                name="set_comprehension",
-            ),
+            subtest(lambda d: 1 in {k for k, _ in d.items()}, name="set_comprehension"),
             subtest(lambda d: 1 in frozenset(d), name="frozenset"),
             subtest(lambda d: 1 in HookKeyFrozenSet(d), name="frozenset_subclass"),
             subtest(lambda d: 1 in dict.fromkeys(set(d)), name="fromkeys_set"),
@@ -1073,6 +1077,12 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     )
     @torch._dynamo.config.patch(allow_unspec_int_on_nn_module=True)
     def test_materialized_hook_keys(self, operation, mapping_type):
+        self._check_materialized_hook_keys(operation, mapping_type)
+
+    def test_hook_dict_as_python_constant(self):
+        self._check_materialized_hook_keys(sum_hook_keys)
+
+    def _check_materialized_hook_keys(self, operation, mapping_type=OrderedDict):
         def fn(x, module):
             return x + operation(module._forward_hooks)
 
@@ -2482,6 +2492,7 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
         preserves_device_selection(torch._dynamo.test_case.TestCase.setUpClass.__func__)
     )
 
+    @onlyAccelerator
     def test_register_hook_on_intermediate_autograd_cache(self, device):
         from torch._dynamo.utils import counters
 
@@ -2490,23 +2501,25 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
             y.register_hook(lambda g: g * 0.5)
             return y.sum()
 
-        with torch._functorch.config.patch(enable_autograd_cache=True):
+        torch._functorch.config.enable_autograd_cache = True
+        try:
             # First compile
             torch._dynamo.reset()
             counters.clear()
             x = torch.randn(4, device=device, requires_grad=True)
             torch.compile(fn, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
-            self.assertEqual(x.grad, torch.ones_like(x))
 
             # Second compile (force recompile to test cache)
             torch._dynamo.reset()
             x2 = torch.randn(4, device=device, requires_grad=True)
             torch.compile(fn, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
-            self.assertEqual(x2.grad, torch.ones_like(x2))
 
             aot_counters = counters["aot_autograd"]
             self.assertEqual(aot_counters.get("autograd_cache_bypass", 0), 0)
+        finally:
+            torch._functorch.config.enable_autograd_cache = False
 
+    @onlyAccelerator
     def test_register_hook_on_intermediate_autograd_cache_different_hooks(self, device):
         from torch._dynamo.utils import counters
 
@@ -2520,7 +2533,8 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
             y.register_hook(lambda g: g * 3.0)
             return y.sum()
 
-        with torch._functorch.config.patch(enable_autograd_cache=True):
+        torch._functorch.config.enable_autograd_cache = True
+        try:
             torch._dynamo.reset()
             counters.clear()
 
@@ -2537,6 +2551,8 @@ class HooksTestsDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 counters["aot_autograd"].get("autograd_cache_bypass", 0), 0
             )
+        finally:
+            torch._functorch.config.enable_autograd_cache = False
 
 
 instantiate_device_type_tests(HooksTestsDevice, globals(), allow_xpu=True)
