@@ -36,7 +36,6 @@
   "test/distributed/_composable/test_replicate.py",
   "test/distributed/_composable/test_replicate_mixed_precision.py",
   "test/distributed/_composable/test_replicate_training.py",
-  "test/distributed/_composable/test_replicate_with_compiler.py",
   "test/distributed/_composable/test_replicate_with_fsdp.py",
   "test/distributed/_shard/sharded_optim/test_sharded_optim.py",
   "test/distributed/_shard/sharded_tensor/ops/test_binary_cmp.py",
