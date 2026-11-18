@@ -286,6 +286,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
     return;
   }
 
+  // See Note [Enabling Deterministic Operations]
   // Duplicate indices race in the copy kernel. Match CUDA/XPU: in deterministic
   // mode, route through index_put_, whose serial path makes the last write win.
   if (globalContext().deterministicAlgorithms()) {
