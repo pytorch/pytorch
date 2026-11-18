@@ -30,6 +30,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM,
+    PLATFORM_SUPPORTS_CK_GEMMS,
     SM90OrLater,
     SM100OrLater,
 )
@@ -1415,6 +1416,10 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_GEMMS,
+        "CK GEMM is not supported on this platform",
+    )
     # Fails with triton 3.7
     @parametrize("backend", ["ck", "ck_tile"])
     def test_grouped_gemm_rocm_ck_flag(self, backend):
