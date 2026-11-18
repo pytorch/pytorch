@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfNoDill,
     skipIfRocm,
     skipIfXpu,
@@ -2979,6 +2980,7 @@ except RuntimeError as e:
 class TestDataLoaderDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
