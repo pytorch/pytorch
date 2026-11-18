@@ -5397,6 +5397,60 @@ class TestWithdrawHoldsOnlyTheToken(unittest.TestCase):
         self.assertEqual(env_values(step, "GH_TOKEN"), ["${{ secrets.GITHUB_TOKEN }}"])
 
 
+class TestPrepareReadsWithTheAppToken(unittest.TestCase):
+    """`prepare` reads through the PR review App, off the shared token budget.
+
+    GITHUB_TOKEN shares one hourly API budget with every workflow in the
+    repository; when it runs out, `prepare` fails before the review starts.
+    The App's key may reach only `prepare`: it runs no pull-request code, and
+    its `bedrock` environment is one the review job never declares.
+    """
+
+    APP_TOKEN = "${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}"
+
+    def setUp(self):
+        self.text = strip_comments(STAGE2.read_text())
+        self.prepare = job_block(self.text, "prepare")
+        mints = steps_using(self.prepare, "actions/create-github-app-token")
+        self.assertEqual(len(mints), 1, "prepare must mint the App token once")
+        self.mint = mints[0]
+
+    def test_only_prepare_names_the_app_key(self):
+        after = self.text.split("\njobs:", 1)[1]
+        jobs = re.findall(rf"(?m)^  (\S.*?):{HEADER_TAIL}", after)
+        for job in jobs:
+            with self.subTest(job=job):
+                named = "PR_REVIEW_APP_" in job_block(self.text, job)
+                self.assertEqual(named, job == "prepare")
+        self.assertNotIn("PR_REVIEW_APP_", self.text.split("\njobs:", 1)[0])
+        self.assertEqual(env_values(self.prepare, "environment"), ["bedrock"])
+
+    def test_the_mint_is_read_only_and_cannot_fail_the_job(self):
+        inputs = mapping_items(with_block(self.mint))
+        perms = {k: v for k, v in inputs.items() if k.startswith("permission-")}
+        self.assertEqual(
+            perms,
+            {
+                "permission-contents": "read",
+                "permission-pull-requests": "read",
+            },
+        )
+        self.assertEqual(inputs["app-id"], "${{ secrets.PR_REVIEW_APP_ID }}")
+        self.assertEqual(
+            inputs["private-key"], "${{ secrets.PR_REVIEW_APP_PRIVATE_KEY }}"
+        )
+        # A missing secret or an App outage falls back to GITHUB_TOKEN rather
+        # than failing every review.
+        self.assertEqual(env_values(self.mint, "continue-on-error"), ["true"])
+        self.assertEqual(env_values(self.mint, "id"), ["app-token"])
+
+    def test_every_read_uses_the_app_token_and_follows_the_mint(self):
+        tokens = env_values(self.prepare, "GH_TOKEN")
+        self.assertEqual(tokens, [self.APP_TOKEN] * 3)
+        first_read = self.prepare.index("GH_TOKEN:")
+        self.assertLess(self.prepare.index(self.mint.strip()), first_read)
+
+
 class TestSymlinkScrubIsNulSafe(unittest.TestCase):
     """A newline in a path component must not split one entry into two.
 

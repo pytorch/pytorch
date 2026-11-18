@@ -794,8 +794,16 @@ def _remove_dir(path_dir: str) -> None:
 def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
+        # This runs on compile-pool threads. Without env=, the child execs with the
+        # live C environ, which a concurrent os.environ insert on another thread can
+        # reallocate and free, so the compiler may start without PATH.
         subprocess.run(
-            cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            cmd,
+            cwd=cwd,
+            env=os.environ.copy(),
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
     except subprocess.CalledProcessError as e:
         output = e.stdout.decode(*SUBPROCESS_DECODE_ARGS)

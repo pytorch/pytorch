@@ -1220,25 +1220,23 @@ class FSDPTestMixin:
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
-    def backend(self, device) -> str:
-        return dist.get_default_backend_for_device(device)
+    @classmethod
+    def backend_str(cls, device_type) -> str:
+        return dist.get_default_backend_for_device(device_type)
 
     @property
-    def _device_type(self) -> str:
-        device_type = getattr(self, "device_type", None)
-        if not isinstance(
-            device_type, str
-        ):  # TODO: fix when FSDPTestContinuous is refactored (legacy classmethod)
-            device_type = None
-        if device_type is None:
-            if (
-                not torch.accelerator.is_available()
-                or torch.accelerator.current_accelerator().type == "mps"
-            ):
-                device_type = "cpu"
-            else:
-                device_type = torch.accelerator.current_accelerator().type
-        return device_type
+    def device_type(self) -> str:
+        # This property bridges the legacy flow and
+        # instantiate_device_type_tests: for instantiated classes, the
+        # `device_type` class attribute from the device base shadows this
+        # property via the base-first MRO; for legacy classes, the fallback
+        # derivation below runs. Remove it once all tests are migrated.
+        if (
+            not torch.accelerator.is_available()
+            or torch.accelerator.current_accelerator().type == "mps"
+        ):
+            return "cpu"
+        return torch.accelerator.current_accelerator().type
 
     def _train_for_several_steps(
         self,
@@ -1266,9 +1264,9 @@ class FSDPTestMixin:
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
         for _ in range(num_steps):
             optim.zero_grad()
-            with torch.amp.autocast(self._device_type, enabled=autocast):
+            with torch.amp.autocast(self.device_type, enabled=autocast):
                 # Inputs always cuda regardless of cpu offloading, or model.device
-                input = model.module.get_input(torch.device(self._device_type))  # type: ignore[operator, union-attr]
+                input = model.module.get_input(torch.device(self.device_type))  # type: ignore[operator, union-attr]
                 if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
                     if isinstance(input, torch.Tensor):
                         input = input.half()
@@ -1388,12 +1386,12 @@ class FSDPTestMixin:
             **ref_init_kwargs,
         )
         if ref_init_fn is None:
-            if self._device_type == "cpu":
+            if self.device_type == "cpu":
                 ref_model = DDP(model)
             elif TEST_HPU:
                 # _get_device_index cannot resolve bare "hpu" to an index;
                 # re-add ":0" for backward compatibility.
-                hpu = f"{self._device_type}:0"
+                hpu = f"{self.device_type}:0"
                 ref_model = DDP(model, device_ids=[hpu], output_device=hpu)
             else:
                 ref_model = DDP(model, device_ids=[rank], output_device=rank)
@@ -1445,7 +1443,7 @@ class FSDPTestMixin:
             # Change the model parameter dtype after FSDP initialization
             fsdp_model = fsdp_model.half()
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            fsdp_model = fsdp_model.to(self._device_type)
+            fsdp_model = fsdp_model.to(self.device_type)
         # Offloading parameters with `DEVICE_AFTER` should raise an error during
         # lazy initialization due to the parameter devices not being CPU;
         # otherwise, all parameter devices should be CPU
@@ -1460,7 +1458,7 @@ class FSDPTestMixin:
             self.assertRaisesRegex(
                 RuntimeError,
                 "An FSDP-managed module with parameter CPU offloading enabled "
-                f"has parameters on {self._device_type}",
+                f"has parameters on {self.device_type}",
             )
             if expects_device_error
             else nullcontext()
@@ -1487,7 +1485,7 @@ class FSDPTestMixin:
             cpu_device = torch.device("cpu")
             for param in fsdp_model.parameters():
                 self.assertEqual(param.device, cpu_device)
-            fsdp_loss = fsdp_loss.to(self._device_type)
+            fsdp_loss = fsdp_loss.to(self.device_type)
         fsdp_unsharded_params = get_full_params(fsdp_model)
         # Do not check dtype since the reference DDP loss may not be the same
         # dtype as the FSDP loss in the case of mixed precision
@@ -1519,7 +1517,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
     @property
     def world_size(self):
-        if self._device_type == "cpu":
+        if self.device_type == "cpu":
             return 1
         else:
             return torch.accelerator.device_count()
@@ -1564,7 +1562,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
             else:
                 dist.init_process_group(
                     init_method=self.init_method,
-                    backend=self.backend(self._device_type),
+                    backend=self.backend_str(self.device_type),
                     world_size=int(self.world_size),
                     rank=self.rank,
                 )
