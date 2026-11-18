@@ -17,7 +17,20 @@ class GlobalStateGuard:
 class LeafGuard:
     def verbose_code_parts(self) -> list[str]: ...
 
+class ORDERED_DICT_ORDER_MATCH(LeafGuard):
+    def __init__(
+        self,
+        root: RootGuardManager,
+        order: Sequence[int],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
+    def __call__(self, value: Any) -> bool: ...
+
+def ordered_dict_keys(value: Any) -> list[Any] | None: ...
+
 class RelationalGuard: ...
+class RELATIONAL_DICT_CONTAINS(LeafGuard): ...
 
 class GuardDebugInfo:
     verbose_code_parts: list[str]
@@ -274,6 +287,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_fake_tensor_match_guard(
+        self,
+        expected: bool,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
@@ -406,6 +425,12 @@ class GuardManager:
     ) -> None: ...
     def mark_tag_safe(self) -> None: ...
     def mark_tag_safe_root(self) -> None: ...
+    def add_ordered_dict_order_guard(
+        self,
+        order: Sequence[int],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
 
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
@@ -458,6 +483,16 @@ class FuncKwDefaultsGuardAccessor(GuardAccessor): ...
 class GetAttrGuardAccessor(GuardAccessor):
     def get_attr_name(self) -> str: ...
 
+def install_relational_dict_contains_guard(
+    root: RootGuardManager,
+    dict_source: tuple[str, int],
+    key_source: tuple[str, int] | None,
+    key_getter: Callable[[dict[str, Any]], Any] | None,
+    expected: bool,
+    safe_key_types: tuple[type, ...],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
 def install_object_aliasing_guard(
     x: GuardManager,
     y: GuardManager,
@@ -473,6 +508,12 @@ def install_no_tensor_aliasing_guard(
 def install_storage_overlapping_guard(
     overlapping_guard_managers: list[GuardManager],
     non_overlapping_guard_managers: list[GuardManager],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
+def install_storage_overlap_partition_guard(
+    guard_managers: list[GuardManager],
+    overlapping_indices: tuple[tuple[int, ...], ...],
     verbose_code_parts: list[str],
     user_stack: traceback.StackSummary | None,
 ) -> None: ...
@@ -516,10 +557,10 @@ def assert_size_stride_grouped(
     op_name: str | None = None,
 ) -> None: ...
 def assert_alignment(
-    item: torch.Tensor,
+    item: torch.Tensor | None,
     alignment: int,
     op_name: str | None = None,
-) -> None: ...
+) -> bool: ...
 def copy_if_misaligned(item: torch.Tensor) -> torch.Tensor: ...
 def check_obj_id(obj: object, expected: int) -> bool: ...
 def check_type_id(obj: object, expected: int) -> bool: ...
@@ -527,4 +568,7 @@ def dict_version(d: dict[Any, Any]) -> int: ...
 def compute_overlapping_tensors(
     tensors: list[torch.Tensor], symbolic: bool = True
 ) -> set[int]: ...
+def compute_overlapping_tensor_groups(
+    tensors: list[torch.Tensor], symbolic: bool = True
+) -> list[list[int]]: ...
 def set_is_in_mode_without_ignore_compile_internals(value: bool) -> None: ...

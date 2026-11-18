@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 from unittest import main, mock, TestCase
 from urllib.error import HTTPError, URLError
@@ -121,9 +121,7 @@ class TestLedgerTransport(LedgerReadTestCase):
         )
         self.assertEqual(set(states), {5})
         self.assertEqual(states[5].run_id, 3)
-        self.assertEqual(
-            states[5].version, datetime(2026, 8, 25, 11, 59, tzinfo=timezone.utc)
-        )
+        self.assertEqual(states[5].version, datetime(2026, 8, 25, 11, 59, tzinfo=UTC))
 
     @mock.patch("greenlight_ledger.gh_fetch_url")
     def test_unknown_response_fields_are_ignored(
@@ -319,14 +317,10 @@ class TestLedgerTransport(LedgerReadTestCase):
     def test_version_timestamps_are_normalized_to_aware_utc(self) -> None:
         cases = {
             "2026-08-25T11:59:00.048Z": datetime(
-                2026, 8, 25, 11, 59, 0, 48000, tzinfo=timezone.utc
+                2026, 8, 25, 11, 59, 0, 48000, tzinfo=UTC
             ),
-            "2026-08-25T13:59:00.000+02:00": datetime(
-                2026, 8, 25, 11, 59, tzinfo=timezone.utc
-            ),
-            "2026-08-25 11:59:00.000": datetime(
-                2026, 8, 25, 11, 59, tzinfo=timezone.utc
-            ),
+            "2026-08-25T13:59:00.000+02:00": datetime(2026, 8, 25, 11, 59, tzinfo=UTC),
+            "2026-08-25 11:59:00.000": datetime(2026, 8, 25, 11, 59, tzinfo=UTC),
         }
         for raw, expected in cases.items():
             with self.subTest(raw=raw):
