@@ -13,6 +13,7 @@ These classes integrate with Dynamo's variable tracking system to enable proper
 handling of iterator operations during code transformation and optimization.
 """
 
+import collections
 import inspect
 import itertools
 import operator
@@ -313,13 +314,6 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         unimplemented(
             gb_type="Unimplemented next() call",
@@ -327,13 +321,6 @@ class IteratorVariable(VariableTracker):
             explanation="This abstract method must be implemented",
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if name == "__iter__" or name == "__next__":
-            return variables.ConstantVariable.create(True)
-        return super().call_obj_hasattr(tx, name)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Iterators are their own iterator."""
@@ -1044,6 +1031,17 @@ class DictValuesIterator(DictViewIterator):
 class DictItemsIterator(DictViewIterator):
     _cpython_type = type(iter({}.items()))
     view_type = "items"
+
+
+_ORDERED_DICT_ITERATOR_TYPE = type(iter(collections.OrderedDict().items()))
+
+
+class OrderedDictItemsIterator(DictViewIterator):
+    _cpython_type = _ORDERED_DICT_ITERATOR_TYPE
+    view_type = "items"
+
+    def python_type(self) -> type:
+        return _ORDERED_DICT_ITERATOR_TYPE
 
 
 class SetIterator(DictViewIterator):
