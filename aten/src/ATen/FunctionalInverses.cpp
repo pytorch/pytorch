@@ -412,7 +412,6 @@ Tensor FunctionalInverses::unfold_inverse(const Tensor& base, const Tensor& muta
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      // I think autograd and the functionalization pass want the exact same thing here, but need to test to confirm.
       // unfold_backward() is safe to use here because it is NOT a view op.
       // (note: technically, we'll have an extra memory copy.
       // We'd need to add an aliasing version of unfold_backward to fix that though).
@@ -423,13 +422,15 @@ When using torch.compile (or running functionalization directly), this is banned
 as the behavior is not well defined. Consider cloning the tensor before mutating it, \
 or removing the mutation from your model."
           );
-      // See Note [*_scatter ops preserve strides]. unfold_backward returns a contiguous tensor,
-      // so for a permuted dense base, run it in the base's memory order and permute back.
-      // NeverView can't preserve strides this way: permute_copy is contiguous too.
+      // unfold_backward returns a contiguous tensor. Unlike autograd, functionalization wants the
+      // base's strides back (see Note [*_scatter ops preserve strides]). We only recover them for
+      // a dense base with static strides: run unfold_backward in the base's memory order and
+      // permute back. Storage offset is not preserved, and non-dense, symbolic (dynamic shapes)
+      // and NeverView cases still get a contiguous result (permute_copy is contiguous too).
       if (inverse_return_mode == InverseReturnMode::NeverView ||
           base.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || base.is_contiguous() ||
           !base.is_non_overlapping_and_dense()) {
-        return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+        return at::unfold_backward_symint(mutated_view, base.sym_sizes(), dimension, size, step);
       }
       const auto ndim = base.dim();
       dimension = at::maybe_wrap_dim(dimension, ndim);

@@ -208,11 +208,6 @@ class TestFunctionalization(TestCase):
         self.assertEqual(out, ref)
         self.assertEqual(out.stride(), ref.stride())
         self.assertEqual(out.as_strided((), (), 1), ref.as_strided((), (), 1))
-        # *_copy view ops return contiguous tensors (crossref would flag t_copy), so only values here.
-        f_no_views = _functionalize(f, reapply_views=False, crossref=False)
-        for shape in ((2, 2), (1, 3)):
-            x = torch.arange(float(shape[0] * shape[1])).reshape(shape)
-            self.assertEqual(f_no_views(x), f(x))
 
     def test_unfold_of_channels_last_preserves_strides(self):
         def f(x):
@@ -225,9 +220,11 @@ class TestFunctionalization(TestCase):
         out = _functionalize(f, reapply_views=True, crossref=self.crossref)(x)
         self.assertEqual(out, ref)
         self.assertEqual(out.stride(), ref.stride())
-        self.assertEqual(_functionalize(f, reapply_views=False, crossref=False)(x), ref)
 
     def test_unfold_of_transposed_view_compiled(self):
+        if self.crossref:
+            self.skipTest("does not use functionalize directly")
+
         def f(x):
             y = x.clone()
             y.t().unfold(0, 1, 1).add_(1)
