@@ -24464,8 +24464,10 @@ if RUN_GPU:
             def fn(x, mask):
                 return (x * mask.t()).sum(1)
 
-            x = torch.randn(1024, 1024, device=GPU_TYPE)
-            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            # num_splits skips the vote when numel >= num_sm * 64; keep numel
+            # below that even on small MIG slices (14-16 SMs).
+            x = torch.randn(256, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 256, device=GPU_TYPE) < 0.5
             result, code = run_and_get_code(torch.compile(fn), x, mask)
             self.assertEqual(result, fn(x, mask))
             self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
