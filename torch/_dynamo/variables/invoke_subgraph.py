@@ -1019,7 +1019,7 @@ def trace_reuse_hash_fn(
     """
     from torch._dynamo.exc import Unsupported
 
-    with tx.output.tracing_context.guards_context.skip_guard_install():
+    with tx.output.tracing_context.guards_context.skip_guard_install(reuse_hash=True):
         try:
             result = _make_inlined(tx, reuse_hash_fn)(*fn_args_vt, **kwargs)
         except Unsupported as e:
