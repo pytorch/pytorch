@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
@@ -12,6 +13,7 @@ from typing import Any, cast, TYPE_CHECKING
 import torch
 
 from .._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from .._topology import select_nics
 from .._work import _validate_timeout, wait_all
 from ._memory import (
     _Registration,
@@ -34,6 +36,28 @@ def _load_backend() -> Any:
         raise RuntimeError("NIXL transport requires the nixl package") from error
 
 
+def _with_device_list(
+    plugin: str,
+    device: torch.device | None,
+    backend_options: dict[str, str] | None,
+    num_threads: int,
+) -> dict[str, str] | None:
+    """Restrict UCX to the NICs nearest the accelerator unless already configured."""
+    if plugin != "UCX" or "UCX_NET_DEVICES" in os.environ:
+        return backend_options
+    if backend_options and "device_list" in backend_options:
+        return backend_options
+    nics = select_nics(device)
+    if not nics:
+        return backend_options
+    # Mirrors how nixl_agent_config passes num_threads to UCX.
+    options = dict(backend_options or {})
+    if num_threads:
+        options["num_threads"] = str(num_threads)
+    options["device_list"] = ", ".join(nics)  # NIXL splits on ", "
+    return options
+
+
 def _agent_name(name: str | bytes) -> str:
     return name.decode() if isinstance(name, bytes) else name
 
@@ -48,6 +72,10 @@ class NIXLTransport(Transport):
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
+
+    The UCX plugin is restricted to the RDMA NIC nearest the accelerator unless
+    ``backend_options`` sets ``device_list`` or ``UCX_NET_DEVICES`` is set; see
+    "RDMA NIC selection" in the transport docs.
     """
 
     def __init__(
@@ -80,6 +108,9 @@ class NIXLTransport(Transport):
             raise TypeError("backend_options must map strings to strings")
         backend = _load_backend()
         self._plugin = plugin.upper()
+        backend_options = _with_device_list(
+            self._plugin, self.device, backend_options, num_threads
+        )
         config = backend.nixl_agent_config(
             backends=[] if backend_options else [self._plugin],
             num_threads=num_threads,

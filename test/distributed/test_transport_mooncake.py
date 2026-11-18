@@ -116,6 +116,9 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         super().setUp()
         register_transport("mooncake", MooncakeTransport, replace=True)
         self.addCleanup(_mooncake._pinned_registrations.clear)
+        nics = patch.object(_mooncake, "select_nics", return_value=None)
+        self.select_nics = nics.start()
+        self.addCleanup(nics.stop)
 
     def make_transport_pair(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
@@ -135,6 +138,27 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.addCleanup(transport.close)
         self.assertEqual(transport._engine.options, ("P2PHANDSHAKE", "tcp", "mlx5_0"))
         self.assertTrue(transport._endpoint.startswith("127.0.0.1:"))
+
+    def test_selected_nics_filter_rdma_devices(self):
+        self.select_nics.return_value = ["mlx5_0", "mlx5_1"]
+        with (
+            patch.object(_mooncake, "_load_backend", return_value=_backend()),
+            patch.dict(os.environ),
+        ):
+            os.environ.pop("MC_TE_FILTERS", None)
+            with new_transport("mooncake", host="127.0.0.1") as transport:
+                self.assertEqual(transport._engine.options[2], "mlx5_0,mlx5_1")
+            with new_transport(
+                "mooncake", host="127.0.0.1", device_name="mlx5_3"
+            ) as transport:
+                self.assertEqual(transport._engine.options[2], "mlx5_3")
+            with new_transport(
+                "mooncake", host="127.0.0.1", protocol="tcp"
+            ) as transport:
+                self.assertEqual(transport._engine.options[2], "")
+            os.environ["MC_TE_FILTERS"] = "mlx5_2"
+            with new_transport("mooncake", host="127.0.0.1") as transport:
+                self.assertEqual(transport._engine.options[2], "")
 
     def test_ipv6_host_requires_mc_use_ipv6(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):

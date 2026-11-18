@@ -14,6 +14,7 @@ from typing import Any, cast, TYPE_CHECKING
 import torch
 
 from .._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from .._topology import select_nics
 from .._work import _validate_timeout, wait_all
 from ._memory import (
     _Registration,
@@ -78,6 +79,10 @@ class MooncakeTransport(Transport):
     submit/cleanup sections are offloaded with ``asyncio.to_thread`` rather than
     spinning on the lock.
 
+    With the default ``protocol="rdma"``, RDMA traffic is restricted to the NICs
+    nearest the accelerator unless ``device_name`` or ``MC_TE_FILTERS`` is set;
+    see "RDMA NIC selection" in the transport docs.
+
     """
 
     def __init__(
@@ -99,6 +104,8 @@ class MooncakeTransport(Transport):
         _validate_timeout(timeout)
         host = _format_host(host)
         backend = _load_backend()
+        if protocol == "rdma" and not device_name and "MC_TE_FILTERS" not in os.environ:
+            device_name = ",".join(select_nics(self.device) or ())
         engine = backend.TransferEngine()
         if engine.initialize(host, metadata_server, protocol, device_name) != 0:
             raise RuntimeError("Mooncake transport initialization failed")

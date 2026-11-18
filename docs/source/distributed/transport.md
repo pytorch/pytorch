@@ -80,6 +80,32 @@ stream; captured transfers hold their slot until `close`. Since consumers may
 already be enqueued, a failed transfer terminates the process. Backends with
 native stream support may override these methods.
 
+## RDMA NIC selection
+
+The NIXL (UCX plugin) and Mooncake (`protocol="rdma"`) backends restrict RDMA
+traffic to the NICs nearest the transport's accelerator, targeting one process
+per accelerator. The accelerator is the transport's `device`, or, if `device`
+is CPU or `None`, the current `torch.accelerator` device once the accelerator
+runtime is initialized: call `torch.accelerator.set_device_index` (or
+`torch.cuda.set_device`) before creating the transport. Processes that never
+initialize an accelerator are left unrestricted.
+
+Only active NICs at the fastest link rate are considered, which excludes
+slower frontend NICs. The nearest NICs share the longest PCIe path with the
+accelerator, with ties broken by NUMA node. Accelerators tied on the same NICs,
+including those hidden by `CUDA_VISIBLE_DEVICES`, split them in PCI address
+order: each gets an equal, disjoint share, leaving any remainder unused, or
+NICs are shared round-robin when there are more accelerators than NICs. Where sysfs exposes no locality, such as
+in some VMs, this reduces to a split in PCI address order.
+
+Selection reads Linux sysfs and the PCI address from `get_device_properties`,
+which CUDA and ROCm expose. If either is unavailable, the backend uses its
+default NIC discovery. To choose NICs explicitly, pass
+`backend_options={"device_list": "mlx5_0, mlx5_1"}` to NIXL or
+`device_name="mlx5_0,mlx5_1"` to Mooncake; list every NIC to use them all.
+Setting `UCX_NET_DEVICES` (for example `UCX_NET_DEVICES=all`, also needed
+for UCX TCP transports) or `MC_TE_FILTERS` also disables selection.
+
 ## NIXL backend
 
 The initial backend is NIXL, installed separately with `pip install nixl`.
