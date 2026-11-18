@@ -480,7 +480,6 @@
   "test/inductor/test_optimize_indexing.py",
   "test/inductor/test_optimize_loop_body.py",
   "test/inductor/test_origami.py",
-  "test/inductor/test_pad_as_cat.py",
   "test/inductor/test_pad_mm.py",
   "test/inductor/test_padding.py",
   "test/inductor/test_pallas.py",
