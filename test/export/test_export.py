@@ -15751,6 +15751,29 @@ def forward(self, x, b_t, y):
             gm.code,
         )
 
+    def test_export_with_outer_autocast(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        x, y = torch.randn(4, 4), torch.randn(4, 4)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            ep = export(Model(), (x, y))
+        out = ep.graph.find_nodes(op="output")[0].args[0][0]
+        self.assertEqual(out.meta["val"].dtype, torch.bfloat16)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(ep.module()(x, y).dtype, torch.bfloat16)
+        expected = torch.float32
+        if is_training_ir_test(self._testMethodName):
+            # These variants lower inside the autocast, which records the casts.
+            expected = torch.bfloat16
+        self.assertEqual(ep.module()(x, y).dtype, expected)
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            lowered = ep.run_decompositions()
+        self.assertEqual(lowered.module()(x, y).dtype, torch.bfloat16)
+        self.assertIn("torch.ops.aten._to_copy.default", lowered.graph_module.code)
+
     def test_export_as_backend(self):
         def f(x, y):
             return x + y
@@ -18379,10 +18402,10 @@ def forward(self, x):
             _maybe_run_with_interpreter,
             autograd_not_implemented,
             reenter_make_fx,
+            register_fake,
             unique_graph_id,
         )
         from torch._ops import HigherOrderOperator
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.proxy_tensor import (
             ProxyTorchDispatchMode,
             track_tensor_tree,
@@ -18431,10 +18454,6 @@ def forward(self, x):
             )
             return fn(x)
 
-        def fake_hop(mode, fn, x, schema):
-            with mode:
-                return dense_hop(fn, x, schema)
-
         def func_hop(ctx, fn, x, schema):
             unwrapped_x = ctx.unwrap_tensors(x)
             functional_fn = ctx.functionalize(_maybe_run_with_interpreter(fn))
@@ -18443,7 +18462,7 @@ def forward(self, x):
         test_hop = TestFunctionSchemaHop()
         test_hop.py_impl(ProxyTorchDispatchMode)(trace_hop)
         test_hop.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)(dense_hop)
-        test_hop.py_impl(FakeTensorMode)(fake_hop)
+        register_fake(test_hop, dense_hop, skip_cache=True)
         test_hop.py_autograd_impl(
             autograd_not_implemented(test_hop, deferred_error=True)
         )
