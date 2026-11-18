@@ -217,7 +217,6 @@
   "test/distributed/test_fake_pg.py",
   "test/distributed/test_functional_differentials.py",
   "test/distributed/test_inductor_collectives.py",
-  "test/distributed/test_inductor_compile_collectives.py",
   "test/distributed/test_local_tensor.py",
   "test/distributed/test_multigpu_marker.py",
   "test/distributed/test_multiproc_continuous_harness.py",
