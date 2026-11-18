@@ -609,7 +609,6 @@
   "test/test_fake_tensor.py",
   "test/test_file_check.py",
   "test/test_foreach.py",
-  "test/test_functional_autograd_benchmark.py",
   "test/test_futures.py",
   "test/test_gpu_trace.py",
   "test/test_hub.py",
