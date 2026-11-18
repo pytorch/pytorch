@@ -32,7 +32,7 @@ pub fn tensor_key<'py>(
     ints: &Bound<'py, PyList>,
 ) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
     let api = capi::api()
-        .ok_or_else(|| PyRuntimeError::new_err("torch.cfg_compile is not initialized"))?;
+        .ok_or_else(|| PyRuntimeError::new_err("torch.vm is not initialized"))?;
     let count = tensors.len();
     let mut kinds: Vec<u8> = Vec::with_capacity(count * 24);
     let mut numbers: Vec<i64> = Vec::with_capacity(count * 8 + ints.len());
