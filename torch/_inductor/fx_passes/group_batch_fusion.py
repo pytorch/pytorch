@@ -1927,7 +1927,8 @@ def group_batch_fusion_passes(
         post_grad_options = dict(config.post_grad_fusion_options)
         # Keep the old pre-grad key working for fusions that moved post grad.
         for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
-            if name in config.pre_grad_fusion_options and name not in post_grad_options:
+            if name in config.pre_grad_fusion_options:
+                # An explicit legacy option wins over the device-scoped default.
                 warning_once(
                     log,
                     "Fusion option %s is post-grad; running it post grad. "
