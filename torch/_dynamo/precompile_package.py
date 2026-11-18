@@ -1687,6 +1687,8 @@ class _CapturePackage(CompilePackage):
     """
 
     records_graph_break_ops = True
+    # The safety report records drops through the post-build global filter.
+    supports_regional_guard_filter_drops = False
 
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)

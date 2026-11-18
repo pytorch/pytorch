@@ -263,16 +263,23 @@ def is_reconstructable_decorator_ctx_manager_clone(
     func: Callable[..., Any], obj_cls: type[Any]
 ) -> bool:
     return (
-        func is torch.utils._contextlib._DecoratorContextManager.clone
-        and obj_cls
-        in (
-            torch.no_grad,
-            torch.enable_grad,
-            torch.autograd.forward_ad.dual_level,
+        (
+            func is torch.utils._contextlib._DecoratorContextManager.clone
+            and obj_cls
+            in (
+                torch.no_grad,
+                torch.enable_grad,
+                torch.autograd.forward_ad.dual_level,
+            )
         )
-    ) or (
-        func is torch.autograd.grad_mode.inference_mode.clone
-        and obj_cls is torch.autograd.grad_mode.inference_mode
+        or (
+            func is torch.autograd.grad_mode.inference_mode.clone
+            and obj_cls is torch.autograd.grad_mode.inference_mode
+        )
+        or (
+            func is torch._guards._GuardContext.clone
+            and obj_cls is torch._guards._GuardContext
+        )
     )
 
 
@@ -288,9 +295,9 @@ def maybe_reconstruct_decorator_ctx_manager_clone(
     """Reconstruct an allowlisted bound _DecoratorContextManager.clone call.
 
     The positive allowlist excludes subclasses whose constructor arity is not
-    compatible with clone(). inference_mode.clone also requires obj_source so
-    self.mode can be guarded rather than baked into the graph. Unsupported
-    cases return None for the caller to handle.
+    compatible with clone(). inference_mode.clone and _GuardContext.clone also
+    require obj_source so their arguments can be guarded rather than baked into
+    the graph. Unsupported cases return None for the caller to handle.
     """
     from .builder import SourcelessBuilder
 
@@ -306,6 +313,11 @@ def maybe_reconstruct_decorator_ctx_manager_clone(
         ).call_function(tx, [], {})
     if obj_source is None:
         return None
+    if func is torch._guards._GuardContext.clone:
+        label = VariableTracker.build(
+            tx, obj.label, AttrSource(obj_source, "label")
+        ).as_python_constant()
+        return variables.GuardContextVariable((label,))  # noqa: RVT001
     mode_var = VariableTracker.build(tx, obj.mode, AttrSource(obj_source, "mode"))
     return SourcelessBuilder.create_internal_torch_ctx_manager(
         obj.__class__
