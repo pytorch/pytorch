@@ -114,6 +114,8 @@ def guard_ctx(label: str) -> "_GuardContext":
     at actual Guard creation and restore the previous label on exit, including
     across graph breaks and exceptions. Nested traces do not inherit the outer
     trace's label. Context entry and exit add no FX graph operations.
+    A graph break may reconstruct the context manager from its label; object
+    identity and aliasing are not guaranteed.
 
     A Guard created in region A and installed later in region B keeps A's
     label. The current label is used at installation only if the Guard has no
