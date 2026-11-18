@@ -1472,9 +1472,8 @@ print(eval(f"bbmod.{name}.{path}") is code)
         # good, since nothing re-seeds them.
         alias = "__import_torch_dot_nn_dot_modules_dot_module"
         module_name = "torch.test_package_alias_helper"
-        # Calling through nn.Module.__call__ is what roots a kept guard at the
-        # alias. The module lives in a file so that re-importing it gives a
-        # scope with none of the names a load has to seed.
+        # Dispatch a child hook to retain the alias guard. Re-importing the
+        # fixture gives a fresh scope without the generated names.
         source = """
 import torch
 
@@ -1489,7 +1488,6 @@ class Child(torch.nn.Module):
 
 
 CHILD = Child()
-# Dispatch a hook so guard loading needs the recorded module-global alias.
 CHILD.register_forward_hook(identity_child_hook)
 
 

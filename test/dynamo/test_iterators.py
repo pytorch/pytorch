@@ -5,7 +5,7 @@ import itertools
 import sys
 import types
 import unittest
-from collections import deque
+from collections import deque, OrderedDict
 
 import torch
 import torch._dynamo.test_case
@@ -140,6 +140,24 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         super().tearDown()
         torch._dynamo.config.enable_trace_unittest = self._u_prev
 
+    @parametrize("created", [False, True])
+    def test_iterable_attribute_error_metadata(self, created):
+        def fn(x, iterator):
+            obj = zip([1], [2]) if created else next(iterator)
+            missing = hasattr(obj, "missing")
+            try:
+                obj.missing
+            except AttributeError as error:
+                return x + 1, missing, error.name, error.obj is obj
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                x, iter((bytearray(b"a"),))
+            ),
+            (x + 1, False, "missing", True),
+        )
+
     @parametrize("name", ["__name__", "__qualname__", "__mro__", "mro", "missing"])
     def test_iterator_missing_instance_attribute(self, name):
         def fn(x):
@@ -203,6 +221,35 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("kind", ["dict", "values", "items", "ordered", "set"])
+    def test_escaped_iterator_attribute_error(self, kind):
+        def fn(x, owner):
+            if kind == "values":
+                iterator = iter(owner.values())
+            elif kind == "items":
+                iterator = iter(owner.items())
+            else:
+                iterator = iter(owner)
+            try:
+                iterator.missing
+            except AttributeError as error:
+                return x + 1, iterator, error
+
+        owner = {1, 2} if kind == "set" else {1: 10, 2: 20}
+        if kind == "ordered":
+            owner = OrderedDict(owner)
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        result, iterator, error = compiled(x, owner)
+        self.assertEqual(result, x + 1)
+        self.assertIs(type(iterator), type(fn(x, owner)[1]))
+        self.assertEqual(error.name, "missing")
+        self.assertIs(error.obj, iterator)
+        owner.clear()
+        reason = "mutated" if kind == "ordered" else "changed size"
+        with self.assertRaisesRegex(RuntimeError, f"{reason} during iteration"):
+            next(iterator)
 
     @make_dynamo_test
     def test_list_iteration(self):

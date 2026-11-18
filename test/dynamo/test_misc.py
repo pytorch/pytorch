@@ -5415,7 +5415,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     @parametrize("copier", [copy.copy, copy.deepcopy])
     def test_ordered_dict_copy_input_order(self, copier):
         def fn(x, od):
-            return x + (next(iter(copier(od))) == "first key")
+            key = next(iter(copier(od)))
+            return x + (key == "first key"), key
 
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
@@ -5426,7 +5427,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(compiled(x, original), fn(x, original))
         original.clear()
         original.update([(equal_key, None), ("b", None)])
-        self.assertEqual(compiled(x, original), fn(x, original))
+        result = compiled(x, original)
+        self.assertEqual(result, fn(x, original))
+        self.assertIs(result[1], equal_key)
         self.assertEqual(counter.frame_count, 1)
         reversed_input = collections.OrderedDict(reversed(list(original.items())))
         self.assertEqual(compiled(x, reversed_input), fn(x, reversed_input))
