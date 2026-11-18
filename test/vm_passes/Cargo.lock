@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "rewrite_passes"
+name = "vm_passes"
 version = "0.1.0"
 dependencies = [
- "torch-rewrite-pass",
+ "torch-vm-pass",
 ]
 
 [[package]]
-name = "torch-rewrite-pass"
+name = "torch-vm-pass"
 version = "0.1.0"

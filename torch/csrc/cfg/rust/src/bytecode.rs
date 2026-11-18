@@ -326,7 +326,7 @@ impl OpcodeTable {
             (3, 14) => true,
             _ => {
                 return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
-                    "torch.rewrite only understands CPython 3.12 and 3.14 bytecode, not {}.{}",
+                    "torch.vm only understands CPython 3.12 and 3.14 bytecode, not {}.{}",
                     version.major, version.minor
                 )))
             }
