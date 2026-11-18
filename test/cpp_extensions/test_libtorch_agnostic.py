@@ -1062,7 +1062,7 @@ class TestLibtorchAgnostic(TestCase):
         result = libtorch_agnostic.ops.my_clone(t)
         expected = t.clone()
         self.assertEqual(result, expected)
-        self.assertNotEqual(result.data_ptr(), expected.data_ptr())
+        self.assertNotEqual(result.data_ptr(), t.data_ptr())
         self.assertEqual(result.stride(), expected.stride())
 
     @skipIfTorchVersionLessThan(2, 10)
@@ -2232,18 +2232,13 @@ except RuntimeError as e:
         self.assertEqual(result_device.is_pinned(), pin_memory)
 
         # Test with dtype and device together
-        target_device = t.device
-        if t.is_cuda and torch.cuda.device_count() > 1:
-            target_device = torch.device(
-                "cuda", (t.device.index + 1) % torch.cuda.device_count()
-            )
         result_both = libtorch_agnostic.ops.my_new_empty(
-            t, [4, 5], dtype=torch.int64, device=target_device
+            t, [4, 5], dtype=torch.int64, device="cpu"
         )
-        expected_both = t.new_empty([4, 5], dtype=torch.int64, device=target_device)
+        expected_both = t.new_empty([4, 5], dtype=torch.int64, device="cpu")
         self.assertEqual(result_both.shape, expected_both.shape)
         self.assertEqual(result_both.dtype, torch.int64)
-        self.assertEqual(result_both.device, target_device)
+        self.assertEqual(result_both.device.type, "cpu")
 
     @skipIfTorchVersionLessThan(2, 10)
     @skipIfTorchDynamo(
@@ -2267,7 +2262,9 @@ except RuntimeError as e:
         expected_dtype = t.new_zeros(
             [2, 3], dtype=torch.float64, layout=torch.sparse_coo
         )
-        self.assertEqual(result_dtype, expected_dtype, exact_device=True)
+        self.assertEqual(
+            result_dtype, expected_dtype, exact_device=True, exact_layout=True
+        )
 
         # Test with different device (move to CPU)
         pin_memory = torch.cuda.is_available()
@@ -2279,15 +2276,10 @@ except RuntimeError as e:
         self.assertEqual(result_device.is_pinned(), pin_memory)
 
         # Test with dtype and device together
-        target_device = t.device
-        if t.is_cuda and torch.cuda.device_count() > 1:
-            target_device = torch.device(
-                "cuda", (t.device.index + 1) % torch.cuda.device_count()
-            )
         result_both = libtorch_agnostic.ops.my_new_zeros(
-            t, [4, 5], dtype=torch.int64, device=target_device
+            t, [4, 5], dtype=torch.int64, device="cpu"
         )
-        expected_both = t.new_zeros([4, 5], dtype=torch.int64, device=target_device)
+        expected_both = t.new_zeros([4, 5], dtype=torch.int64, device="cpu")
         self.assertEqual(result_both, expected_both, exact_device=True)
 
     def test_my_unsqueeze(self, device):

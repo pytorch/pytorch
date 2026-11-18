@@ -3,7 +3,6 @@
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <array>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -929,22 +928,16 @@ inline torch::stable::Tensor new_empty(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  if (device) {
-    STD_TORCH_CHECK(
-        device->index() >= std::numeric_limits<int8_t>::min() &&
-            device->index() <= std::numeric_limits<int8_t>::max(),
-        "Device index ",
-        device->index(),
-        " is out of range for int8_t [",
-        static_cast<int>(std::numeric_limits<int8_t>::min()),
-        ", ",
-        static_cast<int>(std::numeric_limits<int8_t>::max()),
-        "]");
-  }
-  int32_t dtype_val = dtype ? detail::to<int32_t>(detail::from(*dtype)) : 0;
-  int32_t layout_val = layout ? detail::to<int32_t>(detail::from(*layout)) : 0;
-  int32_t device_type_val =
-      device ? detail::to<int32_t>(detail::from(device->type())) : 0;
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type_val = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
   int32_t pin_memory_val = pin_memory.value_or(false);
   AtenTensorHandle ret0 = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_empty(
@@ -984,22 +977,16 @@ inline torch::stable::Tensor new_zeros(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  if (device) {
-    STD_TORCH_CHECK(
-        device->index() >= std::numeric_limits<int8_t>::min() &&
-            device->index() <= std::numeric_limits<int8_t>::max(),
-        "Device index ",
-        device->index(),
-        " is out of range for int8_t [",
-        static_cast<int>(std::numeric_limits<int8_t>::min()),
-        ", ",
-        static_cast<int>(std::numeric_limits<int8_t>::max()),
-        "]");
-  }
-  int32_t dtype_val = dtype ? detail::to<int32_t>(detail::from(*dtype)) : 0;
-  int32_t layout_val = layout ? detail::to<int32_t>(detail::from(*layout)) : 0;
-  int32_t device_type_val =
-      device ? detail::to<int32_t>(detail::from(device->type())) : 0;
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type_val = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
   int32_t pin_memory_val = pin_memory.value_or(false);
   AtenTensorHandle ret0 = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_zeros(
