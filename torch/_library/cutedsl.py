@@ -37,6 +37,16 @@ def is_cutedsl_jit_function(obj: object) -> bool:
     return issubclass(dsl_cls, CuTeDSL) and _jit_executor_name(obj) == "_func"
 
 
+def is_traceable_cutedsl_wrapper(obj: object) -> bool:
+    """Whether ``obj`` is what wrap_cutedsl returns, or an instance of any subclass of
+    it, one that overrides ``__call__`` included (Dynamo refuses a call of each),
+    without importing the HOP module (an instance implies it is imported)."""
+    module = sys.modules.get("torch._higher_order_ops.cutedsl_kernel_wrap")
+    if module is None:
+        return False
+    return isinstance(obj, module.TraceableCuteDSLKernelWrapper)
+
+
 def wrap_cutedsl(
     host_fn: Callable[..., Any],
     /,
@@ -46,11 +56,16 @@ def wrap_cutedsl(
     """Allows capture of a CuTeDSL kernel launch into a graph via make_fx or
     non-strict ``torch.export``: the counterpart of :func:`torch.library.wrap_triton`
     for ``@cute.jit`` host functions. Dynamo does not capture a call of the wrapper:
-    ``torch.compile`` graph-breaks in it, so ``fullgraph=True`` and strict
-    ``torch.export`` refuse it. A call in the body of a higher-order op that Dynamo
-    traces even eagerly and under make_fx and non-strict export, such as
-    ``torch.cond``, ``while_loop``, ``scan``, ``map`` and ``associative_scan``, or in
-    a ``torch.compiler.nested_compile_region`` function under non-strict export, is
+    ``torch.compile`` graph-breaks at the call ("CuTeDSL kernel wrapper not
+    supported"), so ``fullgraph=True`` and strict ``torch.export`` refuse it;
+    without ``fullgraph``, the call runs outside the graph, between the compiled
+    parts of its caller (Dynamo may compile the call's own frames). An explicit
+    ``wrapper.__call__(...)`` and a call of ``wrap_cutedsl`` inside the compiled
+    region graph-break too, but with Dynamo's generic "Attempted to call function
+    marked as skipped". A call in the body of a higher-order op that Dynamo traces
+    even eagerly and under make_fx and non-strict export, such as ``torch.cond``,
+    ``while_loop``, ``scan``, ``map`` and ``associative_scan``, or in a
+    ``torch.compiler.nested_compile_region`` function under non-strict export, is
     refused as well.
 
     ``host_fn`` must have exactly one parameter annotated ``cuda.CUstream``; callers
