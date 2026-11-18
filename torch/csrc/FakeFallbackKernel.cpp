@@ -360,6 +360,9 @@ DEFINE_CACHED_PYTHON_IMPORT(
 DEFINE_CACHED_PYTHON_IMPORT(
     get_run_fake_impl,
     py::module::import("torch._library.fake_impl").attr("run_fake_impl"))
+DEFINE_CACHED_PYTHON_IMPORT(
+    get_has_fake_kernel,
+    py::module::import("torch._library.utils").attr("has_fake_kernel"))
 // fake_tensor_tls is a module-global threading.local, so caching the object is
 // safe: attribute reads on it still resolve to the calling thread's value.
 DEFINE_CACHED_PYTHON_IMPORT(
@@ -784,6 +787,28 @@ bool prim_meta_impl(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       "prim_meta_impl");
 }
 
+bool fake_infer_from_real_out(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode,
+    PyObject* real) {
+  py::gil_scoped_acquire gil;
+  py::handle py_op = getTorchApiFunction(op);
+  auto py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  if (get_has_fake_kernel()(py_op).cast<bool>()) {
+    return false;
+  }
+  return run_fake_python_callback(
+      op,
+      stack,
+      [&](const py::object& args, const py::dict& kwargs) {
+        return py::module::import("torch._subclasses.fake_tensor")
+            .attr("infer_fake_from_real_out")(py_mode, py_op, py::handle(real));
+      },
+      /*convert=*/{},
+      "infer_fake_from_real_out");
+}
+
 c10::intrusive_ptr<c10::TensorImpl> from_real_tensor(
     const std::shared_ptr<c10::FakeTensorMode>& mode,
     const c10::intrusive_ptr<c10::TensorImpl>& real_impl,
@@ -932,6 +957,48 @@ bool allow_non_fake_inputs(const std::shared_ptr<c10::FakeTensorMode>& mode) {
   return mode->allow_non_fake_inputs_;
 }
 
+PyObject* fake_run_real_op(
+    const c10::OperatorHandle& op,
+    const torch::jit::Stack& fake_args,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  py::gil_scoped_acquire gil;
+  auto py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  auto args_kwargs = parseIValuesToPyArgsKwargs(
+      op, torch::jit::last(fake_args, op.schema().arguments().size()).vec());
+  py::object result = py::module::import("torch._subclasses.fake_tensor")
+                          .attr("run_real_op")(
+                              py_mode,
+                              getTorchApiFunction(op),
+                              args_kwargs.first,
+                              args_kwargs.second);
+  return result.is_none() ? nullptr : result.release().ptr();
+}
+
+void propagate_real_tensors(
+    const c10::OperatorHandle& op,
+    PyObject* real,
+    torch::jit::Stack* stack,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  py::gil_scoped_acquire gil;
+  auto py_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
+  auto num_returns = op.schema().returns().size();
+  // Pass the outputs the way a Python op returns them: None, the single value,
+  // or a tuple.
+  py::object py_fake_out = torch::jit::createPyObjectForStack(
+      torch::jit::last(*stack, num_returns).vec());
+  py::object result =
+      py::module::import("torch._subclasses.fake_tensor")
+          .attr("propagate_real_tensors")(
+              py_mode, getTorchApiFunction(op), py::handle(real), py_fake_out);
+  auto outputs =
+      box_py_outputs(op, std::move(result), "propagate_real_tensors");
+  torch::jit::drop(stack, num_returns);
+  stack->insert(
+      stack->end(),
+      std::make_move_iterator(outputs.begin()),
+      std::make_move_iterator(outputs.end()));
+}
+
 void fakeFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatchKeySet,
@@ -966,9 +1033,6 @@ void fakeFallback(
   }
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
-  }
-  if (mode->propagate_real_tensors_) {
-    unsupported(op, "propagate_real_tensors");
   }
   // Python's FakeTensorMode is out of the FAKE dispatch mode slot while its
   // __torch_dispatch__ runs, apart from what it runs under `with self:`
@@ -1185,6 +1249,17 @@ void fakeFallback(
     invalidate_written_to_constants(op, *stack, mode);
   }
 
+  auto* interpreter = getPyInterpreter();
+  c10::SafePyObject real(
+      mode->propagate_real_tensors_ ? fake_run_real_op(op, *stack, mode)
+                                    : nullptr,
+      interpreter);
+  const auto maybe_propagate_real_tensors = [&] {
+    if (real.ptr(interpreter)) {
+      propagate_real_tensors(op, real.ptr(interpreter), stack, mode);
+    }
+  };
+
   // Input devices in argument order, paired with whether each is a CPU scalar.
   c10::SmallVector<std::pair<c10::Device, bool>, 4> input_devices;
   // The sparse inputs' Meta keys; Meta is added before redispatch.
@@ -1208,9 +1283,6 @@ void fakeFallback(
         if (input_mode == nullptr) {
           unsupported(op, "fake tensors without a mode");
         }
-        if (impl->real_tensor() != nullptr) {
-          unsupported(op, "propagate_real_tensors");
-        }
         const auto fake_device = impl->fake_device();
         TORCH_INTERNAL_ASSERT(fake_device.has_value());
         input_devices.emplace_back(
@@ -1227,18 +1299,21 @@ void fakeFallback(
   if (metadata_copy) {
     // These kernels only copy metadata. Run them on the fakes directly so
     // shallow_copy_data_ never replaces an existing fake inside a Meta kernel.
-    c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
-        {c10::DispatchKey::Fake,
-         c10::DispatchKey::Python,
-         c10::DispatchKey::PreDispatch,
-         c10::DispatchKey::PythonTLSSnapshot}));
-    auto self = (*stack)[arguments_begin].toTensor();
-    auto result = schema.name() == "aten::detach"
-        ? at::impl::fake_detach(self)
-        : at::impl::fake_shallow_copy_data_(
-              self, (*stack)[arguments_begin + 1].toTensor());
-    torch::jit::drop(*stack, num_arguments);
-    torch::jit::push(*stack, std::move(result));
+    {
+      c10::impl::ExcludeDispatchKeyGuard no_dispatch(c10::DispatchKeySet(
+          {c10::DispatchKey::Fake,
+           c10::DispatchKey::Python,
+           c10::DispatchKey::PreDispatch,
+           c10::DispatchKey::PythonTLSSnapshot}));
+      auto self = (*stack)[arguments_begin].toTensor();
+      auto result = schema.name() == "aten::detach"
+          ? at::impl::fake_detach(self)
+          : at::impl::fake_shallow_copy_data_(
+                self, (*stack)[arguments_begin + 1].toTensor());
+      torch::jit::drop(*stack, num_arguments);
+      torch::jit::push(*stack, std::move(result));
+    }
+    maybe_propagate_real_tensors();
     return;
   }
   // Mirror FakeTensor._find_common_device, with the device preference captured
@@ -1308,6 +1383,7 @@ void fakeFallback(
     return at::impl::fakeDispatchCategoriesHave(categories, category);
   };
   if (symbolic_sizes && try_fast_impl(op, stack, mode)) {
+    maybe_propagate_real_tensors();
     return;
   }
   // FakeTensorMode._unbacked_special_fake_handling_ops, applied to all
@@ -1343,6 +1419,7 @@ void fakeFallback(
         return true;
       };
       if (fake_run_with_mode_entered(mode, decompose)) {
+        maybe_propagate_real_tensors();
         return;
       }
     }
@@ -1350,11 +1427,23 @@ void fakeFallback(
   if (has(FakeDispatchCategory::PrimMeta)) {
     if (fake_run_with_mode_entered(
             mode, [&] { return prim_meta_impl(op, stack); })) {
+      maybe_propagate_real_tensors();
       return;
     }
   }
+  // Match library_utils.is_builtin before probing custom kernel registrations.
+  const auto op_namespace = op.operator_name().getNamespace();
+  const bool is_builtin = op_namespace &&
+      (*op_namespace == "aten" || *op_namespace == "prim" ||
+       *op_namespace == "prims");
+  if (real.ptr(interpreter) && mode->shape_env_ && !is_builtin &&
+      fake_infer_from_real_out(op, stack, mode, real.ptr(interpreter))) {
+    maybe_propagate_real_tensors();
+    return;
+  }
   if (has(FakeDispatchCategory::CustomOpImpl) &&
-      run_fake_impl(op, stack, mode, /*real=*/nullptr)) {
+      run_fake_impl(op, stack, mode, real.ptr(interpreter))) {
+    maybe_propagate_real_tensors();
     return;
   }
   // Constructors finalize their own output devices.
@@ -1363,6 +1452,7 @@ void fakeFallback(
       : _find_common_device(/*resolve=*/false);
   if (has(FakeDispatchCategory::OpImpl) || has_op_impl_predicate(op)) {
     if (try_op_impl(op, stack, mode, common_device)) {
+      maybe_propagate_real_tensors();
       return;
     }
   }
@@ -1538,6 +1628,7 @@ void fakeFallback(
       return wrap(t, is_alias);
     });
   }
+  maybe_propagate_real_tensors();
 }
 
 TORCH_LIBRARY_IMPL(_, Fake, m) {
