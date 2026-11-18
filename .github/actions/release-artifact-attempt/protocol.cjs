@@ -8,7 +8,7 @@ const path = require('node:path');
 const {Readable} = require('node:stream');
 const {setTimeout: delay} = require('node:timers/promises');
 
-const EXPECTED_PR = 0;
+const EXPECTED_PR = 205523;
 const REPOSITORY = 'pytorch/pytorch';
 const REPOSITORY_ID = 65600975;
 const HEAD_REPOSITORY = 'ptdbot/pytorch';

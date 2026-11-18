@@ -48,13 +48,15 @@ function service() {
   return result;
 }
 
-test('PR0/workflow0/attempt0 remain inert', () => {
-  assert.throws(() => a.configuration());
+test('activation binds the allocated draft and rejects zero identities', () => {
+  assert.deepEqual(a.configuration(), {expected_pr: 205523, workflow_id: 422814113, producer_attempt: 2, actor_ids: CONFIG.actor_ids});
+  assert.equal(p.EXPECTED_PR, 205523);
   assert.deepEqual(a.configuration(CONFIG), CONFIG);
   for (const key of ['expected_pr', 'workflow_id', 'producer_attempt']) assert.throws(() => a.configuration({...CONFIG, [key]: 0}));
   assert.throws(() => a.configuration({...CONFIG, actor_ids: {...CONFIG.actor_ids, ptdbot: 1}}));
   const yaml = fs.readFileSync(path.join(__dirname, '../../workflows/ci-security-ordinary-artifact-attempt-e94e6bc53f124f34.yml'), 'utf8');
-  assert.equal(yaml.match(/pull_request\.number == 0/g).length, 2);
+  assert.equal(yaml.match(/pull_request\.number == 205523/g).length, 2);
+  assert.equal(/pull_request\.number == 0(?:\D|$)/.test(yaml), false);
   assert(yaml.includes('uses: ./.github/workflows/_check-ci.yml'));
   assert(!yaml.includes('id-token: write'));
 });

@@ -1,9 +1,11 @@
 # Ordinary artifact attempt audit
 
-Never merge this audit-only change. PR0, workflow ID0 and attempt0 are inert.
-Activation requires a separately reviewed exact-owned draft, normal workflow
-approval, and a fresh check that the unique workflow name and artifact prefix
-cannot enter an automatic publisher. Do not use a production statistics prefix.
+Never merge this audit-only change. The reviewed inert predecessor allocated
+draft PR205523 and workflow422814113. This append-only activation binds producer
+attempt2 and consumer attempt3. It still requires independent final-tree review,
+normal exact-head workflow approval, and a fresh check that the unique workflow
+name and artifact prefix cannot enter an automatic publisher. Do not use a
+production statistics prefix.
 
 The controller binds producer attempt `N` before activation. Approval can make
 the first executed job attempt2; this is not assumed to be attempt1. `N` first
