@@ -1,13 +1,13 @@
-//! Passes for `torch.rewrite`, written in Rust.
+//! Passes for `torch.vm`, written in Rust.
 //!
 //! A pass is a type that implements [`Pass`]. A library of passes is a
 //! `cdylib` crate that depends on this one and ends with
 //! `export_passes!(First, Second);`. Python loads it with
-//! `torch.rewrite.load_passes(path)`, which gives a dict of the passes by
+//! `torch.vm.load_passes(path)`, which gives a dict of the passes by
 //! name, each of them an entry for `passes=`:
 //!
 //! ```ignore
-//! use torch_rewrite_pass::{export_passes, Bound, Error, Pass, Region};
+//! use torch_vm_pass::{export_passes, Bound, Error, Pass, Region};
 //!
 //! #[derive(Default)]
 //! struct FuseRmsNorm;
@@ -36,7 +36,7 @@
 
 use std::ffi::{c_char, c_void, CString};
 
-/// What `torch_rewrite_abi` of a library must return for it to be loaded.
+/// What `torch_vm_abi` of a library must return for it to be loaded.
 pub const ABI_VERSION: u32 = 1;
 
 /// The functions of the runtime, by which a pass looks at a basic block and
@@ -65,7 +65,7 @@ pub struct Api {
     pub fuse: unsafe extern "C" fn(region: *mut c_void, start: usize, end: usize, callable: *mut c_void) -> i32,
     /// `fuse` with a kernel that returns what the range gives (one value, or
     /// a tuple), checked against the range itself for the first `checks`
-    /// calls, as `torch.rewrite.swap` checks it.
+    /// calls, as `torch.vm.swap` checks it.
     pub swap: unsafe extern "C" fn(
         region: *mut c_void,
         start: usize,
@@ -283,12 +283,12 @@ pub fn raw<P: Pass>() -> RawPass {
 macro_rules! export_passes {
     ($($pass:ty),+ $(,)?) => {
         #[no_mangle]
-        pub extern "C" fn torch_rewrite_abi() -> u32 {
+        pub extern "C" fn torch_vm_abi() -> u32 {
             $crate::ABI_VERSION
         }
 
         #[no_mangle]
-        pub unsafe extern "C" fn torch_rewrite_passes(out: *mut *const $crate::RawPass) -> usize {
+        pub unsafe extern "C" fn torch_vm_passes(out: *mut *const $crate::RawPass) -> usize {
             static TABLE: std::sync::OnceLock<Vec<$crate::RawPass>> = std::sync::OnceLock::new();
             let table = TABLE.get_or_init(|| vec![$($crate::raw::<$pass>()),+]);
             *out = table.as_ptr();

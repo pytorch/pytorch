@@ -139,7 +139,7 @@ struct SettledBlocks {
     blocks: Vec<std::cell::Cell<Settled>>,
     calls: std::cell::Cell<u64>,
     trial: std::cell::Cell<Trial>,
-    /// For the function that was handed to torch.rewrite: whether calls
+    /// For the function that was handed to torch.vm: whether calls
     /// below its last call were part of a measurement (`watched`), and
     /// whether they took a noticeable part of it (`below`).
     watched: std::cell::Cell<bool>,
@@ -328,7 +328,7 @@ struct Callee {
 }
 
 /// The Python functions called from a function compiled with
-/// torch.rewrite, or from anything compiled under it, each compiled the
+/// torch.vm, or from anything compiled under it, each compiled the
 /// first time it is called.
 pub struct Callees {
     table: OpcodeTable,
@@ -935,7 +935,7 @@ thread_local! {
     /// How many blocks are running in the profiling tier on this thread, one
     /// inside the other.
     static PROFILING_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    /// The function handed to torch.rewrite whose call is running on this
+    /// The function handed to torch.vm whose call is running on this
     /// thread: the frames the interpreter starts meanwhile are offered to it
     /// (see `take_frame`). Null while what runs is not the function's own
     /// code but the runtime's: a pass, a region, an import, a call that is
@@ -1293,7 +1293,7 @@ impl Compiled {
         if boxed.is_null() {
             // The reference was consumed either way.
             *regs.get_unchecked_mut(v as usize) = null_mut();
-            panic!("torch.rewrite: could not create the Python object of a tensor");
+            panic!("torch.vm: could not create the Python object of a tensor");
         }
         *regs.get_unchecked_mut(v as usize) = boxed;
         self.boxed_later.fetch_add(1, Ordering::Relaxed);
@@ -2337,7 +2337,7 @@ impl Compiled {
         unsafe { self.specialize(block) };
     }
 
-    /// `call` for the function that was handed to torch.rewrite, which
+    /// `call` for the function that was handed to torch.vm, which
     /// is measured against the interpreter as its callees are.
     pub unsafe fn call_measured(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
         // While it runs compiled, the frames the interpreter starts are
@@ -3468,7 +3468,7 @@ impl Compiled {
                     None => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "torch.rewrite: tensor_size ran without its guard".to_string(),
+                            "torch.vm: tensor_size ran without its guard".to_string(),
                         );
                         Err(())
                     }
@@ -3483,7 +3483,7 @@ impl Compiled {
                     _ => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "torch.rewrite: tensor_dim ran without its guard".to_string(),
+                            "torch.vm: tensor_dim ran without its guard".to_string(),
                         );
                         Err(())
                     }
