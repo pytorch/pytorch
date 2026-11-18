@@ -48,7 +48,8 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
-    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
+    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION, \
+    PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -12990,10 +12991,17 @@ class TestGroupedMM(TestCase):
     @onlyCUDA
     @skipIfRocm(msg="ROCm builds do not pad the functional result")
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @dtypes(torch.bfloat16, torch.float32)
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_out_writes_in_place(self, device, dtype):
-        # With default settings, bf16 runs the fused CUTLASS kernel on SM90 and SM100, and the rest runs the fallback.
-        fused = dtype == torch.bfloat16 and torch.cuda.get_device_capability(device)[0] in (9, 10)
+        # With default settings, fp16 runs the fused cuBLASLt kernel where it is built and supported, bf16 runs the
+        # fused CUTLASS kernel on SM90 and SM100, and the rest runs the fallback.
+        prefer_cublaslt = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = False
+        self.addCleanup(setattr, torch.backends.cuda.matmul, "prefer_cublaslt_grouped_gemm", prefer_cublaslt)
+        if dtype == torch.float16:
+            fused = bool(PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM)
+        else:
+            fused = dtype == torch.bfloat16 and torch.cuda.get_device_capability(device)[0] in (9, 10)
 
         def run(rows, width, row_width):
             a = self._make_grouped_mm_matrix((rows, 32), True, device, dtype)
@@ -13007,8 +13015,9 @@ class TestGroupedMM(TestCase):
             with torch.profiler.profile(record_shapes=True) as prof:
                 torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
             self.assertEqual(out, expected)
-            # The fused kernel writes the row padding, so a direct write into this out would change the sentinel.
-            self.assertTrue((rows_view[:, width:] == 7).all() and (buf[-8:] == 7).all())
+            # The fused kernels write the row padding, so their direct write into this out would change the sentinel.
+            self.assertEqual(rows_view[:, width:], torch.full_like(rows_view[:, width:], 7))
+            self.assertEqual(buf[-8:], torch.full_like(buf[-8:], 7))
             return [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == [rows, width]]
 
         # A width that needs no padding is written directly by every kernel.

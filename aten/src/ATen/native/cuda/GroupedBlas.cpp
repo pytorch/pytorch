@@ -1130,8 +1130,6 @@ std::optional<c10::ScalarType> out_dtype) {
     return GroupedMMKernel::Cutlass;
   }
 #elif defined(USE_ROCM_CK_GEMM)
-  // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
-  // Keep use_fast_path as false till ck kernel perf is optimal.
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
@@ -1210,9 +1208,10 @@ Tensor& out) {
   at::native::resize_output(out, out_size);
   at::assert_no_internal_overlap(out);
   const auto kernel = select_grouped_mm_kernel(mat_a, mat_b, offs, out_dtype);
-  // The fallback writes any layout. The fused kernels need the padded layout and an aligned address,
-  // and the CUTLASS one was measured on H100 writing the row padding, which may belong to another
-  // tensor. So a fused kernel writes directly only into an `out` whose layout needs no padding.
+  // The fallback writes any layout. The fused kernels need the padded layout and an aligned address.
+  // On an H100, CUTLASS and cuBLASLt were measured writing the row padding too, also past the end of an
+  // exactly sized tensor, and that padding may belong to another tensor. So a fused kernel writes
+  // directly only into an `out` whose layout needs no padding.
   const auto unpadded_stride = c10::contiguous_strides(out_size);
   if (kernel == GroupedMMKernel::Fallback ||
       (IntArrayRef(out_stride) == IntArrayRef(unpadded_stride) && out.strides() == IntArrayRef(out_stride) &&
