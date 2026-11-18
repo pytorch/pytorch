@@ -976,7 +976,11 @@ class PaddingTest(TestCaseBase):
         with config.patch({"comprehensive_padding": True}):
             compiled = torch.compile(program, backend="inductor")(x.clone())
 
-        self.assertEqual(eager, compiled)
+        # Each output sums ~100k fp32 values and eager and inductor accumulate
+        # in different orders; on MI200 the gap is input dependent and can
+        # exceed the default fp32 tolerance. The bug this guards (#179931)
+        # read the wrong elements and is off by far more than this tolerance.
+        self.assertEqual(eager, compiled, atol=1e-3, rtol=1e-4)
 
 
 if __name__ == "__main__":
