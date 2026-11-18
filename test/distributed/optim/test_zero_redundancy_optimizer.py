@@ -77,6 +77,12 @@ def deterministic_algorithms(enabled=True):
 
 class TestZeroRedundancyOptimizerContinuous(MultiProcContinuousTest):
     @property
+    def device_type(self) -> str:
+        # Use the module-level derivation, which falls back to "cpu" when
+        # the accelerator is built but has no usable device.
+        return device_type
+
+    @property
     def device(self):
         return device_type
 
