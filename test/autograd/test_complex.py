@@ -4,6 +4,7 @@ import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     parametrize,
     run_tests,
     TestCase,
@@ -11,6 +12,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestAutogradComplex(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_view_func_for_complex_views(self):
         # case 1: both parent and child have view_func
         x = torch.randn(2, 2, 2, dtype=torch.double, requires_grad=True)

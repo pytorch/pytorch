@@ -9,7 +9,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from functools import wraps
 from typing import ParamSpec, TypeVar
-from unittest import mock, SkipTest
+from unittest import mock, skipIf, SkipTest
 
 import torch
 import torch.cuda
@@ -352,6 +352,7 @@ def _nccl_pad_op_launches(group, device) -> dict:
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 @skip_if_rccl_lt_2_30_4
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
@@ -1641,6 +1642,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 
 @requires_cuda_p2p_access()
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     """NCCL symmetric memory over an nccl2-backed process group.

@@ -19,11 +19,15 @@ import torch.nn.functional as F
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._composable import checkpoint, replicate
+from torch.distributed._composable.replicate_with_fsdp import (
+    replicate as replicate_with_fsdp,
+)
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
@@ -36,6 +40,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
+    DefaultAllReduce,
     DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -66,6 +71,7 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MUL
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
 )
 from torch.testing._internal.common_distributed import (
@@ -86,6 +92,8 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    device_sleep,
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -166,6 +174,155 @@ class TestFSDPCommContext(TestCase):
         comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
         comm_ctx.all_gather_stream.wait_event.assert_not_called()
         self.assertIsNone(comm_ctx.all_gather_state)
+
+
+class TestFullyShardCustomAllReduceErrors(TestCase):
+    def test_invalid_parameter_groups(self):
+        cases = [
+            ([], None),
+            ([MagicMock(), MagicMock()], "multiple param groups"),
+            ([MagicMock(mesh_info=MagicMock(spec=FSDPMeshInfo))], "replication mesh"),
+        ]
+        for groups, message in cases:
+            with self.subTest(message=message):
+                model = MagicMock(spec=FSDPModule)
+                model._get_fsdp_state.return_value._fsdp_param_groups = groups
+                if message:
+                    with self.assertRaisesRegex(ValueError, message):
+                        FSDPModule.set_custom_all_reduce(model, DefaultAllReduce())
+                else:
+                    FSDPModule.set_custom_all_reduce(model, DefaultAllReduce())
+
+    def test_default_all_reduce(self):
+        tensor, group, work = MagicMock(), MagicMock(), MagicMock()
+        for async_op in (False, True):
+            with self.subTest(async_op=async_op):
+                with patch.object(dist, "all_reduce", return_value=work) as all_reduce:
+                    result = DefaultAllReduce()(
+                        tensor, group, dist.ReduceOp.SUM, async_op=async_op
+                    )
+                self.assertIs(result, work)
+                all_reduce.assert_called_once_with(
+                    tensor, group=group, op=dist.ReduceOp.SUM, async_op=async_op
+                )
+
+
+class TestFullyShardCustomAllReduce(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def test_custom_all_reduce(self):
+        self.run_subtests(
+            {
+                "use_custom_all_reduce": [False, True],
+                "config": [
+                    (torch.float32, False, None),
+                    (torch.float32, True, None),
+                    (torch.float16, False, None),
+                    (torch.float32, True, 8.0),
+                ],
+            },
+            self._test_custom_all_reduce,
+        )
+
+    def test_custom_all_reduce_replicate(self):
+        self.run_subtests(
+            {
+                "use_custom_all_reduce": [False, True],
+                "config": [
+                    (torch.float32, False, None),
+                    (torch.float16, False, None),
+                ],
+                "use_replicate": [True],
+            },
+            self._test_custom_all_reduce,
+        )
+
+    def _test_custom_all_reduce(
+        self, use_custom_all_reduce: bool, config: tuple, use_replicate: bool = False
+    ):
+        reduce_dtype, force_sum_reduction, divide_factor = config
+        mesh = init_device_mesh(
+            "cpu",
+            (4,) if use_replicate else (2, 2),
+            mesh_dim_names=("replicate",) if use_replicate else ("replicate", "shard"),
+        )
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        parallelize = replicate_with_fsdp if use_replicate else fully_shard
+        parallelize(
+            model, mesh=mesh, mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        )
+        model.set_force_sum_reduction_for_comms(force_sum_reduction)
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        if use_custom_all_reduce:
+            model.set_custom_all_reduce(custom_all_reduce)
+
+        def hook(_tensor):
+            self.assertEqual(custom_all_reduce.call_count, int(use_custom_all_reduce))
+
+        all_reduce_hook = MagicMock(side_effect=hook)
+        model.set_all_reduce_hook(all_reduce_hook)
+        inp = torch.full((2, 4), float(self.rank + 1), device="cpu")
+        model(inp).sum().backward()
+
+        all_reduce_hook.assert_called_once()
+        if use_custom_all_reduce:
+            custom_all_reduce.assert_called_once()
+            kwargs = custom_all_reduce.call_args.kwargs
+            tensor, group, op = kwargs["tensor"], kwargs["group"], kwargs["op"]
+            self.assertIs(group, mesh.get_group("replicate"))
+            self.assertEqual(tensor.dtype, reduce_dtype)
+            self.assertEqual(
+                op,
+                dist.ReduceOp.SUM
+                if force_sum_reduction or reduce_dtype == torch.float16
+                else dist.ReduceOp.AVG,
+            )
+            self.assertIs(all_reduce_hook.call_args.args[0], tensor)
+        else:
+            custom_all_reduce.assert_not_called()
+        self.assertEqual(
+            model.weight.grad.full_tensor(),
+            torch.full((4, 4), 20.0 / (divide_factor or self.world_size), device="cpu"),
+        )
+
+    def test_custom_all_reduce_accumulation(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("replicate", "shard"))
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        fully_shard(model, mesh=mesh)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        model.set_custom_all_reduce(custom_all_reduce)
+        hook = MagicMock()
+        model.set_all_reduce_hook(hook)
+        inp = torch.full((2, 4), float(self.rank + 1), device="cpu")
+
+        model.set_requires_all_reduce(False)
+        model(inp).sum().backward()
+        custom_all_reduce.assert_not_called()
+        hook.assert_not_called()
+        model.set_requires_all_reduce(True)
+        model(inp).sum().backward()
+        custom_all_reduce.assert_called_once()
+        hook.assert_called_once()
+        self.assertEqual(model.weight.grad.full_tensor(), torch.full((4, 4), 10.0))
+
+    def test_restore_default_all_reduce(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("replicate", "shard"))
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        fully_shard(model, mesh=mesh)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        model.set_custom_all_reduce(custom_all_reduce)
+        model.set_custom_all_reduce(None)
+        self.assertIsInstance(
+            model._get_fsdp_state()._fsdp_param_groups[0]._all_reduce_comm,
+            DefaultAllReduce,
+        )
+        model(torch.full((2, 4), float(self.rank + 1), device="cpu")).sum().backward()
+        custom_all_reduce.assert_not_called()
+        self.assertEqual(model.weight.grad.full_tensor(), torch.full((4, 4), 5.0))
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -420,8 +577,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 class TestFullyShardChunkCatMixedDtype(TestCase):
     def test_numerics(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
-        # Dim-0 sizes that need padding, multi-dim, and one large enough to
-        # span several blocks per chunk
+        # Dim-0 sizes that need padding, multi-dim, and one large enough for
+        # the vectorized cast
         sizes = [(5, 3), (7,), (2049, 2, 2)]
         # On CUDA: the fused kernel, a composite fallback, then the fused kernel
         # casting fp16
@@ -444,6 +601,50 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             self.assertEqual(out, expected, atol=0, rtol=0)
             # Autograd must see the in-place write to out
             self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_numerics_cast_alignments(self, device):
+        # The fp32 input shifts the destination alignment of every chunk, and the
+        # source alignment changes from chunk to chunk. Each chunk of the
+        # low-precision input spans several cast blocks, and its last chunk is
+        # one row, i.e. `width` elements, short. The (8, 1000) input with 5
+        # chunks has a last chunk that is all padding.
+        for dtype, num_chunks in itertools.product(
+            (torch.bfloat16, torch.float16), (3, 5)
+        ):
+            base = torch.randn(num_chunks * 8012 + 8, device=device, dtype=dtype)
+            cases = []
+            for dst_offset, width in itertools.product(range(1, 5), range(1, 12)):
+                num_rows = num_chunks * (8001 // width + 1) - 1
+                offset = (width + dst_offset) % 8
+                flat = base[offset : offset + num_rows * width]
+                cases.append((dst_offset, flat.view(num_rows, width)))
+            cases.append((1, torch.randn(8, 1000, device=device, dtype=dtype)))
+            for dst_offset, low_precision in cases:
+                tensors = [
+                    torch.randn(num_chunks * dst_offset, device=device),
+                    low_precision,
+                ]
+                expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+                out = torch.full_like(expected, float("nan"))
+                torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+                msg = f"{dtype} {num_chunks} {dst_offset} {tuple(low_precision.shape)}"
+                self.assertEqual(out, expected, atol=0, rtol=0, msg=msg)
+
+    @onlyCUDA
+    @largeTensorTest("1GB")
+    def test_numerics_cast_several_units_per_thread(self, device):
+        # 50M bf16 elements are enough for each thread to cast 4 units on GPUs
+        # with up to 304 SMs. The fp32 input makes every chunk unaligned.
+        num_chunks = 3
+        tensors = [
+            torch.randn(num_chunks, device=device),
+            torch.randn(3 * 4194304 - 1, 4, device=device, dtype=torch.bfloat16),
+        ]
+        expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+        out = torch.full_like(expected, float("nan"))
+        torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
 
     def test_numerics_with_leading_dims(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
@@ -739,6 +940,39 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
                 self.assertEqual(model(inp), ref_model(inp))
 
     @skip_if_lt_x_gpu(1)
+    def test_single_rank_unshard_casts_once(self):
+        # Unsharding casts the shards straight into the unsharded parameters
+        mesh = init_device_mesh(
+            device.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        model = fully_shard(
+            nn.Linear(16, 33, device=device),
+            mesh=mesh,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        ops = []
+
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        with RecordOps():
+            model.unshard()
+        # One copy for each of the weight and bias, and no separate casts
+        self.assertNotIn(torch.ops.aten._to_copy.default, ops)
+        self.assertEqual(ops.count(torch.ops.aten.copy_.default), 2)
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            self.assertEqual(
+                fsdp_param.unsharded_param,
+                fsdp_param.sharded_param.to_local().to(torch.bfloat16),
+                atol=0,
+                rtol=0,
+            )
+
+    @skip_if_lt_x_gpu(1)
     def test_copy_fns(self):
         # Records what FSDP passes its copy functions, which delegate to the defaults
         model = nn.Sequential(
@@ -944,6 +1178,301 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         self.assertEqual(record_copy_ins(), [None, [1]])
         model.set_reduce_scatter_input_fn(None)
         self.assertEqual(record_copy_ins(), [None, None])
+
+
+class _RecordFuncs(TorchDispatchMode):
+    """Records the ops that run under it and returns their list on entry."""
+
+    def __enter__(self) -> list[torch._ops.OpOverload]:
+        super().__enter__()
+        self.funcs: list[torch._ops.OpOverload] = []
+        return self.funcs
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.funcs.append(func)
+        return func(*args, **(kwargs or {}))
+
+
+class TestFullyShardSingleRank(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _shard_mesh(self) -> DeviceMesh:
+        # A size-1 shard group inside a world of 2
+        return init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )["shard"]
+
+    def _init_models(
+        self,
+        dtype: torch.dtype = torch.float32,
+        bias_grad_dtype: torch.dtype | None = None,
+        **fully_shard_kwargs,
+    ) -> tuple[nn.Module, nn.Module]:
+        # The reference takes foreach_reduce since its input fn is not the default
+        model = nn.Sequential(
+            nn.Linear(16, 33, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Linear(33, 7, device=device, dtype=dtype),
+        )
+        # Gets no gradient in forward
+        model[0].register_parameter(
+            "unused", nn.Parameter(torch.randn(5, device=device, dtype=dtype))
+        )
+        ref_model = copy.deepcopy(model)
+        for module in (model, ref_model):
+            if bias_grad_dtype is not None:  # deepcopy does not copy it
+                module[2].bias.grad_dtype = bias_grad_dtype
+            for submodule in (module[0], module[2], module):
+                fully_shard(
+                    submodule,
+                    shard_placement_fn=lambda param: Shard(param.ndim - 1),
+                    **fully_shard_kwargs,
+                )
+        ref_model.set_reduce_scatter_input_fn(
+            functools.partial(_default_reduce_scatter_input_fn)
+        )
+        return model, ref_model
+
+    def _check_parity(
+        self,
+        model: nn.Module,
+        ref_model: nn.Module,
+        dtype: torch.dtype,
+        num_sync_microbatches: int = 3,
+    ) -> None:
+        """Trains both models and checks that they match bitwise. Only the last
+        ``num_sync_microbatches`` of 3 microbatches reduce gradients."""
+        optims = [
+            # Plain SGD supports gradients with a dtype other than the parameter's
+            torch.optim.SGD(module.parameters(), lr=1e-2, foreach=False)
+            for module in (model, ref_model)
+        ]
+        hook_grads: list[list[torch.Tensor]] = [[], []]
+        for module, grads in zip((model, ref_model), hook_grads):
+            for param in module.parameters():
+                param.register_post_accumulate_grad_hook(
+                    lambda param, grads=grads: grads.append(
+                        param.grad.to_local().clone()
+                    )
+                )
+        generator = torch.Generator(device).manual_seed(self.rank)
+        # Covers new sharded gradients and adds into zeroed ones
+        for set_to_none in (True, False, True):
+            for microbatch in range(3):
+                inp = torch.randn(4, 16, device=device, generator=generator).to(dtype)
+                sync = microbatch >= 3 - num_sync_microbatches
+                losses, copy_ins = [], []
+                for module in (model, ref_model):
+                    module.set_requires_gradient_sync(sync)
+                    losses.append(module(inp).sum())
+                    with _RecordFuncs() as funcs:
+                        losses[-1].backward()
+                    copy_ins.append(
+                        funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+                    )
+                self.assertEqual(losses[0], losses[1], atol=0, rtol=0)
+                # Only the reference copies into reduce-scatter inputs
+                self.assertEqual(copy_ins, [0, 2 if sync else 0])
+            for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+                if (
+                    ref_param.grad is None
+                ):  # unused without reduce_scatter_unused_params
+                    self.assertIsNone(param.grad)
+                    continue
+                grad, ref_grad = param.grad.to_local(), ref_param.grad.to_local()
+                self.assertEqual(grad.dtype, ref_grad.dtype)
+                self.assertEqual(grad.stride(), ref_grad.stride())
+                self.assertEqual(grad, ref_grad, atol=0, rtol=0)
+            for optim in optims:
+                optim.step()
+                optim.zero_grad(set_to_none=set_to_none)
+        self.assertEqual(len(hook_grads[0]), len(hook_grads[1]))
+        self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.to_local(), ref_param.to_local(), atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_matches_reduce_scatter_path(self):
+        self.run_subtests(
+            {
+                # (orig_dtype, param_dtype, reduce_dtype)
+                "dtypes": [
+                    (torch.float32, None, None),
+                    (torch.float32, None, torch.bfloat16),
+                    (torch.float32, torch.bfloat16, torch.float32),
+                    (torch.float32, torch.bfloat16, torch.bfloat16),
+                    (torch.float32, torch.float16, torch.float16),
+                    (torch.bfloat16, None, torch.float32),
+                ],
+                # (gradient divide factor, sum-only reductions)
+                "division": [(None, False), (3.0, False), (3.0, True)],
+            },
+            self._test_single_rank_matches_reduce_scatter_path,
+        )
+
+    def _test_single_rank_matches_reduce_scatter_path(
+        self,
+        dtypes: tuple[torch.dtype, torch.dtype | None, torch.dtype | None],
+        division: tuple[float | None, bool],
+    ):
+        orig_dtype, param_dtype, reduce_dtype = dtypes
+        divide_factor, force_sum = division
+        model, ref_model = self._init_models(
+            orig_dtype,
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(param_dtype, reduce_dtype),
+        )
+        for module in (model, ref_model):
+            for submodule in (module[0], module[2]):
+                if divide_factor is not None:
+                    submodule.set_gradient_divide_factor(divide_factor)
+                submodule.set_force_sum_reduction_for_comms(force_sum)
+        self._check_parity(model, ref_model, param_dtype or orig_dtype)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_mixed_grad_dtypes(self):
+        # A bf16 bias gradient next to fp32 gradients in one group, zero gradients
+        # for an unused parameter, and gradients accumulated without sync
+        self.run_subtests(
+            {"num_sync_microbatches": [3, 1]},
+            self._test_single_rank_mixed_grad_dtypes,
+        )
+
+    def _test_single_rank_mixed_grad_dtypes(self, num_sync_microbatches: int):
+        model, ref_model = self._init_models(
+            bias_grad_dtype=torch.bfloat16,
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        for module in (model, ref_model):
+            module.set_reduce_scatter_unused_params(True)
+        for module in (model, ref_model):
+            self.assertEqual(module[2].bias.grad_dtype, torch.bfloat16)
+        self._check_parity(model, ref_model, torch.bfloat16, num_sync_microbatches)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_grads_do_not_alias(self):
+        # Without casts or divisions, new sharded gradients copy the unsharded ones
+        model, ref_model = self._init_models(mesh=self._shard_mesh())
+        inp = torch.randn(4, 16, device=device)
+        for module in (model, ref_model):
+            loss = module(inp).sum()
+            unsharded_grads: list[torch.Tensor] = []
+            for state in (module[0]._get_fsdp_state(), module[2]._get_fsdp_state()):
+                for fsdp_param in state._fsdp_param_group.fsdp_params:
+                    fsdp_param.unsharded_param.register_post_accumulate_grad_hook(
+                        lambda param: unsharded_grads.append(param.grad)
+                    )
+            loss.backward()
+            self.assertTrue(unsharded_grads)
+            for grad in unsharded_grads:
+                grad.fill_(float("nan"))
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            if ref_param.grad is not None:
+                self.assertEqual(param.grad.to_local(), ref_param.grad.to_local())
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_hook_reads_grad_before_free(self):
+        # A hook that reads the gradient late on the reduce-scatter stream and
+        # then drops it, as an optimizer step in backward does, reads the same
+        # values as on the buffered path. The gradients are large enough that
+        # the next group's copies reuse their blocks once freed.
+        dim = 1024
+        model = nn.Sequential(
+            *(nn.Linear(dim, dim, bias=False, device=device) for _ in range(2))
+        )
+        ref_model = copy.deepcopy(model)
+        for module in (model, ref_model):
+            for submodule in (module[0], module[1], module):
+                fully_shard(submodule, mesh=self._shard_mesh())
+        ref_model.set_reduce_scatter_input_fn(
+            functools.partial(_default_reduce_scatter_input_fn)
+        )
+        inp = torch.randn(4, dim, device=device)
+        hook_grads: list[list[torch.Tensor]] = [[], []]
+        num_copy_ins: list[int] = []
+        for module, grads in zip((model, ref_model), hook_grads):
+
+            def hook(param: nn.Parameter, grads=grads) -> None:
+                device_sleep(device.type, 100_000_000)
+                grads.append(param.grad.to_local().clone())
+                param.grad = None
+
+            for param in module.parameters():
+                param.register_post_accumulate_grad_hook(hook)
+            loss = module(inp).sum()
+            with _RecordFuncs() as funcs:
+                loss.backward()
+            num_copy_ins.append(
+                funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+            )
+        device_module.synchronize()
+        # Only the reference takes the buffered path
+        self.assertEqual(num_copy_ins, [0, 2])
+        self.assertEqual(len(hook_grads[0]), 2)
+        self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_zero_numel_params(self):
+        # The weight of nn.Linear(0, 3) is (3, 0), with sharded size (0, 0) on
+        # Shard(0). There is no reference model: the buffered path fails on
+        # zero-numel gradients in chunk_cat.
+        model = nn.Sequential(
+            nn.Linear(0, 3, device=device), nn.Linear(3, 0, device=device)
+        )
+        fully_shard(model, mesh=self._shard_mesh())
+        # New sharded gradients, then adds into them
+        for _ in range(2):
+            model(torch.randn(4, 0, device=device)).sum().backward()
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            grad = fsdp_param.sharded_param.grad.to_local()
+            self.assertEqual(grad.shape, fsdp_param.sharded_size)
+            self.assertEqual(grad.stride(), fsdp_param.contiguous_sharded_stride)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_reduce_fallbacks(self):
+        # Returns how many reduce-scatter copy-ins one backward runs
+        def num_copy_ins(model: FSDPModule) -> int:
+            loss = model(torch.randn(2, 8, device=device)).sum()
+            with _RecordFuncs() as funcs:
+                loss.backward()
+            return funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+
+        def init_model(**kwargs: object) -> FSDPModule:
+            linear_device = "cpu" if "offload_policy" in kwargs else device
+            kwargs.setdefault("mesh", self._shard_mesh())
+            return fully_shard(nn.Linear(8, 8, device=linear_device), **kwargs)
+
+        model = init_model()
+        self.assertEqual(num_copy_ins(model), 0)
+        model.set_allocate_memory_from_process_group_for_comm(True)
+        self.assertEqual(num_copy_ins(model), 0)
+
+        # A size-1 group never calls the comm, so any comm takes the fast path
+        class CustomReduceScatter(DefaultReduceScatter):
+            pass
+
+        model.set_custom_reduce_scatter(CustomReduceScatter())
+        self.assertEqual(num_copy_ins(model), 0)
+
+        model = init_model()
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+        self.assertEqual(num_copy_ins(model), 1)
+
+        model = init_model()
+        model.set_all_reduce_hook(lambda output: None)
+        self.assertEqual(num_copy_ins(model), 1)
+
+        model = init_model(offload_policy=CPUOffloadPolicy())
+        self.assertEqual(num_copy_ins(model), 1)
+
+        # HSDP with a size-1 shard dim all-reduces over the replicate dim
+        mesh = init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )
+        self.assertEqual(num_copy_ins(init_model(mesh=mesh)), 1)
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
@@ -2825,13 +3354,12 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         return 1
 
     @parametrize("divide_factor", [None, 1.0, 2.0])
-    def test_singleton_copy_division(self, divide_factor):
-        divisions = []
+    def test_singleton_reduce_reuses_input(self, divide_factor):
+        ops = []
 
-        class RecordDivisions(TorchDispatchMode):
+        class RecordOps(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.div.Tensor:
-                    divisions.append(func)
+                ops.append(func)
                 return func(*args, **(kwargs or {}))
 
         model = nn.Linear(8, 4, bias=False, device=device)
@@ -2840,10 +3368,113 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
             model.set_gradient_divide_factor(divide_factor)
         inp = torch.ones(3, 8, device=device)
         loss = model(inp).sum()
-        with RecordDivisions():
+        allocate = DefaultReduceScatter.allocate
+        with (
+            patch.object(
+                DefaultReduceScatter, "allocate", autospec=True, side_effect=allocate
+            ) as mock_allocate,
+            RecordOps(),
+        ):
             loss.backward()
+        # The comm allocates nothing and the packed input is not copied to an output
+        self.assertEqual(mock_allocate.call_count, 0)
+        self.assertNotIn(torch.ops.aten.copy_.default, ops)
+        div_ops = (torch.ops.aten.div.Tensor, torch.ops.aten.div_.Tensor)
+        divisions = [op for op in ops if op in div_ops]
         self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
         expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
+        self.assertEqual(model.weight.grad.to_local(), expected)
+
+    @unittest.skipIf(not hasattr(device_module, "_sleep"), "requires device sleep")
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_accumulation_with_delayed_post_reduce(self, hsdp):
+        # Delay reduce-scatter stream work so that reading a buffer released
+        # too early would race with the next module's backward reusing it. The
+        # sleep only widens that window; nothing relies on it for ordering.
+        # hsdp=True checks that partial accumulation keeps a separate output.
+        sleep_cycles = int(50 * get_cycles_per_ms(device.type))
+
+        def delayed_div_if_needed(tensor, div_factor):
+            device_sleep(device.type, sleep_cycles)
+            _div_if_needed(tensor, div_factor)
+
+        torch.manual_seed(42)
+        dim, num_layers, num_microbatches = 2048, 8, 3
+        layers = [nn.Linear(dim, dim, bias=False) for _ in range(num_layers)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        target = "torch.distributed.fsdp._fully_shard._fsdp_collectives._div_if_needed"
+        with patch(target, delayed_div_if_needed):
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                if hsdp:
+                    model.set_requires_all_reduce(is_last_microbatch)
+                inp = torch.randn(512, dim, device=device)
+                ref_model(inp).square().mean().backward()
+                model(inp).square().mean().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_custom_comm_persistent_input(self, hsdp):
+        class PersistentInputReduceScatter(DefaultReduceScatter):
+            # Comm allows reusing a persistent buffer for the input
+            def __init__(self):
+                self.buffer = None
+                self.next_allocation_is_input = True
+
+            def allocate(self, size, *, dtype, device):
+                is_input = self.next_allocation_is_input
+                self.next_allocation_is_input = not is_input
+                if not is_input:
+                    return super().allocate(size, dtype=dtype, device=device)
+                if self.buffer is None:
+                    self.buffer = super().allocate(size, dtype=dtype, device=device)
+                return self.buffer
+
+        torch.manual_seed(42)
+        layers = [nn.Linear(16, 16, bias=False) for _ in range(4)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        comm = PersistentInputReduceScatter()
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+            layer.set_custom_reduce_scatter(comm)
+        fully_shard(model, mesh=mesh)
+        inp = torch.randn(8, 16, device=device)
+        ref_model(inp).square().mean().backward()
+        model(inp).square().mean().backward()
+        # No reduce-scatter runs, so the comm is never asked for a buffer
+        self.assertIsNone(comm.buffer)
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize("hsdp", [False, True])
+    @parametrize("split_by", ["fp16_reduce", "force_sum"])
+    def test_singleton_split_divide_factor(self, split_by, hsdp):
+        # fp16 and forced-sum reductions split the divide factor into pre/post
+        # factors, so the singleton path must not divide by it again
+        model = nn.Linear(8, 4, bias=False, device=device)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        reduce_dtype = torch.float16 if split_by == "fp16_reduce" else None
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+        model.set_gradient_divide_factor(4.0)
+        model.set_force_sum_reduction_for_comms(split_by == "force_sum")
+        inp = torch.ones(3, 8, device=device)
+        model(inp).sum().backward()
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / 4)
         self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
