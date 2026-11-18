@@ -433,7 +433,7 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         device = _get_device_type(cls.world_size)
         if device == "cpu":
             return "gloo"
