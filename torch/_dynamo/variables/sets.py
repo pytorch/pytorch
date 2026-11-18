@@ -537,7 +537,7 @@ class BaseSetVariable(VariableTracker):
 
         if self.source and not is_constant_source(self.source):
             tx.output.guard_on_key_order.add(self.source)
-        return SetIterator.create(self.items)
+        return SetIterator.create(self.items, owner=self)
 
     def install_set_order_guard(self, tx: "InstructionTranslatorBase") -> None:
         from .dicts import _contains_nan, _get_literal_key
@@ -1068,7 +1068,7 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictKeysIterator
 
-        return DictKeysIterator.create(self.items)
+        return DictKeysIterator.create(self.items, owner=self)
 
     def debug_repr(self) -> str:
         if not self.items:

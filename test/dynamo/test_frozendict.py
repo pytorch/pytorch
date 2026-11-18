@@ -8,6 +8,7 @@ import time
 import types
 import unittest
 from collections import defaultdict, OrderedDict
+from functools import partial
 from unittest.mock import Mock
 
 import torch
@@ -193,9 +194,9 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
 
-    @parametrize("mapping_input", [False, True])
+    @parametrize("operation", ["mapping", "pairs", "fromkeys"])
     @parametrize("key_error", ["unhashable", "custom", "subclass"])
-    def test_constructor_key_type_errors(self, mapping_input, key_error):
+    def test_constructor_and_fromkeys_key_type_errors(self, operation, key_error):
         class KeyTypeError(TypeError):
             pass
 
@@ -218,40 +219,13 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             key = [] if key_error == "unhashable" else Key()
-            source = Mapping(key, x) if mapping_input else [(key, x)]
             try:
-                builtins.frozendict(source)
-            except TypeError as error:
-                return x + 1, type(error), error.args
-            return x - 1, None, ()
-
-        x = torch.randn(3)
-        expected = fn(x)
-        if key_error == "subclass":
-            self.assertIs(expected[1], KeyTypeError)
-            self.assertEqual(expected[2], ("custom hash failed", 17))
-        else:
-            self.assertIs(expected[1], TypeError)
-            self.assertIn("as a frozendict key", expected[2][0])
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
-
-    @parametrize("key_error", ["unhashable", "custom", "subclass"])
-    def test_fromkeys_key_type_errors(self, key_error):
-        class KeyTypeError(TypeError):
-            pass
-
-        class Key:
-            def __hash__(self):
-                if key_error == "subclass":
-                    raise KeyTypeError("custom hash failed", 17)
-                raise TypeError("custom hash failed")
-
-        def fn(x):
-            key = [] if key_error == "unhashable" else Key()
-            try:
-                builtins.frozendict.fromkeys([key], x)
+                if operation == "mapping":
+                    builtins.frozendict(Mapping(key, x))
+                elif operation == "pairs":
+                    builtins.frozendict([(key, x)])
+                else:
+                    builtins.frozendict.fromkeys([key], x)
             except TypeError as error:
                 return x + 1, type(error), error.args
             return x - 1, None, ()
@@ -338,24 +312,21 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             def forward(self, x, mapping):
                 return fn(x, mapping)
 
+        inputs = [
+            (x, builtins.frozendict(x=x + 1, nested=builtins.frozendict(y=x * 2)))
+            for x in (torch.ones(2), torch.full((2,), 3.0))
+        ]
         try:
             if backend == "export":
-                x = torch.ones(2)
-                mapping = builtins.frozendict(
-                    x=x + 1, nested=builtins.frozendict(y=x * 2)
-                )
-                exported = torch.export.export(Module(), (x, mapping), strict=True)
+                exported = torch.export.export(Module(), inputs[0], strict=True)
                 buffer = io.BytesIO()
                 torch.export.save(exported, buffer)
                 buffer.seek(0)
                 compiled = torch.export.load(buffer).module()
             else:
                 compiled = torch.compile(fn, backend=backend, fullgraph=True)
-            for x in (torch.ones(2), torch.full((2,), 3.0)):
-                mapping = builtins.frozendict(
-                    x=x + 1, nested=builtins.frozendict(y=x * 2)
-                )
-                self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            for args in inputs:
+                self.assertEqual(compiled(*args), fn(*args))
         finally:
             torch._dynamo.trace_rules._allowed_callable_ids.remove(id(consume))
         self.assertFalse(torch._dynamo.trace_rules.is_callable_disallowed(consume))
@@ -743,14 +714,15 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             )
 
         x = torch.randn(3)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(result[0]["a"], [x, x + 1])
-        self.assertEqual(list(result[1]), ["a"])
-        self.assertIs(next(iter(result[2])), result[0]["a"])
-        self.assertIs(next(iter(result[3]))[1], result[0]["a"])
-        self.assertIs(result[4]["a"], result[0]["a"])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        mapping, keys, values, items, proxy = compiled(x)
+        self.assertEqual(mapping["a"], [x, x + 1])
+        self.assertEqual(list(keys), ["a"])
+        self.assertIs(next(iter(values)), mapping["a"])
+        self.assertIs(next(iter(items))[1], mapping["a"])
+        self.assertIs(proxy["a"], mapping["a"])
         with self.assertRaisesRegex(TypeError, "does not support item assignment"):
-            result[4]["a"] = x
+            proxy["a"] = x
 
     @parametrize("base_type", [dict, OrderedDict, defaultdict])
     @parametrize("iterable_type", [list, dict, set, frozenset])
@@ -789,8 +761,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertIs(type(result), mapping_type)
-        self.assertEqual(result, fn(x))
-        self.assertEqual(list(result), list(fn(x)))
+        self.assertEqual(list(result.items()), list(fn(x).items()))
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize("name", ["__eq__", "__ne__", "__or__", "__ror__"])
@@ -1724,11 +1695,7 @@ class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
             def keys(self):
                 return ["override"]
 
-            def values(self):
-                return ["override"]
-
-            def items(self):
-                return ["override"]
+            values = items = keys
 
         def fn(x):
             mapping = FrozenMapping(a=x + 1)
@@ -1769,6 +1736,18 @@ class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(result), ["seed", "b", "a"])
         self.assertEqual(result, fn(x))
 
+    def _check_seeded_fromkeys(self, cls, run, x):
+        def fn(x):
+            return run(x, cls.fromkeys)
+
+        expected = fn(x)
+        polyfill = partial(torch._dynamo.polyfills.frozendict_fromkeys, cls)
+        self.assertEqual(run(x, polyfill), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+        return expected
+
     @parametrize(
         "iterable_type",
         [list, iter, dict, getattr(builtins, "frozendict", dict), set, frozenset],
@@ -1794,23 +1773,16 @@ class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
                     data = [(Key("seed"), 0)]
                 return super().__new__(cls, data)
 
-        def fn(x, *, use_polyfill=False):
+        def run(x, fromkeys):
             state["seed_seen"] = True
             keys = iterable_type({Key("a"): 0, Key("b"): 0})
             state["seed_seen"] = False
-            if use_polyfill:
-                result = torch._dynamo.polyfills.frozendict_fromkeys(Seeded, keys, x)
-            else:
-                result = Seeded.fromkeys(keys, x)
+            result = fromkeys(keys, x)
             return x + len(result), [key.name for key in result]
 
         x = torch.randn(3)
-        expected = fn(x)
-        self.assertEqual(expected, (x + 3, ["seed", "a", "b"]))
-        self.assertEqual(fn(x, use_polyfill=True), expected)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
+        result = self._check_seeded_fromkeys(Seeded, run, x)
+        self.assertEqual(result, (x + 3, ["seed", "a", "b"]))
 
     @parametrize(
         "iterable_type", [dict, getattr(builtins, "frozendict", dict), set, frozenset]
@@ -1828,23 +1800,16 @@ class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
             def __new__(cls, data=None):
                 return super().__new__(cls, {"seed": 5} if data is None else data)
 
-        def fn(x, *, use_polyfill=False):
+        def run(x, fromkeys):
             key = Key()
             keys = iterable_type({key: 1})
             calls = key.calls
-            if use_polyfill:
-                result = torch._dynamo.polyfills.frozendict_fromkeys(Seeded, keys, x)
-            else:
-                result = Seeded.fromkeys(keys, x)
+            result = fromkeys(keys, x)
             return x + len(result), key.calls - calls
 
         x = torch.randn(3)
-        expected = fn(x)
-        self.assertEqual(expected, (x + 2, 0))
-        self.assertEqual(fn(x, use_polyfill=True), expected)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
+        result = self._check_seeded_fromkeys(Seeded, run, x)
+        self.assertEqual(result, (x + 2, 0))
 
     @parametrize(
         "iterable_type",
@@ -1862,24 +1827,17 @@ class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
             def __new__(cls, data=None):
                 return super().__new__(cls, {Key(): 5} if data is None else data)
 
-        def fn(x, *, use_polyfill=False):
+        def run(x, fromkeys):
             keys = iterable_type({Key(): 0})
             try:
-                if use_polyfill:
-                    torch._dynamo.polyfills.frozendict_fromkeys(Seeded, keys, x)
-                else:
-                    Seeded.fromkeys(keys, x)
+                fromkeys(keys, x)
             except RuntimeError as error:
                 return x + 1, error.args
             return x - 1, ()
 
         x = torch.randn(3)
-        expected = fn(x)
-        self.assertEqual(expected, (x + 1, ("seed collision",)))
-        self.assertEqual(fn(x, use_polyfill=True), expected)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
+        result = self._check_seeded_fromkeys(Seeded, run, x)
+        self.assertEqual(result, (x + 1, ("seed collision",)))
 
     @parametrize("custom_error", [False, True])
     def test_fromkeys_seed_hash_error_context(self, custom_error):
@@ -1896,30 +1854,21 @@ class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
             def __new__(cls, data=None):
                 return super().__new__(cls, {"seed": 5} if data is None else data)
 
-        def fn(x, *, use_polyfill=False):
+        def run(x, fromkeys):
             try:
-                if use_polyfill:
-                    torch._dynamo.polyfills.frozendict_fromkeys(
-                        Seeded, iter([Key()]), x
-                    )
-                else:
-                    Seeded.fromkeys(iter([Key()]), x)
+                fromkeys(iter([Key()]), x)
             except TypeError as error:
                 return x + 1, error.args, type(error) is error_type
             return x - 1, (), False
 
         x = torch.randn(3)
-        expected = fn(x)
-        self.assertEqual(expected[0], x + 1)
-        self.assertTrue(expected[2])
+        result = self._check_seeded_fromkeys(Seeded, run, x)
+        self.assertEqual(result[0], x + 1)
+        self.assertTrue(result[2])
         if custom_error:
-            self.assertEqual(expected[1], ("bad hash",))
+            self.assertEqual(result[1], ("bad hash",))
         else:
-            self.assertIn("as a frozendict key (bad hash)", expected[1][0])
-        self.assertEqual(fn(x, use_polyfill=True), expected)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
+            self.assertIn("as a frozendict key (bad hash)", result[1][0])
 
     @parametrize("instance", [False, True])
     def test_fromkeys_inherited_new_init_calls(self, instance):
