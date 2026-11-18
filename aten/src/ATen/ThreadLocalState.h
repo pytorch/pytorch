@@ -11,6 +11,7 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/ThreadLocalPythonObjects.h>
+#include <ATen/TunableOpExecution.h>
 #include <ATen/record_function.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -55,6 +56,7 @@ class TORCH_API ThreadLocalState {
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
   std::shared_ptr<c10::ThreadLocalDebugInfo> debug_info_;
+  TunableOpBinding tunableop_binding_;
 
   // RecordFunction TLS
   RecordFunctionTLS rf_tls_;

@@ -12,6 +12,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
+#include <ATen/TunableOpExecution.h>
 
 #include <fstream>
 #include <functional>
@@ -68,6 +69,28 @@ struct TORCH_CUDA_CPP_API TuningResults {
   // Mapping from Callable signature to Callable's tuning result
   ResultsMap results;
 };
+
+// A read-only results table owned by one serving engine.
+class TORCH_CUDA_CPP_API ServingTunableOpResults {
+ public:
+  explicit ServingTunableOpResults(ResultsMap results) : results_(std::move(results)) {}
+  ResultEntry Lookup(const std::string& op, const std::string& params) const;
+  size_t GetSize() const;
+
+ private:
+  const ResultsMap results_;
+};
+
+// Reads and validates a results file against this process's environment.
+// Returns null if the file is missing, fails validation or has no results.
+// Requires managed TunableOp.
+TORCH_CUDA_CPP_API std::shared_ptr<const ServingTunableOpResults>
+LoadServingTunableOpResults(const std::string& filename);
+
+// Looks up the current call's bound results table. Null when the call may not
+// use TunableOp or the table has no entry.
+TORCH_CUDA_CPP_API ResultEntry LookupServingTunableOpResult(
+    const std::string& op, const std::string& params);
 
 class TORCH_CUDA_CPP_API TuningResultsManager {
   public:

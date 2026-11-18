@@ -11,6 +11,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/tunable/Tunable.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
@@ -91,6 +92,50 @@ TuningContext* getTuningContext() {
   return &tuning_context;
 }
 
+ResultEntry ServingTunableOpResults::Lookup(
+    const std::string& op, const std::string& params) const {
+  const auto found = results_.find(op);
+  if (found == results_.end()) {
+    return ResultEntry::Null();
+  }
+  const auto row = found->second.find(params);
+  return row == found->second.end() ? ResultEntry::Null() : row->second;
+}
+
+size_t ServingTunableOpResults::GetSize() const {
+  size_t count = 0;
+  for (const auto& entry : results_) {
+    count += entry.second.size();
+  }
+  return count;
+}
+
+std::shared_ptr<const ServingTunableOpResults> LoadServingTunableOpResults(
+    const std::string& filename) {
+  TORCH_CHECK(at::IsManagedTunableOp(),
+      "LoadServingTunableOpResults requires managed TunableOp");
+  TuningContext reader;
+  if (!reader.ReadFile(filename)) {
+    return nullptr;
+  }
+  auto results = std::make_shared<const ServingTunableOpResults>(
+      reader.GetTuningResultsManager().Dump());
+  return results->GetSize() == 0 ? nullptr : results;
+}
+
+ResultEntry LookupServingTunableOpResult(
+    const std::string& op, const std::string& params) {
+  const auto& binding = at::GetTunableOpBinding();
+  if (!binding || !binding->results ||
+      !getTuningContext()->IsTunableOpEnabled()) {
+    return ResultEntry::Null();
+  }
+  const auto result = binding->results->Lookup(op, params);
+  TUNABLE_LOG3("serving selection generation=", binding->generation,
+      " op=", op, " params=", params, " solution=", result.GetKey());
+  return result;
+}
+
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
   static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
   if (!blaslog) {
@@ -145,6 +190,9 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
 ResultEntry TuningResultsManager::LookupWildcardFallback(
     const std::string& op_signature,
     const std::string& concrete_params_signature) {
+  if (at::IsManagedTunableOp()) {
+    return ResultEntry::Null();
+  }
   std::scoped_lock l{lock_};
   auto kernel_map_it = results_.find(op_signature);
   if (kernel_map_it == results_.cend()) {
@@ -636,6 +684,11 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
+  if (at::IsManagedTunableOp()) {
+    const auto& binding = at::GetTunableOpBinding();
+    return binding && binding->permission == at::TunableOpPermission::Enabled &&
+        binding->results && binding->device == c10::cuda::current_device();
+  }
   static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED") == "1";
   if (eval) {
     return true;
@@ -670,6 +723,9 @@ void TuningContext::EnableWildcardFallback(bool value) {
 }
 
 bool TuningContext::IsWildcardFallbackEnabled() const {
+  if (at::IsManagedTunableOp()) {
+    return false;
+  }
   static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_WILDCARD_FALLBACK") == "1";
   if (eval) {
     return true;
@@ -678,6 +734,9 @@ bool TuningContext::IsWildcardFallbackEnabled() const {
 }
 
 bool TuningContext::IsTuningEnabled() const {
+  if (at::IsManagedTunableOp()) {
+    return false;
+  }
   static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING") == "0";
   if (eval) {
     return false;
@@ -686,6 +745,9 @@ bool TuningContext::IsTuningEnabled() const {
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
+  if (at::IsManagedTunableOp()) {
+    return false;
+  }
   static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED") == "1";
   if (eval) {
     return true;
@@ -878,6 +940,9 @@ int TuningContext::GetRotatingBufferSize() const {
 }
 
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
+  if (at::IsManagedTunableOp()) {
+    return manager_;
+  }
   c10::call_once(manager_init_once_, [this]() {
     manager_initialized_ = true;
     if (GetFilename().empty()) {
