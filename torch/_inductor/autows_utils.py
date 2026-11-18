@@ -32,3 +32,20 @@ def has_two_ctas() -> bool:
     except ImportError:
         return False
     return "two_ctas" in inspect.signature(tl.dot).parameters
+
+
+@functools.cache
+def has_smem_operand_ring_first() -> bool:
+    """Whether ``tl.range`` accepts autoWS's ``smem_operand_ring_first`` option."""
+    try:
+        import dataclasses
+
+        import triton.language as tl
+    except ImportError:
+        return False
+    try:
+        return "smem_operand_ring_first" in {
+            f.name for f in dataclasses.fields(tl.range)
+        }
+    except TypeError:
+        return False
