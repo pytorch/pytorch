@@ -73,7 +73,7 @@ class NIXLTransport(Transport):
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
 
-    The UCX plugin is restricted to the RDMA NIC nearest the accelerator unless
+    The UCX plugin is restricted to the RDMA NICs nearest the accelerator unless
     ``backend_options`` sets ``device_list`` or ``UCX_NET_DEVICES`` is set; see
     "RDMA NIC selection" in the transport docs.
     """

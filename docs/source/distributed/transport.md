@@ -84,27 +84,38 @@ native stream support may override these methods.
 
 The NIXL (UCX plugin) and Mooncake (`protocol="rdma"`) backends restrict RDMA
 traffic to the NICs nearest the transport's accelerator, targeting one process
-per accelerator. The accelerator is the transport's `device`, or, if `device`
-is CPU or `None`, the current `torch.accelerator` device once the accelerator
-runtime is initialized: call `torch.accelerator.set_device_index` (or
-`torch.cuda.set_device`) before creating the transport. Processes that never
-initialize an accelerator are left unrestricted.
+per accelerator. The accelerator is the transport's `device` if it has an
+index, otherwise the current `torch.accelerator` device: call
+`torch.accelerator.set_device_index` (or `torch.cuda.set_device`) before
+creating the transport. If `device` is CPU or `None`, the current device is used
+only once the accelerator runtime is initialized, so processes that never
+initialize an accelerator are left unrestricted. Selection is also skipped
+when the current device is 0 while `LOCAL_RANK` is nonzero on a multi-device
+host, since that usually means `set_device` was not called. An accelerator
+`device` initializes its runtime when the transport is created.
 
-Only active NICs at the fastest link rate are considered, which excludes
-slower frontend NICs. The nearest NICs share the longest PCIe path with the
-accelerator, with ties broken by NUMA node. Accelerators tied on the same NICs,
-including those hidden by `CUDA_VISIBLE_DEVICES`, split them in PCI address
-order: each gets an equal, disjoint share, leaving any remainder unused, or
-NICs are shared round-robin when there are more accelerators than NICs. Where sysfs exposes no locality, such as
-in some VMs, this reduces to a split in PCI address order.
+Only active physical NICs at the fastest link rate are considered, which
+excludes slower frontend NICs and SR-IOV virtual functions. The nearest NICs
+share the longest PCIe path with the accelerator, with ties broken by NUMA
+node. Accelerators with the same nearest NICs, including those hidden by
+`CUDA_VISIBLE_DEVICES`, form a group. In PCI address order, each member gets an
+equal, disjoint share of the group's NICs sorted by name (`mlx5_10` sorts
+before `mlx5_2`); members share NICs round-robin if they outnumber them. Groups
+containing closer accelerators claim NICs first. A group whose nearest NICs
+overlap a closer group's uses the unclaimed ones, including that group's
+remainder, or shares the claimed ones if none are left. A group never uses
+NICs outside its nearest set, even if idle. Where sysfs exposes no locality,
+such as in some VMs, all accelerators form one group.
 
 Selection reads Linux sysfs and the PCI address from `get_device_properties`,
 which CUDA and ROCm expose. If either is unavailable, the backend uses its
 default NIC discovery. To choose NICs explicitly, pass
-`backend_options={"device_list": "mlx5_0, mlx5_1"}` to NIXL or
-`device_name="mlx5_0,mlx5_1"` to Mooncake; list every NIC to use them all.
-Setting `UCX_NET_DEVICES` (for example `UCX_NET_DEVICES=all`, also needed
-for UCX TCP transports) or `MC_TE_FILTERS` also disables selection.
+`backend_options={"device_list": "mlx5_0, mlx5_1"}` to NIXL (names separated
+by `", "`) or `device_name="mlx5_0,mlx5_1"` to Mooncake (separated by `","`);
+list every NIC to use them all. Setting `UCX_NET_DEVICES` disables selection
+for NIXL (for example `UCX_NET_DEVICES=all`, also needed for UCX TCP
+transports), and `MC_TE_FILTERS`, `MC_CUSTOM_TOPO_JSON` or `MC_RDMA_DATA_DIRECT_PAIRING`
+disables it for Mooncake.
 
 ## NIXL backend
 

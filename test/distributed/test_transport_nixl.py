@@ -810,11 +810,12 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             patch.dict(os.environ),
         ):
             os.environ.pop("UCX_NET_DEVICES", None)
-            with _nixl.NIXLTransport(num_threads=2) as transport:
+            with _nixl.NIXLTransport("cpu", num_threads=2) as transport:
                 self.assertEqual(
                     transport._agent.backends["UCX"],
                     {"num_threads": "2", "device_list": "mlx5_0, mlx5_1"},
                 )
+            self.select_nics.assert_called_once_with(torch.device("cpu"))
             options = {"device_list": "mlx5_3"}
             with _nixl.NIXLTransport(backend_options=options) as transport:
                 self.assertEqual(transport._agent.backends["UCX"], options)

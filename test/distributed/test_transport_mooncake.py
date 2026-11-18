@@ -145,9 +145,15 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             patch.object(_mooncake, "_load_backend", return_value=_backend()),
             patch.dict(os.environ),
         ):
-            os.environ.pop("MC_TE_FILTERS", None)
-            with new_transport("mooncake", host="127.0.0.1") as transport:
+            for name in (
+                "MC_TE_FILTERS",
+                "MC_CUSTOM_TOPO_JSON",
+                "MC_RDMA_DATA_DIRECT_PAIRING",
+            ):
+                os.environ.pop(name, None)
+            with new_transport("mooncake", device="cpu", host="127.0.0.1") as transport:
                 self.assertEqual(transport._engine.options[2], "mlx5_0,mlx5_1")
+            self.select_nics.assert_called_once_with(torch.device("cpu"))
             with new_transport(
                 "mooncake", host="127.0.0.1", device_name="mlx5_3"
             ) as transport:
@@ -156,9 +162,14 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
                 "mooncake", host="127.0.0.1", protocol="tcp"
             ) as transport:
                 self.assertEqual(transport._engine.options[2], "")
-            os.environ["MC_TE_FILTERS"] = "mlx5_2"
-            with new_transport("mooncake", host="127.0.0.1") as transport:
-                self.assertEqual(transport._engine.options[2], "")
+            for name in (
+                "MC_TE_FILTERS",
+                "MC_CUSTOM_TOPO_JSON",
+                "MC_RDMA_DATA_DIRECT_PAIRING",
+            ):
+                with patch.dict(os.environ, {name: "x"}):
+                    with new_transport("mooncake", host="127.0.0.1") as transport:
+                        self.assertEqual(transport._engine.options[2], "")
 
     def test_ipv6_host_requires_mc_use_ipv6(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):

@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -60,8 +61,8 @@ class TestSelectNics(TestCase):
         if not vf:
             self.gpus.append(address)
 
-    def add_nic(self, name, path, numa=0, rate=400, state="4: ACTIVE"):
-        self.add_pci(path, NIC, numa)
+    def add_nic(self, name, path, numa=0, rate=400, state="4: ACTIVE", vf=False):
+        self.add_pci(path, NIC, numa, vf)
         port = self.ib / name / "ports" / "1"
         port.mkdir(parents=True)
         (port / "state").write_text(state)
@@ -69,7 +70,11 @@ class TestSelectNics(TestCase):
         (self.ib / name / "device").symlink_to(self.devices / path)
 
     def select(self, index):
-        return _topology.select_nics(torch.device("cuda", index))
+        # Patched to fail if selection hits an unexpected exception.
+        with patch.object(_topology.logger, "debug") as debug:
+            selected = _topology.select_nics(torch.device("cuda", index))
+        debug.assert_not_called()
+        return selected
 
     def test_pcie_switch_beats_numa_and_order(self):
         for i in range(2):
@@ -115,6 +120,63 @@ class TestSelectNics(TestCase):
             [["mlx5_0", "mlx5_1"], ["mlx5_2", "mlx5_3"]],
         )
 
+    def test_overlapping_nearest_nics_stay_disjoint(self):
+        # GPU0 shares a PCIe switch with NIC0; GPU1 is equally far from both.
+        switch = "pci0000:00/0000:00:01.0/0000:01:00.0"
+        self.add_gpu(f"{switch}/0000:02:00.0")
+        self.add_nic("mlx5_0", f"{switch}/0000:03:00.0")
+        self.add_gpu("pci0000:00/0000:00:02.0/0000:04:00.0")
+        self.add_nic("mlx5_1", "pci0000:00/0000:00:03.0/0000:05:00.0")
+        self.assertEqual([self.select(i) for i in range(2)], [["mlx5_0"], ["mlx5_1"]])
+
+    def test_unassigned_nics_stay_free(self):
+        # GPU0/1 split mlx5_0..2 under their switch; GPU2/3 get the leftover.
+        switch = "pci0000:00/0000:00:01.0/0000:01:00.0"
+        for i in range(2):
+            self.add_gpu(f"{switch}/0000:0{2 + i}:00.0")
+        for i in range(3):
+            self.add_nic(f"mlx5_{i}", f"{switch}/0000:0{4 + i}:00.0")
+        for i in range(2):
+            self.add_gpu(f"pci0000:00/0000:00:0{2 + i}.0/0000:1{i}:00.0")
+        self.add_nic("mlx5_3", "pci0000:00/0000:00:04.0/0000:20:00.0")
+        self.assertEqual(
+            [self.select(i) for i in range(4)],
+            [["mlx5_0"], ["mlx5_1"], ["mlx5_2"], ["mlx5_3"]],
+        )
+
+    def test_claimed_nics_shared_when_none_free(self):
+        # GPU0/1 each share a switch with one NIC; GPU2 ties on both.
+        for i in range(2):
+            switch = f"pci0000:00/0000:00:0{i + 1}.0/0000:0{i + 1}:00.0"
+            self.add_gpu(f"{switch}/0000:1{i}:00.0")
+            self.add_nic(f"mlx5_{i}", f"{switch}/0000:2{i}:00.0")
+        self.add_gpu("pci0000:00/0000:00:03.0/0000:30:00.0")
+        self.assertEqual(
+            [self.select(i) for i in range(3)],
+            [["mlx5_0"], ["mlx5_1"], ["mlx5_0", "mlx5_1"]],
+        )
+
+    def test_group_ranked_by_closest_member(self):
+        # GPU1 shares a switch with mlx5_0, so its group (with GPU0, which is
+        # nearest mlx5_0 only by NUMA) claims mlx5_0 before GPU2's tie.
+        switch = "pci0001:00/0001:00:01.0/0001:01:00.0"
+        self.add_gpu(root(0), numa=1)
+        self.add_gpu(f"{switch}/0001:02:00.0", numa=1)
+        self.add_nic("mlx5_0", f"{switch}/0001:03:00.0", numa=1)
+        self.add_nic("mlx5_1", "pci0001:00/0001:00:05.0/0001:06:00.0")
+        self.add_gpu("pci0001:00/0001:00:09.0/0001:0a:00.0", numa=2)
+        self.assertEqual(
+            [self.select(i) for i in range(3)], [["mlx5_0"], ["mlx5_0"], ["mlx5_1"]]
+        )
+
+    def test_nic_virtual_functions_ignored(self):
+        for i in range(2):
+            self.add_gpu(root(i))
+        self.add_nic("mlx5_0", root(0x10))
+        self.add_nic("mlx5_1", f"{root(0x10)}/0010:02:00.0", vf=True)
+        self.add_nic("mlx5_2", root(0x11))
+        self.assertEqual([self.select(i) for i in range(2)], [["mlx5_0"], ["mlx5_2"]])
+
     def test_more_gpus_than_nics(self):
         for i in range(3):
             self.add_gpu(root(i))
@@ -141,16 +203,19 @@ class TestSelectNics(TestCase):
         with patch.object(_topology, "_pci_address", return_value=None):
             self.assertIsNone(self.select(0))
         with patch.object(_topology, "_accelerator", return_value=None):
-            self.assertIsNone(_topology.select_nics(torch.device("cpu")))
+            self.assertIsNone(self.select(0))
 
 
 class TestAccelerator(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def accelerator(self, device, initialized):
+    def accelerator(self, device, initialized, current=3, local_rank=None):
         module = SimpleNamespace(is_initialized=lambda: initialized)
-        index = MagicMock(return_value=3)
+        index = MagicMock(return_value=current)
+        env = {} if local_rank is None else {"LOCAL_RANK": local_rank}
         with (
+            patch.dict(os.environ, env),
+            patch.object(torch.accelerator, "device_count", return_value=8),
             patch.object(
                 torch.accelerator,
                 "current_accelerator",
@@ -172,6 +237,29 @@ class TestAccelerator(TestCase):
             )
             # Never initialize the runtime for a CPU-only process.
             self.assertEqual(self.accelerator(device, False), (None, False))
+
+    def test_unset_device_with_nonzero_local_rank(self):
+        # CUDA initialized without set_device leaves the current device at 0.
+        with self.assertLogs(_topology.logger, "WARNING"):
+            self.assertEqual(
+                self.accelerator(None, True, current=0, local_rank="3"),
+                (None, True),
+            )
+        self.assertEqual(
+            self.accelerator(None, True, current=0, local_rank="0"),
+            (torch.device("cuda", 0), True),
+        )
+
+    def test_device_without_index(self):
+        device = torch.device("cuda")
+        self.assertEqual(
+            self.accelerator(device, False), (torch.device("cuda", 3), True)
+        )
+        with self.assertLogs(_topology.logger, "WARNING"):
+            self.assertEqual(
+                self.accelerator(device, False, current=0, local_rank="3"),
+                (None, True),
+            )
 
     def test_no_accelerator(self):
         with patch.object(torch.accelerator, "current_accelerator", return_value=None):

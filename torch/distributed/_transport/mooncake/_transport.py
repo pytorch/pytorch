@@ -26,6 +26,8 @@ from ._memory import (
 from ._work import _live_transports, _MooncakeWork
 
 
+# Mooncake settings that choose or pair NICs themselves disable NIC selection.
+_USER_NIC_ENVS = ("MC_TE_FILTERS", "MC_CUSTOM_TOPO_JSON", "MC_RDMA_DATA_DIRECT_PAIRING")
 _pinned_registrations: list[tuple[Any, _Registration]] = []
 
 
@@ -80,7 +82,8 @@ class MooncakeTransport(Transport):
     spinning on the lock.
 
     With the default ``protocol="rdma"``, RDMA traffic is restricted to the NICs
-    nearest the accelerator unless ``device_name`` or ``MC_TE_FILTERS`` is set;
+    nearest the accelerator unless ``device_name``, ``MC_TE_FILTERS``,
+    ``MC_CUSTOM_TOPO_JSON`` or ``MC_RDMA_DATA_DIRECT_PAIRING`` is set;
     see "RDMA NIC selection" in the transport docs.
 
     """
@@ -104,7 +107,8 @@ class MooncakeTransport(Transport):
         _validate_timeout(timeout)
         host = _format_host(host)
         backend = _load_backend()
-        if protocol == "rdma" and not device_name and "MC_TE_FILTERS" not in os.environ:
+        user_nics = any(name in os.environ for name in _USER_NIC_ENVS)
+        if protocol == "rdma" and not device_name and not user_nics:
             device_name = ",".join(select_nics(self.device) or ())
         engine = backend.TransferEngine()
         if engine.initialize(host, metadata_server, protocol, device_name) != 0:

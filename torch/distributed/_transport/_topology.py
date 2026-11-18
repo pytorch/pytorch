@@ -8,6 +8,7 @@ device discovery in charge.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import torch
@@ -27,23 +28,40 @@ def _read(path: Path) -> str:
 
 
 def _accelerator(device: torch.device | None) -> torch.device | None:
-    """``device`` if it is an accelerator, else the current accelerator device.
+    """``device`` if it is an indexed accelerator, else the current device.
 
-    Falls back only when the accelerator runtime is already initialized (e.g.
-    by ``set_device``), so CPU-only processes neither initialize it (breaking
-    ``fork``) nor all select device 0's NICs.
+    For a CPU or ``None`` device, falls back only when the accelerator runtime
+    is already initialized (e.g. by ``set_device``), so CPU-only processes
+    neither initialize it (breaking ``fork``) nor all select device 0's NICs.
+    Initialization alone leaves the current device at 0, so device 0 with a
+    nonzero ``LOCAL_RANK`` on a multi-device host is treated as unknown.
     """
     if device is not None and device.type != "cpu":
-        return device
-    accelerator = torch.accelerator.current_accelerator()
-    if accelerator is None:
+        if device.index is not None:
+            return device
+        accelerator = device
+    else:
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is None:
+            return None
+        module = torch.get_device_module(accelerator)
+        is_initialized = getattr(module, "is_initialized", None)
+        if is_initialized is None or not is_initialized():
+            return None
+    index = torch.accelerator.current_device_index()
+    if (
+        index == 0
+        and os.environ.get("LOCAL_RANK", "0") != "0"
+        and torch.accelerator.device_count() > 1
+    ):
+        logger.warning(
+            "transport has no device index and the current %s device is 0 "
+            "with LOCAL_RANK=%s; call set_device first to select RDMA NICs",
+            accelerator.type,
+            os.environ["LOCAL_RANK"],
+        )
         return None
-    is_initialized = getattr(
-        torch.get_device_module(accelerator), "is_initialized", None
-    )
-    if is_initialized is None or not is_initialized():
-        return None
-    return torch.device(accelerator.type, torch.accelerator.current_device_index())
+    return torch.device(accelerator.type, index)
 
 
 def _pci_address(device: torch.device) -> str | None:
@@ -66,22 +84,17 @@ def _nics() -> dict[str, Path]:
     except OSError:
         return {}
     for entry in entries:
-        rate = 0
-        active = False
+        # NIXL uses port 1 of each listed device.
+        port = entry / "ports" / "1"
+        if "ACTIVE" not in _read(port / "state"):
+            continue
+        # SR-IOV virtual functions share their physical function's port.
+        if (entry / "device" / "physfn").exists():
+            continue
         try:
-            ports = list((entry / "ports").iterdir())
-        except OSError:
-            continue
-        for port in ports:
-            if "ACTIVE" not in _read(port / "state"):
-                continue
-            active = True
-            try:
-                rate = max(rate, int(float(_read(port / "rate").split()[0])))
-            except (IndexError, ValueError):
-                pass
-        if not active:
-            continue
+            rate = int(float(_read(port / "rate").split()[0]))
+        except (IndexError, ValueError):
+            rate = 0
         try:
             nics[entry.name] = ((entry / "device").resolve(strict=True), rate)
         except OSError:
@@ -95,8 +108,13 @@ def _numa_node(path: Path) -> str:
     return _read(path / "numa_node")
 
 
-def _nearest(path: Path, nics: dict[str, Path]) -> tuple[str, ...]:
-    """NICs sharing the longest PCIe path prefix with ``path``, then NUMA node."""
+def _nearest(
+    path: Path, nics: dict[str, Path]
+) -> tuple[tuple[int, bool], tuple[str, ...]]:
+    """NICs sharing the longest PCIe path prefix with ``path``, then NUMA node.
+
+    Returns the best score and the NICs that achieve it.
+    """
 
     def score(nic: Path) -> tuple[int, bool]:
         shared = 0
@@ -108,7 +126,7 @@ def _nearest(path: Path, nics: dict[str, Path]) -> tuple[str, ...]:
 
     scores = {name: score(nic) for name, nic in nics.items()}
     best = max(scores.values())
-    return tuple(name for name, value in scores.items() if value == best)
+    return best, tuple(name for name, value in scores.items() if value == best)
 
 
 def _peers(path: Path) -> list[Path]:
@@ -135,14 +153,41 @@ def _peers(path: Path) -> list[Path]:
     return peers if path in peers else [path]
 
 
+def _split(path: Path, nics: dict[str, Path]) -> list[str]:
+    """Assign NICs to ``path`` and every peer accelerator, return ``path``'s.
+
+    Peers with the same nearest NICs form a group. Groups claim NICs closest
+    first, so a group whose nearest NICs overlap a closer group's uses only
+    the unclaimed ones, if any. Each group splits its NICs in name order: an
+    equal disjoint share each (leftovers stay free for other groups), or
+    round-robin when there are more accelerators than NICs.
+    """
+    groups: dict[tuple[str, ...], tuple[tuple[int, bool], list[Path]]] = {}
+    for peer in _peers(path):
+        best, nearest = _nearest(peer, nics)
+        score, members = groups.get(nearest, (best, []))
+        groups[nearest] = (max(score, best), members + [peer])
+    claimed: set[str] = set()
+    for nearest, (_, members) in sorted(
+        groups.items(), key=lambda item: item[1][0], reverse=True
+    ):
+        free = [name for name in nearest if name not in claimed] or list(nearest)
+        share = len(free) // len(members)
+        claimed.update(free[: share * len(members)] if share else free)
+        if path not in members:
+            continue
+        rank = members.index(path)
+        if share:
+            return free[rank * share : (rank + 1) * share]
+        return [free[rank % len(free)]]
+    raise AssertionError("accelerator missing from its peers")
+
+
 def select_nics(device: torch.device | None) -> list[str] | None:
     """Return the RDMA device names a transport should use, or ``None`` for all.
 
     Picks the NICs nearest the transport's accelerator (see :func:`_accelerator`)
-    by PCIe path, then NUMA node. Accelerators tied on the same NICs split
-    them in PCI address order: each gets an equal disjoint share (leftover
-    NICs are unused), or NICs are shared round-robin when there are more
-    accelerators than NICs.
+    by PCIe path, then NUMA node, split among accelerators as in :func:`_split`.
     """
     try:
         accelerator = _accelerator(device)
@@ -153,14 +198,7 @@ def select_nics(device: torch.device | None) -> list[str] | None:
         if not nics:
             return None
         path = (_PCI_ROOT / address).resolve(strict=True)
-        nearest = _nearest(path, nics)
-        tied = [peer for peer in _peers(path) if _nearest(peer, nics) == nearest]
-        rank = tied.index(path)
-        share = len(nearest) // len(tied)
-        if share:
-            selected = list(nearest[rank * share : (rank + 1) * share])
-        else:
-            selected = [nearest[rank % len(nearest)]]
+        selected = _split(path, nics)
     except Exception:
         logger.debug("RDMA NIC selection failed", exc_info=True)
         return None
