@@ -6329,6 +6329,9 @@ class TestLibrarySourceLocation(TestCase):
                     self.assertEqual(op(a, b, 1.0, 0).shape, (2, 5))
                     self.assertEqual(calls, [True])
 
+    @skipIfTorchDynamo(
+        "Checks exact Python frame depths, which Dynamo graph breaks change"
+    )
     def test_get_source_stacklevel(self):
         def caller():
             return torch._library.utils.get_source(2)
