@@ -19,7 +19,7 @@ UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
 class TestDispatchCapture(TestCase):
-    """The dispatcher hook that cfg_compile records kernels with."""
+    """The dispatcher hook that torch.vm records kernels with."""
 
     hw_classification = HardwareClassification.GENERIC
 
