@@ -7571,10 +7571,12 @@ class TestSDPAXpuOnly(NNTestCase):
         self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 
         if train:
-            loss = torch.mean(actual)
-            loss_ref = torch.mean(math_ref)
-            loss.backward()
-            loss_ref.backward()
+            grad_out = torch.randn(
+                batch_size, q_size, n_head_q, head_dim, device=device, dtype=dtype).transpose(1, 2)
+            if layout == "bhsd":
+                grad_out = grad_out.contiguous()
+            actual.backward(grad_out)
+            math_ref.backward(grad_out)
 
             grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
             grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
@@ -7583,9 +7585,49 @@ class TestSDPAXpuOnly(NNTestCase):
                 grad_k_ref = grad_k_ref.to(dtype)
                 grad_v_ref = grad_v_ref.to(dtype)
 
+            tol = Tolerances(3e-5, 5e-6)
+            if dtype is torch.bfloat16:
+                tol = Tolerances(5e-2, 5e-2)
+            if dtype is torch.float16:
+                tol = Tolerances(1e-2, 1e-2)
+
             self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+
+    @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
+    @parametrize("enable_gqa", [True, False])
+    @parametrize("grad_out_type", ["sum", "head_broadcast"])
+    def test_onednn_attention_backward_expanded_grad_out(self, device, dtype, enable_gqa, grad_out_type):
+        tol = Tolerances(1.5e-5, 5e-6)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+        if dtype is torch.float16:
+            tol = Tolerances(1e-2, 1e-2)
+
+        batch_size, n_head_q, seq_len, head_dim = 2, 4, 32, 64
+        n_head_kv = 2 if enable_gqa else n_head_q
+        make_tensor = partial(torch.randn, device=device, dtype=dtype)
+        q = make_tensor(batch_size, n_head_q, seq_len, head_dim).requires_grad_(True)
+        k = make_tensor(batch_size, n_head_kv, seq_len, head_dim).requires_grad_(True)
+        v = make_tensor(batch_size, n_head_kv, seq_len, head_dim).requires_grad_(True)
+        q2, k2, v2 = (t.detach().float().requires_grad_(True) for t in (q, k, v))
+
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            actual = F.scaled_dot_product_attention(q, k, v, enable_gqa=enable_gqa)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = F.scaled_dot_product_attention(q2, k2, v2, enable_gqa=enable_gqa).to(dtype)
+
+        if grad_out_type == "sum":
+            actual.sum().backward()
+            math_ref.sum().backward()
+        else:
+            grad_out = make_tensor(batch_size, 1, seq_len, head_dim).expand(-1, n_head_q, -1, -1)
+            actual.backward(grad_out)
+            math_ref.backward(grad_out)
+
+        for grad, grad_ref in zip((q.grad, k.grad, v.grad), (q2.grad, k2.grad, v2.grad)):
+            self.assertEqual(grad, grad_ref.to(dtype), atol=tol.atol, rtol=tol.rtol)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @parametrize("dtype", [torch.float32, torch.float64])

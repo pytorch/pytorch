@@ -1006,14 +1006,6 @@ partition& find_or_create_backward_graph_partition(
 
 namespace at::native::onednn {
 
-// oneDNN can only implicitly broadcast the batch dims of a MatMul, so a
-// stride-0 M/N/K dim has to be materialized instead of being folded into a
-// size-1 dim by undo_broadcast().
-static bool is_broadcast_on_matmul_dims(const at::Tensor& t) {
-  return t.dim() >= 2 &&
-      (t.stride(t.dim() - 1) == 0 || t.stride(t.dim() - 2) == 0);
-}
-
 // Ensure tensor satisfies OneDNN Block 2D Copy 64-byte base address alignment
 // requirement.
 static at::Tensor ensure_alignment_for_sdpa(const at::Tensor& t) {
@@ -1185,10 +1177,14 @@ void sdpa_backward(
     attn_mask = ensure_alignment_for_sdpa(*attn_mask);
   }
 
-  // autograd may hand us an expanded grad, e.g. out.sum().backward() produces
-  // a grad_out whose strides are all zero. grad_out feeds MatMul directly, so
-  // the broadcast cannot be expressed as size-1 dims.
-  if (is_broadcast_on_matmul_dims(grad_out_aligned)) {
+  // autograd may hand us an expanded grad: out.sum().backward() produces a
+  // grad_out whose strides are all zero, out.mean(dim=1)...backward() one
+  // that is only expanded over the head dim. undo_broadcast() would fold the
+  // stride-0 dims to size 1, which oneDNN cannot broadcast on the M/N/K dims
+  // of the MatMul grad_out feeds, and which breaks the GQA view of grad_out
+  // as [batch, group_num, group_size, seq_len_q, head_dim_v] on the batch and
+  // head dims. Materialize every expanded dim instead.
+  if (is_broadcast(grad_out_aligned)) {
     grad_out_aligned = grad_out_aligned.contiguous();
   }
 

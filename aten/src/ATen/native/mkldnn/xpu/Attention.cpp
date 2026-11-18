@@ -58,13 +58,17 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   return true;
 }
 
+// The oneDNN backward cannot produce a gradient for attn_mask, so a mask that
+// requires grad has to go to another backend. Under functorch transforms a
+// mask that requires grad at an outer level (e.g. a Parameter captured by
+// torch.func.grad) reaches backend selection inside TensorWrappers that do not
+// require grad themselves, so look through them.
 bool check_mask_grad(sdp::sdp_params const& params, bool debug) {
   if (!params.attn_mask.has_value()) {
     return true;
   }
 
   const at::Tensor* attn_mask = &params.attn_mask.value();
-  // Captured masks can have grad wrappers with separate autograd metadata.
   while (!attn_mask->requires_grad()) {
     const auto* wrapper = at::functorch::maybeGetTensorWrapper(*attn_mask);
     if (wrapper == nullptr) {
@@ -75,15 +79,16 @@ bool check_mask_grad(sdp::sdp_params const& params, bool debug) {
 
   if (debug) {
     TORCH_WARN(
-        "scaled_dot_product_attention on xpu is not supported when attn_mask.requires_grad() == True.");
+        "OneDNN attention on XPU does not support attn_mask.requires_grad() == True.");
   }
 
   return false;
 }
 
+// OneDNN doesn't guarantee determinism for both forward and backward
 bool check_deterministic(const sdp::sdp_params& params, bool debug) {
   auto& ctx = at::globalContext();
-  if (ctx.deterministicAlgorithms()) {
+  if (ctx.deterministicAlgorithms() && !ctx.deterministicAlgorithmsWarnOnly()) {
     if (debug) {
       TORCH_WARN("OneDNN attention on XPU is not deterministic.");
     }
@@ -106,12 +111,12 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
                true /*supports GQA*/,
                true /*requires_same_num_heads*/,
                true /*supports_mqa*/>,
+           check_mask_grad,
            sdp::check_attn_mask_shape,
            sdp::check_nonzero_sequence_lengths_dense,
            sdp::check_last_dim_stride_equals_1_dense<
                false /*ignore_singleton_dim*/>,
            check_head_dim_size_xpu,
-           check_mask_grad,
            check_deterministic});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
@@ -369,10 +374,14 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       query.size(1) % key.size(1) == 0,
       "scaled_dot_product_fused_attention_overrideable_xpu: number of heads in K/V must divide number of heads in Q");
   TORCH_INTERNAL_ASSERT(
+      dropout_p == 0.0,
+      "scaled_dot_product_fused_attention_overrideable_xpu: Currently do not support dropout > 0");
+  TORCH_CHECK(
       !(attn_bias.has_value() && is_causal),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot present with is_causal");
   TORCH_INTERNAL_ASSERT(
-      !(attn_bias.has_value() && attn_bias.value().requires_grad()),
+      !(at::GradMode::is_enabled() && attn_bias.has_value() &&
+        attn_bias.value().requires_grad()),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot have requires_grad=True");
 
   const int64_t batch_size = query.size(0);
@@ -465,34 +474,34 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
     std::optional<double> scale) {
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       grad_out.dim() == 4 && out.dim() == 4 &&
           grad_out.size(0) == out.size(0) && grad_out.size(1) == out.size(1) &&
           grad_out.size(2) == out.size(2) && grad_out.size(3) == out.size(3),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad_out and out should have the same shape of {B, H, T, K}");
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Accept only 4 dims inputs shape of {B, H, T, K}");
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       (key.size(0) == value.size(0)) && (key.size(1) == value.size(1)) &&
           (key.size(2) == value.size(2)),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: K/V should have the same batch / seq / num_head");
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       query.size(0) == grad_out.size(0) && query.size(1) == grad_out.size(1) &&
           query.size(2) == grad_out.size(2),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Q should have the same batch / num_head / seq_len as grad_out");
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       query.size(3) == key.size(3),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Q/K should have the same head_dim");
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       value.size(3) == grad_out.size(3),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: V should have the same head_dim as grad_out");
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       logsumexp.dim() == 3 && logsumexp.size(0) == query.size(0) &&
           logsumexp.size(1) == query.size(1) &&
           logsumexp.size(2) == query.size(2),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: logsumexp should have the shape of {B, H, T}");
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       !grad_input_mask[3],
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad for attn_bias is not supported");
 
@@ -510,6 +519,8 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   auto grad_q = at::empty_like(query);
   auto grad_k = at::empty_like(key);
   auto grad_v = at::empty_like(value);
+  auto grad_attn_bias =
+      attn_bias.defined() ? at::empty_like(attn_bias) : at::Tensor();
   at::native::onednn::sdpa_backward(
       batch_size,
       num_head_q,
@@ -537,7 +548,7 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
       std::move(grad_q),
       std::move(grad_k),
       std::move(grad_v),
-      /* grad_attn_bias */ at::Tensor());
+      std::move(grad_attn_bias));
 }
 
 REGISTER_XPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_xpu);
