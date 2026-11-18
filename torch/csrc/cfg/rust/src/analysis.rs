@@ -275,5 +275,14 @@ pub fn compute_kills(insts: &mut [Inst], term: &Term, live_out: &BitSet) -> Vec<
         });
         inst.kills = kills;
     }
+    // What the locals hold when a raise statement is reached is not released
+    // before it: the traceback of the exception keeps the frame, and the
+    // frame its locals. (The kills of a terminator that leaves the block by
+    // raising are never run.)
+    if matches!(term, Term::Raise { .. } | Term::Reraise(..)) {
+        if let Some(Inst { op: Op::Hold(_), kills, .. }) = insts.last_mut() {
+            term_kills.append(kills);
+        }
+    }
     term_kills
 }
