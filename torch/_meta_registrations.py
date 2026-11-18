@@ -6581,7 +6581,7 @@ def meta__scaled_dot_product_flash_attention(
     # See [Note] BC breaking change to flash seed/offset
     device = device_hint(query, default=current_accelerator_hint())
     if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
-        # Maintain old path on AMD
+        # Maintain old path on AMD and XPU
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -7092,7 +7092,7 @@ def meta__flash_attention_forward(
     seed, offset = None, None
     device = device_hint(query, default=current_accelerator_hint())
     if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
-        # Maintain old path on AMD
+        # Maintain old path on AMD and XPU
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
