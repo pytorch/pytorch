@@ -84,7 +84,7 @@ if TYPE_CHECKING:
     _BoxedCallable: TypeAlias = Callable[[Sequence[InputType]], object]
 
     class CompiledFnRunner(Protocol):
-        """Runner emitted by the Python wrapper for a split_into_partitions graph.
+        """Runner emitted by the Python wrapper for a graph that uses graph partition.
 
         codegen writes a Runner class (see codegen/wrapper.py) whose partitions
         hold the per-partition callables and whose recursively_apply_fns rewrites
@@ -876,7 +876,7 @@ class CompiledFxGraph(OutputCode):
         The results of this function are *not* saved in the cache itself.
         """
         customized_wrapper = _unstable_customized_partition_wrapper.wrapper
-        if self.partition_plan.split_into_partitions and customized_wrapper:
+        if self.partition_plan.uses_graph_partition and customized_wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             if self.recursively_apply_fns is None:
                 raise AssertionError("self.recursively_apply_fns must not be None")
