@@ -114,7 +114,7 @@ bool HashStore::check(const std::vector<std::string>& keys) {
 }
 
 bool HashStore::checkLocked(
-    const std::unique_lock<std::mutex>& lock,
+    const std::unique_lock<std::mutex>& /*lock*/,
     const std::vector<std::string>& keys) {
   for (const auto& key : keys) {
     auto foundKV = map_.contains(key);
