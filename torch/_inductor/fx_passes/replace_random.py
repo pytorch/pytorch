@@ -22,7 +22,7 @@ patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
 
-def _shape_to_offset(shape, device: torch.device):
+def _shape_to_offset(shape, device: torch.device, dtype: torch.dtype | None):
     # Modified from torch/_prims/rng_prims.py:philox_rand_offset
     nelem = 1
     for s in shape:
@@ -42,8 +42,8 @@ def _shape_to_offset(shape, device: torch.device):
         return 0
 
     block_size = 256
-    unroll = 4
-    curand4_engine_calls = 4
+    # See elems_per_iter in Dropout.cu.
+    elems = max(inductor_prims.rand_eager_vec(dtype), 4)
 
     device_property = torch.cuda.get_device_properties(device)
 
@@ -53,7 +53,7 @@ def _shape_to_offset(shape, device: torch.device):
     grid_size = -torch.sym_min(-grid_size, -1)
     grid_size = torch.sym_min(grid_size, max_grid)
 
-    return ((nelem - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
+    return ((nelem - 1) // (block_size * grid_size * elems) + 1) * elems
 
 
 def replace_random_passes(gm: torch.fx.GraphModule):
@@ -73,7 +73,8 @@ def replace_random_passes(gm: torch.fx.GraphModule):
 
 def fuse_offset_creation_pass(graph: torch.fx.Graph) -> int:
     """
-    Here offset node means seed << 32 + offset, will unpacked in lowering.py:inductor_random()
+    Here offset node means seed << 32 + offset, will be unpacked in
+    lowering.py:inductor_random()
     Horizontally fuse all the seed generation on each device
         a = inductor_prims.rand_eager_offset(offset, dev)
         b = inductor_prims.rand_eager_offset(offset, dev)
@@ -86,21 +87,23 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph) -> int:
     device_offsets = collections.defaultdict(list)
     for node in graph.nodes:
         if CallFunctionVarArgs(inductor_prims.rand_eager_offset).match(node):
-            device_offsets[node.args[1]].append(node)
+            device_offsets[_device_key(node.args[1])].append(node)
 
     if not device_offsets:
         return 0
 
-    for device, offsets in device_offsets.items():
+    for offsets in device_offsets.values():
+        device = offsets[0].args[1]
         with graph.inserting_before(offsets[0]):
             offs = [n.args[0] for n in offsets]
             combined = graph.call_function(
                 inductor_prims.rand_eager_offsets, (offs, device)
             )
             combined.meta.update(offsets[0].meta)
+            val_device = _concrete_device(device)
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
-                    [len(offsets), 2], device=device, dtype=torch.int64
+                    [len(offsets), 2], device=val_device, dtype=torch.int64
                 )
                 combined.meta["tensor_meta"] = _extract_tensor_metadata(
                     combined.meta["val"]
@@ -135,18 +138,19 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
     device_seeds = collections.defaultdict(list)
     for node in graph.nodes:
         if CallFunctionVarArgs(inductor_prims.seed).match(node):
-            device_seeds[node.args[0]].append(node)
+            device_seeds[_device_key(node.args[0])].append(node)
 
     if not device_seeds:
         return 0
 
-    for device, seeds in device_seeds.items():
+    for seeds in device_seeds.values():
+        device = seeds[0].args[0]
         with graph.inserting_before(seeds[0]):
             combined = graph.call_function(inductor_prims.seeds, (len(seeds), device))
             combined.meta.update(seeds[0].meta)
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
-                    [len(seeds)], device=device, dtype=torch.int64
+                    [len(seeds)], device=_concrete_device(device), dtype=torch.int64
                 )
                 combined.meta["tensor_meta"] = _extract_tensor_metadata(
                     combined.meta["val"]
@@ -168,7 +172,40 @@ def default_kwargs(device):
     return {}
 
 
+def _is_coor_device(device) -> bool:
+    if not isinstance(device, torch.fx.Node):
+        return False
+    if device.target is not torch.ops.coor.current_device.default:
+        raise AssertionError(
+            f"replace_random: device operand is an unexpected graph node: {device}"
+        )
+    return True
+
+
+def _device_key(device):
+    # compile-on-one-rank: each replacement is traced separately and brings its own
+    # current_device() node, but they all denote the same device.
+    return torch.ops.coor.current_device.default if _is_coor_device(device) else device
+
+
+def _concrete_device(device):
+    """A real torch.device for a device operand that may still be a CooR node.
+
+    compile-on-one-rank: these passes run on the joint graph, where a factory op's
+    device operand is still a coor current_device() node -- respecialize_current_device_nodes
+    does not concretise those until post_grad. Resolve it the way that pass does. Nothing
+    is pinned by doing so: replace_by_example swaps the device in the traced replacement
+    back to a current_device() node.
+    """
+    if _is_coor_device(device):
+        from torch.fx.experimental.proxy_tensor import _coor_current_device
+
+        return _coor_current_device()
+    return device
+
+
 def get_device(device):
+    device = _concrete_device(device)
     if device is not None:
         return device
     return torch.empty([]).device  # default device
@@ -217,11 +254,10 @@ def replace_random(
     if mode == "rand" and config.align_random_eager and device.type == "cuda":
         # Only enable when align_random_eager is on.
         def replacement_align(size):
-            offset = _shape_to_offset(size, device)
-
             align_dtype = dtype
             if isinstance(align_dtype, (tuple, list)):
                 align_dtype = align_dtype[0] if len(align_dtype) else None
+            offset = _shape_to_offset(size, device, align_dtype)
 
             result = inductor_prims.random(
                 size,

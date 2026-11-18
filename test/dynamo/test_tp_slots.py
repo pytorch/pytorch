@@ -20,10 +20,13 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestTypeSlots(TestCase):
     """Test suite for type slot detection."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _get_slot_info(self, obj_type):
         """Helper to get and unpack slot information."""
@@ -277,7 +280,7 @@ class TestTypeSlots(TestCase):
         self.assertTrue(has_slot(num_slots, PyNumberSlots.NB_MULTIPLY))
 
     def test_deque_sq_item_only(self):
-        """deque has sq_item but NOT mp_subscript — vt_getitem dispatches to Branch 2."""
+        """deque has sq_item but NOT mp_subscript — generic_getitem dispatches to Branch 2."""
         seq_slots, map_slots, _, _ = self._get_slot_info(collections.deque)
         self.assertFalse(has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT))
         self.assertTrue(has_slot(seq_slots, PySequenceSlots.SQ_ITEM))

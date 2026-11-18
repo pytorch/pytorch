@@ -47,17 +47,17 @@ void inline sparse_indices_and_values_resize(
 }
 
 template <typename scalar_t, int eigen_options, typename index_t>
-const Eigen::Map<Eigen::SparseMatrix<scalar_t, eigen_options, index_t>>
+const Eigen::Map<const Eigen::SparseMatrix<scalar_t, eigen_options, index_t>>
 Tensor_to_Eigen(const at::Tensor& tensor) {
   int64_t rows = tensor.size(0);
   int64_t cols = tensor.size(1);
   int64_t nnz = tensor._nnz();
   TORCH_CHECK(tensor.values().is_contiguous(), "eigen accepts only contiguous tensor values");
   auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(tensor);
-  index_t* c_indices_ptr = compressed_indices.data_ptr<index_t>();
-  index_t* p_indices_ptr = plain_indices.data_ptr<index_t>();
-  scalar_t* values_ptr = tensor.values().data_ptr<scalar_t>();
-  Eigen::Map<Eigen::SparseMatrix<scalar_t, eigen_options, index_t>> map(
+  const index_t* c_indices_ptr = compressed_indices.const_data_ptr<index_t>();
+  const index_t* p_indices_ptr = plain_indices.const_data_ptr<index_t>();
+  const scalar_t* values_ptr = tensor.values().const_data_ptr<scalar_t>();
+  Eigen::Map<const Eigen::SparseMatrix<scalar_t, eigen_options, index_t>> map(
       rows, cols, nnz, c_indices_ptr, p_indices_ptr, values_ptr);
   return map;
 }

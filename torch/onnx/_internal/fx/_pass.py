@@ -208,14 +208,16 @@ class Transform(abc.ABC):
         """
         fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
         with unset_fake_temporarily():
-            return torch._dynamo.utils.detect_fake_mode(fake_tensors)
+            return torch._guards.require_python_fake_mode(
+                torch._dynamo.utils.detect_fake_mode(fake_tensors)
+            )
 
     def _maybe_fakefy_args(
         self, fake_mode: fake_tensor.FakeTensorMode | None, *args: Any
     ) -> tuple[Any, ...]:
         if fake_mode is None:
             return args
-        # NB: This should hit the cache if tensors were fakefied before.
+        # NB: This should hit the cache if tensors were fakified before.
         # E.g., when the fx graph is produced by Dynamo.
         return tuple(
             fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args

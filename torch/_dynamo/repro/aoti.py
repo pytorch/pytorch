@@ -30,8 +30,8 @@ from typing import Any, IO
 
 import torch
 from torch._dynamo.debug_utils import (
-    _cuda_system_info_comment,
     BuckTargetWriter,
+    device_system_info_comment,
     extra_imports,
     generate_config_string,
     generate_env_vars_string,
@@ -43,6 +43,8 @@ from torch._dynamo.debug_utils import (
 )
 from torch.export import ExportedProgram
 from torch.hub import tqdm
+
+from . import _minifier_sanity_guard
 
 
 log = logging.getLogger(__name__)
@@ -262,7 +264,7 @@ isolate_fails_code_str = None
             model_str += f"# torch cuda version: {torch.version.cuda}\n"
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-        model_str += _cuda_system_info_comment()
+        model_str += device_system_info_comment()
     if save_dir:
         ep_path = os.path.join(save_dir, "exported_program.pt2")
     else:
@@ -459,23 +461,25 @@ def repro_minify(
                 return False
             return True
 
-    minifier(
-        mod,
-        flat_example_inputs,
-        module_fails=functools.partial(module_fails, check_str=options.check_str),
-        dump_state=functools.partial(
-            dump_compiler_graph_state,
-            compiler_name=compiler_name,
-            config_patches=config_patches,
-            accuracy=options.accuracy,
-            strict=strict,
-        ),
-        save_dir=options.save_dir,
-        offload_to_disk=options.offload_to_disk,
-        skip_offload=options.skip_saving_eager_intermediates,
-        skip_sanity=options.skip_sanity,
-        max_granularity=options.max_granularity,
-    )
+    with _minifier_sanity_guard() as sanity:
+        minifier(
+            mod,
+            flat_example_inputs,
+            module_fails=functools.partial(module_fails, check_str=options.check_str),
+            dump_state=functools.partial(
+                dump_compiler_graph_state,
+                compiler_name=compiler_name,
+                config_patches=config_patches,
+                accuracy=options.accuracy,
+                strict=strict,
+            ),
+            save_dir=options.save_dir,
+            offload_to_disk=options.offload_to_disk,
+            skip_offload=options.skip_saving_eager_intermediates,
+            skip_sanity=options.skip_sanity,
+            max_granularity=options.max_granularity,
+        )
+    sanity.raise_if_failed()
 
 
 def run_repro(
@@ -558,7 +562,7 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to a integral/boolean
+change the divergence from a floating point divergence to an integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent
