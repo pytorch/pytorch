@@ -950,7 +950,9 @@ class InvokeSubgraphReuseCondition:
     # appear in the guard delta.
     input_checks: list[tuple[Any, object]]  # list[tuple[InputTag, object]]
 
-    # Each captured guard carries its evaluator, expected value and structural dependencies.
+    # Guards captured during the trace (delta + source-mapped).
+    # Each entry maps a guard to its handler, expected value and structural dependencies.
+    # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
     guards: dict[Guard, tuple[GuardCheckSpec, object, OrderedSet[Source]]]
 
     # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
@@ -969,6 +971,7 @@ class InvokeSubgraphReuseCondition:
     lexical_sources: set[tuple[Source, int]] = dataclasses.field(default_factory=set)
     # The identity pattern covers explicit operands, then these captured tensor sources.
     tensor_sources: tuple[Source, ...] = ()
+    overlapping_args: tuple[Source, ...] = ()
     aliases: tuple[int, ...] = ()
 
 

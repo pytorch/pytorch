@@ -191,11 +191,16 @@ class BuiltinMethodKeyTracker:
             self.receivers[source] = tx.output.resolve_source_value(source)
         return self.receivers[source]
 
+    def cached_summary(self, keys: Iterable["HashableTracker"]) -> "KeySummary | None":
+        cached = self.summaries.get(id(keys))
+        if cached is not None and cached[1].size == len(cached[0]):
+            return cached[1]
+        return None
+
     def summary(self, keys: Iterable["HashableTracker"]) -> "KeySummary":
         if isinstance(keys, dict):
-            cached = self.summaries.get(id(keys))
-            if cached is not None and cached[1].size == len(keys):
-                return cached[1]
+            if (cached := self.cached_summary(keys)) is not None:
+                return cached
             summary = KeySummary(
                 self,
                 (
@@ -347,12 +352,9 @@ def guard_key_collisions(
     probe = collections[1] if len(collections) == 2 else ()
     probe_equalities = None
     if type(probe) is tuple and len(probe) == 1 and not probe[0].has_builtin_method:
-        if (
-            (cached := tracker.summaries.get(id(collections[0]))) is not None
-            and cached[1].size == len(cached[0])
-            and not cached[1].has_methods
-        ):
-            return cached[1]
+        cached = tracker.cached_summary(collections[0])
+        if cached is not None and not cached.has_methods:
+            return cached
         equalities = probe[0].equality_sources
         if not probe[0].has_custom_equality:
             probe_equalities = equalities
