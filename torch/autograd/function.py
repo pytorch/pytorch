@@ -36,6 +36,8 @@ _P = ParamSpec("_P")
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
+    __jit_unused_properties__ = ["input_grad_buffers"]
+
     _input_grad_buffers: tuple[torch.Tensor | None, ...]
     output_grad_dtypes: "tuple[torch.dtype | None, ...] | None"
 
