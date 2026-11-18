@@ -27,6 +27,8 @@ _PGS_TO_ANNOTATE = "torch.distributed._hooks.collective_annotations._pgs_to_anno
 
 
 class _HooksFireForAllCollectives:
+    world_size = 2
+
     def _check_hooks_fire_for_all_collectives(self, device):
         pg = _get_default_group()
         # The pre-hook fires before the op is issued, the post-hook after, with
@@ -153,8 +155,6 @@ class TestProcessGroupHooks(_HooksFireForAllCollectives, MultiProcContinuousTest
     """
 
     hw_classification = HardwareClassification.GENERIC
-
-    world_size = 2
 
     @classmethod
     def backend_str(cls):
@@ -318,8 +318,6 @@ class TestProcessGroupHooksAccelerator(
     """Hooks also fire for accelerator collectives dispatched through Ops.cpp."""
 
     hw_classification = HardwareClassification.ACCELERATOR
-
-    world_size = 2
 
     @classmethod
     def backend_str(cls):
