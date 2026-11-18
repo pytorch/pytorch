@@ -79,7 +79,7 @@ from torch._dynamo.types import (
 )
 from torch._export.utils import _compiling_state_context
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
     _combine_args,
@@ -1286,9 +1286,10 @@ class _TorchDynamoContext:
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
-                    if (
-                        tracing_context.fake_mode is not None
-                        and tracing_context.fake_mode.in_kernel_invocation
+                    if tracing_context.fake_mode is not None and (
+                        tracing_context.fake_mode.in_kernel_invocation
+                        if isinstance(tracing_context.fake_mode, FakeTensorMode)
+                        else torch._C._meta_in_tls_dispatch_include()
                     ):
                         return fn(*args, **kwargs)
                 # Skip nested compile during export (but not HOP internal compile)
