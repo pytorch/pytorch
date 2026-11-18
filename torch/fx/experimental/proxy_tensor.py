@@ -15,7 +15,7 @@ import operator
 import threading
 import typing
 import typing_extensions
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass, field
@@ -2658,10 +2658,12 @@ class _ModuleStackTracer(PythonKeyTracer):
         self.counter = 0
 
         if parent is not None:
-            # HOP sub-tracers share scope_root, so reuse its maps (not mutated after init).
+            # HOP sub-tracers are created while the parent is mid-trace, so its maps
+            # are still set and describe the same scope_root.
+            if parent.scope_root is not scope_root:
+                raise AssertionError("sub-tracer must share its parent's scope_root")
             self.enable_attr_proxy = parent.enable_attr_proxy
             self.submodule_paths = parent.submodule_paths
-            self.module_id_cache = parent.module_id_cache
         else:
             self.enable_attr_proxy = False
             self.submodule_paths = {}
@@ -2675,10 +2677,6 @@ class _ModuleStackTracer(PythonKeyTracer):
                     self.enable_attr_proxy = True
                 else:
                     self.submodule_paths[m] = name
-
-            self.module_id_cache = defaultdict(list)
-            for name, mod in self.scope_root.named_modules(remove_duplicate=False):
-                self.module_id_cache[id(mod)].append(name)
 
         # Build a wrapper around _AttrProxy to provide the tracer. We can't
         # store it on _AttrProxy itself because we mimic the underlying class

@@ -17334,23 +17334,27 @@ graph():
                     x = torch.cond(x.sum() > 0, e, torch.clone, (x,))
                 return self.shared(x)
 
-        tracers = []
+        # submodule_paths is reset to None after each trace, so record it at init.
+        paths = {}
+        children = []
         orig_init = _ModuleStackTracer.__init__
 
-        def init(self, *args, **kwargs):
-            orig_init(self, *args, **kwargs)
-            tracers.append(self)
+        def init(self, *args, parent=None, **kwargs):
+            orig_init(self, *args, parent=parent, **kwargs)
+            paths[self] = self.submodule_paths
+            if parent is not None:
+                children.append((self, parent))
 
         m = M()
         with patch.object(_ModuleStackTracer, "__init__", init):
             ep = export(m, (torch.randn(4),), strict=False)
 
-        root, *branches = tracers
-        self.assertGreater(len(branches), 0)
-        for t in branches:
-            self.assertIs(t.submodule_paths, root.submodule_paths)
-            self.assertIs(t.module_id_cache, root.module_id_cache)
-            self.assertTrue(t.enable_attr_proxy)
+        self.assertGreater(len(children), 0)
+        for child, parent in children:
+            self.assertIsNotNone(paths[child])
+            self.assertIs(paths[child], paths[parent])
+            self.assertEqual(child.enable_attr_proxy, parent.enable_attr_proxy)
+        self.assertTrue(any(child.enable_attr_proxy for child, _ in children))
         x = torch.randn(4)
         self.assertEqual(ep.module()(x), m(x))
 
