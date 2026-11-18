@@ -80,6 +80,7 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_get_fake_mode,
     maybe_get_item_memo,
+    unset_fake_temporarily,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch.fx.experimental._backward_state import BackwardState
@@ -4291,7 +4292,8 @@ def _clone_input(
             or value.is_nested
         ):
             # NB: ensure strides are preserved
-            value = clone_input(value)
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 
