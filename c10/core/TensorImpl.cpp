@@ -7,6 +7,7 @@
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Logging.h>
 #include <c10/util/accumulate.h>
@@ -665,24 +666,34 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
-template <typename VariableVersion>
-c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
-    VariableVersion&& version_counter,
-    bool allow_tensor_metadata_change) const {
-  c10::intrusive_ptr<TensorImpl> r;
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_via_python()
+    const {
+  if (C10_UNLIKELY(is_fake())) {
+    if (auto* interpreter =
+            c10::impl::PythonDispatcherTLS::get_state_for_pre_dispatch()) {
+      return (*interpreter)->detach(this, /*pre_dispatch=*/true);
+    }
+  }
   const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
   // TODO: do we have to exclude after Python dispatch key set?
   if (mode_stack_len > 0 &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     const auto& cur_torch_dispatch_mode_state =
         c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-    r = cur_torch_dispatch_mode_state->pyinterpreter()->detach(this);
+    return cur_torch_dispatch_mode_state->pyinterpreter()->detach(this);
   } else if (
       key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
+    return (*c10::impl::getGlobalPyInterpreter())->detach(this);
   }
-  if (r) {
+  return nullptr;
+}
+
+template <typename VariableVersion>
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
+    VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  if (auto r = shallow_copy_and_detach_via_python()) {
     if (!r->is_inference()) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
     }
