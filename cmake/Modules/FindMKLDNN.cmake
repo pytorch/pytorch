@@ -210,6 +210,15 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
   ENDIF()
 
+  # pin.txt is ZenDNN v6.1.3; keep the notices in third_party/zendnn in sync
+  # with it. oneDNN still prefers a ZenDNN package (ZENDNNROOT, zendnnl_DIR),
+  # and a local ONEDNN_ZENDNN_SOURCE tree is kept. Offline builds are tracked
+  # in https://github.com/pytorch/pytorch/issues/204439.
+  IF(USE_MKLDNN_ZENDNN AND NOT (IS_ABSOLUTE "${ONEDNN_ZENDNN_SOURCE}" AND IS_DIRECTORY "${ONEDNN_ZENDNN_SOURCE}"))
+    FILE(READ "${PROJECT_SOURCE_DIR}/third_party/zendnn/pin.txt" ZENDNN_PIN)
+    STRING(STRIP "${ZENDNN_PIN}" ZENDNN_PIN)
+    SET(ONEDNN_ZENDNN_SOURCE "https://github.com/amd/ZenDNN.git@${ZENDNN_PIN}" CACHE STRING "" FORCE)
+  ENDIF()
   SET(ONEDNN_X64_USE_ZEN ${USE_MKLDNN_ZENDNN} CACHE BOOL "" FORCE)
 
   IF(ONEDNN_ACCELERATE_SHIM_DIR)
