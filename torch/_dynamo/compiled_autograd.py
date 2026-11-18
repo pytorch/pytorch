@@ -1667,7 +1667,7 @@ def _enable(
 
         from torch._dynamo import eval_frame
 
-        if eval_frame._stance.stance == "force_eager":
+        if eval_frame._stance.get().stance == "force_eager":
             # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
             # to fall back to eager as well.
             global compiled_autograd_enabled_force_eager

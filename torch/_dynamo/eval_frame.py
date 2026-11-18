@@ -41,6 +41,7 @@ import unittest
 import warnings
 import weakref
 from collections.abc import Generator, Sized
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -166,8 +167,6 @@ cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
-_in_optimized_module = False
-
 
 if DISABLE_JUSTKNOBS:
     _maybe_set_eval_frame = set_eval_frame
@@ -198,14 +197,16 @@ StanceStr = Literal[
 ]
 
 
-@dataclass
+@dataclass(frozen=True)
 class DynamoStance:
     stance: StanceStr = "default"
     skip_guard_eval_unsafe: bool = False
     backend: str | Callable[..., Any] | None = None
 
 
-_stance = DynamoStance()
+_stance: ContextVar[DynamoStance] = ContextVar(
+    "torch._dynamo.stance", default=DynamoStance() # noqa: B039
+)
 _force_eager_nested_compile = threading.local()
 
 
@@ -225,8 +226,6 @@ def _is_eager_on_nested_compile() -> bool:
 
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
-    global _stance
-
     from torch._C._dynamo.eval_frame import get_eval_frame_callback
 
     callback = get_eval_frame_callback()
@@ -234,8 +233,8 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
     if callback is not False and callback is not None:
         raise RuntimeError("attempted to set_stance in a torch.compile region")
 
-    prior = _stance
-    _stance = stance
+    prior = _stance.get()
+    _stance.set(stance)
     return prior
 
 
@@ -260,20 +259,16 @@ def _set_in_optimized_module() -> Generator[None, None, None]:
     # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
     # Prevents graph-breaking forward hooks from being registered & traced.
     # TODO(pianpwk): subsume this flag with better is_compiling() coverage
-    global _in_optimized_module
-    _old_in_optimized_module = (
-        _in_optimized_module  # do we need this? can we just set it to False after
-    )
-    _in_optimized_module = True
+    prior = dynamo_tls.in_optimized_module
+    dynamo_tls.in_optimized_module = True
     try:
         yield
     finally:
-        _in_optimized_module = _old_in_optimized_module
+        dynamo_tls.in_optimized_module = prior
 
 
 def _is_in_optimized_module() -> bool:
-    global _in_optimized_module
-    return _in_optimized_module
+    return dynamo_tls.in_optimized_module
 
 
 class _RecompileRefusedError(RuntimeError):
@@ -408,39 +403,37 @@ class _RefuseRecompileCallback(_FailOnRecompileCallback):
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
+    stance = _stance.get()
     if isinstance(callback, _RefuseRecompileCallback):
-        # Read the stance once: a concurrent set_stance must not slip a
-        # compiling callback in between the check and the choice.
-        stance = _stance.stance
-        if stance == "force_eager":
+        if stance.stance == "force_eager":
             return None
-        return False if stance == "eager_on_recompile" else callback
-    if _stance.stance == "default":
+        return False if stance.stance == "eager_on_recompile" else callback
+    if stance.stance == "default":
         # force_backend
-        if _stance.backend is not None and callback not in (False, None):
-            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
+        if stance.backend is not None and callback not in (False, None):
+            callback = _create_wrapped_callback(get_compiler_fn(stance.backend))
 
         return callback
-    elif _stance.stance == "eager_then_compile":
+    elif stance.stance == "eager_then_compile":
         if callback not in (False, None):
-            return _create_delayed_compile_callback(callback, _stance.stance)
+            return _create_delayed_compile_callback(callback, stance.stance)
         return callback
-    elif _stance.stance == "aot_eager_then_compile":
+    elif stance.stance == "aot_eager_then_compile":
         if callback not in (False, None):
-            return _create_delayed_compile_callback(callback, _stance.stance)
+            return _create_delayed_compile_callback(callback, stance.stance)
         return callback
-    elif _stance.stance == "force_eager":
+    elif stance.stance == "force_eager":
         # disable
         return None
-    elif _stance.stance == "eager_on_recompile":
+    elif stance.stance == "eager_on_recompile":
         # run mode
         return False
-    elif _stance.stance == "fail_on_recompile":
+    elif stance.stance == "fail_on_recompile":
         if callback in (False, None):
             return callback
         return _FailOnRecompileCallback(callback)
     else:
-        raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+        raise RuntimeError(f"invalid torch.compile stance '{stance}'")
 
 
 def _create_wrapped_callback(
@@ -496,7 +489,7 @@ def _create_delayed_compile_callback(
 
 
 def _is_skip_guard_eval_unsafe_stance() -> bool:
-    return _stance.skip_guard_eval_unsafe
+    return _stance.get().skip_guard_eval_unsafe
 
 
 def _reset_guarded_backend_cache() -> None:
@@ -888,6 +881,8 @@ def set_enable_dynamic(enable: bool) -> Generator[None, None, None]:
 # A thread local storage that serves to store information as Dynamo traces
 # through a user provided function.
 class DynamoTLS(threading.local):
+    in_optimized_module: bool = False
+
     # Each string is a summary of a frame Dynamo attempted to trace, stored in
     # temporal order.
     traced_frame_infos: list[str] = []
@@ -1383,7 +1378,7 @@ class _TorchDynamoContext:
                         set_eval_frame(None)
                         if fullgraph_count_enabled and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
-                            if count == 0 and _stance.stance == "default":
+                            if count == 0 and _stance.get().stance == "default":
                                 skip_reasons = get_skip_reasons()
                                 msg = "torch.compile with fullgraph=True found no compiled frames."
                                 if skip_reasons:
