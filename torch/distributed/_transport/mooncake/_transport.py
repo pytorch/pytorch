@@ -14,6 +14,7 @@ from typing import Any, cast, TYPE_CHECKING
 import torch
 
 from .._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from .._topology import select_nics
 from .._work import _validate_timeout, wait_all
 from ._memory import (
     _Registration,
@@ -25,6 +26,8 @@ from ._memory import (
 from ._work import _live_transports, _MooncakeWork
 
 
+# Mooncake settings that choose or pair NICs themselves disable NIC selection.
+_USER_NIC_ENVS = ("MC_TE_FILTERS", "MC_CUSTOM_TOPO_JSON", "MC_RDMA_DATA_DIRECT_PAIRING")
 _pinned_registrations: list[tuple[Any, _Registration]] = []
 
 
@@ -78,6 +81,11 @@ class MooncakeTransport(Transport):
     submit/cleanup sections are offloaded with ``asyncio.to_thread`` rather than
     spinning on the lock.
 
+    With the default ``protocol="rdma"``, RDMA traffic is restricted to the NICs
+    nearest the accelerator unless ``device_name``, ``MC_TE_FILTERS``,
+    ``MC_CUSTOM_TOPO_JSON`` or ``MC_RDMA_DATA_DIRECT_PAIRING`` is set;
+    see "Mooncake RDMA NIC selection" in the transport docs.
+
     """
 
     def __init__(
@@ -99,9 +107,16 @@ class MooncakeTransport(Transport):
         _validate_timeout(timeout)
         host = _format_host(host)
         backend = _load_backend()
+        user_nics = any(name in os.environ for name in _USER_NIC_ENVS)
+        selected = ""
+        if protocol == "rdma" and not device_name and not user_nics:
+            device_name = selected = ",".join(select_nics(self.device) or ())
         engine = backend.TransferEngine()
         if engine.initialize(host, metadata_server, protocol, device_name) != 0:
-            raise RuntimeError("Mooncake transport initialization failed")
+            msg = "Mooncake transport initialization failed"
+            if selected:
+                msg += f" with selected NICs {selected}; set device_name to override"
+            raise RuntimeError(msg)
         self._backend = backend
         self._engine: Any = engine
         self._endpoint = f"{host}:{engine.get_rpc_port()}"
@@ -198,8 +213,9 @@ class MooncakeTransport(Transport):
         if registration := self._registrations.get(key):
             return MooncakeMemory(self, registration)
         device_id = max(tensor.get_device(), 0)
-        # "*" lets Mooncake (>= 0.3.14) pick NICs by the memory's NUMA node;
-        # "cpu:0" would use NUMA node 0's NICs for every host buffer.
+        # "*" lets Mooncake (>= 0.3.14) pick among the engine's NICs by the
+        # memory's NUMA node; "cpu:0" would use NUMA node 0's NICs for every
+        # host buffer.
         location = f"cuda:{device_id}" if tensor.is_cuda else "*"
         if engine.register_memory(tensor.data_ptr(), length, location) != 0:
             raise RuntimeError("Mooncake memory registration failed")
