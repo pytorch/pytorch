@@ -2,7 +2,8 @@
 
 Never merge this audit-only change. The reviewed inert predecessor allocated
 draft PR205523 and workflow422814113. This append-only activation binds producer
-attempt2 and consumer attempt3. It still requires independent final-tree review,
+attempt2 and consumer attempt3. The producer succeeds; a separate consumer
+job fails only at its fixed hold step before a specific-job rerun. It still requires independent final-tree review,
 normal exact-head workflow approval, and a fresh check that the unique workflow
 name and artifact prefix cannot enter an automatic publisher. Do not use a
 production statistics prefix.
@@ -12,9 +13,14 @@ the first executed job attempt2; this is not assumed to be attempt1. `N` first
 proves genuine same-job deletion, then retains one deterministic, ordinary
 `canary.txt` ZIP. It emits only its run/head/job/attempt and artifact identity.
 The controller authenticates that identity through GitHub, stores the immutable
-receipt locally, then reruns only that exact run and head.
+receipt locally, then reruns only the authenticated numeric consumer job ID. Never use an
+all-jobs rerun. Excluded prerequisite jobs must retain their original IDs and
+attempt; any new producer execution fails closed. The exported `rerunTarget`
+selector only describes that numeric job endpoint; it never sends a request.
 
-`N+1` has no experimental uploader. It independently requires the same run,
+`N` consumer hold has no SDK client, archive operation, helper invocation or
+fixture directory. Only its fixed named hold step may fail. `N+1` has no
+experimental uploader. It independently requires the same run,
 head, workflow and one exact artifact name with the precomputed size/digest.
 The unchanged pinned PyTorch helper runs with its scoped job token in a private
 network namespace. A CONNECT relay admits only `api.github.com` and the exact
@@ -37,10 +43,16 @@ No stats uploader, Dr.CI endpoint, AWS method,
 publication workflow, OIDC role or persistent cache is invoked. This proves
 only the owned same-run helper behavior, not protected publication impact.
 
+The selected merge must have the reviewed head parent and identical workflow,
+check-CI and entire action-tree Git objects. Runtime guards independently
+reauthenticate that source before an operation. Missing or different service
+metadata fails closed; unit fixtures are not evidence of partial-rerun retention.
+
 The controller retains deletion authority for every acknowledged artifact ID.
 After consumption or failure it rechecks the exact ownership/name/digest,
-deletes only those artifacts, verifies HTTP204 followed by GET404 and an empty
-owned-run listing, and closes the draft unmerged. The job deletes incomplete
+deletes only those still present, verifies HTTP204 followed by GET404 and an
+empty owned-run listing, and closes the draft unmerged. If an artifact was
+already absent, record its404 without claiming a controller DELETE204. The job deletes incomplete
 same-job production when possible; it deliberately retains successful producer
 artifacts for the same-run rerun and independent controller cleanup.
 

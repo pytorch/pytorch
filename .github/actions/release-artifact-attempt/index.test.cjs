@@ -11,7 +11,7 @@ const a = require('./index.cjs');
 const tunnel = require('./tunnel.cjs');
 
 const CONFIG = {expected_pr: 123, workflow_id: 456, producer_attempt: 2, actor_ids: {ptdbot: 283013143, d4l3k: 909104}};
-const context = {run_id: 100, attempt: 2, producer_attempt: 2, workflow_id: 456, job_id: 200, head: 'a'.repeat(40), merge_sha: 'b'.repeat(40), pr: 123, actor: 'ptdbot', triggering_actor: 'd4l3k', phase: 'producer', repository: p.REPOSITORY};
+const context = {run_id: 100, attempt: 2, producer_attempt: 2, workflow_id: 456, job_id: 200, job_name: a.PRODUCER_JOB, head: 'a'.repeat(40), merge_sha: 'b'.repeat(40), pr: 123, actor: 'ptdbot', triggering_actor: 'd4l3k', phase: 'produce', repository: p.REPOSITORY};
 
 function workflowContract() {
   const workspace = execFileSync('git', ['rev-parse', '--show-toplevel'], {encoding: 'utf8'}).trim();
@@ -55,7 +55,7 @@ test('activation binds the allocated draft and rejects zero identities', () => {
   for (const key of ['expected_pr', 'workflow_id', 'producer_attempt']) assert.throws(() => a.configuration({...CONFIG, [key]: 0}));
   assert.throws(() => a.configuration({...CONFIG, actor_ids: {...CONFIG.actor_ids, ptdbot: 1}}));
   const yaml = fs.readFileSync(path.join(__dirname, '../../workflows/ci-security-ordinary-artifact-attempt-e94e6bc53f124f34.yml'), 'utf8');
-  assert.equal(yaml.match(/pull_request\.number == 205523/g).length, 2);
+  assert.equal(yaml.match(/pull_request\.number == 205523/g).length, 3);
   assert.equal(/pull_request\.number == 0(?:\D|$)/.test(yaml), false);
   assert(yaml.includes('uses: ./.github/workflows/_check-ci.yml'));
   assert(!yaml.includes('id-token: write'));
@@ -71,17 +71,27 @@ test('actual workflow, action, SDK source and concurrency contracts agree', asyn
   assert.equal(action.runs.using, 'node20');
   assert.equal(action.runs.main, 'index.cjs');
   assert(fs.statSync(path.join(__dirname, action.runs.main)).isFile());
-  const steps = workflow.jobs[a.JOB].steps;
+  assert.deepEqual(Object.keys(workflow.jobs), ['check-ci', a.PRODUCER_JOB, a.CONSUMER_JOB]);
+  assert.equal(workflow.jobs[a.PRODUCER_JOB].needs, 'check-ci');
+  assert.deepEqual(workflow.jobs[a.CONSUMER_JOB].needs, ['check-ci', a.PRODUCER_JOB]);
+  assert.equal(Object.values(workflow.jobs).some(job => (Array.isArray(job.needs) ? job.needs : [job.needs]).includes(a.CONSUMER_JOB)), false);
+  const steps = workflow.jobs[a.PRODUCER_JOB].steps;
+  const consumer = workflow.jobs[a.CONSUMER_JOB].steps;
+  assert.deepEqual(steps.map(step => step.name), [a.CHECKOUT_STEP, a.GUARD_STEP, ...a.PRODUCER_STEPS]);
+  assert.deepEqual(consumer.map(step => step.name), [a.CHECKOUT_STEP, a.GUARD_STEP, a.HOLD_STEP, ...a.CONSUMER_STEPS]);
+  assert.equal(consumer.find(step => step.name === a.HOLD_STEP)['continue-on-error'], undefined);
+  assert.equal(consumer.some(step => ['dependencies', 'produce'].includes(step.with?.mode) || step.with?.repository === 'actions/download-artifact' || /npm ci/.test(step.run || '')), false);
   const sdk = steps.find(step => step.with?.repository === 'actions/download-artifact');
   assert.equal(sdk.with.ref, p.SDK_COMMIT);
   assert.equal(sdk.with.path, p.SDK_DIRECTORY);
   assert.equal(steps.find(step => step.name === 'Install locked artifact runtime')['working-directory'], sdk.with.path);
-  const source = steps.find(step => step.with?.repository === p.REPOSITORY);
+  const source = consumer.find(step => step.with?.repository === p.REPOSITORY);
   assert.equal(source.with.ref, a.SOURCE_COMMIT);
   assert.equal(source.with.path, a.SOURCE_DIRECTORY);
-  for (const mode of ['dependencies', 'produce']) assert.equal(steps.find(step => step.with?.mode === mode).if, "steps.guard.outputs.phase == 'producer'");
-  assert.equal(steps.find(step => step.with?.mode === 'consume').if, "steps.guard.outputs.phase == 'consumer'");
-  for (const step of steps.filter(step => step.with?.mode)) assert.equal(step.uses, './.github/actions/release-artifact-attempt');
+  for (const mode of ['dependencies', 'produce']) assert.equal(steps.find(step => step.with?.mode === mode).if, "steps.guard.outputs.phase == 'produce'");
+  for (const mode of ['hold', 'consume']) assert.equal(consumer.find(step => step.with?.mode === mode).if, `steps.guard.outputs.phase == '${mode}'`);
+  assert.equal(consumer.find(step => step.with?.mode === 'finish').if, "always() && steps.guard.outcome == 'success' && steps.guard.outputs.phase == 'consume'");
+  for (const step of [...steps, ...consumer].filter(step => step.with?.mode)) assert.equal(step.uses, './.github/actions/release-artifact-attempt');
   const workspace = execFileSync('git', ['rev-parse', '--show-toplevel'], {encoding: 'utf8'}).trim();
   const sdkSource = path.join(workspace, 'agent_space', 'artifact-attempt-sdk-source');
   assert(fs.existsSync(sdkSource), 'Provision the immutable SDK source checkout first');
@@ -180,25 +190,40 @@ test('post-delete owner and ID substitution fails immediately', async () => fixt
   }
 }));
 
-function metadata(ctx = {...context, attempt: 3, phase: 'consumer'}) {
-  const actor = {login: 'ptdbot', id: CONFIG.actor_ids.ptdbot};
-  const run = {id: ctx.run_id, run_attempt: 2, workflow_id: 456, path: p.WORKFLOW, event: 'pull_request', head_sha: ctx.head, head_branch: p.BRANCH, repository: {id: p.REPOSITORY_ID, full_name: p.REPOSITORY}, head_repository: {id: p.HEAD_REPOSITORY_ID, full_name: p.HEAD_REPOSITORY}, status: 'completed', conclusion: 'success', actor, triggering_actor: {login: 'd4l3k', id: CONFIG.actor_ids.d4l3k}};
-  const job = {id: 200, run_id: ctx.run_id, run_attempt: 2, head_sha: ctx.head, workflow_name: a.WORKFLOW_NAME, name: a.JOB, status: 'completed', conclusion: 'success'};
-  const artifact = {id: 99, name: p.artifactName({...ctx, artifact_attempt: 2}, 'ordinary'), digest: `sha256:${p.digest(p.archive('ordinary'))}`, size_in_bytes: p.archive('ordinary').length, expired: false, workflow_run: {id: ctx.run_id, repository_id: p.REPOSITORY_ID, head_repository_id: p.HEAD_REPOSITORY_ID, head_branch: p.BRANCH, head_sha: ctx.head}};
-  return {ctx, run, job, artifact};
+function finishedSteps(names, failure, skipped = []) {
+  return names.map((name, i) => ({name, number: i + 1, status: 'completed', conclusion: name === failure ? 'failure' : skipped.includes(name) ? 'skipped' : 'success'}));
 }
+
+function job(name, id, attempt, ctx = context, conclusion = 'success') {
+  return {id, run_id: ctx.run_id, run_attempt: attempt, head_sha: ctx.head, workflow_name: a.WORKFLOW_NAME, name, status: 'completed', conclusion, runner_name: 'unit-runner', runner_id: 555, runner_group_id: 0, runner_group_name: 'GitHub Actions', labels: [name === a.CHECK_CI_JOB ? 'ubuntu-24.04' : 'ubuntu-22.04']};
+}
+
+function metadata(ctx = {...context, attempt: 3, job_id: 202, job_name: a.CONSUMER_JOB, phase: 'consume', producer_job_id: 200, hold_job_id: 201, check_ci_job_id: 199}) {
+  const actor = {login: 'ptdbot', id: CONFIG.actor_ids.ptdbot};
+  const run = {id: ctx.run_id, run_attempt: 2, workflow_id: 456, path: p.WORKFLOW, event: 'pull_request', head_sha: ctx.head, head_branch: p.BRANCH, repository: {id: p.REPOSITORY_ID, full_name: p.REPOSITORY}, head_repository: {id: p.HEAD_REPOSITORY_ID, full_name: p.HEAD_REPOSITORY}, status: 'completed', conclusion: 'failure', actor, triggering_actor: {login: 'd4l3k', id: CONFIG.actor_ids.d4l3k}, referenced_workflows: [{path: `${p.REPOSITORY}/${a.CHECK_CI}@${ctx.merge_sha}`, sha: ctx.merge_sha, ref: `refs/pull/${ctx.pr}/merge`}]};
+  const check = {...job(a.CHECK_CI_JOB, 199, 2, ctx), steps: finishedSteps(['Set up job', 'Check for disabled CI', 'Complete job'])};
+  const producer = {...job(a.PRODUCER_JOB, 200, 2, ctx), steps: finishedSteps(['Set up job', a.CHECKOUT_STEP, a.GUARD_STEP, ...a.PRODUCER_STEPS, 'Post Checkout immutable artifact SDK lock', `Post ${a.CHECKOUT_STEP}`, 'Complete job'])};
+  const hold = {...job(a.CONSUMER_JOB, 201, 2, ctx, 'failure'), steps: finishedSteps(['Set up job', a.CHECKOUT_STEP, a.GUARD_STEP, a.HOLD_STEP, ...a.CONSUMER_STEPS, `Post ${a.CHECKOUT_STEP}`, 'Complete job'], a.HOLD_STEP, a.CONSUMER_STEPS)};
+  const current = {...job(a.CONSUMER_JOB, ctx.job_id, 3, ctx, null), status: 'in_progress'};
+  const artifact = {id: 99, name: p.artifactName({...ctx, artifact_attempt: 2}, 'ordinary'), digest: `sha256:${p.digest(p.archive('ordinary'))}`, size_in_bytes: p.archive('ordinary').length, expired: false, workflow_run: {id: ctx.run_id, repository_id: p.REPOSITORY_ID, head_repository_id: p.HEAD_REPOSITORY_ID, head_branch: p.BRANCH, head_sha: ctx.head}};
+  return {ctx, run, check, producer, hold, current, artifact};
+}
+
+function priorJobs(data) { return {total_count: 3, jobs: [data.check, data.producer, data.hold]}; }
+function currentJobs(data) { return {total_count: 3, jobs: [data.check, data.producer, data.current]}; }
 
 function requestFixture(data) {
   return async endpoint => {
     if (endpoint.endsWith('/attempts/2')) return data.run;
-    if (endpoint.endsWith('/attempts/2/jobs?per_page=100')) return {total_count: 1, jobs: [data.job]};
+    if (endpoint.endsWith('/attempts/2/jobs?per_page=100')) return priorJobs(data);
+    if (endpoint.endsWith('/attempts/3/jobs?per_page=100')) return currentJobs(data);
     if (endpoint.endsWith('/artifacts?per_page=100')) return {total_count: data.extra ? 2 : 1, artifacts: data.extra ? [data.artifact, data.extra] : [data.artifact]};
-    if (endpoint.endsWith(`/artifacts/${data.artifact.id}`)) return data.artifact;
+    if (endpoint.endsWith(`/artifacts/${data.artifact.id}`)) return data.detail ?? data.artifact;
     throw new Error('Unexpected unit request');
   };
 }
 
-test('N+1 authenticates same-run prior attempt and deterministic bytes', async () => {
+test('N+1 authenticates successful producer and sole failed hold', async () => {
   const data = metadata();
   const result = await a.priorArtifact(CONFIG, data.ctx, requestFixture(data));
   assert.equal(result.id, 99);
@@ -210,6 +235,8 @@ test('N+1 authenticates same-run prior attempt and deterministic bytes', async (
 test('extra archives and changed artifact metadata reject', async () => {
   const data = metadata();
   await assert.rejects(a.priorArtifact(CONFIG, data.ctx, requestFixture({...data, extra: {...data.artifact, id: 100}})), /Unexpected run artifacts/);
+  const absent = async endpoint => endpoint.endsWith('/artifacts?per_page=100') ? {total_count: 0, artifacts: []} : requestFixture(data)(endpoint);
+  await assert.rejects(a.priorArtifact(CONFIG, data.ctx, absent), /Unexpected run artifacts/);
   for (const [key, value] of [['id', 0], ['name', 'test-reports-runattempt2-x'], ['digest', `sha256:${'0'.repeat(64)}`], ['size_in_bytes', 1], ['expired', true]]) {
     const changed = structuredClone(data); changed.artifact[key] = value;
     await assert.rejects(a.priorArtifact(CONFIG, changed.ctx, requestFixture(changed)));
@@ -218,16 +245,74 @@ test('extra archives and changed artifact metadata reject', async () => {
     const changed = structuredClone(data); changed.artifact.workflow_run[key] = 'wrong';
     await assert.rejects(a.priorArtifact(CONFIG, changed.ctx, requestFixture(changed)));
   }
+  const substituted = structuredClone(data); substituted.detail = {...substituted.artifact, id: 100};
+  await assert.rejects(a.priorArtifact(CONFIG, substituted.ctx, requestFixture(substituted)), /Artifact ID changed/);
 });
 
 test('wrong source attempt, run, head and workflow reject', async () => {
-  for (const [key, value] of [['id', 101], ['run_attempt', 1], ['workflow_id', 457], ['path', 'other'], ['event', 'push'], ['head_sha', 'c'.repeat(40)], ['head_branch', 'other'], ['status', 'in_progress'], ['conclusion', 'failure']]) {
+  for (const [key, value] of [['id', 101], ['run_attempt', 1], ['workflow_id', 457], ['path', 'other'], ['event', 'push'], ['head_sha', 'c'.repeat(40)], ['head_branch', 'other'], ['status', 'in_progress'], ['conclusion', 'success']]) {
     const changed = metadata(); changed.run[key] = value;
     await assert.rejects(a.priorArtifact(CONFIG, changed.ctx, requestFixture(changed)));
   }
   const data = metadata();
   await assert.rejects(a.priorArtifact(CONFIG, {...data.ctx, attempt: 4}, requestFixture(data)));
 });
+
+test('every unapproved source failure and unexpected hold operation rejects', async () => {
+  const mutations = [d => { d.check.conclusion = 'skipped'; }, d => { d.producer.conclusion = 'failure'; }, d => { d.producer.status = 'queued'; }, d => { d.hold.conclusion = 'success'; }, d => { d.hold.steps.find(s => s.name === a.GUARD_STEP).conclusion = 'failure'; }, d => { d.hold.steps.find(s => s.name === a.HOLD_STEP).conclusion = 'success'; }, d => { d.hold.steps.find(s => s.name === a.CONSUMER_STEPS[0]).conclusion = 'success'; }, d => { d.hold.steps.push({name: 'unexpected upload', number: 99, status: 'completed', conclusion: 'success'}); }, d => { d.producer.runner_group_name = 'self-hosted'; }, d => { d.hold.labels = ['self-hosted']; }, d => { d.run.referenced_workflows[0].sha = 'c'.repeat(40); }];
+  for (const mutate of mutations) { const data = metadata(); mutate(data); await assert.rejects(a.priorArtifact(CONFIG, data.ctx, requestFixture(data))); }
+  const data = metadata();
+  assert.throws(() => a.validateSourceJobs({total_count: 4, jobs: [...priorJobs(data).jobs, {...data.hold, id: 999, name: 'other'}]}, {...data.ctx, attempt: 2}));
+});
+
+test('numeric source and consumer job substitutions reject', async () => {
+  for (const role of ['check', 'producer', 'hold', 'current']) {
+    const data = metadata(); data[role].id = 999;
+    await assert.rejects(a.priorArtifact(CONFIG, data.ctx, requestFixture(data)));
+  }
+  const data = metadata();
+  assert.throws(() => a.validateSourceJobs({total_count: 3, jobs: [data.check, data.producer, {...data.hold, id: data.producer.id}]}, {...data.ctx, attempt: 2}));
+});
+
+test('partial rerun retains prerequisite IDs and never permits all-jobs selection', () => {
+  const data = metadata();
+  const source = a.validateSourceJobs(priorJobs(data), {...data.ctx, attempt: 2});
+  assert.equal(a.validateCurrentJobs(currentJobs(data), data.ctx, source).id, 202);
+  assert.equal(a.validateCurrentJobs({total_count: 1, jobs: [data.current]}, data.ctx, source).id, 202);
+  for (const field of ['id', 'run_attempt', 'runner_id', 'head_sha']) {
+    const changed = structuredClone(data); changed.producer[field] = field === 'head_sha' ? 'c'.repeat(40) : 999;
+    assert.throws(() => a.validateCurrentJobs(currentJobs(changed), data.ctx, source), /Unexpected prerequisite rerun/);
+  }
+  assert.throws(() => a.validateCurrentJobs({total_count: 1, jobs: [{...data.current, id: 201}]}, {...data.ctx, job_id: 201}, source), /Hold job was not rerun/);
+  const target = a.rerunTarget(CONFIG, data.ctx, data.run, priorJobs(data));
+  assert.deepEqual(target, {method: 'POST', endpoint: `repos/${p.REPOSITORY}/actions/jobs/201/rerun`, expected_status: 201, body: {enable_debug_logging: false}, producer_job_id: 200, consumer_job_id: 201});
+  for (const endpoint of [`repos/${p.REPOSITORY}/actions/runs/100/rerun`, `repos/${p.REPOSITORY}/actions/runs/100/rerun-failed-jobs`, `repos/${p.REPOSITORY}/actions/jobs/200/rerun`]) assert.throws(() => a.rerunTarget(CONFIG, data.ctx, data.run, priorJobs(data), endpoint), /Only the exact consumer-job/);
+});
+
+test('fixed role tuples and inert hold cannot invoke uploader or consumer', async () => fixture(async root => {
+  assert.equal(a.phaseFor(a.PRODUCER_JOB, 2, 2), 'produce');
+  assert.equal(a.phaseFor(a.CONSUMER_JOB, 2, 2), 'hold');
+  assert.equal(a.phaseFor(a.CONSUMER_JOB, 3, 2), 'consume');
+  for (const name of [a.PRODUCER_JOB, a.CONSUMER_JOB, 'other']) for (const attempt of [1, 2, 3, 4]) {
+    if ((name === a.PRODUCER_JOB && attempt === 2) || (name === a.CONSUMER_JOB && [2, 3].includes(attempt))) continue;
+    assert.throws(() => a.phaseFor(name, attempt, 2), /Unexpected job\/attempt tuple/);
+  }
+  const hold = {...context, job_name: a.CONSUMER_JOB, job_id: 201, phase: 'hold'};
+  await a.execute('guard', CONFIG, hold);
+  assert.equal(fs.existsSync(p.fixtureRoot(hold)), false);
+  assert.equal(await a.execute('hold', CONFIG, hold), 1);
+  assert.equal(fs.existsSync(p.fixtureRoot(hold)), false);
+  assert.equal(fs.readdirSync(root).join(','), 'output');
+  for (const mode of ['dependencies', 'produce', 'consume', 'finish']) await assert.rejects(a.execute(mode, CONFIG, hold));
+  const consumer = metadata().ctx;
+  for (const mode of ['dependencies', 'produce', 'hold']) await assert.rejects(a.execute(mode, CONFIG, consumer));
+  assert.throws(() => a.markStage('unbounded secret diagnostic'));
+  await a.execute('guard', CONFIG, consumer);
+  assert.deepEqual(p.readState(consumer).artifacts, {});
+  await a.execute('finish', CONFIG, consumer);
+  assert.equal(fs.existsSync(p.fixtureRoot(consumer)), false);
+
+}));
 
 test('private and special addresses cannot reach the HTTPS relay', () => {
   for (const value of ['0.0.0.0', '10.1.2.3', '100.64.0.1', '100.127.255.255', '127.0.0.1', '169.254.169.254', '172.16.1.1', '172.31.255.255', '192.0.0.9', '192.0.2.1', '192.31.196.1', '192.52.193.1', '192.88.99.1', '192.168.1.1', '192.175.48.1', '198.18.0.1', '198.19.255.255', '198.51.100.1', '203.0.113.1', '224.0.0.1', '240.0.0.1', '255.255.255.255', '::', '::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '0:0:0:0:0:ffff:7f00:1', '::ffff:140.82.112.6', 'fd00::1', 'fe80::1', 'ff00::1', '2606:50c0:8000::154', '0177.0.0.1', 'not-ip']) assert.equal(tunnel.eligibleIPv4Address(value), false, value);
@@ -242,7 +327,7 @@ test('original source hash pins match immutable Git objects', () => {
   }
 });
 
-test('runtime guard binds the owned draft, actors, workflow, job and N/N+1', async () => fixture(async root => {
+test('runtime guard binds the owned draft, actors, workflow, runner and exact tuples', async () => fixture(async root => {
   const workspace = execFileSync('git', ['rev-parse', '--show-toplevel'], {encoding: 'utf8'}).trim();
   const head = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
   const user = {login: 'ptdbot', id: CONFIG.actor_ids.ptdbot};
@@ -252,24 +337,26 @@ test('runtime guard binds the owned draft, actors, workflow, job and N/N+1', asy
   const event = {action: 'synchronize', number: 123, repository: upstream, sender: user, pull_request: pr};
   const eventFile = path.join(root, 'event.json');
   fs.writeFileSync(eventFile, JSON.stringify(event));
-  Object.assign(process.env, {GITHUB_WORKSPACE: workspace, GITHUB_EVENT_PATH: eventFile, GITHUB_JOB: a.JOB, GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: p.REPOSITORY, GITHUB_REPOSITORY_ID: String(p.REPOSITORY_ID), GITHUB_ACTOR: 'ptdbot', GITHUB_TRIGGERING_ACTOR: 'd4l3k', GITHUB_REF: 'refs/pull/123/merge', GITHUB_HEAD_REF: p.BRANCH, GITHUB_BASE_REF: 'main', GITHUB_SHA: 'b'.repeat(40), GITHUB_RUN_ID: '100', RUNNER_NAME: 'unit-runner'});
-  for (const attempt of [2, 3]) {
-    process.env.GITHUB_RUN_ATTEMPT = String(attempt);
-    const run = {id: 100, run_attempt: attempt, workflow_id: 456, event: 'pull_request', path: p.WORKFLOW, head_sha: head, head_branch: p.BRANCH, repository: upstream, head_repository: fork, actor: user, triggering_actor: {login: 'd4l3k', id: CONFIG.actor_ids.d4l3k}};
-    const job = {id: 200 + attempt, run_id: 100, run_attempt: attempt, head_sha: head, workflow_name: a.WORKFLOW_NAME, name: a.JOB, runner_name: 'unit-runner'};
+  Object.assign(process.env, {GITHUB_WORKSPACE: workspace, GITHUB_EVENT_PATH: eventFile, GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: p.REPOSITORY, GITHUB_REPOSITORY_ID: String(p.REPOSITORY_ID), GITHUB_ACTOR: 'ptdbot', GITHUB_TRIGGERING_ACTOR: 'd4l3k', GITHUB_REF: 'refs/pull/123/merge', GITHUB_HEAD_REF: p.BRANCH, GITHUB_BASE_REF: 'main', GITHUB_SHA: 'b'.repeat(40), GITHUB_RUN_ID: '100', RUNNER_NAME: 'unit-runner'});
+  const verifySource = async (run, ctx) => { a.validateSelectedWorkflow(run, ctx); assert.equal(ctx.head, head); };
+  for (const [name, attempt, phase] of [[a.PRODUCER_JOB, 2, 'produce'], [a.CONSUMER_JOB, 2, 'hold'], [a.CONSUMER_JOB, 3, 'consume']]) {
+    Object.assign(process.env, {GITHUB_JOB: name, GITHUB_RUN_ATTEMPT: String(attempt)});
+    const data = metadata({...metadata().ctx, head});
+    const run = {...data.run, run_attempt: attempt, status: 'in_progress', conclusion: null};
+    const current = phase === 'produce' ? data.producer : phase === 'hold' ? data.hold : data.current;
     const workflow = {id: 456, path: p.WORKFLOW, name: a.WORKFLOW_NAME};
-    const request = async endpoint => endpoint.endsWith(`/attempts/${attempt}`) ? run : endpoint.endsWith('/pulls/123') ? pr : endpoint.includes('/jobs?') ? {total_count: 1, jobs: [job]} : workflow;
-    const result = await a.guard(CONFIG, false, request);
-    assert.equal(result.phase, attempt === 2 ? 'producer' : 'consumer');
-    for (const object of [run, job, workflow]) {
-      const key = object === run ? 'workflow_id' : object === job ? 'run_id' : 'id'; const original = object[key]; object[key] = 999;
-      await assert.rejects(a.guard(CONFIG, false, request)); object[key] = original;
+    const request = async endpoint => endpoint.endsWith(`/attempts/${attempt}`) ? run : endpoint.endsWith('/pulls/123') ? pr : endpoint.endsWith(`/attempts/${attempt}/jobs?per_page=100`) ? (attempt === 2 ? priorJobs(data) : currentJobs(data)) : endpoint.endsWith('/workflows/456') ? workflow : requestFixture(data)(endpoint);
+    const result = await a.guard(CONFIG, false, request, verifySource);
+    assert.equal(result.phase, phase);
+    for (const [object, key, value] of [[run, 'workflow_id', 999], [current, 'run_id', 999], [current, 'runner_name', 'foreign-runner'], [workflow, 'id', 999]]) {
+      const original = object[key]; object[key] = value;
+      await assert.rejects(a.guard(CONFIG, false, request, verifySource)); object[key] = original;
     }
     const oldHead = pr.head.sha; pr.head.sha = 'c'.repeat(40);
-    await assert.rejects(a.guard(CONFIG, false, request)); pr.head.sha = oldHead;
+    await assert.rejects(a.guard(CONFIG, false, request, verifySource)); pr.head.sha = oldHead;
   }
   process.env.GITHUB_RUN_ATTEMPT = '4';
-  await assert.rejects(a.guard(CONFIG, false, async () => { throw new Error('Must not request'); }), /Unexpected attempt/);
+  await assert.rejects(a.guard(CONFIG, false, async () => { throw new Error('Must not request'); }), /Unexpected job\/attempt tuple/);
 }));
 
 test('real private namespace has only loopback and rejects unapproved CONNECT', async () => fixture(async root => {
@@ -297,6 +384,36 @@ test('unchanged Python helpers import and reject wrong torchci attempt without n
   fs.writeFileSync(zip, p.archive('ordinary'));
   const script = `import contextlib,hashlib,importlib.util,io,pathlib,sys\nroot=pathlib.Path(sys.argv[1]);source=root/'source';sys.path.insert(0,str(source))\nfrom tools.stats import upload_artifacts as opposing\nfrom tools.stats import upload_stats_lib as library\nspec=importlib.util.spec_from_file_location('audit_consumer',sys.argv[2]);audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)\nfor name,expected in audit.SOURCE_HASHES.items():\n if hashlib.sha256((source/name).read_bytes()).hexdigest()!=expected: raise RuntimeError('source mismatch')\nb=(root/'ordinary.zip').read_bytes();audit.verify_zip(root/'ordinary.zip',{'size':len(b),'digest':hashlib.sha256(b).hexdigest()})\nseen=[]\ndef observe(frame,event,arg):\n if event=='call' and frame.f_code in (opposing.upload_torchci_reports.__code__,library.upload_file_to_s3.__code__,library.unzip.__code__): seen.append(frame.f_code.co_name)\nlocal=root/'torchci-reports-runattempt2-200.zip';local.write_bytes(b)\nsys.setprofile(observe)\ntry: opposing.upload_torchci_reports('pytorch/pytorch',100,3,local)\nfinally: sys.setprofile(None)\nif seen!=['upload_torchci_reports'] or local.read_bytes()!=b: raise RuntimeError('wrong opposing path')\nblocked=[];sys.setprofile(audit.observe_requests(library._github_get.__code__,'allowed-list','allowed-download',99,[],(library.unzip.__code__,library.upload_file_to_s3.__code__),blocked))\ntry: opposing.upload_torchci_reports('pytorch/pytorch',100,3,local)\nfinally: sys.setprofile(None)\nif blocked or local.read_bytes()!=b: raise RuntimeError('production observer rejected wrong-attempt control')\nblocked=[];sys.setprofile(audit.observe_requests(library._github_get.__code__,'allowed-list','allowed-download',99,[],(library.unzip.__code__,library.upload_file_to_s3.__code__),blocked))\ntry:\n with contextlib.redirect_stdout(io.StringIO()): opposing.upload_torchci_reports('pytorch/pytorch',100,2,local)\nfinally: sys.setprofile(None)\nif blocked!=['unzip'] or local.read_bytes()!=b: raise RuntimeError('production observer missed matching-attempt extraction')\nobserved=[];sys.setprofile(audit.observe_requests(library._github_get.__code__,'allowed-list','allowed-download',99,observed))\ntry:\n try: library._github_get('denied-before-http')\n except AssertionError as e:\n  if str(e)!='Unexpected original helper URL': raise\n else: raise RuntimeError('URL guard did not reject')\nfinally: sys.setprofile(None)\nif observed: raise RuntimeError('unexpected download observation')\nprint('unchanged-source opposing control passed')\n`;
   const env = {PATH: '/usr/local/bin:/usr/bin:/bin', HOME: root, AWS_EC2_METADATA_DISABLED: 'true', AWS_CONFIG_FILE: '/dev/null', AWS_SHARED_CREDENTIALS_FILE: '/dev/null', PYTHONDONTWRITEBYTECODE: '1'};
-  const result = execFileSync('unshare', ['--user', '--map-root-user', '--net', '--', python, '-I', '-c', script, root, path.join(__dirname, 'consume.py')], {env, encoding: 'utf8', timeout: 30000});
+  const result = execFileSync('unshare', ['--user', '--map-root-user', '--net', '--', python, '-I', '-B', '-c', script, root, path.join(__dirname, 'consume.py')], {env, encoding: 'utf8', timeout: 30000});
   assert.equal(result.trim(), 'unchanged-source opposing control passed');
+}));
+
+test('selected merge authenticates real Git workflow, approval and entire action trees', async () => fixture(async root => {
+  const workspace = execFileSync('git', ['rev-parse', '--show-toplevel'], {encoding: 'utf8'}).trim();
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
+  const source = path.join(root, 'immutable-source');
+  const env = {...process.env, GIT_NO_LAZY_FETCH: '1', GIT_NO_REPLACE_OBJECTS: '1', GIT_ALLOW_PROTOCOL: 'file'};
+  execFileSync('git', ['clone', '--shared', '--no-checkout', workspace, source], {env, stdio: 'pipe'});
+  execFileSync('git', ['config', 'core.sparseCheckout', 'true'], {cwd: source, env});
+  fs.writeFileSync(path.join(source, '.git', 'info', 'sparse-checkout'), `/${a.ACTION_DIRECTORY}/\n/${p.WORKFLOW}\n/${a.CHECK_CI}\n`);
+  execFileSync('git', ['checkout', '--detach', head], {cwd: source, env, stdio: 'pipe'});
+  const identity = a.localSource(source);
+  const data = metadata({...metadata().ctx, head});
+  const rootTree = execFileSync('git', ['rev-parse', `${head}^{tree}`], {encoding: 'utf8'}).trim();
+  const commit = {sha: data.ctx.merge_sha, parents: [{sha: 'c'.repeat(40)}, {sha: head}], commit: {tree: {sha: rootTree}}};
+  const request = async endpoint => {
+    if (endpoint.endsWith(`/commits/${data.ctx.merge_sha}`)) return commit;
+    const match = /\/git\/trees\/([0-9a-f]{40})$/.exec(endpoint);
+    assert(match, 'Unexpected source unit request');
+    const text = execFileSync('git', ['ls-tree', match[1]], {encoding: 'utf8'}).trim();
+    return {sha: match[1], truncated: false, tree: text.split('\n').map(line => { const [header, name] = line.split('\t'); const [mode, type, sha] = header.split(' '); return {mode, type, sha, path: name}; })};
+  };
+  await a.selectedSource(data.run, data.ctx, request, identity);
+  for (const key of ['head', 'workflow', 'check_ci', 'action']) await assert.rejects(a.selectedSource(data.run, data.ctx, request, {...identity, [key]: 'd'.repeat(40)}));
+  const old = commit.parents[1].sha; commit.parents[1].sha = 'e'.repeat(40);
+  await assert.rejects(a.selectedSource(data.run, data.ctx, request, identity), /different head parent/); commit.parents[1].sha = old;
+  const wrong = structuredClone(data.run); wrong.referenced_workflows[0].ref = 'refs/heads/main';
+  await assert.rejects(a.selectedSource(wrong, data.ctx, request, identity));
+  fs.appendFileSync(path.join(source, a.ACTION_DIRECTORY, 'README.md'), '\nunit source mismatch\n');
+  assert.throws(() => a.localSource(source), /Working action source changed/);
 }));

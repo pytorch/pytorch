@@ -9,7 +9,7 @@ inputs:
     description: Current owned workflow token
 outputs:
   phase:
-    description: Bound producer or consumer attempt
+    description: Bound producer, inert hold, or consumer attempt
   fixture_root:
     description: Owned disposable fixture root
 runs:
