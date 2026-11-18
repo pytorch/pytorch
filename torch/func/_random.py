@@ -55,6 +55,15 @@ def key(
         shape ``(2,)`` encoding a ``(seed, offset)`` pair. The offset determines
         the starting position in the Philox output stream.
 
+        Each Philox call on a ``(seed, offset)`` pair produces 128 random bits.
+        The sampling functions use 32 bits per value for dtypes of 32 bits or
+        fewer and 64 bits per value for 64-bit dtypes, so each call yields
+        ``E = 4`` or ``E = 2`` values, respectively. Element ``i`` (in
+        row-major order) of a key's output, or of a batched key's slice, is
+        value ``i % E`` of the call at ``offset + i // E``. Thus advancing the
+        offset by ``k`` skips the first ``k * E`` elements, which allows
+        generating a slice of a larger output (e.g. a parameter shard) directly.
+
     Example::
 
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP

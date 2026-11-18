@@ -1304,6 +1304,24 @@ class TestStatelessRNGInteger(TestCase):
             )
 
     @parametrize("dtype", all_int_dtypes)
+    @parametrize("full_range", [False, True])
+    def test_offset_shift_consistency(self, device, dtype, full_range):
+        seed = 42
+        n = 100
+        bounds = {"low": None, "high": None} if full_range else {"high": 100}
+        key0 = random.key(seed, device=device)
+        ref = random.randint(key0, (n,), dtype=dtype, **bounds)
+
+        # as a key's offset shifts, we expect the stream to shift by
+        # the number of elements per philox call (2 for 8-byte dtypes; 4 otherwise)
+        elems_per_call = 2 if dtype.itemsize == 8 else 4
+        for offset in range(1, 4):
+            key = torch.tensor([seed, offset], dtype=torch.uint64, device=device)
+            expected_shift = offset * elems_per_call
+            result = random.randint(key, (n,), dtype=dtype, **bounds)
+            self.assertEqual(ref[expected_shift:], result[:-expected_shift])
+
+    @parametrize("dtype", all_int_dtypes)
     def test_different_keys_produce_different_values(self, device, dtype):
         a = random.randint(random.key(1, device=device), (1000,), low=None, dtype=dtype)
         b = random.randint(random.key(2, device=device), (1000,), low=None, dtype=dtype)
