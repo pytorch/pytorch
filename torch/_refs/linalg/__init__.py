@@ -107,8 +107,9 @@ def _check_vector_norm_args(
         return
 
     nonempty = x.numel() != 0
-    # Preserve eager ATen error precedence in make_dim_mask / check_linalg_norm_dtype:
-    # dtype "without narrowing" must win before canonicalize_dim raises IndexError.
+    # Mirror TORCH_META_FUNC(linalg_vector_norm): the empty-dim checks run before
+    # check_linalg_norm_dtype; for inputs known to be non-empty, skip them so the
+    # dtype error wins over the out-of-range-dim error from make_dim_mask.
     if not statically_known_true(nonempty):
         torch._check(
             sym_or(
