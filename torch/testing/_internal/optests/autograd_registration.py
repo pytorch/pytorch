@@ -1,19 +1,8 @@
 # mypy: ignore-errors
 
-import contextlib
-
 import torch
 import torch.utils._pytree as pytree
-
-
-@contextlib.contextmanager
-def set_autograd_fallback_mode(mode):
-    prev = torch._C._get_autograd_fallback_mode()
-    try:
-        torch._C._set_autograd_fallback_mode(mode)
-        yield
-    finally:
-        torch._C._set_autograd_fallback_mode(prev)
+from torch._library.autograd import autograd_fallback_mode
 
 
 def autograd_registration_check(op, args, kwargs):
@@ -107,7 +96,7 @@ def autograd_registration_check(op, args, kwargs):
 
     # At this point, we know the operator doesn't have a kernel registered to an
     # autograd key. Let's proceed with our test.
-    with set_autograd_fallback_mode("nothing"):
+    with autograd_fallback_mode("nothing"):
         all_outs = op(*args, **kwargs)
 
     inp_ids = {id(arg) for arg in flat_args}
