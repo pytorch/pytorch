@@ -499,6 +499,9 @@ class SuperVariable(VariableTracker):
         elif (
             isinstance(inner_fn, types.MethodDescriptorType)
             and inner_fn in trace_rules.get_tensor_method()
+        ) or (
+            # super().__getitem__(idx) inside a subclass's __getitem__ override.
+            inner_fn is torch._C.TensorBase.__getitem__
         ):
             # FunctionType but implementation is in C, we support some of these,
             # e.g., tensor ops like `torch.Tensor.to`.
