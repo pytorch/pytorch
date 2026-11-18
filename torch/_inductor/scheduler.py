@@ -4019,19 +4019,25 @@ class SchedulerNode(BaseSchedulerNode):
             )
         self._check_affine_indexing()
 
+    def _non_affine_dep(self) -> MemoryDep | None:
+        for dep in self.read_writes.reads_and_writes():
+            if isinstance(dep, MemoryDep) and not is_affine_indexing(dep.index):
+                return dep
+        return None
+
     def _check_affine_indexing(self) -> None:
         if not config.test_configs.raise_on_modular_indexing:
             return
         node = self.node
         if node is None:
             raise AssertionError("expected a node")
-        for dep in self.read_writes.reads_and_writes():
-            if isinstance(dep, MemoryDep) and not is_affine_indexing(dep.index):
-                origins = ", ".join(f"{o.name}={o.target}" for o in node.get_origins())
-                raise NonAffineIndexingError(
-                    f"non-affine indexing in {self.get_name()}: {dep!r}\n"
-                    f"origins: {origins}\n{self.debug_str()}"
-                )
+        dep = self._non_affine_dep()
+        if dep is not None:
+            origins = ", ".join(f"{o.name}={o.target}" for o in node.get_origins())
+            raise NonAffineIndexingError(
+                f"non-affine indexing in {self.get_name()}: {dep!r}\n"
+                f"origins: {origins}\n{self.debug_str()}"
+            )
 
     def recompute_size_and_body(
         self,
@@ -4052,7 +4058,10 @@ class SchedulerNode(BaseSchedulerNode):
             self.set_read_writes(read_writes.rename(self.mutation_renames))
 
     def refresh_dependencies(
-        self, normalize: bool, need_clear_tiling_cache: bool
+        self,
+        normalize: bool,
+        need_clear_tiling_cache: bool,
+        check_affine_indexing: bool = True,
     ) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
         # extract_read_writes. Find them out and apply manually.
@@ -4071,7 +4080,8 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache)
-        self._check_affine_indexing()
+        if check_affine_indexing:
+            self._check_affine_indexing()
 
     def clear_loop_body_dependent_caches(self, need_clear_tiling_cache: bool) -> None:
         self.clear_read_writes_dependent_caches()
@@ -4121,23 +4131,48 @@ class SchedulerNode(BaseSchedulerNode):
         # also restores cache validity.
         self._loop_state_gen += 1
 
-    def _allows_loop_reindexing(self) -> bool:
+    def _begin_loop_reindexing(self) -> tuple[Any, ...] | None:
         """
-        Loop reindexing and index inversion rebuild the loop variables with
-        FloorDiv/ModularIndexing, which would undo avoid_modular_indexing
-        after every lowering kept its indices affine.
+        Loop reindexing, index inversion and dimension expansion rebuild the
+        loop variables with FloorDiv/ModularIndexing. These cancel out of a
+        read or write that is contiguous over the rebuilt loops; anywhere
+        else they would undo affine indexing after every lowering kept its
+        indices affine. Where indices must stay affine, returns the loop
+        state for _finish_loop_reindexing to restore in that case.
         """
-        return not config.avoid_modular_indexing
+        keep_affine = not V.choices.use_modular_indexing(
+            self.get_device(),
+            numel=sympy_product(itertools.chain.from_iterable(self._sizes)),
+            kind="reindex",
+        )
+        state = self.snapshot_loop_state() if keep_affine else None
+        self._before_loop_state_mutation()
+        return state
+
+    def _finish_loop_reindexing(
+        self, state: tuple[Any, ...] | None, normalize: bool
+    ) -> bool:
+        """
+        Refresh the dependencies after the loops were rebuilt. Returns False
+        after undoing the change when state (from _begin_loop_reindexing)
+        asks for affine indices and one of them no longer is.
+        """
+        self.refresh_dependencies(
+            normalize=normalize,
+            need_clear_tiling_cache=True,
+            check_affine_indexing=state is None,
+        )
+        if state is not None and self._non_affine_dep() is not None:
+            self.restore_loop_state(state)
+            return False
+        return True
 
     def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> bool:
         if self._body is None:
             raise AssertionError("expected a loop body")
-        if not self._allows_loop_reindexing():
-            return False
-        self._before_loop_state_mutation()
+        state = self._begin_loop_reindexing()
         self._body = self._body.with_indexing_exprs(replacements)
-        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
-        return True
+        return self._finish_loop_reindexing(state, normalize=True)
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._before_loop_state_mutation()
@@ -4153,10 +4188,7 @@ class SchedulerNode(BaseSchedulerNode):
             raise AssertionError(
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
-        if not self._allows_loop_reindexing():
-            return False
-
-        self._before_loop_state_mutation()
+        state = self._begin_loop_reindexing()
         self._body = self._body.reindex_iter_loops(new_iter_sizes)
         self._sizes = self._body.sizes
 
@@ -4164,8 +4196,7 @@ class SchedulerNode(BaseSchedulerNode):
         group_fn = self.scheduler.get_backend(device).group_fn
         self.group = (device, group_fn(self._sizes))
 
-        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
-        return True
+        return self._finish_loop_reindexing(state, normalize=False)
 
     def swap_pw_red_dimension(self) -> None:
         num_rdims = self._body.get_original_num_rdims()
@@ -4199,10 +4230,7 @@ class SchedulerNode(BaseSchedulerNode):
             raise AssertionError(
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
-        if not self._allows_loop_reindexing():
-            return False
-
-        self._before_loop_state_mutation()
+        state = self._begin_loop_reindexing()
         self._body = self._body.expand_dimension_for_pointwise_node(
             dimension, new_range
         )
@@ -4213,8 +4241,7 @@ class SchedulerNode(BaseSchedulerNode):
         self.group = (device, group_fn(self._sizes))
 
         # Need normalize the prefix name to facilitate finding common dependencies
-        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
-        return True
+        return self._finish_loop_reindexing(state, normalize=True)
 
     def merge_loops(self) -> None:
         self._body = self._body.merge_loops()

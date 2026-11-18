@@ -61,6 +61,48 @@ class AffineIndexingPredicateTest(TestCase):
 instantiate_parametrized_tests(AffineIndexingPredicateTest)
 
 
+class ModularIndexingDecisionTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("avoid", [False, True])
+    def test_config_decides(self, avoid):
+        # the option, when set, is the answer for every device and construct
+        with config.patch(avoid_modular_indexing=avoid):
+            for device in ("cpu", "cuda", None):
+                for kind in (
+                    "view",
+                    "reduction",
+                    "repeat",
+                    "roll",
+                    "slice_scatter",
+                    "index",
+                    "reindex",
+                ):
+                    self.assertEqual(
+                        V.choices.use_modular_indexing(device, numel=8, kind=kind),
+                        not avoid,
+                    )
+
+    def test_choices_override(self):
+        # a backend can replace the whole decision, config check included
+        class AlwaysAffine(InductorChoices):
+            def use_modular_indexing(
+                self, device, *, numel=None, reduction_numel=None, kind
+            ):
+                return False
+
+        with (
+            V.set_choices_handler(AlwaysAffine()),
+            config.patch(avoid_modular_indexing=False),
+        ):
+            self.assertFalse(
+                V.choices.use_modular_indexing("cpu", numel=8, kind="view")
+            )
+
+
+instantiate_parametrized_tests(ModularIndexingDecisionTest)
+
+
 class AvoidModularIndexingTest(TestCase):
     """
     With avoid_modular_indexing every load/store index stays affine in the loop
@@ -421,9 +463,9 @@ class AvoidModularIndexingTest(TestCase):
     def test_fusion_does_not_reindex_loops(self, device):
         # RMS norm over a reshape: fusion would reindex the pointwise's
         # [256, 8192] loops to the reduction's [16384, 128], which turns the
-        # per-row bias read into FloorDiv(t0, 64); the detector also runs
-        # after every loop transformation, so on GPUs (the CPU backend never
-        # reindexes) this fails if the reindex happens
+        # per-row bias read into FloorDiv(t0, 64), so the reindex is undone;
+        # the detector also runs after every loop transformation, so on GPUs
+        # (the CPU backend never reindexes) this fails if the reindex is kept
         def fn(x, b, w):
             h = (x + b[:, None]).view(-1, 128)
             var = (h * h).mean(-1, keepdim=True)
@@ -433,6 +475,20 @@ class AvoidModularIndexingTest(TestCase):
         b = torch.randn(256, device=device)
         w = torch.randn(128, device=device)
         self.check(fn, x, b, w)
+
+    def test_fusion_keeps_affine_loop_reindexing(self, device):
+        # the normalized rows are realized at [1024, 128] (their merge back to
+        # [16, 8192] would load the variance through a FloorDiv) and the
+        # pointwise after the merge only reads that contiguous buffer, so
+        # reindexing its [16, 8192] loops to [1024, 128] leaves the affine
+        # 128 * t0 + t1 and is kept: it fuses with the reduction
+        def fn(x):
+            h = x.view(-1, 128)
+            var = (h * h).mean(-1, keepdim=True)
+            return (h * torch.rsqrt(var + 1e-6)).view(x.shape) + 1
+
+        x = torch.randn(16, 8192, device=device)
+        self.check(fn, x, kernel_count=1)
 
     def test_roll_noop_does_not_alias(self, device):
         def fn(x):
@@ -530,6 +586,81 @@ class AvoidModularIndexingTest(TestCase):
         actual = torch.autograd.grad(torch.compile(fn)(x), x)
         self.assertEqual(actual, expected)
 
+    def test_choices_override_realizes_merge(self, device):
+        class AlwaysAffine(InductorChoices):
+            def use_modular_indexing(
+                self, device, *, numel=None, reduction_numel=None, kind
+            ):
+                return False
+
+        def fn(a, b):
+            return (a.permute(0, 2, 1) + b).reshape(a.shape[0], -1) * 2
+
+        a = torch.randn(4, 8, 16, device=device)
+        b = torch.randn(4, 16, 8, device=device)
+        with (
+            V.set_choices_handler(AlwaysAffine()),
+            config.patch(
+                {
+                    "avoid_modular_indexing": False,
+                    "test_configs.raise_on_modular_indexing": True,
+                }
+            ),
+        ):
+            self.check(fn, a, b, kernel_count=1)
+
+    def test_decision_receives_sizes(self, device):
+        # every call site tells the decision how many elements the affected
+        # kernel touches, and a split reduction also how many of them each
+        # output reduces, so that an override can depend on the size
+        calls: dict[str, set[tuple[int | None, int | None]]] = {}
+
+        class Recording(InductorChoices):
+            def use_modular_indexing(
+                self, device, *, numel=None, reduction_numel=None, kind
+            ):
+                sizes = tuple(
+                    None if n is None else int(n) for n in (numel, reduction_numel)
+                )
+                calls.setdefault(kind, set()).add(sizes)
+                return super().use_modular_indexing(
+                    device, numel=numel, reduction_numel=reduction_numel, kind=kind
+                )
+
+        def roll(x):
+            return torch.roll(x, 3, 1) + 1
+
+        def index(x):
+            i = torch.arange(16, device=x.device)
+            return x[i % 4] + x[i // 2]
+
+        def reduction(x, y):
+            return (x * y).sum((1, 2))
+
+        def reindex(x, b, w):
+            h = (x + b[:, None]).view(-1, 128)
+            var = (h * h).mean(-1, keepdim=True)
+            return h * torch.rsqrt(var + 1e-6) * w
+
+        x = torch.randn(4, 64, 4097, device=device)
+        y = torch.randn(4, 64, 1, device=device)
+        h = torch.randn(256, 8192, device=device)
+        b = torch.randn(256, device=device)
+        w = torch.randn(128, device=device)
+        with V.set_choices_handler(Recording()):
+            self.check(roll, torch.randn(4, 16, device=device))
+            self.check(index, torch.randn(8, 3, device=device))
+            self.check(reduction, x, y)
+            self.check(reindex, h, b, w)
+        self.assertEqual(calls["roll"], {(64, None)})
+        self.assertEqual(calls["index"], {(48, None)})
+        self.assertEqual(calls["view"], {(h.numel(), None)})
+        if device != "cpu":
+            # the CPU backend neither splits reductions nor reindexes loops
+            reduction_sizes = {(x.numel(), x[0].numel())}
+            self.assertEqual(calls["reduction"], reduction_sizes)
+            self.assertEqual(calls["reindex"], {(h.numel(), None)})
+
     def test_avg_pool2d_backward_with_padding(self, device):
         # the window bounds are FloorDiv/Min of the output index and reach the
         # grad load through indirect_indexing
@@ -564,6 +695,11 @@ class _IndexOps:
 class SplitReductionRangesTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def aligned_split(self, reduction_ranges, split, device="cpu"):
+        return ir.Reduction._split_reduction_ranges(
+            torch.device(device), [], reduction_ranges, split
+        )
+
     @parametrize(
         "reduction_ranges,split",
         [
@@ -576,7 +712,7 @@ class SplitReductionRangesTest(TestCase):
     )
     @config.patch(avoid_modular_indexing=True)
     def test_chunks_cover_boundary_dim(self, reduction_ranges, split):
-        aligned = ir.Reduction._split_reduction_ranges(reduction_ranges, split)
+        aligned = self.aligned_split(reduction_ranges, split)
         outer, inner = aligned.outer_ranges, aligned.inner_ranges
         k = len(outer) - 1
         self.assertEqual([int(s) for s in outer[:-1]], list(reduction_ranges[:k]))
@@ -613,12 +749,12 @@ class SplitReductionRangesTest(TestCase):
 
     def test_disabled_without_option(self):
         with config.patch(avoid_modular_indexing=False):
-            self.assertIsNone(ir.Reduction._split_reduction_ranges((1000, 4), 900))
+            self.assertIsNone(self.aligned_split((1000, 4), 900))
 
     @config.patch(avoid_modular_indexing=True)
     def test_one_reduction_dim_keeps_flat_split(self):
-        self.assertIsNone(ir.Reduction._split_reduction_ranges((100003,), 13))
-        self.assertIsNone(ir.Reduction._split_reduction_ranges((1, 100003, 1), 13))
+        self.assertIsNone(self.aligned_split((100003,), 13))
+        self.assertIsNone(self.aligned_split((1, 100003, 1), 13))
 
 
 instantiate_parametrized_tests(SplitReductionRangesTest)

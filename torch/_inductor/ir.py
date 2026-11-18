@@ -2342,6 +2342,8 @@ class Reduction(Loops):
     @classmethod
     def _split_reduction_ranges(
         cls,
+        device: torch.device,
+        ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
         split: _IntLike,
         input_node: IRNode | None = None,
@@ -2353,10 +2355,16 @@ class Reduction(Loops):
         the outer numel closest to split, preferring an even division (an
         uneven one needs a mask). Like the flat split, a full reduction over
         an input whose dense dim is not the last one reduces the dense dim
-        innermost. Returns None when the option is off, a range is symbolic
-        or there is one reduction dim, whose flat split is affine as it is.
+        innermost. Returns None when the flat split stays: the backend keeps
+        it, a range is symbolic or there is one reduction dim, whose flat
+        split is affine as it is.
         """
-        if not config.avoid_modular_indexing:
+        if V.choices.use_modular_indexing(
+            device,
+            numel=sympy_product([*ranges, *reduction_ranges]),
+            reduction_numel=sympy_product(reduction_ranges),
+            kind="reduction",
+        ):
             return None
         if not all(_is_static(r) for r in [*reduction_ranges, split]):
             return None
@@ -2525,7 +2533,9 @@ class Reduction(Loops):
         aligned = (
             None
             if strict_reduction
-            else cls._split_reduction_ranges(reduction_ranges, split, input_node)
+            else cls._split_reduction_ranges(
+                device, ranges, reduction_ranges, split, input_node
+            )
         )
         if aligned is not None:
             return cls.create_multilayer_helper(
@@ -2921,7 +2931,9 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         input_node: IRNode | None = None,
     ) -> Sequence[TensorBox]:
         reduction_numel = sympy_product(reduction_ranges)
-        aligned = cls._split_reduction_ranges(reduction_ranges, split, input_node)
+        aligned = cls._split_reduction_ranges(
+            device, ranges, reduction_ranges, split, input_node
+        )
         if aligned is not None:
             aligned_split = aligned
 
@@ -3185,7 +3197,7 @@ class WelfordReduction(MultiOutputReduction):
         recursively
         """
         reduction_numel = sympy_product(reduction_ranges)
-        aligned = cls._split_reduction_ranges(reduction_ranges, split)
+        aligned = cls._split_reduction_ranges(device, ranges, reduction_ranges, split)
         if aligned is not None:
             need_mask = aligned.need_mask
         else:
@@ -4250,8 +4262,10 @@ class View(GenericView):
                 # https://github.com/pytorch/pytorch/issues/145561
                 reindex = None
             if reindex is not None and (
-                not config.avoid_modular_indexing
-                or all(map(is_affine_indexing, reindex(cls._view_symbols(new_size))))
+                all(map(is_affine_indexing, reindex(cls._view_symbols(new_size))))
+                or V.choices.use_modular_indexing(
+                    x.get_device(), numel=sympy_product(new_size), kind="view"
+                )
             ):
                 return cls(data=x, size=list(new_size), reindex=reindex)
             # Merging dims needs ModularIndexing, and consumers may offset the
@@ -6132,12 +6146,14 @@ class ComputedBuffer(OperationBuffer):
         args, var_ranges = dependencies.index_vars_squeeze(
             self.get_pointwise_size(), self.get_reduction_size(), prefix="q"
         )
-        with patch.object(ConstantBuffer, "override_device", self.get_device()):
+        device = self.get_device_or_error()
+        with patch.object(ConstantBuffer, "override_device", device):
             body = LoopBody(
                 self.get_store_function(),
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
                 *args,
+                device=device,
             )
         index_vars = []
         reduce_vars: list[Any] = []

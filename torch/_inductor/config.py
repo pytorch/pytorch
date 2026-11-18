@@ -996,14 +996,20 @@ strict_output_strides = False
 # its flat block index with // and %). Views that merge dims are realized (a
 # copy, unless the producer's layout is still flexible) instead of being
 # inlined, split reductions split at a dim boundary, repeat, roll and strided
-# slice_scatter are lowered without modular arithmetic, loop reindexing during
-# fusion is skipped, and non-affine index arithmetic (%, //, abs, clamp) stays
-# a value computation behind an indirect variable. Best effort: adaptive
-# pooling and upsample_nearest2d_backward with non-divisible sizes, split
-# reductions over symbolic ranges and a strided slice_scatter whose dim is not
-# provably a multiple of the step still produce modular addresses. Helps
-# backends with restricted memory addressing at the cost of extra buffers and
-# copies.
+# slice_scatter are lowered without modular arithmetic, a loop reindexing
+# during fusion is undone when it leaves a non-affine index, and non-affine
+# index arithmetic (%, //, abs, clamp) stays a value computation behind an
+# indirect variable. The indirect variable does not remove the %, //: it is
+# computed as a value and the load becomes a data-dependent gather, like
+# aten.index or an embedding lookup. That helps a backend that lowers direct
+# loads only from affine addresses but has a gather path (MTIA); it is not
+# faster elsewhere. Best effort: adaptive pooling and
+# upsample_nearest2d_backward with non-divisible sizes, split reductions over
+# symbolic ranges and a strided slice_scatter whose dim is not provably a
+# multiple of the step still produce modular addresses. Helps backends with
+# restricted memory addressing at the cost of extra buffers and copies. Each of
+# these choices is made by InductorChoices.use_modular_indexing, which follows
+# this option by default and can be overridden through V.set_choices_handler.
 avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
 
 # Enabling this will let compiler print warning messages if a generated triton
