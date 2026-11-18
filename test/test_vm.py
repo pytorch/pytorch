@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
 # dynamo test configurations interpose on exactly that.
 UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
 
-# The Rust runtime is only in builds made with USE_CFG_COMPILE=1, and only
+# The Rust runtime is only in builds made with USE_TORCH_VM=1, and only
 # understands CPython 3.12 bytecode.
 try:
     cfg_rs = importlib.import_module("torch._cfg_rs")
@@ -389,7 +389,7 @@ class TestCallSite(TestCase):
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
 class TestDispatchCapture(TestCase):
-    """The dispatcher hook that cfg_compile records kernels with."""
+    """The dispatcher hook that torch.vm records kernels with."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -497,8 +497,8 @@ class TestDispatchCapture(TestCase):
         self.assertEqual([r[0] for r in records if r[2] == 0], ["aten::mul.Tensor"])
 
 
-@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
-class TestCfgFrontend(TestCase):
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmFrontend(TestCase):
     """The bytecode decoder of the Rust crate."""
 
     hw_classification = HardwareClassification.GENERIC
