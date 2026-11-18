@@ -5340,6 +5340,10 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
                 "REVIEWED_SHA": sha,
                 "OPT_OUT_LABEL": label,
             },
+            ("publish", "Check the merge base's age"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
+            },
             ("publish", "Post the automated review on the PR"): {
                 "PR_NUMBER": pr,
                 "REVIEWED_SHA": sha,
@@ -5363,6 +5367,22 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
         step = publish.split("- name: Put back the previous review", 1)[1]
         self.assertIn("if: always()", step.split("run:", 1)[0])
         self.assertIn("post_review.py --restore-pending", step)
+
+    def test_the_merge_base_is_checked_before_the_row_is_written(self):
+        publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
+        before, row_step = publish.split("- name: Record terminal row", 1)
+        download, check = before.split("- name: Check the merge base's age", 1)
+        check = check.split("\n      - name:", 1)[0]
+        self.assertIn("post_review.py --stale-base stale-base.txt", check)
+        # A failure here must not skip the terminal row, and a broken gate
+        # would pass for a base that is not stale.
+        self.assertIn("continue-on-error: true", check)
+        gate = "steps.fetch.outcome == 'success' && needs.review.result == 'success'"
+        self.assertIn(f"if: {gate}", check)
+        self.assertIn("id: fetch", download)
+        self.assertNotIn("configure-aws-credentials", download)
+        row_step = row_step.split("\n      - name:", 1)[0]
+        self.assertIn("--stale-base-file stale-base.txt", row_step)
 
 
 class TestWithdrawHoldsOnlyTheToken(unittest.TestCase):

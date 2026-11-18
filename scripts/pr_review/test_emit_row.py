@@ -206,9 +206,10 @@ class TestPublishedFindings(unittest.TestCase):
             self.assertEqual(published_findings(verdict), [])
 
 
-def terminal_row(verdict: dict, stale_base: str | None = None) -> dict:
+def terminal_row(verdict: dict, stale_base: str | bytes | None = None) -> dict:
     """Run emit_row.py on `verdict` the way the publish job does, with
-    post_review.py --stale-base's output if `stale_base` is not None."""
+    `stale_base` as post_review.py --stale-base's output; None leaves the file
+    missing, as a skipped or failed step does."""
     import json
     import subprocess
     import tempfile
@@ -218,7 +219,9 @@ def terminal_row(verdict: dict, stale_base: str | None = None) -> dict:
         verdict_file.write_text(json.dumps(verdict))
         out = Path(tmp) / "row.json"
         stale_file = Path(tmp) / "stale-base.txt"
-        if stale_base is not None:
+        if isinstance(stale_base, bytes):
+            stale_file.write_bytes(stale_base)
+        elif stale_base is not None:
             stale_file.write_text(stale_base)
         subprocess.run(
             [
@@ -325,7 +328,9 @@ class TestAStaleBaseRequestsChanges(unittest.TestCase):
         self.assertEqual(row["summary"], "s")
 
     def test_no_note_leaves_the_verdict_alone(self):
-        for stale_base in (None, "", "two\nlines", "x" * 1001):
+        for stale_base in (
+            None, "", "two\nlines", "x" * 1001, b"\xff not utf-8", "see www.x", "<b>"
+        ):  # fmt: skip
             row = terminal_row(self.CLEAN, stale_base)
             self.assertEqual(row["verdict"], "ready_for_human_review")
             self.assertNotIn("stale_base", row["extra"])

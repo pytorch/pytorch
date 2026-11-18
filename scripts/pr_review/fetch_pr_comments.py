@@ -31,8 +31,9 @@ within each; the reactors' permission checks are spent only on items
 selection considers. ``reactions_truncated`` is set when a limit or a failed lookup
 may have left some out of a kept item. Bodies are capped; the latest review's
 body at ``MAX_REVIEW_BODY``, after its rebase note (post_review.py's
-``STALE_BASE_TAG`` line and the line after it) is removed, since the review job
-cannot check it. If the conversation is too long, ``truncated`` is
+``STALE_BASE_TAG`` line and the line after it) is replaced with
+``STALE_BASE_STUB``: the review job cannot check the note, but should know why
+the review requested changes. If the conversation is too long, ``truncated`` is
 set and items are selected in two phases. First, people's comments alone,
 newest first; the first that does not fit ends selection, and older comments
 and every finding are left out. Then, only if all of them fit, earlier
@@ -97,11 +98,15 @@ MARKER = "<!-- hardened-pr-review -->"
 # A line of post_review.py's too-large notice, which reviewed nothing, so the
 # verdict before it stays the latest. Model text cannot forge it (`<` escaped).
 TOO_LARGE_TAG = "<!-- hardened-pr-review-too-large -->"
-# post_review.py's line before its rebase note. The note and its tag are
-# dropped from the latest review: the offline review cannot check it, so it
-# must not carry it forward as a finding.
+# post_review.py's line before its rebase note. In the latest review, the
+# note and its tag become STALE_BASE_STUB: the offline review cannot check the
+# note, so it must not carry it forward as a finding.
 STALE_BASE_TAG = "<!-- hardened-pr-review-stale-base -->"
-_STALE_BASE_NOTE = re.compile(rf"^{re.escape(STALE_BASE_TAG)}\r?\n.*\n?", re.MULTILINE)
+STALE_BASE_STUB = (
+    "(The publish job asked for a rebase here because the merge base was stale. "
+    "That check is the publish job's, not the review's, so it is not a finding.)"
+)
+_STALE_BASE_NOTE = re.compile(rf"^{re.escape(STALE_BASE_TAG)}\r?\n[^\r\n]*", re.M)
 AUTOMATED = "automated_review"
 # REST listings carry a reaction count for these kinds only; a review's does not.
 COUNTED = ("issue_comment", "review_comment")
@@ -341,7 +346,7 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
             limit, body = MAX_BODY, obj.get("body")
             if obj is latest:
                 login, role, limit = bot, AUTOMATED, MAX_REVIEW_BODY
-                body = _STALE_BASE_NOTE.sub("", body or "")
+                body = _STALE_BASE_NOTE.sub(STALE_BASE_STUB, body or "")
             elif (
                 kind == "review_comment"
                 and (obj.get("user") or {}).get("login") == bot

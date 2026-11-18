@@ -754,20 +754,19 @@ PULL = {
 
 NOTE = (
     "This PR's merge base is more than 60 days old and 3801 commits behind `main`, "
-    "so its CI ran against an outdated base. Please rebase before merging."
+    "so its CI ran against an outdated base. Please rebase before human review."
 )
 
 
 class TestAStaleBaseAsksForARebase(unittest.TestCase):
-    def note_and_log(self, gh, pull=PULL):
+    def note_and_log(self, gh):
         out = io.StringIO()
         with redirect_stdout(out):
-            note = post_review.stale_base_note(gh, pull, SHA)
+            note = post_review.stale_base_note(gh, 1, SHA)
         return note, out.getvalue()
 
     def note_for(self, gh):
-        """The note for FakeGitHub's PR, as `--stale-base` looks it up."""
-        return post_review.stale_base_note(gh, post_review.pull_request(gh, 1), SHA)
+        return post_review.stale_base_note(gh, 1, SHA)
 
     def compares(self, gh):
         return [c[1] for c in gh.calls if "/compare/" in c[1]]
@@ -785,7 +784,7 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
         )
         self.assertIn("behind `trunk`, so", self.note_for(gh))
 
-    def test_a_pr_the_bot_does_not_land_on_the_default_branch_gets_none(self):
+    def test_a_pr_into_another_branch_gets_none(self):
         for base_ref, head_ref, head_repo in (
             ("release/2.5", "feature", "o/r"),  # a release branch
             ("feature-1", "feature-2", "o/r"),  # an upper native-stack PR
@@ -819,19 +818,20 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
     def test_the_note_starts_past_the_threshold(self):
         days = post_review.STALE_BASE_DAYS
         for age, noted in ((days - 1 / 24, False), (days + 1 / 24, True)):
-            gh = Canned(forked(age))
+            gh = Canned(PULL, forked(age))
             note, log = self.note_and_log(gh)
             self.assertEqual(bool(note), noted)
             self.assertEqual((log, gh.responses), ("", []))
 
     def test_a_base_branch_that_has_not_moved_gets_none(self):
-        gh = Canned(forked(60, behind_by=0))
+        gh = Canned(PULL, forked(60, behind_by=0))
         self.assertEqual(self.note_and_log(gh), ("", ""))
         self.assertEqual(gh.responses, [])
 
     def test_malformed_responses_give_no_note_and_a_warning(self):
         numbered = {**PULL, "base": {"ref": 1, "repo": {"default_branch": 1}}}
         for pull, responses in (
+            (GitHubError(500, "down"), []),
             ("x", []),
             ({**PULL, "base": "x"}, []),
             ({**PULL, "head": {"ref": "gh/u/1/head", "repo": "x"}}, []),
@@ -844,28 +844,33 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
             (PULL, [compared_on("garbage")]),
             (PULL, [compared_on("2026-01-01T00:00:00")]),
         ):
-            gh = Canned(*responses)
-            note, log = self.note_and_log(gh, pull)
+            gh = Canned(pull, *responses)
+            note, log = self.note_and_log(gh)
             self.assertEqual(note, "")
             self.assertIn("could not", log)
             self.assertEqual(gh.responses, [])
 
     def test_a_non_integer_behind_by_gives_no_note(self):
-        gh = Canned({**forked(60), "behind_by": "1"})
+        gh = Canned(PULL, {**forked(60), "behind_by": "1"})
         self.assertEqual(self.note_and_log(gh), ("", ""))
         self.assertEqual(gh.responses, [])
 
-    def test_the_lookup_has_its_own_deadline_and_puts_back_the_old_one(self):
+    def test_both_lookups_share_a_deadline_and_put_back_the_old_one(self):
         limit = post_review.STALE_BASE_SECONDS
         for outer in (None, 12345.0):
-            for response in (forked(60), post_review.OutOfTime()):
-                gh = Canned(response)
+            for responses, calls in (
+                ((PULL, forked(60)), 2),
+                ((PULL, post_review.OutOfTime()), 2),
+                ((post_review.OutOfTime(),), 1),
+            ):
+                gh = Canned(*responses)
                 gh.deadline = outer
                 start = time.monotonic()
                 self.note_and_log(gh)
                 end = time.monotonic()
-                (deadline,) = gh.deadlines
-                self.assertTrue(start + limit <= deadline <= end + limit)
+                self.assertEqual(len(gh.deadlines), calls)
+                self.assertEqual(len(set(gh.deadlines)), 1)
+                self.assertTrue(start + limit <= gh.deadlines[0] <= end + limit)
                 self.assertEqual(gh.deadline, outer)
 
     def test_the_ghstack_pattern_matches_native_stacks(self):
@@ -899,9 +904,10 @@ class TestAStaleBaseRequestsChanges(unittest.TestCase):
         (body,) = gh.posted()
         self.assertEqual(body["event"], "REQUEST_CHANGES")
         self.assertIn("changes requested before human review", body["body"])
-        self.assertIn(
-            f"One bug.\n\n{post_review.STALE_BASE_TAG}\n{NOTE}\n", body["body"]
-        )
+        note = f"{post_review.STALE_BASE_TAG}\n{NOTE} Nothing else in this review"
+        self.assertIn(f"One bug.\n\n{note}", body["body"])
+        # A re-review cannot fix the base, so there is no push-back hint.
+        self.assertNotIn(post_review.PUSH_BACK, body["body"])
         # The model's minor finding stays non-blocking: folded, not on the line.
         self.assertNotIn("comments", body)
         self.assertIn("1 non-blocking finding", body["body"])
@@ -915,30 +921,37 @@ class TestAStaleBaseRequestsChanges(unittest.TestCase):
         self.assertEqual(body["event"], "REQUEST_CHANGES")
         (c,) = body["comments"]
         self.assertIn("Off by one.", c["body"])
-        self.assertIn(NOTE, body["body"])
+        self.assertIn(f"{post_review.STALE_BASE_TAG}\n{NOTE}\n", body["body"])
 
     def test_a_malformed_note_is_ignored(self):
         for extra in (
             {"stale_base": 1, "model_verdict": "ready_for_human_review"},
             {"stale_base": "a\nb", "model_verdict": "ready_for_human_review"},
             {"stale_base": NOTE, "model_verdict": "approve"},
+            {
+                "stale_base": post_review.TOO_LARGE_TAG,
+                "model_verdict": "changes_requested",
+            },
         ):
             r = row(verdict="changes_requested")
             r["extra"] |= extra
             gh = FakeGitHub()
             go(gh, r)
-            self.assertNotIn(post_review.STALE_BASE_TAG, gh.posted()[0]["body"])
+            (posted,) = gh.posted()
+            self.assertEqual(posted["event"], "REQUEST_CHANGES")
+            self.assertIn("changes requested before human review", posted["body"])
+            self.assertNotIn(post_review.STALE_BASE_TAG, posted["body"])
 
 
 class TestStaleBaseModeWritesTheNote(unittest.TestCase):
     ENV = {"GH_TOKEN": "t", "REPO": "o/r", "PR_NUMBER": "1", "REVIEWED_SHA": SHA}
 
-    def run_mode(self, gh):
+    def run_mode(self, gh, env=ENV):
         with tempfile.TemporaryDirectory() as tmp:
             out_file = Path(tmp) / "stale-base.txt"
             argv = ["post_review.py", "--stale-base", str(out_file)]
             with (
-                mock.patch.dict(post_review.os.environ, self.ENV, clear=True),
+                mock.patch.dict(post_review.os.environ, env, clear=True),
                 mock.patch.object(sys, "argv", argv),
                 mock.patch.object(post_review, "GitHub", return_value=gh),
                 redirect_stdout(io.StringIO()) as log,
@@ -952,9 +965,14 @@ class TestStaleBaseModeWritesTheNote(unittest.TestCase):
         self.assertEqual(self.run_mode(stale)[:2], (0, NOTE))
         self.assertEqual(self.run_mode(FakeGitHub(compare=forked(1)))[:2], (0, ""))
 
-    def test_a_failed_pr_fetch_writes_no_file_and_warns(self):
-        gh = Canned(GitHubError(500, "down"))
-        rc, text, log = self.run_mode(gh)
+    def test_a_failed_pr_fetch_writes_no_note_and_warns(self):
+        rc, text, log = self.run_mode(Canned(GitHubError(500, "down")))
+        self.assertEqual((rc, text), (0, ""))
+        self.assertIn("could not check the merge base's age", log)
+
+    def test_a_missing_input_writes_no_file_and_warns(self):
+        env = {k: v for k, v in self.ENV.items() if k != "PR_NUMBER"}
+        rc, text, log = self.run_mode(FakeGitHub(), env)
         self.assertEqual((rc, text), (0, None))
         self.assertIn("merge base not checked", log)
 
@@ -2419,15 +2437,6 @@ class TestWorkflowWiring(unittest.TestCase):
         )
         self.assertIn("REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}", step)
         self.assertIn("pull-requests: write", publish.split("steps:", 1)[0])
-
-    def test_the_merge_base_is_checked_before_the_row_is_written(self):
-        publish = WORKFLOW.read_text().split("\n  publish:\n", 1)[1]
-        before, row_step = publish.split("- name: Record terminal row", 1)
-        check = before.split("- name: Check the merge base's age", 1)[1]
-        self.assertIn("post_review.py --stale-base stale-base.txt", check)
-        self.assertIn("REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}", check)
-        row_step = row_step.split("\n      - name:", 1)[0]
-        self.assertIn("--stale-base-file stale-base.txt", row_step)
 
 
 if __name__ == "__main__":

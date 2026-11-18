@@ -703,19 +703,23 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertIn(20, ids)
         self.assertNotIn(10, ids)
 
-    def test_the_latest_review_loses_its_rebase_note(self):
+    def test_the_latest_review_has_its_rebase_note_replaced(self):
         import post_review
 
-        body = post_review._compose(
-            "changes_requested", "One bug.", "a" * 40, REPO, 0, [], [], 0,
-            note="Please rebase before merging.",
-        )  # fmt: skip
-        note = f"{post_review.STALE_BASE_TAG}\nPlease rebase before merging.\n"
-        for eol in ("\n", "\r\n"):
-            sent = body.replace("\n", eol)
-            (item,) = fpc.collect(FakeApi(reviews=[ours(body=sent)]), REPO, PR)["items"]
-            self.assertIn(note.replace("\n", eol), sent)
-            self.assertEqual(item["body"], sent.replace(note.replace("\n", eol), ""))
+        for verdict in ("changes_requested", "ready_for_human_review"):
+            body = post_review._compose(
+                verdict, "One bug.", "a" * 40, REPO, 0, [], [], 0,
+                note="Please rebase before merging.",
+            )  # fmt: skip
+            lines = body.split("\n")
+            i = lines.index(post_review.STALE_BASE_TAG)
+            self.assertTrue(lines[i + 1].startswith("Please rebase before merging."))
+            want = "\n".join([*lines[:i], fpc.STALE_BASE_STUB, *lines[i + 2 :]])
+            for eol in ("\n", "\r\n"):
+                sent = body.replace("\n", eol)
+                api = FakeApi(reviews=[ours(body=sent)])
+                (item,) = fpc.collect(api, REPO, PR)["items"]
+                self.assertEqual(item["body"], want.replace("\n", eol))
 
     def test_the_latest_review_is_the_highest_id(self):
         api = FakeApi(

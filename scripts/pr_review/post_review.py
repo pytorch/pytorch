@@ -44,10 +44,11 @@ Invariants:
 - `@pytorchbot` is escaped in all posted text, because pytorch-bot reads
   commands from review bodies. Two exceptions stay live, each written
   mid-line inside a code span so it never matches pytorch-bot's
-  `^ *@pytorch(merge|)bot .+$`: a change request's footer names
-  `@pytorchbot review`, so the author can copy it, and the too-large notice
-  gives its opt-out command. A notice put back or folded is defused like any
-  other body.
+  `^ *@pytorch(merge|)bot .+$`: the footer of a change request the model made
+  names `@pytorchbot review`, so the author can copy it (one made only for a
+  stale base does not, since a re-review cannot fix the base), and the
+  too-large notice gives its opt-out command. A notice put back or folded is
+  defused like any other body.
 - A too-large notice is a COMMENT. It hides earlier reviews like any other but
   dismisses no change request, and is not posted again while the newest
   visible review is that same notice, unmarked or marked in progress (a marked
@@ -395,32 +396,33 @@ STALE_BASE_DAYS = 7
 STALE_BASE_SECONDS = 30
 # Kept in step with RE_GHSTACK_HEAD_REF in .github/scripts/native_stack.py.
 _GHSTACK_HEAD = re.compile(r"gh/[^/]+/[0-9]+/head")
-# The line before the note. fetch_pr_comments.py drops both from the review it
-# hands the next run, which cannot check the note and must not repeat it as a
-# finding. Model text cannot forge it (`<` escaped).
+# The line before the note. fetch_pr_comments.py replaces both with a fixed
+# line in the review it hands the next run, which cannot check the note and
+# must not repeat it as a finding. Model text cannot forge it (`<` escaped).
 STALE_BASE_TAG = "<!-- hardened-pr-review-stale-base -->"
 
 
-def stale_base_note(gh: GitHub, pull: dict, sha: str) -> str:
+def stale_base_note(gh: GitHub, pr: int, sha: str) -> str:
     """A rebase request, or "" if none is due.
 
-    One is due when `sha`, the head of the PR `pull`, forked from the default
-    branch more than STALE_BASE_DAYS ago, the default branch has moved since,
-    and the merge bot would land the PR there: it targets the default branch, or
-    is a ghstack PR from this repo. Advisory: any failure gives "". Retries stop
-    after STALE_BASE_SECONDS, though a request already in flight still runs to
-    its own socket timeout. Like `backfill`, it sets the deadline and puts the
-    previous one back; `run()` calls it with none in force."""
+    One is due when `sha`, the head of PR `pr`, forked from the default branch
+    more than STALE_BASE_DAYS ago, the default branch has moved since, and the
+    merge bot would land the PR there: it targets the default branch, or is a
+    ghstack PR from this repo. Advisory: any failure gives "". Retries of both
+    lookups stop after STALE_BASE_SECONDS, though a request already in flight
+    still runs to its own socket timeout. The deadline in force before is put
+    back."""
     outer = gh.deadline
     gh.deadline = time.monotonic() + STALE_BASE_SECONDS
     try:
+        pull = pull_request(gh, pr)
         base, head = pull["base"], pull["head"]
         ref = base["repo"]["default_branch"]
-        # Only what the merge bot lands on the default branch: PRs into it, and
-        # ghstack PRs, whose gh/<user>/<N>/base is pushed with the head and so
-        # never looks stale. Release-branch PRs are not landed by the bot, and
-        # the upper PRs of a native stack share the bottom PR's merge base, so
-        # its note covers them.
+        # PRs into the default branch, and ghstack PRs, whose gh/<user>/<N>/base
+        # is pushed with the head and so never looks stale. Release-branch PRs
+        # are not landed by the bot. The upper PRs of a native stack are left
+        # out too, though the bot lands them on the default branch: telling
+        # them from release-branch PRs needs a stack lookup.
         ghstack = _GHSTACK_HEAD.fullmatch(head["ref"]) and (
             (head["repo"] or {}).get("full_name") == gh.repo
         )
@@ -451,7 +453,7 @@ def stale_base_note(gh: GitHub, pull: dict, sha: str) -> str:
     return (
         f"This PR's merge base is more than {age.days} days old and {count(behind, 'commit')} "
         f"behind {shown}, so its CI ran against an outdated base. Please rebase "
-        "before merging."
+        "before human review."
     )
 
 
@@ -504,6 +506,11 @@ def _compose(
         "",
     ]
     if note:
+        if verdict != "changes_requested":
+            note += (
+                " Nothing else in this review blocks human review; pushing the "
+                "rebase normally gets a fresh automated review."
+            )
         lines += [STALE_BASE_TAG, note, ""]
     if n_inline:
         lines += [
@@ -1381,7 +1388,8 @@ def run(
     # weighs the findings by the model's own verdict; the note says why.
     extra = row.get("extra") or {}
     note, model = extra.get("stale_base"), extra.get("model_verdict")
-    if not (isinstance(note, str) and note.isprintable() and model in VERDICTS):
+    one_line = is_neutral_prose(note, MAX_SUMMARY) and note.isprintable()
+    if not (one_line and model in VERDICTS):
         note, model = "", verdict
     try:
         new_id = publish(
@@ -1552,8 +1560,8 @@ def main() -> int:
                 size_limits(),
             )
         if args.stale_base:
-            pull = pull_request(gh, int(os.environ["PR_NUMBER"]))
-            note = stale_base_note(gh, pull, os.environ["REVIEWED_SHA"])
+            pr = int(os.environ["PR_NUMBER"])
+            note = stale_base_note(gh, pr, os.environ["REVIEWED_SHA"])
             Path(args.stale_base).write_text(note)
             return 0
         if args.withdraw_opted_out:

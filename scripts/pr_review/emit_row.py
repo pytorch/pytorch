@@ -41,8 +41,8 @@ dropped some, so ``findings_count`` can exceed the array's length; and
 ``stale_base`` with ``model_verdict``, present only when the PR's merge base is
 stale (post_review.py --stale-base). Then ``verdict`` is ``changes_requested``
 whatever the model said, so the PR is not handed to a human until it is rebased,
-``stale_base`` is the rebase note post_review.py posts, and ``model_verdict`` is
-the model's own verdict.
+``stale_base`` is the rebase note post_review.py --stale-base wrote, and
+``model_verdict`` is the model's own verdict.
 """
 
 from __future__ import annotations
@@ -247,13 +247,14 @@ def usage_metrics(path: str) -> dict:
 def read_stale_base(path: str) -> str:
     """The rebase note, or "" if there is none or it is not one line of text.
 
-    Written in this job by post_review.py, not by the model; the shape check
-    keeps a malformed file from putting anything else in the row."""
+    Written in this job by post_review.py, not by the model; the shape check,
+    the same as post_review.py's, keeps a malformed file from putting anything
+    else in the row."""
     try:
-        note = Path(path).read_text().strip() if path else ""
-    except OSError:
+        note = Path(path).read_text(encoding="utf-8").strip() if path else ""
+    except (OSError, ValueError):
         return ""
-    return note if note.isprintable() and len(note) <= 1000 else ""
+    return note if is_neutral_prose(note, 1000) and note.isprintable() else ""
 
 
 def main() -> int:
