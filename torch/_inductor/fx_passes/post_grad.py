@@ -92,6 +92,7 @@ from .micro_pipeline_tp import is_micro_pipeline_tp_candidate, micro_pipeline_tp
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
+from .select_scatter_cat import select_scatter_cat_pass
 from .slice_scatter_chunking import slice_scatter_chunking_pass
 from .split_cat import POST_GRAD_PATTERNS
 
@@ -679,6 +680,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(
             gm, "replace_collectives_with_low_contention"
         ).apply_graph_pass(replace_collectives_with_low_contention)
+
+    if config.pattern_matcher and select_scatter_cat_pass(gm.graph):
+        fake_tensor_updater.incremental_update()
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.

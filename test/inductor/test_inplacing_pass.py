@@ -1,12 +1,13 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+from unittest import mock
 
 import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
-from torch._dynamo.utils import ReinplaceCounters
+from torch._dynamo.utils import counters, ReinplaceCounters
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
@@ -15,10 +16,12 @@ from torch._higher_order_ops.auto_functionalize import (
 from torch._inductor import inductor_prims
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
+from torch._inductor.fx_passes.select_scatter_cat import select_scatter_cat_pass
 from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -1078,6 +1081,272 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 del inplaceable_ops[my_wait_functional._opoverload]
 
 
+class TestSelectScatterCat(InductorTestCase):
+    def _check_fx(self, fn, args, expected, symbolic=False):
+        originals = [arg.clone() for arg in args]
+        reference = fn(*args)
+        gm = make_fx(fn, tracing_mode="symbolic" if symbolic else "fake")(*args)
+        before = sum(n.target is aten.select_scatter.default for n in gm.graph.nodes)
+        self.assertGreater(before, 0)
+        count = counters["inductor"]["select_scatter_cat"]
+        pattern_count = counters["inductor"]["pattern_matcher_count"]
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            changed = select_scatter_cat_pass(gm.graph)
+            FakeTensorUpdater(gm).incremental_update()
+        self.assertEqual(changed, expected)
+        self.assertEqual(
+            counters["inductor"]["pattern_matcher_count"] - pattern_count, int(expected)
+        )
+        self.assertEqual(
+            counters["inductor"]["select_scatter_cat"] - count, int(expected)
+        )
+        self.assertEqual(
+            sum(n.target is aten.select_scatter.default for n in gm.graph.nodes),
+            0 if expected else before,
+        )
+        self.assertEqual(
+            sum(n.target is aten.cat.default for n in gm.graph.nodes), int(expected)
+        )
+        gm.recompile()
+        result = gm(*args)
+        self.assertEqual(result, reference)
+        for arg, original in zip(args, originals):
+            self.assertEqual(arg, original)
+        if expected:
+            self.assertEqual(result.stride(), reference.stride())
+            for arg in args:
+                self.assertNotEqual(
+                    result.untyped_storage().data_ptr(),
+                    arg.untyped_storage().data_ptr(),
+                )
+
+    @parametrize(
+        "case",
+        [
+            "ordered",
+            "permuted",
+            "negative",
+            "zero_gaps",
+            "full_zero_gaps",
+            "strided_source",
+            "singleton",
+        ],
+    )
+    def test_rewrite(self, device, case):
+        slots = 1 if case == "singleton" else 4
+        indices = list(range(slots))
+        if case in ("permuted", "negative"):
+            indices = [3, 1, 0, 2]
+            if case == "negative":
+                indices = [index - slots for index in indices]
+        elif case in ("zero_gaps", "full_zero_gaps"):
+            indices = [0, 2]
+        args = tuple(
+            torch.randn(2, 3, device=device).t()
+            if case == "strided_source"
+            else torch.randn(3, 2, device=device)
+            for _ in indices
+        )
+
+        def fn(*sources):
+            if case == "zero_gaps":
+                result = torch.zeros((slots, 3, 2), device=device)
+            else:
+                fill = 0.0 if case == "full_zero_gaps" else 2.0
+                result = torch.full((slots, 3, 2), fill, device=device)
+            for source, index in zip(sources, indices):
+                result = aten.select_scatter.default(result, source, 0, index)
+            return result
+
+        self._check_fx(fn, args, True)
+
+    def test_interleaved_producers(self, device):
+        def fn(a, b):
+            base = torch.zeros((2, 3, 2), device=device)
+            first = aten.select_scatter.default(base, a.sin(), 0, 0)
+            source = b.cos()
+            return aten.select_scatter.default(first, source, 0, 1)
+
+        args = (torch.randn(3, 2, device=device), torch.randn(3, 2, device=device))
+        self._check_fx(fn, args, True)
+
+    def test_multiple_chains(self, device):
+        def fn(a, b):
+            base = torch.zeros((2, 3, 2), device=device)
+            first = aten.select_scatter.default(base, a, 0, 0)
+            first = aten.select_scatter.default(first, b, 0, 1)
+            second = aten.select_scatter.default(base, b, 0, 0)
+            second = aten.select_scatter.default(second, a, 0, 1)
+            return first, second
+
+        args = (torch.randn(3, 2, device=device), torch.randn(3, 2, device=device))
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        count = counters["inductor"]["select_scatter_cat"]
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            self.assertTrue(select_scatter_cat_pass(gm.graph))
+        self.assertEqual(counters["inductor"]["select_scatter_cat"] - count, 2)
+        self.assertEqual(sum(n.target is aten.cat.default for n in gm.graph.nodes), 2)
+        self.assertFalse(
+            any(n.target is aten.select_scatter.default for n in gm.graph.nodes)
+        )
+        gm.recompile()
+        self.assertEqual(gm(*args), fn(*args))
+
+    def test_mutation_barrier(self, device):
+        def fn(a, b):
+            base = torch.zeros((2, 3, 2), device=device)
+            first = aten.select_scatter.default(base, a, 0, 0)
+            a.add_(1)
+            return aten.select_scatter.default(first, b, 0, 1)
+
+        args = (torch.randn(3, 2, device=device), torch.randn(3, 2, device=device))
+        reference_args = tuple(arg.clone() for arg in args)
+        reference = fn(*reference_args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            self.assertFalse(select_scatter_cat_pass(gm.graph))
+        self.assertEqual(
+            sum(n.target is aten.select_scatter.default for n in gm.graph.nodes), 2
+        )
+        gm.recompile()
+        self.assertEqual(gm(*args), reference)
+        self.assertEqual(args, reference_args)
+
+    def test_input_base(self, device):
+        def fn(base, a, b):
+            result = aten.select_scatter.default(base, a, 0, 1)
+            return aten.select_scatter.default(result, b, 0, 0)
+
+        args = (
+            torch.randn(2, 3, 2, device=device),
+            torch.randn(3, 2, device=device),
+            torch.randn(3, 2, device=device),
+        )
+        self._check_fx(fn, args, True)
+
+    @parametrize(
+        "case",
+        [
+            "duplicate",
+            "live",
+            "dependency",
+            "base_dependency",
+            "nonzero_gaps",
+            "strided_base",
+            "rank",
+            "dim",
+            "dtype",
+        ],
+    )
+    def test_rejection(self, device, case):
+        shape = (4, 3) if case == "rank" else (4, 3, 2)
+        base = torch.randn(shape, device=device)
+        if case == "strided_base":
+            base = torch.randn(3, 4, 2, device=device).permute(1, 0, 2)
+        dim = 1 if case == "dim" else 0
+        source_shape = (4, 2) if dim == 1 else shape[1:]
+        dtype = torch.float64 if case == "dtype" else base.dtype
+        args = (
+            base,
+            torch.randn(source_shape, device=device, dtype=dtype),
+            torch.randn(source_shape, device=device, dtype=dtype),
+        )
+
+        def fn(base, a, b):
+            first = aten.select_scatter.default(base, a, dim, 0)
+            if case == "dependency":
+                b = first.select(0, 2)
+            elif case == "base_dependency":
+                b = base.select(0, 2)
+            index = 0 if case == "duplicate" else 1
+            second = aten.select_scatter.default(first, b, dim, index)
+            return (first, second) if case == "live" else second
+
+        self._check_fx(fn, args, False)
+
+    def test_symbolic(self, device):
+        def fn(a, b):
+            result = torch.zeros((2, a.shape[0], a.shape[1]), device=device)
+            result = aten.select_scatter.default(result, a, 0, 0)
+            return aten.select_scatter.default(result, b, 0, 1)
+
+        args = (torch.randn(3, 2, device=device), torch.randn(3, 2, device=device))
+        self._check_fx(fn, args, False, symbolic=True)
+
+    @parametrize("source_grad", [False, True])
+    def test_compile_backward(self, device, source_grad):
+        args = (
+            torch.randn(2, 3, 2, device=device, requires_grad=True),
+            torch.randn(3, 2, device=device, requires_grad=source_grad),
+            torch.randn(3, 2, device=device, requires_grad=source_grad),
+        )
+
+        def fn(base, a, b):
+            result = aten.select_scatter.default(base, a, 0, 0)
+            return aten.select_scatter.default(result, b, 0, 1)
+
+        fn(*args).sum().backward()
+        reference_grads = [
+            arg.grad.clone() if arg.grad is not None else None for arg in args
+        ]
+        for arg in args:
+            arg.grad = None
+        torch.compile(fn, fullgraph=True)(*args).sum().backward()
+        self.assertEqual([arg.grad for arg in args], reference_grads)
+
+    @parametrize("combo", [False, True])
+    def test_compile_padding_cleanup(self, device, combo):
+        if combo and device == "cpu":
+            self.skipTest("Combo kernels require a GPU")
+        widths = [8 if i == 3 else 3 + i % 4 for i in range(12)]
+        args = tuple(torch.randn(7, width, device=device) for width in widths)
+        edges = torch.tensor(
+            [float("nan"), float("inf"), float("-inf"), -8.0, 8.0, -7.5, 7.5],
+            device=device,
+        )
+        args[0].view(-1)[: edges.numel()].copy_(edges)
+        originals = [arg.clone() for arg in args]
+
+        def fn(*sources):
+            result = torch.zeros((12, 8, 7), device=device)
+            for i, source in enumerate(sources):
+                source = source.t()
+                if widths[i] != 8:
+                    source = torch.nn.functional.pad(source, (0, 0, 0, 8 - widths[i]))
+                result = aten.select_scatter.default(result, source, 0, (i * 5) % 12)
+            result = result.permute(0, 2, 1).clamp_min(-7.5).clamp_max(7.5)
+            return torch.nan_to_num(result)
+
+        reference = fn(*args)
+        with inductor_config.patch(
+            combo_kernels=combo, fx_graph_cache=False, force_disable_caches=True
+        ):
+            before = counters["inductor"]["select_scatter_cat"]
+            result = torch.compile(fn, fullgraph=True)(*args)
+            self.assertGreater(counters["inductor"]["select_scatter_cat"], before)
+            self.assertEqual(result, reference)
+            self.assertEqual(result.stride(), reference.stride())
+            torch._dynamo.reset()
+            with mock.patch(
+                "torch._inductor.fx_passes.post_grad.select_scatter_cat_pass",
+                return_value=False,
+            ):
+                baseline = torch.compile(fn, fullgraph=True)(*args)
+                self.assertEqual(counters["inductor"]["select_scatter_cat"], before + 1)
+                self.assertEqual(baseline, reference)
+        for arg, original in zip(args, originals):
+            self.assertEqual(arg, original)
+            self.assertNotEqual(
+                result.untyped_storage().data_ptr(), arg.untyped_storage().data_ptr()
+            )
+
+
+instantiate_device_type_tests(
+    TestSelectScatterCat, globals(), only_for=("cpu", GPU_TYPE)
+)
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 
