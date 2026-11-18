@@ -28,12 +28,15 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
+from torch._logging import trace_structured
+from torch._logging._internal import trace_log
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
+from torchgen.utils import dataclass_repr
 
 from . import config
 from ._aot_autograd import autograd_cache
@@ -477,6 +480,22 @@ AOT_COUNTER = itertools.count()
 aot_autograd_decompositions: dict[OpOverload, Callable[..., Any]] = {}
 
 
+def _log_export_error_fw_metadata(
+    artifact_name: str, fw_metadata: ViewAndMutationMeta
+) -> str:
+    # The aot_export validation errors fire before the regular structured
+    # metadata artifacts are logged, so emit it here instead of in the message.
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {"name": artifact_name, "encoding": "string"},
+        payload_fn=lambda: dataclass_repr(fw_metadata),
+        expect_trace_id=False,
+    )
+    if trace_log.handlers:
+        return f"The full fw_metadata is logged to the structured trace as `{artifact_name}`; attach the tlparse output to your issue."
+    return f'To collect the full fw_metadata, rerun with TORCH_TRACE="/tmp/tracedir" and attach the tlparse output (artifact `{artifact_name}`) to your issue.'
+
+
 def create_aot_state(
     stack: contextlib.ExitStack,
     flat_fn: Callable[_P, _R],
@@ -656,35 +675,41 @@ issue""")
         # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
         # Keeping .resize_() in the graph will require some work
         # Allowing it but keeping the graph functional will require some calling convention changes.
-        if len([x for x in fw_metadata.input_info if x.mutates_metadata]) != 0:
+        metadata_mutated = [
+            i for i, x in enumerate(fw_metadata.input_info) if x.mutates_metadata
+        ]
+        if metadata_mutated:
+            hint = _log_export_error_fw_metadata(
+                "aot_export_metadata_mutation_fw_metadata", fw_metadata
+            )
             raise RuntimeError(
                 f"""\
 Found an input that received a metadata mutation, through e.g. a call to `.resize_()` or `.transpose_()`.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
-fw_metadata={str(fw_metadata)}"""
+Inputs that received a metadata mutation (by flat input index): {metadata_mutated}
+{hint}"""
             )
         # In export, banning data mutations on inputs that require grad for now.
         # This should be rare, and is tricky to get right. When we trace the backward,
         # we currently trace with autograd.grad instead of .backward(), which makes it difficult
         # to ensure that we run autograd all the way through the input **before** it saw the mutation.
-        if (
-            len(
-                [
-                    x
-                    for x in fw_metadata.input_info
-                    if x.requires_grad and x.mutates_data
-                ]
+        grad_mutated = [
+            i
+            for i, x in enumerate(fw_metadata.input_info)
+            if x.requires_grad and x.mutates_data
+        ]
+        if grad_mutated and aot_config.export_trace_joint:
+            hint = _log_export_error_fw_metadata(
+                "aot_export_requires_grad_mutation_fw_metadata", fw_metadata
             )
-            != 0
-            and aot_config.export_trace_joint
-        ):
             raise RuntimeError(
                 f"""\
 Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
-fw_metadata={str(fw_metadata)}"""
+Inputs that require gradients and received a mutation (by flat input index): {grad_mutated}
+{hint}"""
             )
         if req_subclass_dispatch:
             raise RuntimeError(
