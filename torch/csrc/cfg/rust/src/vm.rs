@@ -48,6 +48,8 @@ pub struct Options {
     pub unroll: bool,
     /// Compile the Python functions that compiled code calls.
     pub callees: bool,
+    /// Take the registered shortcuts through library code (see shortcuts.rs).
+    pub shortcuts: bool,
 }
 
 impl Default for Options {
@@ -62,6 +64,7 @@ impl Default for Options {
             inline: true,
             unroll: true,
             callees: true,
+            shortcuts: true,
         }
     }
 }
@@ -1333,7 +1336,15 @@ impl Compiled {
             if ffi::PyType_HasFeature(ty, ffi::Py_TPFLAGS_HEAPTYPE) == 0 || ffi::PyType_Check(callee) != 0 {
                 return None;
             }
-            (pyffi::_PyType_Lookup(ty, self.callees.call_name.as_ptr()), callee)
+            let call = pyffi::_PyType_Lookup(ty, self.callees.call_name.as_ptr());
+            // What the call comes down to, if a shortcut says so: for a
+            // module without hooks, its forward.
+            let target = if self.options.shortcuts && !call.is_null() {
+                crate::shortcuts::call_target(callee, ty, call)
+            } else {
+                null_mut()
+            };
+            (if target.is_null() { call } else { target }, callee)
         };
         if func.is_null() || ffi::PyFunction_Check(func) == 0 {
             return None;
@@ -1721,7 +1732,17 @@ impl Compiled {
                         }
                     }
                 }
-                checked(ffi::PyObject_GetAttr(obj, f.consts[*name as usize].as_ptr()))
+                let name = f.consts[*name as usize].as_ptr();
+                if self.options.shortcuts {
+                    let found = crate::shortcuts::load_attr(obj, name);
+                    if !found.is_null() {
+                        return Ok(found);
+                    }
+                    if !ffi::PyErr_Occurred().is_null() {
+                        return Err(());
+                    }
+                }
+                checked(ffi::PyObject_GetAttr(obj, name))
             }
             Op::StoreAttr { obj, name, val } => status(ffi::PyObject_SetAttr(
                 self.obj(regs, *obj),
@@ -2103,21 +2124,41 @@ impl Compiled {
                     (kw, ffi::PyTuple_GET_SIZE(kw) as usize)
                 };
                 let mut method: Obj = null_mut();
-                let unbound =
-                    pyffi::_PyObject_GetMethod(buf[0], f.consts[*name as usize].as_ptr(), &mut method);
+                let attr = f.consts[*name as usize].as_ptr();
+                if self.options.shortcuts {
+                    method = crate::shortcuts::load_attr(buf[0], attr);
+                    if method.is_null() && !ffi::PyErr_Occurred().is_null() {
+                        return Err(());
+                    }
+                }
+                // Found through a shortcut, it is the attribute, bound.
+                let unbound = if method.is_null() {
+                    pyffi::_PyObject_GetMethod(buf[0], attr, &mut method)
+                } else {
+                    0
+                };
                 if method.is_null() {
                     return Err(());
                 }
                 // A method takes the receiver as its first argument; any
                 // other attribute is called on its own.
                 let (first, receiver) = if unbound == 1 { (0, buf[0]) } else { (1, null_mut()) };
-                let r = match (ffi::PyFunction_Check(method) != 0)
-                    .then(|| self.compiled_function(method))
-                    .flatten()
-                    .filter(|_| self.options.callees && unbound == 1)
-                {
-                    Some(compiled) => {
-                        self.call_compiled(&*compiled, method, receiver, &buf[1..args.len() + 1], kw)
+                // A function found on the type runs compiled, bound to the
+                // receiver; anything else that was found is called as any
+                // callee is, which finds what it comes down to.
+                let compiled = if !self.options.callees {
+                    None
+                } else if unbound == 1 {
+                    (ffi::PyFunction_Check(method) != 0)
+                        .then(|| self.compiled_function(method))
+                        .flatten()
+                        .map(|compiled| (compiled, method, receiver))
+                } else {
+                    self.compiled_callee(method)
+                };
+                let r = match compiled {
+                    Some((compiled, func, bound_to)) => {
+                        self.call_compiled(&*compiled, func, bound_to, &buf[1..args.len() + 1], kw)
                     }
                     None => ffi::PyObject_Vectorcall(
                         method,

@@ -64,6 +64,8 @@ from typing import Any
 
 import torch
 
+from . import _shortcuts
+
 
 __all__ = ["Pipeline", "Unsupported", "cfg_compile", "is_available"]
 
@@ -184,6 +186,7 @@ def cfg_compile(
     inline: bool = True,
     unroll: bool = True,
     callees: bool = True,
+    shortcuts: bool = True,
     max_versions: int = 4,
     max_respecializations: int = 6,
 ) -> Any:
@@ -213,6 +216,12 @@ def cfg_compile(
         callees: compile the Python functions that the compiled code calls
             (functions, methods, and objects whose ``__call__`` is a Python
             function) the first time each is called, with the same options.
+        shortcuts: skip the code of ``nn.Module`` that sits in front of every
+            call of a module and every read of a parameter, buffer or
+            submodule, whenever a few checks show what it would do: a call of
+            a module without hooks goes straight to its ``forward``, and the
+            three dicts are looked at without calling ``Module.__getattr__``.
+            ``Module.__call__`` then does not appear on the stack.
             A callee the compiler does not support runs in the interpreter.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
@@ -231,6 +240,7 @@ def cfg_compile(
         "inline": inline,
         "unroll": unroll,
         "callees": callees,
+        "shortcuts": shortcuts,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
     }
@@ -257,6 +267,7 @@ def cfg_compile(
             inline=inline,
             unroll=unroll,
             callees=callees,
+            shortcuts=shortcuts and _shortcuts.register(runtime),
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
