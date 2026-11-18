@@ -12977,6 +12977,16 @@ class TestGroupedMM(TestCase):
 
         self.assertEqual(torch.func.functionalize(resized)(a, b).stride(), resized(a, b).stride())
 
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("rows,cols", [(0, 16), (8, 0)])
+    def test_grouped_mm_empty_result_strides(self, device, rows, cols):
+        a = self._make_grouped_mm_matrix((2, rows, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((2, cols, 32), True, device, torch.float32).transpose(-2, -1)
+        expected = torch._grouped_mm(a, b)
+        with FakeTensorMode() as mode:
+            fake = torch._grouped_mm(mode.from_tensor(a), mode.from_tensor(b))
+        self.assertEqual(fake.stride(), expected.stride())
+
     @onlyCUDA
     @skipIfRocm(msg="ROCm builds do not pad the functional result")
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
