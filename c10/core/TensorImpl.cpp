@@ -421,6 +421,8 @@ void TensorImpl::release_resources() {
     mode->clear_constant(this);
   }
   autograd_meta_.reset();
+  // Weak references must not keep a dead tensor's version counter shared.
+  version_counter_ = VariableVersion::DISABLED;
   if (storage_) {
     storage_ = {};
   }
