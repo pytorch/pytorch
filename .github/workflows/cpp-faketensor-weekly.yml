@@ -2,15 +2,15 @@
 name: cpp-faketensor-weekly
 
 on:
-  # Temporary PR validation; replace with the schedule below before landing.
+  schedule:
+    - cron: '17 8 * * 0'  # Sundays at 08:17 UTC.
   push:
     tags:
-      - ciflow/trunk/205094
-  # schedule:
-  #   - cron: '17 8 * * 0'  # Sundays at 08:17 UTC.
+      - ciflow/cpp-faketensor/*
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -21,9 +21,9 @@ permissions:
 jobs:
   get-label-type:
     name: get-label-type
-    # Restore the main guard with the schedule before landing.
-    # if: github.repository == 'pytorch/pytorch' && github.ref == 'refs/heads/main'
-    if: github.repository == 'pytorch/pytorch'
+    if: >-
+      github.repository == 'pytorch/pytorch' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ciflow/cpp-faketensor/'))
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
