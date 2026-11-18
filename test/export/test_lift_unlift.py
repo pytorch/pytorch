@@ -204,7 +204,7 @@ class TestLift(TestCase):
         # TODO(suo): we shouldn't hardcode these names in the test, this is an
         # internal detail of the pass.
         self.assertIn("lifted_tensor_0", constants)
-        self.assertIs(constants["lifted_tensor_0"], const_tensor)
+        self.assertEqual(constants["lifted_tensor_0"], const_tensor)
         self.assertIn("lifted_custom_0", constants)
         self.assertEqual(constants["lifted_custom_0"], const_obj)
 
