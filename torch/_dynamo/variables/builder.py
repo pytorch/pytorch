@@ -233,6 +233,7 @@ from .ctx_manager import (
     CudagraphOverrideVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
+    GuardContextVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
     RecordFunctionVariable,
@@ -1864,6 +1865,12 @@ class VariableBuilder:
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif isinstance(value, CudagraphOverrideContextManager):
             return CudagraphOverrideVariable(value.fwd, value.bwd)
+        elif type(value) is torch._guards._GuardContext:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            label = VariableTracker.build(
+                self.tx, value.label, AttrSource(self.source, "label")
+            ).as_python_constant()
+            return GuardContextVariable((label,), source=self.source)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
