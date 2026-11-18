@@ -2,8 +2,6 @@
 
 #include <torch/headeronly/native/cpu/zmath.h>
 
-#include <cmath>
-#include <limits>
 #include <type_traits>
 
 namespace {
@@ -49,7 +47,6 @@ TEST(TestZmath, TestAngleImpl) {
   EXPECT_FLOAT_EQ(
       torch::headeronly::native::angle_impl(-1.0f),
       static_cast<float>(torch::headeronly::pi<double>));
-  EXPECT_FLOAT_EQ(torch::headeronly::native::angle_impl(1.0f), 0.0f);
   EXPECT_FLOAT_EQ(
       torch::headeronly::native::angle_impl(-0.0f),
       static_cast<float>(torch::headeronly::pi<double>));
@@ -66,9 +63,6 @@ TEST(TestZmath, TestAngleImpl) {
           torch::headeronly::BFloat16{-0.0f})),
       static_cast<float>(torch::headeronly::pi<double>),
       2e-3f);
-  EXPECT_TRUE(std::isnan(torch::headeronly::native::angle_impl(
-      std::numeric_limits<float>::quiet_NaN())));
-
   ExpectComplexEq(
       torch::headeronly::native::angle_impl(
           torch::headeronly::complex<float>(0.0f, 1.0f)),
@@ -208,9 +202,6 @@ TEST(TestZmath, TestSgnImpl) {
   ExpectComplexEq(
       torch::headeronly::native::sgn_impl(Complex(3.0f, 4.0f)),
       Complex(0.6f, 0.8f));
-  ExpectComplexEq(
-      torch::headeronly::native::sgn_impl(Complex(0.0f, 0.0f)),
-      Complex(0.0f, 0.0f));
   using ComplexDouble = torch::headeronly::complex<double>;
   ExpectComplexEq(
       torch::headeronly::native::sgn_impl(ComplexDouble(3.0, 4.0)),

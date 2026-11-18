@@ -6,12 +6,14 @@
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/MathConstants.h>
 #include <torch/headeronly/util/NumericUtils.h>
+#include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/jiterator_macros.h>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <tuple>
 #include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -70,7 +72,7 @@ Output was modified to be inf or -inf when input is 1 or -1. */
     POSSIBILITY OF SUCH DAMAGE.
 */
 
-namespace {
+namespace detail {
 /*
  * This function is derived from the implementation of the i0e function in the
  * Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
@@ -147,7 +149,10 @@ jiterator_also_stringify_as(
               std::sqrt(x);
         }),
     i0e_string) // i0e_string
-} // namespace
+} // namespace detail
+
+using detail::calc_i0e;
+using detail::chbevl;
 
 #define CENTRAL_RANGE 0.7
 

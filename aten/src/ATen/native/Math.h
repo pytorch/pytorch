@@ -28,7 +28,7 @@ using torch::headeronly::chebyshev_coefficients_i0e_B;
 using torch::headeronly::exp2_impl;
 using torch::headeronly::polevl;
 #if defined(__CUDACC__) || defined(__HIPCC__)
-using torch::headeronly::i0e_string;
+using torch::headeronly::detail::i0e_string;
 #endif
 using torch::headeronly::_igam_helper_asymptotic_series;
 using torch::headeronly::_igam_helper_fac;

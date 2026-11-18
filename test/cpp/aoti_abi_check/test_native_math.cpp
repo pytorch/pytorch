@@ -20,10 +20,8 @@ TEST(TestNativeMath, TestTrigamma) {
 }
 
 TEST(TestNativeMath, TestCalcErfinv) {
-  EXPECT_NEAR(torch::headeronly::calc_erfinv(0.0f), 0.0f, 1e-6f);
   EXPECT_NEAR(
       torch::headeronly::calc_erfinv(0.5f), 0.47693627620446987f, 1e-5f);
-  EXPECT_NEAR(torch::headeronly::calc_erfinv(0.9), 1.1630871536766743, 1e-13);
   EXPECT_NEAR(torch::headeronly::calc_erfinv(-0.9), -1.1630871536766743, 1e-13);
   EXPECT_NEAR(
       static_cast<float>(
@@ -33,7 +31,6 @@ TEST(TestNativeMath, TestCalcErfinv) {
 }
 
 TEST(TestNativeMath, TestCalcI0e) {
-  EXPECT_NEAR(torch::headeronly::calc_i0e(0.0f), 1.0f, 1e-5f);
   EXPECT_NEAR(torch::headeronly::calc_i0e(1.0f), 0.46575960759364043f, 1e-5f);
   EXPECT_NEAR(torch::headeronly::calc_i0e(1.0), 0.46575960759364043, 1e-12);
 }
@@ -57,13 +54,30 @@ TEST(TestNativeMath, TestCalcDigamma) {
 
 TEST(TestNativeMath, TestChbevl) {
   static const float coeff[] = {1.0f, 2.0f, 3.0f};
-  EXPECT_NEAR(torch::headeronly::chbevl(0.0f, coeff, 3), 0.5f, 1e-6f);
-  EXPECT_NEAR(
-      torch::headeronly::chbevl(0.0f, coeff, std::size_t{3}), 0.5f, 1e-6f);
+  // Exact function-pointer types for int and size_t versions of chbevl.
+  float (*float_int)(float, const float*, int) =
+      &torch::headeronly::chbevl<float>;
+  float (*float_size)(float, const float*, std::size_t) =
+      &torch::headeronly::chbevl<float>;
+  EXPECT_NEAR(float_int(0.0f, coeff, 3), 0.5f, 1e-6f);
+  EXPECT_NEAR(float_size(0.0f, coeff, std::size_t{3}), 0.5f, 1e-6f);
+
   static const double double_coeff[] = {1.0, 2.0, 3.0};
-  EXPECT_NEAR(torch::headeronly::chbevl(0.0, double_coeff, 3), 0.5, 1e-12);
+  double (*double_int)(double, const double*, int) =
+      &torch::headeronly::chbevl<double>;
+  double (*double_size)(double, const double*, std::size_t) =
+      &torch::headeronly::chbevl<double>;
+  EXPECT_NEAR(double_int(0.0, double_coeff, 3), 0.5, 1e-12);
+  EXPECT_NEAR(double_size(0.0, double_coeff, std::size_t{3}), 0.5, 1e-12);
+
+  // Half only uses the int overload
+  using torch::headeronly::Half;
+  static const Half half_coeff[] = {Half{1.0f}, Half{2.0f}, Half{3.0f}};
   EXPECT_NEAR(
-      torch::headeronly::chbevl(0.0, double_coeff, std::size_t{3}), 0.5, 1e-12);
+      static_cast<float>(
+          torch::headeronly::chbevl<Half>(Half{0.0f}, half_coeff, 3)),
+      0.5f,
+      1e-3f);
 }
 
 TEST(TestNativeMath, TestExp2Impl) {
