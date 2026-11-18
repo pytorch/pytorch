@@ -579,7 +579,6 @@
   "test/test_appending_byte_serializer.py",
   "test/test_autocast.py",
   "test/test_autograd.py",
-  "test/test_autograd_fallback.py",
   "test/test_autoload.py",
   "test/test_binary_ufuncs.py",
   "test/test_bmm_outer_product.py",
