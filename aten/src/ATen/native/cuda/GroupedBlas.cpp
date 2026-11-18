@@ -49,7 +49,6 @@
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
-#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/max.h>
@@ -1110,8 +1109,9 @@ c10::ScalarType out_dtype) {
   return layout;
 }
 
-// Writes the grouped GEMM into `out`, an uninitialized, 16-byte aligned tensor
-// laid out as grouped_mm_cuda_output_layout describes.
+// Writes the grouped GEMM into `out`, a 16-byte aligned tensor laid out as
+// grouped_mm_cuda_output_layout describes. The fused kernels may also write
+// the padding at the end of each row.
 static void _grouped_mm_cuda_impl(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
@@ -1189,9 +1189,10 @@ Tensor& out) {
   TORCH_CHECK(out.scalar_type() == out_dtype_, "Expected out tensor to have dtype ", out_dtype_, " but got ", out.scalar_type(), " instead");
   const auto [out_size, out_stride] = grouped_mm_cuda_output_layout(mat_a, mat_b, offs, out_dtype_);
   at::native::resize_output(out, out_size);
-  // The kernels need this exact layout and an aligned address, so any other
-  // `out` gets the result through a copy, as a structured kernel's proxy output would.
-  if (out.strides() == IntArrayRef(out_stride) &&
+  // The fused kernels need this layout and an aligned address, and they also write the row
+  // padding, which may belong to another tensor. So only a layout without padding is written directly.
+  const auto unpadded_stride = c10::contiguous_strides(out_size);
+  if (IntArrayRef(out_stride) == IntArrayRef(unpadded_stride) && out.strides() == IntArrayRef(out_stride) &&
       reinterpret_cast<uintptr_t>(out.const_data_ptr()) % 16 == 0) {
     _grouped_mm_cuda_impl(mat_a, mat_b, offs, bias, out_dtype, out);
   } else {

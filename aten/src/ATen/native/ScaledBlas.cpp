@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
@@ -677,6 +678,7 @@ Tensor& out) {
   TORCH_CHECK(out.device() == mat_a.device(), "Expected out tensor to be on device ", mat_a.device(), " but got ", out.device(), " instead");
   TORCH_CHECK(!offs.has_value() || offs->device() == mat_a.device(), "Expected offs to be on device ", mat_a.device(), " but got ", offs->device(), " instead");
   at::native::resize_output(out, compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first);
+  at::assert_no_internal_overlap(out);
   _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   return out;
 }

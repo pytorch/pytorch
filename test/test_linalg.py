@@ -12919,6 +12919,9 @@ class TestGroupedMM(TestCase):
                 self.assertEqual((fake_out.shape, fake_out.stride()), (out.shape, out.stride()))
                 if layout != "empty":
                     self.assertEqual((out.stride(), out.data_ptr()), (stride, data_ptr))
+        binding_out = torch.full_like(expected, math.nan, memory_format=torch.contiguous_format)
+        self.assertIs(torch._grouped_mm(a, b, offs=offs, out=binding_out), binding_out)
+        self.assertEqual(binding_out, expected)
         wrong_out = torch.empty(0, device=device, dtype=torch.bfloat16 if dtype == torch.float16 else torch.float16)
         fake_wrong_out = mode.from_tensor(wrong_out)
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
@@ -12975,20 +12978,41 @@ class TestGroupedMM(TestCase):
         self.assertEqual(torch.func.functionalize(resized)(a, b).stride(), resized(a, b).stride())
 
     @onlyCUDA
+    @skipIfRocm(msg="ROCm builds do not pad the functional result")
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16, torch.float32)
     def test_grouped_mm_out_writes_in_place(self, device, dtype):
-        a = self._make_grouped_mm_matrix((64, 32), True, device, dtype)
-        b = self._make_grouped_mm_matrix((4, 17, 32), True, device, dtype).transpose(-2, -1)
-        offs = torch.tensor([16, 32, 48, 64], device=device, dtype=torch.int32)
-        expected = torch._grouped_mm(a, b, offs=offs)
-        out = torch.empty_strided(expected.shape, expected.stride(), device=device, dtype=dtype).fill_(math.nan)
-        with torch.profiler.profile(record_shapes=True) as prof:
-            torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
-        self.assertEqual(out, expected)
-        # An out with the kernel's own layout must be written directly, not through a temporary.
-        full_copies = [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == list(out.shape)]
+        def run(rows, width):
+            a = self._make_grouped_mm_matrix((rows, 32), True, device, dtype)
+            b = self._make_grouped_mm_matrix((4, width, 32), True, device, dtype).transpose(-2, -1)
+            offs = torch.tensor([rows * (i + 1) // 4 for i in range(4)], device=device, dtype=torch.int32)
+            expected = torch._grouped_mm(a, b, offs=offs)
+            # Each row of buf is as wide as a kernel row, so out has the kernel's layout.
+            buf = torch.full((rows, expected.stride(0)), 7.0, device=device, dtype=dtype)
+            out = buf[:, :width]
+            with torch.profiler.profile(record_shapes=True) as prof:
+                torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
+            self.assertEqual(out, expected)
+            return buf, [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == [rows, width]]
+
+        # An out without row padding is written directly, not through a temporary.
+        _, full_copies = run(64, 16)
         self.assertEqual(full_copies, [])
+        # The fused kernels also write the row padding, which here belongs to buf, so these outs need a temporary.
+        # The sentinel catches a direct write only where a fused kernel runs; the copy check catches it everywhere.
+        for rows in (64, 1):
+            buf, full_copies = run(rows, 17)
+            self.assertTrue((buf[:, 17:] == 7).all())
+            self.assertNotEqual(full_copies, [])
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_out_internal_overlap(self, device):
+        a = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32).transpose(-2, -1)
+        offs = torch.tensor([16, 32], device=device, dtype=torch.int32)
+        out = torch.empty(8, 8, device=device).expand(2, 8, 8)
+        with self.assertRaisesRegex(RuntimeError, "more than one element of the written-to tensor"):
+            torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
 
     @onlyCPU
     def test_grouped_mm_out_variant_lookup(self, device):
