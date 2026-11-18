@@ -2087,6 +2087,26 @@ class TestCfgMoreBytecodes(TestCase):
                 compiled(bad)
             self.assertEqual(str(got.exception), str(expected.exception))
 
+    def test_class_statement(self):
+        def f(x):
+            class Point:
+                scale = 2
+
+                def __init__(self, v):
+                    self.v = v
+
+                def scaled(self):
+                    return self.v * Point.scale
+
+            return Point(x).scaled(), Point.__qualname__
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        self.assertEqual(compiled(3), f(3))
+        self.assertEqual(compiled(torch.ones(2))[0], torch.full((2,), 2.0))
+        self.assertTrue(
+            compiled.stats()["compiled_callees"][0].endswith("f.<locals>.Point.scaled")
+        )
+
     def test_jump_to_an_instruction_with_extended_arg(self):
         # A loop long enough that its header takes an EXTENDED_ARG prefix,
         # which is what the jump back to it then names.
