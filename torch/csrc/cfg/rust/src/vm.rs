@@ -269,7 +269,7 @@ impl Compiled {
         if boxed.is_null() {
             // The reference was consumed either way.
             *regs.get_unchecked_mut(v as usize) = null_mut();
-            panic!("cfg_compile: could not create the Python object of a tensor");
+            panic!("torch.vm: could not create the Python object of a tensor");
         }
         *regs.get_unchecked_mut(v as usize) = boxed;
         self.boxed_later.fetch_add(1, Ordering::Relaxed);
@@ -978,7 +978,7 @@ impl Compiled {
                     None => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_size ran without its guard".to_string(),
+                            "torch.vm: tensor_size ran without its guard".to_string(),
                         );
                         Err(())
                     }
@@ -993,7 +993,7 @@ impl Compiled {
                     _ => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_dim ran without its guard".to_string(),
+                            "torch.vm: tensor_dim ran without its guard".to_string(),
                         );
                         Err(())
                     }
