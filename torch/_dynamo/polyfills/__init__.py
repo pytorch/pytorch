@@ -91,7 +91,11 @@ def index(
     from itertools import islice
 
     for i, elem in islice(enumerate(iterator), start, end):
-        if elem is item or elem == item:
+        # Exact ints compare by value even when their boxed identity is unavailable.
+        if type(elem) is int and type(item) is int:
+            if elem == item:
+                return i
+        elif elem is item or elem == item:
             return i
     # Callers pass the message their sequence type raises in CPython, which is
     # not uniform: list/deque repr the value, tuple ignores it.
