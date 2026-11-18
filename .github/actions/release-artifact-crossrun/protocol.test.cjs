@@ -8,11 +8,11 @@ const path = require('node:path');
 const test = require('node:test');
 const canary = require('./protocol.cjs');
 
-function identities() {
+function identities(prNumber = 205398) {
   const sha = 'a'.repeat(40);
-  const env = {GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: canary.REPOSITORY, GITHUB_REPOSITORY_ID: String(canary.REPOSITORY_ID), GITHUB_ACTOR: 'ptdbot', GITHUB_TRIGGERING_ACTOR: 'ptdbot', GITHUB_REF: 'refs/pull/205398/merge', GITHUB_HEAD_REF: canary.BRANCH, GITHUB_BASE_REF: 'main', GITHUB_SHA: 'b'.repeat(40), GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1'};
-  const pr = {number: 205398, user: {login: 'ptdbot'}, state: 'open', draft: true, head: {repo: {id: canary.HEAD_REPOSITORY_ID, full_name: canary.HEAD_REPOSITORY}, ref: canary.BRANCH, sha}, base: {repo: {id: canary.REPOSITORY_ID, full_name: canary.REPOSITORY}, ref: 'main'}};
-  const event = {action: 'synchronize', number: 205398, repository: {id: canary.REPOSITORY_ID, full_name: canary.REPOSITORY}, sender: {login: 'ptdbot'}, pull_request: structuredClone(pr)};
+  const env = {GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: canary.REPOSITORY, GITHUB_REPOSITORY_ID: String(canary.REPOSITORY_ID), GITHUB_ACTOR: 'ptdbot', GITHUB_TRIGGERING_ACTOR: 'ptdbot', GITHUB_REF: `refs/pull/${prNumber}/merge`, GITHUB_HEAD_REF: canary.BRANCH, GITHUB_BASE_REF: 'main', GITHUB_SHA: 'b'.repeat(40), GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1'};
+  const pr = {number: prNumber, user: {login: 'ptdbot'}, state: 'open', draft: true, head: {repo: {id: canary.HEAD_REPOSITORY_ID, full_name: canary.HEAD_REPOSITORY}, ref: canary.BRANCH, sha}, base: {repo: {id: canary.REPOSITORY_ID, full_name: canary.REPOSITORY}, ref: 'main'}};
+  const event = {action: 'synchronize', number: prNumber, repository: {id: canary.REPOSITORY_ID, full_name: canary.REPOSITORY}, sender: {login: 'ptdbot'}, pull_request: structuredClone(pr)};
   const run = {id: 123, run_attempt: 1, event: 'pull_request', path: canary.WORKFLOW, head_sha: sha, head_branch: canary.BRANCH, repository: {id: canary.REPOSITORY_ID, full_name: canary.REPOSITORY}, head_repository: {id: canary.HEAD_REPOSITORY_ID, full_name: canary.HEAD_REPOSITORY}, actor: {login: 'ptdbot'}, triggering_actor: {login: 'ptdbot'}};
   return {env, event, run, pr};
 }
@@ -33,18 +33,22 @@ function withFixture(callback) {
   });
 }
 
-test('PR0 cannot activate through workflow or runtime', () => {
+test('only the allocated PR preflight is active and the default PR0 remains denied', () => {
   assert.equal(canary.EXPECTED_PR, 0);
-  const {env, event, run, pr} = identities();
+  const {env, event, run, pr} = identities(205419);
   assert.throws(() => canary.validateIdentity(env, event, run, pr));
-  assert.equal(canary.validateIdentity(env, event, run, pr, 205398).pr, 205398);
+  assert.equal(canary.validateIdentity(env, event, run, pr, 205419).pr, 205419);
+  assert.throws(() => canary.validateIdentity(env, event, run, pr, 205398));
   const activation = require('./activation.json');
-  assert.equal(activation.phase, 'disabled');
-  assert.equal(activation.expected_pr, 0);
-  assert.throws(() => require('./index.cjs').configuration());
+  assert.deepEqual(activation, {phase: 'preflight', expected_pr: 205419, actor_ids: {ptdbot: 283013143, d4l3k: 909104}, rest_preflight: null, producer: null});
+  assert.deepEqual(require('./index.cjs').configuration(), activation);
+  assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'disabled', expected_pr: 0}));
+  assert.throws(() => require('./index.cjs').configuration({...activation, expected_pr: 0}));
+  assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'producer'}));
   const workflow = fs.readFileSync(path.resolve(__dirname, '../../workflows/security-artifact-crossrun.yml'), 'utf8');
   assert.equal(canary.WORKFLOW, '.github/workflows/security-artifact-crossrun.yml');
-  assert.equal((workflow.match(/github\.event\.pull_request\.number == 0\b/g) || []).length, 2);
+  assert.equal((workflow.match(/github\.event\.pull_request\.number == 205419\b/g) || []).length, 2);
+  assert.doesNotMatch(workflow, /github\.event\.pull_request\.number == 0\b/);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/_check-ci\.yml/);
   assert.match(workflow, /github\.repository_owner == 'pytorch'/);
   assert.doesNotMatch(workflow, /actions: write|workflow_dispatch|pull_request_target|id-token|secrets\.|environment:/);

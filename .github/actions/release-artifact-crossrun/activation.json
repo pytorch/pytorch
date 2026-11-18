@@ -1,7 +1,7 @@
 {
-  "phase": "disabled",
-  "expected_pr": 0,
-  "actor_ids": {"ptdbot": 0, "d4l3k": 0},
+  "phase": "preflight",
+  "expected_pr": 205419,
+  "actor_ids": {"ptdbot": 283013143, "d4l3k": 909104},
   "rest_preflight": null,
   "producer": null
 }
