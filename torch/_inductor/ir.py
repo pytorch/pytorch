@@ -6351,7 +6351,9 @@ class TemplateBuffer(OperationBuffer):
                 template_buf._multi_output_children[mo.get_name()] = mo
                 if on_tensor_leaf is not None:
                     on_tensor_leaf(mo.get_name(), mo, indices, leaf_idx)
-                tb = TensorBox(mo)
+                # Boxed as every other lowering's result is, so that a graph
+                # output or an extern kernel input sees a realized buffer.
+                tb = TensorBox.create(mo)
                 seen_outputs[tid] = tb
                 return [tb]
             # Non-tensor leaf (int, SymInt, None, etc.)
@@ -11431,6 +11433,11 @@ class InvokeSubgraph(ExternKernel):
             if not isinstance(operand, ShapeAsConstantBuffer):
                 device = operand.get_device()
                 break
+        if device is None:
+            # A subgraph that reads no tensors (e.g. one that only builds an
+            # arange) has no operands to take the device from, but its outputs
+            # carry it.
+            device = next(filter(None, (out.get_device() for out in outputs)), None)
         if device is None:
             raise AssertionError("Expected device is not None")
         invoke_subgraph = InvokeSubgraph(
