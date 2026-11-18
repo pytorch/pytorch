@@ -1569,6 +1569,7 @@ ownership:
       - /test/test_stateless.py
       - /test/test_stateless_rng.py
       - /test/test_subclass.py
+      - /test/test_symnode_cache.py
       - /test/test_sympy_utils.py
       - /test/test_tensor_creation_ops.py
       - /test/test_tensor_iterator.py

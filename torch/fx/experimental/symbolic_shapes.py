@@ -4300,6 +4300,9 @@ class ShapeEnv:
         # so nothing being traced is served from here.
         self._symop_cache: dict[Any, Any] = {}
         self._symop_cache_version = 0
+        self._native_symnode_cache = (
+            torch._C._SymNodeCache() if torch._C._symnode_cache_enabled() else None
+        )
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
@@ -4505,6 +4508,7 @@ class ShapeEnv:
             "_replacements_version_counter",
             "_symop_cache",
             "_symop_cache_version",
+            "_native_symnode_cache",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
@@ -4904,6 +4908,8 @@ class ShapeEnv:
         )
 
     def _bump_replacements_version(self) -> None:
+        if self._native_symnode_cache is not None:
+            self._native_symnode_cache.clear()
         self._replacements_version_counter += 1
         self._update_version_counter()
 
@@ -4930,6 +4936,8 @@ class ShapeEnv:
         cur_key = self._get_key()
 
         if self._prev_cache_key != cur_key:
+            if self._native_symnode_cache is not None:
+                self._native_symnode_cache.clear()
             self._prev_cache_key = cur_key
             self._version_counter += 1
 
