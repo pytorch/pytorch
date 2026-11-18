@@ -138,11 +138,9 @@ struct C10_API PyInterpreterVTable {
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this
-  // situation. Native fakes use normal operator dispatch to reach pre-dispatch
-  // modes, since they do not have a Python __torch_dispatch__ implementation.
+  // situation
   virtual c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* self,
-      bool pre_dispatch = false) const = 0;
+      const TensorImpl* self) const = 0;
 
   // Invoke the Python boxed fallback dispatch to go back into Python
   virtual void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
