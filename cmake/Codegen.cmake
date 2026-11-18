@@ -144,6 +144,15 @@ if(INTERN_BUILD_ATEN_OPS)
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
       "89;90a;100a;103f;110a;120a;121a")
+    # By default nvcc compiles a file's archs one after another, and this file
+    # has the most: a parallel build ends up waiting for it alone.  nvcc warns
+    # when --threads is given twice, so a count set for every file (e.g. in
+    # TORCH_NVCC_FLAGS) is left alone.
+    if(NOT CMAKE_CUDA_FLAGS MATCHES "--threads")
+      set_property(
+        SOURCE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
+        APPEND_STRING PROPERTY COMPILE_FLAGS " --threads 4")
+    endif()
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
       "90a")

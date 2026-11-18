@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import functools
+import os
 import random
+import subprocess
 import sys
 import unittest
 from collections import defaultdict
@@ -613,6 +615,19 @@ class TestCalculateShards(unittest.TestCase):
                 )
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
+
+
+class TestNumProcs(unittest.TestCase):
+    def test_environment_sets_it(self) -> None:
+        code = "from tools.testing import test_selections as s; "
+        code += "print(s.NUM_PROCS, s.NUM_PROCS_FOR_SHARDING_CALC, s.IS_ROCM)"
+        env = {**os.environ, "PYTORCH_NUM_TEST_PROCS": "7"}
+        env["PYTORCH_TEST_CUDA_MEM_LEAK_CHECK"] = "0"
+        run = {"cwd": REPO_ROOT, "env": env, "capture_output": True, "text": True}
+        done = subprocess.run([sys.executable, "-c", code], check=True, **run)
+        *_, procs, for_shards, rocm = done.stdout.split()
+        if rocm == "False":  # ROCm runs a test process per GPU
+            self.assertEqual((procs, for_shards), ("7", "7"))
 
 
 class TestGetJobBaseName(unittest.TestCase):
