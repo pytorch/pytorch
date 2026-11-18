@@ -27,6 +27,7 @@ from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfXpu,
     TEST_ACCELERATOR,
@@ -310,6 +311,8 @@ class BlockWork(dist._Work):
 
 
 class TestPyProcessGroup(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_attr_overrides(self):
         pg = DummyAttrProcessGroup(0, 1)
         self.assertEqual(pg.name(), "dummy-attr")
@@ -527,41 +530,6 @@ class TestPyProcessGroup(TestCase):
 
         self.assertFalse(dist.ProcessGroup.supports_reconfigure.__get__(PG(0, 1)))
 
-    def test_reconfigure_cpp_fallback(self):
-        class PG(dist.ProcessGroup):
-            pass
-
-        class DelegatingPG(PG):
-            @property
-            def supports_reconfigure(self):
-                return super().supports_reconfigure
-
-            def get_reconfigure_handle(self):
-                return super().get_reconfigure_handle()
-
-            def reconfigure(self, opts):
-                return super().reconfigure(opts)
-
-        for cls in (PG, DelegatingPG):
-            with self.subTest(cls=cls):
-                store = dist.HashStore()
-                pg = cls(store, 0, 1)
-                backend = dist.ProcessGroupGloo(store, 0, 1, enable_reconfigure=True)
-                pg._set_default_backend(dist.ProcessGroup.BackendType.GLOO)
-                pg._register_backend(
-                    torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO, backend
-                )
-                try:
-                    self.assertTrue(dist.ProcessGroup.supports_reconfigure.__get__(pg))
-                    handle = dist.ProcessGroup.get_reconfigure_handle(pg)
-                    self.assertEqual(handle, backend.get_reconfigure_handle())
-                    opts = ReconfigureOptions()
-                    opts.uuid = 14
-                    opts.handles = [handle]
-                    self.assertTrue(dist.ProcessGroup.reconfigure(pg, opts).wait())
-                finally:
-                    pg.shutdown()
-
     def test_reconfigure_cpp_errors(self):
         class PG(dist.ProcessGroup):
             @property
@@ -597,6 +565,49 @@ class TestPyProcessGroup(TestCase):
         t = torch.zeros(4)
         self.assertEqual(dist._new_window(t, group=pg), "fake-window")
         self.assertIs(pg.new_window_tensor, t)
+
+
+class TestPyProcessGroupCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_reconfigure_cpp_fallback(self):
+        class PG(dist.ProcessGroup):
+            pass
+
+        class DelegatingPG(PG):
+            @property
+            def supports_reconfigure(self):
+                return super().supports_reconfigure
+
+            def get_reconfigure_handle(self):
+                return super().get_reconfigure_handle()
+
+            def reconfigure(self, opts):
+                return super().reconfigure(opts)
+
+        for cls in (PG, DelegatingPG):
+            with self.subTest(cls=cls):
+                store = dist.HashStore()
+                pg = cls(store, 0, 1)
+                backend = dist.ProcessGroupGloo(store, 0, 1, enable_reconfigure=True)
+                pg._set_default_backend(dist.ProcessGroup.BackendType.GLOO)
+                pg._register_backend(
+                    torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO, backend
+                )
+                try:
+                    self.assertTrue(dist.ProcessGroup.supports_reconfigure.__get__(pg))
+                    handle = dist.ProcessGroup.get_reconfigure_handle(pg)
+                    self.assertEqual(handle, backend.get_reconfigure_handle())
+                    opts = ReconfigureOptions()
+                    opts.uuid = 14
+                    opts.handles = [handle]
+                    self.assertTrue(dist.ProcessGroup.reconfigure(pg, opts).wait())
+                finally:
+                    pg.shutdown()
+
+
+class TestPyProcessGroupCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not TEST_ACCELERATOR, "no accelerator")
     @skipIfXpu(
@@ -664,6 +675,8 @@ class TestPyProcessGroup(TestCase):
 
 
 class TestBatchSendRecv(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
