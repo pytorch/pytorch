@@ -99,6 +99,123 @@ Other filters available in `torch.compiler` (all `_unsafe`, same caveats):
 - `skip_all_guards_unsafe` — drop **all** guards; removes every safety guarantee,
   use with extreme caution.
 
+### Label guards by region with `guard_ctx`
+
+Use {func}`torch.compiler.guard_ctx` and
+{func}`torch.compiler.register_guard_filter` to apply a policy to guards from a
+particular region. Labels are compile-time metadata: entering a labeled region
+does not add operations to the FX graph. A label alone does not remove guards.
+
+Register filters before compiling, using unique names for your application or
+library. The following dictionary policy is user-defined; PyTorch does not
+provide a built-in `skip_dict_guards` helper.
+
+```python
+import torch
+
+
+@torch.compiler.register_guard_filter("example.no_dict_guard")
+def no_dict_guard(entries):
+    return [entry.guard_type != "DICT_KEYS_MATCH" for entry in entries]
+
+
+@torch.compiler.register_guard_filter("example.no_guards")
+def no_guards(entries):
+    return [False for entry in entries]
+
+
+def fn2(args):
+    return args["x"] + args["offset"]
+
+
+def fn3(args):
+    return args["x"].sin()
+
+
+@torch.compiler.guard_ctx("example.no_dict_guard")
+def fn(args):
+    y = fn2(args)
+    with torch.compiler.guard_ctx("example.no_guards"):
+        z = fn3(args)
+    return y + z
+
+
+compiled_fn = torch.compile(fn, fullgraph=True)
+args = {"x": torch.ones(2), "offset": 2}
+torch.testing.assert_close(compiled_fn(args), args["x"] + 2 + args["x"].sin())
+```
+
+The decorator labels guards created while tracing `fn` and its call to `fn2`.
+The explicit inner context labels new guards created while tracing `fn3`.
+Nested contexts use the innermost label and restore the previous label on exit,
+including across graph breaks and exceptions. Nested traces start without the
+outer trace's label unless they explicitly enter their own context. Use
+non-empty, exact built-in `str` labels for uninterrupted `fullgraph=True`
+tracking. String subclasses work eagerly but require fallback when traced.
+
+You can also enter a context before a compiled call starts tracing:
+
+```python
+compiled_fn2 = torch.compile(fn2, fullgraph=True)
+with torch.compiler.guard_ctx("example.no_dict_guard"):
+    torch.testing.assert_close(compiled_fn2(args), args["x"] + 2)
+```
+
+Labels attach at actual **Guard creation**. A Guard created in region A and
+installed later in region B keeps A's label; installation uses the current label
+only if the Guard has no creation label. Allocating a lazy variable tracker does
+not itself create its guards: a Guard first created when that variable is
+realized in B receives B's label. If semantically duplicate guards are installed
+in several regions, their attached labels are unioned.
+
+At guard finalization, each registered filter whose label appears on at least one
+guard receives one batch containing only entries carrying that label. Each entry
+exposes `name`, `guard_type`, `is_global`,
+the original Guard in `orig_guard`, and all attached labels as a `frozenset` in
+`labels`. This happens **before C++ guard construction**: regional entries have
+`has_value=False`, and `derived_guard_types` and `code_parts` are empty tuples.
+Filter using the available metadata, without relying on source values or built
+guard code. Guard types and inspection data have no backward compatibility
+guarantee.
+
+Return a sequence with exactly one built-in `bool` per entry: `True` keeps the
+guard and `False` rejects it. Integers and tensor booleans are invalid. Every
+registered filter matching a guard's labels runs, even if another already
+accepted it. Decisions are ORed: the guard is dropped only when **all matching
+filters reject it**. Guards without any registered matching label are kept;
+an unregistered label does not override a matching filter's rejection. The
+compile-wide `options={"guard_filter_fn": ...}` policy then runs on the
+survivors, with its existing built-entry metadata, and can reject them too.
+
+Registrations are process-global and survive `torch.compiler.reset()` and
+`torch._dynamo.reset()`. Registering the same name twice raises `ValueError`;
+there is no public unregister operation. Finalization takes a snapshot of the
+registry before invoking callbacks. Registrations made during a callback affect
+later finalizations. Registration does not change cached artifacts retroactively,
+and callbacks do not run on cache hits. Enter the desired context for the call
+that actually traces; adding a context around an existing cache hit does not
+relabel the saved guards.
+
+```{warning}
+Dropping a guard transfers responsibility for its assumption to you. If that
+assumption changes, a cache hit can silently reuse stale code and return wrong
+results. In the example, dropping `DICT_KEYS_MATCH` does not disable every
+dictionary check: surviving child guards may still require dictionary key-order
+managers, which can reject a changed key order. Unlabeled ambient guards and
+backend AOTAutograd alias/storage relations are outside the regional policy.
+Even a filter returning all `False` does not promise to remove every check or
+constraint from a compiled call.
+```
+
+Ordinary AOT compilation and the legacy `caching_precompile` mode support
+regional filtering. Saved artifacts retain the resulting survivor policy;
+creation labels and attached label metadata are transient and are not saved.
+Loading rebuilds those survivors without invoking registered regional callbacks.
+The prototype `torch.compiler.precompile.capture` with `DynamoTracer` rejects
+regional decisions that actually drop a guard, before constructing guards,
+because its safety reporting cannot account for these drops. Keep-all regional
+filters work with that prototype path.
+
 ## 3. Try `use_recursive_dict_tags_for_guards` first
 
 ```python
