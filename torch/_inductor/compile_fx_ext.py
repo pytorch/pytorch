@@ -27,13 +27,14 @@ from torch._inductor.output_code import (
 )
 from torch._inductor.utils import patch_subprocess_env
 from torch._subclasses import FakeTensorMode
+from torch.fx.graph_module import _get_attr
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
 from .codegen.common import custom_backend_codegen_configs
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
-from .graph import GraphLowering
+from .graph import _is_cpu_strided_tensor_pinned, GraphLowering
 from .virtualized import V
 
 
@@ -424,6 +425,24 @@ class _CapturedLogs:
                 logger.setLevel(level)
 
 
+def _pinned_constant_targets(gm: torch.fx.GraphModule) -> tuple[str, ...]:
+    """
+    Names of graph constants pinned in this process.
+
+    A compile worker reproduces pin_memory codegen from this metadata instead
+    of touching real pinned memory. Only the root graph is scanned; sorted so
+    the pickled payload is deterministic.
+    """
+    return tuple(
+        sorted(
+            node.target
+            for node in gm.graph.find_nodes(op="get_attr")
+            if isinstance(t := _get_attr(gm, node.target), torch.Tensor)
+            and _is_cpu_strided_tensor_pinned(t)
+        )
+    )
+
+
 class _SerializedFxCompile(FxCompile):
     """
     This is used to represent an FxCompile which occurs across a serialized
@@ -514,6 +533,9 @@ class _SerializedFxCompile(FxCompile):
         from pickle import PicklingError
 
         try:
+            # Read by the compile worker to reproduce pin_memory codegen;
+            # popped in the finally so the caller's gm is unchanged.
+            gm.meta["pinned_constants"] = _pinned_constant_targets(gm)
             input = _WireProtocolInput(
                 gm,
                 example_inputs,
@@ -541,6 +563,8 @@ class _SerializedFxCompile(FxCompile):
             log.warning("Unable to pickle input graph or example inputs", exc_info=True)
 
             return None
+        finally:
+            gm.meta.pop("pinned_constants", None)
 
     @abstractmethod
     def _send_to_child(
