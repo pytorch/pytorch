@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 import tempfile
 from typing import Any, IO
@@ -26,6 +27,7 @@ from torch.distributed.checkpoint import (
 from torch.distributed.checkpoint._extension import ZStandard
 from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, ReadItem
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.utils import _create_file_view
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -194,34 +196,35 @@ class TestDistributedStateDictSaveLoad(TestCase):
             self.assertGreater(mocked_load_zip_region.call_count, 0)
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
-    def test_mmap_non_native_byteorder_falls_back_twice(self) -> None:
-        # Cross-endian mapped loads must fall back; loading the same region
-        # twice must not silently byteswap a shared mapping.
-        opposite = b"big" if sys.byteorder == "little" else b"little"
-        with tempfile.TemporaryDirectory() as path:
-            state_dict_to_save = {"w": torch.arange(8, dtype=torch.float32)}
-            save_state_dict(
-                state_dict=state_dict_to_save,
-                storage_writer=FileSystemWriter(path=path, thread_count=1),
-                no_dist=True,
-            )
-
-            with mock.patch(
-                "torch.serialization._region_load_byteorder",
-                return_value=opposite,
-            ):
-                for _ in range(2):
-                    state_dict_to_load_to = {
-                        "w": torch.empty_like(state_dict_to_save["w"])
-                    }
-                    load_state_dict(
-                        state_dict=state_dict_to_load_to,
-                        storage_reader=FileSystemReader(path=path, mmap=True),
-                        no_dist=True,
-                    )
-                    self.assertEqual(
-                        state_dict_to_load_to["w"], state_dict_to_save["w"]
-                    )
+    def test_load_zip_region_cross_endian_twice_on_shared_mapping(self) -> None:
+        # Force _load to byteswap by omitting the byteorder record and setting
+        # the opposite default endianness. Loading twice through one mapping
+        # must still return correct values (copy path, not in-place swap).
+        tensor = torch.arange(8, dtype=torch.float32)
+        opposite = (
+            torch.serialization.LoadEndianness.BIG
+            if sys.byteorder == "little"
+            else torch.serialization.LoadEndianness.LITTLE
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "region.pt")
+            torch.save(tensor, path, _disable_byteorder_record=True)
+            size = os.path.getsize(path)
+            mapped = torch.UntypedStorage.from_file(path, False, size)
+            prev = torch.serialization.get_default_load_endianness()
+            try:
+                torch.serialization.set_default_load_endianness(opposite)
+                with open(path, "rb") as fh:
+                    for _ in range(2):
+                        view = _create_file_view(fh, 0, size)
+                        loaded = torch.serialization._load_zip_region(
+                            view,
+                            overall_storage=mapped,
+                            storage_base_offset=0,
+                        )
+                        self.assertEqual(loaded, tensor)
+            finally:
+                torch.serialization.set_default_load_endianness(prev)
 
     def test_mmap_storage_range_outside_file_raises(self) -> None:
         with tempfile.TemporaryDirectory() as path:
@@ -291,7 +294,16 @@ class TestDistributedStateDictSaveLoad(TestCase):
                     def commit_tensor(self, req, tensor):
                         pass
 
-                reader.read_data(LoadPlan(items=[item]), _Planner()).wait()
+                if mmap:
+                    with mock.patch(
+                        "torch.distributed.checkpoint.filesystem.torch.load",
+                        side_effect=AssertionError(
+                            "mmap partial narrow should not fall back to torch.load"
+                        ),
+                    ):
+                        reader.read_data(LoadPlan(items=[item]), _Planner()).wait()
+                else:
+                    reader.read_data(LoadPlan(items=[item]), _Planner()).wait()
                 return dest
 
             mmap_out = _run(True)

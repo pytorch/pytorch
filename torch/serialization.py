@@ -843,21 +843,25 @@ class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
         super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
-class _UnsupportedZipRegion(RuntimeError):
-    """Raised when a bounded ZIP cannot safely use mapped storage."""
+def _get_load_byteorder(zip_file) -> bytes | None:
+    """Resolve the effective load byte order for a ZIP archive.
 
-
-def _region_load_byteorder(zip_file) -> bytes | None:
-    """Resolve the effective byte order the same way :func:`_load` does."""
+    Matches the historical :func:`_load` rules, including treating an unset
+    default as little-endian.
+    """
     if zip_file.has_record("byteorder"):
-        return zip_file.get_record("byteorder")
+        byteorderdata = zip_file.get_record("byteorder")
+        if byteorderdata not in [b"little", b"big"]:
+            raise ValueError("Unknown endianness type: " + byteorderdata.decode())
+        return byteorderdata
     endian = get_default_load_endianness()
-    if endian == LoadEndianness.NATIVE:
-        return None
+    if endian == LoadEndianness.LITTLE or endian is None:
+        return b"little"
     if endian == LoadEndianness.BIG:
         return b"big"
-    # LITTLE or unset defaults to little, matching _load.
-    return b"little"
+    if endian == LoadEndianness.NATIVE:
+        return None
+    raise ValueError("Invalid load endianness type")
 
 
 def _load_zip_region(
@@ -866,13 +870,13 @@ def _load_zip_region(
     overall_storage: torch.UntypedStorage,
     storage_base_offset: int,
 ) -> Any:
-    """Load one torch.save ZIP region whose tensor bytes live in ``overall_storage``.
+    """Load one torch.save ZIP region, aliasing ``overall_storage`` when safe.
 
     Uses the same ``weights_only`` unpickler setup as :func:`torch.load`
     (``encoding="utf-8"`` and :func:`_get_wo_message` on ``UnpicklingError``).
 
-    Raises :class:`_UnsupportedZipRegion` when the region would require an
-    in-place ``byteswap`` on the shared mapped storage (cross-endian loads).
+    Like ``FsspecReader``'s aliased loader: if the region would need an
+    in-place ``byteswap``, ``overall_storage`` is ignored and ``_load`` copies.
     """
     original_position = zip_view.tell()
     try:
@@ -880,19 +884,17 @@ def _load_zip_region(
         zip_view.seek(0)
         try:
             with _open_zipfile_reader(zip_view) as zip_file:
-                order = _region_load_byteorder(zip_file)
+                storage = overall_storage[
+                    storage_base_offset : storage_base_offset + region_length
+                ]
+                order = _get_load_byteorder(zip_file)
                 if order is not None and order != sys.byteorder.encode():
-                    raise _UnsupportedZipRegion(
-                        "mapped ZIP regions cannot be byteswapped "
-                        f"(region={order!r}, host={sys.byteorder!r})"
-                    )
+                    storage = None
                 return _load(
                     zip_file,
                     map_location="cpu",
                     pickle_module=_weights_only_unpickler,
-                    overall_storage=overall_storage[
-                        storage_base_offset : storage_base_offset + region_length
-                    ],
+                    overall_storage=storage,
                     weights_only=True,
                     encoding="utf-8",
                 )
@@ -2068,22 +2070,7 @@ def _load(
 
     # check if byteswapping is needed
     byteordername = "byteorder"
-    byteorderdata = None
-    if zip_file.has_record(byteordername):
-        byteorderdata = zip_file.get_record(byteordername)
-        if byteorderdata not in [b"little", b"big"]:
-            raise ValueError("Unknown endianness type: " + byteorderdata.decode())
-    elif (
-        get_default_load_endianness() == LoadEndianness.LITTLE
-        or get_default_load_endianness() is None
-    ):
-        byteorderdata = b"little"
-    elif get_default_load_endianness() == LoadEndianness.BIG:
-        byteorderdata = b"big"
-    elif get_default_load_endianness() == LoadEndianness.NATIVE:
-        pass
-    else:
-        raise ValueError("Invalid load endianness type")
+    byteorderdata = _get_load_byteorder(zip_file)
 
     storage_alignment = 64
     if zip_file.has_record(".storage_alignment"):

@@ -3,7 +3,6 @@ import collections
 import dataclasses
 import io
 import json
-import logging
 import operator
 import os
 import pickle
@@ -68,7 +67,6 @@ __all__ = [
 ]
 
 _metadata_fn: str = ".metadata"
-logger = logging.getLogger(__name__)
 
 CURRENT_DCP_VERSION: Final[str] = "1.0.0"
 
@@ -858,15 +856,17 @@ class FileSystemReader(StorageReader):
         mmap: If ``True``, eligible tensor regions are loaded from a private
             whole-file mapping of each backing ``.distcp`` file. Default is
             ``False``. Requires the built-in local ``FileSystem`` (exact type
-            match) and no stream transforms; unsupported regions fall back to
-            ``torch.load``. Checkpoint files must remain unchanged for the
-            duration of the load. Per-record CRCs of tensor payloads are not
-            eagerly verified.
+            match) and no stream transforms. Cross-endian regions are loaded
+            by copying instead of aliasing the mapping. Invalid DCP storage
+            ranges raise ``RuntimeError``. Checkpoint files must remain
+            unchanged for the duration of the load. Per-record CRCs of tensor
+            payloads are not eagerly verified.
 
     Note:
-        ``mmap`` is specific to ``FileSystemReader``. Other storage readers
-        such as ``FsspecReader`` and ``HuggingFaceStorageReader`` do not
-        accept this argument.
+        ``mmap`` only affects ``FileSystemReader``'s local mapped path.
+        ``HuggingFaceStorageReader`` does not accept this argument.
+        ``FsspecReader(path, mmap=True)`` does not enable this mapped loader;
+        the kwarg is forwarded to fsspec as a storage option.
     """
 
     def __init__(
@@ -936,21 +936,13 @@ class FileSystemReader(StorageReader):
         *,
         mapped_storage: torch.UntypedStorage,
         storage_base_offset: int,
-    ) -> Tensor | None:
-        """Deserialize via mapped storage; return ``None`` to fall back."""
-        try:
-            tensor = torch.serialization._load_zip_region(
-                file_slice,
-                overall_storage=mapped_storage,
-                storage_base_offset=storage_base_offset,
-            )
-        except torch.serialization._UnsupportedZipRegion as e:
-            logger.debug(
-                "mmap load falling back to torch.load for %s: %s",
-                req.storage_index,
-                e,
-            )
-            return None
+    ) -> Tensor:
+        """Deserialize via mapped storage, copying on cross-endian loads."""
+        tensor = torch.serialization._load_zip_region(
+            file_slice,
+            overall_storage=mapped_storage,
+            storage_base_offset=storage_base_offset,
+        )
         return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
 
     def _resolve_item(
@@ -986,7 +978,6 @@ class FileSystemReader(StorageReader):
                         item = self._load_item(req, file_slice)
                         planner.load_bytes(req, cast(io.BytesIO, item))
                     else:
-                        tensor: Tensor | None = None
                         if can_mmap and not (item_md.transform_descriptors or ()):
                             if file_size is None:
                                 file_size = os.fstat(stream.fileno()).st_size
@@ -1014,7 +1005,7 @@ class FileSystemReader(StorageReader):
                                 mapped_storage=mapped_storage,
                                 storage_base_offset=item_md.offset,
                             )
-                        if tensor is None:
+                        else:
                             tensor = cast(Tensor, self._load_item(req, file_slice))
                         target_tensor = self._resolve_item(req, tensor, planner)
                         target_tensor.copy_(tensor)
