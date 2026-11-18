@@ -419,6 +419,20 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("size", (49, 98))
+    def test_div_trunc_symbolic_scalar_reciprocal(self, device, dtype, numerics, size):
+        x = torch.full((size,), size, device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.div(x, x.shape[0], rounding_mode="trunc")
+
+        compiled = torch.compile(
+            fn, fullgraph=True, dynamic=True, options={"numerics": numerics}
+        )
+        self.assertEqual(compiled(x), fn(x), atol=0, rtol=0)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("other_consumer", (False, True))
     @parametrize("scalar_input", (False, True))
     def test_div_trunc_cpu_scalar_reciprocal_cudagraphs(
@@ -480,14 +494,13 @@ class StrictNumericsCompileTest(TestCase):
         compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
         self.assertEqual(compiled(x, divisor), fn(x, divisor))
 
-    @config.patch({"graph_partition": True})
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("tensor_divisor", (False, True))
     def test_div_trunc_fp64_scalar_reciprocal(
         self, device, dtype, numerics, tensor_divisor
     ):
-        # Cover fp64 scalar reciprocals and movement; the generic sweep excludes fp64.
+        # Cover fp64 scalar reciprocals; the generic sweep excludes fp64.
         # Non-strict returns 1 for CPU tensors; Python scalars already use a reciprocal.
         x = torch.tensor(49.0, device=device, dtype=dtype)
         divisor = torch.tensor(49.0, dtype=dtype) if tensor_divisor else 49.0
@@ -495,9 +508,8 @@ class StrictNumericsCompileTest(TestCase):
         def fn(x, divisor):
             return torch.div(x, divisor, rounding_mode="trunc")
 
-        with config.patch({"numerics": numerics}):
-            compiled = torch.compile(fn, fullgraph=True, mode="reduce-overhead")
-            self.assertEqual(compiled(x, divisor), fn(x, divisor))
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x, divisor), fn(x, divisor))
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):

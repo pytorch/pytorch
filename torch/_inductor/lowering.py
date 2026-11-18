@@ -8210,12 +8210,16 @@ def _floor_div_floating(a, b):
 
 
 def _div_trunc_cuda_scalar(
-    a: TensorBox | IRNode, b: TensorBox | IRNode | int | float
+    a: TensorBox | IRNode, b: TensorBox | IRNode | int | float | sympy.Basic
 ) -> TensorBox:
     # Match eager CUDA: use the accumulation dtype, then round after truncation.
     compute_dtype = get_computation_dtype(a.get_dtype())
     if isinstance(b, (int, float)):
         b = ir.Constant(value=b, dtype=compute_dtype, device=a.get_device_or_error())
+    elif isinstance(b, sympy.Basic):
+        b = ir.IndexingConstant(
+            index=b, dtype=compute_dtype, device=a.get_device_or_error()
+        )
     elif isinstance(b, TensorBox):
         b = maybe_copy_cpu_scalar(b, a.get_device_or_error())
     b = expand(b, a.get_size())
@@ -8238,7 +8242,9 @@ def div_mode(a, b, rounding_mode=None):
         and not b.get_size()
     )
     # Preserve CPU scalar shape and dtype before broadcasting and promotion.
-    scalar_divisor = b if isinstance(b, (int, float)) or is_cpu_scalar else None
+    scalar_divisor = (
+        b if isinstance(b, (int, float, sympy.Basic)) or is_cpu_scalar else None
+    )
     (a, b), _ = transform_args(
         [a, b], {}, True, ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, False
     )
