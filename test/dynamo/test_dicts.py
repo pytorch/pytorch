@@ -922,12 +922,16 @@ class DictTests(torch._dynamo.test_case.TestCase):
         [
             (kind, operation)
             for kind in (dict, OrderedDict)
-            for operation in ("extend", "copy", "update", "union")
+            for operation in ("iter", "extend", "copy", "update", "union")
         ]
         + [(OrderedDict, "popitem")],
     )
     def test_sourced_mapping_order_consumers(self, mapping_type, operation):
         def fn(x, mapping):
+            if operation == "iter":
+                views = mapping.keys(), mapping.values(), mapping.items()
+                iterables = (mapping, *views, dict.items(mapping))
+                return x + 1, tuple((type(it), next(it)) for it in map(iter, iterables))
             if operation == "popitem":
                 key, value = mapping.popitem(last=False)
                 return x + value, key
@@ -1922,12 +1926,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
     def test_ordered_dict_update_builtin_keys_fast_path(
         self, source_type, keys, nonliteral_destination_key
     ):
-        traced_code = []
-
-        def backend(graph, example_inputs):
-            traced_code.extend(torch._dynamo.utils.get_traced_code())
-            return graph.forward
-
         def fn(x, source, destination):
             destination.update(source)
             return x + len(destination), list(destination.items())
@@ -1938,12 +1936,20 @@ class DictTests(torch._dynamo.test_case.TestCase):
         if nonliteral_destination_key:
             destination[torch.ones(2)] = 0
         expected = fn(x, source, destination.copy())
-        actual = torch.compile(fn, backend=backend, fullgraph=True)(
-            x, source, destination
-        )
+        with patch.object(
+            variables.ConstDictVariable,
+            "dict_update_common",
+            autospec=True,
+            side_effect=variables.ConstDictVariable.dict_update_common,
+        ) as fast_update:
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(
+                x, source, destination
+            )
         self.assertEqual(actual, expected)
-        self.assertIn(fn.__code__, traced_code)
-        self.assertNotIn(torch._dynamo.polyfills.odict_update.__code__, traced_code)
+        if source_type is list and nonliteral_destination_key:
+            fast_update.assert_not_called()
+        else:
+            fast_update.assert_called_once()
 
     @parametrize("source_type, entries", [(list, ()), (tuple, (("initial", 0),))])
     def test_ordered_dict_update_classifies_pairs_once(self, source_type, entries):
@@ -2935,11 +2941,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x * d["foo"] * d["bar"]
 
         # Replay must resolve builtin operations independently of the frame's globals.
-        fn = types.FunctionType(
-            fn.__code__, {**fn.__globals__, "type": None, "dict": None}
-        )
+        frame_globals = {**fn.__globals__, "type": None, "dict": None}
+        fn = types.FunctionType(fn.__code__, frame_globals)
         fn = torch.compile(fn, backend="eager")
-        fn(torch.randn(4), d)
+        self.assertEqual(fn(torch.ones(4), d), torch.full((4,), 2.0))
+        self.assertEqual(list(dict.items(d)), [("foo", 1), ("bar", 2), ("baz", 4)])
+        self.assertEqual(d.sample, 1)
         # This is intentional because the dict is mutated, so we will have a recompilation.
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
