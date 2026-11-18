@@ -11,6 +11,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -417,6 +418,93 @@ class ForeachTests(TestCase):
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu
+    @parametrize(
+        "op",
+        [
+            torch._foreach_add_,
+            torch._foreach_mul_,
+            torch._foreach_div_,
+            torch._foreach_copy_,
+            torch._foreach_addcmul_,
+            torch._foreach_addcdiv_,
+        ],
+        name_fn=lambda f: f.__name__,
+    )
+    def test_inplace_fallback_list(self, op):
+        if op in (torch._foreach_addcmul_, torch._foreach_addcdiv_):
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                op([a0, a1], [b0, b1], [c0, c1])
+                return [a0 * 2, a1 * 2]
+
+            n_args = 6
+        else:
+
+            def fn(a0, a1, b0, b1):
+                op([a0, a1], [b0, b1])
+                return [a0 * 2, a1 * 2]
+
+            n_args = 4
+
+        inputs = [
+            torch.randn(10, 10, device=GPU_TYPE, dtype=torch.complex64)
+            for _ in range(n_args)
+        ]
+        self.check_model_gpu(fn, inputs, check_lowp=False)
+
+    @requires_gpu
+    @parametrize(
+        "op",
+        [torch._foreach_add_, torch._foreach_mul_, torch._foreach_div_],
+        name_fn=lambda f: f.__name__,
+    )
+    def test_inplace_fallback_scalar(self, op):
+        def fn(a0, a1):
+            op([a0, a1], 2j)
+            return [a0 * 2, a1 * 2]
+
+        inputs = [
+            torch.randn(10, 10, device=GPU_TYPE, dtype=torch.complex64)
+            for _ in range(2)
+        ]
+        self.check_model_gpu(fn, inputs, check_lowp=False)
+
+    @requires_gpu
+    def test_sgd_foreach_fallback(self):
+        def fn(params, grads):
+            with torch.no_grad():
+                torch.optim._functional.sgd(
+                    params,
+                    grads,
+                    [None] * len(params),
+                    foreach=True,
+                    fused=False,
+                    has_sparse_grad=False,
+                    weight_decay=0,
+                    momentum=0,
+                    lr=0.1,
+                    dampening=0,
+                    nesterov=False,
+                    maximize=False,
+                )
+            return params
+
+        p = torch.nn.Parameter(
+            torch.complex(
+                torch.randn(3, 2, device=GPU_TYPE), torch.randn(3, 2, device=GPU_TYPE)
+            )
+        )
+        grad = torch.ones_like(p)
+
+        expected = [p.detach().clone()]
+        actual = [p.detach().clone()]
+
+        expected = fn(expected, [grad])
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(actual, [grad])
+
+        self.assertEqual(actual, expected)
 
     @requires_gpu
     @scalar_bin_ops
@@ -957,6 +1045,73 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def _nodes_pre_fusion(self, fn, *args):
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.compile(fn)(*args)
+        return torch._inductor.metrics.ir_nodes_pre_fusion
+
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
+    @parametrize("case", ("add", "mul_self", "sgd_momentum"))
+    @parametrize("device", ("cpu", GPU_TYPE))
+    def test_inplace_foreach_computed_into_target(self, device, case):
+        # The value of an in-place foreach op that reads its target only where
+        # it writes it is computed straight into the target, not into a
+        # buffer of its own that is then copied. The scheduler would fuse
+        # such a copy back into one kernel, so count the nodes before fusion.
+        if device != "cpu" and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        if case == "sgd_momentum":
+            params = [
+                torch.randn(8, 8, device=device, requires_grad=True) for _ in range(3)
+            ]
+            for p in params:
+                p.grad = torch.randn_like(p)
+            opt = torch.optim.SGD(params, lr=0.1, momentum=0.9, foreach=True)
+            opt.step()  # creates the momentum buffers
+            # Per parameter: the new momentum buffer, its copy into the old
+            # one, and the update computed straight into the parameter.
+            self.assertEqual(self._nodes_pre_fusion(opt.step), 3 * len(params))
+            return
+
+        def fn(x, y):
+            if case == "add":
+                torch._foreach_add_([x], [y])
+            else:
+                torch._foreach_mul_([x], [x])
+
+        x = torch.randn(64, 64, device=device)
+        y = torch.randn(64, 64, device=device)
+        x_eager = x.clone()
+        fn(x_eager, y)
+        self.assertEqual(self._nodes_pre_fusion(fn, x, y), 1)
+        self.assertEqual(x, x_eager)
+
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
+    @parametrize("device", ("cpu", GPU_TYPE))
+    def test_inplace_foreach_reads_target_elsewhere(self, device):
+        # https://github.com/pytorch/pytorch/issues/198033: computed straight
+        # into x, the value would read rows of x that it has already written
+        # (on a GPU, that another block has). It gets a buffer of its own,
+        # which is then copied into x: two nodes.
+        if device != "cpu" and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x):
+            torch._foreach_add_([x], [x.flip(0)])
+
+        x = torch.randn(1024, 1024, device=device)
+        expected = x + x.flip(0)
+        self.assertEqual(self._nodes_pre_fusion(fn, x), 2)
+        self.assertEqual(x, expected)
+
     @requires_gpu
     def test_multi_device(self):
         def test_foreach_add(a0, a1, b0, b1):
@@ -1486,6 +1641,41 @@ class ForeachTests(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
+
+    @requires_cuda_and_triton
+    def test_foreach_pow_int_fallback(self):
+        from torch._inductor import scheduler
+
+        def fn_inplace(t, e):
+            torch._foreach_pow_(t, e)
+            return t[0]
+
+        def fn_outplace(t, e):
+            res = torch._foreach_pow(t, e)
+            return res[0]
+
+        create_foreach_nodes_calls = 0
+        orig_create_foreach_nodes = scheduler.Scheduler.create_foreach_nodes
+
+        def create_foreach_nodes_spy(self):
+            nonlocal create_foreach_nodes_calls
+            create_foreach_nodes_calls += 1
+            return orig_create_foreach_nodes(self)
+
+        t = [torch.tensor([2], device=GPU_TYPE, dtype=torch.int32)]
+        e = [torch.tensor(3, device=GPU_TYPE, dtype=torch.int32)]
+        with mock.patch.object(
+            scheduler.Scheduler, "create_foreach_nodes", create_foreach_nodes_spy
+        ):
+            self.assertEqual(
+                fn_inplace([t[0].clone()], e),
+                torch.compile(fn_inplace)([t[0].clone()], e),
+            )
+            self.assertEqual(
+                fn_outplace([t[0].clone()], e),
+                torch.compile(fn_outplace)([t[0].clone()], e),
+            )
+        self.assertGreaterEqual(create_foreach_nodes_calls, 2)
 
 
 if __name__ == "__main__":

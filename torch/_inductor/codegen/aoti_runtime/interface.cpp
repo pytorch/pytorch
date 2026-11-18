@@ -3,10 +3,12 @@
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // Stores the last error message from a failed AOTI runtime call so that
@@ -14,32 +16,38 @@
 // AOTInductorGetLastError(). Without this, exception messages (e.g.
 // "CUDA error: an illegal memory access was encountered") are lost when
 // the runtime boundary catches them and returns an error code.
-static thread_local std::string g_aoti_last_error;
+//
+// This must stay trivially destructible. A thread_local with a destructor
+// (e.g. std::string) registers a per-thread destructor in every thread that
+// calls into this DSO, and glibc then refuses to unload the DSO until all of
+// those threads exit: dlclose() becomes a no-op and every model reload leaks
+// the whole .so.
+constexpr size_t kAotiLastErrorCapacity = 1024;
+static thread_local char g_aoti_last_error[kAotiLastErrorCapacity];
 
 namespace {
+
+void set_aoti_last_error(const char* msg) noexcept {
+  std::strncpy(g_aoti_last_error, msg, kAotiLastErrorCapacity - 1);
+  g_aoti_last_error[kAotiLastErrorCapacity - 1] = '\0';
+}
 
 // Error reporting must not let a secondary exception cross the C ABI.
 AOTIRuntimeError record_aoti_runtime_exception(
     const std::exception& e) noexcept {
-  try {
-    g_aoti_last_error = e.what();
-  } catch (...) {
-  }
+  set_aoti_last_error(e.what());
   try {
     std::cerr << "Error: " << e.what() << '\n';
-  } catch (...) {
+  } catch (...) { // NOLINT(bugprone-empty-catch)
   }
   return AOTI_RUNTIME_FAILURE;
 }
 
 AOTIRuntimeError record_unknown_aoti_runtime_exception() noexcept {
-  try {
-    g_aoti_last_error = "Unknown exception";
-  } catch (...) {
-  }
+  set_aoti_last_error("Unknown exception");
   try {
     std::cerr << "Unknown exception occurred.\n";
-  } catch (...) {
+  } catch (...) { // NOLINT(bugprone-empty-catch)
   }
   return AOTI_RUNTIME_FAILURE;
 }
@@ -48,7 +56,7 @@ AOTIRuntimeError record_unknown_aoti_runtime_exception() noexcept {
 
 #define AOTI_RUNTIME_TRY(...)                       \
   try {                                             \
-    g_aoti_last_error.clear();                      \
+    g_aoti_last_error[0] = '\0';                    \
     __VA_ARGS__                                     \
   } catch (const std::exception& e) {               \
     return record_aoti_runtime_exception(e);        \
@@ -116,7 +124,7 @@ AOTIRuntimeError createModelImpl(
       // for CPU models.
       "cpu",
       "");
-  populate(*constant_map);
+  std::forward<Populate>(populate)(*constant_map);
   if (load_constants_from_blob) {
     model->load_constants();
   }
@@ -124,6 +132,50 @@ AOTIRuntimeError createModelImpl(
   return AOTI_RUNTIME_SUCCESS;
 }
 
+} // namespace
+
+namespace {
+// Generated code defines AOTI_CUDA_GRAPHS only with aot_inductor.cudagraphs, so
+// other models don't depend on the CUDA graph shim functions.
+#if defined(USE_CUDA) && defined(AOTI_CUDA_GRAPHS)
+void run_with_lazy_cuda_graphs(
+    AOTInductorModelContainerHandle container_handle,
+    AtenTensorHandle* input_handles,
+    size_t num_inputs,
+    AtenTensorHandle* output_handles,
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
+  AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  AOTINoGradGuard guard;
+  container->run_with_lazy_cuda_graphs(
+      input_handles, output_handles, stream, proxy_executor_handle);
+}
+#else
+void run_with_lazy_cuda_graphs(
+    AOTInductorModelContainerHandle /*container_handle*/,
+    AtenTensorHandle* /*input_handles*/,
+    size_t /*num_inputs*/,
+    AtenTensorHandle* /*output_handles*/,
+    size_t /*num_outputs*/,
+    AOTInductorStreamHandle /*stream_handle*/,
+    AOTIProxyExecutorHandle /*proxy_executor_handle*/) {
+#ifdef USE_CUDA
+  AOTI_RUNTIME_CHECK(
+      false,
+      "Running as CUDA graphs requires compiling the model with "
+      "aot_inductor.cudagraphs=True (not supported on ROCm yet)");
+#else
+  AOTI_RUNTIME_CHECK(false, "Running as CUDA graphs requires a CUDA model");
+#endif // USE_CUDA
+}
+#endif // defined(USE_CUDA) && defined(AOTI_CUDA_GRAPHS)
 } // namespace
 
 extern "C" {
@@ -282,6 +334,29 @@ AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
   AOTINoGradGuard guard;
   container->run_single_threaded(
       input_handles, output_handles, stream, proxy_executor_handle);
+  return AOTI_RUNTIME_SUCCESS;
+})
+
+AOTIRuntimeError AOTInductorModelContainerRunWithLazyCudaGraphs(
+    AOTInductorModelContainerHandle container_handle,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
+    size_t num_inputs,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) AOTI_RUNTIME_TRY({
+  run_with_lazy_cuda_graphs(
+      container_handle,
+      input_handles,
+      num_inputs,
+      output_handles,
+      num_outputs,
+      stream_handle,
+      proxy_executor_handle);
   return AOTI_RUNTIME_SUCCESS;
 })
 
@@ -756,9 +831,15 @@ AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(
   return AOTI_RUNTIME_SUCCESS;
 })
 
+AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyCpuThreads(
+    size_t threads) AOTI_RUNTIME_TRY({
+  torch::aot_inductor::setPinnedAsyncConstantsCopyCpuThreads(threads);
+  return AOTI_RUNTIME_SUCCESS;
+})
+
 AOTIRuntimeError AOTInductorGetLastError(
     const char** error_msg) {
-  *error_msg = g_aoti_last_error.c_str();
+  *error_msg = g_aoti_last_error;
   return AOTI_RUNTIME_SUCCESS;
 }
 

@@ -36,10 +36,13 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @skipIfNoFBGEMM
 class TestFuseEager(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion

@@ -180,9 +180,8 @@ operator*(const Float8_e5m2fnuz& a, const Float8_e5m2fnuz& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e5m2fnuz operator/(
-    const Float8_e5m2fnuz& a,
-    const Float8_e5m2fnuz& b) __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE Float8_e5m2fnuz
+operator/(const Float8_e5m2fnuz& a, const Float8_e5m2fnuz& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -229,8 +228,7 @@ inline C10_HOST_DEVICE float operator-(Float8_e5m2fnuz a, float b) {
 inline C10_HOST_DEVICE float operator*(Float8_e5m2fnuz a, float b) {
   return static_cast<float>(a) * b;
 }
-inline C10_HOST_DEVICE float operator/(Float8_e5m2fnuz a, float b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(Float8_e5m2fnuz a, float b) {
   return static_cast<float>(a) / b;
 }
 
@@ -243,8 +241,7 @@ inline C10_HOST_DEVICE float operator-(float a, Float8_e5m2fnuz b) {
 inline C10_HOST_DEVICE float operator*(float a, Float8_e5m2fnuz b) {
   return a * static_cast<float>(b);
 }
-inline C10_HOST_DEVICE float operator/(float a, Float8_e5m2fnuz b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(float a, Float8_e5m2fnuz b) {
   return a / static_cast<float>(b);
 }
 
@@ -272,8 +269,7 @@ inline C10_HOST_DEVICE double operator-(Float8_e5m2fnuz a, double b) {
 inline C10_HOST_DEVICE double operator*(Float8_e5m2fnuz a, double b) {
   return static_cast<double>(a) * b;
 }
-inline C10_HOST_DEVICE double operator/(Float8_e5m2fnuz a, double b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(Float8_e5m2fnuz a, double b) {
   return static_cast<double>(a) / b;
 }
 
@@ -286,8 +282,7 @@ inline C10_HOST_DEVICE double operator-(double a, Float8_e5m2fnuz b) {
 inline C10_HOST_DEVICE double operator*(double a, Float8_e5m2fnuz b) {
   return a * static_cast<double>(b);
 }
-inline C10_HOST_DEVICE double operator/(double a, Float8_e5m2fnuz b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(double a, Float8_e5m2fnuz b) {
   return a / static_cast<double>(b);
 }
 
@@ -427,10 +422,10 @@ class numeric_limits<c10::Float8_e5m2fnuz> {
     return c10::Float8_e5m2fnuz(0xFF, c10::Float8_e5m2fnuz::from_bits());
   }
   static constexpr c10::Float8_e5m2fnuz epsilon() {
-    return c10::Float8_e5m2fnuz(0x34, c10::Float8_e5m2fnuz::from_bits());
+    return c10::Float8_e5m2fnuz(0x38, c10::Float8_e5m2fnuz::from_bits());
   }
   static constexpr c10::Float8_e5m2fnuz round_error() {
-    return c10::Float8_e5m2fnuz(0x38, c10::Float8_e5m2fnuz::from_bits());
+    return c10::Float8_e5m2fnuz(0x3C, c10::Float8_e5m2fnuz::from_bits());
   }
   static constexpr c10::Float8_e5m2fnuz infinity() {
     return c10::Float8_e5m2fnuz(0x80, c10::Float8_e5m2fnuz::from_bits());

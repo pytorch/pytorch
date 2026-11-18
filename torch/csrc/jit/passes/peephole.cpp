@@ -294,16 +294,12 @@ struct PeepholeOptimizeImpl {
       } else if (
           node->matches("aten::device(str type, int index) -> Device") &&
           shape_peepholes_) {
-        auto string_type = node->inputs().at(0)->type()->expect<StringType>();
-        if (string_type) {
+        auto type = toIValue(node->inputs().at(0));
+        auto index = toIValue(node->inputs().at(1));
+        if (type && index) {
           WithInsertPoint guard(node);
-          std::string type_str = node->inputs().at(0)->node()->s(attr::value);
-          auto maybe_index = toIValue(node->inputs().at(1));
-          int64_t index = 0;
-          if (maybe_index) {
-            index = maybe_index->toInt();
-          }
-          auto device = c10::Device(type_str + ":" + std::to_string(index));
+          auto device = c10::Device(
+              type->toStringRef() + ":" + std::to_string(index->toInt()));
           auto output = node->owningGraph()->insertConstant(device);
           GRAPH_UPDATE(
               "Replacing ",
