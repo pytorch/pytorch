@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
@@ -3197,6 +3198,7 @@ class TestPrecompile(TestCase):
         self.assertIn("forward = _build_installed_forward()", python_code)
         self.assertNotIn("_FRAMES = ", python_code)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
         # than the raw internal error one produces further down (a static capture has no
