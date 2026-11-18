@@ -23,13 +23,19 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -2424,8 +2430,8 @@ class GraphModule(torch.nn.Module):
             ContextWrappingVariable(target_values={"key": "val"})
 
 
-class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
-    def test_cuda_use_mem_pool_fx_cse_preserves_distinct_contexts(self):
+class AcceleratorCtxManagerTests(torch._dynamo.test_case.TestCase):
+    def test_accelerator_use_mem_pool_fx_cse_preserves_distinct_contexts(self):
         from torch._functorch.compile_utils import fx_graph_cse
 
         graph = torch.fx.Graph()
@@ -2444,49 +2450,53 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         ]
         self.assertEqual(len(add_nodes), 2)
 
-    def _check_cuda_use_mem_pool(self, backend=None):
-        torch.cuda.empty_cache()
+    def _check_accelerator_use_mem_pool(self, backend=None):
+        torch.accelerator.empty_cache()
 
         def fn(pool):
-            with torch.cuda.use_mem_pool(pool):
-                return torch.ones(16, device="cuda") + 1
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
+                return torch.ones(16, device=GPU_TYPE) + 1
 
-        pool = torch.cuda.MemPool()
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
         opt_fn = (
             torch.compile(fn, backend=backend, fullgraph=True)
             if backend is not None
             else torch.compile(fn, backend="inductor", fullgraph=True)
         )
         res = opt_fn(pool)
-        torch.cuda.synchronize()
-        self.assertEqual(res, torch.full((16,), 2.0, device="cuda"))
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        torch.accelerator.synchronize()
+        self.assertEqual(res, torch.full((16,), 2.0, device=GPU_TYPE))
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_use_mem_pool_context_manager(self):
-        self._check_cuda_use_mem_pool(backend="eager")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_use_mem_pool_context_manager(self):
+        self._check_accelerator_use_mem_pool(backend="eager")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_mem_pool_id(self):
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6325")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_mem_pool_id(self):
         def fn(pool):
             return pool.id
 
-        pool = torch.cuda.MemPool()
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(pool), pool.id)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_context_manager_inductor(self):
-        self._check_cuda_use_mem_pool()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_context_manager_inductor(self):
+        self._check_accelerator_use_mem_pool()
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_cpp_wrapper_unsupported(self):
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_cpp_wrapper_unsupported(self):
         def fn(pool):
-            with torch.cuda.use_mem_pool(pool):
-                return torch.ones(16, device="cuda")
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
+                return torch.ones(16, device=GPU_TYPE)
 
-        pool = torch.cuda.MemPool()
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
         with (
             torch._inductor.config.patch(
                 {
@@ -2497,75 +2507,79 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             ),
             self.assertRaisesRegex(
                 torch._dynamo.exc.BackendCompilerFailed,
-                "torch.cuda.use_mem_pool is not supported with C\\+\\+ wrapper codegen",
+                "torch.get_device_module(GPU_TYPE).use_mem_pool is not supported with C\\+\\+ wrapper codegen",
             ),
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(pool)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_realize_at_boundary_inductor(self):
-        torch.cuda.empty_cache()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_realize_at_boundary_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(pool, inp):
-            with torch.cuda.use_mem_pool(pool):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
                 x = inp + 1
             return x + 1
 
-        pool = torch.cuda.MemPool()
-        inp = torch.ones(16, device="cuda")
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
+        inp = torch.ones(16, device=GPU_TYPE)
         res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
-        torch.cuda.synchronize()
-        self.assertEqual(res, torch.full((16,), 3.0, device="cuda"))
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        torch.accelerator.synchronize()
+        self.assertEqual(res, torch.full((16,), 3.0, device=GPU_TYPE))
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_fallback_alloc_inductor(self):
-        torch.cuda.empty_cache()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_fallback_alloc_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(pool, inp):
-            with torch.cuda.use_mem_pool(pool):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
                 return torch.histc(inp, bins=4, min=0, max=4)
 
-        pool = torch.cuda.MemPool()
-        inp = torch.arange(16, device="cuda", dtype=torch.float32) % 4
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
+        inp = torch.arange(16, device=GPU_TYPE, dtype=torch.float32) % 4
         res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
-        torch.cuda.synchronize()
-        self.assertEqual(res, torch.full((4,), 4.0, device="cuda"))
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        torch.accelerator.synchronize()
+        self.assertEqual(res, torch.full((4,), 4.0, device=GPU_TYPE))
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_foreach_alloc_inductor(self):
-        torch.cuda.empty_cache()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_foreach_alloc_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(pool, xs):
-            with torch.cuda.use_mem_pool(pool):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
                 return torch._foreach_add(xs, 1.0)
 
-        pool = torch.cuda.MemPool()
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
         xs = [
-            torch.ones(64, device="cuda"),
-            torch.full((64,), 2.0, device="cuda"),
+            torch.ones(64, device=GPU_TYPE),
+            torch.full((64,), 2.0, device=GPU_TYPE),
         ]
         res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, xs)
-        torch.cuda.synchronize()
-        self.assertEqual(res[0], torch.full((64,), 2.0, device="cuda"))
-        self.assertEqual(res[1], torch.full((64,), 3.0, device="cuda"))
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        torch.accelerator.synchronize()
+        self.assertEqual(res[0], torch.full((64,), 2.0, device=GPU_TYPE))
+        self.assertEqual(res[1], torch.full((64,), 3.0, device=GPU_TYPE))
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_forced_extern_multi_template_inductor(self):
-        torch.cuda.empty_cache()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_forced_extern_multi_template_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(pool, x, y):
-            with torch.cuda.use_mem_pool(pool):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
                 return x @ y
 
-        pool = torch.cuda.MemPool()
-        x = torch.randn(32, 32, device="cuda")
-        y = torch.randn(32, 32, device="cuda")
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
+        x = torch.randn(32, 32, device=GPU_TYPE)
+        y = torch.randn(32, 32, device=GPU_TYPE)
         with torch._inductor.config.patch(
             {
                 "test_configs.force_extern_kernel_in_multi_template": True,
@@ -2578,103 +2592,110 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
                 mode="max-autotune-no-cudagraphs",
                 fullgraph=True,
             )(pool, x, y)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         self.assertEqual(res, x @ y, atol=1e-4, rtol=1e-4)
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_nested_inductor(self):
-        torch.cuda.empty_cache()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_nested_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(outer_pool, inner_pool, inp):
-            with torch.cuda.use_mem_pool(outer_pool):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(outer_pool):
                 outer = inp + 1
-                with torch.cuda.use_mem_pool(inner_pool):
+                with torch.get_device_module(GPU_TYPE).use_mem_pool(inner_pool):
                     inner = inp + 2
                 outer = outer + 3
             return outer, inner
 
-        outer_pool = torch.cuda.MemPool()
-        inner_pool = torch.cuda.MemPool()
-        inp = torch.ones(16, device="cuda")
+        outer_pool = torch.get_device_module(GPU_TYPE).MemPool()
+        inner_pool = torch.get_device_module(GPU_TYPE).MemPool()
+        inp = torch.ones(16, device=GPU_TYPE)
         outer, inner = torch.compile(fn, backend="inductor", fullgraph=True)(
             outer_pool, inner_pool, inp
         )
-        torch.cuda.synchronize()
-        self.assertEqual(outer, torch.full((16,), 5.0, device="cuda"))
-        self.assertEqual(inner, torch.full((16,), 3.0, device="cuda"))
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(outer_pool.id)), 0)
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(inner_pool.id)), 0)
+        torch.accelerator.synchronize()
+        self.assertEqual(outer, torch.full((16,), 5.0, device=GPU_TYPE))
+        self.assertEqual(inner, torch.full((16,), 3.0, device=GPU_TYPE))
+        self.assertGreater(
+            len(torch.accelerator.memory.memory_snapshot(outer_pool.id)), 0
+        )
+        self.assertGreater(
+            len(torch.accelerator.memory.memory_snapshot(inner_pool.id)), 0
+        )
         self.assertEqual(outer_pool.use_count(), 1)
         self.assertEqual(inner_pool.use_count(), 1)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_distinct_pools_not_cse_inductor(self):
-        torch.cuda.empty_cache()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_distinct_pools_not_cse_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(pool_a, pool_b, inp):
-            with torch.cuda.use_mem_pool(pool_a):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool_a):
                 a = inp + 1
-            with torch.cuda.use_mem_pool(pool_b):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool_b):
                 b = inp + 1
             return a + b
 
-        pool_a = torch.cuda.MemPool()
-        pool_b = torch.cuda.MemPool()
-        inp = torch.ones(16, device="cuda")
+        pool_a = torch.get_device_module(GPU_TYPE).MemPool()
+        pool_b = torch.get_device_module(GPU_TYPE).MemPool()
+        inp = torch.ones(16, device=GPU_TYPE)
         res = torch.compile(fn, backend="inductor", fullgraph=True)(pool_a, pool_b, inp)
-        torch.cuda.synchronize()
-        self.assertEqual(res, torch.full((16,), 4.0, device="cuda"))
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_a.id)), 0)
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_b.id)), 0)
+        torch.accelerator.synchronize()
+        self.assertEqual(res, torch.full((16,), 4.0, device=GPU_TYPE))
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool_a.id)), 0)
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool_b.id)), 0)
         self.assertEqual(pool_a.use_count(), 1)
         self.assertEqual(pool_b.use_count(), 1)
 
     @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_reduce_overhead_cudagraph_asserts_inductor(self):
-        torch.cuda.empty_cache()
+    def test_accelerator_use_mem_pool_reduce_overhead_cudagraph_asserts_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(pool, x, w):
-            with torch.cuda.use_mem_pool(pool):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
                 return (x @ w).relu()
 
-        pool = torch.cuda.MemPool()
-        x = torch.randn(64, 64, device="cuda")
-        w = torch.randn(64, 64, device="cuda")
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
+        x = torch.randn(64, 64, device=GPU_TYPE)
+        w = torch.randn(64, 64, device=GPU_TYPE)
         with torch._inductor.config.patch({"triton.slow_path_cudagraph_asserts": True}):
             opt_fn = torch.compile(
                 fn, backend="inductor", mode="reduce-overhead", fullgraph=True
             )
             res = opt_fn(pool, x, w)
             res_second = opt_fn(pool, x, w)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         self.assertEqual(res, (x @ w).relu(), atol=1e-4, rtol=1e-4)
         self.assertEqual(res_second, res)
-        self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        self.assertGreater(len(torch.accelerator.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @requires_cuda_and_triton
-    def test_cuda_use_mem_pool_stream_order_inductor(self):
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    def test_accelerator_use_mem_pool_stream_order_inductor(self):
         from torch._inductor.utils import run_and_get_code
 
-        torch.cuda.empty_cache()
+        torch.accelerator.empty_cache()
 
         def pool_outer(pool, stream, inp):
-            with torch.cuda.use_mem_pool(pool):
-                with torch.cuda.stream(stream):
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
+                with torch.get_device_module(GPU_TYPE).stream(stream):
                     return inp + 1
 
         def stream_outer(pool, stream, inp):
-            with torch.cuda.stream(stream):
-                with torch.cuda.use_mem_pool(pool):
+            with torch.get_device_module(GPU_TYPE).stream(stream):
+                with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
                     return inp + 2
 
-        inp = torch.ones(16, device="cuda")
-        stream = torch.cuda.Stream()
+        inp = torch.ones(16, device=GPU_TYPE)
+        stream = torch.Stream()
         for fn in (pool_outer, stream_outer):
             with self.subTest(fn=fn.__name__):
-                pool = torch.cuda.MemPool()
+                pool = torch.get_device_module(GPU_TYPE).MemPool()
                 expected = fn(pool, stream, inp)
                 actual, source_codes = run_and_get_code(
                     torch.compile(fn, backend="inductor", fullgraph=True),
@@ -2682,60 +2703,70 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
                     stream,
                     inp,
                 )
-                torch.cuda.synchronize()
+                torch.accelerator.synchronize()
                 self.assertEqual(actual, expected)
-                self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+                self.assertGreater(
+                    len(torch.accelerator.memory.memory_snapshot(pool.id)), 0
+                )
                 self.assertEqual(pool.use_count(), 1)
 
                 source = "\n".join(source_codes)
                 # The compiled wrapper deliberately normalizes to pool-outer,
                 # stream-inner ordering so allocators with set_context/pop_context
                 # side effects see a consistent pool lifetime.
-                mempool_enter = source.index("with torch.cuda.use_mem_pool(")
+                mempool_enter = source.index(
+                    "with torch.get_device_module(GPU_TYPE).use_mem_pool("
+                )
                 stream_enter = source.index("with stream")
                 self.assertLess(mempool_enter, stream_enter)
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires multiple cuda devices")
-    def test_cuda_use_mem_pool_device_none_resolves_at_entry_inductor(self):
-        torch.cuda.empty_cache()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @requires_gpu_and_triton
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "requires multiple cuda devices"
+    )
+    def test_accelerator_use_mem_pool_device_none_resolves_at_entry_inductor(self):
+        torch.accelerator.empty_cache()
 
         def fn(pool):
-            with torch.cuda.use_mem_pool(pool):
-                return torch.ones(16, device="cuda:0")
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool):
+                return torch.ones(16, device=f"{GPU_TYPE}:0")
 
-        with torch.cuda.device(1):
-            pool = torch.cuda.MemPool()
+        with torch.device(1):
+            pool = torch.get_device_module(GPU_TYPE).MemPool()
             res = torch.compile(fn, backend="inductor", fullgraph=True)(pool)
-        torch.cuda.synchronize(0)
-        torch.cuda.synchronize(1)
-        self.assertEqual(res, torch.ones(16, device="cuda:0"))
-        self.assertEqual(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
+        torch.accelerator.synchronize(0)
+        torch.accelerator.synchronize(1)
+        self.assertEqual(res, torch.ones(16, device=f"{GPU_TYPE}:0"))
+        self.assertEqual(len(torch.accelerator.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_use_mem_pool_invalid_signatures(self):
-        pool = torch.cuda.MemPool()
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6329")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_use_mem_pool_invalid_signatures(self):
+        pool = torch.get_device_module(GPU_TYPE).MemPool()
 
         def missing(_pool):
-            with torch.cuda.use_mem_pool():
-                return torch.ones(1, device="cuda")
+            with torch.get_device_module(GPU_TYPE).use_mem_pool():
+                return torch.ones(1, device=GPU_TYPE)
 
         def too_many(pool):
-            with torch.cuda.use_mem_pool(pool, None, None):
-                return torch.ones(1, device="cuda")
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool, None, None):
+                return torch.ones(1, device=GPU_TYPE)
 
         def unexpected_kwarg(pool):
-            with torch.cuda.use_mem_pool(pool, foo=None):
-                return torch.ones(1, device="cuda")
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool, foo=None):
+                return torch.ones(1, device=GPU_TYPE)
 
         def duplicate_pool(pool):
-            with torch.cuda.use_mem_pool(pool, pool=pool):
-                return torch.ones(1, device="cuda")
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(pool, pool=pool):
+                return torch.ones(1, device=GPU_TYPE)
 
         def duplicate_device(pool):
-            with torch.cuda.use_mem_pool(pool, None, device=None):
-                return torch.ones(1, device="cuda")
+            with torch.get_device_module(GPU_TYPE).use_mem_pool(
+                pool, None, device=None
+            ):
+                return torch.ones(1, device=GPU_TYPE)
 
         cases = [
             (missing, "missing 1 required positional argument: 'pool'"),
@@ -2754,22 +2785,22 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(pool)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager1(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_stream_context_manager1(self):
         def fn(x):
-            s = torch.cuda.Stream()
+            s = torch.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
-            current_stream = torch.cuda.current_stream()
+            current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
-            with torch.cuda.stream(s):
+            with torch.get_device_module(GPU_TYPE).stream(s):
                 x = torch.relu(x)
             current_stream.wait_stream(s)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2779,17 +2810,17 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(str(cnts.op_count), """9""")
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_across_graph_break(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_stream_across_graph_break(self):
         def fn(x):
-            s = torch.cuda.Stream()
+            s = torch.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
 
             print("foo")
 
-            tcs = torch.cuda.stream(s)
-            current_stream = torch.cuda.current_stream()
+            tcs = torch.get_device_module(GPU_TYPE).stream(s)
+            current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
 
             with tcs:
@@ -2800,7 +2831,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -2810,25 +2841,25 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 9)
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager2(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_stream_context_manager2(self):
         def fn(x, s):
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
 
-            current_stream = torch.cuda.current_stream()
+            current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
 
-            with torch.cuda.stream(s):
+            with torch.get_device_module(GPU_TYPE).stream(s):
                 x = torch.relu(x)
 
             current_stream.wait_stream(s)
-            with torch.cuda.stream(current_stream):
+            with torch.get_device_module(GPU_TYPE).stream(current_stream):
                 x = torch.relu(x)
 
-            s2 = torch.cuda.Stream()
+            s2 = torch.Stream()
             s2.wait_stream(current_stream)
-            with torch.cuda.stream(s2):
+            with torch.get_device_module(GPU_TYPE).stream(s2):
                 x = torch.relu(x)
 
             current_stream.wait_stream(s2)
@@ -2836,8 +2867,8 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
-        s = torch.cuda.Stream()
+        x = torch.randn((2, 2), device=GPU_TYPE)
+        s = torch.Stream()
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2846,17 +2877,17 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 18)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_method(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_stream_method(self):
         def fn(x):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
 
-            new_stream = torch.cuda.Stream()
-            cur_stream = torch.cuda.current_stream()
+            new_stream = torch.Stream()
+            cur_stream = torch.accelerator.current_stream()
             new_stream.wait_stream(cur_stream)
 
-            with torch.cuda.stream(new_stream):
+            with torch.get_device_module(GPU_TYPE).stream(new_stream):
                 x = torch.sin(x)
                 x = torch.add(x, 3)
 
@@ -2866,7 +2897,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             cur_stream.query()
             cur_stream.synchronize()
 
-            with torch.cuda.stream(new_stream):
+            with torch.get_device_module(GPU_TYPE).stream(new_stream):
                 x = torch.add(x, 5)
             new_stream.synchronize()
 
@@ -2874,7 +2905,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2883,13 +2914,13 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """15""")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_compared_with_constant(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_stream_compared_with_constant(self):
         def fn(x):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
 
-            cur_stream = torch.cuda.current_stream()
+            cur_stream = torch.accelerator.current_stream()
             if cur_stream is not None:
                 return x + 1
             return x - 1
@@ -2898,12 +2929,12 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
 
-            cur_stream = torch.cuda.current_stream()
+            cur_stream = torch.accelerator.current_stream()
             if cur_stream != "const_str":
                 return x + 1
             return x - 1
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2913,16 +2944,16 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(ref, res2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_compared_with_stream(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_stream_compared_with_stream(self):
         def fn(x, s0, s1):
             if s0 == s1:
                 return x + 1
             else:
                 return x - 1
 
-        s0 = torch.cuda.Stream()
-        s1 = torch.cuda.Stream()
+        s0 = torch.Stream()
+        s1 = torch.Stream()
         x = torch.randn(2, 2)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2951,18 +2982,18 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref0, res0)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_reconstruct(self):
+    def test_accelerator_event_reconstruct(self):
         def fn(x):
-            e = torch.cuda.Event()
+            e = torch.Event()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
             return x, e
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -2971,25 +3002,25 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_across_graph_break(self):
+    def test_accelerator_event_across_graph_break(self):
         def fn(x):
-            e = torch.cuda.Event()
+            e = torch.Event()
             e.record()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
 
             print("foo")
 
-            torch.cuda.current_stream().wait_event(e)
+            torch.accelerator.current_stream().wait_event(e)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x, e
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -2998,31 +3029,31 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 10)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_created_outside_of_graph(self):
-        user_stream = torch.cuda.Stream()
-        event = torch.cuda.Event()
-        foo = torch.empty((2, 2), device="cuda")
+    def test_accelerator_event_created_outside_of_graph(self):
+        user_stream = torch.Stream()
+        event = torch.Event()
+        foo = torch.empty((2, 2), device=GPU_TYPE)
 
         def func(foo):
             event.wait()
             return foo + 1, event
 
-        x = torch.randn((1024, 1024), device="cuda")
+        x = torch.randn((1024, 1024), device=GPU_TYPE)
         cnts = torch._dynamo.testing.CompileCounter()
 
         def run_iters(fn, compile=False):
             if compile:
                 fn = torch.compile(fn, backend=cnts)
             for _ in range(10):
-                with torch.cuda.stream(user_stream):
+                with torch.get_device_module(GPU_TYPE).stream(user_stream):
                     torch.mm(x, x, out=foo)
                     event.record()
                 out = fn(foo)
-                torch.cuda.current_stream().synchronize()
+                torch.accelerator.current_stream().synchronize()
             return out
 
         ref = run_iters(func, compile=False)
@@ -3031,11 +3062,11 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_method_create_stream_outside_of_compile(self):
+    def test_accelerator_event_method_create_stream_outside_of_compile(self):
         def fn(x, cur_stream, new_stream):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
@@ -3046,48 +3077,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             event.query()
 
             new_stream.wait_event(event)
-            with torch.cuda.stream(new_stream):
-                x = torch.add(x, 4)
-
-            new_event = torch.cuda.Event()
-            new_event.record(new_stream)
-
-            new_event.wait(cur_stream)
-            x = torch.add(x, 5)
-
-            new_event.synchronize()
-
-            x = torch.relu(x)
-            x = torch.cos(x)
-            return x
-
-        x = torch.randn((2, 2), device="cuda")
-        cur_stream = torch.cuda.current_stream()
-        new_stream = torch.cuda.Stream()
-        ref = fn(x, cur_stream, new_stream)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        res = opt_fn(x, cur_stream, new_stream)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """16""")
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_event_method(self):
-        def fn(x):
-            x = torch.mul(x, 1)
-            x = torch.add(x, 2)
-
-            cur_stream = torch.cuda.current_stream()
-            new_stream = torch.cuda.Stream()
-
-            x = torch.add(x, 3)
-
-            event = cur_stream.record_event()
-            event.query()
-
-            new_stream.wait_event(event)
-            with torch.cuda.stream(new_stream):
+            with torch.get_device_module(GPU_TYPE).stream(new_stream):
                 x = torch.add(x, 4)
 
             new_event = torch.Event()
@@ -3102,7 +3092,48 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
+        cur_stream = torch.accelerator.current_stream()
+        new_stream = torch.Stream()
+        ref = fn(x, cur_stream, new_stream)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, cur_stream, new_stream)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_event_method(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.accelerator.current_stream()
+            new_stream = torch.Stream()
+
+            x = torch.add(x, 3)
+
+            event = cur_stream.record_event()
+            event.query()
+
+            new_stream.wait_event(event)
+            with torch.get_device_module(GPU_TYPE).stream(new_stream):
+                x = torch.add(x, 4)
+
+            new_event = torch.Event()
+            new_event.record(new_stream)
+
+            new_event.wait(cur_stream)
+            x = torch.add(x, 5)
+
+            new_event.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -3111,42 +3142,44 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """17""")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_device(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_device(self):
         def fn(x):
-            with torch.cuda.device(x.device.index - 1):
+            with torch.get_device_module(GPU_TYPE).device(max(x.device.index - 1, 0)):
                 x = torch.sin(x + 1)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=GPU_TYPE)
         ref = fn(x)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda__exchange_device_args(self):
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator__exchange_device_args(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(args, kwargs):
-            torch.cuda._exchange_device(*args, **kwargs)
+            torch.get_device_module(GPU_TYPE)._exchange_device(*args, **kwargs)
 
-        initial_dev = torch.cuda.current_device()
+        initial_dev = torch.get_device_module(GPU_TYPE).current_device()
         for args, kwargs in (((), ()), ((0, 0), ()), ((), ("kwarg",))):
             self.assertRaises(torch._dynamo.exc.Unsupported, fn, args, kwargs)
-            self.assertEqual(torch.cuda.current_device(), initial_dev)
+            self.assertEqual(
+                torch.get_device_module(GPU_TYPE).current_device(), initial_dev
+            )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_autocast(self):
-        if not torch.cuda.is_bf16_supported():
+        if not torch.get_device_module(GPU_TYPE).is_bf16_supported():
             raise unittest.SkipTest("requires bf16")
 
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=GPU_TYPE)
+                b_float32 = torch.rand((8, 8), device=GPU_TYPE)
+                d_float32 = torch.rand((8, 8), device=GPU_TYPE)
 
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                with torch.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16):
                     e_float16 = torch.mm(a_float32, b_float32)
                     f_float16 = torch.mm(d_float32, e_float16)
                 return f_float16
@@ -3161,18 +3194,19 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
 
-        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.type, GPU_TYPE)
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_amp_autocast(self):
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2680")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_accelerator_amp_autocast(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=GPU_TYPE)
+                b_float32 = torch.rand((8, 8), device=GPU_TYPE)
 
-                with torch.autocast(device_type="cuda", dtype=torch.float64):
+                with torch.autocast(device_type=GPU_TYPE, dtype=torch.float64):
                     c_float64 = torch.mm(a_float32, b_float32)
                 return c_float64
 
@@ -3186,19 +3220,20 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
 
-        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.type, GPU_TYPE)
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2680")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_float64(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=GPU_TYPE)
+                b_float32 = torch.rand((8, 8), device=GPU_TYPE)
+                d_float32 = torch.rand((8, 8), device=GPU_TYPE)
 
-                with torch.autocast(device_type="cuda", dtype=torch.float64):
+                with torch.autocast(device_type=GPU_TYPE, dtype=torch.float64):
                     e_float64 = torch.mm(a_float32, b_float32)
                     f_float64 = torch.mm(d_float32, e_float64)
                 return f_float64
@@ -3216,15 +3251,15 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_device(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=GPU_TYPE)
+                b_float32 = torch.rand((8, 8), device=GPU_TYPE)
+                d_float32 = torch.rand((8, 8), device=GPU_TYPE)
 
-                with torch.autocast("cuda"):
+                with torch.autocast(GPU_TYPE):
                     e_float64 = torch.mm(a_float32, b_float32)
                     f_float64 = torch.mm(d_float32, e_float64)
                 return f_float64
@@ -3242,10 +3277,10 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float16)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_arguments_binding(self):
         def f1(x):
-            with torch.autocast(device_type="cuda", enabled=False):
+            with torch.autocast(device_type=GPU_TYPE, enabled=False):
                 x = torch.sin(x + 1)
             return x
 
@@ -3264,17 +3299,17 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
         self.assertTrue(same(ref2, res2))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_decorator(self):
         def autocast_func(orig_func):
-            @torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+            @torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
             return new_fwd
 
-        def autocast_func_cuda(orig_func):
-            @torch.autocast(device_type="cuda", dtype=torch.float16)
+        def autocast_func_accelerator(orig_func):
+            @torch.autocast(device_type=GPU_TYPE, dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
@@ -3291,14 +3326,14 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             return torch.mm(a, b)
 
         mm_float16 = autocast_func(mm)
-        mm_float16_cuda = autocast_func_cuda(mm)
+        mm_float16_accelerator = autocast_func_accelerator(mm)
         mm_float16_cpu = autocast_func_cpu(mm)
 
         def fn(a, b):
-            return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
+            return mm_float16(a, b), mm_float16_accelerator(a, b), mm_float16_cpu(a, b)
 
-        a_float32 = torch.rand((8, 8), device="cuda")
-        b_float32 = torch.rand((8, 8), device="cuda")
+        a_float32 = torch.rand((8, 8), device=GPU_TYPE)
+        b_float32 = torch.rand((8, 8), device=GPU_TYPE)
 
         ref = fn(a_float32, b_float32)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
@@ -3894,9 +3929,9 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_autocast_bf16(self, device):
-        if not torch.cuda.is_bf16_supported():
+        if not torch.get_device_module(GPU_TYPE).is_bf16_supported():
             raise unittest.SkipTest("requires bf16")
 
         device_type = torch.device(device).type
