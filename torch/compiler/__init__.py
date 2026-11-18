@@ -28,6 +28,7 @@ from ._cache import CacheInfo
 
 if TYPE_CHECKING:
     from torch._dynamo.eval_frame import StanceStr
+    from torch._guards import _GuardContext
 
 
 __all__ = [
@@ -42,6 +43,7 @@ __all__ = [
     "disable",
     "set_default_backend",
     "get_default_backend",
+    "guard_ctx",
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
@@ -90,6 +92,21 @@ def reset() -> None:
     import torch._dynamo
 
     torch._dynamo.reset()
+
+
+def guard_ctx(label: str) -> "_GuardContext":
+    """Apply a compile-time guard label within a context or decorated call.
+
+    Labels must be non-empty strings. Nested contexts use the innermost label
+    and restore the previous label on exit.
+    """
+    from torch._guards import _GuardContext
+
+    if not isinstance(label, str):
+        raise TypeError("guard_ctx label must be a non-empty string")
+    if not label:
+        raise ValueError("guard_ctx label must be a non-empty string")
+    return _GuardContext(label)
 
 
 def allow_in_graph(fn):
