@@ -698,7 +698,12 @@ impl Compiled {
         regs[nregs - 1] = new_ref(function);
         let result = match self.bind_args(&mut regs, function, args, kwargs) {
             Ok(()) => self.exec(&mut regs),
-            Err(()) => null_mut(),
+            // Arguments that do not fit the signature: the interpreter turns
+            // the call down before it runs anything, in its own words.
+            Err(()) => {
+                ffi::PyErr_Clear();
+                ffi::PyObject_Call(function, args, kwargs)
+            }
         };
         for r in regs.iter_mut() {
             capi::release(std::mem::replace(r, null_mut()));
@@ -1067,11 +1072,15 @@ impl Compiled {
                 let ty = ffi::Py_TYPE(o);
                 let attr = pyffi::_PyType_Lookup(ty, f.consts[*name as usize].as_ptr());
                 if attr.is_null() {
+                    let name = pyffi::str_to_string(f.consts[*name as usize].as_ptr());
+                    let missed =
+                        if name == "__exit__" { " (missed __exit__ method)" } else { "" };
                     set_error(
                         ffi::PyExc_TypeError,
                         format!(
-                            "'{}' object does not support the context manager protocol",
-                            pyffi::type_name(o)
+                            "'{}' object does not support the context manager protocol{}",
+                            pyffi::type_name(o),
+                            missed
                         ),
                     );
                     return Err(());
