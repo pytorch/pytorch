@@ -344,7 +344,6 @@
   "test/higher_order_ops/test_with_effects.py",
   "test/inductor/test_alignment.py",
   "test/inductor/test_allow_tf32.py",
-  "test/inductor/test_analysis.py",
   "test/inductor/test_aot_inductor.py",
   "test/inductor/test_aot_inductor_arrayref.py",
   "test/inductor/test_aot_inductor_custom_ops.py",
