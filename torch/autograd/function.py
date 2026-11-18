@@ -36,6 +36,11 @@ _P = ParamSpec("_P")
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
+    # `tuple[T, ...]` is not a valid TorchScript type. This property is
+    # eager-backward-only, so subclasses of autograd.Function must not
+    # compile it when the class is scripted.
+    __jit_unused_properties__ = ["input_grad_buffers"]
+
     _input_grad_buffers: tuple[torch.Tensor | None, ...]
     output_grad_dtypes: "tuple[torch.dtype | None, ...] | None"
 
