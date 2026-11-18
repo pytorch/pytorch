@@ -600,12 +600,12 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
-        py_type = self.python_type()
-        if py_type is dict or not hasattr(py_type, "__missing__"):
+        if not hasattr(self.python_type(), "__missing__"):
             return self.getitem_const_raise_exception_if_absent(tx, key)
-        # A dict subclass's missing key goes to type(self).__missing__.
-        value = self.items.get(self._lookup_key(tx, key))
-        if value is None or type(value) is variables.DeletedVariable:
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is None or istype(value, variables.DeletedVariable):
+            self.install_dict_contains_guard(tx, hashed, key_present=False)
             return self.call_method(tx, "__missing__", [key], {})
         return value
 
