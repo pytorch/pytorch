@@ -35,6 +35,8 @@ class BuiltinPass:
     # What it is over: the control-flow graph of the function, once, or one
     # basic block after it was profiled.
     kind: ClassVar[str] = "block"
+    # A pass of the engine leaves every result what the interpreter computes.
+    exact: ClassVar[bool] = True
 
     def __repr__(self) -> str:
         fields = dataclasses.fields(self)  # type: ignore[arg-type]
@@ -144,6 +146,8 @@ class Graphs(BuiltinPass):
     """
 
     engine: ClassVar[str] = "graphs"
+    # The kernels of a graph compiler are not the ones eager runs.
+    exact: ClassVar[bool] = False
 
     backend: str | Callable[..., Any] = "inductor"
     min_ops: int = 4
