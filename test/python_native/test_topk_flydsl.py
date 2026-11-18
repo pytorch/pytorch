@@ -505,6 +505,25 @@ class TestFlyDSLTopK(TestCase):
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
 
+    def test_radix_reuses_one_kernel_across_n(self):
+        # The scan trip count is a launch argument, so a second length with
+        # the same K, dtype, and ordering must hit the compiled kernel.
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        k = 64
+        n0 = _test_n(k)
+        n1 = n0 + 1
+        self.assertEqual(_expected_kernel(k, n0), "radix")
+        self.assertEqual(_expected_kernel(k, n1), "radix")
+        m = _test_m(k)
+        for n in (n0, n1):
+            self._assert_topk_matches_aten(self._make_input(shape=(m, n)), k)
+
+        info = topk_cache_info("radix")
+        self.assertEqual(info.misses, 1)
+        self.assertGreaterEqual(info.hits, 1)
+        self.assertEqual(info.currsize, 1)
+
     @parametrize("k,n", ((32, 4096), (8, 1537), (64, 4096), (320, 8192)))
     def test_unsupported_configuration_falls_through_without_compiling(
         self, k: int, n: int

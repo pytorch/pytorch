@@ -322,7 +322,7 @@ def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
 # dtype/largest part of the key. FlyDSL 0.5 keys traced MLIR and fixes this:
 # https://github.com/ROCm/FlyDSL/pull/1338
 def _build_radix_select_topk_module(
-    n: int, k: int, deterministic: bool, arch: str, spec: TopKSpec
+    k: int, deterministic: bool, arch: str, spec: TopKSpec
 ):
     cache_tag = spec.cache_token()  # See Note [FlyDSL 0.3.x cache tag].
     num_stages = (k - 1).bit_length()
@@ -339,19 +339,24 @@ def _build_radix_select_topk_module(
     warp_size = 32 if is_rdna_arch(arch) else 64
     num_warps = block_threads // warp_size
     tile = block_threads * spec.vec
-    vec_iters = n // tile
-    vec_end = vec_iters * tile
-    scalar_tail_iters = (n - vec_end + block_threads - 1) // block_threads
 
     @flyc.kernel(known_block_size=[block_threads, 1, 1])
     def radix_select_topk_kernel(
         input: fx.Tensor,
         values: fx.Tensor,
         indices: fx.Tensor,
+        n_cols: fx.Int32,
     ):
         _ = cache_tag  # Keep the compatibility token in the kernel closure.
         row = fx.block_idx.x
         tid = fx.thread_idx.x
+        # N is a launch argument, so one compiled kernel covers every length.
+        # The byte passes and the vector width stay compile-time.
+        tile_i = fx.Int32(tile)
+        vec_iters = n_cols // tile_i
+        vec_end = vec_iters * tile_i
+        block_i = fx.Int32(block_threads)
+        scalar_tail_iters = (n_cols - vec_end + fx.Int32(block_threads - 1)) // block_i
 
         input_buf = fx.rocdl.make_buffer_tensor(input)
         values_buf = fx.rocdl.make_buffer_tensor(values)
@@ -452,10 +457,8 @@ def _build_radix_select_topk_module(
             # Accumulate the current byte histogram.
             prefix = s_prefix[0]
             decided_mask = s_mask[0]
-            for step in range_constexpr(vec_iters):
-                rvals = _load_vec(
-                    spec, copy_atom_v, input_div, step * block_threads + tid
-                )
+            for step in range(vec_iters):
+                rvals = _load_vec(spec, copy_atom_v, input_div, step * block_i + tid)
                 for vi in range_constexpr(spec.vec):
                     accumulate_radix_byte_hist(
                         spec.to_ord(rvals[vi]),
@@ -465,9 +468,9 @@ def _build_radix_select_topk_module(
                         shift,
                         sign_bit_xor_val,
                     )
-            for step in range_constexpr(scalar_tail_iters):
-                col = vec_end + step * block_threads + tid
-                if col < n:
+            for step in range(scalar_tail_iters):
+                col = vec_end + step * block_i + tid
+                if col < n_cols:
                     accumulate_radix_byte_hist(
                         spec.to_ord(row_in[col]),
                         byte_pos,
@@ -553,12 +556,10 @@ def _build_radix_select_topk_module(
                 eq_base = (next_eq_base < remaining_k).select(next_eq_base, remaining_k)
                 return above_base, eq_base
 
-            for step in range_constexpr(vec_iters):
-                tile_base = step * tile
+            for step in range(vec_iters):
+                tile_base = step * tile_i
                 base = tile_base + tid * spec.vec
-                rvals = _load_vec(
-                    spec, copy_atom_v, input_div, step * block_threads + tid
-                )
+                rvals = _load_vec(spec, copy_atom_v, input_div, step * block_i + tid)
                 elems = []
                 for vi in range_constexpr(spec.vec):
                     idx = fx.Int32(base + vi)
@@ -568,9 +569,9 @@ def _build_radix_select_topk_module(
                 )
 
             # --- Scalar tail ---
-            for step in range_constexpr(scalar_tail_iters):
-                col = vec_end + step * block_threads + tid
-                valid = col < n
+            for step in range(scalar_tail_iters):
+                col = vec_end + step * block_i + tid
+                valid = col < n_cols
                 col_safe = valid.select(col, 0)
                 elems = [(valid, row_in[col_safe], fx.Int32(col))]
                 above_base, eq_base = gather_deterministic_step(
@@ -595,18 +596,16 @@ def _build_radix_select_topk_module(
                         vals[pos] = val
                         idxs[pos] = idx
 
-            for step in range_constexpr(vec_iters):
-                tile_base = step * tile
+            for step in range(vec_iters):
+                tile_base = step * tile_i
                 base = tile_base + tid * spec.vec
-                rvals = _load_vec(
-                    spec, copy_atom_v, input_div, step * block_threads + tid
-                )
+                rvals = _load_vec(spec, copy_atom_v, input_div, step * block_i + tid)
                 for vi in range_constexpr(spec.vec):
                     idx = fx.Int32(base + vi)
                     gather_candidate(rvals[vi], idx, s_vals, s_idxs)
-            for step in range_constexpr(scalar_tail_iters):
-                col = vec_end + step * block_threads + tid
-                if col < n:
+            for step in range(scalar_tail_iters):
+                col = vec_end + step * block_i + tid
+                if col < n_cols:
                     gather_candidate(row_in[col], fx.Int32(col), s_vals, s_idxs)
 
         gpu.barrier()  # Phase 3 owns s_keys; s_scan is dead after phase 2.
@@ -669,9 +668,10 @@ def _build_radix_select_topk_module(
         values: fx.Tensor,
         indices: fx.Tensor,
         rows_m: fx.Int32,
+        n_cols: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
-        launcher = radix_select_topk_kernel(input, values, indices)
+        launcher = radix_select_topk_kernel(input, values, indices, n_cols)
         launcher.launch(
             grid=(rows_m, 1, 1),
             block=(block_threads, 1, 1),
@@ -903,13 +903,12 @@ def topk_register(
 
 @instrumented_flydsl_cache(
     "aten::topk",
-    key_fn=lambda n, k, deterministic, arch, spec, backend, device_index, *a, **kw: (
-        f"radix N={n} K={k} deterministic={deterministic} {spec.cache_token()} "
+    key_fn=lambda k, deterministic, arch, spec, backend, device_index, *a, **kw: (
+        f"radix K={k} deterministic={deterministic} {spec.cache_token()} "
         f"{arch} backend={backend} device={device_index}"
     ),
 )
 def _compile_radix_select_topk(
-    n: int,
     k: int,
     deterministic: bool,
     arch: str,
@@ -920,14 +919,18 @@ def _compile_radix_select_topk(
     compile_args,
 ) -> flyc.CompiledFunction:
     del backend, device_index  # cache keys only; see _compile_register_topk
-    input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_radix_select_topk_module(n, k, deterministic, arch, spec)
+    input_2d, values_2d, indices_2d, rows_m, n_cols, stream = compile_args
+    launch = _build_radix_select_topk_module(k, deterministic, arch, spec)
+    # Rows are already dynamic. The column count and the row stride are N.
+    input_arg = make_compile_arg(input_2d, read_only=True)
+    input_arg.mark_shape_dynamic(1).mark_stride_dynamic(0)
     return flyc.compile(
         launch,
-        make_compile_arg(input_2d, read_only=True),
+        input_arg,
         make_compile_arg(values_2d),
         make_compile_arg(indices_2d),
         rows_m,
+        n_cols,
         stream,
     )
 
@@ -950,16 +953,15 @@ def topk_radix_out(
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
         compiled = _compile_radix_select_topk(
-            n,
             k,
             deterministic,
             arch,
             spec,
             flyc.compile_backend_name(),
             device_index,
-            compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
+            compile_args=(input_2d, values_2d, indices_2d, rows_m, n, stream),
         )
-        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
+        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, n, stream)
 
 
 def topk_radix(
