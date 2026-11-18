@@ -182,30 +182,7 @@ def fold_decoded(
     base_r = tidx
     for _ in cutlass.range(n_full):
         # Inline offsets to avoid a spurious loop-carried value.
-        if const_expr(gidx == "flat"):
-            acc = reduce_fn(
-                acc,
-                acc_dt(
-                    mX[
-                        obase
-                        + _decode_offset(
-                            _rotate(base_r, shift, rb),
-                            rdivs,
-                            rstrides,
-                            npairs,
-                            native_div,
-                        )
-                    ]
-                ),
-                Int32(
-                    obase
-                    + _decode_offset(
-                        _rotate(base_r, shift, rb), rdivs, rstrides, npairs, native_div
-                    )
-                ),
-                True,
-            )
-        elif const_expr(gidx == "chunk"):
+        if const_expr(gidx == "chunk"):
             acc = reduce_fn(
                 acc,
                 acc_dt(
@@ -249,8 +226,6 @@ def fold_decoded(
     )
     off_s = off if valid else in_base
     val = acc_dt(mX[off_s])
-    if const_expr(gidx == "flat"):
-        return reduce_fn(acc, val, Int32(off_s), valid)
     if const_expr(gidx == "chunk"):
         return reduce_fn(acc, val, chunk_base + _rotate(base_r, shift, rb), valid)
     return reduce_fn(acc, val, _rotate(base_r, shift, rb), valid)
@@ -597,7 +572,7 @@ def fold_row_rolled(
 
 def ragged_vector_width(N: int, itemsize: int, order: str | None, use_tma: bool) -> int:
     """Check a ragged vector row request and return its aligned interior's load width."""
-    # Empty rows have no defined min, max or arg result.
+    # The edge folds load rowv[0] for masked lanes, which an empty row does not have.
     if N < 1:
         raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
     if order == "inner_tree":
@@ -605,6 +580,23 @@ def ragged_vector_width(N: int, itemsize: int, order: str | None, use_tma: bool)
     if use_tma:
         raise ValueError("ragged vectors cannot use TMA")
     return TRANSFER_ALIGNMENT // itemsize
+
+
+@cute.jit
+def _fold_aligned_vector(
+    reduce_fn, acc_dt, accs, aligned, frag, base, group, vec, nacc
+):
+    # Fold vector `group` of the row's aligned interior (element `base` onward) into the
+    # per-lane accumulators.
+    src = cute.make_tensor(aligned + group * Int32(vec), cute.make_layout(vec))
+    cute.autovec_copy(src, frag)
+    for j in cutlass.range_constexpr(vec // nacc):
+        col = base + Int32(j * nacc)
+        accs = tuple(
+            reduce_fn(accs[i], acc_dt(frag[j * nacc + i]), col + Int32(i), True)
+            for i in range(nacc)
+        )
+    return accs
 
 
 @cute.jit
@@ -616,64 +608,67 @@ def fold_row_aligned(
     lane,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
 ):
-    """Fold a ragged tm.N-wide row with aligned wide interior loads and scalar edges.
+    """Fold a ragged row with aligned wide interior loads and scalar edges.
 
-    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce derives vec) and rows
-    packed at stride N from a 16-byte aligned base, so the logical prefix below matches
-    the pointer's alignment (reduce_row_tile checks it). TileReduce and reduce_row_tile
-    also reject empty rows: one would fold nothing and return trait.init(), which is no
-    result for min, max or arg traits. The interior keeps fold_row_rolled's per-lane
-    accumulators; lane 0 folds every edge element into the first accumulator, before the
-    interior.
+    The width and pitch are runtime values, so one kernel per launch class serves every
+    ragged row. Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce derives vec) and a
+    16-byte aligned base, so a row's prefix below matches its pointer's alignment
+    (reduce_row_tile checks it). TileReduce and reduce_row_tile also reject empty rows: the
+    edge folds load rowv[0] for masked lanes, past the end of an empty row. The interior
+    keeps fold_row_rolled's per-lane accumulators; each edge element folds into its lane's
+    first accumulator before the interior (lane 0 takes all of them in one-thread rows).
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
-    n = Int32(tm.N)
+    n = Int32(mX.shape[1])
     vec = const_expr(tm.vec)
     nacc = const_expr(vec if trait.nfields == 1 else min(vec, _FIELD_ACCS))
     threads_per_row = const_expr(tm.threads_per_row)
     rowv = mX[Int64(r), None]
     aligned = rowv.iterator.align(TRANSFER_ALIGNMENT)
-    # `prefix` elements reach `aligned`. It is (-r * n) mod vec, the elements before the
-    # row's first 16-byte boundary, clamped to n for rows that end before it. Equal rows
+    # `prefix` elements reach `aligned`. It is (-r * pitch) mod vec, the elements before
+    # the row's first 16-byte boundary, clamped to n for rows that end before it. Equal rows
     # at different indices can split differently between edges and vectors, fold in a
     # different order and round apart.
-    prefix = Int32((-Int64(r) * Int64(n)) & Int64(vec - 1))
+    prefix = Int32((-Int64(r) * Int64(mX.stride[0])) & Int64(vec - 1))
     prefix = n if prefix > n else prefix  # noqa: FURB136 -- no DSL builtin min
     groups = (n - prefix) // Int32(vec)
-    waves = (groups + Int32(threads_per_row - 1)) // Int32(threads_per_row)
     tail = prefix + groups * Int32(vec)
-    # B200 64 MiB: 16-bit sums at N = 255/257 ran 1.4-1.5x N = 256/258 (27 vs 18-20 us)
-    # yet beat scalar 1.7x; Welford (from N = 1025) pays at most 7%, N >= 4095 none.
-    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long. Every
-    # lane runs these vec - gcd(N, vec) predicated iterations; only lane 0 loads real
-    # edge elements (the others reread element 0 and discard it).
-    for i in cutlass.range_constexpr(vec - math.gcd(tm.N, vec)):
-        prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
-        prefix_index = Int32(i) if prefix_valid else Int32(0)
+    # Both edges are under vec long. Lane i folds prefix element i and tail element i;
+    # one-thread rows fold them all in lane 0. Compare the remaining count: tail + i can
+    # pass 2^31 - 1 for N near it.
+    if const_expr(threads_per_row >= vec):
+        prefix_valid = lane < prefix
+        prefix_index = lane if prefix_valid else Int32(0)
         acc = reduce_fn(acc, acc_dt(rowv[prefix_index]), prefix_index, prefix_valid)
-        # Compare the remaining count: tail + i can pass 2^31 - 1 for N near it.
-        tail_valid = (lane == Int32(0)) & (Int32(i) < n - tail)
-        safe_tail = tail + Int32(i) if tail_valid else Int32(0)
+        tail_valid = lane < n - tail
+        safe_tail = tail + lane if tail_valid else Int32(0)
         acc = reduce_fn(acc, acc_dt(rowv[safe_tail]), safe_tail, tail_valid)
+    else:
+        for i in cutlass.range_constexpr(vec - 1):
+            prefix_valid = Int32(i) < prefix
+            prefix_index = Int32(i) if prefix_valid else Int32(0)
+            acc = reduce_fn(acc, acc_dt(rowv[prefix_index]), prefix_index, prefix_valid)
+            tail_valid = Int32(i) < n - tail
+            safe_tail = tail + Int32(i) if tail_valid else Int32(0)
+            acc = reduce_fn(acc, acc_dt(rowv[safe_tail]), safe_tail, tail_valid)
     accs = (acc,) + tuple(trait.init() for _ in range(nacc - 1))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
-    for c in cutlass.range(waves, unroll=unroll):
+    # Whole waves load unpredicated. In the last, only lanes with a vector load: a masked
+    # load could pass the end of a row with no whole vector, and of the tensor.
+    full = groups // Int32(threads_per_row)
+    for c in cutlass.range(full, unroll=unroll):
         group = c * Int32(threads_per_row) + lane
-        valid = group < groups
-        safe_group = group if valid else Int32(0)
-        base = prefix + safe_group * Int32(vec)
-        src = cute.make_tensor(
-            aligned + safe_group * Int32(vec),
-            cute.make_layout(vec),
+        base = prefix + group * Int32(vec)
+        accs = _fold_aligned_vector(
+            reduce_fn, acc_dt, accs, aligned, frag, base, group, vec, nacc
         )
-        cute.autovec_copy(src, frag)
-        for j in cutlass.range_constexpr(vec // nacc):
-            col = base + Int32(j * nacc)
-            accs = tuple(
-                reduce_fn(accs[i], acc_dt(frag[j * nacc + i]), col + Int32(i), valid)
-                for i in range(nacc)
-            )
+    group = full * Int32(threads_per_row) + lane
+    if group < groups:
+        base = prefix + group * Int32(vec)
+        accs = _fold_aligned_vector(
+            reduce_fn, acc_dt, accs, aligned, frag, base, group, vec, nacc
+        )
     return _linear_reduce(accs, trait.combine)
 
 
@@ -725,10 +720,10 @@ def fold_linear_rolled(
 
     Single-field traits fold element e into accumulator e % WARP and combine those like
     warp_reduce: chains of every WARP-th element, then a tree. For rows narrower than
-    128 elements that is ATen's association. Accumulators past a short row stay at
-    init and combine as identities. Multi-field traits keep fold_row_rolled's per-lane
-    accumulators. `unroll` applies to multi-field traits only; each single-field wave
-    already issues WARP elements of loads.
+    128 elements that is ATen's association at the M >= 16 the dispatcher routes here.
+    Accumulators past a short row stay at init and combine as identities. Multi-field
+    traits keep fold_row_rolled's per-lane accumulators. `unroll` applies to multi-field
+    traits only; each single-field wave already issues WARP elements of loads.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     gv = cute.flat_divide(mX[Int64(r), None], (vec,))
@@ -903,7 +898,8 @@ def fold_cols_rolled(
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
-    # A group stages at most 32 elements (vec columns x group rows) in registers.
+    # A group stages vec columns x group rows in registers, at most 32 elements while
+    # vec <= 32.
     group = const_expr(min(16, max(1, 32 // vec)))
     online = nrows
     if const_expr(trait.nfields == 1):
@@ -1012,8 +1008,8 @@ class TileReduce:
         if ragged_vector:
             if axis != "row":
                 raise ValueError(f"ragged vectors require the row axis, got {axis!r}")
-            # fold_row_aligned also needs rows packed at stride N from a 16-byte aligned
-            # base, which only the driver (reduce_row_tile) can check.
+            # fold_row_aligned also needs a 16-byte aligned base (at any pitch), which
+            # only the driver (reduce_row_tile) can check.
             ragged_vec = ragged_vector_width(N, itemsize, order, use_tma)
             if combine:
                 raise ValueError("ragged vectors cannot combine partials")
@@ -1021,6 +1017,20 @@ class TileReduce:
             if axis not in ("row", "general") or itree is None:
                 raise ValueError(
                     "the inner-tree order needs a row or general axis and a plan"
+                )
+            wide = wide_count or wide_red or wide_output
+            if axis == "general" and (
+                combine
+                or flat_tail
+                or ragged_chunk
+                or gidx_from != "r"
+                or wide
+                or itree.stage_e
+            ):
+                raise ValueError(
+                    "the general-axis inner-tree order takes only plain 32-bit decoded rows: "
+                    f"{combine=} {flat_tail=} {ragged_chunk=} {gidx_from=} {wide=} "
+                    f"stage_e={itree.stage_e}"
                 )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
@@ -1139,9 +1149,9 @@ class TileReduce:
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
-        # TMA (static box) and ragged vectors (static row edges) key N, the uniform tree
-        # its whole-load count and a tail flag, and fixed DAGs their N; other paths share
-        # a vector class.
+        # TMA (static box) keys N, the uniform tree its whole-load count and a tail flag,
+        # and fixed DAGs their N; ragged rows take a runtime width and other paths share a
+        # vector class.
         return (
             self.axis,
             self.vec,
@@ -1155,7 +1165,7 @@ class TileReduce:
             self.batched_col,
             self.pc,
             self.trait.nfields,
-            self.N if self.use_tma or self.ragged_vector else 0,
+            self.N if self.use_tma else 0,
             self.npairs_red,
             self.npairs_kept,
             self.wide_count,
@@ -1729,7 +1739,8 @@ class TileReduce:
         else:
             tma_atom = None
         if const_expr(self.order == "inner_tree"):
-            # Split inner-tree writes one partial per (output, batch).
+            # Every inner-tree shape sizes its grid by output count; split's outputs are
+            # (output, batch) partials.
             nout = mOuts[0].shape[0]
             gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
             gy = Int32(1)
@@ -1740,13 +1751,7 @@ class TileReduce:
                 gx = mOuts[0].shape[0]
                 gy = Int32(1)
         elif const_expr(self.axis == "row"):
-            # Split inner-tree writes (row, batch) partials, so count outputs, not input rows.
-            nout = (
-                mOuts[0].shape[0]
-                if const_expr(self.order == "inner_tree")
-                else mIns[0].shape[0]
-            )
-            gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
+            gx = cute.ceil_div(mIns[0].shape[0], const_expr(self.rows_per_block))
             gy = Int32(1)
         else:
             gx = cute.ceil_div(nchunks, const_expr(self.threads_per_block))
@@ -1816,7 +1821,7 @@ class TileReduce:
         bx, by, _ = cute.arch.block_idx()
         grid_x = cute.arch.grid_dim()[0] if const_expr(self.wide_output) else Int32(0)
         trait = self.trait
-        chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
+        chunk_base = Int32(0)  # set by ragged_chunk and flat_tail, for gidx "chunk"
         shift = None  # set only under rotate_chunks
         batch_idx = None  # split shape only: which batch of the row this block folds
         # Inner-tree thread map, set from its plan.
@@ -1868,9 +1873,7 @@ class TileReduce:
                 else Int32(bx)
             )
             lane = Int32(tx)
-            alive = (
-                raw < Int64(mOuts[0].shape[0]) if const_expr(self.wide_output) else True
-            )
+            alive = raw < cute.size(mOuts[0]) if const_expr(self.wide_output) else True
         elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
                 tx // const_expr(self.threads_per_row)
@@ -2076,8 +2079,8 @@ class TileReduce:
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
         elif const_expr(self.ragged_vector):
-            # Baking N ran FP16 4095-wide row sums at 6.75 us against 9.92 us with a
-            # runtime width, and BF16 variance at 32.7 against 36.1 us (B200).
+            # One kernel per launch class: on B200 16-bit odd-width sums ran a
+            # median 0.90-1.11x of a kernel baked per width, fp32 1.07-1.17x.
             acc = fold_row_aligned(
                 trait,
                 mIns[0],
