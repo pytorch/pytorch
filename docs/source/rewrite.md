@@ -35,6 +35,10 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.rewrite.load_passes
+```
+
+```{eval-rst}
 .. autofunction:: torch.rewrite.regions
 ```
 

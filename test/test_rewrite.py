@@ -9,8 +9,11 @@ import importlib
 import math
 import os
 import random
+import shutil
 import signal
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -1660,9 +1663,11 @@ class SwapKernel:
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.rewrite runtime not built")
 class TestCfgUserPasses(TestCase):
-    """Passes of the user's: a kernel in place of operations."""
+    """Passes of the user's: a kernel in place of operations, by a pass
+    written in Python or in Rust."""
 
     hw_classification = HardwareClassification.GENERIC
+    _library = None
 
     def run_swapped(self, fn, passes, calls=12):
         compiled = torch.rewrite(fn, passes=[*passes, *canonical], fallback=False)
@@ -1730,6 +1735,69 @@ class TestCfgUserPasses(TestCase):
         swap = torch.rewrite.swap(["pow", "mean", "sub"], kernel)
         self.run_swapped(swap_rms, [swap])
         self.assertEqual(kernel.calls, 0)
+
+    def library(self):
+        """The passes of test/rewrite_passes, built with cargo."""
+        cls = type(self)
+        if cls._library is None:
+            cargo = shutil.which("cargo")
+            if cargo is None:
+                self.skipTest("cargo is not installed")
+            here = os.path.dirname(os.path.abspath(__file__))
+            manifest = os.path.join(here, "rewrite_passes", "Cargo.toml")
+            target = tempfile.mkdtemp(prefix="rewrite_passes_")
+            command = [cargo, "build", "--release", "--offline", "--locked"]
+            command += ["--manifest-path", manifest, "--target-dir", target]
+            subprocess.run(command, check=True, capture_output=True)
+            (cls._library,) = (
+                os.path.join(target, "release", name)
+                for name in os.listdir(os.path.join(target, "release"))
+                if name.startswith("librewrite_passes.") and not name.endswith(".d")
+            )
+        return torch.rewrite.load_passes(cls._library)
+
+    def test_a_pass_written_in_rust_puts_a_kernel_in(self):
+        passes = self.library()
+        self.assertEqual(sorted(passes), ["fuse_rmsnorm", "strict"])
+        kernel = SwapKernel()
+        fuse = passes["fuse_rmsnorm"].bind(kernel)
+        self.assertEqual(fuse.__name__, "fuse_rmsnorm")
+        compiled, x, w = self.run_swapped(swap_rms, [fuse])
+        self.assertGreater(kernel.calls, 4)
+        self.assertEqual(kernel.took, [torch.Tensor])
+        kernel.shift = 1.0
+        self.assertEqual(compiled(x, w), swap_rms(x, w) + w)
+        # Bound to a kernel that is wrong, it is found out as swap finds it.
+        wrong = passes["fuse_rmsnorm"].bind(SwapKernel(shift=1e-2))
+        with self.assertRaisesRegex(torch.rewrite.Mismatch, "differs by up to 0.01"):
+            self.run_swapped(swap_rms, [wrong])
+
+    def test_a_pass_written_in_rust_can_fail(self):
+        passes = self.library()
+
+        def rejected(compiled):
+            return [b["rejected"] for b in compiled.stats()["blocks"]]
+
+        # A pass that fails leaves its block as the function wrote it.
+        compiled, _, _ = self.run_swapped(swap_rms, [passes["strict"]])
+        self.assertIn(
+            "a block that multiplies: aten::pow.Tensor_Scalar", str(rejected(compiled))
+        )
+        unbound, _, _ = self.run_swapped(swap_rms, [passes["fuse_rmsnorm"]])
+        self.assertIn("needs a kernel", str(rejected(unbound)))
+
+        def adds(x, w):
+            return x + w
+
+        compiled, _, _ = self.run_swapped(adds, [passes["strict"]])
+        self.assertEqual(rejected(compiled), [None])
+        self.assertEqual(block_stats(compiled, "versions"), [1])
+
+    def test_a_library_that_is_none_is_an_error(self):
+        with self.assertRaisesRegex(RuntimeError, "cannot load"):
+            torch.rewrite.load_passes("/nowhere/libpasses.so")
+        with self.assertRaisesRegex(RuntimeError, "exports no passes"):
+            torch.rewrite.load_passes(torch._C.__file__)
 
 
 def inl_scale(x, k):
