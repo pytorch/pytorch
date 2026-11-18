@@ -99,10 +99,10 @@ using Stream = void*;
 using Pool = ModelPool<FakeModel, Stream>;
 
 // Only checkout() creates leases: the constructor is private and takes the
-// pool's private slot type, so a caller can neither forge a lease nor wrap a
+// pool's private entry type, so a caller can neither forge a lease nor wrap a
 // bare model in one.
 static_assert(
-    !std::is_constructible_v<Pool::Lease, Pool&, FakeModel*>,
+    !std::is_constructible_v<Pool::ModelLease, Pool&, FakeModel*>,
     "A lease must not be constructible from a bare model");
 
 template <typename T, typename = void>
@@ -111,13 +111,13 @@ template <typename T>
 constexpr bool
     kHasArrow<T, std::void_t<decltype(std::declval<T>().operator->())>> = true;
 
-static_assert(kHasArrow<Pool::Lease&>);
-static_assert(kHasArrow<const Pool::Lease&>);
+static_assert(kHasArrow<Pool::ModelLease&>);
+static_assert(kHasArrow<const Pool::ModelLease&>);
 static_assert(
-    !kHasArrow<Pool::Lease>,
+    !kHasArrow<Pool::ModelLease>,
     "A temporary lease must not give access to its model");
 static_assert(
-    !kHasArrow<const Pool::Lease>,
+    !kHasArrow<const Pool::ModelLease>,
     "A const temporary lease must not give access to its model");
 
 struct TestPool {
@@ -153,7 +153,7 @@ std::string runtime_error_of(Fn&& fn) {
   return "";
 }
 
-[[nodiscard]] Pool::Lease checkout(Pool& pool, Stream stream = nullptr) {
+[[nodiscard]] Pool::ModelLease checkout(Pool& pool, Stream stream = nullptr) {
   auto future =
       std::async(std::launch::async, [&] { return pool.checkout(stream); });
   return wait_or_abort(future);
@@ -164,7 +164,7 @@ std::string runtime_error_of(Fn&& fn) {
 // returned within kBlocked of its thread calling it.
 constexpr auto kBlocked = std::chrono::milliseconds(100);
 
-std::future<Pool::Lease> blocked_checkout(Pool& pool) {
+std::future<Pool::ModelLease> blocked_checkout(Pool& pool) {
   std::promise<void> entering;
   auto entered = entering.get_future();
   auto lease = std::async(
@@ -177,7 +177,7 @@ std::future<Pool::Lease> blocked_checkout(Pool& pool) {
   return lease;
 }
 
-FakeModel* model_of(const Pool::Lease& lease) {
+FakeModel* model_of(const Pool::ModelLease& lease) {
   return lease.operator->();
 }
 
@@ -192,7 +192,7 @@ FakeModel* start_run(Pool& pool, Stream stream = nullptr) {
 
 // Mirrors a run() that throws after launching device work: the lease is dropped
 // while that work may still be running.
-void fail_run(Pool::Lease lease) {
+void fail_run(Pool::ModelLease lease) {
   lease->start();
   AOTI_RUNTIME_CHECK(false, "run failed");
 }
@@ -236,7 +236,7 @@ TEST(ModelPoolTest, FailedStatusQueryKeepsPoolConsistent) {
       runtime_error_of([&] { (void)checkout(t.pool); }), "status query failed");
   middle->finish();
   newest->finish();
-  std::vector<Pool::Lease> leases;
+  std::vector<Pool::ModelLease> leases;
   std::set<FakeModel*> held;
   for (size_t i = 0; i < t.models.size(); ++i) {
     leases.push_back(checkout(t.pool));
@@ -287,7 +287,7 @@ TEST(ModelPoolTest, LeaseMarksInFlightOnlyOnce) {
 
 TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
   TestPool t(1);
-  std::optional<Pool::Lease> holder;
+  std::optional<Pool::ModelLease> holder;
   {
     auto lease = checkout(t.pool);
     holder.emplace(std::move(lease));
