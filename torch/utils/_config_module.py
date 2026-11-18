@@ -559,6 +559,8 @@ class ConfigModule(ModuleType):
             if config.alias is not None:
                 self._set_alias_val(config, value)
             else:
+                if name == "_custom_ops_profile":
+                    self._enable_cpp_fake_custom_op_profiles(value)
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
@@ -748,6 +750,8 @@ class ConfigModule(ModuleType):
                 for module, key, value in targets:
                     if isinstance(module, ConfigModule):
                         entry = module._config[key]
+                        if key == "_custom_ops_profile":
+                            module._enable_cpp_fake_custom_op_profiles(value)
                         entry.user_override.set(value)
                         if entry.hide:
                             entry.hide = False
@@ -778,6 +782,17 @@ class ConfigModule(ModuleType):
         return revert
 
     _GET_DICT_DIRTY_KEYS_CAP = 16
+
+    def _enable_cpp_fake_custom_op_profiles(self, value: Any) -> None:
+        if (
+            value is not None
+            and value is not _UNSET_SENTINEL
+            and self.__name__ == "torch._dynamo.config"
+        ):
+            import torch
+
+            # Notify before publishing. Never reset: another context may use it.
+            torch._C._enable_fake_tensor_custom_op_profiles()
 
     def _mark_get_dict_dirty(self, name: str) -> None:
         dirty = self._get_dict_dirty_keys_var.get()
@@ -1335,6 +1350,8 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
+                if k == "_custom_ops_profile":
+                    self._enable_cpp_fake_custom_op_profiles(v)
                 config[k].user_override.set(v)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(k)
