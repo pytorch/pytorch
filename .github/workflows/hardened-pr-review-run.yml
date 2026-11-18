@@ -7,7 +7,8 @@ name: In Progress PR Review Run
 # are the trusted versions - never anything from the pull request.
 #
 #   prepare  authenticate the Stage-1 artifact, re-derive pr_number/base_sha,
-#            fetch the PR conversation
+#            fetch the PR conversation (reads with the PR review App's token,
+#            GITHUB_TOKEN if it cannot be minted)
 #   announce marks the newest automated review in progress, or says the PR is
 #            too large to review (GITHUB_TOKEN with pull-requests: write only;
 #            no AWS, no environment, no PR code)
@@ -178,9 +179,37 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # GITHUB_TOKEN shares one hourly API budget with every other workflow in
+      # this repository. When it runs out, the reads below fail with "API rate
+      # limit exceeded for installation" and the PR is never reviewed. This
+      # job's reads use the PR review GitHub App instead, whose budget is its
+      # own. The App's key is a secret of the `bedrock` environment, which the
+      # review job does not declare, so it never reaches a runner holding
+      # pull-request code. If minting fails, the reads fall back to
+      # GITHUB_TOKEN.
+      - name: Mint the PR review app token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ secrets.PR_REVIEW_APP_ID }}
+          private-key: ${{ secrets.PR_REVIEW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          # Read-only. No Actions permission: the Stage-1 artifact download
+          # below works without it.
+          permission-contents: read
+          permission-pull-requests: read
+
+      # Runs only on a fallback, so its conclusion (success rather than
+      # skipped) marks the runs that used GITHUB_TOKEN.
+      - name: Fall back to GITHUB_TOKEN
+        if: steps.app-token.outcome != 'success'
+        run: echo "::warning::Could not mint the PR review app token; this run uses GITHUB_TOKEN."
+
       - name: Download Stage-1 artifact
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           REPO: ${{ github.repository }}
         run: |
@@ -290,7 +319,7 @@ jobs:
       - name: Corroborate the claimed PR against the trusted API
         id: freshness
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.coords.outputs.pr_number }}
           HEAD_SHA: ${{ steps.coords.outputs.head_sha }}
           TRIGGER_EVENT: ${{ steps.coords.outputs.trigger_event }}
@@ -430,7 +459,7 @@ jobs:
         id: conversation
         if: steps.freshness.outputs.eligible == 'true' && steps.freshness.outputs.fresh == 'true' && steps.freshness.outputs.too_large != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.coords.outputs.pr_number }}
           HEAD_SHA: ${{ steps.coords.outputs.head_sha }}
