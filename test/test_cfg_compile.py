@@ -5412,6 +5412,31 @@ class TestCfgRegions(TestCase):
         (region,) = self.compiled_regions(compiled)
         self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
 
+    def test_matrix_of_a_product_stays_an_input(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        regions = torch.cfg_compile._regions
+
+        def uses(weight, bias, table, positions, scale, ids, x):
+            h = torch.nn.functional.linear(x, weight, bias)
+            h = h + torch.nn.functional.embedding(ids, table)
+            return h * scale + torch.nn.functional.embedding(positions, table)
+
+        example = (
+            torch.randn(8, 8),
+            torch.randn(8),
+            torch.randn(5, 8),
+            torch.arange(4),
+            torch.randn(1, 8),
+            torch.tensor([0, 1, 2, 3]),
+            torch.randn(4, 8),
+        )
+        graph = make_fx(uses)(*example)
+        worth = regions._worth_building_in
+        # The table is also looked up at built-in positions: that folds.
+        self.assertEqual(worth(graph, [0, 1, 2, 3, 4]), [1, 2, 3, 4])
+        self.assertEqual(worth(graph, [0, 1, 2, 4]), [1, 4])
+
     @slowTest
     def test_inductor_folds_built_in_weights(self):
         torch.manual_seed(0)

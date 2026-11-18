@@ -296,9 +296,10 @@ def cfg_compile(
             call: a tensor that was written to since (in place, through
             ``.data``, by an optimizer) or replaced makes the region compile
             again with that tensor as an input of the graph. Not built in:
-            a tensor the region itself writes, and memory PyTorch does not
-            see the writes to (shared with another process, or a NumPy
-            array's).
+            a tensor the region itself writes, the matrix of a matrix
+            product or of an embedding lookup (nothing folds, and it would
+            be a second copy), and memory PyTorch does not see the writes
+            to (shared with another process, or a NumPy array's).
             ``regions()`` reports ``frozen`` per region. On by default
             (``TORCH_CFG_COMPILE_FREEZE=0`` turns it off).
 
