@@ -1359,6 +1359,7 @@ def _to_copy_out(
     out.copy_(temp)
     return out
 
+
 @register_complex(aten.view.dtype)
 def view_dtype_impl(
     self: ComplexTensor,
@@ -1372,4 +1373,16 @@ def view_dtype_impl(
     return ComplexTensor(
         re.view(real_dtype),
         im.view(real_dtype),
+    )
+
+
+@register_complex(aten.view.default)
+def view_default_impl(
+    self: ComplexTensor,
+    shape: tuple[int, ...],
+) -> torch.Tensor:
+    re, im = split_complex_arg(self)
+    return ComplexTensor(
+        re.view(shape),
+        im.view(shape),
     )
