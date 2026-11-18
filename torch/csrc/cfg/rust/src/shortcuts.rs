@@ -7,7 +7,7 @@
 //! to and under which conditions; the VM checks the conditions on every use
 //! and otherwise runs the function itself. What the conditions and the
 //! outcome are is decided where the function is defined, in Python (see
-//! `torch/cfg_compile/_shortcuts.py`), and registered here.
+//! `torch/vm/_shortcuts.py`), and registered here.
 
 use crate::capi;
 use crate::pyffi::{self, Obj, PyObj, Shared};
