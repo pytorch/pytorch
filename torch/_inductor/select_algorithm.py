@@ -4307,6 +4307,26 @@ FeedbackFunction = Callable[
 PreprocessingFunction = Callable[[list[ChoiceCaller]], list[ChoiceCaller]]
 
 
+def min_choice_with_extern_margin(timings: dict[ChoiceCaller, float]) -> ChoiceCaller:
+    """The fastest choice, except that the fastest extern (ATen) choice is kept
+    unless the winner beats it by more than ``config.max_autotune_extern_margin``."""
+    best = min(timings, key=timings.__getitem__)
+    margin = config.max_autotune_extern_margin
+    if margin <= 0 or isinstance(best, ExternKernelCaller):
+        return best
+    extern = [
+        c
+        for c in timings
+        if isinstance(c, ExternKernelCaller) and math.isfinite(timings[c])
+    ]
+    if not extern:
+        return best
+    best_extern = min(extern, key=timings.__getitem__)
+    if timings[best_extern] <= timings[best] * (1 + margin):
+        return best_extern
+    return best
+
+
 def filter_choices_by_name_regex(choices: list[ChoiceCaller]) -> list[ChoiceCaller]:
     """Filter choices based on autotune_choice_name_regex config."""
     if config.test_configs.autotune_choice_name_regex is not None:
@@ -4749,7 +4769,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return node, choice
 
         # if we got any timings at all, pick the best of those
-        best_choice = min(timings, key=timings.__getitem__)
+        best_choice = min_choice_with_extern_margin(timings)
         best_time = timings[best_choice]
 
         # All benchmarks failed; fall back to ATen if available (#171094)
@@ -5823,6 +5843,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     return 1  # Triton and others in the middle
 
             choices = sorted(choices, key=choice_priority)
+        elif config.max_autotune_benchmark_extern_last:
+            choices = sorted(choices, key=cls._is_extern)
 
         if is_collective:
             import torch.distributed as dist
@@ -5965,12 +5987,17 @@ class AlgorithmSelectorCache(PersistentCache):
         ]
         cutlass = [c for c in choices if isinstance(c, CUTLASSTemplateCaller)]
 
-        timings = cls.benchmark_in_current_process(
-            extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
-        )
+        def bench_extern() -> dict[ChoiceCaller, float]:
+            return cls.benchmark_in_current_process(
+                extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            )
+
+        timings = {} if config.max_autotune_benchmark_extern_last else bench_extern()
         # Order Triton before CUTLASS so valid Triton timings are collected
         # before any CUTLASS kernel can crash the subprocess (#171094)
         timings.update(autotune_process.benchmark_in_sub_process(non_cutlass + cutlass))  # type: ignore[arg-type]
+        if config.max_autotune_benchmark_extern_last:
+            timings.update(bench_extern())
         return timings
 
     @classmethod
