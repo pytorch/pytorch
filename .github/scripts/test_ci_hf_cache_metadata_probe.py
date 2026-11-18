@@ -524,13 +524,12 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
                     probe.Transport(CREDS).request("HeadBucket")
         self.assertEqual(response.read.call_args.args, (probe.LIMIT + 1,))
 
-    def test_bootstrap_and_activated_owned_routes(self):
-        self.assertEqual(probe.PR_NUMBER, "0")
-        self.assertFalse(probe.scope_valid(environment()))
-        with (
-            mock.patch.object(probe, "PR_NUMBER", "205999"),
-            mock.patch.object(probe, "TAG", "refs/tags/ciflow/inductor-cu126/205999"),
-        ):
+    def test_exact_owned_routes(self):
+        self.assertEqual(probe.PR_NUMBER, "205566")
+        self.assertEqual(probe.TAG, "refs/tags/ciflow/inductor-cu126/205566")
+        with mock.patch.object(probe, "PR_NUMBER", "0"):
+            self.assertFalse(probe.scope_valid(environment()))
+        with self.subTest(pr_number=probe.PR_NUMBER):
             env = environment()
             self.assertTrue(probe.scope_valid(env))
             self.assertTrue(probe.preflight(env))
@@ -589,8 +588,8 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
             / "workflows/ci-security-hf-cache-metadata-read-canary.yml"
         )
         text = path.read_text()
-        self.assertIn("tags: [ciflow/inductor-cu126/0]", text)
-        self.assertEqual(text.count("github.event.pull_request.number == 0"), 2)
+        self.assertIn("tags: [ciflow/inductor-cu126/205566]", text)
+        self.assertEqual(text.count("github.event.pull_request.number == 205566"), 2)
         for clause in (
             "github.repository_id == '65600975'",
             "github.event.pull_request.user.id == 283013143",

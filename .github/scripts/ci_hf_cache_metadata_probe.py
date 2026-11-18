@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ET
 ACCOUNT = "308535385114"
 REGION = "us-east-1"
 ROLE = "gha_workflow_hf-cache-write"
-PR_NUMBER = "0"
+PR_NUMBER = "205566"
 HEAD_REF = "d4l3k/release-hf-cache-metadata-audit"
 TAG = f"refs/tags/ciflow/inductor-cu126/{PR_NUMBER}"
 BUCKET = "pytorch-hf-model-cache-meta-prod-aws-ue1"

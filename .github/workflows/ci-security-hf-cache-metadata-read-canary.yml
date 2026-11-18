@@ -9,7 +9,7 @@ on:
       - .github/scripts/test_ci_hf_cache_metadata_probe.py
     types: [opened, synchronize, reopened]
   push:
-    tags: [ciflow/inductor-cu126/0]
+    tags: [ciflow/inductor-cu126/205566]
 permissions:
   contents: read
 concurrency:
@@ -17,11 +17,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check-ci:
-    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.user.id == 283013143 && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-hf-cache-metadata-audit') || (github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/0'))
+    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 205566 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.user.id == 283013143 && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-hf-cache-metadata-audit') || (github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205566'))
     uses: ./.github/workflows/_check-ci.yml
   exact-read:
     needs: check-ci
-    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.user.id == 283013143 && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-hf-cache-metadata-audit') || (github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/0'))
+    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 205566 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.user.id == 283013143 && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-hf-cache-metadata-audit') || (github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205566'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     strategy:
