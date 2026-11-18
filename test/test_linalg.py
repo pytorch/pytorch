@@ -4,6 +4,7 @@
 import torch
 import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
+from torch._library._out_variant import check_out_variant
 from torch._subclasses.fake_tensor import FakeTensorMode
 import numpy as np
 
@@ -47,7 +48,8 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
-    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
+    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION, \
+    PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -12883,6 +12885,163 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([2, 4, 6, 8], device=device, dtype=torch.int32)
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             F.grouped_mm(a, b, offs=offs)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("a_shape,b_shape,offsets", [
+        subtest(((16, 256), (32, 256), [0, 128, 128, 256]), name="2d_2d_zero_size"),
+        subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64]), name="2d_3d"),
+        subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128]), name="3d_2d"),
+        subtest(((4, 16, 64), (4, 32, 64), None), name="3d_3d"),
+    ])
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_mm_out(self, device, a_shape, b_shape, offsets, dtype):
+        a = self._make_grouped_mm_matrix(a_shape, True, device, dtype)
+        b = self._make_grouped_mm_matrix(b_shape, True, device, dtype).transpose(-2, -1)
+        offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
+        expected = torch._grouped_mm(a, b, offs=offs)
+        out_op = torch.ops.aten._grouped_mm.out
+        mode = FakeTensorMode()
+        fake_args = [mode.from_tensor(t) for t in (a, b, offs) if t is not None]
+        shifted = torch.full((expected.numel() + 1,), math.nan, device=device, dtype=dtype)[1:]
+        outs = {
+            "empty": torch.empty(0, device=device, dtype=dtype),
+            "contiguous": torch.full_like(expected, math.nan, memory_format=torch.contiguous_format),
+            "column_major": torch.full_like(expected.mT, math.nan, memory_format=torch.contiguous_format).mT,
+            "misaligned": shifted.view_as(expected),
+        }
+        for layout, out in outs.items():
+            with self.subTest(layout=layout):
+                fake_out = mode.from_tensor(out)
+                with mode:
+                    self.assertIs(out_op(*fake_args, out=fake_out), fake_out)
+                stride, data_ptr = out.stride(), out.data_ptr()
+                self.assertIs(out_op(a, b, offs, out=out), out)
+                self.assertEqual(out, expected)
+                self.assertEqual((fake_out.shape, fake_out.stride()), (out.shape, out.stride()))
+                if layout != "empty":
+                    self.assertEqual((out.stride(), out.data_ptr()), (stride, data_ptr))
+        binding_out = torch.full_like(expected, math.nan, memory_format=torch.contiguous_format)
+        self.assertIs(torch._grouped_mm(a, b, offs=offs, out=binding_out), binding_out)
+        self.assertEqual(binding_out, expected)
+        wrong_out = torch.empty(0, device=device, dtype=torch.bfloat16 if dtype == torch.float16 else torch.float16)
+        fake_wrong_out = mode.from_tensor(wrong_out)
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            out_op(a, b, offs, out=wrong_out)
+        with mode, self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            out_op(*fake_args, out=fake_wrong_out)
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_out_unaligned_width(self, device):
+        a = self._make_grouped_mm_matrix((2, 8, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((2, 17, 32), True, device, torch.float32).transpose(-2, -1)
+        expected = torch._grouped_mm(a, b)
+        # ROCm builds and XPU do not pad the functional result.
+        if not torch.version.hip and torch.device(device).type != "xpu":
+            self.assertFalse(expected.is_contiguous())
+        with FakeTensorMode() as mode:
+            fake = torch._grouped_mm(mode.from_tensor(a), mode.from_tensor(b))
+        self.assertEqual(fake.stride(), expected.stride())
+        out_op = torch.ops.aten._grouped_mm.out
+
+        def flat(a, b, out):
+            out_op(a, b, out=out)
+            return out.view(-1)
+
+        def flat_column_major(a, b, out):
+            out_op(a, b, out=out)
+            return out.mT.view(-1)
+
+        def contiguous():
+            return torch.empty(2, 8, 17, device=device)
+
+        def column_major():
+            return torch.empty(2, 17, 8, device=device).mT
+
+        # The views above only work if out keeps its own strides instead of the padded ones.
+        for fn, make_out in ((flat, contiguous), (flat_column_major, column_major)):
+            with self.subTest(fn=fn.__name__):
+                eager_out = make_out()
+                eager_ret = fn(a, b, eager_out)
+                self.assertEqual(eager_out, expected)
+                out = make_out()
+                self.assertEqual(torch.func.functionalize(fn)(a, b, out), eager_ret)
+                self.assertEqual(out, eager_out)
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                out = contiguous()
+                ret = torch.compile(flat, backend=backend, fullgraph=True)(a, b, out)
+                self.assertEqual(ret, expected.flatten())
+                self.assertEqual(out, expected)
+
+        def resized(a, b):
+            return out_op(a, b, out=torch.empty(0, device=a.device))
+
+        self.assertEqual(torch.func.functionalize(resized)(a, b).stride(), resized(a, b).stride())
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize("rows,cols", [(0, 16), (8, 0)])
+    def test_grouped_mm_empty_result_strides(self, device, rows, cols):
+        a = self._make_grouped_mm_matrix((2, rows, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((2, cols, 32), True, device, torch.float32).transpose(-2, -1)
+        expected = torch._grouped_mm(a, b)
+        with FakeTensorMode() as mode:
+            fake = torch._grouped_mm(mode.from_tensor(a), mode.from_tensor(b))
+        self.assertEqual(fake.stride(), expected.stride())
+
+    @onlyCUDA
+    @skipIfRocm(msg="ROCm builds do not pad the functional result")
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    def test_grouped_mm_out_writes_in_place(self, device, dtype):
+        # With default settings, fp16 runs the fused cuBLASLt kernel where it is built and supported, bf16 runs the
+        # fused CUTLASS kernel on SM90 and SM100, and the rest runs the fallback.
+        prefer_cublaslt = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = False
+        self.addCleanup(setattr, torch.backends.cuda.matmul, "prefer_cublaslt_grouped_gemm", prefer_cublaslt)
+        if dtype == torch.float16:
+            fused = bool(PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM)
+        else:
+            fused = dtype == torch.bfloat16 and torch.cuda.get_device_capability(device)[0] in (9, 10)
+
+        def run(rows, width, row_width):
+            a = self._make_grouped_mm_matrix((rows, 32), True, device, dtype)
+            b = self._make_grouped_mm_matrix((4, width, 32), True, device, dtype).transpose(-2, -1)
+            offs = torch.tensor([rows * (i + 1) // 4 for i in range(4)], device=device, dtype=torch.int32)
+            expected = torch._grouped_mm(a, b, offs=offs)
+            # Sentinels fill the rest of each row and 8 elements after the last row.
+            buf = torch.full((rows * row_width + 8,), 7.0, device=device, dtype=dtype)
+            rows_view = buf[:rows * row_width].view(rows, row_width)
+            out = rows_view[:, :width]
+            with torch.profiler.profile(record_shapes=True) as prof:
+                torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
+            self.assertEqual(out, expected)
+            # The fused kernels write the row padding, so their direct write into this out would change the sentinel.
+            self.assertEqual(rows_view[:, width:], torch.full_like(rows_view[:, width:], 7))
+            self.assertEqual(buf[-8:], torch.full_like(buf[-8:], 7))
+            return [e for e in prof.events() if e.name == "aten::copy_" and e.input_shapes[0] == [rows, width]]
+
+        # A width that needs no padding is written directly by every kernel.
+        self.assertEqual(run(64, 16, 16), [])
+        # With padding, the fallback still writes directly, while the fused kernel needs a temporary.
+        for rows, row_width in ((64, 17), (64, 24), (1, 24)):
+            full_copies = run(rows, 17, row_width)
+            if fused:
+                self.assertNotEqual(full_copies, [])
+            else:
+                self.assertEqual(full_copies, [])
+
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    def test_grouped_mm_out_internal_overlap(self, device):
+        a = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32)
+        b = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32).transpose(-2, -1)
+        offs = torch.tensor([16, 32], device=device, dtype=torch.int32)
+        out = torch.empty(8, 8, device=device).expand(2, 8, 8)
+        with self.assertRaisesRegex(RuntimeError, "more than one element of the written-to tensor"):
+            torch.ops.aten._grouped_mm.out(a, b, offs, out=out)
+
+    @onlyCPU
+    def test_grouped_mm_out_variant_lookup(self, device):
+        check_out_variant(torch.ops.aten._grouped_mm.default, torch.ops.aten._grouped_mm.out)
 
     @onlyOn(["cuda", "mps", "xpu"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
