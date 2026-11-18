@@ -17181,6 +17181,66 @@ fn
 """,
         )
 
+    def test_funcname_cache_single_line(self):
+        from torch._dynamo.funcname_cache import get_funcname
+
+        src = """\
+class E(Exception): pass
+def f():
+    return 1
+def one_line(): pass
+value = 1
+class A:
+    @overload
+    def to(self, x: int): ...
+    @overload
+    def to(self, x: str): ...
+    @staticmethod
+    def bar(
+    ):
+        # Comment before the body.
+
+        return 1
+    def inline(self): pass
+    value = 2
+    async def async_inline(self): pass
+    def last(self):
+        return 2
+value = 3
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "source.py")
+            with open(filename, "w") as f:
+                f.write(src)
+            names = [get_funcname(filename, i + 1) for i in range(src.count("\n"))]
+
+        self.assertExpectedInline(
+            "\n".join(names),
+            """\
+E
+f
+f
+one_line
+
+A
+A
+A.to
+A
+A.to
+A
+A.bar
+A.bar
+A.bar
+A.bar
+A.bar
+A.inline
+A
+A.async_inline
+A.last
+A.last
+""",
+        )
+
     def test_return_dict_with_graph_break_and_update(self):
         def create():
             torch._dynamo.graph_break()
@@ -17558,10 +17618,6 @@ fn
         compile_id = entry.compile_id
         trace_annotation = entry.trace_annotation
         entry_hash = hash(entry)
-        with self.assertRaises(RuntimeError):
-            entry.update_diff_guard_root_manager()
-        with self.assertRaises(RuntimeError):
-            entry.guard_manager.extra_state.invalidate(entry, entry.guard_manager)
 
         torch._dynamo.reset()
         self.assertEqual(_debug_get_cache_entry_list(fn), [])
@@ -17578,8 +17634,13 @@ fn
         self.assertEqual(entry.trace_annotation, trace_annotation)
         self.assertEqual(entry.isolate_recompiles_id, region_id)
         self.assertEqual(hash(entry), entry_hash)
-        self.assertIsNone(entry.guard_manager.cache_entry)
-        self.assertIsNone(entry.guard_manager.extra_state)
+        # The guard manager outlives its entry, and finds nothing to update.
+        eval_frame = torch._C._dynamo.eval_frame
+        eval_frame._update_diff_guard_root_manager(entry.guard_manager)
+        deleted = torch._dynamo.guards.DeletedGuardManagerWrapper("test")
+        self.assertFalse(
+            eval_frame._invalidate_cache_entry(entry.guard_manager, deleted)
+        )
 
     def test_inspect_signature_bind(self):
         import inspect
@@ -21445,11 +21506,15 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
     def test_interpolate_propagate_real_tensors(self, device):
         real_tensor_refs = []
-        from_tensor = torch._subclasses.FakeTensorMode.from_tensor
-        from torch._subclasses.fake_tensor import maybe_get_real_tensor
+        from torch._subclasses.fake_tensor import (
+            FakeTensorConverter,
+            maybe_get_real_tensor,
+        )
 
-        def record_real_tensor(mode, tensor, **kwargs):
-            fake = from_tensor(mode, tensor, **kwargs)
+        from_real_tensor = FakeTensorConverter.from_real_tensor
+
+        def record_real_tensor(converter, mode, tensor, *args, **kwargs):
+            fake = from_real_tensor(converter, mode, tensor, *args, **kwargs)
             real_tensor = maybe_get_real_tensor(fake)
             if mode.propagate_real_tensors and real_tensor is not None:
                 real_tensor_refs.append(weakref.ref(real_tensor))
@@ -21465,7 +21530,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             )
 
         with mock.patch.object(
-            torch._subclasses.FakeTensorMode, "from_tensor", record_real_tensor
+            FakeTensorConverter, "from_real_tensor", record_real_tensor
         ):
             f(
                 torch.tensor([30, 30], device=device),
