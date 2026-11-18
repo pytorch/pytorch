@@ -27,6 +27,7 @@ from torch._higher_order_ops.utils import (
     register_fake,
     save_values_for_backward,
     saved_values,
+    validate_subgraph_args_types,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
@@ -68,6 +69,10 @@ _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
         # is first autotuned, runtime/benchmarking.py reads the global value to
         # choose CUDA-graph timing (only with autotune_cudagraph_benchmarking).
         "max_autotune",
+        # Read only during lowering, post-grad passes and scheduling for GEMM
+        # autotuning choices; never baked into inductor_meta or read at runtime.
+        # Unlike max_autotune, it does not affect pointwise/reduction tuning.
+        "max_autotune_gemm",
         # Baked into the region's kernels' inductor_meta at codegen. The runtime
         # heuristics read max_autotune or this key to widen the configs tried
         # for pointwise, reduction, persistent and split reduction, and
@@ -376,27 +381,12 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
-        # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
-        # cached GraphModule is unpickled (_deserialize_graph_module).
-        if not all(
-            isinstance(
-                o,
-                (
-                    torch.Tensor,
-                    int,
-                    torch.SymInt,
-                    torch.Generator,
-                    FakeScriptObject,
-                    torch.fx.Proxy,
-                ),
-            )
-            or is_custom_class(type(o))
-            for o in operands
-            if o is not None
-        ):
-            raise AssertionError(
-                f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator, got {operands}"
-            )
+        validate_subgraph_args_types(
+            operands,
+            extra_allowed_types=(torch.Generator, FakeScriptObject, type(None)),
+            is_allowed=lambda o: is_custom_class(type(o)),
+            hop_name="invoke_subgraph",
+        )
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
@@ -1014,13 +1004,11 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         # different invoke_subgraphs, the backward graph can be different
         # because the tangent strides can be different. So, here we cache on
         # tangent_metadata in addition to identifier
-        from torch._guards import detect_fake_mode, require_python_fake_mode
+        from torch._guards import detect_fake_mode
         from torch._subclasses._fake_tensor_utils import _CacheKeyState
         from torch._subclasses.fake_tensor import extract_tensor_metadata
 
-        fake_mode = require_python_fake_mode(
-            detect_fake_mode(primals + filtered_grad_outs)
-        )
+        fake_mode = detect_fake_mode(primals + filtered_grad_outs)
         if fake_mode is None:
             raise AssertionError("fake_mode should be enabled for HOPs")
         state = _CacheKeyState(fake_mode.shape_env)
