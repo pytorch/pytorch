@@ -1836,13 +1836,6 @@ class GuardContextVariable(ContextWrappingVariable):
             return variables.ConstantVariable.create(self.target_values[0])
         return super().tp_getattro_impl(tx, name)
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self.source is not None:
-            codegen(self.source)
-        else:
-            super().reconstruct(codegen)
-
-
 class ErrorOnGraphBreakVariable(ContextWrappingVariable):
     """represents torch._dynamo.error_on_graph_break"""
 
