@@ -6607,6 +6607,7 @@ class Model(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(8, 8)
+        self.register_buffer("calls", torch.zeros(8))
 
     def forward(self, x):
         return torch.relu(self.lin(x))
@@ -6643,6 +6644,21 @@ def overrides_the_forward(model, x):
 def turns_cudagraphs_on(model, x):
     with torch._dynamo.override_cudagraphs(fwd=True):
         return step(model, x)
+
+
+def bumps_a_buffer(model, x):
+    model.calls.add_(1)
+    return model(x).sin()
+
+
+def kernelless_backward(model, x):
+    return x.sin().sum() + model.lin.weight.sum()
+
+
+def breaks_inline(model, x):
+    y = model(x).sin()
+    torch._dynamo.graph_break()
+    return y.cos()
 
 
 class WrapsNoGraph(CUDAGraphPolicy):
@@ -6682,12 +6698,15 @@ def cudagraph_config():
 torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 if saved["policy"]:
     torch._inductor.config.cudagraph_policy = getattr(mod, saved["policy"])()
+for key, value in saved["config"].items():
+    setattr(torch._inductor.config, key, value)
 ambient = cudagraph_config()
 allow = saved["serve_time"]
 f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 # load() patches the artifact's config around the post-compile, and sets nothing.
 assert cudagraph_config() == ambient
 training = saved["expected_grad"] is not None
+calls = model.calls.clone()
 with contextlib.nullcontext() if training else torch.no_grad():
     for i in range(3):
         if saved["mark_step"]:
@@ -6710,6 +6729,7 @@ served = {
     "trees": manager is not None,
     "skips": counters["inductor"]["cudagraph_skips"],
     "compiles": counters["frames"]["ok"],
+    "bumps": int((model.calls - calls).max()),
 }
 print(json.dumps(served))
 """
@@ -6766,6 +6786,7 @@ class TestPrecompileCudagraphs(TestCase):
         args=None,
         policy=None,
         serve_time=False,
+        config=None,
     ):
         # Calls the loaded artifact three times, on the model and args (self.x
         # by default; a list gives each call its own args and expected), in a
@@ -6775,9 +6796,11 @@ class TestPrecompileCudagraphs(TestCase):
         #   captured: every CUDA graph captured, a tree manager's pool graph too
         #   trees: whether it made a CUDA graph tree manager
         #   skips: its cudagraph skips
+        #   bumps: how much the calls raised model.calls
         # With expected_grad, each call also runs the backward.
         # policy names the module's CUDAGraphPolicy the process sets before load().
         # serve_time loads with allow_serve_time_compiles.
+        # config is the Inductor config the process sets before load().
         state = os.path.join(self.dir, "state.pt")
         calls = [((self.x,) if args is None else args, expected)]
         if isinstance(args, list):
@@ -6788,6 +6811,7 @@ class TestPrecompileCudagraphs(TestCase):
             "mark_step": mark_step,
             "policy": policy,
             "serve_time": serve_time,
+            "config": config or {},
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6959,6 +6983,62 @@ class TestPrecompileCudagraphs(TestCase):
             expected, env, args=(miss,), serve_time=True
         )
         self.assertEqual(served["captured"] > 0, cudagraphs)
+        self.assertEqual(served["skips"], 0)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_training_artifact_serves_its_graphs_as_cudagraphs(self):
+        from torch._inductor import cudagraph_trees
+
+        fn = self.mod.calls_breaking_helper
+        y, meta = self._capture_step(fn, grad=True, mode="reduce-overhead")
+        self.assertEqual(meta["SERVING_MODE"], "installed")
+        grad = self._eager_grad(fn)
+        served = self._serve_in_fresh_process(y, mark_step=True, expected_grad=grad)
+        self.assertEqual(served["skips"], 0)
+        # As many as torch.compile(mode="reduce-overhead") records for the step.
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, mode="reduce-overhead")
+        for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            self.model.zero_grad(set_to_none=True)
+            compiled(self.model, self.x).sum().backward()
+        manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
+        todo, baseline = [n for ns in manager.roots.values() for n in ns], 0
+        while todo:
+            baseline += 1
+            todo.extend(c for cs in todo.pop().children.values() for c in cs)
+        self.assertGreater(baseline, 0)
+        self.assertEqual(served["recorded"], baseline)
+
+    def test_a_standalone_artifact_with_a_continuation_records_its_cudagraphs(self):
+        # The entry's graph and its continuation's run in the generation the
+        # entry's call started, so both record.
+        fn = self.mod.breaks_inline
+        y, meta = self._capture_step(fn, mode="reduce-overhead")
+        self.assertEqual(meta["SERVING_MODE"], "standalone")
+        served = self._serve_in_fresh_process(y)
+        self.assertEqual(served["recorded"], 2)
+        self.assertEqual(served["skips"], 0)
+
+    def test_a_training_artifact_whose_backward_runs_without_a_cudagraph_serves(self):
+        # The weight's backward is an expand with no kernel, so it runs without a
+        # CUDA graph, and it is lowered before the forward's first call creates the
+        # CUDA graph tree manager.
+        fn = self.mod.kernelless_backward
+        y, _ = self._capture_step(fn, grad=True, mode="reduce-overhead")
+        served = self._serve_in_fresh_process(y, expected_grad=self._eager_grad(fn))
+        self.assertEqual(served["recorded"], 1)
+
+    def test_a_tree_artifact_mutating_a_buffer_serves_cudagraphs_without_trees(self):
+        # A buffer is a static input, whose mutation CUDA graph trees allow; the
+        # tree manager the artifact is served by must not re-read cudagraph_trees.
+        fn = self.mod.bumps_a_buffer
+        y, _ = self._capture_step(fn, mode="reduce-overhead")
+        no_trees = {"triton.cudagraph_trees": False}
+        served = self._serve_in_fresh_process(y, config=no_trees)
+        self.assertEqual(served["bumps"], 3)
+        self.assertTrue(served["trees"])
+        self.assertEqual(served["recorded"], 1)
         self.assertEqual(served["skips"], 0)
 
 
