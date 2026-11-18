@@ -1,0 +1,198 @@
+//  Copyright © 2022 Apple Inc.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ceil_div.h>
+#include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/SoftMax.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/safe_conv.h>
+#include <bit>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_softmax_backward_data_native.h>
+#include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/empty.h>
+#endif
+
+namespace at::native {
+
+using namespace mps;
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/SoftMax_metallib.h>
+#endif
+
+static SoftmaxParams<uint32_t> narrow_params(const SoftmaxParams<uint64_t>& params) {
+  SoftmaxParams<uint32_t> result{.dim_size = c10::safe_conv<uint32_t>(params.dim_size, "softmax dimension size"),
+                                 .num_rows = c10::safe_conv<uint32_t>(params.num_rows, "number of softmax rows"),
+                                 .inner_size = c10::safe_conv<uint32_t>(params.inner_size, "softmax inner size"),
+                                 .chunk_size = c10::safe_conv<uint32_t>(params.chunk_size, "softmax chunk size"),
+                                 .n_chunks = c10::safe_conv<uint32_t>(params.n_chunks, "number of softmax chunks"),
+                                 .ndim = params.ndim,
+                                 .dim = params.dim};
+  for (const auto d : c10::irange(params.ndim)) {
+    result.sizes[d] = c10::safe_conv<uint32_t>(params.sizes[d], "softmax source size");
+    result.strides[d] = c10::safe_conv<uint32_t>(params.strides[d], "softmax source stride");
+  }
+  return result;
+}
+
+template <typename... Tensors>
+static void run_softmax(MPSStream* stream,
+                        const std::string& kernel,
+                        bool use_u32,
+                        MTLSize grid,
+                        MTLSize group,
+                        const SoftmaxParams<uint64_t>& params,
+                        const Tensor& self,
+                        const Tensors&... tensors) {
+  auto encoder = stream->commandEncoder();
+  auto pso =
+      lib.getPipelineStateForFunc(fmt::format("{}_{}{}", kernel, scalarToMetalTypeString(self), mtlIdxSuffix(use_u32)));
+  getMPSProfiler().beginProfileKernel(pso, kernel, {self}, stream);
+  [encoder setComputePipelineState:pso];
+  if (use_u32) {
+    mtl_setArgs(encoder, self, tensors..., narrow_params(params));
+  } else {
+    mtl_setArgs(encoder, self, tensors..., params);
+  }
+  [encoder dispatchThreadgroups:grid threadsPerThreadgroup:group];
+  getMPSProfiler().endProfileKernel(pso, stream);
+}
+
+static void softmax_mps_impl(const std::string& kernel,
+                             const Tensor& self,
+                             int64_t dim,
+                             const Tensor& out,
+                             const std::optional<Tensor>& aux = std::nullopt) {
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self), kernel, " not implemented on MPS for ", self.scalar_type());
+  if (self.numel() == 0) {
+    return;
+  }
+
+  const auto self_ = self.dim() == 0 ? self.view(1) : self;
+  const auto wrapped_dim = maybe_wrap_dim(dim, self_.dim());
+  const auto dim_size = static_cast<uint64_t>(self_.size(wrapped_dim));
+  const auto inner_size = static_cast<uint64_t>(c10::multiply_integers(self_.sizes().slice(wrapped_dim + 1)));
+  const auto num_rows = static_cast<uint64_t>(self_.numel()) / dim_size;
+  const auto output = out.is_contiguous() ? out : at::empty(out.sizes(), out.options());
+  const bool use_u32 = offsetsFitIn<int32_t>(self_, output);
+  const bool contiguous_rows = self_.is_contiguous() && wrapped_dim == self_.dim() - 1;
+  // one simdgroup per row stops paying off past this width
+  constexpr uint64_t row_kernel_max_dim = 2048;
+  // rows wider than this need many rows to fill the GPU
+  constexpr uint64_t row_kernel_solo_dim = 1024;
+  constexpr uint64_t row_kernel_min_rows = 128;
+  const bool row_dim_fits = dim_size <= row_kernel_solo_dim || num_rows >= row_kernel_min_rows;
+  const bool use_row_kernel = contiguous_rows && dim_size <= row_kernel_max_dim && row_dim_fits;
+  // split long rows into enough chunks to occupy the GPU
+  constexpr uint64_t split_target_groups = 512;
+  // below this width a chunk cannot amortize the second pass
+  constexpr uint64_t split_min_chunk = 2048;
+  const auto n_chunks = std::clamp(split_target_groups / num_rows, uint64_t(1), ceil_div(dim_size, split_min_chunk));
+  const auto chunk_size = ceil_div(dim_size, n_chunks);
+  const bool use_split = contiguous_rows && !use_row_kernel && n_chunks > 1;
+  // double the width for 2-byte dtypes so a threadgroup row spans a full 128-byte cache line
+  const auto max_tg_x = uint64_t((self.element_size() == 2 ? 2u : 1u) * c10::metal::simdgroup_size);
+  const auto tg_x = std::min(inner_size, max_tg_x);
+  const auto tg_y =
+      std::min({std::bit_ceil(dim_size), uint64_t(kSoftmaxThreads), std::bit_floor(kSoftmaxMaxThreads / tg_x)});
+  // the strided kernel runs one threadgroup per tg_x columns, which leaves the
+  // GPU idle when there are few columns; split the reduction dim over grid.z
+  const auto col_groups = ceil_div(inner_size, tg_x) * (num_rows / inner_size);
+  constexpr uint64_t strided_target_groups = 256;
+  // below this many elements per thread a chunk cannot amortize the second pass
+  constexpr uint64_t strided_min_elems_per_thread = 16;
+  const auto strided_chunks = std::max(
+      uint64_t(1), std::min(strided_target_groups / col_groups, dim_size / (strided_min_elems_per_thread * tg_y)));
+  const auto strided_chunk_size = ceil_div(dim_size, strided_chunks);
+  const bool use_strided_split = !use_row_kernel && !use_split && strided_chunks > 1;
+  SoftmaxParams<uint64_t> params{.dim_size = dim_size,
+                                 .num_rows = num_rows,
+                                 .inner_size = inner_size,
+                                 .chunk_size = use_strided_split ? strided_chunk_size : chunk_size,
+                                 .n_chunks = use_strided_split ? strided_chunks : n_chunks,
+                                 .ndim = static_cast<uint32_t>(self_.dim()),
+                                 .dim = static_cast<uint32_t>(wrapped_dim)};
+  for (const auto d : c10::irange(self_.dim())) {
+    params.sizes[d] = self_.size(d);
+    params.strides[d] = self_.size(d) == 1 ? 0 : self_.stride(d);
+  }
+  const auto partials = use_split || use_strided_split
+      ? at::empty({static_cast<int64_t>(num_rows), static_cast<int64_t>(params.n_chunks), 2},
+                  self.options().dtype(kFloat))
+      : Tensor();
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      if (use_row_kernel) {
+        constexpr auto rows_per_group = kSoftmaxThreads / c10::metal::simdgroup_size;
+        const auto grid = MTLSizeMake(ceil_div(num_rows, uint64_t(rows_per_group)), 1, 1);
+        const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
+        run_softmax(stream, kernel + "_row", use_u32, grid, group, params, self_, aux, output);
+      } else if (use_split) {
+        const auto grid = MTLSizeMake(n_chunks, num_rows, 1);
+        const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
+        run_softmax(stream, kernel + "_partial", use_u32, grid, group, params, self_, aux, partials);
+        run_softmax(stream, kernel + "_finalize", use_u32, grid, group, params, self_, aux, output, partials);
+      } else if (use_strided_split) {
+        const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, strided_chunks);
+        const auto group = MTLSizeMake(tg_x, tg_y, 1);
+        run_softmax(stream, kernel + "_strided_partial", use_u32, grid, group, params, self_, aux, partials);
+        run_softmax(stream, kernel + "_strided_finalize", use_u32, grid, group, params, self_, aux, output, partials);
+      } else {
+        const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);
+        const auto group = MTLSizeMake(tg_x, tg_y, 1);
+        run_softmax(stream, kernel, use_u32, grid, group, params, self_, aux, output);
+      }
+    }
+  });
+  if (!out.is_contiguous()) {
+    out.copy_(output);
+  }
+}
+
+TORCH_IMPL_FUNC(softmax_mps_out)
+(const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
+  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
+  softmax_mps_impl("softmax", self, dim, out);
+}
+
+TORCH_IMPL_FUNC(log_softmax_mps_out)
+(const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
+  TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on MPS");
+  softmax_mps_impl("log_softmax", self, dim, out);
+}
+
+static void softmax_backward_mps_impl(const std::string& kernel,
+                                      const Tensor& grad,
+                                      const Tensor& output,
+                                      int64_t dim,
+                                      const Tensor& grad_input) {
+  TORCH_CHECK(grad_input.scalar_type() == grad.scalar_type() && output.scalar_type() == grad.scalar_type(),
+              kernel,
+              " with mixed dtypes is not supported on MPS");
+  const bool same_strides = grad.strides() == output.strides();
+  const auto grad_ = same_strides ? grad : grad.contiguous();
+  const auto output_ = same_strides ? output : output.contiguous();
+  softmax_mps_impl(kernel, grad_, dim, grad_input, output_);
+}
+
+TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
+(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  softmax_backward_mps_impl("log_softmax_backward", grad, output, dim, grad_input);
+}
+
+TORCH_IMPL_FUNC(softmax_backward_mps_out)
+(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  softmax_backward_mps_impl("softmax_backward", grad, output, dim, grad_input);
+}
+
+} // namespace at::native

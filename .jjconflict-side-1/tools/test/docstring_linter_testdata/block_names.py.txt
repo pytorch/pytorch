@@ -1,0 +1,44 @@
+def top(number):
+    if number == 0:
+
+        def fun():
+            if number == 10:
+                def sab():
+                    return 1
+            else:
+                def sub():
+                    return 2
+            return sub
+
+    elif number == 1:
+
+        def fun():
+            if number == 11:
+                def sub():
+                    return 3
+            else:
+                def sub():
+                    return 4
+            return sub
+
+    elif number == 2:
+
+        def fun():
+            if number == 12:
+                def sub():
+                    return 5
+            else:
+                def sab():
+                    return 6
+            return sub
+
+    elif number == 3:
+
+        def run():
+            if number == 12:
+                def sub():
+                    return 5
+            else:
+                def sub():
+                    return 6
+            return sub
