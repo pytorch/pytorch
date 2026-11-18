@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfMPS,
     dtypesIfXPU,
+    expectedFailureHPU,
     expectedFailureMeta,
     expectedFailureMPS,
     expectedFailureXPU,
@@ -1577,7 +1578,7 @@ class TestConvolutionNNDevice(NNTestCase):
             output2.backward(grad_output[:, offset:].contiguous())
             is_cuda_sm86 = device.startswith(
                 "cuda"
-            ) and torch.cuda.get_device_capability(0) == (8, 6)
+            ) and torch.cuda.get_device_capability(device) == (8, 6)
             atol, rtol = (
                 (3e-4, 3e-2)
                 if dtype == torch.float32 and is_cuda_sm86
@@ -1736,7 +1737,11 @@ class TestConvolutionNNDevice(NNTestCase):
         # ConvB propagation shouldn't return any of gradient
         test_conv_backward_output_mask([False, False, False])
 
-    def test_conv_double_backward_no_bias(self):
+    @skipMPS
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.mkldnn.flags(enabled=True, deterministic=True)
+    @torch.backends.miopen.flags(immediate=True)
+    def test_conv_double_backward_no_bias(self, device):
         kern = 3
         stride = 2
         chan_in, chan_out = 2, 4
@@ -1745,7 +1750,7 @@ class TestConvolutionNNDevice(NNTestCase):
         padding = 1
         dilation = 1
         no_weight = False
-        use_bias = True
+        use_bias = False
         result = self.run_conv_double_back_test(
             kern,
             stride,
@@ -1756,6 +1761,7 @@ class TestConvolutionNNDevice(NNTestCase):
             inp_size,
             dilation,
             no_weight,
+            device=device,
             use_bias=use_bias,
         )
         self.assertTrue(
@@ -1779,7 +1785,11 @@ class TestConvolutionNNDevice(NNTestCase):
             + str(dilation),
         )
 
-    def test_conv_double_backward_groups(self):
+    @skipMPS
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.mkldnn.flags(enabled=True, deterministic=True)
+    @torch.backends.miopen.flags(immediate=True)
+    def test_conv_double_backward_groups(self, device):
         kern = 3
         stride = 1
         padding = 2
@@ -1800,6 +1810,7 @@ class TestConvolutionNNDevice(NNTestCase):
             dilation,
             no_weight,
             groups=groups,
+            device=device,
         )
         self.assertTrue(
             result,
@@ -1824,7 +1835,11 @@ class TestConvolutionNNDevice(NNTestCase):
             + str(groups),
         )
 
-    def test_conv_double_backward_stride(self):
+    @skipMPS
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.mkldnn.flags(enabled=True, deterministic=True)
+    @torch.backends.miopen.flags(immediate=True)
+    def test_conv_double_backward_stride(self, device):
         batch_size = 2
 
         # Cannot provide ggW when stride is > 1
@@ -1843,6 +1858,7 @@ class TestConvolutionNNDevice(NNTestCase):
                     inp_size,
                     dilation,
                     no_weight,
+                    device=device,
                 )
 
     @dtypes(torch.float, torch.cfloat)
@@ -2232,9 +2248,10 @@ class TestConvolutionNNDevice(NNTestCase):
             if mode == "same":
                 actual = actual[:5, :5, :10]
 
-            if torch.cuda.is_tf32_supported() and (
-                dtype == torch.float or dtype == torch.complex64
-            ):
+            is_tf32_supported = (
+                torch.device(device).type == "cuda" and torch.cuda.is_tf32_supported()
+            )
+            if is_tf32_supported and (dtype == torch.float or dtype == torch.complex64):
                 self.assertEqual(actual, expected, atol=0.05, rtol=0.05)
             else:
                 self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
@@ -3786,10 +3803,10 @@ class TestConvolutionNNDevice(NNTestCase):
                 )
 
     # Only CPU and CUDA dispatch; xfail others so new backends XPASS and enable.
+    @expectedFailureHPU
     @expectedFailureMeta
     @expectedFailureXPU
     @expectedFailureMPS
-    @onlyNativeDeviceTypes
     def test_slow_conv_dilated2d_unbatched(self, device):
         # Direct op call to guarantee the slow path.
         input = torch.randn(2, 5, 5, dtype=torch.double, device=device)
@@ -3806,10 +3823,10 @@ class TestConvolutionNNDevice(NNTestCase):
         )
 
     # Only CPU and CUDA dispatch; xfail others so new backends XPASS and enable.
+    @expectedFailureHPU
     @expectedFailureMeta
     @expectedFailureXPU
     @expectedFailureMPS
-    @onlyNativeDeviceTypes
     def test_slow_conv_dilated3d_unbatched(self, device):
         # Direct op call to guarantee the slow path.
         input = torch.randn(2, 5, 5, 5, dtype=torch.double, device=device)
