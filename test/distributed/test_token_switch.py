@@ -72,7 +72,7 @@ def _mori_available() -> bool:
         return False
     try:
         _import_mori()
-    except ImportError:
+    except Exception:
         log.debug("MoRI unavailable; skipping MoRI tests", exc_info=True)
         return False
     return True
@@ -1115,79 +1115,6 @@ class _TokenSwitchExpertMajorTests:
         expected = torch.full((NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16)
         self.assertEqual(combined.cpu(), expected)
 
-    def test_expert_major_slots_and_combine(self):
-        # One slot per (token, local expert), grouped by local expert; a second
-        # dispatch on the Routing keeps the slots; unweighted combine of an identity
-        # expert returns K * x (one row per (token, expert) pair).
-        self._init()
-        ts = self.get_contract_token_switch()
-        epr = CONTRACT_EXPERTS_PER_RANK
-        topk_idx, w, x, _nd, _exp, all_idx = self._contract_inputs(seed=21)
-        counts = torch.zeros(epr, dtype=torch.int32, device=self.device)
-        routing = ts.create_routing(topk_idx, counts, layout="expert_major")
-        out_tokens, out_w, out_idx = ts._alloc_dispatch_outputs(
-            routing, x, w, ts.max_recv_tokens_per_rank, HIDDEN, CONTRACT_TOP_K
-        )
-        self.assertIsNone(out_idx)
-        ts.dispatch(routing, x, w, out=(out_tokens, out_w, None))
-        lo = self.rank * epr
-        zones = [
-            sorted(
-                (r, t, round(0.1 * (k + 1), 4))
-                for r in range(self.world_size)
-                for t in range(NUM_TOKENS)
-                for k, e in enumerate(all_idx[r][t].tolist())
-                if e == lo + j
-            )
-            for j in range(epr)
-        ]
-        self.assertEqual(counts.cpu().tolist(), [len(z) for z in zones])
-        n = sum(len(z) for z in zones)
-        rows = out_tokens[:n].float().cpu()
-        wts = out_w[:n].cpu().tolist()
-        start = 0
-        for zone in zones:
-            got = [
-                (int(rows[i, 0]), int(rows[i, 1]), round(wts[i], 4))
-                for i in range(start, start + len(zone))
-            ]
-            self.assertEqual(sorted(got), zone)
-            start += len(zone)
-        first = out_tokens[:n].clone()
-        x2 = x.clone()
-        x2[:, 2:] = -x2[:, 2:]
-        ts.dispatch(routing, x2, w, out=(out_tokens, out_w, None))
-        self.assertEqual(out_tokens[:n, :2], first[:, :2])
-        self.assertEqual(out_tokens[:n, 2:], -first[:, 2:])
-        combined = torch.zeros_like(x)
-        ts.combine(routing, first, out=combined)
-        self.assertEqual(combined.float(), CONTRACT_TOP_K * x.float())
-
-    def test_expert_major_interleaved_autograd(self):
-        # Two expert_major Routings, two dispatches before either combine; each
-        # token's gradient is its number of (token, expert) pairs, K.
-        self._init()
-        ts = self.get_contract_token_switch()
-        max_recv = ts.max_recv_tokens_per_rank
-        idx1, w1, x1, _nd1, _e1, _ = self._contract_inputs(seed=23)
-        idx2, w2, x2, _nd2, _e2, _ = self._contract_inputs(seed=24)
-        r1 = ts.create_routing(idx1, layout="expert_major")
-        r2 = ts.create_routing(idx2, layout="expert_major")
-        t1 = x1.clone().requires_grad_(True)
-        t2 = x2.clone().requires_grad_(True)
-        d1, _, _ = ts.dispatch(r1, t1, w1, max_recv)
-        d2, _, _ = ts.dispatch(r2, t2, w2, max_recv)
-        y1 = ts.combine(r1, d1)
-        y2 = ts.combine(r2, d2)
-        (y1.sum() + 2 * y2.sum()).backward()
-        k = CONTRACT_TOP_K
-        self.assertEqual(y1.float(), k * x1.float())
-        self.assertEqual(y2.float(), k * x2.float())
-        self.assertEqual(t1.grad.float(), torch.full_like(x1, k, dtype=torch.float32))
-        self.assertEqual(
-            t2.grad.float(), torch.full_like(x2, 2 * k, dtype=torch.float32)
-        )
-
 
 @instantiate_parametrized_tests
 class _TokenSwitchNCCLSymmMemTests:
@@ -1602,6 +1529,7 @@ instantiate_device_type_tests(TokenSwitchRoutingDtypeTest, globals(), only_for="
 
 
 @requires_mori()
+@instantiate_parametrized_tests
 class TokenSwitchMoRITest(
     _TokenSwitchFlatTests,
     _TokenSwitchExpertMajorTests,
@@ -1658,6 +1586,109 @@ class TokenSwitchMoRITest(
     def _init(self):
         torch.cuda.set_device(self.device)
         dist.barrier()
+
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_dispatch_short_out_raises(self, layout):
+        self._init()
+        ts = self.get_contract_token_switch()
+        topk_idx, w, x, _nd, _exp, _ = self._contract_inputs(seed=31)
+        routing = ts.create_routing(topk_idx, layout=layout)
+        need = ts.max_expert_major_slots_per_rank
+        if layout == "flat":
+            need = ts.max_recv_tokens_per_rank
+        out = ts._alloc_dispatch_outputs(routing, x, w, need, HIDDEN, CONTRACT_TOP_K)
+        with self.assertRaisesRegex(ValueError, f"require at least {need} rows"):
+            ts.dispatch(routing, x, w, out=(out[0][: need - 1], out[1], out[2]))
+
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_combine_backward_zeroes_unused_rows(self, layout):
+        # combine ignores rows past the received slots, so their gradient is zero.
+        self._init()
+        ts = self.get_contract_token_switch()
+        topk_idx, w, x, _nd, expected, _ = self._contract_inputs(seed=32)
+        epr = CONTRACT_EXPERTS_PER_RANK
+        counts = torch.zeros(epr, dtype=torch.int32, device=self.device)
+        routing = ts.create_routing(topk_idx, counts, layout=layout)
+        d, _, _ = ts.dispatch(routing, x, w, ts.max_recv_tokens_per_rank)
+        n = len(expected) if layout == "flat" else int(counts.sum())
+        d = d.detach().requires_grad_(True)
+        ts.combine(routing, d).float().sum().backward()
+        grad = d.grad.float()
+        self.assertEqual(grad[:n], torch.ones_like(grad[:n]))
+        self.assertEqual(grad[n:], torch.zeros_like(grad[n:]))
+
+    def test_expert_major_slots_and_combine(self):
+        # One slot per (token, local expert), grouped by local expert; a second
+        # dispatch on the Routing keeps the slots; unweighted combine of an identity
+        # expert returns K * x (one row per (token, expert) pair).
+        self._init()
+        ts = self.get_contract_token_switch()
+        epr = CONTRACT_EXPERTS_PER_RANK
+        topk_idx, w, x, _nd, _exp, all_idx = self._contract_inputs(seed=21)
+        counts = torch.zeros(epr, dtype=torch.int32, device=self.device)
+        routing = ts.create_routing(topk_idx, counts, layout="expert_major")
+        out_tokens, out_w, out_idx = ts._alloc_dispatch_outputs(
+            routing, x, w, ts.max_recv_tokens_per_rank, HIDDEN, CONTRACT_TOP_K
+        )
+        self.assertIsNone(out_idx)
+        ts.dispatch(routing, x, w, out=(out_tokens, out_w, None))
+        lo = self.rank * epr
+        zones = [
+            sorted(
+                (r, t, round(0.1 * (k + 1), 4))
+                for r in range(self.world_size)
+                for t in range(NUM_TOKENS)
+                for k, e in enumerate(all_idx[r][t].tolist())
+                if e == lo + j
+            )
+            for j in range(epr)
+        ]
+        self.assertEqual(counts.cpu().tolist(), [len(z) for z in zones])
+        n = sum(len(z) for z in zones)
+        rows = out_tokens[:n].float().cpu()
+        wts = out_w[:n].cpu().tolist()
+        start = 0
+        for zone in zones:
+            got = [
+                (int(rows[i, 0]), int(rows[i, 1]), round(wts[i], 4))
+                for i in range(start, start + len(zone))
+            ]
+            self.assertEqual(sorted(got), zone)
+            start += len(zone)
+        first = out_tokens[:n].clone()
+        x2 = x.clone()
+        x2[:, 2:] = -x2[:, 2:]
+        ts.dispatch(routing, x2, w, out=(out_tokens, out_w, None))
+        self.assertEqual(out_tokens[:n, :2], first[:, :2])
+        self.assertEqual(out_tokens[:n, 2:], -first[:, 2:])
+        combined = torch.zeros_like(x)
+        ts.combine(routing, first, out=combined)
+        self.assertEqual(combined.float(), CONTRACT_TOP_K * x.float())
+
+    def test_expert_major_interleaved_autograd(self):
+        # Two expert_major Routings, two dispatches before either combine; each
+        # token's gradient is its number of (token, expert) pairs, K.
+        self._init()
+        ts = self.get_contract_token_switch()
+        max_recv = ts.max_recv_tokens_per_rank
+        idx1, w1, x1, _nd1, _e1, _ = self._contract_inputs(seed=23)
+        idx2, w2, x2, _nd2, _e2, _ = self._contract_inputs(seed=24)
+        r1 = ts.create_routing(idx1, layout="expert_major")
+        r2 = ts.create_routing(idx2, layout="expert_major")
+        t1 = x1.clone().requires_grad_(True)
+        t2 = x2.clone().requires_grad_(True)
+        d1, _, _ = ts.dispatch(r1, t1, w1, max_recv)
+        d2, _, _ = ts.dispatch(r2, t2, w2, max_recv)
+        y1 = ts.combine(r1, d1)
+        y2 = ts.combine(r2, d2)
+        (y1.sum() + 2 * y2.sum()).backward()
+        k = CONTRACT_TOP_K
+        self.assertEqual(y1.float(), k * x1.float())
+        self.assertEqual(y2.float(), k * x2.float())
+        self.assertEqual(t1.grad.float(), torch.full_like(x1, k, dtype=torch.float32))
+        self.assertEqual(
+            t2.grad.float(), torch.full_like(x2, 2 * k, dtype=torch.float32)
+        )
 
 
 if __name__ == "__main__":
