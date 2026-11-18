@@ -1,16 +1,16 @@
-"""Benchmarks for torch.cfg_compile.
+"""Benchmarks for torch.vm.
 
 Compares eager execution with the tiers of the cfg VM on small workloads where
 per-operation overhead matters, and prints the results as Markdown tables
 (with Mermaid charts when --charts is given).
 
-    python benchmarks/cfg_compile/bench.py
-    python benchmarks/cfg_compile/bench.py --charts --json results.json > report.md
+    python benchmarks/vm/bench.py
+    python benchmarks/vm/bench.py --charts --json results.json > report.md
 
 The modes are cumulative, each adding one mechanism to the previous one:
 
     eager          plain Python and the regular bindings
-    generic        the VM running bytecode semantics (specialize=False)
+    generic        the VM running bytecode semantics (no passes over a block)
     sites          + operations call the kernel the dispatcher resolved them to,
                    entering at the top of the chain (skip_autograd=False)
     skip_autograd  + enter below the Autograd kernel when no gradient is tracked
@@ -28,7 +28,7 @@ import torch
 
 MODES = ["eager", "generic", "sites", "skip_autograd", "unboxed"]
 MODE_OPTIONS = {
-    "generic": {"specialize": False},
+    "generic": {"passes": [p for p in torch.vm.DEFAULT_PASSES if p.kind == "cfg"]},
     "sites": {"skip_autograd": False, "unboxed": False},
     "skip_autograd": {"unboxed": False},
     "unboxed": {},
@@ -169,7 +169,7 @@ def compiled_modes(fn, modes=MODES):
     return {
         mode: fn
         if mode == "eager"
-        else torch.cfg_compile(fn, fallback=False, **MODE_OPTIONS[mode])
+        else torch.vm(fn, fallback=False, **MODE_OPTIONS[mode])
         for mode in modes
     }
 
@@ -208,7 +208,7 @@ def bench_warmup(device):
     build, calls = [], []
     for _ in range(20):
         start = time.perf_counter_ns()
-        compiled = torch.cfg_compile(for_loop, fallback=False)
+        compiled = torch.vm(for_loop, fallback=False)
         build.append(time.perf_counter_ns() - start)
         times = []
         for _ in range(6):
@@ -252,14 +252,13 @@ def bench_autograd(device):
 def bench_narrowing(device):
     """Shape-dependent control flow: everything dynamic versus a range guard
     on the dimension the branch looks at."""
-    pipeline = torch.cfg_compile.Pipeline
+    default = torch.vm.DEFAULT_PASSES
+    at = default.index(torch.vm.passes.Fold())
+    narrowing = (*default[:at], torch.vm.passes.NarrowDims(), *default[at:])
     y = torch.randn(1, 16, device=device)
     out = {}
-    for label, pipe in (
-        ("default", pipeline.default()),
-        ("narrowing", pipeline.narrowing()),
-    ):
-        compiled = torch.cfg_compile(shape_branch, pipeline=pipe, fallback=False)
+    for label, pipe in (("default", default), ("narrowing", narrowing)):
+        compiled = torch.vm(shape_branch, passes=pipe, fallback=False)
         timings = {}
         for batch in (1, 8):
             x = torch.randn(batch, 16, device=device)
@@ -284,7 +283,7 @@ def bench_unboxing(device):
         ("chain of 9 ops", chain, args[:2]),
         ("for loop, 10 x (3 ops + branch)", for_loop, args),
     ):
-        compiled = torch.cfg_compile(fn, fallback=False)
+        compiled = torch.vm(fn, fallback=False)
         for _ in range(3):
             compiled(*a)
         before = compiled.stats()
@@ -394,9 +393,7 @@ def report(results, charts):
     out.append("### Warm-up (for loop, 64 elements)\n")
     out.append("| step | time (us) |")
     out.append("|---|---:|")
-    out.append(
-        f"| `torch.cfg_compile(fn)`: bytecode to SSA | {warm['build'] / 1e3:,.1f} |"
-    )
+    out.append(f"| `torch.vm(fn)`: bytecode to SSA | {warm['build'] / 1e3:,.1f} |")
     for i, t in enumerate(warm["calls"]):
         out.append(f"| call {i + 1} | {t / 1e3:,.1f} |")
     out.append(f"| steady state | {warm['steady'] / 1e3:,.1f} |")
@@ -472,9 +469,9 @@ def main():
     )
     args = parser.parse_args()
 
-    if not torch.cfg_compile.is_available():
+    if not torch.vm.is_available():
         raise SystemExit(
-            "this build has no cfg_compile runtime; build with USE_CFG_COMPILE=1"
+            "this build has no torch.vm runtime; build with USE_TORCH_VM=1"
         )
     torch.set_num_threads(args.threads)
     with torch.no_grad():
