@@ -30,9 +30,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    MI300_ARCH,
     run_tests,
-    skipIfRocmArch,
     skipIfRocmVersionLessThan,
     TEST_HPU,
 )
@@ -93,16 +91,19 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             device=device,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
+        orig_dtype = next(ref_model.parameters()).dtype
+        for param in ref_model_bf16.parameters():
+            param.grad_dtype = orig_dtype
         orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
-            self.assertEqual(output.dtype, param_dtype)
+            self.assertEqual(output.dtype, orig_dtype)
 
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
+            self.process_group, all_reduce_group=None, reduce_dtype=orig_dtype
         )
 
         torch.manual_seed(42 + self.rank + 1)
@@ -623,7 +624,6 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         self._test_norm_modules(mp_policy, device=device)
 
     @skip_if_lt_x_gpu(1)
-    @skipIfRocmArch(MI300_ARCH)  # https://github.com/pytorch/pytorch/issues/182988
     def test_norm_modules_fp16(self, device):
         device = torch.device(device).type
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
