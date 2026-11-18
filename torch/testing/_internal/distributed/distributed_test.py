@@ -6944,9 +6944,14 @@ class DistributedTest:
 
             backend = os.environ["BACKEND"]
             if backend in ("nccl", "xccl"):
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
-                torch.accelerator.set_device_index(next_rank)
+                # A group bound to a device at init can only run on that device;
+                # otherwise test the case where rank != GPU device.
+                bound_device = (subgroup or _get_default_group()).bound_device_id
+                if bound_device is not None:
+                    torch.accelerator.set_device_index(bound_device.index)
+                else:
+                    next_rank = (self.rank + 1) % int(self.world_size)
+                    torch.accelerator.set_device_index(next_rank)
 
             # If GPU test, add object with GPU tensor
             if backend in ("nccl", "xccl"):
@@ -6989,9 +6994,14 @@ class DistributedTest:
 
             backend = os.environ["BACKEND"]
             if backend in ("nccl", "xccl"):
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
-                torch.accelerator.set_device_index(next_rank)
+                # A group bound to a device at init can only run on that device;
+                # otherwise test the case where rank != GPU device.
+                bound_device = (pg or _get_default_group()).bound_device_id
+                if bound_device is not None:
+                    torch.accelerator.set_device_index(bound_device.index)
+                else:
+                    next_rank = (self.rank + 1) % int(self.world_size)
+                    torch.accelerator.set_device_index(next_rank)
 
             # If GPU test, add object with GPU tensor
             if backend in ("nccl", "xccl"):
