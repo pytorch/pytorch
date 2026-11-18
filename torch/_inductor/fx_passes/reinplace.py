@@ -253,7 +253,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     Reinplacing view scatter ops can be pessimising as it blocks fusion with the
     input or output tensor computations. However, it is still profitable if the
     input and output would have been realized anyway.
-
+    config.reinplace_whenever_possible overrides profitability, but not safety.
     """
     inp, src, _view_ops = node.args
 
@@ -279,8 +279,8 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     ):
         return True
 
-    # Otherwise, assume fusions will make functional variants profitable
-    return False
+    # Otherwise, prefer functional variants for fusion unless explicitly overridden.
+    return config.reinplace_whenever_possible
 
 
 def should_reinplace_all_reduce(node: torch.fx.Node) -> bool:
@@ -288,6 +288,8 @@ def should_reinplace_all_reduce(node: torch.fx.Node) -> bool:
     The inplace lowering requires contiguous inputs; other layouts produce a copy.
     The symmetric-memory one-shot all-reduce lowering is out-of-place, so
     reinplacing an all_reduce it may pick only adds a copy back into the input.
+    Keep the symmetric-memory gate: the in-place one-shot path marks the reused
+    buffer as skip-wait, which can suppress a later collective's wait.
     """
     args = (
         node.args[2:]
