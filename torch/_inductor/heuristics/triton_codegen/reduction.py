@@ -22,6 +22,7 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_MIX_ORDER_XBLOCK,
 )
 from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
+from torch._inductor.runtime.tiling import get_max_block
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -82,7 +83,7 @@ def _match_target_block_product(
         dim, score = max(relative_scores.items(), key=lambda item: item[1])
 
         if (
-            block_sizes[dim] >= TRITON_MAX_BLOCK[dim.capitalize()]
+            block_sizes[dim] >= get_max_block(dim, TRITON_MAX_BLOCK)
             or block_sizes[dim] >= size_hints[dim]
         ):
             del relative_scores[dim]

@@ -190,7 +190,7 @@ def _sequential_split_and_maybe_inline_subgraphs(
                 raise AssertionError(f"expected call_module op, got {node.op}")
             if not isinstance(node.target, str):
                 raise AssertionError(f"expected str target, got {type(node.target)}")
-            node_inline_(node)
+            node_inline_(node, recompile=False)
 
     return _sequential_split_and_maybe_inline_subgraphs_helper(
         new_gm, graph_signature, _maybe_inline_or_replace_with_hop

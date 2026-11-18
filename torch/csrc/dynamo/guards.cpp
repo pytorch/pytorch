@@ -1799,6 +1799,11 @@ class StorageOverlapChecker {
       : _expected_overlapping(expected_overlapping),
         _expected_non_overlapping(expected_non_overlapping) {}
 
+  std::shared_ptr<StorageOverlapChecker> clone() const {
+    return std::make_shared<StorageOverlapChecker>(
+        _expected_overlapping, _expected_non_overlapping);
+  }
+
   /**
    * Adds a tensor to the corresponding storage, based on whether it should be
    * an `overlapping` tensor or not.
@@ -2007,7 +2012,7 @@ class LeafGuard {
     return GuardDebugInfo(true, 0);
   }
 
-  py::list verbose_code_parts() {
+  py::list verbose_code_parts() const {
     return _verbose_code_parts;
   }
 
@@ -3266,6 +3271,8 @@ class OBJECT_ALIASING : public RelationalGuard {
     _is_first_call = true;
   }
 
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
+
  private:
   bool _is_first_call{true};
   PyObject* _first_tensor{nullptr};
@@ -3313,6 +3320,8 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     _unique_tensors.clear();
   }
 
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
+
  private:
   py::list _tensor_names;
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
@@ -3357,6 +3366,8 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
     return _checker.get();
   }
 
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
+
  private:
   // Flag that indicates which kind of tensor this guard is collecting:
   //   1. Possibly overlapping tensors; or
@@ -3373,6 +3384,11 @@ class StorageOverlapPartitionChecker {
       std::vector<std::vector<int64_t>> expected_partition)
       : _expected_partition(std::move(expected_partition)),
         _inputs(expected_inputs, nullptr) {}
+
+  std::shared_ptr<StorageOverlapPartitionChecker> clone() const {
+    return std::make_shared<StorageOverlapPartitionChecker>(
+        _inputs.size(), _expected_partition);
+  }
 
   void add(PyObject* obj, size_t input_index) {
     TORCH_CHECK(input_index < _inputs.size());
@@ -3452,6 +3468,8 @@ class STORAGE_OVERLAP_PARTITION : public RelationalGuard {
     return _checker.get();
   }
 
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
+
  private:
   size_t _input_index;
   std::shared_ptr<StorageOverlapPartitionChecker> _checker;
@@ -3489,6 +3507,21 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     _args_int = std::vector<int64_t>(_nargs_int);
     _args_float = std::vector<double>(_nargs_float);
   }
+
+  SYMBOLIC_SHAPE_GUARD(
+      RootGuardManager* root,
+      const SYMBOLIC_SHAPE_GUARD& other)
+      : RelationalGuard(
+            root,
+            other.verbose_code_parts(),
+            other.get_user_stack()),
+        _py_addr_keep_alive(other._py_addr_keep_alive),
+        _nargs_float(other._nargs_float),
+        _nargs_int(other._nargs_int),
+        _nargs(other._nargs),
+        _args_int(_nargs_int),
+        _args_float(_nargs_float),
+        _guard_check_fn(other._guard_check_fn) {}
 
   bool check_nopybind(PyObject* value) override {
     // We know that these arguments came from
@@ -3564,6 +3597,8 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
   void reset_state() final {
     _args_seen = 0;
   }
+
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
 
  private:
   py::object _py_addr_keep_alive;
@@ -5106,11 +5141,10 @@ class RootGuardManager : public GuardManager {
     return _no_tensor_aliasing_guard;
   }
 
-  template <typename State, typename Factory>
-  std::shared_ptr<State> clone_relational_state(
-      const std::shared_ptr<State>& state,
-      Factory factory) {
-    auto [it, inserted] = _relational_state_clones.try_emplace(state.get());
+  template <typename Factory>
+  auto clone_relational_state(const void* key, Factory factory) {
+    using State = typename decltype(factory())::element_type;
+    auto [it, inserted] = _relational_state_clones.try_emplace(key);
     if (inserted) {
       it->second = factory();
     }
@@ -5816,7 +5850,7 @@ std::shared_ptr<RelationalGuard> OBJECT_ALIAS_PATTERN::clone(
   return std::make_shared<OBJECT_ALIAS_PATTERN>(
       root,
       root->clone_relational_state(
-          _state,
+          _state.get(),
           [&] {
             return std::make_shared<ObjectAliasPatternState>(
                 _state->representatives.size());
@@ -5826,14 +5860,53 @@ std::shared_ptr<RelationalGuard> OBJECT_ALIAS_PATTERN::clone(
       get_user_stack());
 }
 
+std::shared_ptr<RelationalGuard> OBJECT_ALIASING::clone(
+    RootGuardManager* root) {
+  return root->clone_relational_state(this, [&] {
+    return std::make_shared<OBJECT_ALIASING>(
+        root, verbose_code_parts(), get_user_stack());
+  });
+}
+
+std::shared_ptr<RelationalGuard> NO_TENSOR_ALIASING::clone(
+    RootGuardManager* root) {
+  return root->clone_relational_state(this, [&] {
+    return std::make_shared<NO_TENSOR_ALIASING>(
+        root, _tensor_names, verbose_code_parts(), get_user_stack());
+  });
+}
+
+std::shared_ptr<RelationalGuard> STORAGE_OVERLAPPING::clone(
+    RootGuardManager* root) {
+  auto checker = root->clone_relational_state(
+      _checker.get(), [&] { return _checker->clone(); });
+  return std::make_shared<STORAGE_OVERLAPPING>(
+      root, _overlapping, checker, verbose_code_parts(), get_user_stack());
+}
+
+std::shared_ptr<RelationalGuard> STORAGE_OVERLAP_PARTITION::clone(
+    RootGuardManager* root) {
+  auto checker = root->clone_relational_state(
+      _checker.get(), [&] { return _checker->clone(); });
+  return std::make_shared<STORAGE_OVERLAP_PARTITION>(
+      root, _input_index, checker, verbose_code_parts(), get_user_stack());
+}
+
+std::shared_ptr<RelationalGuard> SYMBOLIC_SHAPE_GUARD::clone(
+    RootGuardManager* root) {
+  return root->clone_relational_state(this, [&] {
+    return std::make_shared<SYMBOLIC_SHAPE_GUARD>(root, *this);
+  });
+}
+
 std::shared_ptr<RelationalGuard> NN_MODULE_HOOK_MEMBERSHIP::clone(
     RootGuardManager* root) {
   // Clone dependencies before the factory: nested insertion can invalidate its
   // iterator.
-  auto validation = root->clone_relational_state(_state->flags_validation, [] {
-    return std::make_shared<NNModuleHookFlagsValidation>();
-  });
-  auto state = root->clone_relational_state(_state, [&] {
+  auto validation = root->clone_relational_state(
+      _state->flags_validation.get(),
+      [] { return std::make_shared<NNModuleHookFlagsValidation>(); });
+  auto state = root->clone_relational_state(_state.get(), [&] {
     auto copy = std::make_shared<NNModuleHookMembership>();
     copy->expected = _state->expected;
     copy->flags_validation = validation;
@@ -7489,6 +7562,9 @@ class TypeDictGuardAccessor : public GuardAccessor {
   // reference, so we must decref after use.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return false;
+    }
 #if PY_VERSION_HEX >= 0x030C0000
     PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
     if (x == nullptr) {
@@ -7508,6 +7584,9 @@ class TypeDictGuardAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return GuardDebugInfo(false, "expected a type on " + repr(), 0);
+    }
 #if PY_VERSION_HEX >= 0x030C0000
     PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
     if (x == nullptr) {
@@ -7569,13 +7648,22 @@ class TypeMROGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return false;
+    }
     PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    return x != nullptr && _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return GuardDebugInfo(false, "expected a type on " + repr(), 0);
+    }
     PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
+    if (x == nullptr) {
+      return GuardDebugInfo(false, "null type MRO on " + repr(), 0);
+    }
     return _guard_manager->check_verbose_nopybind(x);
   }
 
