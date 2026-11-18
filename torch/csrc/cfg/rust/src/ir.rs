@@ -149,6 +149,12 @@ pub enum Op {
     /// Calls a fixed Python object with these values. A pass puts it where
     /// it found something that does the work of a run of instructions.
     CallObject(PyObj, Vec<V>),
+    /// Calls a fixed Python object with these values. It returns None, and
+    /// the instructions go on, or it says where in the function execution
+    /// continues and what the values are there (see `Compiled::leap`): a
+    /// pass puts it in front of instructions that something else can do the
+    /// work of, together with what follows them in other blocks.
+    Leap(PyObj, Vec<V>),
     /// len(v) as an int: what a sequence pattern of `match` compares.
     GetLen(V),
     /// Whether the type of v is a sequence (false) or a mapping (true) for
@@ -358,7 +364,7 @@ impl Op {
                 f(*class);
                 f(*names)
             }
-            Op::CallObject(_, args) => args.iter().for_each(|v| f(*v)),
+            Op::CallObject(_, args) | Op::Leap(_, args) => args.iter().for_each(|v| f(*v)),
             Op::SuperObject { global_super, class, this, .. } => {
                 f(*global_super);
                 f(*class);
@@ -403,6 +409,7 @@ impl Op {
                 | Op::CallMethod { .. }
                 | Op::CallEx { .. }
                 | Op::CallObject(..)
+                | Op::Leap(..)
                 | Op::Dispatch(_)
         )
     }
@@ -416,6 +423,7 @@ impl Op {
             Op::Const(_)
                 | Op::LoadGlobal(_)
                 | Op::LoadAttr(..)
+                | Op::CellGet(..)
                 | Op::Binary(..)
                 | Op::Unary(..)
                 | Op::Compare(..)
@@ -450,6 +458,17 @@ impl Op {
         )
     }
 
+    /// Whether the instruction can be run on its own, outside the loop that
+    /// runs a function: what can be replayed, and what works on objects a
+    /// replay made itself (an iterator, a cell, a container) or only looks.
+    pub fn is_steppable(&self) -> bool {
+        self.is_replayable()
+            || matches!(
+                self,
+                Op::GetIter(_) | Op::IterNext(_) | Op::MakeCell(_) | Op::CheckBound(..) | Op::SetItem { .. }
+            )
+    }
+
     /// Instructions that can be dropped when their result is unused: they
     /// neither have effects nor can raise in a way a program could rely on.
     pub fn is_pure(&self) -> bool {
@@ -469,6 +488,7 @@ impl Op {
 
 /// The code an instruction came from: the function itself (origin 0) or a
 /// function that was inlined into it.
+#[derive(Clone)]
 pub struct Origin {
     pub name: String,
     pub filename: String,
@@ -498,6 +518,7 @@ pub struct Phi {
     pub srcs: Vec<V>,
 }
 
+#[derive(Clone)]
 pub struct Block {
     pub phis: Vec<Phi>,
     pub insts: Vec<Inst>,
@@ -526,6 +547,7 @@ pub struct BlockCode {
     pub id: u32,
 }
 
+#[derive(Clone)]
 pub struct Function {
     pub name: String,
     pub qualname: String,
@@ -723,6 +745,10 @@ impl Function {
             Op::CallObject(callee, args) => {
                 let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
                 format!("call_object {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
+            }
+            Op::Leap(callee, args) => {
+                let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
+                format!("leap {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
             }
             Op::GetLen(a) => format!("get_len {}", n(a)),
             Op::MatchKind(a, mapping) => {

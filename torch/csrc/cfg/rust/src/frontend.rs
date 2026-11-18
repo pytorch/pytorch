@@ -1503,7 +1503,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::WithExceptStart { exit: a, exc: b }
         | Op::CellSet(a, b) => r!(a, b),
         Op::MatchClass { subject, class, names, .. } => r!(subject, class, names),
-        Op::CallObject(_, args) => {
+        Op::CallObject(_, args) | Op::Leap(_, args) => {
             for v in args.iter_mut() {
                 r!(v);
             }

@@ -35,5 +35,7 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pyapi::CfgFunction>()?;
     m.add_class::<pyapi::Region>()?;
     m.add_class::<pyapi::Replay>()?;
+    // What a leap is called with in place of a value that is not defined.
+    m.add("UNDEFINED", unsafe { Bound::from_borrowed_ptr(m.py(), vm::undefined()) })?;
     Ok(())
 }
