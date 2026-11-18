@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._logging import trace_structured, warning_once
 from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
@@ -622,7 +623,11 @@ class BatchLinearLHSFusion(BatchFusion):
                 if user in closure or user.op == "output":
                     continue
                 target = user.target
-                is_hop = isinstance(target, torch._ops.HigherOrderOperator)
+                writes_through_base = (
+                    is_user_kernel_functional_hop(target)
+                    or target is torch.ops.higher_order.auto_functionalized
+                    or target is torch.ops.higher_order.auto_functionalized_v2
+                )
                 if isinstance(target, torch._ops.OpOverload):
                     if target.namespace == "aten":
                         continue
@@ -634,9 +639,10 @@ class BatchLinearLHSFusion(BatchFusion):
                 for arg in pytree.arg_tree_leaves(*user.args, **user.kwargs):
                     if isinstance(arg, torch.fx.Node) and arg in closure:
                         count += 1
-                # A mutated view under auto_functionalized_v2 is rebuilt from
-                # its base, so even one aliased input is unsafe.
-                if count > 1 or (is_hop and count > 0):
+                # These HOPs rebuild a mutated view from its base, so even one
+                # aliased input is unsafe. Read-only HOPs such as
+                # flex_attention read the slice with its real strides.
+                if count > 1 or (writes_through_base and count > 0):
                     return True
         return False
 

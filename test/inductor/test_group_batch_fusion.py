@@ -1345,6 +1345,36 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(subsets, [2])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
+    def test_batch_linear_lhs_alias_guard_read_only_hop(self):
+        from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
+
+        def build(hop):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.randn(32, 64)
+            w = graph.placeholder("w")
+            w.meta["val"] = torch.randn(48, 64)
+            mm = graph.call_function(torch.ops.aten.mm.default, args=(x, w))
+            mm.meta["val"] = torch.randn(32, 48)
+            view = graph.call_function(torch.ops.aten.t.default, args=(mm,))
+            view.meta["val"] = torch.randn(48, 32)
+            graph.call_function(hop, args=(view,))
+            return mm
+
+        # A read-only HOP with one aliased input reads the slice with its real
+        # strides, so it must not block fusion.
+        self.assertFalse(
+            BatchLinearLHSFusion._consumes_multiple_aliases(
+                build(torch.ops.higher_order.flex_attention)
+            )
+        )
+        # auto_functionalized rebuilds the mutated view from the base.
+        self.assertTrue(
+            BatchLinearLHSFusion._consumes_multiple_aliases(
+                build(torch.ops.higher_order.auto_functionalized)
+            )
+        )
+
     def test_batch_linear_lhs_match_ignores_mm_dtype(self):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
 
