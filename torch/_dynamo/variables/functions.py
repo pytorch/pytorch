@@ -23,6 +23,7 @@ accurate graph capture while handling Python's various function-related behavior
 
 import builtins
 import collections
+import copy
 import functools
 import importlib
 import importlib.metadata
@@ -72,6 +73,7 @@ from ..source import (
     CellContentsSource,
     ClosureSource,
     ConstantSource,
+    ConstDictKeySource,
     DefaultsSource,
     GetItemSource,
     ImportSource,
@@ -114,6 +116,10 @@ from .user_defined import (
     maybe_reconstruct_decorator_ctx_manager_clone,
     UserDefinedObjectVariable,
 )
+
+
+_legacy_deepcopy = copy.deepcopy if hasattr(copy, "_deepcopy_atomic") else None
+_copy_reconstruct_code = getattr(vars(copy).get("_reconstruct"), "__code__", None)
 
 
 try:
@@ -969,6 +975,26 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (
+            self.fn is _legacy_deepcopy
+            and tx.f_code is _copy_reconstruct_code
+            and len(args) == 2
+            and not kwargs
+            and isinstance(args[0].source, ConstDictKeySource)
+            and type(args[0].realize()) is ConstantVariable
+            and type(owner := tx.symbolic_locals["x"].realize())
+            is variables.OrderedDictVariable
+            and owner.source is not None
+        ):
+            from ..polyfills.copy import is_unmemoized_atomic_key
+            from .builder import SourcelessBuilder
+
+            check = SourcelessBuilder.create_internal_user_function(
+                is_unmemoized_atomic_key
+            )
+            if check.call_function(tx, [*args, owner], {}).as_python_constant():
+                return args[0]
+
         # Handle patch_dynamo_config call
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:

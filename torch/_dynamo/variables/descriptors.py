@@ -294,6 +294,8 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1450
     """
 
+    _cpython_type = types.MethodWrapperType
+
     _nonvar_fields = {
         "descriptor",
         *VariableTracker._nonvar_fields,
@@ -508,6 +510,10 @@ class MethodDescriptorVariable(DescriptorVariable):
         name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
+        if self.descriptor.__objclass__ is dict and isinstance(
+            obj, variables.ConstDictVariable
+        ):
+            obj.check_base_dict_mutation(tx, name)
         if isinstance(obj, variables.ConstDictVariable):
             result = obj.call_method_descriptor(tx, self.descriptor, rest, kwargs)
             if result is not None:
@@ -680,21 +686,17 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         return super().get_id(tx)
 
     def has_fresh_container_receiver(self) -> bool:
-        return (
-            self.value is None
-            and self.obj.source is None
-            and (
-                (
-                    self.obj.mutation_type is not None
-                    and self.obj.mutation_type.scope > 0
-                )
-                or isinstance(self.obj, variables.RangeVariable)
-            )
-            and not (
-                isinstance(self.obj, variables.TupleVariable)
-                and self.obj.python_type() is tuple
-                and not self.obj.items
-            )
+        obj = self.obj
+        if self.value is not None or obj.source is not None:
+            return False
+        if (
+            isinstance(obj, variables.TupleVariable)
+            and obj.python_type() is tuple
+            and not obj.items
+        ):
+            return False  # the empty tuple is a singleton
+        return isinstance(obj, variables.RangeVariable) or (
+            obj.mutation_type is not None and obj.mutation_type.scope > 0
         )
 
     def key_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1528,6 +1530,8 @@ class PropertyVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
     """
 
+    _cpython_type = property
+
     _nonvar_fields = {
         "descriptor",
         *VariableTracker._nonvar_fields,
@@ -1683,6 +1687,8 @@ class TupleGetterVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2735
     https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2636-L2663
     """
+
+    _cpython_type = _collections._tuplegetter
 
     _nonvar_fields = {
         "descriptor",

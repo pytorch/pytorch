@@ -242,24 +242,21 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             def forward(self, x, mapping):
                 return fn(x, mapping)
 
+        inputs = [
+            (x, builtins.frozendict(x=x + 1, nested=builtins.frozendict(y=x * 2)))
+            for x in (torch.ones(2), torch.full((2,), 3.0))
+        ]
         try:
             if backend == "export":
-                x = torch.ones(2)
-                mapping = builtins.frozendict(
-                    x=x + 1, nested=builtins.frozendict(y=x * 2)
-                )
-                exported = torch.export.export(Module(), (x, mapping), strict=True)
+                exported = torch.export.export(Module(), inputs[0], strict=True)
                 buffer = io.BytesIO()
                 torch.export.save(exported, buffer)
                 buffer.seek(0)
                 compiled = torch.export.load(buffer).module()
             else:
                 compiled = torch.compile(fn, backend=backend, fullgraph=True)
-            for x in (torch.ones(2), torch.full((2,), 3.0)):
-                mapping = builtins.frozendict(
-                    x=x + 1, nested=builtins.frozendict(y=x * 2)
-                )
-                self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            for args in inputs:
+                self.assertEqual(compiled(*args), fn(*args))
         finally:
             torch._dynamo.trace_rules._allowed_callable_ids.remove(id(consume))
         self.assertFalse(torch._dynamo.trace_rules.is_callable_disallowed(consume))
@@ -594,14 +591,15 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             )
 
         x = torch.randn(3)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(result[0]["a"], [x, x + 1])
-        self.assertEqual(list(result[1]), ["a"])
-        self.assertIs(next(iter(result[2])), result[0]["a"])
-        self.assertIs(next(iter(result[3]))[1], result[0]["a"])
-        self.assertIs(result[4]["a"], result[0]["a"])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        mapping, keys, values, items, proxy = compiled(x)
+        self.assertEqual(mapping["a"], [x, x + 1])
+        self.assertEqual(list(keys), ["a"])
+        self.assertIs(next(iter(values)), mapping["a"])
+        self.assertIs(next(iter(items))[1], mapping["a"])
+        self.assertIs(proxy["a"], mapping["a"])
         with self.assertRaisesRegex(TypeError, "does not support item assignment"):
-            result[4]["a"] = x
+            proxy["a"] = x
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize("name", ["__eq__", "__ne__", "__or__", "__ror__"])
