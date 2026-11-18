@@ -7953,7 +7953,6 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
-    @skipIfRocm(msg="loads before the graph input pointer read back 0 on ROCm")
     def test_as_strided_past_input_extent(self):
         # A graph input aliasing a larger storage may legitimately be
         # as_strided'd past its own extent: Inductor rebases the storage-relative
@@ -24464,8 +24463,10 @@ if RUN_GPU:
             def fn(x, mask):
                 return (x * mask.t()).sum(1)
 
-            x = torch.randn(1024, 1024, device=GPU_TYPE)
-            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            # num_splits skips the vote when numel >= num_sm * 64; keep numel
+            # below that even on small MIG slices (14-16 SMs).
+            x = torch.randn(256, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 256, device=GPU_TYPE) < 0.5
             result, code = run_and_get_code(torch.compile(fn), x, mask)
             self.assertEqual(result, fn(x, mask))
             self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
