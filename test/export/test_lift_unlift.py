@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: export"]
+import unittest
+import warnings
 from collections import OrderedDict
 from typing import Any
 
@@ -19,6 +21,7 @@ from torch.export.exported_program import (
 from torch.export.graph_signature import CustomObjArgument
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     run_tests,
     TestCase,
 )
@@ -142,6 +145,7 @@ class GraphBuilder:
         )
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestLift(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -366,7 +370,28 @@ class TestLift(TestCase):
         self.assertIn("non_persistent_buf", stateful_gm._non_persistent_buffers_set)
         self.assertNotIn("non_persistent_buf", stateful_gm.state_dict())
 
+    def test_unlift_dotted_constant_requiring_grad(self):
+        # A dotted constant that the unlifted module already holds is not
+        # handled a second time, so it warns once.
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.sub = torch.nn.Module()
+                self.sub.c = torch.randn(2, requires_grad=True)
 
+            def forward(self, x):
+                return x + self.sub.c
+
+        foo, x = Foo(), torch.randn(2)
+        exported = torch.export.export(foo, (x,), strict=False)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            module = exported.module()
+        self.assertEqual(len([w for w in caught if "`sub.c`" in str(w.message)]), 1)
+        self.assertEqual(module(x), foo(x))
+
+
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class ConstantAttrMapTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

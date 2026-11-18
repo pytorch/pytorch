@@ -100,8 +100,8 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '9.0'
       test-matrix: |
@@ -132,7 +132,7 @@ jobs:
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   test-periodically:
@@ -156,7 +156,7 @@ jobs:
       enable-torch-trace: "1"
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   test-weekly:
@@ -180,7 +180,7 @@ jobs:
       enable-torch-trace: "1"
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   test:
@@ -206,5 +206,5 @@ jobs:
       enable-torch-trace: "1"
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
