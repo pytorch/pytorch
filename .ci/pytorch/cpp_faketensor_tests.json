@@ -515,6 +515,7 @@
     "test_meta.py::TestMetaKernelRegistrations::test_shift_out_symbolic_fake_tensor_*",
     "test_meta.py::TestMetaKernelRegistrations::test_weight_int8pack_mm_inner_dim_mismatch",
     "test_meta.py::TestMetaKernelRegistrations::test_weight_int8pack_mm_scales_mismatch",
+    "test_proxy_tensor.py::TestFakeProxyTensor::test_snapshot_fake_of_sparse_batched_tensor",
     "test_sparse.py::TestSparseMeta::test_fake_*",
     "test_sparse.py::TestSparseMeta::test_zeros_like_fake_*"
   ]
