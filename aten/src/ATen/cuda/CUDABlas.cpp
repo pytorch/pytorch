@@ -16,6 +16,7 @@
 
 #ifdef USE_ROCM
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/detail/HipblasltHeuristicCache.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
@@ -213,6 +214,7 @@ static void _syncCurrentWithCarveoutStream(hipStream_t stream, bool presync) {
     AT_CUDA_CHECK(hipStreamWaitEvent(current_stream, event, 0));
   }
 }
+
 #endif
 
 } // anonymous namespace
@@ -369,6 +371,15 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
+#ifdef USE_ROCM
+  const auto heuristic_key = hipblasltGemmConfig(
+      abType, cType, computeType, scaleType, opa, opb, m, n, k, lda, ldb, ldc,
+      ldc, num_batches, stridea, strideb, stridec, CUBLASLT_EPILOGUE_DEFAULT,
+      ltworkspace.size);
+  if (HipblasltHeuristicCache::get().find(heuristic_key, &heuristicResult)) {
+    returnedResult = 1;
+  } else {
+#endif
   // on Blackwell+, we fake a n > 1 matmul when querying heuristics
   // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
 #ifndef USE_ROCM
@@ -417,6 +428,12 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
         &heuristicResult,
         &returnedResult));
   }
+#ifdef USE_ROCM
+    if (returnedResult > 0 && heuristicResult.state == CUBLAS_STATUS_SUCCESS) {
+      HipblasltHeuristicCache::get().add(heuristic_key, heuristicResult);
+    }
+  }
+#endif
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
@@ -445,6 +462,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
+#ifdef USE_ROCM
+    HipblasltHeuristicCache::get().drop(heuristic_key);
+#endif
     TORCH_WARN(
       "bgemm_internal_cublaslt error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
@@ -1727,6 +1747,15 @@ bool gemm_and_bias(
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+#ifdef USE_ROCM
+  const auto heuristic_key = hipblasltGemmConfig(
+      abType, cType, computeType, scaleType, transa, transb, m, n, k, mat1_ld,
+      mat2_ld, c_ptr ? c_ld : result_ld, result_ld, /*num_batches=*/1, 0, 0, 0,
+      epilogue, ltworkspace.size);
+  if (HipblasltHeuristicCache::get().find(heuristic_key, &heuristicResult)) {
+    returnedResult = 1;
+  } else {
+#endif
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
@@ -1738,6 +1767,12 @@ bool gemm_and_bias(
       1,
       &heuristicResult,
       &returnedResult));
+#ifdef USE_ROCM
+    if (returnedResult > 0 && heuristicResult.state == CUBLAS_STATUS_SUCCESS) {
+      HipblasltHeuristicCache::get().add(heuristic_key, heuristicResult);
+    }
+  }
+#endif
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
@@ -1767,6 +1802,9 @@ bool gemm_and_bias(
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
+#ifdef USE_ROCM
+    HipblasltHeuristicCache::get().drop(heuristic_key);
+#endif
     TORCH_WARN(
       "gemm_and_bias error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),

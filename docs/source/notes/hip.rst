@@ -236,6 +236,36 @@ the handle returned outside capture does not apply inside it. Its workspace for 
 allocated during capture, from the graph's memory pool; one for a stream other than the capture
 stream stays allocated, and keeps part of that pool in use, until the workspace cache is cleared.
 
+hipBLASLt heuristic cache
+-------------------------
+
+``torch.mm``, ``torch.bmm``, ``torch.addmm``, and ``F.linear`` on the hipBLASLt
+backend call ``hipblasLtMatmulAlgoGetHeuristic()`` to choose an algorithm and
+then ``hipblasLtMatmul()`` to run it. The heuristic result is a small block of
+plain data: a solution index and the workspace that algorithm needs. It does
+not point at a handle, a stream, a descriptor, or library-owned memory, so
+PyTorch keeps a process-local cache from the GEMM configuration to that result.
+
+The key is the whole configuration the heuristic sees, not just ``M``, ``N``,
+and ``K``. It includes the device, the data types, the compute and scale type,
+the transpose modes, the leading dimensions, the batch count and strides, the
+epilogue (none, bias, ReLU, or GELU), the workspace limit, whether
+deterministic algorithms are enabled, and the SM carveout. A later call with
+the same configuration reuses the cached result and does not call the heuristic
+again. The workspace pointer is not cached: it is taken on every call, which
+keeps HIP graph capture on its own buffer.
+
+The cache holds 1024 entries and drops the least recently used one past that.
+An empty or failed heuristic query is not stored. If
+``hipblasLtMatmul()`` rejects a cached algorithm, that entry is removed and the
+existing rocBLAS or unfused fallback runs, as it does with no cache.
+
+This only stores the answer ``hipblasLtMatmulAlgoGetHeuristic()`` already
+gave. It does not launch or time candidate kernels, so it is not hipBLASLt
+offline tuning and it is not ``torch.compile(mode="max-autotune")`` or
+TunableOp. Those time candidates and can pick a different kernel. Scaled,
+int8, and grouped GEMMs do not use this cache.
+
 .. _hipfft-plan-cache:
 
 hipFFT/rocFFT plan cache

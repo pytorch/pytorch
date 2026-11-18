@@ -1018,6 +1018,17 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(out1_gpu, out2_gpu[0])
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_hipblaslt_heuristic_repeat_matches(self, device):
+        # The first call queries hipBLASLt. The second call of the same
+        # configuration must return the same tensor.
+        a = torch.randn(128, 128, device=device, dtype=torch.bfloat16)
+        b = torch.randn(128, 128, device=device, dtype=torch.bfloat16)
+        first = torch.mm(a, b)
+        second = torch.mm(a, b)
+        self.assertEqual(second, first, atol=0, rtol=0)
+
+    @onlyCUDA
     @parametrize("shape", [2**i for i in range(5, 14)])
     @dtypes(torch.float, torch.half, torch.bfloat16)
     def test_cublas_deterministic(self, device, shape, dtype):
