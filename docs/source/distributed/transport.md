@@ -93,7 +93,9 @@ initialize an accelerator are left unrestricted. Selection is also skipped
 when the current device is 0 while `LOCAL_RANK` is nonzero and more than one
 device is visible, since that usually means `set_device` was not called; pass
 an indexed `device` to select device 0 anyway. When selection runs, an
-accelerator `device` initializes its runtime.
+accelerator `device` initializes its runtime. A process that transfers tensors
+on several accelerators still uses only one accelerator's NICs; list every NIC
+explicitly (see below) to use them all.
 
 Only active physical NICs at the fastest link rate are considered, which
 excludes slower frontend NICs and SR-IOV virtual functions. The nearest NICs

@@ -34,7 +34,8 @@ def _accelerator(device: torch.device | None) -> torch.device | None:
     is already initialized (e.g. by ``set_device``), so CPU-only processes
     neither initialize it (breaking ``fork``) nor all select device 0's NICs.
     Initialization alone leaves the current device at 0, so device 0 with a
-    nonzero ``LOCAL_RANK`` on a multi-device host is treated as unknown.
+    nonzero ``LOCAL_RANK`` and more than one visible device is treated as
+    unknown.
     """
     if device is not None and device.type != "cpu":
         if device.index is not None:
@@ -159,7 +160,8 @@ def _split(path: Path, nics: dict[str, Path]) -> list[str]:
 
     Peers with the same nearest NICs form a group. Groups claim NICs closest
     first, so a group whose nearest NICs overlap a closer group's uses only
-    the unclaimed ones, if any. Each group splits its NICs in name order: an
+    the unclaimed ones, or shares them all if none are left. Each group
+    splits its NICs in name order: an
     equal disjoint share each (leftovers stay free for other groups), or
     round-robin when there are more accelerators than NICs.
     """
