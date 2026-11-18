@@ -923,8 +923,11 @@ def _compile_radix_select_topk(
     del backend, device_index  # cache keys only; see _compile_register_topk
     input_2d, values_2d, indices_2d, rows_m, n, stream = compile_args
     launch = _build_radix_select_topk_module(k, deterministic, arch, spec)
-    input_arg = make_compile_arg(input_2d, read_only=True)
-    input_arg.mark_shape_dynamic(1).mark_stride_dynamic(0)
+    input_arg = (
+        make_compile_arg(input_2d, read_only=True)
+        .mark_shape_dynamic(1)
+        .mark_stride_dynamic(0)
+    )
     return flyc.compile(
         launch,
         input_arg,
