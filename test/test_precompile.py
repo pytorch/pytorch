@@ -6708,13 +6708,14 @@ assert cudagraph_config() == ambient
 training = saved["expected_grad"] is not None
 calls = model.calls.clone()
 with contextlib.nullcontext() if training else torch.no_grad():
-    for _ in range(3):
+    for i in range(3):
         if saved["mark_step"]:
             torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
+        args, expected = saved["calls"][i % len(saved["calls"])]
         # y stays alive into the next call, as in a loop that uses its output.
-        y = f(model, *saved["args"])
-        torch.testing.assert_close(y, saved["expected"])
+        y = f(model, *args)
+        torch.testing.assert_close(y, expected)
         if training:
             y.sum().backward()
             torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
@@ -6788,8 +6789,9 @@ class TestPrecompileCudagraphs(TestCase):
         config=None,
     ):
         # Calls the loaded artifact three times, on the model and args (self.x
-        # by default), in a fresh process whose triton.cudagraphs is off unless
-        # env turns it on, and returns what that process counted:
+        # by default; a list gives each call its own args and expected), in a
+        # fresh process whose triton.cudagraphs is off unless env turns it on,
+        # and returns what that process counted:
         #   recorded: the nodes in its CUDA graph tree
         #   captured: every CUDA graph captured, a tree manager's pool graph too
         #   trees: whether it made a CUDA graph tree manager
@@ -6800,9 +6802,11 @@ class TestPrecompileCudagraphs(TestCase):
         # serve_time loads with allow_serve_time_compiles.
         # config is the Inductor config the process sets before load().
         state = os.path.join(self.dir, "state.pt")
+        calls = [((self.x,) if args is None else args, expected)]
+        if isinstance(args, list):
+            calls = list(zip(args, expected))
         saved = {
-            "args": (self.x,) if args is None else args,
-            "expected": expected,
+            "calls": calls,
             "expected_grad": expected_grad,
             "mark_step": mark_step,
             "policy": policy,
@@ -6865,8 +6869,10 @@ class TestPrecompileCudagraphs(TestCase):
             ) as cap:
                 cap(self.model, self.x, 1.0)
                 cap(self.model, self.x, 2.0)
-            expected = fn(self.model, self.x, 3.0)
-        served = self._serve_in_fresh_process(expected, args=(self.x, 3.0))
+            # A value per call: a replay must not bake in the one it recorded.
+            args = [(self.x, scale) for scale in (3.0, 4.0, 5.0)]
+            expected = [fn(self.model, *a) for a in args]
+        served = self._serve_in_fresh_process(expected, args=args)
         self.assertGreater(served["recorded"], 0)
         self.assertEqual(served["skips"], 0)
 
@@ -7001,6 +7007,7 @@ class TestPrecompileCudagraphs(TestCase):
         while todo:
             baseline += 1
             todo.extend(c for cs in todo.pop().children.values() for c in cs)
+        self.assertGreater(baseline, 0)
         self.assertEqual(served["recorded"], baseline)
 
     def test_a_standalone_artifact_with_a_continuation_records_its_cudagraphs(self):
@@ -7030,7 +7037,8 @@ class TestPrecompileCudagraphs(TestCase):
         no_trees = {"triton.cudagraph_trees": False}
         served = self._serve_in_fresh_process(y, config=no_trees)
         self.assertEqual(served["bumps"], 3)
-        self.assertGreater(served["recorded"], 0)
+        self.assertTrue(served["trees"])
+        self.assertEqual(served["recorded"], 1)
         self.assertEqual(served["skips"], 0)
 
 
