@@ -20,6 +20,7 @@ from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.guards import _ordered_dict_order, GuardBuilder
+from torch._dynamo.utils import common_constant_types
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -335,6 +336,219 @@ def less_match(x, expected):
 
 def less_match_verbose_code_parts(expected):
     return [f"expected < {expected}"]
+
+
+@instantiate_parametrized_tests
+class RelationalDictContainsGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def make_guard(self, expected, key_getter=None):
+        root = RootGuardManager()
+        guards.install_relational_dict_contains_guard(
+            root,
+            ("d", 0),
+            ("key", 1) if key_getter is None else None,
+            key_getter,
+            expected,
+            tuple(common_constant_types),
+            ["key in d"],
+            None,
+        )
+        self.assertIsInstance(
+            root.get_epilogue_lambda_guards()[0], guards.RELATIONAL_DICT_CONTAINS
+        )
+        return root
+
+    @parametrize("expected", [False, True])
+    def test_membership(self, expected):
+        root = self.make_guard(expected)
+        clone = root.clone_manager(lambda manager: True)
+        for manager in (root, clone, root):
+            for mapping, key in (
+                ({"a": 1}, "a"),
+                ({"b": 2}, "b"),
+                ({"a": 1, "b": 2}, "c"),
+                ({}, "a"),
+                ({1: None}, True),
+            ):
+                inputs = {"d": mapping, "key": key}
+                matches = (key in mapping) == expected
+                self.assertEqual(manager.check(inputs), matches)
+                debug_info = manager.check_verbose(inputs)
+                self.assertEqual(debug_info.result, matches)
+                if not matches:
+                    self.assertEqual(debug_info.verbose_code_parts, ["key in d"])
+
+    @parametrize(
+        "key",
+        [
+            None,
+            True,
+            2,
+            1.5,
+            2j,
+            "a",
+            b"a",
+            Ellipsis,
+            NotImplemented,
+            torch.device("cpu"),
+            torch.float32,
+            torch.contiguous_format,
+            torch.strided,
+            torch.Size([2, 3]),
+            (1, ("a", frozenset({2, 3}))),
+            frozenset({(1, 2), (3, 4)}),
+        ],
+    )
+    def test_safe_key_types(self, key):
+        root = self.make_guard(True)
+        self.assertTrue(root.check({"d": {key: None}, "key": key}))
+
+    @parametrize("position", ["incoming", "stored", "tuple", "frozenset"])
+    def test_callback_keys_are_rejected(self, position):
+        events = []
+
+        class Key:
+            def __hash__(self):
+                events.append("hash")
+                return hash("a")
+
+            def __eq__(self, other):
+                events.append("eq")
+                return False
+
+        unsafe = Key()
+        key = "a"
+        mapping = {"b": 1}
+        if position == "incoming":
+            key = unsafe
+        elif position == "stored":
+            mapping = {unsafe: 1}
+        elif position == "tuple":
+            key = (unsafe,)
+        else:
+            key = frozenset({unsafe})
+        events.clear()
+        root = self.make_guard(False)
+        inputs = {"d": mapping, "key": key}
+        self.assertFalse(root.check(inputs))
+        self.assertFalse(root.check_verbose(inputs).result)
+        self.assertEqual(events, [])
+        self.assertTrue(root.check({"d": {}, "key": "a"}))
+
+    def test_safety_cache_invalidated_by_mutation_and_clone(self):
+        events = []
+
+        class Key:
+            def __hash__(self):
+                events.append("hash")
+                return hash("a")
+
+            def __eq__(self, other):
+                events.append("eq")
+                return False
+
+        unsafe_mapping = {Key(): None}
+        root = self.make_guard(False)
+        mapping = {"b": None}
+        inputs = {"d": mapping, "key": "a"}
+        self.assertTrue(root.check(inputs))
+        mapping.update(unsafe_mapping)
+        events.clear()
+        self.assertFalse(root.check(inputs))
+        self.assertEqual(events, [])
+        mapping.clear()
+        self.assertTrue(root.check(inputs))
+        mapping.update(unsafe_mapping)
+        events.clear()
+        self.assertFalse(root.check(inputs))
+        self.assertEqual(events, [])
+        mapping.clear()
+        mapping["a"] = None
+        self.assertFalse(root.check(inputs))
+        self.assertTrue(root.check({"d": {"b": None}, "key": "a"}))
+
+    def test_invalid_operand_types(self):
+        class DictSubclass(dict):
+            def __contains__(self, key):
+                raise AssertionError("must not call __contains__")
+
+        root = self.make_guard(False)
+        for mapping, key in (([], "a"), (DictSubclass(), "a"), ({}, []), ({}, {})):
+            self.assertFalse(root.check({"d": mapping, "key": key}))
+        # The roles cannot be inferred from the runtime operand types.
+        self.assertFalse(root.check({"d": "a", "key": {}}))
+        self.assertTrue(root.check({"d": {}, "key": "a"}))
+
+    def test_computed_key_lifetime(self):
+        root = self.make_guard(
+            True, lambda inputs: "".join(["long", "_temporary", "_key"])
+        )
+        for _ in range(10):
+            self.assertTrue(root.check({"d": {"long_temporary_key": None}}))
+            self.assertFalse(root.check({"d": {}}))
+
+    @parametrize("key", [None, "", 0, False])
+    def test_computed_falsey_key(self, key):
+        root = self.make_guard(True, lambda inputs: key)
+        self.assertTrue(root.check({"d": {key: None}}))
+
+    def test_key_getter_precedes_dictionary_lookup(self):
+        def getter(inputs):
+            inputs["d"] = {"a": None}
+            return inputs["key"]
+
+        root = self.make_guard(True, getter)
+        self.assertFalse(root.check({"d": {}}))
+        self.assertTrue(root.check({"d": {}, "key": "a"}))
+
+    def test_missing_local(self):
+        root = self.make_guard(True)
+        for inputs in (None, {}, {"d": {}}, {"key": "a"}):
+            self.assertFalse(root.check(inputs))
+        self.assertTrue(root.check({"d": {"a": None}, "key": "a"}))
+
+    def test_accessor_mutation_precedes_membership(self):
+        events = []
+
+        class Key:
+            def __hash__(self):
+                return hash("a")
+
+            def __eq__(self, other):
+                events.append("eq")
+                return True
+
+        stored = Key()
+
+        def accessor(inputs):
+            inputs["d"][stored] = None
+            events.append("accessor")
+            return None
+
+        root = self.make_guard(True)
+        root.lambda_manager(accessor, "later accessor", None, default_mgr_enum)
+        self.assertFalse(root.check({"d": {}, "key": "a"}))
+        self.assertEqual(events, ["accessor"])
+
+    @parametrize("verbose", [False, True])
+    def test_clone_reentrant_computed_key(self, verbose):
+        nested_results = []
+
+        def key_getter(inputs):
+            if inputs.get("check_clone"):
+                nested_results.append(clone.check({"d": {"a": None}, "key": "a"}))
+            return inputs["key"]
+
+        root = self.make_guard(True, key_getter)
+        clone = root.clone_manager(lambda manager: True)
+        inputs = {"d": {}, "key": "a", "check_clone": True}
+        result = root.check_verbose(inputs).result if verbose else root.check(inputs)
+        self.assertFalse(result)
+        self.assertEqual(nested_results, [True])
+        self.assertTrue(root.check({"d": {"a": None}, "key": "a"}))
+        self.assertFalse(clone.check({"d": {}, "key": "a"}))
+        self.assertTrue(clone.check({"d": {"a": None}, "key": "a"}))
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):

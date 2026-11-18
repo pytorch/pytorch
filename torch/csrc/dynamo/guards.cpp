@@ -15,6 +15,7 @@
 #include <fmt/format.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Size.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -29,6 +30,7 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 
@@ -54,6 +56,7 @@
 #include <sstream>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 // Uncomment next line to count instructions for guard eval.
@@ -3015,6 +3018,167 @@ class RelationalGuard : public LeafGuard {
   // reset the relational guard state on guard failure. This is called by the
   // guard manager.
   virtual void reset_state() = 0;
+};
+
+class RELATIONAL_DICT_CONTAINS : public LeafGuard {
+ public:
+  RELATIONAL_DICT_CONTAINS(
+      RootGuardManager* root,
+      py::tuple dict_source,
+      py::object key_source,
+      py::object key_getter,
+      bool expected,
+      py::tuple safe_key_types,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(root, std::move(verbose_code_parts), std::move(user_stack)),
+        _key_getter(std::move(key_getter)),
+        _expected(expected),
+        _safe_key_types(std::move(safe_key_types)) {
+    TORCH_CHECK_VALUE(
+        key_source.is_none() != _key_getter.is_none(),
+        "Relational dictionary guards require exactly one key source or getter");
+    TORCH_CHECK_TYPE(
+        _key_getter.is_none() || PyCallable_Check(_key_getter.ptr()),
+        "Relational dictionary key getter must be callable");
+    _dict_name = py::cast<py::str>(dict_source[0]);
+    _dict_index = py::cast<int>(dict_source[1]);
+    if (!key_source.is_none()) {
+      auto source = py::cast<py::tuple>(key_source);
+      _key_name = py::cast<py::str>(source[0]);
+      _key_index = py::cast<int>(source[1]);
+    }
+    for (const auto& type : _safe_key_types) {
+      _safe_types.insert(reinterpret_cast<PyTypeObject*>(type.ptr()));
+    }
+  }
+
+  bool check_nopybind(PyObject* locals) override {
+    if (!PyDict_Check(locals)) {
+      return false;
+    }
+    PyObject* key = nullptr;
+    if (_key_getter.is_none()) {
+      PyDict_GetItemRef(locals, _key_name.ptr(), &key);
+    } else {
+      key = PyObject_CallOneArg(_key_getter.ptr(), locals);
+    }
+    auto key_ref = py::reinterpret_steal<py::object>(key);
+    if (!key_ref) {
+      PyErr_Clear();
+      return false;
+    }
+    // Match the old root lambda: evaluate the key before reading the
+    // dictionary.
+    PyObject* dict = nullptr;
+    PyDict_GetItemRef(locals, _dict_name.ptr(), &dict);
+    auto dict_ref = py::reinterpret_steal<py::object>(dict);
+    return check_values(dict_ref.ptr(), key_ref.ptr());
+  }
+
+  bool check_nopybind(FrameLocalsMapping* locals) override {
+    if (!_key_getter.is_none()) {
+      return check_nopybind(reinterpret_cast<PyObject*>(locals->to_dict()));
+    }
+    auto key = py::reinterpret_borrow<py::object>(locals->get(_key_index));
+    auto dict = py::reinterpret_borrow<py::object>(locals->get(_dict_index));
+    return check_values(dict.ptr(), key.ptr());
+  }
+
+ private:
+  bool check_values(PyObject* dict, PyObject* key) {
+    if (!dict || !key || !PyDict_CheckExact(dict) || !is_safe_key(key)) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result;
+    Py_BEGIN_CRITICAL_SECTION(dict);
+    result = check_dict_contains(dict, key);
+    Py_END_CRITICAL_SECTION();
+    return result;
+  }
+
+  bool check_dict_contains(PyObject* dict, PyObject* lookup_key) {
+    // Empty dictionaries can receive a CLONED event, which the version
+    // watcher deliberately ignores. Only cache nonempty dictionaries.
+    if (PyDict_GET_SIZE(dict) != 0) {
+      uint64_t version = get_dict_version_unchecked(dict);
+      if (_safe_dict_version.load(std::memory_order_relaxed) != version) {
+        Py_ssize_t pos = 0;
+        PyObject* key = nullptr;
+        PyObject* item = nullptr;
+        while (PyDict_Next(dict, &pos, &key, &item)) {
+          // Recursive validation can allocate and suspend the critical section.
+          auto key_ref = py::reinterpret_borrow<py::object>(key);
+          if (!is_safe_key(key_ref.ptr())) {
+            return false;
+          }
+        }
+        if (get_dict_version_unchecked(dict) != version) {
+          return false;
+        }
+        // Versions are globally unique. Atomic access permits sharing this leaf
+        // with cloned roots without retaining any dictionary between checks.
+        _safe_dict_version.store(version, std::memory_order_relaxed);
+      }
+    }
+    int result = PyDict_Contains(dict, lookup_key);
+    if (result == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return result == _expected;
+  }
+
+  bool is_safe_key(PyObject* value) {
+    if (_safe_types.contains(Py_TYPE(value))) {
+      return true;
+    }
+    bool is_tuple = PyTuple_CheckExact(value) || THPSize_Check(value);
+    if (!is_tuple && !PyFrozenSet_CheckExact(value)) {
+      return false;
+    }
+    if (Py_EnterRecursiveCall(" while checking a dictionary key")) {
+      PyErr_Clear();
+      return false;
+    }
+    auto leave_recursive_call =
+        c10::make_scope_exit([] { Py_LeaveRecursiveCall(); });
+    if (is_tuple) {
+      for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(value); ++i) {
+        if (!is_safe_key(PyTuple_GET_ITEM(value, i))) {
+          return false;
+        }
+      }
+    } else {
+      auto iter = py::reinterpret_steal<py::object>(PyObject_GetIter(value));
+      if (!iter) {
+        PyErr_Clear();
+        return false;
+      }
+      while (auto key =
+                 py::reinterpret_steal<py::object>(PyIter_Next(iter.ptr()))) {
+        if (!is_safe_key(key.ptr())) {
+          return false;
+        }
+      }
+      if (PyErr_Occurred()) {
+        PyErr_Clear();
+        return false;
+      }
+    }
+    return true;
+  }
+
+  py::str _dict_name;
+  int _dict_index;
+  py::str _key_name;
+  int _key_index{-1};
+  py::object _key_getter;
+  int _expected;
+  py::tuple _safe_key_types;
+  std::unordered_set<PyTypeObject*> _safe_types;
+  std::atomic<uint64_t> _safe_dict_version{0};
 };
 
 /**
@@ -7877,6 +8041,26 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
+void install_relational_dict_contains_guard(
+    RootGuardManager* root,
+    py::tuple dict_source,
+    py::object key_source,
+    py::object key_getter,
+    bool expected,
+    py::tuple safe_key_types,
+    py::object verbose_code_parts,
+    py::object user_stack) {
+  root->add_epilogue_lambda_guard(std::make_unique<RELATIONAL_DICT_CONTAINS>(
+      root,
+      std::move(dict_source),
+      std::move(key_source),
+      std::move(key_getter),
+      expected,
+      std::move(safe_key_types),
+      std::move(verbose_code_parts),
+      std::move(user_stack)));
+}
+
 void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -8497,6 +8681,12 @@ PyObject* torch_c_dynamo_guards_init() {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
       py_m, "RelationalGuard");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      RELATIONAL_DICT_CONTAINS,
+      LeafGuard,
+      std::shared_ptr<RELATIONAL_DICT_CONTAINS>>(
+      py_m, "RELATIONAL_DICT_CONTAINS");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       OBJECT_ALIASING,
@@ -9643,6 +9833,9 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
+  py_m.def(
+      "install_relational_dict_contains_guard",
+      install_relational_dict_contains_guard);
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);

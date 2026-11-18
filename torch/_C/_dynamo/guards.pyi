@@ -30,6 +30,7 @@ class ORDERED_DICT_ORDER_MATCH(LeafGuard):
 def ordered_dict_keys(value: Any) -> list[Any] | None: ...
 
 class RelationalGuard: ...
+class RELATIONAL_DICT_CONTAINS(LeafGuard): ...
 
 class GuardDebugInfo:
     verbose_code_parts: list[str]
@@ -482,6 +483,16 @@ class FuncKwDefaultsGuardAccessor(GuardAccessor): ...
 class GetAttrGuardAccessor(GuardAccessor):
     def get_attr_name(self) -> str: ...
 
+def install_relational_dict_contains_guard(
+    root: RootGuardManager,
+    dict_source: tuple[str, int],
+    key_source: tuple[str, int] | None,
+    key_getter: Callable[[dict[str, Any]], Any] | None,
+    expected: bool,
+    safe_key_types: tuple[type, ...],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
 def install_object_aliasing_guard(
     x: GuardManager,
     y: GuardManager,
