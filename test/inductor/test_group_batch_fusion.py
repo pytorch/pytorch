@@ -49,6 +49,16 @@ def _(x: torch.Tensor) -> torch.Tensor:
     return torch.empty_like(x)
 
 
+@torch.library.custom_op("_batch_linear_lhs_test::same_ptr", mutates_args=())
+def _same_ptr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.tensor([float(x.data_ptr() == y.data_ptr())])
+
+
+@_same_ptr.register_fake
+def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.empty(1)
+
+
 @contextlib.contextmanager
 def _record_fusion_subsets():
     from unittest import mock
@@ -1186,6 +1196,45 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual([t.stride() for t in actual], [t.stride() for t in expected])
         self.assertEqual(subsets, [2])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @parametrize("alias", ["self", "transpose", "view", "contiguous"])
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_preserves_alias_observation(self, alias):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                if alias == "self":
+                    other = large
+                elif alias == "transpose":
+                    other = large.t()
+                elif alias == "view":
+                    other = large.view(32, 4, 12)
+                else:
+                    other = large.contiguous()
+                return _same_ptr(large, other), torch.sin(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # The pass refuses to fuse when a consumer observes two aliases, so
+        # eager aliasing (and this data_ptr comparison) is preserved.
+        self.assertEqual(actual[0].item(), 1.0)
+        self.assertEqual(subsets, [])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
     def test_batch_linear_lhs_match_ignores_mm_dtype(self):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion

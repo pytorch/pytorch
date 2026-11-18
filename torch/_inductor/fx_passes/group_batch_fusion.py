@@ -598,6 +598,48 @@ class BatchLinearLHSFusion(BatchFusion):
                         pending.append(user)
         return False
 
+    @staticmethod
+    def _consumes_multiple_aliases(node: torch.fx.Node) -> bool:
+        # Opaque consumers can observe that two inputs are aliases of the same
+        # projection. Value-only aten ops and the graph output cannot, so keep
+        # fusing across those.
+        closure = OrderedSet([node])
+        pending = [node]
+        while pending:
+            cur = pending.pop()
+            multi_output_view = _get_view_type(cur.target) is _ViewType.MultiOutputView
+            for user in cur.users:
+                if _is_view_op(user.target) or (
+                    multi_output_view and user.target is operator.getitem
+                ):
+                    if user not in closure:
+                        closure.add(user)
+                        pending.append(user)
+        for cur in closure:
+            for user in cur.users:
+                if user in closure or user.op == "output":
+                    continue
+                target = user.target
+                if isinstance(target, torch._ops.OpOverload):
+                    if target.namespace == "aten":
+                        continue
+                elif isinstance(target, torch._ops.OpOverloadPacket):
+                    default = getattr(target, "default", None)
+                    if default is not None and default.namespace == "aten":
+                        continue
+                count = 0
+                stack = [user.args]
+                while stack:
+                    arg = stack.pop()
+                    if isinstance(arg, torch.fx.Node):
+                        if arg in closure:
+                            count += 1
+                    elif isinstance(arg, (tuple, list)):
+                        stack.extend(arg)
+                if count > 1:
+                    return True
+        return False
+
     def match(self, node: torch.fx.Node):
         devices = self.graph_search_options.get("devices")
         if devices is not None:
@@ -622,6 +664,10 @@ class BatchLinearLHSFusion(BatchFusion):
         # the wide GEMM row stride instead of the eager slice. Follow views so
         # an aliased consumer such as t().as_strided() also blocks the fusion.
         if self._reaches_raw_storage_op(node):
+            return None
+        # A consumer that receives two aliases of the projection would see
+        # different storage after the split, so do not fuse across it.
+        if self._consumes_multiple_aliases(node):
             return None
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
         if not statically_known_true(weight_val.shape[1] > 0):
