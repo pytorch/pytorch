@@ -206,8 +206,9 @@ class TestPublishedFindings(unittest.TestCase):
             self.assertEqual(published_findings(verdict), [])
 
 
-def terminal_row(verdict: dict) -> dict:
-    """Run emit_row.py on `verdict` the way the publish job does."""
+def terminal_row(verdict: dict, stale_base: str | None = None) -> dict:
+    """Run emit_row.py on `verdict` the way the publish job does, with
+    post_review.py --stale-base's output if `stale_base` is not None."""
     import json
     import subprocess
     import tempfile
@@ -216,6 +217,9 @@ def terminal_row(verdict: dict) -> dict:
         verdict_file = Path(tmp) / "verdict.json"
         verdict_file.write_text(json.dumps(verdict))
         out = Path(tmp) / "row.json"
+        stale_file = Path(tmp) / "stale-base.txt"
+        if stale_base is not None:
+            stale_file.write_text(stale_base)
         subprocess.run(
             [
                 sys.executable,
@@ -224,6 +228,8 @@ def terminal_row(verdict: dict) -> dict:
                 "terminal",
                 "--verdict-file",
                 str(verdict_file),
+                "--stale-base-file",
+                str(stale_file),
                 "--out",
                 str(out),
             ],
@@ -305,6 +311,29 @@ class TestTerminalRowCarriesFindings(unittest.TestCase):
             }
         )
         self.assertNotIn("findings_dropped_at_publish", row["extra"])
+
+
+class TestAStaleBaseRequestsChanges(unittest.TestCase):
+    NOTE = "This PR's merge base is more than 60 days old. Please rebase."
+    CLEAN = {"status": "succeeded", "verdict": "ready_for_human_review", "summary": "s"}
+
+    def test_a_stale_base_records_changes_requested_and_keeps_the_models_verdict(self):
+        row = terminal_row(self.CLEAN, self.NOTE)
+        self.assertEqual(row["verdict"], "changes_requested")
+        self.assertEqual(row["extra"]["stale_base"], self.NOTE)
+        self.assertEqual(row["extra"]["model_verdict"], "ready_for_human_review")
+        self.assertEqual(row["summary"], "s")
+
+    def test_no_note_leaves_the_verdict_alone(self):
+        for stale_base in (None, "", "two\nlines", "x" * 1001):
+            row = terminal_row(self.CLEAN, stale_base)
+            self.assertEqual(row["verdict"], "ready_for_human_review")
+            self.assertNotIn("stale_base", row["extra"])
+
+    def test_a_failed_review_never_becomes_changes_requested(self):
+        row = terminal_row({"status": "model_error"}, self.NOTE)
+        self.assertIsNone(row["verdict"])
+        self.assertEqual(row["extra"], {})
 
 
 class TestFailureDetail(unittest.TestCase):

@@ -1319,6 +1319,18 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-duration-seconds: 900
 
+      - name: Check the merge base's age
+        # Before the terminal row: a stale merge base makes emit_row.py record
+        # the verdict as changes_requested, so Dr. CI does not hand the PR to a
+        # human until it is rebased. Never fails the step; a lookup that fails
+        # leaves the file absent, which counts as not stale.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
+        run: python3 scripts/pr_review/post_review.py --stale-base stale-base.txt
+
       - name: Record terminal row
         env:
           HARNESS: gha-interim
@@ -1360,6 +1372,7 @@ jobs:
               --phase terminal \
               --verdict-file out/verdict.json \
               --usage-file out/usage.json \
+              --stale-base-file stale-base.txt \
               ${STATUS_OVERRIDE:+--status "$STATUS_OVERRIDE"} \
               --out terminal.json
 

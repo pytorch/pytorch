@@ -10,12 +10,15 @@ take no row: they mark the previous review in progress for RUN_ID, or put it
 back (see Invariants). `--too-large`, and a `skipped_too_large` row, post a
 notice that the PR is over the size limit instead of a verdict.
 `--withdraw-opted-out` takes no row either: it runs when the opt-out label is
-added. A verdict review gets a rebase note when the PR's merge base is over
-STALE_BASE_DAYS old, found with one more GET (`compare`); see stale_base_note.
+added. `--stale-base OUT` runs before emit_row.py: it writes the rebase note to
+OUT when the PR's merge base is over STALE_BASE_DAYS old (see stale_base_note),
+and emit_row.py then records the verdict as `changes_requested`, keeping the
+model's in the row's `model_verdict`. The review posts the note and requests
+changes, while its findings are still weighed by the model's verdict.
 
 Invariants:
-- A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
-  never APPROVE.
+- A `changes_requested` verdict, a stale base's included, is REQUEST_CHANGES;
+  anything else is COMMENT, never APPROVE.
 - A new review is posted before earlier ones are hidden. Hiding folds the
   review's body into a collapsed section, deletes its inline comments that
   nobody replied to, resolves the replied threads where it can, and minimizes
@@ -494,7 +497,8 @@ def _compose(
 ) -> str:
     lines = [
         MARKER,
-        f"**Automated review** of {sha[:12]}: {_VERDICT_LINE[verdict]}.",
+        f"**Automated review** of {sha[:12]}: "
+        f"{_VERDICT_LINE['changes_requested' if note else verdict]}.",
         "",
         *contained(summary),
         "",
@@ -554,7 +558,7 @@ def post(
     into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
     report = report_url(gh.repo, pr, sha, run_link)
-    event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
+    event = "REQUEST_CHANGES" if verdict == "changes_requested" or note else "COMMENT"
     base = {"commit_id": sha, "event": event}
     comments = [
         {
@@ -1360,8 +1364,7 @@ def run(
     if row.get("status") == "skipped_too_large":
         return decline(gh, pr, sha, author, opt_out, limits)
     review = load_review(row)
-    pull = pull_request(gh, pr)
-    current = (pull.get("head") or {}).get("sha")
+    current = head_sha(gh, pr)
     if current != sha:
         # A run for the newer head will handle it.
         print(f"head moved {sha} -> {current}; not posting a stale review")
@@ -1374,10 +1377,15 @@ def run(
         return 0
     verdict, summary, findings = review
     clean = verdict == "ready_for_human_review"
+    # A stale base made emit_row.py record changes_requested. The review still
+    # weighs the findings by the model's own verdict; the note says why.
+    extra = row.get("extra") or {}
+    note, model = extra.get("stale_base"), extra.get("model_verdict")
+    if not (isinstance(note, str) and note.isprintable() and model in VERDICTS):
+        note, model = "", verdict
     try:
-        note = stale_base_note(gh, pull, sha)
         new_id = publish(
-            gh, pr, sha, author, verdict, summary, findings, run_url(gh.repo, row), note
+            gh, pr, sha, author, model, summary, findings, run_url(gh.repo, row), note
         )
     except GitHubError as exc:
         if not clean:
@@ -1522,6 +1530,11 @@ def main() -> int:
         help="say the PR at REVIEWED_SHA is too large to review",
     )
     mode.add_argument(
+        "--stale-base",
+        metavar="OUT",
+        help="write the rebase note for REVIEWED_SHA to OUT, empty if none is due",
+    )
+    mode.add_argument(
         "--withdraw-opted-out",
         action="store_true",
         help="dismiss the automated change requests of a PR that opted out",
@@ -1538,6 +1551,11 @@ def main() -> int:
                 os.environ.get("OPT_OUT_LABEL", "no automated review"),
                 size_limits(),
             )
+        if args.stale_base:
+            pull = pull_request(gh, int(os.environ["PR_NUMBER"]))
+            note = stale_base_note(gh, pull, os.environ["REVIEWED_SHA"])
+            Path(args.stale_base).write_text(note)
+            return 0
         if args.withdraw_opted_out:
             withdraw_opted_out(
                 gh,
@@ -1575,6 +1593,9 @@ def main() -> int:
             size_limits(),
         )
     except Exception as exc:  # noqa: BLE001 - an API failure never fails the job
+        if args.stale_base:
+            warn(f"merge base not checked: {exc!r}")
+            return 0
         if args.row_file or args.too_large:
             what = "posted"
         elif args.mark_pending:

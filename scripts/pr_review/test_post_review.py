@@ -11,6 +11,7 @@ import io
 import json
 import re
 import sys
+import tempfile
 import time
 import unittest
 import urllib.parse
@@ -751,6 +752,12 @@ PULL = {
 }
 
 
+NOTE = (
+    "This PR's merge base is more than 60 days old and 3801 commits behind `main`, "
+    "so its CI ran against an outdated base. Please rebase before merging."
+)
+
+
 class TestAStaleBaseAsksForARebase(unittest.TestCase):
     def note_and_log(self, gh, pull=PULL):
         out = io.StringIO()
@@ -758,20 +765,16 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
             note = post_review.stale_base_note(gh, pull, SHA)
         return note, out.getvalue()
 
+    def note_for(self, gh):
+        """The note for FakeGitHub's PR, as `--stale-base` looks it up."""
+        return post_review.stale_base_note(gh, post_review.pull_request(gh, 1), SHA)
+
     def compares(self, gh):
         return [c[1] for c in gh.calls if "/compare/" in c[1]]
 
-    def test_an_old_merge_base_gets_a_tagged_note_after_the_summary(self):
-        for verdict in ("changes_requested", "ready_for_human_review"):
-            gh = FakeGitHub(compare=forked(60, behind_by=3801))
-            go(gh, row(verdict=verdict))
-            body = gh.posted()[0]["body"]
-            note = (
-                "This PR's merge base is more than 60 days old and 3801 commits behind "
-                "`main`, "
-                "so its CI ran against an outdated base. Please rebase before merging."
-            )
-            self.assertIn(f"One bug.\n\n{post_review.STALE_BASE_TAG}\n{note}\n", body)
+    def test_an_old_merge_base_gets_the_note(self):
+        gh = FakeGitHub(compare=forked(60, behind_by=3801))
+        self.assertEqual(self.note_for(gh), NOTE)
 
     def test_a_ghstack_pr_is_measured_against_the_default_branch(self):
         gh = FakeGitHub(
@@ -780,8 +783,7 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
             head_ref="gh/u/1/head",
             default_branch="trunk",
         )
-        go(gh)
-        self.assertIn("behind `trunk`, so", gh.posted()[0]["body"])
+        self.assertIn("behind `trunk`, so", self.note_for(gh))
 
     def test_a_pr_the_bot_does_not_land_on_the_default_branch_gets_none(self):
         for base_ref, head_ref, head_repo in (
@@ -795,13 +797,12 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
                 head_ref=head_ref,
                 head_repo=head_repo,
             )
-            go(gh)
-            self.assertNotIn("merge base", gh.posted()[0]["body"])
+            self.assertEqual(self.note_for(gh), "")
             self.assertEqual(self.compares(gh), [])
 
     def test_the_compare_names_the_branch_unescaped(self):
         gh = FakeGitHub(compare=forked(60), base_ref="v/2.5", default_branch="v/2.5")
-        go(gh)
+        self.note_for(gh)
         self.assertEqual(
             self.compares(gh), [f"/repos/o/r/compare/v/2.5...{SHA}?per_page=1"]
         )
@@ -813,8 +814,7 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
             ("r\u00e9lease", "the default branch"),
         ):
             gh = FakeGitHub(compare=forked(60), base_ref=ref, default_branch=ref)
-            go(gh)
-            self.assertIn(f"behind {shown}, so", gh.posted()[0]["body"])
+            self.assertIn(f"behind {shown}, so", self.note_for(gh))
 
     def test_the_note_starts_past_the_threshold(self):
         days = post_review.STALE_BASE_DAYS
@@ -875,14 +875,88 @@ class TestAStaleBaseAsksForARebase(unittest.TestCase):
         )
         self.assertEqual(post_review._GHSTACK_HEAD.pattern, pattern)
 
-    def test_a_failed_lookup_still_posts_the_review(self):
+    def test_a_failed_lookup_gives_no_note(self):
         gh = FakeGitHub(compare=GitHubError(500, "boom"))
         out = io.StringIO()
         with redirect_stdout(out):
-            go(gh)
-        (body,) = gh.posted()
-        self.assertNotIn("merge base", body["body"])
+            self.assertEqual(self.note_for(gh), "")
         self.assertIn("could not check the merge base's age", out.getvalue())
+
+
+def stale_row(model="ready_for_human_review", findings=None, note=NOTE):
+    """A terminal row as emit_row.py writes it for a stale base."""
+    r = row(verdict="changes_requested", findings=findings)
+    r["extra"] |= {"stale_base": note, "model_verdict": model}
+    return r
+
+
+class TestAStaleBaseRequestsChanges(unittest.TestCase):
+    MINOR = [{"path": "torch/x.py", "line": 3, "severity": "minor", "message": "Nit."}]
+
+    def test_a_clean_review_of_a_stale_pr_requests_changes_with_the_note(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        go(gh, stale_row(findings=self.MINOR))
+        (body,) = gh.posted()
+        self.assertEqual(body["event"], "REQUEST_CHANGES")
+        self.assertIn("changes requested before human review", body["body"])
+        self.assertIn(
+            f"One bug.\n\n{post_review.STALE_BASE_TAG}\n{NOTE}\n", body["body"]
+        )
+        # The model's minor finding stays non-blocking: folded, not on the line.
+        self.assertNotIn("comments", body)
+        self.assertIn("1 non-blocking finding", body["body"])
+        # Not clean, so the earlier change request is not dismissed.
+        self.assertFalse([c for c in gh.writes("PUT") if c[1].endswith("/dismissals")])
+
+    def test_a_blocking_review_of_a_stale_pr_keeps_its_findings_and_adds_the_note(self):
+        gh = FakeGitHub()
+        go(gh, stale_row(model="changes_requested", findings=None))
+        (body,) = gh.posted()
+        self.assertEqual(body["event"], "REQUEST_CHANGES")
+        (c,) = body["comments"]
+        self.assertIn("Off by one.", c["body"])
+        self.assertIn(NOTE, body["body"])
+
+    def test_a_malformed_note_is_ignored(self):
+        for extra in (
+            {"stale_base": 1, "model_verdict": "ready_for_human_review"},
+            {"stale_base": "a\nb", "model_verdict": "ready_for_human_review"},
+            {"stale_base": NOTE, "model_verdict": "approve"},
+        ):
+            r = row(verdict="changes_requested")
+            r["extra"] |= extra
+            gh = FakeGitHub()
+            go(gh, r)
+            self.assertNotIn(post_review.STALE_BASE_TAG, gh.posted()[0]["body"])
+
+
+class TestStaleBaseModeWritesTheNote(unittest.TestCase):
+    ENV = {"GH_TOKEN": "t", "REPO": "o/r", "PR_NUMBER": "1", "REVIEWED_SHA": SHA}
+
+    def run_mode(self, gh):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_file = Path(tmp) / "stale-base.txt"
+            argv = ["post_review.py", "--stale-base", str(out_file)]
+            with (
+                mock.patch.dict(post_review.os.environ, self.ENV, clear=True),
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(post_review, "GitHub", return_value=gh),
+                redirect_stdout(io.StringIO()) as log,
+            ):
+                rc = post_review.main()
+            text = out_file.read_text() if out_file.exists() else None
+        return rc, text, log.getvalue()
+
+    def test_it_writes_the_note_or_nothing(self):
+        stale = FakeGitHub(compare=forked(60, behind_by=3801))
+        self.assertEqual(self.run_mode(stale)[:2], (0, NOTE))
+        self.assertEqual(self.run_mode(FakeGitHub(compare=forked(1)))[:2], (0, ""))
+
+    def test_a_failed_pr_fetch_writes_no_file_and_warns(self):
+        gh = Canned(GitHubError(500, "down"))
+        rc, text, log = self.run_mode(gh)
+        self.assertEqual((rc, text), (0, None))
+        self.assertIn("merge base not checked", log)
 
 
 class TestNothingIsPosted(unittest.TestCase):
@@ -2345,6 +2419,15 @@ class TestWorkflowWiring(unittest.TestCase):
         )
         self.assertIn("REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}", step)
         self.assertIn("pull-requests: write", publish.split("steps:", 1)[0])
+
+    def test_the_merge_base_is_checked_before_the_row_is_written(self):
+        publish = WORKFLOW.read_text().split("\n  publish:\n", 1)[1]
+        before, row_step = publish.split("- name: Record terminal row", 1)
+        check = before.split("- name: Check the merge base's age", 1)[1]
+        self.assertIn("post_review.py --stale-base stale-base.txt", check)
+        self.assertIn("REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}", check)
+        row_step = row_step.split("\n      - name:", 1)[0]
+        self.assertIn("--stale-base-file stale-base.txt", row_step)
 
 
 if __name__ == "__main__":

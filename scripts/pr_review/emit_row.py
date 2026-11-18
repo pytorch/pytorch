@@ -33,11 +33,16 @@ The row is deliberately keyed and versioned for reuse: the interim GitHub
 Actions harness and the credential-less sandbox that replaces it write the SAME
 shape, distinguished by ``harness``, so the two eras stay comparable. ``extra``
 is the escape hatch for anything we learn we need later without re-cutting the
-table. Two keys today, both only on a succeeded review: ``findings``, the
+table. Its keys, all only on a succeeded review: ``findings``, the
 sanitized findings as a JSON array, which Dr.CI renders under the verdict (a
-finding on a file the PR deletes carries that file's pre-deletion line number); and
+finding on a file the PR deletes carries that file's pre-deletion line number);
 ``findings_dropped_at_publish``, present only when the publish-side re-check
-dropped some, so ``findings_count`` can exceed the array's length.
+dropped some, so ``findings_count`` can exceed the array's length; and
+``stale_base`` with ``model_verdict``, present only when the PR's merge base is
+stale (post_review.py --stale-base). Then ``verdict`` is ``changes_requested``
+whatever the model said, so the PR is not handed to a human until it is rebased,
+``stale_base`` is the rebase note post_review.py posts, and ``model_verdict`` is
+the model's own verdict.
 """
 
 from __future__ import annotations
@@ -239,6 +244,18 @@ def usage_metrics(path: str) -> dict:
     }
 
 
+def read_stale_base(path: str) -> str:
+    """The rebase note, or "" if there is none or it is not one line of text.
+
+    Written in this job by post_review.py, not by the model; the shape check
+    keeps a malformed file from putting anything else in the row."""
+    try:
+        note = Path(path).read_text().strip() if path else ""
+    except OSError:
+        return ""
+    return note if note.isprintable() and len(note) <= 1000 else ""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--phase", required=True, choices=["started", "terminal"])
@@ -252,6 +269,11 @@ def main() -> int:
         "--status",
         default="",
         help="override the terminal status (e.g. skipped_stale) when no verdict file exists",
+    )
+    ap.add_argument(
+        "--stale-base-file",
+        default="",
+        help="post_review.py --stale-base output; non-empty means the base is stale",
     )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -310,6 +332,11 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 row["extra"]["findings_dropped_at_publish"] = str(dropped_at_publish)
+        stale = read_stale_base(args.stale_base_file)
+        if status == "succeeded" and stale:
+            row["extra"]["stale_base"] = stale
+            row["extra"]["model_verdict"] = row["verdict"]
+            row["verdict"] = "changes_requested"
         row["findings_dropped"] = as_int(str(verdict.get("findings_dropped", 0)))
         row["failure_detail"] = safe_detail(verdict.get("failure_detail"))
         row["reasoning_uri"] = env("REASONING_URI")
