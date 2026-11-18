@@ -7129,6 +7129,8 @@ def _tdm_fake_kernel(**overrides):
     analysis into its persistent-reduction and combo-kernel branches and then
     fails on arithmetic against Mock objects.
     """
+    from torch._inductor.codegen.simd import IterationRangesRoot
+
     kernel = mock.Mock(
         no_x_dim=False,
         persistent_reduction=False,
@@ -7137,6 +7139,19 @@ def _tdm_fake_kernel(**overrides):
         fixed_config=None,
         tma_min_block_sizes={},
     )
+    kernel.range_trees = [
+        IterationRangesRoot(
+            "xindex",
+            sympy.Integer(1024),
+            "x",
+            0,
+            kernel,
+            is_loop=False,
+            tensor_dim=0,
+            grid_dim=0,
+            has_zdim=False,
+        )
+    ]
     kernel.max_block.return_value = 1024
     kernel.index_to_str.side_effect = str
     kernel.features.strict_reduction_rblock.return_value = 0
