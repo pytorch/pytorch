@@ -11,6 +11,10 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.vm.configure
+```
+
+```{eval-rst}
 .. autodata:: torch.vm.DefaultCFGPasses
 ```
 

@@ -32,6 +32,15 @@ A pass that has a setting is made with it::
 
     # loops of up to 16 iterations, where the default is 8
     cfg_passes = (torch.vm.inlining_pass(), torch.vm.loop_unrolling_pass(16))
+
+:func:`configure` makes the keyword arguments for the default passes with
+some of them set differently::
+
+    passes = torch.vm.configure(loop_unrolling_pass=16)
+
+
+    @torch.vm(**passes)
+    def forward(model, x): ...
 """
 
 import sys
@@ -60,6 +69,7 @@ __all__ = [
     "FAST",
     "Mismatch",
     "Unsupported",
+    "configure",
     "dce_pass",
     "fold_pass",
     "fuse_checked",
@@ -315,6 +325,96 @@ def vm(
         DefaultBlockPasses if block_passes is None else block_passes,
     )
     return _rewrite(fn, passes=passes, **options)
+
+
+# The passes that configure names, in the place each has in its list.
+_CFG = ("inlining_pass", "loop_unrolling_pass", "module_shortcuts_pass")
+_BLOCK = (
+    "graphs_pass",
+    "resolve_dispatch_pass",
+    "tensor_accessors_pass",
+    "method_calls_pass",
+    "narrow_dims_pass",
+    "fold_pass",
+    "dce_pass",
+)
+_OPTIONS = (
+    "fallback",
+    "skip_autograd",
+    "unboxed",
+    "callees",
+    "demote",
+    "max_versions",
+    "max_respecializations",
+    "keep_memory",
+)
+
+
+def configure(
+    preset: Mapping[str, Any] | None = None, /, **settings: Any
+) -> dict[str, Any]:
+    """The keyword arguments of ``torch.vm`` for the default passes, with
+    some of them set differently::
+
+        passes = torch.vm.configure(loop_unrolling_pass=16)
+
+
+        @torch.vm(**passes)
+        def forward(model, x): ...
+
+    Args:
+        preset: what to start from instead of the defaults: a preset such as
+            :data:`FAST`, or what an earlier call returned.
+        settings: per pass, by the name of the function that makes it, what
+            to make it with: one argument (``loop_unrolling_pass=16``,
+            ``graphs_pass="aot_eager"``), a tuple of arguments, a dict of
+            keyword arguments, ``True`` for the pass as it comes, and
+            ``False`` or ``None`` to leave it out. A pass that is in a list
+            keeps its place there; one that is not goes where it belongs
+            (``graphs_pass`` first, ``narrow_dims_pass`` in front of
+            ``fold_pass``). Any other name is an option of ``torch.vm``
+            (``demote=False``) and is handed through.
+
+    Returns:
+        A dict with ``cfg_passes``, ``block_passes`` and the options given.
+    """
+    found = dict(preset) if preset is not None else {}
+    cfg = list(found.get("cfg_passes", DefaultCFGPasses))
+    block = list(found.get("block_passes", DefaultBlockPasses))
+    module = sys.modules[__name__]
+    for name, value in settings.items():
+        if name in _OPTIONS:
+            found[name] = value
+            continue
+        if name not in _CFG and name not in _BLOCK:
+            known = ", ".join((*_CFG, *_BLOCK, *_OPTIONS))
+            raise TypeError(f"configure() does not know {name!r}; it knows {known}")
+        passes, order = (cfg, _CFG) if name in _CFG else (block, _BLOCK)
+        at = next((i for i, one in enumerate(passes) if _made_by(one) == name), None)
+        if value is None or value is False:
+            if at is not None:
+                del passes[at]
+            continue
+        make = getattr(module, name)
+        if value is True:
+            made = make()
+        elif isinstance(value, tuple):
+            made = make(*value)
+        elif isinstance(value, dict):
+            made = make(**value)
+        else:
+            made = make(value)
+        if at is not None:
+            passes[at] = made
+            continue
+        # In front of the first pass that comes after it in the usual order.
+        later = order[order.index(name) + 1 :]
+        at = next(
+            (i for i, one in enumerate(passes) if _made_by(one) in later), len(passes)
+        )
+        passes.insert(at, made)
+    found["cfg_passes"], found["block_passes"] = tuple(cfg), tuple(block)
+    return found
 
 
 class _CallableModule(types.ModuleType):
