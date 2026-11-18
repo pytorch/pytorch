@@ -424,11 +424,52 @@ class TestInnerTreeOrder(TestCase):
                     "with the launch-shape order while the gate was on",
                 )
 
-    @parametrize("name", ["strided", "welford_strided", "full_strided", "multidim"])
+    def test_pitched_and_channels_last_rows_take_the_row_order(self):
+        # TI views both as (rows, N) at a runtime pitch: the row DAG serves them with the
+        # packed copy's bits (the indexed decode would match the bits too, so check the
+        # caches).
+        base = torch.randn(64, 1032, device="cuda")
+        cl = torch.randn(4, 16, 6, 6, device="cuda")
+        cl = cl.contiguous(memory_format=torch.channels_last)
+        cases = (
+            ("pitched", base[:, :1024], base[:, :1024].contiguous()),
+            ("channels_last", cl, cl.permute(0, 2, 3, 1).reshape(-1, 16)),
+        )
+        for name, x, rows in cases:
+            with self.subTest(name):
+                key = f"inner_tree_test_rows_{name}"
+                want = self._run(T.SumOps, rows)
+                with _order_on():
+                    got = kg.reduce_dim(
+                        T.SumOps(acc=cutlass.Float32), key, x, [1], torch.float32
+                    )
+                self.assertEqual(
+                    got.reshape(-1).view(torch.int32), want.view(torch.int32)
+                )
+                self.assertTrue(any(key in k for k in rt._CACHE))
+                self.assertFalse(any(key in k for k in kg._COMPILE_CACHE))
+
+    @parametrize(
+        "name",
+        [
+            "strided",
+            "welford_strided",
+            "full_strided",
+            "multidim",
+            "offset",
+            "multirow",
+            "two_kept",
+            "bf16",
+            "var_mean",
+        ],
+    )
     def test_indexed_reduction_dims_preserve_the_order(self, name):
         """Preserve fold order when arbitrary reduction dimensions require index decode."""
         base = torch.randn(8, 65538, device="cuda")
         x2 = torch.randn(5, 7, 9, device="cuda")
+        x3 = torch.randn(3, 600, 50, device="cuda")
+        short = torch.randn(5, 300, device="cuda")
+        half = base.bfloat16()
         cases = {
             "strided": (T.SumOps, base[:, ::2], [1], base[:, ::2].contiguous()),
             "welford_strided": (
@@ -449,18 +490,49 @@ class TestInnerTreeOrder(TestCase):
                 [0, 2],
                 x2.permute(1, 0, 2).contiguous().reshape(7, 45),
             ),
+            "offset": (T.SumOps, base[1:5, 1::2], [1], base[1:5, 1::2].contiguous()),
+            "multirow": (T.SumOps, short, [0], short.t().contiguous()),
+            "two_kept": (T.SumOps, x3, [1], x3.permute(0, 2, 1).reshape(150, 600)),
+            "bf16": (T.SumOps, half[:, ::2], [1], half[:, ::2].contiguous()),
+            "var_mean": (T.VarMeanOps, base[:4, ::2], [1], base[:4, ::2].contiguous()),
         }
         trait, x, dims, rows = cases[name]
-        want = self._run(trait, rows)
+        key = f"inner_tree_test_indexed_{name}"
+        nouts = getattr(trait, "nouts", 1)
+        dtypes = [torch.float32] * nouts
+        op = trait(acc=cutlass.Float32)
+        want = rt.reduce_row_tile(op, key, rows, dtypes, nouts, order="inner_tree")
         with _order_on():
-            got = kg.reduce_dim(
-                trait(acc=cutlass.Float32),
-                f"inner_tree_test_indexed_{name}",
-                x,
-                dims,
-                torch.float32,
-            )
-        self.assertEqual(got.reshape(-1).view(torch.int32), want.view(torch.int32))
+            if nouts == 2:
+                got = kg.reduce_dim2(op, key, x, dims, dtypes)
+            else:
+                got = (kg.reduce_dim(op, key, x, dims, dtypes[0]),)
+        for g, w in zip(got, want, strict=True):
+            self.assertEqual(g.reshape(-1).view(torch.int32), w.view(torch.int32))
+
+    @parametrize("gate", [False, True])
+    def test_index_traits_number_reduced_dims_logically(self, gate):
+        """Index traits return ATen's index into the logical reshape even when TI merges
+        the reduced axes in storage order."""
+        y = torch.randn(48, 40, device="cuda")
+        z = torch.randn(6, 50, 7, device="cuda").permute(2, 0, 1)
+        cases = (
+            (y.t(), [0, 1], y.t().reshape(1, -1)),
+            (z, [0, 2], z.permute(1, 0, 2).reshape(6, -1)),
+        )
+        env = {rt._INNER_TREE_ENV: "1" if gate else "0"}
+        for x, dims, rows in cases:
+            with self.subTest(shape=tuple(x.shape), dims=dims):
+                with mock.patch.dict(os.environ, env):
+                    got = kg.reduce_dim(
+                        T.ArgMaxOps(acc=cutlass.Float32),
+                        "inner_tree_test_logical_index",
+                        x,
+                        dims,
+                        torch.int32,
+                    )
+                want = rows.argmax(1).to(torch.int32)
+                self.assertEqual(got.reshape(-1), want)
 
     def test_indexed_split_cache_distinguishes_partial_dtypes(self):
         """Compile distinct stage-one launchers when accumulator dtypes differ."""
