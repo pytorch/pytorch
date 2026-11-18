@@ -1093,6 +1093,136 @@ from user code:
             expected,
         )
 
+    def _make_scaled_tensor_cls(self, passthrough_op):
+        class ScaledTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, scale):
+                t = torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+                t._data = data
+                t._scale = scale
+                return t
+
+            def __repr__(self):
+                return f"ScaledTensor(shape={self.shape}, scale={self._scale})"
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"scale": self._scale}
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return ScaledTensor(inner_tensors["_data"], metadata["scale"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func.name() == passthrough_op:
+                    return super().__torch_dispatch__(func, types, args, kwargs or {})
+
+                def unwrap(t):
+                    return t._data if isinstance(t, ScaledTensor) else t
+
+                return func(
+                    *python_pytree.tree_map(unwrap, args),
+                    **python_pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        return ScaledTensor
+
+    def test_custom_op_tensor_subclass_data_ptr(self):
+        op_name = "mylib::error_messages_subclass_data_ptr"
+        ScaledTensor = self._make_scaled_tensor_cls(op_name)
+
+        @torch.library.custom_op(op_name, mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            if isinstance(x, ScaledTensor):
+                x._data.data_ptr()
+                return ScaledTensor(x._data * 2, x._scale)
+            return x * 2
+
+        @foo.register_fake
+        def _(x):
+            return x.new_empty(x.shape)
+
+        def fn(x):
+            return torch.ops.mylib.error_messages_subclass_data_ptr(x)
+
+        x = ScaledTensor(torch.randn(3), 0.5)
+        self.assertExpectedInlineMunged(
+            TorchRuntimeError,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(x),
+            """\
+Custom op accessed data of a Tensor subclass wrapping FakeTensors
+  Explanation: A custom op accessed a data pointer while one of its inputs is a Tensor subclass wrapping FakeTensors. Either the subclass's `__torch_dispatch__` passed the op through, so the op's own implementation ran on fake data instead of its registered fake implementation, or the fake implementation itself accessed a data pointer. Tensor subclasses are desugared into plain tensors only in the compiled graph, not while Dynamo traces the op.
+  Hint: Register a rule for this op and subclass with `torch.library.register_torch_dispatch` that unwraps the subclass, so the fake implementation runs.
+  Hint: Alternatively, make the subclass's `__torch_dispatch__` unwrap its inputs for this op.
+  Hint: For a Python custom op, handle subclass inputs that wrap FakeTensors in its implementation.
+  Hint: If the fake implementation accesses a data pointer, remove that access: fake implementations must not read data.
+
+  Developer debug context: mylib.error_messages_subclass_data_ptr
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb8797.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return torch.ops.mylib.error_messages_subclass_data_ptr(x)""",
+        )
+
+        with torch._dynamo.config.patch(suppress_errors=False):
+            with self.assertRaisesRegex(TorchRuntimeError, "Tensor subclass wrapping"):
+                torch.compile(fn, backend="eager")(x)
+
+        @foo.register_torch_dispatch(ScaledTensor)
+        def _(cls, func, types, args, kwargs):
+            return func(args[0]._data)
+
+        torch._dynamo.reset()
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(out, x._data * 2)
+
+    def test_custom_op_tensor_subclass_fake_impl_data_ptr(self):
+        ScaledTensor = self._make_scaled_tensor_cls(None)
+
+        @torch.library.custom_op(
+            "mylib::error_messages_subclass_fake_data_ptr", mutates_args=()
+        )
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @foo.register_fake
+        def _(x):
+            x.data_ptr()
+            return x.new_empty(x.shape)
+
+        def fn(x):
+            return torch.ops.mylib.error_messages_subclass_fake_data_ptr(x)
+
+        x = ScaledTensor(torch.randn(3), 0.5)
+        with torch._dynamo.config.patch(suppress_errors=False):
+            for fullgraph in (True, False):
+                with self.assertRaisesRegex(
+                    TorchRuntimeError, "fake implementation itself accessed"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=fullgraph)(x)
+
+    def test_custom_op_plain_tensor_data_ptr(self):
+        @torch.library.custom_op(
+            "mylib::error_messages_plain_data_ptr", mutates_args=()
+        )
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @foo.register_fake
+        def _(x):
+            x.data_ptr()
+            return x.new_empty(x.shape)
+
+        def fn(x):
+            return torch.ops.mylib.error_messages_plain_data_ptr(x)
+
+        with self.assertRaisesRegex(TorchRuntimeError, "wrap the custom kernel"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
     def test_fx_node_error_bad_user_code(self):
         def fn(x, y):
             return x + y

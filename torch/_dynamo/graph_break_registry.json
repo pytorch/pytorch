@@ -3605,6 +3605,19 @@
       ]
     }
   ],
+  "GB8797": [
+    {
+      "Gb_type": "Custom op accessed data of a Tensor subclass wrapping FakeTensors",
+      "Context": "{node.target}",
+      "Explanation": "A custom op accessed a data pointer while one of its inputs is a Tensor subclass wrapping FakeTensors. Either the subclass's `__torch_dispatch__` passed the op through, so the op's own implementation ran on fake data instead of its registered fake implementation, or the fake implementation itself accessed a data pointer. Tensor subclasses are desugared into plain tensors only in the compiled graph, not while Dynamo traces the op.",
+      "Hints": [
+        "Register a rule for this op and subclass with `torch.library.register_torch_dispatch` that unwraps the subclass, so the fake implementation runs.",
+        "Alternatively, make the subclass's `__torch_dispatch__` unwrap its inputs for this op.",
+        "For a Python custom op, handle subclass inputs that wrap FakeTensors in its implementation.",
+        "If the fake implementation accesses a data pointer, remove that access: fake implementations must not read data."
+      ]
+    }
+  ],
   "GB0195": [
     {
       "Gb_type": "issubclass() with non-constant arguments",

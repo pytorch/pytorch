@@ -4287,6 +4287,31 @@ def get_fake_value(
         tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
 
 
+def _is_subclass_data_ptr_error_in_custom_op(
+    node: torch.fx.Node, cause: BaseException, args: Any, kwargs: Any
+) -> bool:
+    from torch._library.utils import parse_namespace
+    from torch._subclasses.fake_impls import _is_builtin_namespaces
+
+    target = node.target
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        namespace = parse_namespace(target._qualified_op_name)[0]
+    elif isinstance(target, torch._ops.OpOverload):
+        namespace = target.namespace
+    else:
+        return False
+    return (
+        node.op == "call_function"
+        and namespace not in _is_builtin_namespaces
+        # Message from throwNullDataPtrError in c10/core/StorageImpl.cpp. The
+        # "(e.g." suffix excludes the "doesn't have storage" variant.
+        and str(cause).startswith("Cannot access data pointer of Tensor (e.g.")
+        and any(
+            is_traceable_wrapper_subclass(t) for t in pytree.tree_leaves((args, kwargs))
+        )
+    )
+
+
 def _get_fake_value_impl(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4541,6 +4566,28 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
+        elif _is_subclass_data_ptr_error_in_custom_op(node, cause, args, kwargs):
+            record_op()
+            # Stay a hard error: the data pointer may have been read by the
+            # op's own fake impl, which an eager fallback would hide.
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="Custom op accessed data of a Tensor subclass wrapping FakeTensors",
+                    context=f"{node.target}",
+                    explanation="A custom op accessed a data pointer while one of its inputs is a Tensor subclass wrapping FakeTensors. "
+                    "Either the subclass's `__torch_dispatch__` passed the op through, so the op's own implementation ran on fake data "
+                    "instead of its registered fake implementation, or the fake implementation itself accessed a data pointer. "
+                    "Tensor subclasses are desugared into plain tensors only in the compiled graph, not while Dynamo traces the op.",
+                    hints=[
+                        "Register a rule for this op and subclass with `torch.library.register_torch_dispatch` that unwraps the subclass, so the fake implementation runs.",
+                        "Alternatively, make the subclass's `__torch_dispatch__` unwrap its inputs for this op.",
+                        "For a Python custom op, handle subclass inputs that wrap FakeTensors in its implementation.",
+                        "If the fake implementation accesses a data pointer, remove that access: fake implementations must not read data.",
+                    ],
+                    from_exc=cause,
+                )
+            )
+            raise AssertionError("should not be reachable") from None
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         from .exc import (
             FakeTensorObservedException,
