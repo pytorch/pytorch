@@ -3,6 +3,12 @@
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>
 
+#ifdef _WIN32
+#include <c10/util/win32-headers.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <vector>
 
 namespace c10::xpu {
@@ -352,15 +358,12 @@ void register_host_memory(void* ptr, size_t size) {
 void unregister_host_memory(void* ptr) {
 #if SYCL_COMPILER_VERSION >= 20260200
   TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
-  static bool _ [[maybe_unused]] = []() -> bool {
-    TORCH_CHECK(
-        get_device_context().get_platform().has(
-            sycl::aspect::ext_oneapi_register_host_memory),
-        "Requires the ext_oneapi_register_host_memory extension, "
-        "which is not supported on this device. ",
-        "Please upgrade to a newer driver.");
-    return true;
-  }();
+  TORCH_CHECK(
+      get_device_context().get_platform().has(
+          sycl::aspect::ext_oneapi_register_host_memory),
+      "Requires the ext_oneapi_register_host_memory extension, "
+      "which is not supported on this device. ",
+      "Please upgrade to a newer driver.");
   sycl::ext::oneapi::experimental::unregister_host_memory(
       ptr, get_device_context());
 #else

@@ -1984,7 +1984,7 @@ if __name__ == "__main__":
                 "register_host_memory is not supported for the current SYCL compiler version",
             ):
                 pin_memory_utils.pin_memory(a.data_ptr(), a.nbytes)
-                return
+            return
 
         self.assertFalse(a.is_pinned())
         pin_memory_utils.pin_memory(a.data_ptr(), a.nbytes)
