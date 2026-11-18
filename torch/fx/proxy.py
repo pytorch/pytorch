@@ -5,14 +5,12 @@ import enum
 import inspect
 import logging
 import operator
-import sys
 import traceback
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, cast, TypeVar
-from typing_extensions import Never
+from typing import Any, cast, Never, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -690,14 +688,9 @@ class Proxy:
         if calling_frame is None:
             raise AssertionError("frame.f_back is None")
         inst_list = list(dis.get_instructions(calling_frame.f_code))
-        if sys.version_info >= (3, 11):
-            from bisect import bisect_left
+        from bisect import bisect_left
 
-            inst_idx = bisect_left(
-                inst_list, calling_frame.f_lasti, key=lambda x: x.offset
-            )
-        else:
-            inst_idx = calling_frame.f_lasti // 2
+        inst_idx = bisect_left(inst_list, calling_frame.f_lasti, key=lambda x: x.offset)
         inst = inst_list[inst_idx]
         if inst.opname == "UNPACK_SEQUENCE":
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
@@ -718,12 +711,9 @@ class Proxy:
             if calling_frame is None:
                 raise AssertionError("frame.f_back is None")
             insts = list(dis.get_instructions(calling_frame.f_code))
-            if sys.version_info >= (3, 11):
-                from bisect import bisect_left
+            from bisect import bisect_left
 
-                cur = bisect_left(insts, calling_frame.f_lasti, key=lambda x: x.offset)
-            else:
-                cur = calling_frame.f_lasti // 2
+            cur = bisect_left(insts, calling_frame.f_lasti, key=lambda x: x.offset)
             inst = insts[cur]
 
             if inst.opname == "POP_JUMP_IF_TRUE":
