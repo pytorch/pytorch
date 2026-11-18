@@ -1060,19 +1060,23 @@ def rewritten(model_iter_fn):
     return found
 
 
-def settle_rewritten(fn, model, example_inputs, most=1000, seconds=600.0, calm=16):
+def settle_rewritten(
+    fn, model, example_inputs, most=1000, seconds=600.0, calm=16, **kwargs
+):
     """Calls what ``rewritten`` returned until it has stopped compiling and
     measuring: ``torch.rewrite`` compiles a region after some calls of it, and
     then times the function and what it calls against the interpreter for a
     while, one level of calls after the other: a training step, which goes
     through an optimizer, takes some hundred calls where a model's forward
     takes twenty. Over when ``calm`` calls in a row changed nothing; a call
-    that is slow is given fewer. Returns the number of calls that took, and
-    the time of one of the calm ones (0 if there was none)."""
+    that is slow is given fewer. ``kwargs`` are what the calls that will be
+    timed pass: an argument is part of what a region is compiled for. Returns
+    the number of calls that took, and the time of one of the calm ones (0 if
+    there was none)."""
     quiet, before, start, calls = 0, None, time.perf_counter(), 0
     calm_start = start
     while calls < most:
-        fn(model, example_inputs)
+        fn(model, example_inputs, **kwargs)
         calls += 1
         regions = torch.rewrite.regions(fn)
         now = (len(regions), sum(r.get("variants", 0) for r in regions))
@@ -3004,14 +3008,20 @@ class BenchmarkRunner:
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
-                for _ in range(measure_iters):
-                    fn(model, example_inputs)
                 if self.args.rewrite and mode == "dynamo":
                     # Its compile time is spread over the calls it takes to
-                    # settle, not all in the first one.
-                    calls, steady = settle_rewritten(fn, model, example_inputs)
-                    settled["calls"] = measure_iters + calls
-                    settled["steady"] = steady
+                    # settle, not all in the first one. They are made as the
+                    # timed ones will be: with another collect_outputs the
+                    # first timed call would compile its graph once more.
+                    settled["calls"], settled["steady"] = settle_rewritten(
+                        fn,
+                        model,
+                        example_inputs,
+                        collect_outputs=self.args.collect_outputs,
+                    )
+                else:
+                    for _ in range(measure_iters):
+                        fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
                 for _ in range(stabilization_iters):
