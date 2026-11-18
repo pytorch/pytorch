@@ -91,6 +91,8 @@ pub struct BlockState {
     pub entry_misses: u64,
     pub deopts: u64,
     pub rejected: Option<String>,
+    /// What a pass left here for its next run on this block.
+    pub note: Option<PyObj>,
 }
 
 pub struct State {
@@ -727,6 +729,43 @@ unsafe fn tick() -> bool {
 }
 
 thread_local! {
+    /// Above zero while a range of a block is being replayed for a trace:
+    /// the functions it calls are then left to the interpreter, whose calls
+    /// the tracer sees.
+    static REPLAY_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many blocks are running in the profiling tier on this thread, one
+    /// inside the other.
+    static PROFILING_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many blocks on this thread are in their profiling run: code that
+/// decides when to compile something uses it to let the outermost block go
+/// first.
+pub fn profiling_depth() -> usize {
+    PROFILING_DEPTH.with(|d| d.get())
+}
+
+/// Counts a block in the profiling tier for as long as it lives.
+struct Profiling(bool);
+
+impl Profiling {
+    fn enter(active: bool) -> Profiling {
+        if active {
+            PROFILING_DEPTH.with(|d| d.set(d.get() + 1));
+        }
+        Profiling(active)
+    }
+}
+
+impl Drop for Profiling {
+    fn drop(&mut self) {
+        if self.0 {
+            PROFILING_DEPTH.with(|d| d.set(d.get() - 1));
+        }
+    }
+}
+
+thread_local! {
     /// How many compiled functions are running on this thread, one inside the
     /// other.
     static DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -961,11 +1000,15 @@ impl Compiled {
     }
 
     pub fn new(
-        func: Function,
+        mut func: Function,
         options: Options,
         pipeline: Arc<Pipeline>,
         callees: Arc<Callees>,
     ) -> Compiled {
+        // One value no instruction of the function defines: where a pass can
+        // put a result it takes apart right away (see `Region.fuse`).
+        func.value_names.push(None);
+        func.nvalues += 1;
         let analysis = analysis::analyze(&func);
         let mut generic = Vec::with_capacity(func.blocks.len());
         for (b, block) in func.blocks.iter().enumerate() {
@@ -997,6 +1040,7 @@ impl Compiled {
                 entry_misses: 0,
                 deopts: 0,
                 rejected: None,
+                note: None,
             })
             .collect();
         let state = State {
@@ -1434,7 +1478,7 @@ impl Compiled {
     /// is bound to (null for a plain function): a function, a bound method,
     /// or an instance of a class whose `__call__` is a Python function.
     unsafe fn compiled_callee(&self, callee: Obj) -> Option<(*const Compiled, Obj, Obj)> {
-        if !self.options.callees {
+        if !self.options.callees || REPLAY_DEPTH.with(|d| d.get()) > 0 {
             return None;
         }
         let (func, receiver) = if ffi::PyFunction_Check(callee) != 0 {
@@ -1516,6 +1560,138 @@ impl Compiled {
                 None
             }
         }
+    }
+
+    /// The value that no instruction of the function defines.
+    pub fn scratch(&self) -> V {
+        self.func.nvalues - 1
+    }
+
+    /// The values a range of the generic instructions of a block takes from
+    /// before it, and the ones it defines that are needed after it.
+    pub fn range_io(&self, block: usize, lo: usize, hi: usize) -> (Vec<V>, Vec<V>) {
+        let insts = &self.func.blocks[block].insts;
+        let mut defined: Vec<V> = Vec::new();
+        let mut inputs: Vec<V> = Vec::new();
+        for inst in &insts[lo..hi] {
+            // A hold names values that may not exist yet (a local before its
+            // first assignment), so it does not make a value an input.
+            if !matches!(inst.op, Op::Hold(_)) {
+                inst.op.for_each_use(|v| {
+                    if v != UNDEF && v != NONE && !defined.contains(&v) && !inputs.contains(&v) {
+                        inputs.push(v);
+                    }
+                });
+            }
+            if inst.dst != NONE {
+                defined.push(inst.dst);
+            }
+        }
+        let mut needed: Vec<V> = Vec::new();
+        let mut need = |v: V| {
+            if defined.contains(&v) && !needed.contains(&v) {
+                needed.push(v);
+            }
+        };
+        for inst in &insts[hi..] {
+            inst.op.for_each_use(&mut need);
+        }
+        self.func.blocks[block].term.for_each_use(&mut need);
+        for v in self.analysis.live_out[block].iter() {
+            need(v);
+        }
+        // In the order they are defined.
+        let outputs = defined.into_iter().filter(|v| needed.contains(v)).collect();
+        (inputs, outputs)
+    }
+
+    /// Runs the generic instructions lo..hi of a block on the values in
+    /// `env`, a dict from value numbers to objects, which afterwards holds
+    /// the values that are still needed. With `traced`, what the
+    /// instructions call is left to the interpreter. On an error returns the
+    /// index of the instruction that raised it, with the error set.
+    pub unsafe fn replay(&self, block: usize, lo: usize, hi: usize, env: Obj, traced: bool) -> Result<(), usize> {
+        let insts = &self.generic[block].insts;
+        let nvalues = self.func.nvalues as usize;
+        let mut regs: Vec<Obj> = vec![null_mut(); nvalues + 1];
+        let mut pos: ffi::Py_ssize_t = 0;
+        let (mut key, mut value): (Obj, Obj) = (null_mut(), null_mut());
+        while ffi::PyDict_Next(env, &mut pos, &mut key, &mut value) != 0 {
+            let v = ffi::PyLong_AsSsize_t(key);
+            if v >= 0 && (v as usize) < nvalues {
+                regs[v as usize] = new_ref(value);
+            }
+        }
+        ffi::PyErr_Clear();
+        if traced {
+            REPLAY_DEPTH.with(|d| d.set(d.get() + 1));
+        }
+        let mut failed = None;
+        for (i, inst) in insts.iter().enumerate().take(hi).skip(lo) {
+            if !inst.op.is_replayable() {
+                set_error(ffi::PyExc_RuntimeError, "the instruction cannot be replayed".to_string());
+                failed = Some(i);
+                break;
+            }
+            match self.exec_op(&mut regs, &inst.op) {
+                Ok(obj) => {
+                    if inst.dst != NONE {
+                        capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
+                    } else {
+                        capi::release(obj);
+                    }
+                    for v in &inst.kills {
+                        capi::release(take(&mut regs, *v));
+                    }
+                }
+                Err(()) => {
+                    failed = Some(i);
+                    break;
+                }
+            }
+        }
+        if traced {
+            REPLAY_DEPTH.with(|d| d.set(d.get() - 1));
+        }
+        let raised = if failed.is_some() { ffi::PyErr_GetRaisedException() } else { null_mut() };
+        ffi::PyDict_Clear(env);
+        for v in 0..nvalues {
+            if regs[v].is_null() {
+                continue;
+            }
+            if failed.is_none() {
+                let object = self.obj(&mut regs, v as V);
+                let key = ffi::PyLong_FromSsize_t(v as isize);
+                if !object.is_null() && !key.is_null() {
+                    ffi::PyDict_SetItem(env, key, object);
+                }
+                xdecref(key);
+            }
+            capi::release(std::mem::replace(&mut regs[v], null_mut()));
+        }
+        match failed {
+            Some(i) => {
+                ffi::PyErr_SetRaisedException(raised);
+                Err(i)
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Specializes the block again, right away, from what its profiling runs
+    /// have seen so far: its versions are retired (the one that may be
+    /// running stays alive), and the pipeline runs over the block anew.
+    pub fn respecialize(&self, block: usize) {
+        {
+            let mut st = self.state.borrow_mut();
+            let bs = &mut st.blocks[block];
+            let old = std::mem::take(&mut bs.versions);
+            bs.retired.extend(old);
+            // One attempt for this, and one left so that this one may still
+            // put guards on what was observed.
+            bs.respec_left = bs.respec_left.max(2);
+        }
+        unsafe { self.specialize(block) };
     }
 
     /// `call` for the function that was handed to torch.cfg_compile, which
@@ -2246,6 +2422,20 @@ impl Compiled {
                 let builtin = callee == std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj;
                 let nargs = if *explicit || builtin { 2 } else { 0 };
                 checked(ffi::PyObject_Vectorcall(callee, args.as_ptr(), nargs, null_mut()))
+            }
+            Op::CallObject(callee, args) => {
+                let mut small: [Obj; 8] = [null_mut(); 8];
+                let mut big: Vec<Obj>;
+                let buf: &mut [Obj] = if args.len() <= small.len() {
+                    &mut small[..args.len()]
+                } else {
+                    big = vec![null_mut(); args.len()];
+                    &mut big[..]
+                };
+                for (i, v) in args.iter().enumerate() {
+                    buf[i] = self.obj(regs, *v);
+                }
+                checked(ffi::PyObject_Vectorcall(callee.as_ptr(), buf.as_ptr(), args.len(), null_mut()))
             }
             Op::GetLen(v) => {
                 let len = ffi::PyObject_Length(self.obj(regs, *v));
@@ -3057,6 +3247,7 @@ impl Compiled {
             }
 
             let (mut code, mut mode) = self.select(cur, regs, api);
+            let _profiling = Profiling::enter(mode == Mode::Profile);
             let mut pc: usize = 0;
             let next: usize = loop {
                 let mut resume: Option<usize> = None;

@@ -1323,6 +1323,135 @@ class TestCfgPasses(TestCase):
         self.assertIn("5 <= size(%x.1, 0) <= 5", text)
         self.assertEqual(block_stats(compiled, "profile_runs"), [2])
 
+    def test_pass_replaces_a_run_by_a_call(self):
+        # The pass has the VM call `run` where the block had its
+        # instructions; `run` gets the values the instructions took from
+        # before them and gives the ones that are needed after them.
+        made = []
+
+        class Run:
+            def __init__(self, replay):
+                self.replay = replay
+                self.inputs, self.outputs = replay.io(replay.start, replay.end)
+                self.calls = 0
+
+            def __call__(self, *args):
+                self.calls += 1
+                env = dict(zip(self.inputs, args))
+                self.replay.run(self.replay.start, self.replay.end, env)
+                return tuple(env[value] for value in self.outputs)
+
+        def replace(region):
+            insts = region.instructions()
+            if any(inst["op"] == "call_object" for inst in insts):
+                return False
+            work = [i for i, inst in enumerate(insts) if inst["op"] == "binary"]
+            if region.note is None:
+                self.assertTrue(all(insts[i]["replayable"] for i in work))
+                region.note = Run(region.replayer(work[0], work[-1] + 1))
+                made.append(region.note)
+            run = region.note
+            return region.fuse(run.replay.start, run.replay.end, run)
+
+        def f(x, y, k):
+            a = x * y + k
+            b = a - x
+            return a, b * 2
+
+        compiled = torch.cfg_compile(f, pipeline=Pipeline([replace]), fallback=False)
+        for k in range(6):
+            x, y = torch.randn(3), torch.randn(3)
+            self.assertEqual(compiled(x, y, k), f(x, y, k), atol=0, rtol=0)
+        (run,) = made
+        # The first call profiled the block; the others went through `run`.
+        self.assertEqual(run.calls, 5)
+        self.assertEqual(len(run.inputs), 3)
+        # What is returned, and `b`, which the block keeps alive to its end
+        # as the interpreter's frame would.
+        self.assertEqual(len(run.outputs), 3)
+        self.assertIn("call_object", compiled.dump())
+        self.assertEqual(run.replay.name, "TestCfgPasses.test_pass_replaces_a_run_by_a_call.<locals>.f (block 0)")
+        # Four operators and the constant one of them takes.
+        self.assertEqual(len(run.replay.text(run.replay.start, run.replay.end)), 5)
+
+    def test_replayed_error_names_its_instruction(self):
+        handles = []
+
+        def grab(region):
+            if not handles:
+                handles.append((region.replayer(0, len(region.instructions())), region.instructions()))
+            return False
+
+        def f(x, y):
+            a = x + 1
+            b = a @ y
+            return b - 1
+
+        compiled = torch.cfg_compile(f, pipeline=Pipeline([grab]), fallback=False)
+        compiled(torch.ones(2, 3), torch.ones(3, 2))
+        (replay, insts), = handles
+        binary = [i for i, inst in enumerate(insts) if inst["op"] == "binary"]
+        lo, hi = 0, binary[-1] + 1
+        inputs, outputs = replay.io(lo, hi)
+        self.assertEqual(len(inputs), 2)
+        env = dict(zip(inputs, (torch.ones(2, 3), torch.ones(3, 2))))
+        replay.run(lo, hi, env)
+        # The outputs are in the order they are defined: the result is last.
+        self.assertEqual(env[outputs[-1]], f(torch.ones(2, 3), torch.ones(3, 2)))
+        # The matrix product is the second of the three.
+        env = dict(zip(inputs, (torch.ones(2, 3), torch.ones(4, 2))))
+        with self.assertRaisesRegex(RuntimeError, "shapes cannot be multiplied") as caught:
+            replay.run(lo, hi, env)
+        self.assertEqual(caught.exception.cfg_index, binary[1])
+        with self.assertRaisesRegex(IndexError, "outside the range"):
+            replay.io(lo, hi + 100)
+
+    def test_settle_specializes_the_block_again(self):
+        seen = []
+
+        def note_taker(region):
+            seen.append(region.note)
+            if region.note is None:
+                region.note = [region.replayer(0, len(region.instructions()))]
+            return False
+
+        def f(x):
+            return x * 2
+
+        compiled = torch.cfg_compile(
+            f, pipeline=Pipeline([note_taker, *Pipeline.default().passes]), fallback=False
+        )
+        for _ in range(3):
+            self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
+        (note,) = [n for n in seen if n is not None][:1]
+        runs = len(seen)
+        note[0].settle("again")
+        # The pass ran on the block right away, and saw what was left for it.
+        self.assertGreater(len(seen), runs)
+        self.assertEqual(seen[-1], "again")
+        self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
+
+    def test_profiling_depth(self):
+        depths = []
+
+        def probe(x):
+            depths.append(cfg_rs.profiling_depth())
+            return x
+
+        def inner(x):
+            return probe(x) + 1
+
+        def outer(x):
+            return inner(x) * 2
+
+        compiled = torch.cfg_compile(outer, fallback=False, inline=False, callees=True)
+        for _ in range(3):
+            compiled(torch.ones(2))
+        # The first run of a block is its profiling run: on the first call
+        # that is outer's, inner's and the one of probe itself.
+        self.assertEqual(depths, [3, 0, 0])
+        self.assertEqual(cfg_rs.profiling_depth(), 0)
+
     def test_region_is_only_valid_during_the_pass(self):
         kept = []
 

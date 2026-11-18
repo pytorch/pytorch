@@ -30,8 +30,10 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyapi::register_call_shortcut, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::register_getattr_shortcut, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::clear_shortcuts, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::profiling_depth, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::plan_changed, m)?)?;
     m.add_class::<pyapi::CfgFunction>()?;
     m.add_class::<pyapi::Region>()?;
+    m.add_class::<pyapi::Replay>()?;
     Ok(())
 }
