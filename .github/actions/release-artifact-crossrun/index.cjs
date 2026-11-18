@@ -10,6 +10,8 @@ const ACTIVATION = require('./activation.json');
 const JOB = 'exact-owned-crossrun';
 const LEGACY_COMMIT = '65a9edc5881444af0b9093a5e628f2fe47ea3b2e';
 const WORKFLOW_NAME = 'CI security artifact cross-run canary';
+const MAX_PR_COMMITS = 250;
+const COMMITS_PER_PAGE = 100;
 
 function exactKeys(value, keys) {
   assert(value && typeof value === 'object' && !Array.isArray(value));
@@ -61,6 +63,7 @@ function configuration(value = ACTIVATION) {
     else {
       validateBinding(value.producer, 'producer', value.expected_pr);
       assert.notEqual(value.producer.run_id, value.rest_preflight.run_id);
+      assert.notEqual(value.producer.head, value.rest_preflight.head);
       assert.equal(value.producer.workflow_id, value.rest_preflight.workflow_id);
     }
   }
@@ -127,7 +130,67 @@ async function guardRuntime(config, cleanup = false, request = api) {
   return context;
 }
 
-function validateEarlierRun(run, job, binding, config) {
+function currentPr(pr, context, config) {
+  assert.equal(pr.number, config.expected_pr);
+  assert.equal(pr.user.login, 'ptdbot');
+  actor(pr.user, config);
+  assert.equal(pr.state, 'open');
+  assert.equal(pr.draft, true);
+  assert.equal(pr.head.repo.id, p.HEAD_REPOSITORY_ID);
+  assert.equal(pr.head.repo.full_name, p.HEAD_REPOSITORY);
+  assert.equal(pr.head.ref, p.BRANCH);
+  assert.equal(pr.head.sha, context.head);
+  assert.equal(pr.base.repo.id, p.REPOSITORY_ID);
+  assert.equal(pr.base.repo.full_name, p.REPOSITORY);
+  assert.equal(pr.base.ref, 'main');
+  assert(Number.isSafeInteger(pr.commits) && pr.commits > 0 && pr.commits <= MAX_PR_COMMITS);
+  return pr.commits;
+}
+
+function checkAncestry(heads, current) {
+  const options = {cwd: process.env.GITHUB_WORKSPACE, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']};
+  assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], options).trim(), current);
+  assert.equal(execFileSync('git', ['rev-parse', '--is-shallow-repository'], options).trim(), 'false', 'Phase history checkout must not be shallow');
+  for (const [index, head] of heads.entries()) {
+    assert.match(head, /^[0-9a-f]{40}$/);
+    assert.notEqual(head, current, 'Earlier phase must precede current head');
+    execFileSync('git', ['merge-base', '--is-ancestor', head, current], options);
+    if (index) execFileSync('git', ['merge-base', '--is-ancestor', heads[index - 1], head], options);
+  }
+}
+
+async function phaseHistory(config, context, request = api, ancestry = checkAncestry) {
+  assert.equal(context.pr, config.expected_pr);
+  assert.match(context.head, /^[0-9a-f]{40}$/);
+  const endpoint = `repos/${p.REPOSITORY}/pulls/${config.expected_pr}`;
+  const total = currentPr(await request(endpoint), context, config);
+  const commits = new Set();
+  let last;
+  for (let page = 1; commits.size < total; page++) {
+    assert(page <= Math.ceil(MAX_PR_COMMITS / COMMITS_PER_PAGE));
+    const items = await request(`${endpoint}/commits?per_page=${COMMITS_PER_PAGE}&page=${page}`);
+    assert(Array.isArray(items));
+    assert.equal(items.length, Math.min(COMMITS_PER_PAGE, total - commits.size));
+    for (const item of items) {
+      assert.match(item.sha, /^[0-9a-f]{40}$/);
+      assert(!commits.has(item.sha), 'Duplicate PR commit');
+      commits.add(item.sha);
+      last = item.sha;
+    }
+  }
+  assert.equal(last, context.head, 'PR commit list does not end at current head');
+  assert.equal(currentPr(await request(endpoint), context, config), total, 'PR history changed while reading');
+  const heads = [config.rest_preflight?.head, config.producer?.head].filter(Boolean);
+  assert.equal(new Set(heads).size, heads.length);
+  for (const head of heads) assert(commits.has(head), 'Earlier phase head missing from current PR');
+  ancestry(heads, context.head);
+  return {pr: config.expected_pr, current_head: context.head, heads};
+}
+
+function validateEarlierRun(run, job, binding, config, history) {
+  assert.equal(history.pr, config.expected_pr);
+  assert.match(history.current_head, /^[0-9a-f]{40}$/);
+  assert(history.heads.includes(binding.head), 'Earlier run lacks append-only PR history');
   assert.equal(run.id, binding.run_id);
   assert.equal(run.run_attempt, binding.attempt);
   assert.equal(run.workflow_id, binding.workflow_id);
@@ -145,14 +208,16 @@ function validateEarlierRun(run, job, binding, config) {
   actor(run.triggering_actor, config);
   assert.equal(run.actor.login, 'ptdbot');
   assert(Array.isArray(run.pull_requests));
-  const matches = run.pull_requests.filter(pr => pr.number === binding.pr);
-  assert.equal(matches.length, 1);
-  const pr = matches[0];
-  assert.equal(pr.head.sha, binding.head);
-  assert.equal(pr.head.ref, p.BRANCH);
-  assert.equal(pr.head.repo.id, p.HEAD_REPOSITORY_ID);
-  assert.equal(pr.base.ref, 'main');
-  assert.equal(pr.base.repo.id, p.REPOSITORY_ID);
+  if (run.pull_requests.length) {
+    const matches = run.pull_requests.filter(pr => pr.number === binding.pr);
+    assert.equal(matches.length, 1);
+    const pr = matches[0];
+    assert.equal(pr.head.sha, binding.head);
+    assert.equal(pr.head.ref, p.BRANCH);
+    assert.equal(pr.head.repo.id, p.HEAD_REPOSITORY_ID);
+    assert.equal(pr.base.ref, 'main');
+    assert.equal(pr.base.repo.id, p.REPOSITORY_ID);
+  }
   validateJob(job, binding);
   assert.equal(job.status, 'completed');
   assert.equal(job.conclusion, 'success');
@@ -172,13 +237,14 @@ function validateArtifact(item, expected, binding) {
   assert.equal(run.head_sha, binding.head);
 }
 
-async function verifyEarlier(binding, config, deleted, request = api) {
+async function verifyEarlier(binding, config, deleted, context, request = api, ancestry = checkAncestry) {
+  const history = await phaseHistory(config, context, request, ancestry);
   const [run, job, inventory] = await Promise.all([
     request(`repos/${p.REPOSITORY}/actions/runs/${binding.run_id}/attempts/${binding.attempt}`),
     request(`repos/${p.REPOSITORY}/actions/jobs/${binding.job_id}`),
     request(`repos/${p.REPOSITORY}/actions/runs/${binding.run_id}/artifacts?per_page=100`)
   ]);
-  validateEarlierRun(run, job, binding, config);
+  validateEarlierRun(run, job, binding, config, history);
   const expected = Object.values(binding.artifacts);
   assert(Array.isArray(inventory.artifacts));
   assert.equal(inventory.total_count, inventory.artifacts.length);
@@ -241,7 +307,7 @@ async function protocolOperation(mode, context, config) {
   }
   if (mode === 'protocol-produce') {
     assert.equal(config.phase, 'producer');
-    await verifyEarlier(config.rest_preflight, config, true);
+    await verifyEarlier(config.rest_preflight, config, true, context);
     return p.produce(context, service);
   }
   assert.equal(mode, 'protocol-cleanup');
@@ -270,8 +336,8 @@ async function main(mode) {
   const config = configuration();
   const context = await guardRuntime(config, mode === 'finish' || mode === 'protocol-cleanup');
   if (mode === 'guard') {
-    if (config.rest_preflight) await verifyEarlier(config.rest_preflight, config, true);
-    if (config.phase === 'consumer') await verifyEarlier(config.producer, config, false);
+    if (config.rest_preflight) await verifyEarlier(config.rest_preflight, config, true, context);
+    if (config.phase === 'consumer') await verifyEarlier(config.producer, config, false, context);
     p.initialize(context);
     console.log(JSON.stringify({operation: 'guard', context, node: process.version, node_executable: process.execPath, consumers: {legacy: LEGACY_COMMIT, modern: p.MODERN_COMMIT}, consumer_process_runtime: 'not observed'}));
     output('phase', config.phase);
@@ -296,7 +362,7 @@ async function main(mode) {
   }
   if (mode === 'verify') {
     assert.equal(config.phase, 'consumer');
-    await verifyEarlier(config.producer, config, false);
+    await verifyEarlier(config.producer, config, false, context);
     return p.verifyExtraction(context);
   }
   assert.equal(mode, 'finish');
@@ -306,7 +372,7 @@ async function main(mode) {
   fs.rmSync(p.fixtureRoot(context), {recursive: true});
 }
 
-module.exports = {JOB, LEGACY_COMMIT, WORKFLOW_NAME, configuration, validateBinding, validateJob, validateEarlierRun, validateArtifact, verifyEarlier, ordinaryPreflight, completed, ready, exactKeys};
+module.exports = {JOB, LEGACY_COMMIT, WORKFLOW_NAME, MAX_PR_COMMITS, COMMITS_PER_PAGE, configuration, validateBinding, validateJob, currentPr, checkAncestry, phaseHistory, validateEarlierRun, validateArtifact, verifyEarlier, ordinaryPreflight, completed, ready, exactKeys};
 if (require.main === module) main(process.argv[2] || process.env.INPUT_MODE).catch(() => {
   console.error('Cross-run artifact canary failed closed; raw service errors and credentials are not logged.');
   process.exitCode = 1;

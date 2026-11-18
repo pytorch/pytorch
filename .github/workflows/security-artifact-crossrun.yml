@@ -25,6 +25,7 @@ jobs:
         with:
           repository: ptdbot/pytorch
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify exact-owned draft PR and run
         id: guard
