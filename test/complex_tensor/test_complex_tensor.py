@@ -236,6 +236,34 @@ class TestComplexTensorGeneric(TestCase):
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
 
+    @parametrize("op_name", ["linspace", "logspace"])
+    @parametrize(
+        "start_is_tensor, end_is_tensor", [(True, True), (True, False), (False, True)]
+    )
+    def test_space_complex_endpoints(self, op_name, start_is_tensor, end_is_tensor):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        op = getattr(torch, op_name)
+        start = torch.tensor(1 - 2j, dtype=torch.complex64)
+        end = torch.tensor(-3 + 0.5j, dtype=torch.complex64)
+        if not start_is_tensor:
+            start = start.item()
+        if not end_is_tensor:
+            end = end.item()
+
+        def as_complex_tensor(x):
+            if isinstance(x, torch.Tensor):
+                return ComplexTensor.from_interleaved(x)
+            return x
+
+        xstart, xend = as_complex_tensor(start), as_complex_tensor(end)
+        expected = op(start, end, 5)
+        self.assertEqual(op(xstart, xend, 5), expected)
+
+        out = ComplexTensor.from_interleaved(torch.empty(5, dtype=torch.complex64))
+        self.assertIs(op(xstart, xend, 5, out=out), out)
+        self.assertEqual(out, expected)
+
     def test_as_strided_inplace_beyond_wrapper_storage(self):
         from torch._subclasses.complex_tensor import ComplexTensor
 
