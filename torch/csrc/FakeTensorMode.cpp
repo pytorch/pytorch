@@ -127,7 +127,13 @@ static int cpp_fake_tensor_mode_init(
       std::make_shared<c10::SafePyObject>(
           Py_NewRef(converter), getPyInterpreter()),
       config.attr("fake_tensor_allow_meta").cast<bool>(),
-      config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>());
+      config.attr("fake_tensor_allow_unsafe_data_ptr_access").cast<bool>(),
+      config.attr("fake_tensor_propagate_real_tensors").cast<bool>());
+  mode->avoid_device_init_ = py::module::import("torch._subclasses.fake_tensor")
+                                 .attr("_avoid_device_init")()
+                                 .cast<bool>();
+  mode->prefer_device_type_ = config.attr("fake_tensor_prefer_device_type")
+                                  .cast<std::optional<std::string>>();
   if (creation_traceback != Py_None) {
     mode->creation_traceback_ = std::make_shared<c10::SafePyObject>(
         Py_NewRef(creation_traceback), getPyInterpreter());
@@ -187,6 +193,11 @@ static PyObject* get_mode_pyobject(PyObject* self, void*) {
 }
 
 static PyGetSetDef mode_properties[] = {
+    {"avoid_device_init",
+     get_mode_field<&c10::FakeTensorMode::avoid_device_init_>,
+     nullptr,
+     nullptr,
+     nullptr},
     {"_creation_traceback",
      get_mode_pyobject<&c10::FakeTensorMode::creation_traceback_>,
      nullptr,
@@ -212,9 +223,24 @@ static PyGetSetDef mode_properties[] = {
      set_mode_field<&c10::FakeTensorMode::allow_non_fake_inputs_>,
      nullptr,
      nullptr},
+    {"allow_fallback_kernels",
+     get_mode_field<&c10::FakeTensorMode::allow_fallback_kernels_>,
+     set_mode_field<&c10::FakeTensorMode::allow_fallback_kernels_>,
+     nullptr,
+     nullptr},
+    {"propagate_real_tensors",
+     get_mode_field<&c10::FakeTensorMode::propagate_real_tensors_>,
+     set_mode_field<&c10::FakeTensorMode::propagate_real_tensors_>,
+     nullptr,
+     nullptr},
     {"epoch",
      get_mode_field<&c10::FakeTensorMode::epoch_>,
      set_mode_field<&c10::FakeTensorMode::epoch_>,
+     nullptr,
+     nullptr},
+    {"allow_scalar_outputs",
+     get_mode_field<&c10::FakeTensorMode::allow_scalar_outputs_>,
+     set_mode_field<&c10::FakeTensorMode::allow_scalar_outputs_>,
      nullptr,
      nullptr},
     {"fake_tensor_converter",

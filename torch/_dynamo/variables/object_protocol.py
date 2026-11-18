@@ -192,6 +192,14 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
+
+
+def type_is_immutable(obj_type: type, /) -> bool:
+    return bool(
+        type.__dict__["__flags__"].__get__(obj_type, type(obj_type))
+        & Py_TPFLAGS_IMMUTABLETYPE
+    )
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
@@ -2592,7 +2600,12 @@ def generic_getattr(
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
-            value = tx.output.side_effects.load_attr(obj, name)
+            is_module = isinstance(obj, variables.PythonModuleVariable)
+            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=is_module)
+            if isinstance(value, variables.DeletedVariable):
+                if default is _NO_DEFAULT:
+                    raise_observed_exception(AttributeError, tx)
+                return default  # type: ignore[return-value]
             # A pending store of a descriptor onto a class lands in cls.__dict__,
             # so reading it back has to run tp_descr_get the way type_getattro
             # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports
