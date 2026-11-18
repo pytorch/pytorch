@@ -18,7 +18,7 @@ pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
     let api = capsule.pointer() as *mut TcfgApi;
     if api.is_null() || unsafe { (*api).version } != TCFG_API_VERSION {
         return Err(PyRuntimeError::new_err(
-            "torch._C and the cfg_compile runtime were built from different sources",
+            "torch._C and the torch.vm runtime were built from different sources",
         ));
     }
     capi::set_api(api);
@@ -146,7 +146,7 @@ impl CfgFunction {
     }
 
     fn __repr__(&self) -> String {
-        format!("<cfg_compile function {}>", self.inner.func.qualname)
+        format!("<torch.vm function {}>", self.inner.func.qualname)
     }
 
     /// The names of the passes this function is specialized with, in order.

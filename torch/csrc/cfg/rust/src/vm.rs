@@ -912,7 +912,7 @@ impl Compiled {
                     None => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_size ran without its guard".to_string(),
+                            "torch.vm: tensor_size ran without its guard".to_string(),
                         );
                         Err(())
                     }
@@ -927,7 +927,7 @@ impl Compiled {
                     _ => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_dim ran without its guard".to_string(),
+                            "torch.vm: tensor_dim ran without its guard".to_string(),
                         );
                         Err(())
                     }
