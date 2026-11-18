@@ -13,6 +13,7 @@ from torch._native.ops.topk.flydsl_impl import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -505,25 +506,35 @@ class TestFlyDSLTopK(TestCase):
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
 
+    @parametrize(
+        "dtype,k", ((torch.float32, 64), (torch.float16, 257), (torch.int8, 1024))
+    )
+    @parametrize("largest", (False, True))
     @parametrize("deterministic", (False, True))
-    def test_radix_reuses_one_kernel_across_n(self, deterministic: bool):
-        # Change both the vector-loop and scalar-tail trip counts while reusing
-        # one kernel in each gather mode.
+    def test_radix_reuses_one_kernel_across_n_and_m(
+        self, dtype: torch.dtype, k: int, largest: bool, deterministic: bool
+    ):
+        # The second launch changes both rows and row length while reusing one
+        # kernel. Tied input makes the deterministic gather order observable.
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
-        k = 64
-        n0 = _test_n(k)
+        n0 = _test_n(k, dtype)
         n1 = 2 * n0 + 1
-        self.assertEqual(_expected_kernel(k, n0), "radix")
-        self.assertEqual(_expected_kernel(k, n1), "radix")
-        m = _test_m(k)
-        prior = torch.are_deterministic_algorithms_enabled()
-        try:
-            torch.use_deterministic_algorithms(deterministic)
-            for n in (n0, n1):
-                self._assert_topk_matches_aten(self._make_input(shape=(m, n)), k)
-        finally:
-            torch.use_deterministic_algorithms(prior)
+        m = _test_m(k, dtype)
+        self.assertEqual(_expected_kernel(k, n0, dtype), "radix")
+        self.assertEqual(_expected_kernel(k, n1, dtype), "radix")
+
+        with DeterministicGuard(deterministic):
+            for rows, n in ((m, n0), (m + 1, n1)):
+                x = _tied_input((rows, n), dtype)
+                with pn.flydsl.disabled():
+                    ref_v, ref_i = torch.topk(x, k, dim=-1, largest=largest)
+                got_v, got_i = torch.topk(x, k, dim=-1, largest=largest)
+                self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+                if deterministic:
+                    self.assertEqual(got_i, ref_i)
+                else:
+                    self.assertEqual(torch.gather(x, -1, got_i), got_v, atol=0, rtol=0)
 
         info = topk_cache_info("radix")
         self.assertEqual(info.misses, 1)

@@ -923,6 +923,8 @@ def _compile_radix_select_topk(
     del backend, device_index  # cache keys only; see _compile_register_topk
     input_2d, values_2d, indices_2d, rows_m, n, stream = compile_args
     launch = _build_radix_select_topk_module(k, deterministic, arch, spec)
+    # These marks make it safe to drop N from the cache key: without them the
+    # compiled input descriptor keeps the first length's shape and row stride.
     input_arg = (
         make_compile_arg(input_2d, read_only=True)
         .mark_shape_dynamic(1)
