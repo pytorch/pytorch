@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from .codegen.multi_kernel import MultiKernel
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
+    from .graph import GraphLowering
     from .memory import FreeableInputBuffer
     from .tiling_utils import CoalesceVarAnalysis
 
@@ -61,6 +62,7 @@ from .comm_analysis import (
     estimate_nccl_collective_runtime,
     estimate_nccl_collective_runtime_nccl_estimator,
 )
+from .cudagraph_utils import check_multiple_devices_or_any_cpu_nodes
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
@@ -78,7 +80,6 @@ from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
-    _unstable_customized_partition_wrapper,
     cache_on_self,
     cache_on_self_and_args,
     cmp,
@@ -6116,6 +6117,37 @@ class Scheduler:
     def count_kernel_nodes(nodes: Sequence[BaseSchedulerNode]) -> int:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
+    def _count_subgraph_kernel_nodes(self, subgraph: ir.Subgraph | None) -> int:
+        """Pre-fusion kernel estimate from the lowered body; building a Scheduler
+        would finalize the body's MultiTemplateBuffers in place."""
+        if subgraph is None or subgraph.graph is None:
+            return 0
+        cache = self._subgraph_kernel_count_cache
+        if (name := subgraph.graph.name) not in cache:
+            count = 0
+            for op in subgraph.graph.operations:
+                if not isinstance(op, ir.IRNode):
+                    continue
+                if nested_subgraphs := op.get_subgraphs():
+                    count += sum(
+                        map(self._count_subgraph_kernel_nodes, nested_subgraphs)
+                    )
+                elif not isinstance(op, ir.MultiOutput) and not op.is_no_op():
+                    count += 1
+            cache[name] = count
+        return cache[name]
+
+    def _count_partition_kernel_nodes(self, nodes: Sequence[BaseSchedulerNode]) -> int:
+        count = 0
+        for node in nodes:
+            region = self._get_invoke_subgraph_region(node)
+            if region is None:
+                count += not isinstance(node, NopKernelSchedulerNode)
+            elif node.node is region:
+                # The MultiOutputs unpacking a region's results count as 0.
+                count += self._count_subgraph_kernel_nodes(region.subgraph)
+        return count
+
     def _init(self, nodes: list[ir.Operation]) -> None:
         self._loop_mutation_trackers: list[_LoopMutationTracker] = []
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
@@ -6130,6 +6162,10 @@ class Scheduler:
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
         self._fusion_memory_state: FusionMemoryState | None = None
+        # Bodies are keyed by their qualified graph name, families by call site.
+        self._invoke_subgraph_body_skip_reason_cache: dict[str, str | None] = {}
+        self._subgraph_kernel_count_cache: dict[str, int] = {}
+        self._invoke_subgraph_family_skip_reason_cache: dict[str, str | None] = {}
 
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
@@ -6349,9 +6385,12 @@ class Scheduler:
 
         self.process_grouped_nodes()
 
+        # Preserve the config opt-in for this CUDA Graph optimization; a
+        # customized partition wrapper alone does not request reordering.
         if (
             # pyrefly: ignore[unbound-name]
             config.graph_partition
+            and V.graph.partition_plan.cudagraphs_per_partition
             # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
             # pyrefly: ignore[unbound-name]
@@ -12142,49 +12181,18 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def should_partition(self, node: BaseSchedulerNode) -> str | None:
-        """
-        Return the reason why we should partition the inductor graph on this node,
-        or None if the node is cudagraphable.
-        """
-
+    def _ir_node_cudagraph_skip_reason(self, ir_node: ir.Operation) -> str | None:
         # Allow users to manually specify if a node should be partitioned
         # Can only do this for FallbackKernels
-        ir_node = node.node
-        if isinstance(ir_node, torch._inductor.ir.FallbackKernel) and (
-            op := ir_node.op_overload
-        ):
-            op_overload_packet_name, op_overload_name = get_op_names(op)
+        if isinstance(ir_node, ir.FallbackKernel) and (op := ir_node.op_overload):
+            op_packet_name, op_name = get_op_names(op)
             if (
-                op_overload_packet_name in config.custom_should_partition_ops
-                or op_overload_name in config.custom_should_partition_ops
+                op_packet_name in config.custom_should_partition_ops
+                or op_name in config.custom_should_partition_ops
             ):
                 if not isinstance(op, torch._ops.OpOverload):
                     raise AssertionError("expected op to be a torch._ops.OpOverload")
-                return f"custom partition op: {op_overload_name}"
-
-        # When not using cudagraphs, keep all kernels in the `call` function
-        # instead of graph partition functions, since graph partition only brings
-        # benefit to cudagraph
-        if (
-            not torch._inductor.config.triton.cudagraphs
-            and _unstable_customized_partition_wrapper.wrapper is None
-        ):
-            return "partition includes all ops when cudagraphs is disabled"
-
-        if isinstance(node, FusedSchedulerNode):
-            for snode in node.snodes:
-                reason = self.should_partition(snode)
-                if reason:
-                    return reason
-            return None
-
-        if node.node is None:
-            raise AssertionError("expected node.node to be set")
-
-        if not node.is_gpu():
-            return f"{node.get_device()} ops"
-
+                return f"custom partition op: {op_name}"
         # Decided on the FX node so that MultiOutput children, which share their
         # parent's fx_node, are split together with it.
         if isinstance(ir_node, ir.DeviceCopy) or (
@@ -12193,25 +12201,152 @@ class Scheduler:
             and fx_node_crosses_devices(fx_node)
         ):
             return "cross-device ops"
-
-        if isinstance(node.node, ir.Switch):
+        if isinstance(ir_node, ir.Switch):
             return "Switch ops"
-
-        if getattr(node.node, "unbacked_bindings", None):
+        if getattr(ir_node, "unbacked_bindings", None):
             return "unbacked binding ops"
-
-        if is_cudagraph_unsafe_op(node.node):
+        if is_cudagraph_unsafe_op(ir_node):
             return "CUDAGraph-unsafe custom ops"
+        return None
 
+    def _subgraph_cudagraph_skip_reason(self, subgraph: ir.Subgraph) -> str | None:
+        if (graph := subgraph.graph) is None:
+            return None
+        cache = self._invoke_subgraph_body_skip_reason_cache
+        if graph.name not in cache:
+            patches = subgraph.inductor_config_patches
+            with config.patch(patches) if patches else contextlib.nullcontext():
+                cache[graph.name] = self._compute_subgraph_cudagraph_skip_reason(graph)
+        return cache[graph.name]
+
+    def _compute_subgraph_cudagraph_skip_reason(
+        self, graph: GraphLowering
+    ) -> str | None:
+        if graph.disable_cudagraphs_reason is not None:
+            return f"invoke_subgraph body: {graph.disable_cudagraphs_reason}"
+        # A body is never partitioned, so judge it by whole-graph rules. The
+        # mapping is copied because the check pops the entries it tolerates,
+        # meta among them -- a meta tensor implies no compute to capture.
+        if reason := check_multiple_devices_or_any_cpu_nodes(
+            dict(graph.device_node_mapping), cpu_nodes_partitioned_out=False
+        ):
+            return f"invoke_subgraph body: {reason}"
+        # An unsafe unbacked symint defined in the body is rejected with its
+        # defining op, and an outer one is caught on the call's operands.
+        for op in graph.operations:
+            if reason := self._ir_node_cudagraph_skip_reason(op):
+                return f"invoke_subgraph body: {reason}"
+            if config.triton.cudagraph_skip_dynamic_graphs:
+                symbol_uses = OrderedSet(op.get_free_symbol_uses())
+                for output in op.get_outputs():
+                    symbol_uses.update(get_layout_symints(output))
+                if filter_graph_level_symbols(symbol_uses):
+                    return "invoke_subgraph body: dynamic shape ops"
+            if isinstance(op, ir.IRNode):
+                for nested_subgraph in op.get_subgraphs():
+                    if reason := self._subgraph_cudagraph_skip_reason(nested_subgraph):
+                        return reason
+        return None
+
+    def _scheduler_node_cudagraph_skip_reason(
+        self, node: BaseSchedulerNode
+    ) -> str | None:
+        if node.node is None:
+            raise AssertionError("expected node.node to be set")
+        if not node.is_gpu():
+            return f"{node.get_device()} ops"
+        if reason := self._ir_node_cudagraph_skip_reason(node.node):
+            return reason
         if reason := self._uses_cudagraph_unsafe_unbacked_symint(node):
             return reason
-
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
             if filter_graph_level_symbols(get_scheduler_node_symbol_uses(node)):
                 return "dynamic shape ops"
-
         return None
+
+    def _invoke_subgraph_family_cudagraph_skip_reason(
+        self, node: BaseSchedulerNode, region: ir.InvokeSubgraph
+    ) -> str | None:
+        """Why one invoke_subgraph call cannot be captured, judged on its nodes
+        in the outer graph: the call and its MultiOutput nodes.
+
+        Those are separate scheduler nodes but must land in the same partition,
+        so they share one verdict: any of them off the GPU, using a
+        cudagraph-unsafe unbacked symint, or (under cudagraph_skip_dynamic_graphs)
+        having dynamic shapes rejects the whole call. Cached per call so every
+        node of the family gets the same answer. The body is checked separately
+        by _subgraph_cudagraph_skip_reason.
+        """
+        cache = self._invoke_subgraph_family_skip_reason_cache
+        if (region_name := region.get_name()) in cache:
+            return cache[region_name]
+        family: list[ir.OperationBuffer] = [region]
+        if region.outputs is not None:
+            family.extend(
+                output
+                for output in region.outputs
+                if isinstance(output, ir.MultiOutput)
+            )
+        reason = None
+        for ir_node in family:
+            family_node = (
+                node
+                if node.node is ir_node
+                else self.name_to_node[ir_node.get_operation_name()]
+            )
+            if reason := self._scheduler_node_cudagraph_skip_reason(family_node):
+                break
+        cache[region_name] = reason
+        return reason
+
+    @staticmethod
+    def _get_invoke_subgraph_region(
+        node: BaseSchedulerNode,
+    ) -> ir.InvokeSubgraph | None:
+        if isinstance(node.node, ir.InvokeSubgraph):
+            return node.node
+        if isinstance(node.node, ir.MultiOutput):
+            return next(
+                (i for i in node.node.inputs if isinstance(i, ir.InvokeSubgraph)),
+                None,
+            )
+        return None
+
+    def should_partition(self, node: BaseSchedulerNode) -> str | None:
+        """
+        Return the reason why we should partition the inductor graph on this node,
+        or None if the node is cudagraphable.
+        """
+        region = self._get_invoke_subgraph_region(node)
+        if (
+            region is not None
+            and V.graph.partition_plan.cudagraphs_per_partition
+            and config.triton.cudagraphs
+        ):
+            # invoke_subgraph is opaque to the outer scheduler, so the cudagraph
+            # checks have to run over the region body rather than the call node.
+            if region.subgraph is None:
+                raise AssertionError("expected invoke_subgraph to have a subgraph")
+            if reason := self._subgraph_cudagraph_skip_reason(region.subgraph):
+                return reason
+            return self._invoke_subgraph_family_cudagraph_skip_reason(node, region)
+
+        # When the partitions are not for CUDA Graphs, keep kernels in call();
+        # the whole callable may still be captured by post_compile.
+        if not V.graph.partition_plan.cudagraphs_per_partition:
+            return (
+                "partition includes all ops when the partitions are not for CUDA Graphs"
+            )
+
+        if isinstance(node, FusedSchedulerNode):
+            for snode in node.snodes:
+                reason = self.should_partition(snode)
+                if reason:
+                    return reason
+            return None
+
+        return self._scheduler_node_cudagraph_skip_reason(node)
 
     @cache_on_self
     def _get_cudagraph_unsafe_unbacked_symints(self) -> OrderedSet[sympy.Symbol]:
@@ -12738,7 +12873,7 @@ class Scheduler:
         if min_size > 0:
             for i, (partition, skip) in enumerate(zip(partitions, skip_cudagraphs)):
                 if not skip:
-                    kernel_count = self.count_kernel_nodes(partition)
+                    kernel_count = self._count_partition_kernel_nodes(partition)
                     if kernel_count < min_size:
                         skip_cudagraphs[i] = True
                         cudagraphs_log.debug(
@@ -12835,7 +12970,7 @@ class Scheduler:
             try:
                 return (
                     self._codegen_partitions()
-                    if torch._inductor.config.graph_partition
+                    if V.graph.partition_plan.uses_graph_partition
                     else self._codegen(self.nodes)
                 )
             finally:
