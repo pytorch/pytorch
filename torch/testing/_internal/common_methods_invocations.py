@@ -11726,13 +11726,6 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe
             # cast from a result of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
-            DecorateInfo(
-                unittest.skip("failed on xpu"),
-                "TestForeachDevice",
-                "test_foreach_norm_empty_tensor_inf_error",
-                device_type="xpu",
-                dtypes=floating_types_and(torch.bfloat16, torch.half),
-            ),
         ),
     ),
 ]
@@ -14074,12 +14067,6 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_out=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # Exception: Tensor-likes are not close!
-               # torch-xpu-ops: #3296
-               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive',
-                            device_type='xpu', dtypes=(torch.float16,)),
-            ),
            ),
     OpInfo('istft',
            dtypes=complex_types(),
@@ -18989,8 +18976,6 @@ op_db: list[OpInfo] = [
                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
            ],
            skips=(
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # test_out passes on MPS, which the expectedFailure above would report as an unexpected success
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
@@ -19398,8 +19383,7 @@ op_db: list[OpInfo] = [
                          DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-3)}), 'TestUnaryUfuncs'),
                          DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e1, rtol=1e-1),
                                                          torch.float32: tol(atol=1e-4, rtol=1e-2)}),
-                                      'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                      active_if=IS_WINDOWS),
+                                      'TestUnaryUfuncs', 'test_reference_numerics_normal'),
                      ),
                      skips=(
                          # Redundant tests
@@ -19410,7 +19394,7 @@ op_db: list[OpInfo] = [
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large'),
                      ),
-                     sample_kwargs=lambda device, dtype, input: ({'n': n_}, {'n': n_}),
+                     sample_kwargs=lambda device, dtype, input, n=n_: ({'n': n}, {'n': n}),
                      # polygamma functions have multiple singularities at x having non-positive integer value
                      reference_numerics_filter=NumericsFilter(condition=lambda x: (x < 0.1) & ((x - x.round()).abs() < 1e-4),
                                                               safe_val=1))
@@ -22979,7 +22963,7 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
         # (CompositeCompliantTensor, COW wrapper) or FakeTensor.
         supports_cow_input_no_materialize_forward=False,
         decorators=[
-            DecorateInfo(onlyCUDA),
+            DecorateInfo(onlyOn(["cuda", "xpu"])),
         ],
         skips=(
             DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
