@@ -1736,7 +1736,8 @@ class TestConvolutionNNDevice(NNTestCase):
         # ConvB propagation shouldn't return any of gradient
         test_conv_backward_output_mask([False, False, False])
 
-    def test_conv_double_backward_no_bias(self):
+    @skipMPS
+    def test_conv_double_backward_no_bias(self, device):
         kern = 3
         stride = 2
         chan_in, chan_out = 2, 4
@@ -1756,6 +1757,7 @@ class TestConvolutionNNDevice(NNTestCase):
             inp_size,
             dilation,
             no_weight,
+            device=device,
             use_bias=use_bias,
         )
         self.assertTrue(
@@ -1779,7 +1781,10 @@ class TestConvolutionNNDevice(NNTestCase):
             + str(dilation),
         )
 
-    def test_conv_double_backward_groups(self):
+    # cuDNN's grouped conv backward is nondeterministic, which gradcheck rejects.
+    @skipMPS
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    def test_conv_double_backward_groups(self, device):
         kern = 3
         stride = 1
         padding = 2
@@ -1800,6 +1805,7 @@ class TestConvolutionNNDevice(NNTestCase):
             dilation,
             no_weight,
             groups=groups,
+            device=device,
         )
         self.assertTrue(
             result,
@@ -1824,7 +1830,8 @@ class TestConvolutionNNDevice(NNTestCase):
             + str(groups),
         )
 
-    def test_conv_double_backward_stride(self):
+    @skipMPS
+    def test_conv_double_backward_stride(self, device):
         batch_size = 2
 
         # Cannot provide ggW when stride is > 1
@@ -1843,6 +1850,7 @@ class TestConvolutionNNDevice(NNTestCase):
                     inp_size,
                     dilation,
                     no_weight,
+                    device=device,
                 )
 
     @dtypes(torch.float, torch.cfloat)
@@ -3789,7 +3797,6 @@ class TestConvolutionNNDevice(NNTestCase):
     @expectedFailureMeta
     @expectedFailureXPU
     @expectedFailureMPS
-    @onlyNativeDeviceTypes
     def test_slow_conv_dilated2d_unbatched(self, device):
         # Direct op call to guarantee the slow path.
         input = torch.randn(2, 5, 5, dtype=torch.double, device=device)
@@ -3809,7 +3816,6 @@ class TestConvolutionNNDevice(NNTestCase):
     @expectedFailureMeta
     @expectedFailureXPU
     @expectedFailureMPS
-    @onlyNativeDeviceTypes
     def test_slow_conv_dilated3d_unbatched(self, device):
         # Direct op call to guarantee the slow path.
         input = torch.randn(2, 5, 5, 5, dtype=torch.double, device=device)
