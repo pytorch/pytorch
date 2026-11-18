@@ -976,11 +976,11 @@ class PaddingTest(TestCaseBase):
         with config.patch({"comprehensive_padding": True}):
             compiled = torch.compile(program, backend="inductor")(x.clone())
 
-        # This reduction sums ~100k fp32 values, so eager and inductor differ
-        # only by floating-point accumulation order, which slightly exceeds the
-        # default fp32 tolerance on some backends (e.g. ROCm MI200). The
-        # regression guarded here is a stride mismatch during compilation, not
-        # the last-ULP numerics, so a relaxed tolerance is appropriate.
+        # Each output sums ~100k fp32 values and eager and inductor accumulate
+        # in different orders; on MI200 the gap comes within a few percent of
+        # the default fp32 tolerance, so it fails intermittently. The bug this
+        # guards (#179931) read the wrong elements and is off by far more than
+        # this tolerance.
         self.assertEqual(eager, compiled, atol=1e-3, rtol=1e-4)
 
 
