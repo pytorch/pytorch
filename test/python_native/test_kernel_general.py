@@ -10,6 +10,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
@@ -120,6 +121,20 @@ class TestKernelGeneral(TestCase):
             )
             kg._launch(wide_output, ("wide", "wide_output"), [x], [out])
         self.assertEqual(out, x)
+
+    @largeTensorTest("24GB", device="cuda")
+    def test_wide_outputs_store_every_output(self):
+        """Bound 2^31 outputs by the output's full 64-bit size: a 64-bit extent's
+        shape[0] reads back as Int32 and wraps negative, which stored nothing."""
+        x = torch.ones(2**31, 2, device="cuda", dtype=torch.float16)
+        out = torch.empty(2**31, device="cuda")
+        red, kept = kg._ti_pairs(x, kg._probe(x, {1}))
+        trait = T.SumOps(acc=cutlass.Float32)
+        op = kg.ReduceBlock(trait, count=2, num_o=2**31, red_pairs=red, kept_pairs=kept)
+        kg._launch(op, ("wide", "wide_outputs"), [kg._flat(x)], [out])
+        with torch.backends.python_native.cutedsl.disabled():
+            lo, hi = out.aminmax()
+        self.assertEqual((lo.item(), hi.item()), (2.0, 2.0))
 
     def test_two_stage_row_ragged_split(self):
         # A prime row requires ragged stage-1 chunks that stop at row boundaries.
