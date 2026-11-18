@@ -1431,6 +1431,8 @@ class TestMatmulCuda(InductorTestCase):
             # matches ck_tile::GroupedGemmKernel and the StreamingGroupedGemmKernel built on it
             "ck_tile": ("ROCM_ALLOW_GROUP_GEMM_CK_TILE", "GroupedGemmKernel", "GroupedGemmKernel"),
         }[backend]
+        # ck_tile is on by default and is tried before ck, so the other backend is turned off
+        other_env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK_TILE", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK"}[backend]
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
@@ -1471,9 +1473,9 @@ class TestMatmulCuda(InductorTestCase):
                 kernels.add(evt.key)
             return kernels
 
-        with rocm_group_gemm_ck_env("0", var=env_var):
+        with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env("0", var=env_var):
             self.assertTrue(uses_hipblaslt(collect_kernel_names(equal_k=True)))
-        with rocm_group_gemm_ck_env("1", var=env_var):
+        with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env("1", var=env_var):
             ck_equal_kernels = collect_kernel_names(equal_k=True)
             self.assertTrue(has_ck_kernel(ck_equal_kernels, CK_EQUAL_K_HINT))
 
