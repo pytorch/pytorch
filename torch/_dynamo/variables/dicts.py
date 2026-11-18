@@ -1166,6 +1166,10 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if not self.items and len(args) == 1 and not kwargs:
+            # A missing key in an empty OrderedDict never mutates its linked order.
+            self.install_dict_keys_match_guard()
+            raise_observed_exception(KeyError, tx, args=[args[0]])
         if self.source:
             unimplemented(
                 gb_type="Input OrderedDict linked-order mutation",
@@ -1441,6 +1445,14 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         if self.source:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # A missing OrderedDict-only attribute raises before call_method runs.
+        if not hasattr(dict, name):
+            self._guard_type()
+        return super().tp_getattro_impl(tx, name)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1493,7 +1505,10 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         # Key lookups, mutations and detached copies can observe IDs without
         # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
-            key.vt = specialize_symnode(key.vt.realize())
+            original = key.vt
+            key.vt = specialize_symnode(original.realize())
+            if key.vt is not original and original in self.original_items:
+                self.original_items[key.vt] = self.original_items.pop(original)
         return self.items
 
     def clone(self, **kwargs: Any) -> VariableTracker:
@@ -1517,7 +1532,7 @@ class NNModuleHooksOrderedDictVariable(NNModuleHooksDictVariable, OrderedDictVar
     pass
 
 
-class _NNModuleHookFlagsDictVariable(ConstDictVariable):
+class NNModuleHookFlagsDictVariable(NNModuleHooksDictVariable):
     GLOBAL_FLAGS = False
 
     _nonvar_fields = {
@@ -1588,21 +1603,13 @@ class _NNModuleHookFlagsDictVariable(ConstDictVariable):
         return super().sq_contains_impl(tx, item)
 
 
-class NNModuleHookFlagsDictVariable(
-    _NNModuleHookFlagsDictVariable, NNModuleHooksDictVariable
-):
-    pass
-
-
 class NNModuleHookFlagsOrderedDictVariable(
     NNModuleHookFlagsDictVariable, OrderedDictVariable
 ):
     pass
 
 
-class NNModuleGlobalHooksDictVariable(
-    _NNModuleHookFlagsDictVariable, NNModuleHooksDictVariable
-):
+class NNModuleGlobalHooksDictVariable(NNModuleHookFlagsDictVariable):
     # Global IDs may be pinned while local IDs vary across equivalent modules.
     GLOBAL_FLAGS = True
 
