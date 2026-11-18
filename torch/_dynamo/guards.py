@@ -50,7 +50,11 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
-from torch._C._dynamo.eval_frame import code_framelocals_names
+from torch._C._dynamo.eval_frame import (
+    _invalidate_cache_entry,
+    _update_diff_guard_root_manager,
+    code_framelocals_names,
+)
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -80,6 +84,11 @@ from torch._C._dynamo.guards import (
     TypeDictGuardAccessor,
     TypeGuardAccessor,
     TypeMROGuardAccessor,
+)
+from torch._C._functorch import (
+    get_unwrapped,
+    is_batchedtensor,
+    is_functorch_wrapped_tensor,
 )
 from torch._dynamo.package import (
     _globals_module,
@@ -126,6 +135,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     is_fake_tensor,
     maybe_get_fake_dispatch_keys,
+    maybe_get_fake_pytype,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
@@ -199,7 +209,6 @@ from .source import (
 from .types import (  # noqa: F401
     CacheEntry,
     DynamoFrameType,
-    ExtraState,
     GuardedCode,
     GuardFail,
     GuardFilterEntry,
@@ -268,6 +277,8 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 
 
 def _sequence_length(value: object) -> int:
+    if issubclass(type(value), dict):
+        return dict.__len__(cast(dict[Any, Any], value))
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
@@ -358,6 +369,32 @@ def _cow_tensor_matches(value: object, expected: object) -> bool:
     return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
 
 
+def _has_tangent(value: object) -> bool:
+    """Whether `value`, or a functorch layer under it, holds a forward-AD tangent.
+
+    `_unpack_dual` has no batching rule and a BatchedTensor never holds the
+    tangent (under jvp(vmap(f)) it is on an inner layer), so batched layers are
+    skipped. A tensor that cannot be unpacked cannot hold a tangent either:
+    unpacking dispatches `aten.alias`, which a subclass's `__torch_dispatch__`
+    may reject with any exception.
+    """
+    while isinstance(value, torch.Tensor):
+        if not is_batchedtensor(value):
+            try:
+                dual = torch.autograd.forward_ad.unpack_dual(value, level=0)
+            except Exception:
+                pass
+            else:
+                if dual.tangent is not None:
+                    return True
+        value = get_unwrapped(value) if is_functorch_wrapped_tensor(value) else None
+    return False
+
+
+def _has_no_tangent(value: object) -> bool:
+    return not _has_tangent(value)
+
+
 dunder_attrs_assumed_constants = (
     "__defaults__",
     "__kwdefaults__",
@@ -423,8 +460,8 @@ class GuardManagerWrapper:
         self.verbose_code_parts: list[str] | None = None
         self.global_scope: dict[str, Any] | None = None
         self.guard_fail_fn: Callable[[GuardFail], None] | None = None
-        self.cache_entry: CacheEntry | None = None
-        self.extra_state: ExtraState | None = None
+        # Set when the guard manager is cached, to find its cache entry.
+        self.code_ref: ReferenceType[types.CodeType] | None = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
         self.no_tensor_aliasing_sources: list[Source] = []
 
@@ -782,15 +819,11 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
-        # Ensure that C++ side points to the updated diff guard manager.
-        # When a new GuardManagerWrapper is created, it does not have a
-        # cache_entry attribute, so it relies on the CacheEntry constructor to
-        # set the diff_guard_root in C++.  But once it is saved in the Dynamo
-        # cache, C++ side adds a cache_entry attribute. On recompiles, this
-        # cache_entry is visible, so we update the C++ side to point to the
-        # update guard manager.
-        if self.cache_entry:
-            self.cache_entry.update_diff_guard_root_manager()
+        # Ensure that C++ side points to the updated diff guard manager.  A new
+        # GuardManagerWrapper is not cached yet, so this does nothing and the
+        # CacheEntry constructor reads diff_guard_root instead.  On recompiles,
+        # the guard managers already in the cache are updated in place.
+        _update_diff_guard_root_manager(self)
 
     def clone_with_chosen_sources(
         self, chosen_sources: OrderedSet[str]
@@ -989,6 +1022,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
             "___cow_tensor_matches": _cow_tensor_matches,
+            "___has_no_tangent": _has_no_tangent,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -1900,17 +1934,17 @@ class GuardBuilder(GuardBuilderBase):
         | None,
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
+        example_type: type[object] = type(example_value)
         if self.requires_key_order_guarding(source):
-            # Fix this if condition
-            if isinstance(example_value, dict_keys):
+            if issubclass(example_type, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-            elif isinstance(example_value, (set, frozenset)):
+            elif issubclass(example_type, (set, frozenset)):
                 # we don't need to guard on key order for set/frozenset
                 # but the if above will be true for these types as set is
                 # implemented using a dict in Dynamo
                 guard_manager_enum = GuardManagerType.GUARD_MANAGER
             else:
-                if not isinstance(example_value, dict):
+                if not issubclass(example_type, dict):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
@@ -2641,15 +2675,7 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
-        if (
-            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                value, torch._subclasses.FakeTensor
-            )
-            and value.pytype
-        ):
-            t = value.pytype
-        else:
-            t = type(value)
+        t = maybe_get_fake_pytype(value) or type(value)
 
         if t.__qualname__ != t.__name__:
             # A local-scope type cannot be serialized; serialize_guards raises
@@ -2884,6 +2910,17 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_fake_tensor_match_guard(
             expected, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: _has_no_tangent(value),
+    )
+    def NO_TANGENT_MATCH(self, guard: Guard) -> None:
+        code = f"___has_no_tangent({self.arg_ref(guard)})"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            _has_no_tangent, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     @register_guard_check_spec(
@@ -3573,12 +3610,14 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not isinstance(value, dict):
+        if not issubclass(type(value), dict):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
-        if isinstance(value, set):
+        if issubclass(type(value), dict):
+            code.append(f"dict.__len__({ref}) == {length}")
+        elif isinstance(value, set):
             code.append(f"set.__len__({ref}) == {length}")
         elif isinstance(value, frozenset):
             code.append(f"frozenset.__len__({ref}) == {length}")
@@ -3588,7 +3627,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
-        if isinstance(value, dict):
+        if issubclass(type(value), dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
                 get_verbose_code_parts(code, guard),
@@ -4259,11 +4298,9 @@ class GuardBuilder(GuardBuilderBase):
             dispatch_keys = maybe_get_fake_dispatch_keys(value)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(value)
-            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                value, torch._subclasses.FakeTensor
-            ):
-                if value.pytype is not None:
-                    pytype = value.pytype
+            fake_pytype = maybe_get_fake_pytype(value)
+            if fake_pytype is not None:
+                pytype = fake_pytype
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -6088,6 +6125,9 @@ class CheckFunctionManager:
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
                         ret.append(False)
+                    elif g.guard_type == "CLOSURE_MATCH":
+                        # Saving rewrites this guard or bypasses packaging.
+                        ret.append(True)
                     elif g.guard_type not in (
                         "TYPE_MATCH",
                         "BUILTIN_MATCH",
@@ -6095,7 +6135,6 @@ class CheckFunctionManager:
                         g.guard_type
                         in (
                             "ID_MATCH",
-                            "CLOSURE_MATCH",
                             "WEAKREF_ALIVE",
                             "DICT_VERSION",
                         )
@@ -6743,10 +6782,6 @@ class CheckFunctionManager:
         # Grab only G, but preserve "G" because guards access it as "G"
         self.guard_manager.global_scope = globals_for_guard_fn
         self.guard_manager.guard_fail_fn = guard_fail_fn
-        # will be populated by a non-owning reference to CacheEntry/ExtraState
-        # when the CacheEntry is constructed
-        self.guard_manager.cache_entry = None
-        self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = (
             builder.no_tensor_aliasing_sources
         )
@@ -6755,22 +6790,13 @@ class CheckFunctionManager:
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
-        if (
-            hasattr(self, "guard_manager")
-            and not isinstance(self.guard_manager, DeletedGuardManagerWrapper)
-            and (cache_entry := self.guard_manager.cache_entry) is not None
-            and (extra_state := self.guard_manager.extra_state) is not None
+        if hasattr(self, "guard_manager") and not isinstance(
+            self.guard_manager, DeletedGuardManagerWrapper
         ):
-            if not isinstance(cache_entry, CacheEntry):
-                raise AssertionError(f"Expected CacheEntry, got {type(cache_entry)}")
-
-            if not isinstance(extra_state, ExtraState):
-                raise AssertionError(f"Expected ExtraState, got {type(extra_state)}")
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
-
-            extra_state.invalidate(cache_entry, deleted_guard_manager)
-            self.guard_manager = deleted_guard_manager
+            if _invalidate_cache_entry(self.guard_manager, deleted_guard_manager):
+                self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
         """add a weakref, return the id"""
@@ -7108,6 +7134,7 @@ def get_guard_fail_reason_helper(
     f_locals: dict[str, object],
     compile_id: CompileId | None,
     backend: Callable[..., object] | None,
+    cache_entry_backend: Callable[..., object] | None = None,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -7122,10 +7149,6 @@ def get_guard_fail_reason_helper(
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
-
-    cache_entry_backend = None
-    if guard_manager.cache_entry:
-        cache_entry_backend = guard_manager.cache_entry.backend
 
     no_tensor_aliasing_check_failed = False
 
@@ -7222,20 +7245,24 @@ def get_guard_fail_reason(
     compile_id: CompileId,
     backend: Callable[..., object],
     skip_logging: bool = False,
+    cache_entry_backend: Callable[..., object] | None = None,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(
-        guard_manager, f_locals, compile_id, backend
+        guard_manager, f_locals, compile_id, backend, cache_entry_backend
     )
-    if skip_logging:
+    # A reset clears orig_code_map, and can run after a compile but before its
+    # entry is cached, leaving the entry with nothing to attribute it to.
+    orig_code = orig_code_map.get(code)
+    if skip_logging or orig_code is None:
         return reason_str
-    guard_failures[orig_code_map[code]].append(reason_str)
+    guard_failures[orig_code].append(reason_str)
 
     try:
         if guard_manager.guard_fail_fn is not None:
             guard_manager.guard_fail_fn(
-                GuardFail(reason_str or "unknown reason", orig_code_map[code])
+                GuardFail(reason_str or "unknown reason", orig_code)
             )
     except Exception:
         log.exception(
@@ -7266,6 +7293,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.compile_id,
             backend,
             skip_logging,
+            cache_entry.backend,
         )
         if reason:
             reasons.append(reason)
