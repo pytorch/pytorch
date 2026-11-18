@@ -668,7 +668,6 @@
   "test/python_native/test_rmsnorm_cutedsl.py",
   "test/python_native/test_sum_cutedsl.py",
   "test/python_native/test_sum_inner_tree_plan.py",
-  "test/python_native/test_tensor_utils.py",
   "test/python_native/test_tile_datapath.py",
   "test/python_native/test_topk_cutedsl.py",
   "test/python_native/test_topk_cutedsl_eligibility.py",
