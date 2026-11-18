@@ -245,6 +245,14 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(xc.re.shape, (3, 4))
         self.assertEqual(xc.im.shape, (3, 4))
 
+        r = torch.randn()
+        xc = ComplexTensor(r, r)
+        result = xc.resize_(3, 4)
+        self.assertEqual(xc.shape, (3, 4))
+        self.assertEqual(xc.stride(), (4, 1))
+        self.assertEqual(xc.re.shape, (3, 4))
+        self.assertEqual(xc.im.shape, (3, 4))
+
     def test_out_overload_resizes_destination(self):
         from torch._subclasses.complex_tensor import ComplexTensor
 

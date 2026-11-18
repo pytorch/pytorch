@@ -1,0 +1,1505 @@
+Thank you for your interest in contributing to PyTorch!
+If you're a new contributor, please first read the [Issue and PR Workflow](#issue-and-pr-workflow)
+section, which describes how to contribute a change to PyTorch.
+This document is the source of truth for that process, in particular how to most effectively engage with issues and PRs.
+
+The rest of this document covers some of the more technical
+aspects of contributing to PyTorch.
+
+# Table of Contents
+
+<!-- toc -->
+
+- [Issue and PR Workflow](#issue-and-pr-workflow)
+  - [Issue lifecycle](#issue-lifecycle)
+  - [PR lifecycle](#pr-lifecycle)
+  - [Current status](#current-status)
+  - [Why was my issue or PR closed?](#why-was-my-issue-or-pr-closed)
+- [Developing PyTorch](#developing-pytorch)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
+- [Codebase structure](#codebase-structure)
+- [AI-Assisted Development](#ai-assisted-development)
+- [Spin](#spin)
+  - [Building](#building)
+  - [Linting](#linting)
+    - [default lint](#default-lint)
+  - [Testing](#testing)
+  - [Regenerating](#regenerating)
+- [Unit testing](#unit-testing)
+  - [Python Unit Testing](#python-unit-testing)
+  - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [C++ Unit Testing](#c-unit-testing)
+  - [Run Specific CI Jobs](#run-specific-ci-jobs)
+  - [Skip CI while iterating](#skip-ci-while-iterating)
+  - [Keep PR stacks small](#keep-pr-stacks-small)
+- [Merging your Change](#merging-your-change)
+  - [Continue a GitHub-native stack after part of it lands](#continue-a-github-native-stack-after-part-of-it-lands)
+- [GreenLight](#greenlight)
+- [Writing documentation](#writing-documentation)
+  - [Docstring type formatting](#docstring-type-formatting)
+  - [Building documentation](#building-documentation)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes locally](#previewing-changes-locally)
+  - [Previewing documentation on PRs](#previewing-documentation-on-prs)
+  - [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Profile build time](#profile-build-time)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+    - [Use pre-compiled headers](#use-pre-compiled-headers)
+    - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
+  - [Rebuild few files with debug information](#rebuild-few-files-with-debug-information)
+  - [C++ frontend development tips](#c-frontend-development-tips)
+  - [GDB integration](#gdb-integration)
+  - [C++ stacktraces](#c-stacktraces)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+  - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
+- [Linting before committing](#linting-before-committing)
+- [CI failure tips](#ci-failure-tips)
+  - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+
+<!-- tocstop -->
+
+## Issue and PR Workflow
+
+Issues are where we receive feedback and decide what should be done about it: bug reports, feature requests and design discussions all happen there.
+Once a change and design is agreed upon, pull requests are the place to discuss and verify the implementation.
+
+For clarity, PyTorch uses labels to track the state of every issue and PR, so that both contributors and maintainers can tell what the next step is and who is expected to take it.
+
+This workflow is being rolled out and not all of it is live yet, see [Current status](#current-status).
+
+### Issue lifecycle
+
+Issues are a way to report feedback or make suggestions. PyTorch uses issues to track ongoing efforts and considerations for improving the codebase. Before opening an issue, please check to see if there's already an existing issue for your topic, as it may be more effective to contribute there!
+
+```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
+flowchart LR
+    new[New issue] --> ai(AI triage)
+    ai -- success --> triaged["Triaged<br/>“triaged” + “module: *” / “oncall: *” labels"]
+    ai -- "fails, or “no automated triage”" --> manual(Manual triage) --> triaged
+    triaged --> mtriage("Module-level triage<br/>any module maintainer")
+    mtriage --> full["Fully triaged<br/>“needs reproduction” / “needs research” /<br/>“needs design” / “actionable” / “won't fix”"]
+    full -- "remove the label to request<br/>re-evaluation" --> triaged
+    classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
+    class new,triaged,full state
+    class ai aiproc
+    class manual,mtriage humanproc
+```
+
+Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
+
+1. **Triage**: a bot triages every new issue by module so it is seen by the right maintainers. If the bot fails or the issue has the `no automated triage` label, a maintainer will handle the triage instead. A triaged issue has the `triaged` label and one or more `module: *` or `oncall: *` labels.
+2. **Module-level triage**: a maintainer of one of the applied modules completes triage by applying one of the labels below or by closing the issue.
+
+| Label | Meaning | What you can do |
+|---|---|---|
+| `needs reproduction` | The problem has not been reproduced yet. | Reproduce the issue that was reported. A maintainer then validates it. |
+| `needs research` | We have not decided yet whether the bug is real or whether we want the feature. | Provide supporting evidence that the feature is useful or the bug is valid. A maintainer then decides whether it is worth pursuing. |
+| `needs design` | We want to fix the bug or add the feature, but how to do it is not settled. | Propose a design on the issue. A maintainer then validates it. |
+| `actionable` | The issue has enough detail for anyone to write a good PR, and the maintainer who applied the label is willing to review it. | Send a PR, see [PR lifecycle](#pr-lifecycle). |
+| `won't fix` | The report is valid, but the cost of fixing it is too high for its benefit at this time. PyTorch will not fix it or review a fix for it. | Nothing: this is a final state and further comments on the issue will not be considered. |
+
+An assigned issue is being moved forward by its assignee, who can be the maintainer themselves.
+An unassigned issue is one where we are looking for help from the community.
+
+Once you have provided what a label asks for, you can request the issue to be re-evaluated by removing the label and commenting with the reason.
+Abusing this leads to losing the ability to change labels, up to being banned.
+
+Two other labels are orthogonal to the states above:
+
+- `high priority`: regressions, hard crashes and silent correctness issues. Undocumented APIs and edge cases are not high priority by default. An issue is high priority if it is high priority for any of the modules it is labeled with.
+- `good first issue`: an `actionable` issue that is especially simple and well suited for new contributors.
+
+### PR lifecycle
+
+```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
+flowchart TD
+    draft[Draft PR] -- author marks ready --> ready[Ready PR]
+    ready --> ai("AI triage<br/>CODEOWNERS, “module: *”, linked issue")
+    ai -- fails pre-conditions --> closed[Closed]
+    ai -- success --> triaged["Triaged PR<br/>“triaged”, one reviewer per module"]
+    ai -- "fails, or “no automated triage”" --> htriage(Manual triage) --> triaged
+    triaged --> dev["In development by author<br/>“in progress”"]
+    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>“ready for review”"]
+    auto -- changes needed --> dev
+    dev -- "“no automated review”" --> rfr
+    rfr --> review(Human review)
+    review -- "needs significant changes,<br/>automated review enabled" --> dev
+    review -- "needs significant changes,<br/>“no automated review”" --> rfr
+    review -- any reviewer accepts --> accepted[Accepted]
+    ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
+    accepted -- "@pytorchbot merge" --> merged[Merged]
+    classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
+    class draft,ready,closed,triaged,dev,rfr,accepted,merged state
+    class ai,auto,gl aiproc
+    class htriage,review humanproc
+```
+
+Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
+
+| Stage | Label | Who acts next | How to move on |
+|---|---|---|---|
+| Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
+| Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
+| Triaged | `triaged` | Bot | The bot adds `in progress`, even if the PR is already approved. This starts the automated review, unless the PR has `no automated review`. |
+| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. Adding that label also withdraws the automated review's change requests. |
+| Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
+| Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
+
+The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+The labels are the source of truth for where your PR is in the process. For what to do next, check the first pytorchbot comment, which displays status, CI results, doc previews, among other fun details.
+
+**When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
+
+- The automated review ([pr-review skill](.agents/skills/pr-review/SKILL.md)) does not flag anything blocking. You can run the skill locally to check your PR before pushing.
+- All CI has finished and Dr. CI classified every failure as unrelated to your PR. Fix the failures it attributes to your PR. Workflows waiting for a maintainer to approve their run do not block this.
+- Every comment from a maintainer has been addressed, either with a code change that fixes the specific problem or with a reply explaining why no change is needed. If you reply without pushing, comment `@pytorchbot review` to run the automated review again.
+
+If a maintainer requests changes and your PR returns to `in progress`, please address their feedback before the PR returns to maintainer review. A fresh automated review checks that the feedback has been addressed, and the PR must meet all of the readiness criteria above again. The earlier passing review cannot move the PR back to `ready for review`. If you address comments without pushing, comment `@pytorchbot review` to run the automated review again.
+
+With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. Adding the label withdraws any change requests from the automated review; a maintainer still needs to approve the PR. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
+
+**Address the automated review first**: maintainers are not expected to start reviewing your PR until it is `ready for review`. Put in the time to address the automated review's feedback before then.
+
+**Passing the automated review does not guarantee your PR lands**: a reviewer can still reject a PR that is moving in the wrong direction, for example because it needs a design discussion first or does not solve an important problem. If a PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
+
+**Pre-conditions**:
+
+- the PR is linked to an issue labeled `actionable` OR
+- the author has write access to the repo OR
+- the author names the maintainer who pre-approved the change (see the "Supported by" line of the [PR template](.github/PULL_REQUEST_TEMPLATE.md))
+
+The PR must follow the [AI policy](AI_POLICY.md).
+
+**GreenLight**: PRs from authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml) can also be approved directly by [GreenLight](#greenlight).
+
+**Stale PRs**: PRs without any update for 60 days get the `Stale` label and are closed 30 days later. PRs labeled `high priority` or `no-stale` are exempt.
+Remove the `Stale` label (or ask a maintainer to) if the PR is still active.
+
+**CI execution and contributor responsibilities**: You are responsible for any code or content you upload. You confirm that you have the right to share any code or content you submit and that it does not include confidential, sensitive, personal, or illegal information. Your code will run automatically without review in environments that are not fully secure. This service does not guarantee that your code is safe or error-free. If you discover a security issue, you must report it promptly.
+
+### Current status
+
+This workflow is being rolled out. The following parts are still in progress:
+
+| In progress | Until it lands |
+|---|---|
+| The `no automated triage` label on issues | The label exists, but the issue triage bot does not act on it yet. |
+| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
+| PR triage: a bot assigns one reviewer per module and adds `triaged` | The bot only triages PRs labeled `open source` and only assigns reviewers for a few modules. Other reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
+
+### Why was my issue or PR closed?
+
+Issues and PRs should be closed with a comment giving the reason (see [Current status](#current-status)). The most common ones are:
+
+- The PR is not linked to an `actionable` issue or was not pre-approved by a maintainer. Open an issue, or comment on the existing one, and wait for a maintainer to mark it `actionable`.
+- The PR needs a design discussion. Continue it on the linked issue with a summary of the status and of the proposed approach.
+- The issue or PR does not follow the [AI policy](AI_POLICY.md).
+- The issue was marked `won't fix`.
+- The issue is a usage question. Please ask it on the [forums](https://discuss.pytorch.org) instead.
+- The PR was [stale](#pr-lifecycle) for 30 days.
+
+## Developing PyTorch
+
+Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
+
+### Tips and Debugging
+
+* If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
+
+* When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python -m pip install . -v --no-build-isolation`) Python runtime will use
+  the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; the compiled output is installed into `build/install/<wheel tag>/` in the checkout and loaded from there.)
+  The install tree is keyed by wheel tag only. If you point `SKBUILD_BUILD_DIR` at a second build tree (another CUDA toolkit, a Debug build), also set `SKBUILD_EDITABLE_REBUILD_DIR` to a directory under it, otherwise both editable installs share `build/install/<wheel tag>/` and the last one installed wins.
+  This way you do not need to repeatedly install after modifying Python files (`.py`).
+  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
+
+
+  One way to avoid running `python -m pip install -e . -v --no-build-isolation` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
+  is to create a symbolic link from `build` folder to `torch/lib`, for example, by issuing following:
+  ```bash
+  pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
+  ```
+  Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
+  would be sufficient to make change visible in `torch` package.
+
+  Alternatively, scikit-build-core's editable install can rebuild the project
+  automatically on the first `import torch` in a process. This is off by default
+  (a plain editable install does not rebuild on import); opt in at install time
+  by setting the `SKBUILD_EDITABLE_REBUILD` environment variable:
+  ```bash
+  SKBUILD_EDITABLE_REBUILD=true spin develop
+  ```
+  (equivalently, via config-settings with a raw pip install:
+  `python -m pip install -e . -v --no-build-isolation -C editable.rebuild=true`).
+  With this enabled, editing a source file and re-importing `torch` runs
+  `cmake --build & --install` before the import proceeds, so changes are picked
+  up without an explicit reinstall. Set `SKBUILD_EDITABLE_VERBOSE=1` to see the
+  build output, or `=0` to silence it.
+
+
+  To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
+  uninstall torch` multiple times. You'll know `torch` is fully
+  uninstalled when you see `WARNING: Skipping torch as it is not
+  installed`. (You should only have to `pip uninstall` a few times, but
+  you can always `uninstall` with `timeout` or in a loop if you're feeling
+  lazy.)
+
+  ```bash
+  pip uninstall torch
+  ```
+
+  Next run `spin clean`. After that, you can install in editable mode again.
+
+* If you run into errors when running `python -m pip install -e . -v --no-build-isolation`, here are some debugging steps:
+  1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
+  your CMake works and can compile this simple Hello World program without errors.
+  2. Nuke your `build` directory. The build compiles binaries into the `build` folder and caches many
+  details along the way, which saves time the next time you build. If you're running into issues, you can always
+  `rm -rf build` from the toplevel `pytorch` directory and start over.
+  3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
+  following commands (note that clean _really_ removes all untracked files and changes.):
+      ```bash
+      git submodule deinit -f .
+      git clean -xdf
+      spin clean
+      git submodule update --init --recursive
+      python -m pip install --group dev
+      python -m pip install --no-build-isolation -v -e .
+      ```
+  4. The main step within `python -m pip install -e . -v --no-build-isolation` is the CMake build in the
+    `build` directory (`ninja` by default). If you want to experiment with some environment variables, you
+    can pass them into the command (see
+    [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for the environment variables the build forwards):
+      ```bash
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python -m pip install --no-build-isolation -v -e .
+      ```
+  5. Try installing PyTorch without build isolation by adding `--no-build-isolation` to the `pip install` command.
+  This will use the current environment's packages instead of creating a new isolated environment for the build.
+      ```bash
+      python -m pip install --no-build-isolation -v -e .
+      ```
+
+
+* If you run into an issue running `git submodule update --init --recursive`, please try the following:
+  - If you encounter an error such as
+    ```
+    error: Submodule 'third_party/pybind11' could not be updated
+    ```
+    check whether your Git local or global config file contains any `submodule.*` settings. If yes, remove them and try again.
+    (please reference [this doc](https://git-scm.com/docs/git-config#Documentation/git-config.txt-submoduleltnamegturl) for more info).
+
+  - If you encounter an error such as
+    ```
+    fatal: unable to access 'https://github.com/pybind/pybind11.git': could not load PEM client certificate ...
+    ```
+    it is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
+    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate validity dates by running
+    ```bash
+    openssl x509 -noout -in <cert_file> -dates
+    ```
+
+  - If you encounter an error that some third_party modules are not checked out correctly, such as
+    ```
+    Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
+    ```
+    remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
+* If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
+
+## Nightly Checkout & Pull
+
+The `tools/nightly.py` script is provided to ease pure Python development of
+PyTorch. This uses `venv` and `git` to check out the nightly development
+version of PyTorch and installs pre-built binaries into the current repository.
+This is like a development or editable install, but without needing the ability
+to compile any C++ code.
+
+You can use this script to check out a new nightly branch with the following:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --cuda
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --rocm
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+Pass `--rocm preview` to opt into the moving ROCm preview channel. Bare
+`--rocm` continues to select the latest supported numeric ROCm version.
+
+You can also use this tool to pull the nightly commits into the current branch:
+
+```bash
+./tools/nightly.py pull
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+To create the virtual environment with a specific Python interpreter, you can
+pass in the `--python` argument:
+
+```bash
+./tools/nightly.py --python /path/to/python3.12
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+Pulling will recreate a fresh virtual environment and reinstall the development
+dependencies as well as the nightly binaries into the repo directory.
+
+## Codebase structure
+
+* [c10](c10) - Core library files that work everywhere, both server
+  and mobile. We are slowly moving pieces from [ATen/core](aten/src/ATen/core)
+  here. This library is intended only to contain essential functionality,
+  and appropriate to use in settings where binary size matters. (But
+  you'll have a lot of missing functionality if you try to use it
+  directly.)
+* [aten](aten) - C++ tensor library for PyTorch (no autograd support)
+  * [src](aten/src) - [README](aten/src/README.md)
+    * [ATen](aten/src/ATen)
+      * [core](aten/src/ATen/core) - Core functionality of ATen. This
+        is migrating to top-level c10 folder.
+      * [native](aten/src/ATen/native) - Modern implementations of
+        operators. If you want to write a new operator, here is where
+        it should go. Most CPU operators go in the top level directory,
+        except for operators which need to be compiled specially; see
+        cpu below.
+        * [cpu](aten/src/ATen/native/cpu) - Not actually CPU
+          implementations of operators, but specifically implementations
+          which are compiled with processor-specific instructions, like
+          AVX. See the [README](aten/src/ATen/native/cpu/README.md) for more
+          details.
+        * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
+          operators.
+        * [mps](aten/src/ATen/native/mps) - MPS implementations of
+          operators for Apple's Metal GPU family.
+        * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
+          implementations of COO sparse tensor operations
+        * [mkl](aten/src/ATen/native/mkl) [mkldnn](aten/src/ATen/native/mkldnn)
+          [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
+          - implementations of operators which simply bind to some
+            backend library.
+        * [quantized](aten/src/ATen/native/quantized/) - Quantized tensor (i.e. QTensor) operation implementations. [README](aten/src/ATen/native/quantized/README.md) contains details including how to implement native quantized operations.
+* [torch](torch) - The actual PyTorch library. Everything that is not
+  in [csrc](torch/csrc) is a Python module, following the PyTorch Python
+  frontend module structure.
+  * [csrc](torch/csrc) - C++ files composing the PyTorch library. Files
+    in this directory tree are a mix of Python binding code
+    (conventionally prefixed with `python_`) and C++ heavy lifting.
+    [README](torch/csrc/README.md)
+    * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
+      frontend. [README](torch/csrc/jit/README.md)
+    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic differentiation. [README](torch/csrc/autograd/README.md)
+    * [api](torch/csrc/api) - The PyTorch C++ frontend.
+    * [distributed](torch/csrc/distributed) - Distributed training
+      support for PyTorch.
+* [tools](tools) - Code generation scripts for the PyTorch library.
+  See [README](tools/README.md) of this directory for more details.
+* [torchgen](torchgen) - contains the logic and tooling for generating PyTorch's low-level C++ and Python bindings from operator definitions, typically specified in native_functions.yaml
+* [test](test) - Python unit tests for PyTorch Python frontend.
+  * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
+    functionality.
+  * [test_autograd.py](test/test_autograd.py) - Tests for non-NN
+    automatic differentiation support.
+  * [test_nn.py](test/test_nn.py) - Tests for NN operators and
+    their automatic differentiation.
+  * [test_jit.py](test/test_jit.py) - Tests for the JIT compiler
+    and TorchScript.
+  * ...
+  * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
+    * [api](test/cpp/api) - [README](test/cpp/api/README.md)
+    * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
+  * [expect](test/expect) - Automatically generated "expect" files
+    which are used to compare against expected output.
+  * [onnx](test/onnx) - Tests for ONNX export functionality,
+    using both PyTorch and Caffe2.
+* [caffe2](caffe2) - The Caffe2 library.
+  * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
+    blobs, etc.
+  * ...
+
+## AI-Assisted Development
+
+Please see PyTorch's detailed [AI Policy here](AI_POLICY.md).
+
+How to contribute (with or without AI assistance) is described in the [Issue and PR Workflow](#issue-and-pr-workflow) section.
+A couple reminders here though:
+
+- **You are personally responsible for what you send**: If the comments, issues or PRs you send are low quality or consistently overly verbose compared to what is expected, your contributions will not be accepted anymore. You are responsible for reviewing, ensuring the accuracy and the quality of everything you send.
+- **PRs must have an associated "actionable" Issue**: Unless you have write access to the repo, you should never send a PR that doesn't have a corresponding issue with the "actionable" label, unless a maintainer pre-approved it (see the "Supported by" line of the [PR template](.github/PULL_REQUEST_TEMPLATE.md)). If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before sending a PR for it. See the [PR lifecycle](#pr-lifecycle).
+- **New features, utility functions, or core extensions**: Create a short and to the point issue about the problem you're encountering. You should NEVER include AI-generated explanation of how to solve the problem (this will be discussed later once it's decided the feature should be implemented).
+
+## Spin
+
+[Spin](https://github.com/scientific-python/spin) is a developer cli tool that
+helps running common tasks.
+You can either install it in your dev environment with `pip install spin` or as a global uv tool in your system with `uv tool install spin --with=packaging,pyyaml,typing_extensions`.
+
+To list the available tasks, run `spin --help`.
+Currently, we support the following tasks with Spin:
+
+### Building
+
+To support building and general development, the following commands exist.
+Both `develop` and `install` prefer `uv pip` when available and fall back to
+regular pip. Build configuration comes from the environment as usual, e.g.
+`BUILD_CONFIG spin develop`.
+
+|command||
+|-|-|
+|`develop` / `editable`|editable install (also known as develop or `-e` install)|
+|`install`|non-editable install|
+|`clean`|clean, that is remove files and directories listed in .gitignore before the NOT-CLEAN-FILES marker|
+
+### Linting
+
+Spin helps with linting by making sure that [lintrunner](https://github.com/pytorch/pytorch/wiki/lintrunner) is installed correctly
+and by isolating the lintrunner environment from the general development
+environment using uv.
+You can pass additional arguments to lintrunner by adding them after a
+separating double dash (`--`), for example `spin quicklint -- --take CLANGTIDY`.
+
+|command||
+|-|-|
+|`lint`|perform default lint (see below)|
+|`quicklint`|perform lint on all files changed in the latest commit and the working directory|
+|`quickfix`|autofix issues on all files changed in the latest commit and the working directory|
+
+#### default lint
+
+Since some linters take a long time to run, we categorize all linters as either
+fast or slow. In the default lint, only the fast linters are run on all files;
+the slow linters are run on the changed files only.
+
+### Testing
+
+|command||
+|-|-|
+|`test`|run tests with pytest; all arguments are forwarded, e.g. `spin test test/test_nn.py -k Linear`. `spin test --ci ARGS` forwards to `test/run_test.py`, the orchestrator CI uses, instead|
+
+### Regenerating
+
+PyTorch makes use of a number of code generations, which range from the version
+information in `torch/version.py` over type stubs and other linter support to
+github workflows.
+With Spin, we offer a unified interface to these tasks.
+
+|command||
+|-|-|
+|`regenerate-version`|regenerate `torch/version.py`|
+|`regenerate-type-stubs`|regenerates type stubs for use by static type checkers|
+|`regenerate-clangtidy-files`|regenerates clang related files needed for linting|
+|`regenerate-github-workflows`|regenerates github workflows from jinja templates|
+
+## Unit testing
+
+### Python Unit Testing
+
+**Prerequisites**:
+The following packages should be installed with `pip`:
+- `expecttest` and `hypothesis` - required to run tests
+- `pyrefly` - recommended for type checking. [Pyrefly](https://pyrefly.org/)
+- `pytest` - recommended to run tests more selectively
+Running
+```
+pip install --group dev
+```
+will install these dependencies for you.
+
+All PyTorch test suites are located in the `test` folder and start with
+`test_`. Run the entire test
+suite with
+
+```bash
+python test/run_test.py
+```
+
+(`spin test --ci ARGS` forwards `ARGS` to the same runner), or run individual
+test suites using the command `python test/FILENAME.py`,
+where `FILENAME` represents the file containing the test suite you wish
+to run.
+
+For example, to run all the TorchScript JIT tests (located at
+`test/test_jit.py`), you would run:
+
+```bash
+python test/test_jit.py
+```
+
+You can narrow down what you're testing even further by specifying the
+name of an individual test with `TESTCLASSNAME.TESTNAME`. Here,
+`TESTNAME` is the name of the test you want to run, and `TESTCLASSNAME`
+is the name of the class in which it is defined.
+
+Going off the above example, let's say you want to run
+`test_Sequential`, which is defined as part of the `TestJit` class
+in `test/test_jit.py`. Your command would be:
+
+```bash
+python test/test_jit.py TestJit.test_Sequential
+```
+
+**Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
+
+### Better local unit tests with `pytest`
+
+We don't officially support `pytest`, but it works well with our
+`unittest` tests and offers a number of useful features for local
+developing. Install it via `pip install pytest` (`pip install --group dev`
+includes it). `spin test ARGS` runs `pytest ARGS` with the same interpreter
+that has torch installed, editable or not.
+
+If you want to just run tests that contain a specific substring, you can
+use the `-k` flag:
+
+```bash
+pytest test/test_nn.py -k Loss -v
+```
+
+The above is an example of testing a change to all Loss functions: this
+command runs tests such as `TestNN.test_BCELoss` and
+`TestNN.test_MSELoss` and can be useful to save keystrokes.
+
+### C++ Unit Testing
+
+PyTorch offers a series of tests located in the `test/cpp` folder.
+These tests are written in C++ and use the Google Test testing framework.
+After compiling PyTorch from source, the test runner binaries will be
+written to the `build/bin` folder. The command to run one of these tests
+is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
+`TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
+the suite that test is defined in.
+
+For example, if you wanted to run the test `MayContainAlias`, which
+is part of the test suite `ContainerAliasingTest` in the file
+`test/cpp/jit/test_alias_analysis.cpp`, the command would be:
+
+```bash
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.MayContainAlias
+```
+
+
+### Run Specific CI Jobs
+
+You can generate a commit that limits the CI to only run a specific job by using
+`tools/testing/explicit_ci_jobs.py` like so:
+
+```bash
+# --filter-gha: keep only the github actions workflow files matching this glob
+#               (all other workflow files are deleted)
+# --make-commit: commit the CI changes to git with a message explaining the change
+python tools/testing/explicit_ci_jobs.py --filter-gha '*pull*' --make-commit
+
+# Make your changes
+
+ghstack submit
+```
+
+**NB**: It is not recommended to use this workflow unless you are also using
+[`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
+of very low signal to reviewers.
+
+### Skip CI while iterating
+
+Prefix your PR title with `[no-ci]` to disable CI while iterating, for example
+`[no-ci] Add a new operator`. The prefix is checked on PR runs and on runs
+triggered by `ciflow/*` labels, including when those labels trigger CI again
+after a push. A check in the runner selector, or a separate `check-ci` job,
+fails with an explanation before the build, test, and lint jobs start. This
+failure keeps the PR from being merged without CI. PR administration, such
+as CLA and mergeability checks, still runs. If GitHub cannot return the PR
+title after retries, CI runs normally.
+
+The prefix must be in the title when the run starts; adding it does not cancel
+CI that is already running. To enable CI, remove the prefix and push a new
+commit. You can also rerun the failed workflows: the check reads the current
+PR title each time. Branch CI, such as `main` and nightly runs, is unaffected.
+
+With `ghstack`, the initial PR title comes from your commit subject. Once the
+PR exists, you can edit its title on GitHub, and normal `ghstack` updates
+preserve it, so you do not need to repeat the prefix on each update.
+`ghstack -u` replaces the PR title from the commit subject, so keep the prefix
+there too if you use that option. This is separate from GitHub's `[no ci]`
+commit-message directive, which applies only to the commit that contains it.
+
+### Keep PR stacks small
+
+Stacks of pull requests must have fewer than 10 PRs. Every PR in a stack runs
+CI on each push, so large stacks use up shared CI resources. Land the bottom of
+a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet.
+
+For `ghstack` stacks, the automated review requests changes on a PR that is
+10th or higher from the bottom, and CI fails on a PR with 10 or more PRs below
+it unless the PR has the `ciflow/trunk` label.
+
+## Merging your Change
+The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.
+
+If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
+
+Occasionally, things might fall through the cracks (sorry!). In case your PR is waiting on its reviewers for more than a week, please don't hesitate to leave a comment on the PR mentioning them! That will get it nudged back onto peoples' radars.
+
+Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
+
+The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it, reopens them, and merges `main` into their branches when needed so that each shows only its own changes again. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A merge or rebase is refused if a ghstack PR is below the commented PR in its stack.
+
+A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to the same checks as the commented PR: it waits for their checks, ciflow runs included, and a failure on any of them stops the merge unless Dr. CI classifies it as unrelated to that PR. `@pytorchbot merge -i` ignores the failures already present on any of them when the merge starts.
+
+### Continue a GitHub-native stack after part of it lands
+
+The bot lands a PR by pushing its commit to `main` and closing the PR, so GitHub shows the PR as closed, not merged. The landed PRs stay at the bottom of the GitHub stack, and keeping them there matters: when a PR above them lands, its commit lists them as stack dependencies, and that link is what makes `@pytorchbot revert` on a landed PR also revert the PRs that landed on top of it.
+
+[`gh stack`](https://github.com/github/gh-stack) skips only branches whose PR GitHub marks as merged, so it treats the landed branches as active branches with no PR: `gh stack submit` opens new PRs for them, `gh stack rebase`, `sync` and `push` rebase and force-push them, and `gh stack unstack` takes them out of the GitHub stack. Do not run `gh stack` on a stack until all of it has landed. Keep the rest of it up to date with plain git instead: give the topmost landed branch the exact content of `main` with a merge commit, then merge each branch into the one above it, bottom to top. For a stack `A <- B <- C` whose bottom PR `A` has landed:
+
+```bash
+git fetch origin
+git checkout A && git merge --ff-only origin/A
+git merge --ff-only "$(git commit-tree -p HEAD -p origin/main -m 'Merge main into A' 'origin/main^{tree}')"
+git push origin A
+git checkout B && git merge --ff-only origin/B && git merge A && git push origin B
+git checkout C && git merge --ff-only origin/C && git merge B && git push origin C
+```
+
+A plain `git merge origin/main` is not enough for `A`: `main` holds `A`'s changes as a different commit, so later `main` changes to those lines conflict, and a file `A` added that `main` later deleted would stay on `A` and reach the PRs above. Every push is a fast-forward, and each open PR still shows only its own changes. You only need this to pick up a newer `main` or to resolve conflicts with it; `@pytorchbot rebase -b main` on the top PR does the same update on GitHub. New work goes the same way: commit on its branch, merge it into the branches above, and `git push`. Never add commits other than merges of `main` to a landed branch: the bot refuses to land the PRs above a closed PR whose branch has commits that never landed.
+
+## GreenLight
+
+GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
+
+A PR is eligible when one rule in `merge_rules.yaml` names you and covers every file the PR changes. A scan picks up your eligible open PRs every few minutes; one that becomes eligible while it is open may need a new push first. GreenLight reads the changes and decides whether they are safe to land as-is; when they are, it approves the PR, and that approval alone satisfies a merge rule. The criteria it applies are in [its review skill](https://github.com/pytorch/test-infra/tree/main/.claude/skills/greenlight-review).
+
+The Dr. CI comment on your PR (the pytorchbot comment) shows whether the PR is eligible, when GreenLight's review starts, and whether the result is `PR approved to be merged without human review` or `PR requires human review`. An approval appears on the PR as a review from `pytorchgreenlight[bot]`.
+
+You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a stacked merge (ghstack or GitHub-native) every PR that the merge lands is checked, so one PR without a current approval holds up all of them. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
+
+`PR requires human review` is not a block, but merging while it stands is refused immediately rather than waiting. Either push a commit so GreenLight reviews the new content, or get an approval from a human reviewer with merge rights for the files you touched and merge as usual.
+
+GreenLight does not review drafts, PRs with unresolved requested changes, or PRs already approved by someone listed in `merge_rules.yaml`. A diff over 2000 lines or 200 files is declined automatically as too large to review. GreenLight also skips PRs labeled `Stale`, even after a push; remove the label to bring the PR back into scope. If a PR is reverted, GreenLight dismisses its approval and does not review that PR again, so re-landing it always needs a human approval.
+
+To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues) with the prefix on the title `[Greenlight Policy Triage]`; those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board. To report a wrong verdict on a merged PR, open its landed commit on HUD (for example, [commit 38395f3](https://hud.pytorch.org/pytorch/pytorch/commit/38395f306af10d0f565d5e14f8f55beb3cb44937)), expand the `GREEN LIGHT` section if it is collapsed, click `Report wrong verdict`, and describe what GreenLight got wrong. HUD then files an issue in pytorch/test-infra and adds it to the same board. The button only appears when you are signed in to HUD with write access to pytorch/pytorch.
+
+## Writing documentation
+
+So you want to write some documentation and don't know where to start?
+PyTorch has two main types of documentation:
+- **User facing documentation**:
+These are the docs that you see over at [our docs website](https://pytorch.org/docs).
+- **Developer facing documentation**:
+Developer facing documentation is spread around our READMEs in our codebase and in
+the [PyTorch Developer Wiki](https://github.com/pytorch/pytorch/wiki).
+If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
+
+The rest of this section is about user-facing documentation.
+
+PyTorch uses [Google style](https://www.sphinx-doc.org/en/master/usage/extensions/example_google.html)
+for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
+
+
+### Docstring type formatting
+
+In addition to the standard Google Style docstring formatting rules, the following guidelines should be followed for docstring types (docstring types are the type information contained in the round brackets after the variable name):
+
+* The "`Callable`", "`Any`", "`Iterable`", "`Iterator`", "`Generator`" types should have their first letter capitalized.
+
+* The "`list`" and "`tuple`" types should be completely lowercase.
+
+* Types should not be made plural. For example: `tuple of int` should be used instead of `tuple of ints`.
+
+* The only acceptable delimiter words for types are `or` and `of`. No other non-type words should be used other than `optional`.
+
+* The word `optional` should only be used after the types, and it is only used if the user does not have to specify a value for the variable. Default values are listed after the variable description. Example:
+
+    ```
+    my_var (int, optional): Variable description. Default: 1
+    ```
+
+* Basic Python types should match their type name so that the [Intersphinx](https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html) extension can correctly identify them. For example:
+    * Use `str` instead of `string`.
+    * Use `bool` instead of `boolean`.
+    * Use `dict` instead of `dictionary`.
+
+* Square brackets should be used for the dictionary type. For example:
+
+    ```
+    my_var (dict[str, int]): Variable description.
+    ```
+
+* If a variable has two different possible types, then the word `or` should be used without a comma. Otherwise variables with 3 or more types should use commas to separate the types. Example:
+
+    ```
+    x (type1 or type2): Variable description.
+    y (type1, type2, or type3): Variable description.
+    ```
+
+
+### Building documentation
+
+Note that the docs will only build with Python versions <3.13. To build the documentation:
+
+1. Build and install PyTorch
+
+2. Install the prerequisites
+
+```bash
+cd docs
+pip install -r requirements.txt
+# `katex` must also be available in your PATH.
+# You can either install katex globally if you have properly configured npm:
+# npm install -g katex
+# Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
+# npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
+```
+> Note: if you installed `nodejs` with a different package manager then `npm` will probably install a version of `katex` that is not
+compatible with your version of `nodejs` and doc builds will fail.
+A combination of versions that is known to work is `node@22` (current LTS) and
+`katex@0.16.10`. To install the latter with `npm` you can run
+```npm install -g katex@0.16.10```
+
+
+> Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
+
+```bash
+yarn global add katex
+```
+> If a specific version is required you can use for example `yarn global add katex@0.16.10`.
+
+3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
+
+```bash
+make html
+```
+
+#### Building C++ Documentation
+
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](https://www.doxygen.nl/manual/) for more
+information on the documentation syntax.
+
+We run Doxygen in CI to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp/source`.
+
+To build the documentation, follow the same steps as above, but run them from
+`docs/cpp` instead of `docs`.
+
+### Previewing changes locally
+
+To view HTML files locally, you can open the files in your web browser. For example,
+navigate to `file:///your_pytorch_folder/docs/build/html/index.html` in a web
+browser.
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine from your local machine. To map
+remote port 8000 to local port 8000, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8000:my_machine:8000
+
+# For Eternal Terminal
+et my_machine -t="8000:8000"
+```
+
+Then navigate to `localhost:8000` in your web browser.
+
+**Tip:**
+You can start a lightweight HTTP server on the remote machine with:
+
+```bash
+python -m http.server 8000 <path_to_html_output>
+```
+
+Alternatively, you can run `rsync` on your local machine to copy the files from
+your remote machine:
+
+```bash
+mkdir -p build cpp/build
+rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
+rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
+```
+
+### Previewing documentation on PRs
+
+PyTorch will host documentation previews at `https://docs-preview.pytorch.org/pytorch/pytorch/<pr number>/index.html` once the docs GitHub Actions job has completed on your PR. You can find its link in the automated pytorchbot comment on your PR or go to the URL
+directly.
+
+### Adding documentation tests
+
+It is easy for code snippets in docstrings and `.rst` files to get out of date. The docs
+build includes the [Sphinx Doctest Extension](https://www.sphinx-doc.org/en/master/usage/extensions/doctest.html),
+which can run code in documentation as a unit test. To use the extension, use
+the `.. testcode::` directive in your `.rst` and docstrings.
+
+To manually run these tests, follow steps 1 and 2 above, then run:
+
+```bash
+cd docs
+make doctest
+```
+
+## Profiling with `py-spy`
+
+Evaluating the performance impact of code changes in PyTorch can be complicated,
+particularly if code changes happen in compiled code. One simple way to profile
+both Python and C++ code in PyTorch is to use
+[`py-spy`](https://github.com/benfred/py-spy), a sampling profiler for Python
+that has the ability to profile native code and Python code in the same session.
+
+`py-spy` can be installed via `pip`:
+
+```bash
+pip install py-spy
+```
+
+To use `py-spy`, first write a Python test script that exercises the
+functionality you would like to profile. For example, this script profiles
+`torch.add`:
+
+```python
+import torch
+
+t1 = torch.tensor([[1, 1], [1, 1.]])
+t2 = torch.tensor([[0, 0], [0, 0.]])
+
+for _ in range(1000000):
+    torch.add(t1, t2)
+```
+
+Since the `torch.add` operation happens in microseconds, we repeat it a large
+number of times to get good statistics. The most straightforward way to use
+`py-spy` with such a script is to generate a [flame
+graph](http://www.brendangregg.com/flamegraphs.html):
+
+```bash
+py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
+```
+
+This will output a file named `profile.svg` containing a flame graph you can
+view in a web browser or SVG viewer. Individual stack frame entries in the graph
+can be selected interactively with your mouse to zoom in on a particular part of
+the program execution timeline. The `--native` command-line option tells
+`py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
+for C++ code it may be necessary to compile PyTorch in debug mode by prepending
+your `python -m pip install -e . -v --no-build-isolation` call to compile
+PyTorch with `DEBUG=1`. Depending on your operating system it may also be
+necessary to run `py-spy` with root privileges.
+
+`py-spy` can also work in an `htop`-like "live profiling" mode and can be
+tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
+details.
+
+## Managing multiple build trees
+
+One downside to using `python -m pip install -e . -v --no-build-isolation` is
+that your development version of PyTorch will be installed globally on your
+account (e.g., if you run `import torch` anywhere else, the development version
+will be used).
+
+If you want to manage multiple builds of PyTorch, you can make use of
+[venv environments](https://docs.python.org/3/library/venv.html) to maintain
+separate Python package environments, each of which can be tied to a
+specific build of PyTorch. To set one up:
+
+```bash
+python -m venv pytorch-myfeature
+source pytorch-myfeature/bin/activate  # or `& .\pytorch-myfeature\Scripts\Activate.ps1` on Windows
+# if you run python now, torch will NOT be installed
+python -m pip install --no-build-isolation -v -e .
+```
+
+## C++ development tips
+
+If you are working on the C++ code, there are a few important things that you
+will want to keep in mind:
+
+1. How to rebuild only the code you are working on.
+2. How to make rebuilds in the absence of changes go faster.
+
+### Build only what you need
+
+`spin develop` will build everything by default, but sometimes you are
+only interested in a specific component.
+
+- Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
+  rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
+  `make` if you don't have ninja installed).
+
+On the initial build, you can also speed things up by disabling the features you don't need. Common ones to know about are
+
+- `DEBUG=1` will enable debug builds (this should rarely be used) (-g -O0)
+- `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
+- `USE_DISTRIBUTED=0` will disable distributed (c10d, gloo, mpi, etc.) build.
+- `USE_MKLDNN=0` will disable using MKL-DNN.
+- `USE_CUDA=0` will disable compiling CUDA.
+- `BUILD_TEST=0` will disable building C++ test binaries.
+- `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
+- `USE_XNNPACK=0` will disable compiling with XNNPACK.
+- `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively.
+- `BUILD_LAZY_TS_BACKEND=0` will disable the lazy TorchScript backend (Lazy Tensor Core).
+- `USE_PYTORCH_QNNPACK=0` will disable PyTorch's internal QNNPACK quantized kernels.
+- `USE_CPU_VECTORIZATION=0` will disable building vectorized CPU kernel variants (AVX2, AVX512, VSX, ZVECTOR, SVE). Only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work; not for CPU benchmarking.
+- `USE_COLORIZE_OUTPUT=1` will colorize compiler output for easier reading.
+- `TORCH_NATIVE_AOT=0` will disable the native-AOT stage-2 step (exporting the DSL kernels and embedding them into `libtorch_cuda`; see `tools/native_aot/build_stage2.py`, whose module docstring lists these in the order they are checked). Stage 2 already skips itself when the platform is not Linux, when the built torch does not import or was built without CUDA, when no toolchain targets this backend, when CUDA is older than 13 or cannot be determined, when the interpreter has no published DSL wheel and none is installed, when `BUILD_SHARED_LIBS=OFF` leaves a static `torch_cuda` that cannot take the version script, when nothing declares kernels, and when no op declares a target compatible with a supported arch -- note that with `TORCH_CUDA_ARCH_LIST` unset it exports for whatever GPU is present, so a GPU compatible with a declared target does not hit that last one. Once it decides it *will* export, a missing DSL wheel is a hard error rather than a skip, so this is the switch to use when you want a build without the DSL toolchain installed.
+
+  Native-AOT export for supported Hopper and Blackwell targets requires Triton at
+  build time alongside CuTeDSL. Install the pinned Triton wheel with
+  `bash scripts/install_triton_wheel.sh`. Embedded Triton kernels do not require
+  the Triton Python package at runtime.
+
+The full list of build environment variables, what each one does, and how it reaches CMake is
+documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
+
+For example, a good default for the most minimal build is to add to your bashrc is:
+```bash
+alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
+```
+
+You can then re-enable features selectively
+```bash
+# Minimal cpu build
+BUILD_CONFIG pip install --no-build-isolation -v -e .
+
+# Minimal cuda build
+BUILD_CONFIG USE_CUDA=1 pip install --no-build-isolation -v -e .
+
+# Minimal cuda distributed build
+BUILD_CONFIG USE_CUDA=1 USE_DISTRIBUTED=1 pip install --no-build-isolation -v -e .
+```
+
+For subsequent builds (i.e., when `build/CMakeCache.txt` exists), an option
+that is no longer in the environment keeps the value the cache remembers from
+the first build, while a variable that is in the environment is re-applied on
+every build. Environment variables win over `-C` flags, `-C` flags win over
+`pyproject.toml`, and all three win over the cache. To change a cached option
+without setting its variable, run `ccmake build/`, run `cmake-gui build/`, or
+directly edit `build/CMakeCache.txt`.
+
+### Profile build time
+
+With CMake 4.3 or newer, you can collect timing information for compile, link,
+and custom build commands by enabling CMake instrumentation:
+
+```bash
+USE_CMAKE_INSTRUMENTATION=1 pip install --no-build-isolation -v -e .
+```
+
+The build prints a timing summary and the path to a trace that can be loaded in
+[Perfetto](https://ui.perfetto.dev/) for further analysis.
+
+### Code completion and IDE support
+
+When using `python -m pip install -e . -v --no-build-isolation`, PyTorch will generate
+a `compile_commands.json` file that can be used by many editors
+to provide command completion and error highlighting for PyTorch's
+C++ code. You need to `pip install ninja` to generate accurate
+information for the code in `torch/csrc`. More information at:
+- https://sarcasm.github.io/notes/dev/compilation-database.html
+
+### Make no-op build fast
+
+#### Use Ninja
+
+By default, cmake will use its Makefile generator to generate your build
+system.  You can get faster builds if you install the ninja build system
+with `pip install ninja`.  If PyTorch was already built, you will need
+to run `spin clean` once after installing ninja for builds to
+succeed.
+
+Note: Make sure to use a machine with a larger number of CPU cores;this will significantly reduce your build times.
+
+#### Use CCache
+
+Even when dependencies are tracked with file modification, there are many
+situations where files get rebuilt when a previous compilation was exactly the
+same. Using ccache in a situation like this is a real time-saver.
+
+Before building PyTorch, install ccache from your package manager of choice:
+
+```bash
+sudo apt install ccache
+sudo yum install ccache
+brew install ccache
+```
+
+You may also find the default cache size in ccache is too small to be useful.
+The cache sizes can be increased from the command line:
+
+```bash
+# config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
+# max size of cache
+ccache -M 25Gi  # -M 0 for unlimited
+# unlimited number of files
+ccache -F 0
+```
+
+To check this is working, do two clean builds of PyTorch in a row. The second
+build should be substantially and noticeably faster than the first build. If
+this doesn't seem to be the case, check the `CMAKE_<LANG>_COMPILER_LAUNCHER`
+rules in `build/CMakeCache.txt`, where `<LANG>` is `C`, `CXX` and `CUDA`.
+Each of these 3 variables should contain ccache, e.g.
+
+```
+//CXX compiler launcher
+CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
+```
+
+If not, you can define these variables on the command line before building.
+
+```bash
+export CMAKE_C_COMPILER_LAUNCHER=ccache
+export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
+python -m pip install --no-build-isolation -v -e .
+```
+
+#### Use a faster linker
+
+If you are editing a single file and rebuilding in a tight loop, the time spent linking will dominate. The system linker available in most Linux distributions (GNU `ld`) is quite slow. To improve build times, consider using a faster linker such as [mold](https://github.com/rui314/mold) or [lld](https://lld.llvm.org/).
+
+- **mold**: A modern, high-performance linker that significantly reduces linking time. It is typically available via package managers like `apt` or `yum`. Note that `mold` requires GCC version 12 or higher.
+- **lld**: A fast linker from the LLVM project. The easiest way to get `lld` is from a [LLVM release](https://releases.llvm.org/download.html).
+
+Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
+
+```sh
+CMAKE_LINKER_TYPE=MOLD python -m pip install --no-build-isolation -v -e .
+```
+
+#### Use pre-compiled headers
+
+Sometimes there's no way of getting around rebuilding lots of files, for example
+editing `native_functions.yaml` usually means 1000+ files being rebuilt. If
+you're using CMake newer than 3.16, you can enable pre-compiled headers by
+setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
+`CMakeCache.txt` file.
+
+```sh
+USE_PRECOMPILED_HEADERS=1 python -m pip install --no-build-isolation -v -e .
+```
+
+This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
+dumps its internal AST to a file so the compiler can avoid repeating itself for
+every `.cpp` file.
+
+One caveat is that when enabled, this header gets included in every file by default,
+which may change what code is legal, for example:
+- internal functions can never alias existing names in `<ATen/ATen.h>`
+- names in `<ATen/ATen.h>` will work even if you don't explicitly include it.
+
+#### Workaround for header dependency bug in nvcc
+If re-building without modifying any files results in several CUDA files being
+re-compiled, you may be running into an `nvcc` bug where header dependencies are
+not converted to absolute paths before reporting it to the build system. This
+makes `ninja` think one of the header files has been deleted, so it runs the
+build again.
+
+A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can use
+this as a compiler launcher, similar to `ccache`
+```bash
+export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
+python -m pip install --no-build-isolation -v -e .
+```
+
+### Rebuild few files with debug information
+
+While debugging a problem, one often has to maintain a debug build in a separate folder.
+But often only a few files need to be rebuilt with debug info to get a symbolicated backtrace or enable source debugging.
+One can easily solve this with the help of `tools/build_with_debinfo.py`
+
+For example, suppose one wants to debug what is going on while a tensor index is selected, which can be achieved by setting a breakpoint at `applySelect` function:
+```
+% lldb -o "b applySelect" -o "process launch" -- python3 -c "import torch;print(torch.rand(5)[3])"
+(lldb) target create "python"
+Current executable set to '/usr/bin/python3' (arm64).
+(lldb) settings set -- target.run-args  "-c" "import torch;print(torch.rand(5)[3])"
+(lldb) b applySelect
+Breakpoint 1: no locations (pending).
+WARNING:  Unable to resolve breakpoint to any actual locations.
+(lldb) process launch
+2 locations added to breakpoint 1
+Process 87729 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x00000001023d55a8 libtorch_python.dylib`at::indexing::impl::applySelect(at::Tensor const&, long long, c10::SymInt, long long, c10::Device const&, std::__1::optional<c10::ArrayRef<c10::SymInt>> const&)
+libtorch_python.dylib`at::indexing::impl::applySelect:
+->  0x1023d55a8 <+0>:  sub    sp, sp, #0xd0
+    0x1023d55ac <+4>:  stp    x24, x23, [sp, #0x90]
+    0x1023d55b0 <+8>:  stp    x22, x21, [sp, #0xa0]
+    0x1023d55b4 <+12>: stp    x20, x19, [sp, #0xb0]
+Target 0: (python) stopped.
+Process 87729 launched: '/usr/bin/python' (arm64)
+```
+This is not very informative, but can be easily remedied by rebuilding `python_variable_indexing.cpp` with debug information.
+```
+% ./tools/build_with_debinfo.py torch/csrc/autograd/python_variable_indexing.cpp
+[1 / 2] Building caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_variable_indexing.cpp.o
+[2 / 2] Building lib/libtorch_python.dylib
+```
+And afterwards:
+```
+% lldb -o "b applySelect" -o "process launch" -- python3 -c "import torch;print(torch.rand(5)[3])"
+(lldb) target create "python"
+Current executable set to '/usr/bin/python3' (arm64).
+(lldb) settings set -- target.run-args  "-c" "import torch;print(torch.rand(5)[3])"
+(lldb) b applySelect
+Breakpoint 1: no locations (pending).
+WARNING:  Unable to resolve breakpoint to any actual locations.
+(lldb) process launch
+2 locations added to breakpoint 1
+Process 87741 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x00000001024e2628 libtorch_python.dylib`at::indexing::impl::applySelect(self=0x00000001004ee8a8, dim=0, index=(data_ = 3), real_dim=0, (null)=0x000000016fdfe535, self_sizes= Has Value=true ) at TensorIndexing.h:239:7
+   236         const at::Device& /*self_device*/,
+   237         const std::optional<SymIntArrayRef>& self_sizes) {
+   238       // See NOTE [nested tensor size for indexing]
+-> 239       if (self_sizes.has_value()) {
+   240         auto maybe_index = index.maybe_as_int();
+   241         if (maybe_index.has_value()) {
+   242           TORCH_CHECK_INDEX(
+Target 0: (python) stopped.
+Process 87741 launched: '/usr/bin/python3' (arm64)
+```
+This is much more useful, isn't it?
+
+### C++ frontend development tips
+
+We have very extensive tests in the [test/cpp/api](test/cpp/api) folder. The
+tests are a great way to see how certain components are intended to be used.
+When compiling PyTorch from source, the test runner binary will be written to
+`build/bin/test_api`. The tests use the [GoogleTest](https://github.com/google/googletest/blob/master/googletest)
+framework, which you can read up about to learn how to configure the test runner. When
+submitting a new feature, we care very much that you write appropriate tests.
+Please follow the lead of the other tests to see how to write a new test case.
+
+### GDB integration
+
+If you are debugging PyTorch inside GDB, you might be interested in
+[pytorch-gdb](tools/gdb/pytorch-gdb.py). This script introduces some
+PyTorch-specific commands which you can use from the GDB prompt. In
+particular, `torch-tensor-repr` prints a human-readable representation of an at::Tensor
+object. Example of usage:
+
+```
+$ gdb python
+GNU gdb (GDB) 9.2
+[...]
+(gdb) # insert a breakpoint when we call .neg()
+(gdb) break at::Tensor::neg
+Function "at::Tensor::neg" not defined.
+Make breakpoint pending on future shared library load? (y or [n]) y
+Breakpoint 1 (at::Tensor::neg) pending.
+
+(gdb) run
+[...]
+>>> import torch
+>>> t = torch.tensor([1, 2, 3, 4], dtype=torch.float64)
+>>> t
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+>>> t.neg()
+
+Thread 1 "python" hit Breakpoint 1, at::Tensor::neg (this=0x7ffb118a9c88) at aten/src/ATen/core/TensorBody.h:3295
+3295    inline at::Tensor Tensor::neg() const {
+(gdb) # the default repr of 'this' is not very useful
+(gdb) p this
+$1 = (const at::Tensor * const) 0x7ffb118a9c88
+(gdb) p *this
+$2 = {impl_ = {target_ = 0x55629b5cd330}}
+(gdb) torch-tensor-repr *this
+Python-level repr of *this:
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+```
+
+GDB tries to automatically load `pytorch-gdb` thanks to the
+[.gdbinit](.gdbinit) at the root of the PyTorch repository. However, auto-loading is disabled by default, because of security reasons:
+
+```bash
+$ gdb
+warning: File "/path/to/pytorch/.gdbinit" auto-loading has been declined by your `auto-load safe-path' set to "$debugdir:$datadir/auto-load".
+To enable execution of this file add
+        add-auto-load-safe-path /path/to/pytorch/.gdbinit
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+To completely disable this security protection add
+        set auto-load safe-path /
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+For more information about this security protection see the
+"Auto-loading safe path" section in the GDB manual.  E.g., run from the shell:
+        info "(gdb)Auto-loading safe path"
+(gdb)
+```
+
+As gdb itself suggests, the best way to enable auto-loading of `pytorch-gdb`
+is to add the following line to your `~/.gdbinit` (i.e., the `.gdbinit` file
+which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
+
+```bash
+add-auto-load-safe-path /path/to/pytorch/.gdbinit
+```
+
+### C++ stacktraces
+Set `TORCH_SHOW_CPP_STACKTRACES=1` to get the C++ stacktrace when an error occurs in Python.
+
+## CUDA development tips
+
+If you are working on the CUDA code, here are some useful CUDA debugging tips:
+
+1. `CUDA_DEVICE_DEBUG` will enable CUDA device function debug symbols (`-g -G`).
+    This will be particularly helpful in debugging device code. However, it will
+    slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
+    Unlike `DEBUG`, it is read as a CMake variable rather than forwarded from the environment, so
+    pass it at install time (it has no effect on MSVC builds):
+      ```bash
+      python -m pip install -e . -v --no-build-isolation -C cmake.define.CUDA_DEVICE_DEBUG=1
+      ```
+2. `cuda-gdb` and `compute-sanitizer` are your best CUDA debugging friends. Unlike`gdb`,
+   `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
+3. CUDA supports a lot of C++17/20 features, which include `std::numeric_limits`, `std::nextafter`,
+   `if constexpr` etc. in device code. Many of such features are possible because of the
+   [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
+   nvcc flag. There is a known [issue](https://github.com/ROCm/hip/issues/374)
+   that ROCm errors out on device code, which uses such STL functions.
+4. A good performance metric for a CUDA kernel is the
+   [Effective Memory Bandwidth](https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/#effective_bandwidth).
+   It is useful for you to measure this metric whenever you are writing/optimizing a CUDA
+   kernel. Following script shows how we can measure the effective bandwidth of CUDA `uniform_`
+   kernel.
+   ```python
+   import torch
+   from torch.utils.benchmark import Timer
+   size = 128*512
+   nrep = 100
+   nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
+
+   for i in range(10):
+       a=torch.empty(size).cuda().uniform_()
+       torch.cuda.synchronize()
+       out = a.uniform_()
+       torch.cuda.synchronize()
+       t = Timer(stmt="a.uniform_()", globals=globals())
+       res = t.blocked_autorange()
+       timec = res.median
+       print("uniform, size, elements", size, "forward", timec, "bandwidth (GB/s)", size*(nbytes_read_write)*1e-9/timec)
+       size *=2
+   ```
+
+  See more cuda development tips [here](https://github.com/pytorch/pytorch/wiki/CUDA-basics)
+
+## Windows development tips
+
+For building from source on Windows, consult
+[our documentation](https://pytorch.org/docs/stable/notes/windows.html) on it.
+
+Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
+There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
+than Linux, which are worth keeping in mind when fixing these problems.
+
+1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
+   mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
+   `__declspec(dllimport)`. We have codified this pattern into a set of macros
+   which follow the convention `*_API`, e.g., `TORCH_API` inside Caffe2, Aten and Torch.
+   (Every separate shared library needs a unique macro name, because symbol visibility
+   is on a per shared library basis. See c10/macros/Macros.h for more details.)
+
+   The upshot is if you see an "unresolved external" error in your Windows build, this
+   is probably because you forgot to mark a function with `*_API`. However, there is
+   one important counterexample to this principle: if you want a *templated* function
+   to be instantiated at the call site, do NOT mark it with `*_API` (if you do mark it,
+   you'll have to explicitly instantiate all of the specializations used by the call
+   sites.)
+
+2. If you link against a library, this does not make its dependencies transitively
+   visible. You must explicitly specify a link dependency against every library whose
+   symbols you use. (This is different from Linux where in most environments,
+   transitive dependencies can be used to fulfill unresolved symbols.)
+
+3. If you have a Windows box (we have a few on EC2 which you can request access to) and
+   you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh`.
+
+Even if you don't know anything about MSVC, you can use cmake to build simple programs on
+Windows; this can be helpful if you want to learn more about some peculiar linking behavior
+by reproducing it on a small example. Here's a simple example cmake file that defines
+two dynamic libraries, one linking with the other:
+
+```CMake
+project(myproject CXX)
+set(CMAKE_CXX_STANDARD 20)
+add_library(foo SHARED foo.cpp)
+add_library(bar SHARED bar.cpp)
+# NB: don't forget to __declspec(dllexport) at least one symbol from foo,
+# otherwise foo.lib will not be created.
+target_link_libraries(bar PUBLIC foo)
+```
+
+You can build it with:
+
+```bash
+mkdir build
+cd build
+cmake ..
+cmake --build .
+```
+
+### Known MSVC (and MSVC with NVCC) bugs
+
+The PyTorch codebase sometimes likes to use exciting C++ features, and
+these exciting features lead to exciting bugs in Windows compilers.
+To add insult to injury, the error messages will often not tell you
+which line of code actually induced the erroring template instantiation.
+
+We've found the most effective way to debug these problems is to
+carefully read over diffs, keeping in mind known bugs in MSVC/NVCC.
+Here are a few well known pitfalls and workarounds:
+
+* This is not actually a bug per se, but in general, code generated by MSVC
+  is more sensitive to memory errors; you may have written some code
+  that does a use-after-free or stack overflows; on Linux the code
+  might work, but on Windows your program will crash. ASAN may not
+  catch all of these problems: stay vigilant to the possibility that
+  your crash is due to a real memory problem.
+
+* `constexpr` generally works less well on MSVC.
+
+  * The idiom `static_assert(f() == f())` to test if `f` is constexpr
+    does not work; you'll get "error C2131: expression did not evaluate
+    to a constant". Don't use these asserts on Windows.
+    (Example: `c10/util/intrusive_ptr.h`)
+
+* (NVCC) Code you access inside a `static_assert` will eagerly be
+  evaluated as if it were device code, and so you might get an error
+  that the code is "not accessible".
+
+```cpp
+class A {
+  static A singleton_;
+  static constexpr inline A* singleton() {
+    return &singleton_;
+  }
+};
+static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
+```
+
+* The compiler will run out of heap space if you attempt to compile files that
+  are too large. Splitting such files into separate files helps. This is why
+  the codegen shards large generated files (e.g. `VariableType.cpp` and
+  `RegisterCPU.cpp`); see Note [Sharded File] for details.
+
+* MSVC's preprocessor (but not the standard compiler) has a bug
+  where it incorrectly tokenizes raw string literals, ending when it sees a `"`.
+  This causes preprocessor tokens inside the literal like an`#endif`  to be incorrectly
+  treated as preprocessor directives. See https://godbolt.org/z/eVTIJq as an example.
+
+* Either MSVC or the Windows headers have a PURE macro defined and will replace
+  any occurrences of the PURE token in code with an empty string. This is why
+  we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
+  The same is likely true for other identifiers that we just didn't try to use yet.
+
+### Building on legacy code and CUDA
+
+CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions. Current
+PyTorch requires CUDA 12.8+ and Visual Studio 2022 (17.X). Building PyTorch requires a C++20
+capable toolchain (GCC 11.3+, Clang 16+, or MSVC 2022).
+
+## Linting before committing
+
+All linting (clang-tidy, flake8, formatting, and more) is run through
+[`lintrunner`](https://github.com/pytorch/pytorch/wiki/lintrunner). The
+easiest way to run it is via `spin`:
+
+  ```bash
+  spin lint        # run the default lint
+  spin quicklint   # lint only files changed in the latest commit and working tree
+  spin quickfix    # autofix issues on those changed files
+  ```
+
+You can also invoke `lintrunner` directly. With no arguments it lints the files
+changed relative to the merge-base, so just run:
+
+  ```bash
+  lintrunner          # lint changed files
+  lintrunner -a       # lint changed files and apply autofixes
+  ```
+
+Fix the code so that no errors are reported when you re-run the above check again,
+and then commit the fix.
+
+## CI failure tips
+
+Once you submit a PR or push a new commit to a branch that is in
+an active PR, CI jobs will be run automatically. Some of these may
+fail and you will need to find out why, by looking at the logs.
+
+Fairly often, a CI failure might be unrelated to your changes. You can
+confirm by going to our [HUD](https://hud.pytorch.org) and seeing if the CI job
+is failing upstream already. In this case, you
+can usually ignore the failure. See [the following
+subsection](#which-commit-is-used-in-ci) for more details.
+
+Some failures might be related to specific hardware or environment
+configurations. In this case, if you're a Meta employee, you can ssh into
+the job's session to perform manual debugging following the instructions in
+our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-for-Github-Actions).
+
+
+### Which commit is used in CI?
+
+For CI run on `main`, this repository is checked out for a given `main`
+commit, and CI is run on that commit (there isn't really any other choice).
+
+For PRs, however, it's a bit more complicated. Consider this commit graph, where
+`main` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+commit `B`:
+
+```
+       o---o---B (refs/pull/42/head)
+      /         \
+     /           C (refs/pull/42/merge)
+    /           /
+---o---o---o---A (merge-destination) - usually main
+```
+
+There are two possible choices for which commit to use:
+
+1. Checkout commit `B`, the head of the PR (manually committed by the PR
+   author).
+2. Checkout commit `C`, the hypothetical result of what would happen if the PR
+   were merged into its destination (usually `main`).
+
+For all practical purposes, most people can think of the commit being used as
+commit `B` (choice **1**).
+
+However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch was created) there's
+a nuance to know about:
+The workflow files themselves get taken from checkpoint `C`, the merger of your
+PR and the `main` branch. But only the workflow files get taken from that merged
+checkpoint. Everything else (tests, code, etc) all get taken directly from your
+PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
