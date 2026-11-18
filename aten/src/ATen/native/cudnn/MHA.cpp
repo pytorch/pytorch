@@ -2142,7 +2142,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
     float dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
-    const Tensor& q,
+    const Tensor& query,
     const Tensor& k,
     const Tensor& v,
     const std::optional<Tensor>& attn_bias,
@@ -2154,12 +2154,19 @@ void run_cudnn_SDP_bprop_nestedtensor(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
+  Tensor q = query;
   if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel() ||
       !softmaxstats.numel()) {
     dQ.zero_();
     dK.zero_();
     dV.zero_();
     return;
+  }
+  // cuDNN uses Q's ragged offsets for the packed dQ accumulator.
+  // TODO: Remove this copy when cuDNN uses the accumulator's own offsets.
+  if (q.strides() != dQ.strides()) {
+    q = at::empty_like(dQ);
+    q.copy_(query);
   }
   check_cudnn_sdpa_decode(s_q);
   TORCH_CHECK(
