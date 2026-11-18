@@ -481,13 +481,13 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     )
   endif()
 
-  # ---[ torch.rewrite runtime (torch._cfg_rs)
-  # The compiler and VM behind torch.rewrite are a Rust crate that only
+  # ---[ torch.vm runtime (torch._cfg_rs)
+  # The compiler and VM behind torch.vm are a Rust crate that only
   # depends on the Python C API; everything that touches the dispatcher is in
   # torch_python (torch/csrc/cfg) and reaches the crate through a capsule.
   # Opt-in because it needs cargo, and the network the first time, to fetch
   # pyo3.
-  if(USE_CFG_COMPILE)
+  if(USE_TORCH_VM)
     find_program(CARGO_EXECUTABLE cargo HINTS "$ENV{HOME}/.cargo/bin" REQUIRED)
     set(_cfg_rs_dir "${CMAKE_BINARY_DIR}/cfg_rs")
     set(_cfg_rs_lib "${_cfg_rs_dir}/release/lib_cfg_rs.so")
@@ -497,7 +497,7 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
         --manifest-path "${TORCH_SRC_DIR}/csrc/cfg/rust/Cargo.toml"
         --target-dir "${_cfg_rs_dir}"
       BYPRODUCTS "${_cfg_rs_lib}"
-      COMMENT "Building the torch.rewrite runtime"
+      COMMENT "Building the torch.vm runtime"
       VERBATIM
     )
     if(SKBUILD)
