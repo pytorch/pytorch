@@ -14075,6 +14075,18 @@ class TestNondeterministic(TestCaseMPS):
         values = torch.randn(10, device=device)
         return lambda: input.index_put(indices, values, accumulate=True)
 
+    def _case_put_accumulate(self, device):
+        input = torch.randn(4, device=device)
+        index = torch.zeros(16, dtype=torch.long, device=device)
+        source = torch.randn(16, device=device)
+        return lambda: input.put(index, source, accumulate=True)
+
+    def _case_index_add(self, device):
+        input = torch.randn(4, device=device)
+        index = torch.zeros(16, dtype=torch.long, device=device)
+        source = torch.randn(16, device=device)
+        return lambda: input.index_add(0, index, source)
+
     def _case_index_reduce(self, device):
         n = 16
         input = torch.randn(4, device=device)
@@ -14134,6 +14146,8 @@ class TestNondeterministic(TestCaseMPS):
         "scatter_reduce": _case_scatter_reduce,
         "scatter_reduce_strided": _case_scatter_reduce_strided,
         "index_put_accumulate": _case_index_put_accumulate,
+        "put_accumulate": _case_put_accumulate,
+        "index_add": _case_index_add,
         "index_reduce": _case_index_reduce,
     }
 
