@@ -8,6 +8,7 @@ C10_METAL_CONSTEXPR uint32_t kFFTFourStepTwiddles = 1u << 2;
 C10_METAL_CONSTEXPR uint32_t kFFTExtendedStores = 1u << 3;
 C10_METAL_CONSTEXPR uint32_t kFFTExtendedLoads = 1u << 4;
 C10_METAL_CONSTEXPR uint32_t kFFTGlobalStage = 1u << 5;
+C10_METAL_CONSTEXPR uint32_t kFFTPackedRealStores = 1u << 6;
 // The bits of four-step, chirp and global-memory passes
 C10_METAL_CONSTEXPR uint32_t kFFTMultiPass = kFFTFourStepTwiddles |
     kFFTExtendedStores | kFFTExtendedLoads | kFFTGlobalStage;
@@ -69,15 +70,16 @@ C10_METAL_CONSTEXPR uint32_t kFFTMaskP235713 = kFFTMaskP2357 | (1u << 13);
 C10_METAL_CONSTEXPR uint32_t kFFTP16Points = 16;
 
 // tgb transforms of n points per group, jt threads each. n_sig: full signal
-// (zero-padded beyond), n_out: outputs. Four-step: input e * ld_mul + i0,
-// output k * out_k_mul + i0, mirror_out adds conj X[k] at n_sig - k, i0_dim1
-// reads i0 from batch dim 1. Smem slot i of a row of `row` slots is at
-// i + (i >> padshift); tiles interleave by es.
+// (zero-padded beyond), n_in: inputs (c2r: n_sig/2+1, mirrored), n_out:
+// outputs. Four-step: input e * ld_mul + i0, output k * out_k_mul + i0,
+// mirror_out adds conj X[k] at n_sig - k, i0_dim1 reads i0 from batch dim 1.
+// Smem slot i of a row of `row` slots is at i + (i >> padshift); tiles
+// interleave by es.
 // index_t: the offset type, 64-bit where one transform spans 2^31 elements.
 template <typename index_t>
 struct FFTParams {
-  uint32_t n, n_sig, n_out, tgb, jt, ndim, nstages;
-  index_t in_stride, out_stride; // along the axis
+  uint32_t n, n_sig, n_in, n_out, tgb, jt, ndim, nstages;
+  index_t in_stride, in_unit, out_stride; // along the axis: slice, full, out
   float scale;
   uint32_t ld_mul, out_k_mul, row, padshift, es;
   bool mirror_out, i0_dim1, via_smem;
