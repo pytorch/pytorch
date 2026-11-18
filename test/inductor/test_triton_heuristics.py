@@ -8,6 +8,7 @@ import math
 import os
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from unittest import skipUnless
@@ -1575,6 +1576,103 @@ class TestCachingAutotunerPlugin(TestCase):
         revived = CachingAutotuner.__new__(CachingAutotuner)
         revived.__setstate__(state)
         self.assertEqual(revived._plugins, [])
+
+
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+class TestCachingAutotunerConcurrentRun(TestCase):
+    def test_concurrent_first_runs_tune_once(self):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
+        autotuner = CachingAutotuner(**args)
+        configs = args["configs"]
+        nthreads = len(configs)
+        inputs = [torch.randn(16, device=GPU_TYPE) for _ in range(nthreads)]
+        outputs = [torch.empty(16, device=GPU_TYPE) for _ in range(nthreads)]
+        stream = TestCachingAutotunerPlugin._get_stream()
+        torch.accelerator.synchronize()
+
+        # The first thread to benchmark waits until another thread benchmarks
+        # too, or waits for the autotuner's lock while the first one holds it.
+        cond = threading.Condition()
+        benchmarking = 0
+        max_benchmarking = 0
+        waiting_for_lock = 0
+
+        class ObservedLock:
+            def __init__(self, lock):
+                self.lock = lock
+                self.owner = None
+                self.depth = 0
+
+            def __enter__(self):
+                nonlocal waiting_for_lock
+                if not self.lock.acquire(blocking=False):
+                    with cond:
+                        waiting_for_lock += 1
+                        cond.notify_all()
+                    self.lock.acquire()
+                    with cond:
+                        waiting_for_lock -= 1
+                self.owner = threading.get_ident()
+                self.depth += 1
+
+            def __exit__(self, *exc_info):
+                self.depth -= 1
+                if self.depth == 0:
+                    self.owner = None
+                self.lock.release()
+
+        autotuner.lock = ObservedLock(autotuner.lock)
+        orig_bench = CachingAutotuner.bench
+        preferred = {}
+
+        def bench(self, launcher, *args, **kwargs):
+            nonlocal benchmarking, max_benchmarking
+            with cond:
+                benchmarking += 1
+                max_benchmarking = max(max_benchmarking, benchmarking)
+                cond.notify_all()
+                holds_lock = autotuner.lock.owner == threading.get_ident()
+                if not cond.wait_for(
+                    lambda: max_benchmarking > 1 or (holds_lock and waiting_for_lock),
+                    timeout=60,
+                ):
+                    raise AssertionError("the other thread did not reach the kernel")
+            try:
+                orig_bench(self, launcher, *args, **kwargs)
+            finally:
+                with cond:
+                    benchmarking -= 1
+            # Each thread prefers a different config.
+            best = preferred[threading.get_ident()]
+            return 0.0 if launcher.config.kwargs == best.kwargs else 1.0
+
+        start = threading.Barrier(nthreads)
+        failures = []
+
+        def worker(tid):
+            preferred[threading.get_ident()] = configs[tid]
+            try:
+                start.wait()
+                autotuner.run(inputs[tid], outputs[tid], 16, stream=stream)
+                self.assertEqual(outputs[tid], inputs[tid].cos())
+            except Exception as e:
+                failures.append(e)
+
+        threads = [
+            threading.Thread(target=worker, args=(i,), daemon=True)
+            for i in range(nthreads)
+        ]
+        with patch.object(CachingAutotuner, "bench", bench):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=120)
+        self.assertFalse(any(t.is_alive() for t in threads), "a thread hung")
+        if failures:
+            raise failures[0]
+        self.assertEqual(max_benchmarking, 1)
+        self.assertEqual(len(autotuner.launchers), 1)
 
 
 class TestArgumentCloneAndRestore(TestCase):

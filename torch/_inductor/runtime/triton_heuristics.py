@@ -790,7 +790,8 @@ class CachingAutotuner(KernelInterface):
 
         self.compile_results: list[_KernelCompileResult] = []
         self.launchers: list[LauncherType] = []
-        self.lock = threading.Lock()
+        # Reentrant because run() holds it while tuning, which precompiles under it.
+        self.lock = threading.RLock()
         self.benchmark_failure_reasons: dict[Any, BenchmarkFailureReason] = {}
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
@@ -1415,7 +1416,7 @@ class CachingAutotuner(KernelInterface):
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self._plugins = get_caching_autotuner_plugins(self)
 
     def get_device_interface(self):
@@ -2788,46 +2789,54 @@ class CachingAutotuner(KernelInterface):
             ) is not DEFER:
                 return result
 
-        if len(self.launchers) != 1:
-            if len(self.launchers) == 0:
-                start_time = time.time_ns()
-                self.precompile()
-                self.precompile_time_taken_ns = time.time_ns() - start_time
-            if len(self.launchers) > 1:
-                for plugin in self._active_plugins():
-                    if (
-                        result := plugin.pre_autotune(
-                            self, *args, stream=stream, **kwargs
+        # Threads that call a kernel for the first time at once tune it one at a
+        # time: tuning replaces self.launchers and closes the losing launchers.
+        if self._needs_tuning():
+            with self.lock:
+                if len(self.launchers) != 1:
+                    if len(self.launchers) == 0:
+                        start_time = time.time_ns()
+                        self.precompile()
+                        self.precompile_time_taken_ns = time.time_ns() - start_time
+                    if len(self.launchers) > 1:
+                        for plugin in self._active_plugins():
+                            if (
+                                result := plugin.pre_autotune(
+                                    self, *args, stream=stream, **kwargs
+                                )
+                            ) is not DEFER:
+                                return result
+                        # Re-check: a plugin may have mutated launchers down to one.
+                        if len(self.launchers) > 1:
+                            self.autotune_to_one_config(*args, **kwargs)
+
+                if self.inductor_meta.get("combo_tuning_groups") and not getattr(
+                    self.launchers[0].config, "found_by_combo_autotune", False
+                ):
+                    with dynamo_timed(
+                        "CachingAutotuner.combo_sequential_autotune",
+                        log_pt2_compile_event=False,
+                        metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+                        dynamo_compile_column_us="runtime_triton_autotune_time_us",
+                        compile_id=self.compile_id,
+                        is_backward=self.is_backward,
+                        log_waitcounter=True,
+                        waitcounter_name_override="triton_autotuner",
+                    ):
+                        self.launchers = [
+                            self._combo_sequential_autotune(
+                                self.launchers[0], *args, **kwargs
+                            )
+                        ]
+
+                if not getattr(
+                    self.launchers[0].config, "found_by_coordesc", False
+                ) and self.inductor_meta.get("coordinate_descent_tuning", False):
+                    self.launchers = [
+                        self.coordinate_descent_tuning(
+                            self.launchers[0], *args, **kwargs
                         )
-                    ) is not DEFER:
-                        return result
-                # Re-check: a plugin may have mutated launchers down to one.
-                if len(self.launchers) > 1:
-                    self.autotune_to_one_config(*args, **kwargs)
-
-        if self.inductor_meta.get("combo_tuning_groups") and not getattr(
-            self.launchers[0].config, "found_by_combo_autotune", False
-        ):
-            with dynamo_timed(
-                "CachingAutotuner.combo_sequential_autotune",
-                log_pt2_compile_event=False,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-                dynamo_compile_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
-                log_waitcounter=True,
-                waitcounter_name_override="triton_autotuner",
-            ):
-                self.launchers = [
-                    self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
-                ]
-
-        if not getattr(
-            self.launchers[0].config, "found_by_coordesc", False
-        ) and self.inductor_meta.get("coordinate_descent_tuning", False):
-            self.launchers = [
-                self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)
-            ]
+                    ]
 
         (launcher,) = self.launchers
         # Ensure the final launcher is marked as a winner for bundle filtering.
@@ -2866,6 +2875,20 @@ class CachingAutotuner(KernelInterface):
             self._cached_profiler_kwargs = self.get_profiler_kwargs(None, launcher)
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
+
+    def _needs_tuning(self) -> bool:
+        launchers = self.launchers
+        if len(launchers) != 1:
+            return True
+        config = launchers[0].config
+        if self.inductor_meta.get("combo_tuning_groups") and not getattr(
+            config, "found_by_combo_autotune", False
+        ):
+            return True
+        return bool(
+            self.inductor_meta.get("coordinate_descent_tuning", False)
+            and not getattr(config, "found_by_coordesc", False)
+        )
 
     def _check_launcher_call_args(
         self,
