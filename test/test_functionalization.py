@@ -196,6 +196,46 @@ class TestFunctionalization(TestCase):
         )
         self.assertEqual(r.stride(), (5, 1))
 
+    def test_unfold_of_transposed_view_preserves_strides(self):
+        def f(x):
+            y = x.clone()
+            y.t().unfold(0, 1, 1).add_(1)
+            return y
+
+        x = torch.arange(4.0).reshape(2, 2)
+        ref = f(x)
+        out = _functionalize(f, reapply_views=True, crossref=self.crossref)(x)
+        self.assertEqual(out, ref)
+        self.assertEqual(out.stride(), ref.stride())
+        self.assertEqual(out.as_strided((), (), 1), ref.as_strided((), (), 1))
+        # *_copy view ops return contiguous tensors (crossref would flag t_copy), so only values here.
+        f_no_views = _functionalize(f, reapply_views=False, crossref=False)
+        for shape in ((2, 2), (1, 3)):
+            x = torch.arange(float(shape[0] * shape[1])).reshape(shape)
+            self.assertEqual(f_no_views(x), f(x))
+
+    def test_unfold_of_channels_last_preserves_strides(self):
+        def f(x):
+            y = x.clone(memory_format=torch.channels_last)
+            y.unfold(2, 2, 2).mul_(2)
+            return y
+
+        x = torch.randn(2, 3, 4, 4)
+        ref = f(x)
+        out = _functionalize(f, reapply_views=True, crossref=self.crossref)(x)
+        self.assertEqual(out, ref)
+        self.assertEqual(out.stride(), ref.stride())
+        self.assertEqual(_functionalize(f, reapply_views=False, crossref=False)(x), ref)
+
+    def test_unfold_of_transposed_view_compiled(self):
+        def f(x):
+            y = x.clone()
+            y.t().unfold(0, 1, 1).add_(1)
+            return y.as_strided((), (), 1)
+
+        x = torch.arange(4.0).reshape(2, 2)
+        self.assertEqual(torch.compile(f, backend="aot_eager", fullgraph=True)(x), f(x))
+
     def test_set_(self):
         def f(x):
             y = torch.ones(2)

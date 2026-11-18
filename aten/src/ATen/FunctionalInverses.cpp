@@ -6,6 +6,8 @@
 #include <ATen/WrapDimUtilsMulti.h>
 
 #include <c10/util/irange.h>
+#include <algorithm>
+#include <numeric>
 #include <utility>
 namespace at::functionalization {
 
@@ -421,7 +423,31 @@ When using torch.compile (or running functionalization directly), this is banned
 as the behavior is not well defined. Consider cloning the tensor before mutating it, \
 or removing the mutation from your model."
           );
-      return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+      // See Note [*_scatter ops preserve strides]. unfold_backward returns a contiguous tensor,
+      // so for a permuted dense base, run it in the base's memory order and permute back.
+      // NeverView can't preserve strides this way: permute_copy is contiguous too.
+      if (inverse_return_mode == InverseReturnMode::NeverView ||
+          base.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || base.is_contiguous() ||
+          !base.is_non_overlapping_and_dense()) {
+        return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+      }
+      const auto ndim = base.dim();
+      dimension = at::maybe_wrap_dim(dimension, ndim);
+      std::vector<int64_t> perm(ndim);
+      std::iota(perm.begin(), perm.end(), 0);
+      std::stable_sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) { return base.stride(a) > base.stride(b); });
+      std::vector<int64_t> perm_sizes(ndim);
+      int64_t perm_dim = 0;
+      for (const auto i : c10::irange(ndim)) {
+        perm_sizes[i] = base.size(perm[i]);
+        if (perm[i] == dimension) {
+          perm_dim = i;
+        }
+      }
+      auto view_perm = perm;
+      view_perm.push_back(ndim);
+      auto out = unfold_backward(mutated_view.permute(view_perm), perm_sizes, perm_dim, size, step);
+      return at::functionalization::permute_inverse(out, perm, inverse_return_mode);
     }
 }
 
