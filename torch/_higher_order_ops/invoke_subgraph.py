@@ -163,8 +163,9 @@ class NestedCompileRegionOptions:
 
     # If set, an immutable snapshot of the full Inductor config for the backward
     # subgraph, used instead of inductor_config_patches (a replacement, not merged
-    # with it), mirroring aot_autograd's separate fw_compiler/bw_compiler. If None,
-    # the backward reuses the forward config.
+    # with it, except that the forward's triton.cudagraphs carries over),
+    # mirroring aot_autograd's separate fw_compiler/bw_compiler. If None, the
+    # backward reuses the forward config.
     bw_inductor_config_patches: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -223,17 +224,25 @@ def get_backward_nested_region_config(
     """Region config for compiling the backward subgraph.
 
     When the region sets bw_inductor_config_patches, the backward compiles under
-    it (a replacement for inductor_config_patches, not merged with it). Otherwise
-    the forward config is reused unchanged, so the returned object is identical
+    it (a replacement for inductor_config_patches, not merged with it), plus the
+    forward's triton.cudagraphs, which covers both directions. Otherwise the
+    forward config is reused unchanged, so the returned object is identical
     (callers rely on this identity to detect a distinct backward config).
     """
     if (
         isinstance(fw_config, NestedCompileRegionOptions)
         and fw_config.bw_inductor_config_patches is not None
     ):
+        bw_patches = fw_config.bw_inductor_config_patches
+        fw_patches = fw_config.inductor_config_patches or {}
+        if "triton.cudagraphs" in fw_patches:
+            bw_patches = {
+                **bw_patches,
+                "triton.cudagraphs": fw_patches["triton.cudagraphs"],
+            }
         return replace(
             fw_config,
-            inductor_config_patches=fw_config.bw_inductor_config_patches,
+            inductor_config_patches=bw_patches,
             bw_inductor_config_patches=None,
         )
     return fw_config
@@ -1462,6 +1471,16 @@ def invoke_subgraph_inductor_compile(
     gm, example_inputs, inductor_config_patches=None, **kwargs
 ):
     _validate_nested_region_inductor_config_patches(inductor_config_patches)
+    if inductor_config_patches and "triton.cudagraphs" in inductor_config_patches:
+        # Only the main Inductor compile validates and honors it (see
+        # _validate_region_cudagraphs); compiled on its own here, a region would
+        # be captured without pairing its forward and backward.
+        raise ValueError(
+            "Inductor config key 'triton.cudagraphs' in nested compile-region "
+            "options is not supported when the region is compiled on its own, "
+            "e.g. by regional_inductor_invoke_subgraph; it is only supported "
+            "under torch.compile(backend='inductor')"
+        )
     if inductor_config_patches is None:
         inductor_config_patches = {}
 
