@@ -1827,6 +1827,36 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B),
             )
 
+    def test_assume_constant_result_object_identity_recompile_hint(self):
+        class Box:
+            def __init__(self, value):
+                self.value = value
+
+            def __eq__(self, other):
+                return isinstance(other, Box) and self.value == other.value
+
+        @torch._dynamo.assume_constant_result
+        def read(box):
+            return box.value
+
+        def fn(x, box):
+            return x + read(box)
+
+        failures = []
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        first = Box(2)
+        self.assertEqual(compiled(x, first), x + 2)
+        self.assertEqual(compiled(x, first), x + 2)
+        self.assertEqual(failures, [])
+        self.assertEqual(compiled(x, Box(2)), x + 2)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("___check_obj_id(box", failures[0])
+        self.assertIn("Dynamo ran a function with this object", failures[0])
+        self.assertIn("Even an equal-valued replacement can recompile", failures[0])
+
     def test_assume_constant_result_on_computation_with_graph_input(self):
         @torch._dynamo.assume_constant_result
         def check(y):

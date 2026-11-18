@@ -2242,6 +2242,17 @@ class WrappedUserFunctionVariable(ContextWrappedFunctionMixin, UserFunctionVaria
         self.context = context
 
 
+_constant_function_object_guard = functools.partial(
+    GuardBuilder.ID_MATCH,
+    recompile_hint=(
+        "Dynamo checks for the same object on later calls because a replacement "
+        "could produce a different result. Even an equal-valued replacement can "
+        "recompile. If possible, pass the needed value to that function "
+        "instead of the object."
+    ),
+)
+
+
 def invoke_and_store_as_constant(
     tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
@@ -2254,7 +2265,7 @@ def invoke_and_store_as_constant(
             return cast("TensorVariable", x).get_real_value()
         if isinstance(x, UserDefinedObjectVariable):
             if x.source is not None:
-                install_guard(x.make_guard(GuardBuilder.ID_MATCH))
+                install_guard(x.make_guard(_constant_function_object_guard))
             return x.value
         try:
             return x.as_python_constant()
