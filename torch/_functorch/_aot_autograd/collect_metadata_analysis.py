@@ -582,8 +582,8 @@ alias each other from a multi-output view call"
                 # o was set_() onto an input (see "Why Do We Care If Storage Changed?"
                 # above). Outputs that require grad are skipped: alias_of_input
                 # regenerates o from the input at runtime, which would replace o's own
-                # grad_fn. They stay non_alias and so don't share the input's storage
-                # in compiled mode, unlike eager.
+                # grad_fn. They fall through to the remaining classifications and so
+                # don't share the input's storage in compiled mode, unlike eager.
                 base_idx = inp_inner_storage_refs[inner_storage]
                 output_type = OutputType.alias_of_input
 

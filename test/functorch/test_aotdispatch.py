@@ -822,13 +822,17 @@ def forward(self, primals_1):
             )
 
             graph_inps = [x.clone() for x in inps]
+            base = graph_inps[base_idx]
             compiled_f = self.run_autograd(f, [None], None, True, False)
             out = compiled_f(*graph_inps)
 
+            self.assertIsNot(out, base)
             self.assertEqual(
-                out.untyped_storage().data_ptr(),
-                graph_inps[base_idx].untyped_storage().data_ptr(),
+                out.untyped_storage().data_ptr(), base.untyped_storage().data_ptr()
             )
+            base_shape = base.shape
+            out.unsqueeze_(0)
+            self.assertEqual(base.shape, base_shape)
 
     def test_set__intermediate_onto_input_is_alias_of_input(self):
         def f(a):

@@ -21563,6 +21563,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         out_eager = fn(x_eager)
         out_compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x_compiled)
+        self.assertIsNot(out_compiled, x_compiled)
         self.assertEqual(
             out_compiled.untyped_storage().data_ptr(),
             x_compiled.untyped_storage().data_ptr(),
