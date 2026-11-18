@@ -179,7 +179,6 @@ DECOMPOSED_OPS: set[OpType] = {
     aten.unsafe_split,
     aten.unsqueeze_copy,
     aten.vdot,
-    aten.view_copy,
     aten.zeros,
 }
 
