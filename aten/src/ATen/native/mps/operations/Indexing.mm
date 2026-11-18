@@ -196,6 +196,8 @@ static void index_put_kernel_mps(TensorIterator& iter,
     validateInputData(iter, index_size, index_stride, "index_put_impl");
     if (accumulate) {
       const auto dtype = iter.tensor_base(0).scalar_type();
+      // See Note [Enabling Deterministic Operations]
+      // Normally nondeterministic due to atomic-add
       const bool needs_determinism =
           at::globalContext().deterministicAlgorithms() && (at::isFloatingType(dtype) || at::isComplexType(dtype));
       if (needs_determinism) {
