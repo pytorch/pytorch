@@ -358,16 +358,56 @@ def in_namespace(
     return False
 
 
+def _get_pointwise_device(
+    inputs: Sequence[IRNode], override_device: torch.device | None = None
+) -> torch.device:
+    if override_device is not None:
+        return override_device
+    for arg in inputs:
+        device = arg.get_device()
+        if device is not None and is_gpu(device.type):
+            return device
+    device = inputs[0].get_device()
+    if device is None:
+        raise AssertionError("Pointwise inputs must have a device")
+    return device
+
+
 def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """Prepare CPU scalar operands for pointwise codegen on another device.
+
+    Inlining an expression over non-scalar CPU storage would pass a CPU pointer
+    to Triton. Realized zero-dimensional CPU buffers can instead be registered
+    by the scheduler and unwrapped by `should_unwrap_unspec_arg`. Immutable
+    tensor constants are already safe: codegen loads a copy on the kernel's device.
     """
-    Copy cpu scalar if doesn't not match with given `device`
-    """
-    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
-        x.get_size()
-    ):
+    cur_device = x.get_device()
+    if not isinstance(x.data, ir.ReinterpretView):
+        if (
+            cur_device is not None
+            and cur_device.type == "cpu"
+            and device.type != "cpu"
+            and len(x.get_size()) == 0
+            and not ir.is_storage_and_layout(x)
+            and any(
+                (
+                    name not in V.graph.constants
+                    or V.graph.allocated_constant_name.get(name, name)
+                    in V.graph.mutated_named_buffers
+                )
+                and not V.graph.is_zero_dim_cpu_buffer(name)
+                for name in x.get_read_names()
+            )
+        ):
+            if isinstance(x.data, ir.StorageBox):
+                x.realize()
+            else:
+                # Preserve the scalar view's shape, not its backing buffer's.
+                return ir.ExternKernel.copy_input(x)
+        return x
+    if has_free_unbacked_symbols(x.get_size()):
         return x
     size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
-    cur_device = x.get_device()
     if (
         cur_device is not None
         and cur_device.type == "cpu"
@@ -412,9 +452,9 @@ def transform_args(
                 type_promotion_kind=type_promotion_kind,  # type: ignore[arg-type]
             )
 
-        device = (
-            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
-        ).get_device()
+        device = _get_pointwise_device(
+            [args[i] for i in args_indices] + [kwargs[k] for k in kwargs_indices]
+        )
 
         for i in args_indices:
             args[i] = maybe_copy_cpu_scalar(args[i], device)
@@ -783,6 +823,7 @@ def make_pointwise(
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
     force_output_cast: bool = False,
+    preserve_cuda_scalar_precision: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR.
@@ -790,6 +831,11 @@ def make_pointwise(
     force_output_cast rounds a bf16/fp16 result down and back up in registers,
     emulating the rounding eager applies at the op's output; see
     emulate_lowp_output_cast.
+
+    preserve_cuda_scalar_precision keeps original CUDA bf16/fp16 arithmetic
+    scalars in FP32 at emulation boundaries. Enable it only for operations whose
+    eager CUDA kernels use opmath scalars; tensor constants retain input casts.
+    Generic alpha scaling retains its existing input casts.
     """
 
     def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
@@ -800,6 +846,20 @@ def make_pointwise(
                 raise AssertionError("expected: not allow_alpha")
             return triton_fallback(*inputs)
 
+        # Preserve scalar provenance before promotion assigns a tensor dtype.
+        original_inputs = inputs
+        scalar_inputs = (
+            {
+                index: inp
+                for index, inp in enumerate(inputs)
+                if isinstance(inp, (int, float, sympy.Basic))
+            }
+            if preserve_cuda_scalar_precision
+            else {}
+        )
+        current_node = (
+            getattr(V.graph, "current_node", None) if V.graph is not None else None
+        )
         # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(
             inputs,
@@ -817,12 +877,23 @@ def make_pointwise(
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
+                        if (
+                            scalar_inputs
+                            and inputs[0].get_dtype() in (torch.bfloat16, torch.float16)
+                            and _has_lowp_pointwise_barrier(current_node)
+                        ):
+                            return make_pointwise(
+                                lambda a, b, scale: ops.fma(b, scale, a),
+                                preserve_cuda_scalar_precision=True,
+                            )(*original_inputs, alpha)
                         return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
 
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
                 # pyrefly: ignore [unsupported-operation]
                 inputs[-1] = mul(inputs[-1], alpha)
+                # Preserve the existing rounding path for generic alpha scaling.
+                scalar_inputs.clear()
         else:
             if alpha is not None:
                 raise AssertionError("expected: alpha is None")
@@ -841,9 +912,6 @@ def make_pointwise(
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
         low_pr_fp = (torch.bfloat16, torch.float16)
-        current_node = (
-            getattr(V.graph, "current_node", None) if V.graph is not None else None
-        )
         emulate_precision_casts = _has_lowp_pointwise_barrier(current_node)
         truncate_saved_output = (
             config.emulate_precision_casts_on_saved_tensors
@@ -863,11 +931,28 @@ def make_pointwise(
             else:
                 inputs_loaded = []
                 for inp_index, load in enumerate(loaders):
-                    out = load(index)
-                    inp_dtype = inputs[inp_index].get_dtype()
-                    if emulate_precision_casts and inp_dtype in low_pr_fp:
-                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, inp_dtype)
+                    inp = inputs[inp_index]
+                    inp_dtype = inp.get_dtype()
+                    if (
+                        emulate_precision_casts
+                        and inp_dtype in low_pr_fp
+                        and inp_index in scalar_inputs
+                        and inp.get_device().type == "cuda"
+                    ):
+                        # Eager converts these arithmetic scalars directly to FP32.
+                        # Bypass the promoted loader and tensor input-rounding casts.
+                        scalar = scalar_inputs[inp_index]
+                        if isinstance(scalar, sympy.Basic):
+                            out = ops.index_expr(scalar, torch.float32)
+                        else:
+                            out = ops.constant(scalar, torch.float32)
+                    else:
+                        out = load(index)
+                        if emulate_precision_casts and inp_dtype in low_pr_fp:
+                            downcast = ops.to_dtype(
+                                out, inp_dtype, use_compute_types=False
+                            )
+                            out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
@@ -878,18 +963,7 @@ def make_pointwise(
                     return ops.to_dtype(downcast, dtype)
                 return out
 
-        if not override_device:
-            device = None
-            for i in inputs:
-                # pyrefly: ignore [missing-attribute]
-                if is_gpu(i.get_device().type):
-                    device = i.get_device()
-                    break
-            if not device:
-                device = inputs[0].get_device()
-
-        # pyrefly: ignore [unbound-name]
-        device = override_device or device
+        device = _get_pointwise_device(inputs, override_device)
 
         return Pointwise.create(
             device=device,  # type: ignore[arg-type]
@@ -1213,6 +1287,7 @@ def register_pointwise(
     use_fma_for_alpha=False,
     triton_fallback=None,
     round_scalars_to_tensor_dtype=False,
+    preserve_cuda_scalar_precision=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1234,6 +1309,7 @@ def register_pointwise(
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
         round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+        preserve_cuda_scalar_precision=preserve_cuda_scalar_precision,
     )
     fn = register_lowering(
         aten_fn,
@@ -1502,8 +1578,8 @@ def expand(x, sizes, *, implicit=False, graph_fanout=False):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.guarding_hint_or_throw(
-            sympy_product(x.get_size())
+        x_size_product = int(
+            V.graph.sizevars.guarding_hint_or_throw(sympy_product(x.get_size()))
         )
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
@@ -1519,7 +1595,7 @@ def expand(x, sizes, *, implicit=False, graph_fanout=False):
             # In deterministic modes, preserve the old materialization boundary
             # since fusing through expanded inputs can change reduction numerics.
             x.mark_reuse(
-                V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
+                int(V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes)))
                 // x_size_product,
                 graph_reuse=graph_fanout
                 or config.deterministic
@@ -1821,6 +1897,31 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     )
 
 
+def _record_input_as_strided(
+    data: ir.IRNode, layout: ir.FixedLayout, needed: sympy.Expr
+) -> None:
+    """For aot_inductor.cudagraphs, records the first as_strided view of a
+    graph input that may read outside the input's own elements (`needed` is
+    the view's storage size), which AOTI's CUDA graphs copy alone."""
+    if not (
+        V.graph.aot_mode
+        and config.aot_inductor.cudagraphs
+        and V.graph.input_as_strided_node is None
+        and isinstance(data, ir.InputBuffer)
+        and data.get_name() in V.graph.graph_inputs
+    ):
+        return
+    input_layout = data.get_layout()
+    numel = sympy_product(input_layout.size)
+    sizevars = V.graph.sizevars
+    if not (
+        sizevars.statically_known_equals(input_layout.storage_size(), numel)
+        and sizevars.statically_known_geq(layout.offset, 0)
+        and sizevars.statically_known_leq(needed, numel)
+    ):
+        V.graph.input_as_strided_node = V.graph.current_node
+
+
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(
     x,
@@ -1830,6 +1931,7 @@ def as_strided(
     *,
     storage_offset_relative_to_input_storage=True,
 ):
+    """Lower aten.as_strided to a ReinterpretView of ``x``'s underlying storage."""
     explicit_storage_offset = (
         storage_offset is not None and storage_offset_relative_to_input_storage
     )
@@ -1863,6 +1965,12 @@ def as_strided(
             storage_offset
             - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
         )
+        if torch.version.hip is not None and not V.graph.sizevars.statically_known_geq(
+            storage_offset, 0
+        ):
+            # Unlike padding's masked negative indices, this rebase can access
+            # storage before the incoming pointer, even inside a masked load.
+            V.graph.inputs_with_negative_as_strided_offset.add(storage_data.get_name())
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,
@@ -1879,6 +1987,7 @@ def as_strided(
     # are exempt -- their real storage may legitimately extend past the layout, and
     # the adjustment above has already rebased the offset onto the incoming pointer.
     needed = new_layout.storage_size()
+    _record_input_as_strided(storage_data, new_layout, needed)
     buffer = storage_data if isinstance(storage_data, ir.Buffer) else None
     if buffer is not None and not isinstance(buffer, ir.InputBuffer):
         allocated = V.graph.get_allocation_storage_size(buffer)
@@ -2881,9 +2990,14 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         def wrap_tensors(x):
             return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
-        return pytree.tree_map(
-            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
-        )
+        out = ir.FallbackKernel.create(kernel, *args, **kwargs)
+        # The reinplace pass replaces the out-of-place overload with its
+        # in-place equivalent, which returns () but retains the original
+        # operator.getitem users. Return the mutated input list to preserve
+        # the expected outputs for these reinplaced foreach ops.
+        if kernel in inplace_foreach_ops:
+            return list(args[0])
+        return pytree.tree_map(wrap_tensors, out)
 
     # This lets us detect that a lowering is a fallback handler.
     handler._is_fallback_handler = True  # type: ignore[attr-defined]
@@ -3965,9 +4079,6 @@ if torch.mtia._is_compiled():
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-
-# 2) Medium
-make_fallback(aten._trilinear)
 
 
 # 3) Difficult
@@ -8479,6 +8590,7 @@ add = register_pointwise(
     use_fma_for_alpha=True,
     override_fn_when_input_bool="logical_or",
     round_scalars_to_tensor_dtype=True,
+    preserve_cuda_scalar_precision=True,
 )
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
@@ -8757,7 +8869,12 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+sub = register_pointwise(
+    aten.sub,
+    allow_alpha=True,
+    round_scalars_to_tensor_dtype=True,
+    preserve_cuda_scalar_precision=True,
+)
 
 
 def _with_positional_alpha(lowering, self, other, alpha=1):
@@ -9396,6 +9513,13 @@ def resize(x, size, *, memory_format=None):
     if not (isinstance(size, (list, tuple))):
         raise AssertionError("expected: isinstance(size, (list, tuple))")
 
+    # Functional resize clones first; a same-shape resize preserves that clone's
+    # logical values and dimension order.
+    if memory_format is None and V.graph.sizevars.statically_known_list_equals(
+        x.get_size(), size
+    ):
+        return clone(x)
+
     if memory_format is None:
         memory_format = torch.contiguous_format
     if memory_format == torch.preserve_format:
@@ -9433,14 +9557,12 @@ def resize(x, size, *, memory_format=None):
     has_overlapping = strides is not None and any(
         V.graph.sizevars.statically_known_equals(s, 0) for s in strides
     )
-    if has_overlapping:
-        # overlapping: provide a contiguous logical view
-        x_flat = view(x, [old_numel])
-    else:
-        # non-overlapping: keep storage order
-        if isinstance(x.data, ir.BaseView):
-            x.data = x.data.unwrap_view()
-        x_flat = as_strided(x, [old_numel], [1])
+    if strides is not None and not has_overlapping:
+        # The preserve-format clone removes storage gaps but retains dimension
+        # order. Flatten logical elements in that order, preserving view offsets.
+        fill_order = ir.stride_order2fill_order(ir.get_stride_order(strides))
+        x = permute(x, list(reversed(fill_order)))
+    x_flat = view(x, [old_numel])
     flat_loader = x_flat.make_loader()
     out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
     out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()

@@ -176,7 +176,7 @@ class MinCutOptions:
 
 
 def must_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", None) in [
+    return node.op != "placeholder" and node.meta.get("recompute", None) in [
         CheckpointPolicy.MUST_RECOMPUTE,
         CheckpointPolicy.PREFER_RECOMPUTE,
     ]
@@ -2172,9 +2172,9 @@ def functionalize_rng_ops(
         return torch.device("cpu")
 
     def get_sample_rng_state(device: torch.device | None) -> torch.Tensor:
-        from torch._guards import detect_fake_mode
+        from torch._guards import detect_fake_mode, require_python_fake_mode
 
-        fake_mode = detect_fake_mode()
+        fake_mode = require_python_fake_mode(detect_fake_mode())
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
         with fake_mode:
