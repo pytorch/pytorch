@@ -188,18 +188,19 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             "triton.cudagraphs": False,
         }
     )
+    @parametrize("key", ("max_autotune", "max_autotune_gemm"))
     @parametrize("parent_max_autotune", (False, True))
     @parametrize("nested_max_autotune", (False, True))
     def test_nested_region_inductor_config_max_autotune(
-        self, parent_max_autotune, nested_max_autotune
+        self, key, parent_max_autotune, nested_max_autotune
     ):
         """Check GEMM backend selection in both forward and backward code."""
         if not IS_BIG_GPU:
             self.skipTest("requires a GPU with Triton GEMM template support")
 
         nested_config = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"max_autotune": nested_max_autotune},
-            bw_inductor_config_patches={"max_autotune": nested_max_autotune},
+            fw_inductor_config_patches={key: nested_max_autotune},
+            bw_inductor_config_patches={key: nested_max_autotune},
         )
 
         @torch.compiler.nested_compile_region(options=nested_config)
@@ -216,7 +217,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         with torch.no_grad():
             expected = fn(*inputs)
 
-        with torch._inductor.config.patch(max_autotune=parent_max_autotune):
+        with torch._inductor.config.patch({key: parent_max_autotune}):
             result, codes = run_fw_bw_and_get_code(
                 lambda: torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
             )

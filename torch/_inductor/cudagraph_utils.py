@@ -356,6 +356,7 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
 
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    expected_device_type: str | None = None,
     *,
     cpu_nodes_partitioned_out: bool,
 ) -> str | None:
@@ -379,9 +380,10 @@ def check_multiple_devices_or_any_cpu_nodes(
         # rather than falling through to an empty "multiple devices" list.
         return format_default_skip_message("no GPU ops")
 
-    if (
-        len(device_node_mapping) == 1
-        and next(iter(device_node_mapping)).type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
+    if len(device_node_mapping) == 1 and next(iter(device_node_mapping)).type in (
+        _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
+        if expected_device_type is None
+        else (expected_device_type,)
     ):
         return None
 
@@ -409,16 +411,49 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
     return None
 
 
+def check_current_accelerator_for_cudagraphs(device_type: str) -> str | None:
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        return format_default_skip_message(
+            f"expected accelerator {device_type!r}, but found none"
+        )
+    if accelerator.type != device_type:
+        return format_default_skip_message(
+            f"current accelerator {accelerator.type!r} does not match "
+            f"graph device {device_type!r}"
+        )
+    return None
+
+
+def check_rng_state_for_cudagraphs(device_type: str) -> str | None:
+    device_module = torch.get_device_module(device_type)
+    missing = [
+        name
+        for name in ("get_rng_state", "set_rng_state")
+        if not callable(getattr(device_module, name, None))
+    ]
+    if missing:
+        return format_default_skip_message(
+            "cudagraph capture requires accelerator RNG state support; "
+            f"missing {', '.join(missing)}"
+        )
+    return None
+
+
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
+    device_type: str = "cuda",
     *,
     cpu_nodes_partitioned_out: bool,
 ) -> str | None:
-    return (
-        check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(
-            device_node_mapping, cpu_nodes_partitioned_out=cpu_nodes_partitioned_out
-        )
+    if device_type == "cuda":
+        if reason := check_caching_allocator_for_cudagraphs():
+            return reason
+
+    return check_multiple_devices_or_any_cpu_nodes(
+        device_node_mapping,
+        expected_device_type=device_type,
+        cpu_nodes_partitioned_out=cpu_nodes_partitioned_out,
     )
 
 
@@ -810,8 +845,8 @@ def get_partition_cudagraph_metadata(
     )
 
 
-def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
-    """Debug helper that collects the data pointers of all CUDA tensors in the object."""
+def collect_device_data_ptrs(obj: object, device_type: str) -> OrderedSet[int]:
+    """Collect data pointers for tensors on the given device type."""
     if not isinstance(obj, torch.Tensor):
         return OrderedSet()
 
@@ -819,7 +854,7 @@ def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
     for base in get_plain_tensors(obj, out=[]):
         if type(base) is not torch.Tensor:
             continue
-        if is_fake(base) or base.is_meta or base.device.type != "cuda":
+        if is_fake(base) or base.is_meta or base.device.type != device_type:
             continue
         try:
             ptrs.add(base.data_ptr())

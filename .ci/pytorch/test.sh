@@ -317,8 +317,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/tcm/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
-  # shellcheck disable=SC1091
-  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  if [ -f /opt/intel/oneapi/mpi/latest/env/vars.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  fi
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Check XPU status before testing
@@ -480,6 +482,64 @@ test_editable() {
   assert_git_not_dirty
 }
 
+# Call from a subshell so the compat path and cleanup trap stay scoped to the caller.
+setup_cuda_compat_13_5() {
+  CUDA_COMPAT_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+  local driver_version
+  driver_version=$(cd test && python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
+  echo "CUDA driver API version: ${driver_version}"
+  [[ "$driver_version" -lt 13050 ]] || return 0
+
+  local compat_package compat_repo_arch compat_sha256
+  CUDA_COMPAT_DIR=$(mktemp -d)
+  trap_add "rm -rf \"$CUDA_COMPAT_DIR\"" EXIT
+  case "$(dpkg --print-architecture)" in
+    amd64)
+      compat_repo_arch=x86_64
+      compat_package=cuda-compat-13-5_620.70.06-1ubuntu1_amd64.deb
+      compat_sha256=27141970a149dc70b925243368206d0affc92da017e8b6237772ff0ad1777406
+      ;;
+    arm64)
+      compat_repo_arch=sbsa
+      compat_package=cuda-compat-13-5_620.70.06-1ubuntu1_arm64.deb
+      compat_sha256=eead9673186a18108b9cdf20c1d6af3325ed788a8cbf2e25e0961709cd6444a2
+      ;;
+    *)
+      echo "Unsupported architecture for CUDA 13.5 compatibility package" >&2
+      return 1
+      ;;
+  esac
+  curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/$compat_repo_arch/$compat_package" -o "$CUDA_COMPAT_DIR/$compat_package"
+  echo "$compat_sha256  $CUDA_COMPAT_DIR/$compat_package" | sha256sum --check
+  dpkg-deb --extract "$CUDA_COMPAT_DIR/$compat_package" "$CUDA_COMPAT_DIR"
+  CUDA_COMPAT_LIBRARY_PATH="$CUDA_COMPAT_DIR/usr/local/cuda-13.5/compat${CUDA_COMPAT_LIBRARY_PATH:+:$CUDA_COMPAT_LIBRARY_PATH}"
+  driver_version=$(cd test && env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
+  echo "CUDA driver API version with cuda-compat: ${driver_version}"
+  if [[ "$driver_version" -lt 13050 ]]; then
+    echo "cuda-compat 13.5 did not take effect" >&2
+    return 1
+  fi
+}
+
+test_cuspy() {
+  (
+    # No CPU lane exercises this CUDA/CUPTI 13.5-only shard.
+    export PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=""
+    setup_cuda_compat_13_5
+    # The Cuspy tests skip below CUDA 13.5 + libcupti 13.5 (the CUDA 13.5 image preinstalls
+    # libcupti 13.5); fail instead of passing vacuously.
+    (cd test && env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python -c "from torch.testing._internal.common_cuda import TEST_CUPTI_V13_5; assert TEST_CUPTI_V13_5, 'Cuspy tests need a CUDA >= 13.5 build and libcupti >= 13.5'")
+    time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include \
+      profiler/test_cuspy \
+      profiler/test_cuspy_decoder \
+      profiler/test_cuspy_node_timer \
+      profiler/test_cupti_python \
+      profiler/test_cupti_pm_sampling \
+      --verbose
+  )
+  assert_git_not_dirty
+}
+
 test_python_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -542,7 +602,7 @@ test_python_smoke() {
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm inductor/test_cutedsl_kernels $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -616,6 +676,7 @@ test_python_smoke_b200() {
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
       inductor/test_cutedsl_grouped_mm \
+      inductor/test_cutedsl_kernels \
       inductor/test_cutedsl_template \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
@@ -669,8 +730,6 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
-  # Required by the device info tests in test_xpu, pinned to the XPU wheel's dep
-  pip_install "pyzes==0.1.2"
   time python test/run_test.py --include test_transformers test_xpu $PYTHON_TEST_EXTRA_OPTION
   # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
   # time test_xpu_sycl_tla_backend
@@ -1519,6 +1578,8 @@ PY
     inductor/test_flydsl_grouped_scheduler.py \
     inductor/test_flydsl_flex_attention.py \
     --verbose
+  python test/run_test.py --include python_native/test_topk_flydsl --verbose
+  env OPINFO_RESTRICT_TO_DSL=flydsl python test/run_test.py --include test_ops -k topk_flydsl_optimized --verbose
   assert_git_not_dirty
 }
 
@@ -2673,7 +2734,13 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == "onnx" ]]; then
+if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
+  if [[ "${NUM_TEST_SHARDS}" -gt 1 ]]; then
+    test_python_shard "${SHARD_NUMBER}"
+  else
+    test_python
+  fi
+elif [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
 elif [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
@@ -2697,6 +2764,8 @@ elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'editable' ]]; then
   test_editable
+elif [[ "$TEST_CONFIG" == 'cuspy' ]]; then
+  test_cuspy
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
   test_quantization
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
