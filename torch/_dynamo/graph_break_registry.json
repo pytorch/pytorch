@@ -303,6 +303,16 @@
       "Hints": []
     }
   ],
+  "GB3253": [
+    {
+      "Gb_type": "Unbound method descriptor call with unmodeled owner",
+      "Context": "{self.descriptor.__qualname__}({obj}, ...)",
+      "Explanation": "Dynamo has no model of {objclass.__qualname__}.{name} for a {obj.python_type().__qualname__} receiver.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0017": [
     {
       "Gb_type": "Attempted to wrap torch._higher_order_ops.invoke_subgraph",
