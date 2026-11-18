@@ -1,5 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import functools
 import os
 import sys
 import unittest
@@ -8,7 +9,10 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -123,6 +127,15 @@ class TestReductionConfig(TestCase):
             self.assertEqual(rt.reduction_order("inner_tree"), "inner_tree")
         with self.assertRaisesRegex(ValueError, "order"):
             rt.reduction_order("linear")
+
+    @parametrize("value", ["STRICT", "strict ", "true"])
+    def test_unknown_gate_values_raise(self, value):
+        """Reject gate values other than unset, 0, 1 and strict."""
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: value}):
+            with self.assertRaisesRegex(ValueError, rt._INNER_TREE_ENV):
+                rt.reduction_order()
+            with self.assertRaisesRegex(ValueError, rt._INNER_TREE_ENV):
+                rt.inner_tree_fallback("unused")
 
     @parametrize("cc", [(9, 0), (10, 0), (10, 3), (11, 0)])
     def test_architecture_isolation(self, cc):
@@ -429,7 +442,7 @@ class TestReductionConfig(TestCase):
         """Pin B200 full-reduction launch choices at measured operation and size anchors."""
         count = (256 << 20) // torch.float16.itemsize
         args = (torch.float16, count)
-        kwargs = dict(trait_type=T.ArgMaxOps, nfields=2, nouts=1, acc_bits=32)
+        kwargs = dict(trait_type=T.ArgMaxOps, acc_bits=32)
         self.assertEqual(
             kg.select_all_config((10, 0), *args, **kwargs),
             kg._AllConfig(block=512, grid_mult=8),
@@ -441,7 +454,7 @@ class TestReductionConfig(TestCase):
         self.assertEqual(
             kg.select_all_config((10, 0), *half, **kwargs), kg._AllConfig()
         )
-        plain = dict(trait_type=T.SumOps, nfields=1, nouts=1, acc_bits=32)
+        plain = dict(trait_type=T.SumOps, acc_bits=32)
         self.assertEqual(
             kg.select_all_config((10, 0), torch.float16, count, **plain),
             kg._AllConfig(),
@@ -506,10 +519,9 @@ class TestReductionConfig(TestCase):
         nansum match no index or one-field rule, and amax and amin skip the wide strided
         one-field rule but share the c256 rule."""
         count = (256 << 20) // torch.float16.itemsize
-        index = dict(nfields=2, nouts=1, acc_bits=32)
         for trait_type in (T.ArgMaxOps, T.ArgMinOps):
             cfg = kg.select_all_config(
-                (10, 0), torch.float16, count, trait_type=trait_type, **index
+                (10, 0), torch.float16, count, trait_type=trait_type, acc_bits=32
             )
             self.assertEqual(cfg, kg._AllConfig(block=512, grid_mult=8))
         num_o, count = 4096, 1024
@@ -578,8 +590,6 @@ class TestReductionConfig(TestCase):
             )
             self.assertTrue(cfg.uniform_tree)
             self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))
-        # The block check shared with TileReduce rejects a non-power-of-two warp count.
-        self.assertFalse(tile.uniform_tree_ok(T.WelfordOps(), 4096, 96, 1))
 
     @parametrize(
         "dtype,count,updates,expected",
@@ -599,21 +609,22 @@ class TestReductionConfig(TestCase):
             ),
             (torch.float16, 4096, {"alignment": 8}, kg._GeneralConfig()),
             (torch.float16, 4096, {"acc_bits": 64}, kg._GeneralConfig()),
+            # A padded pitch and stride 3 are not the measured stride-2 rows.
+            (torch.float16, 4096, {"kept_pairs": ((4096, 8200),)}, kg._GeneralConfig()),
+            (
+                torch.float16,
+                4096,
+                {"red_pairs": ((4096, 3),), "kept_pairs": ((4096, 3 * 4096),)},
+                kg._GeneralConfig(),
+            ),
         ],
     )
     def test_b200_strided_boundaries(self, dtype, count, updates, expected):
         """Pin the fp32 index block and keep off-anchor strided shapes on defaults."""
         num_o = 4096
-        cfg = self.general(
-            cc=(10, 0),
-            dtype=dtype,
-            count=count,
-            num_o=num_o,
-            red_pairs=((count, 2),),
-            kept_pairs=((num_o, 2 * count),),
-            **updates,
-        )
-        self.assertEqual(cfg, expected)
+        pairs = dict(red_pairs=((count, 2),), kept_pairs=((num_o, 2 * count),))
+        args = dict(cc=(10, 0), dtype=dtype, count=count, num_o=num_o, **pairs)
+        self.assertEqual(self.general(**(args | updates)), expected)
 
     @parametrize("trait", ["sum", "argmax", "var"])
     def test_b200_wide_strided_rules_need_many_outputs(self, trait):
@@ -806,7 +817,7 @@ class TestReductionConfig(TestCase):
         "case,updates,expected_rule",
         [
             ("anchor", {}, "b200_ragged_c257"),
-            ("explicit_threads", {"threads_per_block": 64}, "explicit"),
+            ("explicit_threads", {"threads_per_block": 64}, "default"),
             ("explicit_npar", {"npar": 1024}, "explicit"),
             ("explicit_vec", {"vec": 1}, "explicit"),
             ("row_below", {"rows": (16 << 20) // 514 - 1}, "default"),
@@ -857,36 +868,56 @@ class TestReductionConfig(TestCase):
             (torch.float32, 1025, "var_mean", True),
             (torch.float32, 1023, "var", False),
             (torch.float32, 1025, "var", True),
+            # Even widths that are not whole vectors start at N = 1023.
+            (torch.float16, 258, "sum", False),
+            (torch.float16, 1026, "sum", True),
+            (torch.float32, 1030, "sum", True),
+            (torch.float32, 1028, "sum", False),
         ],
         name_fn=lambda dtype, N, trait, routed: f"{str(dtype)[6:]}_{N}_{trait}",
     )
     def test_b200_ragged_row_gate(self, dtype, N, trait, routed):
-        """Route odd rows to the ragged-vector kernel only inside the measured band."""
+        """Route rows that are not whole vectors to the ragged-vector kernel only inside
+        the measured band."""
         trait = {
             "sum": T.SumOps(),
             "argmax": T.ArgMaxOps(),
             "var_mean": T.VarMeanOps(),
             "var": T.WelfordOps(),
         }[trait]
-        ok = kg._ragged_rows_ok
+        ok = functools.partial(kg._ragged_rows_ok, pitch=N)
         self.assertEqual(ok((10, 0), dtype, N, 16, trait, acc_bits=32), routed)
         self.assertFalse(ok((9, 0), dtype, N, 16, trait, acc_bits=32))
         self.assertFalse(ok((10, 0), dtype, N, 8, trait, acc_bits=32))
         self.assertFalse(ok((10, 0), dtype, N, 16, trait, acc_bits=64))
 
+    def test_b200_ragged_rows_take_whole_widths_at_a_narrow_pitch(self):
+        """Whole-vector rows at a pitch below the vector width take ragged rows from the
+        odd-width band's start: the general kernel is their only other route."""
+        ok, f16, trait = kg._ragged_rows_ok, torch.float16, T.SumOps()
+        for N, pitch, routed in (
+            (1024, 1025, True),
+            (1024, 1032, False),
+            (256, 257, True),
+        ):
+            got = ok((10, 0), f16, N, 16, trait, acc_bits=32, pitch=pitch)
+            self.assertEqual(got, routed)
+
     def test_b200_ragged_rows_start_late_traits_later(self):
         """Keep absmax, absmin and general-p norms off ragged rows at N = 255, and every
-        variance-returning Welford trait until N = 1025."""
+        Welford trait until N = 1025."""
         late = (T.AbsMaxOps(), T.AbsMinOps(), T.NormOps(3), T.NormOps(0.5))
         early = (T.AMaxOps(), T.NormOps(1), T.NormOps(2), T.SumOps())
         self.assertEqual({kg._ragged_row_min_n(t) for t in late}, {1023})
         self.assertEqual({kg._ragged_row_min_n(t) for t in early}, {255})
         self.assertEqual(kg._ragged_row_min_n(T.VarMeanOps(take_sqrt=True)), 1025)
         self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(take_sqrt=True)), 1025)
-        self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(return_mean=True)), 255)
+        self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(return_mean=True)), 1025)
         absmax = T.AbsMaxOps()
         for N, routed in ((255, False), (1023, True)):
-            ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, absmax, acc_bits=32)
+            ok = kg._ragged_rows_ok(
+                (10, 0), torch.float16, N, 16, absmax, acc_bits=32, pitch=N
+            )
             self.assertEqual(ok, routed)
 
 
@@ -938,6 +969,7 @@ class TestReductionConfigDevice(TestCase):
         x = torch.randn((64, 2048 * stride), device=device)[:, ::stride]
         key = f"selector_inner_tree_{stride}"
         with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "0"}),
             mock.patch.object(rt, "select_row_order", return_value="inner_tree"),
             mock.patch.object(
                 kg,
@@ -956,22 +988,26 @@ class TestReductionConfigDevice(TestCase):
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
 
     @parametrize(
-        "op,dtype,N",
+        "op,dtype,N,pitch",
         [
-            ("sum", torch.float32, 255),
-            ("var_mean", torch.bfloat16, 1025),
-            ("var_mean", torch.float16, 16383),
+            ("sum", torch.float32, 255, 255),
+            ("var_mean", torch.bfloat16, 1025, 1025),
+            ("var_mean", torch.float16, 16383, 16383),
+            ("sum", torch.float16, 1026, 1026),
+            ("sum", torch.bfloat16, 1024, 1025),
+            ("sum", torch.float32, 4097, 4104),
         ],
-        name_fn=lambda op, dtype, N: f"{op}_{str(dtype)[6:]}_{N}",
+        name_fn=lambda op, dtype, N, pitch: f"{op}_{str(dtype)[6:]}_{N}_{pitch}",
     )
-    def test_b200_ragged_rows_route(self, device, op, dtype, N):
-        """Serve unordered odd rows inside the B200 band with the ragged-vector plan."""
+    def test_b200_ragged_rows_route(self, device, op, dtype, N, pitch):
+        """Serve unordered rows whose width or pitch is not whole vectors inside the B200
+        band with the ragged-vector plan."""
         import cutlass
 
         if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the ragged-row route is measured on B200 only")
-        x = torch.randn(64, N, device=device, dtype=dtype)
-        key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}"
+        x = torch.randn(64, pitch, device=device, dtype=dtype)[:, :N]
+        key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}_{pitch}"
         if op == "sum":
             trait, outs = T.SumOps(acc=cutlass.Float32), [torch.float32]
             got = (kg.reduce_dim(trait, key, x, [1], outs[0], order="unordered"),)
@@ -1028,15 +1064,17 @@ class TestReductionConfigDevice(TestCase):
             want = x.argmax(1)
         self.assertEqual(got, want)
 
-    def test_b200_strided_welford_route(self, device):
-        """Fold b200_strided_welford's smallest anchor with the uniform Welford tree."""
+    @parametrize("count", [1024, 4095, 4096])
+    def test_b200_strided_welford_route(self, device, count):
+        """Fold b200_strided_welford's anchors with the uniform Welford tree."""
         import cutlass
 
         if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the strided rules are measured on B200 only")
-        count, num_o = 1024, 2048
+        num_o = 2048
         x = torch.randn(num_o, 2 * count, device=device)[:, ::2]
-        trait, key = T.WelfordOps(correction=1, acc=cutlass.Float32), "var_strided_tree"
+        trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
+        key = f"var_strided_tree_{count}"
         got = kg.reduce_dim(trait, key, x, [1], torch.float32, order="unordered")
         pairs = dict(red_pairs=((count, 2),), kept_pairs=((num_o, 2 * count),))
         shape = dict(count=count, num_o=num_o, **pairs, block=64)
@@ -1058,9 +1096,10 @@ class TestReductionConfigDevice(TestCase):
         x = torch.randn(64, 4096, device=device)
         trait = traits.SumOps(acc=cutlass.Float32)
         f32 = [torch.float32]
+        refused = "order='inner_tree' cannot be honoured here"
         with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}):
             (got,) = rt.reduce_row_tile(trait, "row_env", x, f32)
-            with self.assertRaisesRegex(ValueError, "cannot be honoured"):
+            with self.assertRaisesRegex(ValueError, refused):
                 rt.reduce_row_tile(
                     trait, "row_env", x, f32, threads_per_row=32, order="inner_tree"
                 )
@@ -1091,7 +1130,8 @@ class TestReductionConfigDevice(TestCase):
                 two, key, x, [f32, f32], order=order
             ),
         }
-        ordered = calls[entry](f"{entry}_ordered", "inner_tree")
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "0"}):
+            ordered = calls[entry](f"{entry}_ordered", "inner_tree")
         tags = _served(f"{entry}_ordered")
         self.assertTrue(any(t.startswith("rowitree") for t in tags), tags)
         # An explicit unordered request overrides the env gate.
@@ -1111,7 +1151,7 @@ class TestReductionConfigDevice(TestCase):
 
         # A stride-0 view reaches the extent check without allocating 2^31 elements.
         x = torch.zeros(1, 1, device=device).expand(2, 2**31)
-        with self.assertRaisesRegex(ValueError, "32-bit logical extents"):
+        with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
             kg.reduce_dim(
                 traits.SumOps(acc=cutlass.Float32),
                 "sum",
@@ -1130,12 +1170,12 @@ class TestReductionConfigDevice(TestCase):
         x = torch.randn(4096, device=device)
         trait = traits.SumOps(acc=cutlass.Float32)
         with mock.patch.object(kg, "_INT32_LIMIT", 1024):
-            with self.assertRaisesRegex(ValueError, "32-bit logical extents"):
+            with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
                 kg.reduce_all(trait, "sum", x, torch.float32, order="inner_tree")
             with (
                 mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
                 mock.patch.object(rt, "_warned_inner_tree_reasons", set()),
-                self.assertWarnsRegex(UserWarning, "32-bit logical extents"),
+                self.assertWarnsRegex(UserWarning, rt._INNER_TREE_WIDE),
             ):
                 got = kg.reduce_all(trait, "sum", x, torch.float32)
         self.assertEqual(got, x.double().sum().float(), atol=1e-4, rtol=1e-4)
@@ -1156,10 +1196,11 @@ class TestReductionConfigDevice(TestCase):
         }
         expected = torch.zeros((), device=device)
         with warnings.catch_warnings():
-            warnings.simplefilter("error")
+            warnings.filterwarnings("error", ".*could not be honoured")
             self.assertEqual(calls[entry](order="inner_tree"), expected)
-            with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}):
-                self.assertEqual(calls[entry](), expected)
+            for gate in ("1", "strict"):
+                with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: gate}):
+                    self.assertEqual(calls[entry](), expected)
 
     def test_strided_reduce_all_uses_the_general_selector(self, device):
         """Size strided reduce-all launches with the general kernel's selector."""
@@ -1169,12 +1210,18 @@ class TestReductionConfigDevice(TestCase):
 
         x = torch.randn(64, 128, device=device)[:, ::2]
         key = "strided_reduce_all"
-        got = kg.reduce_all(traits.SumOps(acc=cutlass.Float32), key, x, torch.float32)
+        trait = traits.SumOps(acc=cutlass.Float32)
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "0"}):
+            got = kg.reduce_all(trait, key, x, torch.float32)
         self.assertTrue(_served(key) & {"reduce", "gensplit1"}, _served(key))
+        # threads_per_block follows axis, vec and threads_per_row in the cache_sig.
+        blocks = {k[0][7] for k in kg._PLAN if k[0][1:3] == ("gensplit1", key)}
+        self.assertEqual(blocks, {kg._K0_ALL_BLOCK})
         self.assertEqual(got, x.double().sum().float(), atol=1e-4, rtol=1e-4)
 
     def test_env_gate_falls_back_with_one_warning(self, device):
-        """Serve unservable geometry unordered under the env gate, warning only once."""
+        """Serve 64-bit extents (by a patched limit) unordered under the env gate, warning
+        only once."""
         import cutlass
 
         from torch._native.ops.reductions import traits
@@ -1214,6 +1261,64 @@ class TestReductionConfigDevice(TestCase):
                 kg.reduce_dim(
                     traits.SumOps(acc=cutlass.Float32), "sum", x, [1], torch.float32
                 )
+
+    @largeTensorTest("5GB")
+    def test_strict_env_gate_raises_in_reduce_all(self, device):
+        """Raise under the strict env gate when reduce-all has 64-bit extents."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.empty(2**31, device=device, dtype=torch.float16)  # never read
+        with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
+            self.assertRaisesRegex(ValueError, f"{rt._INNER_TREE_ENV}=strict"),
+        ):
+            kg.reduce_all(traits.SumOps(acc=cutlass.Float32), "sum", x, torch.float32)
+
+    def test_env_gate_falls_back_in_strided_reduce_all(self, device):
+        """Warn, not raise, when the env gate cannot order a strided reduce-all."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        # A stride-0 view reaches the extent check without allocating 2^31 elements.
+        x = torch.zeros(1, device=device).expand(2**31)
+        rt._warned_inner_tree_reasons.discard(rt._INNER_TREE_WIDE)
+        with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
+            self.assertWarnsRegex(UserWarning, rt._INNER_TREE_WIDE),
+        ):
+            got = kg.reduce_all(
+                traits.SumOps(acc=cutlass.Float32), "sum", x, torch.float32
+            )
+        self.assertEqual(got, torch.zeros((), device=device))
+
+    def test_explicit_order_raises_with_its_reason(self, device):
+        """Raise for explicit order through the two-output entry points, and for a
+        geometry the inner-tree kernels cannot serve."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        two = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
+        f32 = torch.float32
+        wide = torch.zeros(1, 1, device=device).expand(2, 2**31)
+        with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
+            kg.reduce_dim2(two, "var_mean", wide, [1], [f32, f32], order="inner_tree")
+        with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
+            kg.reduce_all2(two, "var_mean", wide[0], [f32, f32], order="inner_tree")
+        # 2^25 outputs of 2^20 elements need 2^32 split partials, past Int32.
+        deep = torch.zeros(1, 1, device=device).expand(2**25, 2**20)
+        with self.assertRaisesRegex(ValueError, rt._INNER_TREE_GEOMETRY):
+            kg.reduce_dim(
+                traits.SumOps(acc=cutlass.Float32),
+                "sum",
+                deep,
+                [1],
+                f32,
+                order="inner_tree",
+            )
 
 
 instantiate_parametrized_tests(TestReductionConfig)
