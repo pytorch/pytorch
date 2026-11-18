@@ -654,11 +654,12 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # Order roots alone add no names: they select dictionary manager types but
-    # do not certify every value. A root with its own kept GlobalSource guard
-    # is still included below. Serialized global_scope also carries alias roots,
-    # shape_env_sources and DUPLICATE_INPUT's source_b, which need not have a value guard.
-    # DUPLICATE_INPUT can even record a root before its optimizer-source early return.
+    # Order roots alone choose dictionary manager types without certifying values.
+    # Narrower than the serialized global_scope for the same reason: the
+    # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
+    # and from DUPLICATE_INPUT's source_b -- names whose value no guard checks,
+    # and which DUPLICATE_INPUT records before its optimizer-source early return,
+    # so an optimizer-rooted pair records one with no guard installed at all.
     from .source import GlobalSource
 
     return {
@@ -670,13 +671,13 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
 
 def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
     """Global names required to rebuild or check the retained guard tree."""
-    # Beyond the guards' own originating_sources, global_scope carries retained
-    # order roots used to select manager types during rebuilding, even if no
-    # runtime guard reads the root directly. It also carries a DUPLICATE_INPUT's
-    # source_b and a cpp-form SHAPE_ENV guard's shape_env_sources. A SHAPE_ENV
-    # guard installed as a Python lambda reads its G['NAME'] operands from the
-    # same scope. Only the C++ code parts populate shape_env_sources, so we
-    # recover the Python operands from the lambda's own text.
+    # In addition to the originating sources and order roots used to rebuild
+    # dictionary managers, the serialized scope records other dependencies. It
+    # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
+    # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
+    # its G['NAME'] operands from the same scope, and none of them reaches
+    # global_scope -- shape_env_sources is filled from the cpp code parts alone
+    # -- so they are recovered from the lambda's own text.
     # A filter that drops SHAPE_ENV drops them too: the builder records
     # shape_code_parts on the save pass only, which runs over the kept guards.
     names = set(guards_state.output_graph.global_scope)
@@ -841,7 +842,7 @@ class AOTCompiledFunction:
     def _seed_guard_scope(
         self, guard_scope: dict[str, Any], guards_state: "GuardsState"
     ) -> None:
-        # Dynamo mints __import_* aliases, a __builtins_dict___N key and the
+        # Dynamo mints constant-result names, __import_* aliases, a builtins key and the
         # ___unnamed_scope_<id>_c<n> key of an inlined frame's globals into the
         # TRACING process's globals and roots guards at them; a process that only
         # loads never traced. Each name is gated on the artifact needing it to
@@ -2421,9 +2422,11 @@ class AOTCompiledModel:
         to a function torch itself defines, whose globals are a torch module's
         namespace (the module's dispatch otherwise, ``torch.compile(mod).forward``,
         included), or the target a Dynamo wrapper is seen through to does not
-        resolve itself; guards then resolve against the scope rebuilt from the
-        artifact, where they check nothing useful, and a guard rooted at any
-        global but those aliases and that key warns to say so, naming the cause.
+        resolve itself. In these cases the artifact uses its saved global scope.
+        A guard on a saved global cannot see later rebindings, and a guard on a
+        missing name fails. Some dictionaries supply only the order of their
+        keys for rebuilding guards. Loading warns when the artifact requires a
+        global name from this scope and explains why a live scope was unavailable.
 
         The function ``model.forward`` resolves to is the one bound as ``forward``
         seen through Dynamo's own wrappers -- the ones ``torch.compile``,
@@ -2506,8 +2509,8 @@ class AOTCompiledModel:
             log.warning(
                 "no live guard scope could be resolved from model.forward, so "
                 "global names required by this artifact resolve against the scope "
-                "rebuilt from the serialized bytecode instead. An order-only root "
-                "supplies dictionary structure without a runtime value check. "
+                "rebuilt from the serialized bytecode instead. Some dictionaries "
+                "supply only the order of their keys for rebuilding guards. "
                 "A runtime guard on a captured global cannot detect rebinding; "
                 "one on a name absent from that scope cannot be satisfied, so "
                 "the call will report no match. %s.",
