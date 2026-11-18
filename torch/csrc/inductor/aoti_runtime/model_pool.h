@@ -270,10 +270,10 @@ class ModelPool {
     return result;
   }
 
-  Slot* oldest(State state) {
+  Slot* oldest(State state, uint64_t min_seq = 0) {
     Slot* result = nullptr;
     for (auto& slot : slots_) {
-      if (slot.state == state &&
+      if (slot.state == state && slot.seq >= min_seq &&
           (result == nullptr || slot.seq < result->seq)) {
         result = &slot;
       }
@@ -356,19 +356,13 @@ class ModelPool {
 
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
     // Move every finished run back to available, oldest first, so the most
-    // recently launched one is reused first.
-    std::vector<Slot*> in_flight;
-    for (auto& slot : slots_) {
-      if (slot.state == State::kInFlight) {
-        in_flight.push_back(&slot);
-      }
-    }
-    std::sort(
-        in_flight.begin(), in_flight.end(), [](const Slot* a, const Slot* b) {
-          return a->seq < b->seq;
-        });
+    // recently launched one is reused first. This allocates nothing, and if
+    // is_finished() throws, every slot is still in exactly one state.
     bool reclaimed = false;
-    for (Slot* slot : in_flight) {
+    uint64_t min_seq = 0;
+    while (Slot* slot = oldest(State::kInFlight, min_seq)) {
+      // Read before transition() gives the slot a new seq.
+      min_seq = slot->seq + 1;
       if (slot->model->is_finished()) {
         transition(*slot, State::kInFlight, State::kAvailable);
         reclaimed = true;
