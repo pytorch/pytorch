@@ -1212,6 +1212,38 @@ class TestBlackwellAutoWSConstraints(TestCase):
                 )
             )
 
+    def test_two_ctas_requires_even_group_m(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "EPILOGUE_SUBTILE": 1,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            for group_m, ok in ((1, False), (3, False), (2, True), (8, True)):
+                kwargs["GROUP_M"] = group_m
+                self.assertEqual(
+                    CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                        kwargs, element_size=2
+                    ),
+                    ok,
+                )
+            kwargs["TWO_CTAS"] = False
+            kwargs["GROUP_M"] = 1
+            self.assertTrue(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=2
+                )
+            )
+
     def test_two_ctas_requires_tma_store_for_metaws_template(self):
         kwargs = {
             "BLOCK_M": 128,
