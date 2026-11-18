@@ -37,6 +37,12 @@ def conj_impl(self: ComplexTensor) -> ComplexTensor:
     return aten._conj(self)
 
 
+@register_complex(prims.item)
+def item_impl(self: ComplexTensor) -> complex:
+    re, im = split_complex_tensor(self)
+    return complex(prims.item(re), prims.item(im))
+
+
 rev_impl = register_simple(prims.rev)
 
 
