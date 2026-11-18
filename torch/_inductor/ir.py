@@ -6665,8 +6665,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     def get_min_choice(
         self, hint_override: int | None = None
     ) -> tuple[ChoiceCaller, float]:
+        from torch._inductor.select_algorithm import min_choice_with_extern_margin
+
         timings = self.choice_timings(hint_override=hint_override)
-        min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
+        min_choice = min_choice_with_extern_margin(timings)
         return (min_choice, timings[min_choice])
 
     def finalize_as_triton_callers(
