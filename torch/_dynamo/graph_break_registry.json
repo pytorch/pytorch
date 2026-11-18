@@ -7033,10 +7033,11 @@
   ],
   "GB3841": [
     {
-      "Gb_type": "Class attribute set on its metaclass in this frame",
-      "Context": "{self.value.__qualname__}.{name}",
-      "Explanation": "Dynamo looks up class attributes in the metaclass dicts, which do not have a store made earlier in this frame yet.",
+      "Gb_type": "Class attribute changed on its metaclass in this frame",
+      "Context": "{self.value.__qualname__}.{name}, changed on {owner.__qualname__}",
+      "Explanation": "Dynamo reads class attributes from the metaclass dicts, which do not have a store or delete made earlier in this frame yet.",
       "Hints": [
+        "Set or delete the metaclass attribute outside the compiled function.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
