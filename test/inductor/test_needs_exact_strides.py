@@ -42,7 +42,11 @@ if has_triton():
 class TestNeedsExactStrides(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipIf(not has_triton(), "requires triton for cuda and xpu", device_type=("cuda", "xpu"))
+    @skipIf(
+        not has_triton(),
+        "requires triton for cuda and xpu",
+        device_type=("cuda", "xpu"),
+    )
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, device, dtype):
         # float8_e8m0fnu errors on "cpu"
@@ -123,7 +127,11 @@ class TestNeedsExactStrides(InductorTestCase):
                 if not called:
                     raise AssertionError
 
-    skipIf(not has_triton(), "requires triton for cuda and xpu", device_type=("cuda", "xpu"))
+    @skipIf(
+        not has_triton(),
+        "requires triton for cuda and xpu",
+        device_type=("cuda", "xpu"),
+    )
     @parametrize("n", [64, 128, 256])
     def test_dynamic_size_one_leading_dim_view_triton_kernel_wrapper_functional(
         self, device, n
