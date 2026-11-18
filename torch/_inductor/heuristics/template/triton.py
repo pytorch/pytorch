@@ -3606,10 +3606,6 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             # 128 bytes to use the required swizzle.
             if block_m < 128 or (block_n // 2) * element_size < 128:
                 return False
-            # The cluster pairs consecutive tile ids, which _compute_pid maps to the
-            # same N tile only when GROUP_M is even; an odd GROUP_M gives wrong results.
-            if template_kwargs.get("GROUP_M", 8) % 2 != 0:
-                return False
         return True
 
     def _get_config_generator(self) -> partial[Generator[TritonConfig, None, None]]:
