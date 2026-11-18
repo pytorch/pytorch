@@ -25,6 +25,7 @@
 #include <ATen/ops/_empty_affine_quantized_native.h>  // for empty_affine_qu...
 #include <ATen/ops/empty.h>                           // for empty
 #include <ATen/ops/quantize_per_channel_native.h>     // for quantize_per_ch...
+#include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/quantize_per_tensor_native.h>      // for quantize_per_te...
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/_weight_int4pack_mm_for_cpu.h>
@@ -814,7 +815,33 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   auto is_input_qint8 = input.scalar_type() == c10::ScalarType::QInt8;
   auto input_contig = input.expect_contiguous();
   auto& w = *weight_;
-  auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
+  auto K = input.size(dim - 1), N = w.get_dim(1);
+  double input_scale = input.q_scale();
+  int64_t input_zero_point = input.q_zero_point();
+  if (K == 0) {
+    // Empty dot products are bias-only; do not create a oneDNN matmul primitive.
+    TORCH_CHECK(
+        w.get_dim(0) == 0,
+        "qlinear (ONEDNN): zero input features do not match weight input features ",
+        w.get_dim(0));
+    auto output_sizes = input.sizes().vec();
+    output_sizes.back() = N;
+    auto output = orig_bias_.has_value()
+        ? orig_bias_.value().clone()
+        : at::zeros({N}, input.options().dtype(at::kFloat));
+    if (post_op == Relu) {
+      at::relu_(output);
+    } else if (post_op == LeakyRelu) {
+      at::leaky_relu_(output, post_op_args.get(0).to<double>());
+    } else if (post_op == Tanh) {
+      at::tanh_(output);
+    }
+    return at::quantize_per_tensor(
+        output, output_scale, output_zero_point, input.scalar_type())
+        .expand(output_sizes)
+        .contiguous();
+  }
+  auto M = input.numel() / K;
   auto input_dims = {M, K};
   auto input_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
@@ -828,8 +855,6 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   }
   ideep::tensor x(input_desc, input_contig->data_ptr());
   auto dst_dims = {M, N};
-  double input_scale = input.q_scale();
-  int64_t input_zero_point = input.q_zero_point();
   const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input_scale);
   const ideep::scale_t& weights_scales = w.get_scale();
   // Scales of ONEDNN and PyTorch are reciprocal
