@@ -31,13 +31,16 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    ACCELERATOR_DIST_BACKENDS,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfXpu,
     TEST_HPU,
     TEST_XPU,
     TestCase,
+    xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -246,9 +249,8 @@ class DeviceMeshTest(DTensorTestBase):
 
     # TODO: need to refactor the other tests in this file to test both
     # eager_init=True and eager_init=False scenarios.
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="XCCL does not support process group splitting"
-    )
+    # XCCL does not support process group splitting: https://github.com/intel/torch-xpu-ops/issues/5385
+    @xfailIf(TEST_XPU)
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
@@ -256,7 +258,7 @@ class DeviceMeshTest(DTensorTestBase):
 
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl" or self.backend == "xccl":
+        if self.backend in ACCELERATOR_DIST_BACKENDS:
             curr_device = torch.accelerator.current_device_index()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
