@@ -925,6 +925,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     @scoped_load_inline
     def test_pyobject_dispatch_falls_back_to_cpp_dispatcher(self, load_inline):
+        namespace = "_test_pyobject_dispatch_cpp_fallback_" + type(self).__name__
         load_inline(
             name="test_pyobject_dispatch_cpp_fallback",
             cpp_sources="""
@@ -939,12 +940,12 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback, m) {
   m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(pyobject_dispatch_cpp_fallback));
   m.impl("foo", c10::DispatchKey::Autograd, torch::CppFunction::makeFallthrough());
 }
-""",
+""".replace("_test_pyobject_dispatch_cpp_fallback", namespace),
             is_python_module=False,
             verbose=True,
         )
 
-        op = torch.ops._test_pyobject_dispatch_cpp_fallback.foo.default
+        op = getattr(torch.ops, namespace).foo.default
         op._enable_pyobj_dispatch(True)
 
         x = torch.ones(2)
@@ -955,6 +956,9 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback, m) {
     def test_pyobject_dispatch_cpp_fallback_consumes_torch_function_skip(
         self, load_inline
     ):
+        namespace = (
+            "_test_pyobject_dispatch_cpp_fallback_torch_function_" + type(self).__name__
+        )
         load_inline(
             name="test_pyobject_dispatch_cpp_fallback_torch_function",
             cpp_sources="""
@@ -969,7 +973,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
   m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(pyobject_dispatch_cpp_fallback_torch_function));
   m.impl("foo", c10::DispatchKey::Autograd, torch::CppFunction::makeFallthrough());
 }
-""",
+""".replace("_test_pyobject_dispatch_cpp_fallback_torch_function", namespace),
             is_python_module=False,
             verbose=True,
         )
@@ -978,7 +982,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
             def __torch_function__(self, func, types, args=(), kwargs=None):
                 return torch.overrides.redispatch_function(func, types, args, kwargs)
 
-        op = torch.ops._test_pyobject_dispatch_cpp_fallback_torch_function.foo.default
+        op = getattr(torch.ops, namespace).foo.default
         op._enable_pyobj_dispatch(True)
 
         x = torch.ones(2)
@@ -2896,6 +2900,7 @@ Dynamic shape operator
 
     @scoped_load_inline
     def test_autograd_function_backed_op(self, load_inline):
+        namespace = "test_autograd_function_backed_op_" + type(self).__name__
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2924,18 +2929,16 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
 
         module = load_inline(
             name="test_autograd_function_backed_op",
-            cpp_sources=cpp_source,
+            cpp_sources=cpp_source.replace(
+                "test_autograd_function_backed_op", namespace
+            ),
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
         x = torch.ones(2, 2, requires_grad=True)
         temp = x.detach().clone()
-        out = (
-            torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
-                x
-            )
-        )
+        out = getattr(torch.ops, namespace).custom_op_backed_by_autograd_fn(x)
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)
@@ -2957,6 +2960,7 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
 
     @scoped_load_inline
     def test_torch_ops_out_of_range_raises_index_error(self, load_inline):
+        namespace = "_test_out_of_range_index_error_" + type(self).__name__
         load_inline(
             name="test_out_of_range_index_error",
             cpp_sources="""
@@ -2972,14 +2976,14 @@ TORCH_LIBRARY(_test_out_of_range_index_error, m) {
   m.def("foo(Tensor x) -> Tensor");
   m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(out_of_range_op));
 }
-""",
+""".replace("_test_out_of_range_index_error", namespace),
             is_python_module=False,
             verbose=True,
         )
 
         x = torch.ones(2)
         with self.assertRaisesRegex(IndexError, "index 5 is out of bounds"):
-            torch.ops._test_out_of_range_index_error.foo.default(x)
+            getattr(torch.ops, namespace).foo.default(x)
 
     # Using a non-existent DSO is a quick way to trigger an OSError,
     # which can be used to not break BC.
@@ -7009,6 +7013,7 @@ instantiate_device_type_tests(
 )
 instantiate_parametrized_tests(TestCustomOp)
 instantiate_parametrized_tests(TestCustomOpAPI)
+
 
 if __name__ == "__main__":
     run_tests()
