@@ -42,7 +42,7 @@ enum TcfgPyOpKind : int32_t {
   TCFG_METHOD = 1,
   // operands = [lhs, rhs]
   TCFG_BINARY = 2,
-  // operands = [self]: unary operators, truthiness, attribute getters
+  // operands = [self]: unary operators, truthiness
   TCFG_UNARY = 3,
 };
 
