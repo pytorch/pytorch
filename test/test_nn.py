@@ -14779,7 +14779,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @decorateIf(
         unittest.skip('bf16 requires SM80+ on CUDA'),
-        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not PLATFORM_SUPPORTS_BF16),
     )
     def test_linear_cross_entropy_none_reduction_chunked(
         self, device, dtype, bias
@@ -14981,7 +14981,7 @@ class TestNNDeviceType(NNTestCase):
     )
     @decorateIf(
         unittest.skip('bf16 requires SM80+ on CUDA'),
-        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not PLATFORM_SUPPORTS_BF16),
     )
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
         if (
@@ -15008,7 +15008,7 @@ class TestNNDeviceType(NNTestCase):
     )
     @decorateIf(
         unittest.skip('bf16 requires SM80+ on CUDA'),
-        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not PLATFORM_SUPPORTS_BF16),
     )
     def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
@@ -15050,7 +15050,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     @decorateIf(
         unittest.skip('bf16 requires SM80+ on CUDA'),
-        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not PLATFORM_SUPPORTS_BF16),
     )
     def test_linear_cross_entropy_loss_prob_target_with_acc_dtype(
         self, device, dtype, acc_policy, bias
@@ -15084,7 +15084,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     @decorateIf(
         unittest.skip('bf16 requires SM80+ on CUDA'),
-        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not PLATFORM_SUPPORTS_BF16),
     )
     def test_linear_cross_entropy_loss_prob_target_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias

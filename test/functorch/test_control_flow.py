@@ -13547,7 +13547,7 @@ class <lambda>(torch.nn.Module):
 
     # https://github.com/pytorch/pytorch/issues/201590
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @skipCUDAIf(not SM70OrLater, "triton")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "triton")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_output_alias_input_raises(self, device, dynamic):
         # A branch that mutates an operand makes cond's schema mutable, which routes
@@ -13580,7 +13580,7 @@ class <lambda>(torch.nn.Module):
 
     # https://github.com/pytorch/pytorch/issues/201590
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @skipCUDAIf(not SM70OrLater, "triton")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "triton")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_output_alias_output_raises(self, device, dynamic):
         # The same check also rejects output-output aliasing: a branch returning one

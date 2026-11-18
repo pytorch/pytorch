@@ -988,7 +988,6 @@ def xor_words(pairs, maximum, outputs):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-@unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @unittest.skipIf(not has_triton(), "Requires Triton")
 class TestInlineAsmConcat(TestCase):
     def setUp(self):

@@ -2401,7 +2401,7 @@ class TestSDPAFailureModes(NNTestCase):
     @tf32_off()
     @decorateIf(
         unittest.skip('bfloat16 requires SM80 or later'),
-        lambda p: p['dtype'] == torch.bfloat16 and (not SM80OrLater),
+        lambda p: p['dtype'] == torch.bfloat16 and (not PLATFORM_SUPPORTS_BF16),
     )
     def test_sdpa_large_batch_or_heads(self, device, dtype, batch, heads, kv_heads, with_bias, dropout_p, backend):
         if dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
