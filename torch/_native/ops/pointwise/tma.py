@@ -21,13 +21,27 @@ from .layout import (
 
 
 def fake_tensor(
-    dtype: NumericType, view: tuple[Shape, Shape], transposed: bool | None = False
+    dtype: NumericType,
+    view: tuple[Shape, Shape],
+    transposed: bool | None = False,
+    *,
+    dynamic: bool = False,
 ) -> cute.Tensor:
     align = (
         max(dtype.width // 8, 1) if transposed is None else 128 if transposed else 16
     )
+    shape, strides = view
+    if dynamic and transposed is not None:
+        shape = tuple(
+            cute.sym_int32(divisibility=1 if len(shape) == 3 and i == 0 else _BOX)
+            for i in range(len(shape))
+        )
+        strides = tuple(
+            1 if s == 1 else cute.sym_int64(divisibility=16 // (dtype.width // 8))
+            for s in strides
+        )
     return cute.runtime.make_fake_tensor(
-        dtype, view[0], stride=view[1], assumed_align=align
+        dtype, shape, stride=strides, assumed_align=align
     )
 
 
@@ -70,16 +84,20 @@ class ElementwiseTma(_PointwiseOp):
         self.rows_first: bool = layout.rows_first
 
     def fake_args(
-        self, layout: TmaLayout, storage_types: tuple[NumericType, ...]
+        self,
+        layout: TmaLayout,
+        storage_types: tuple[NumericType, ...],
+        *,
+        dynamic: bool = False,
     ) -> tuple[list[cute.Tensor], list[cute.Tensor]]:
         r"""Build aligned operands for JIT compilation and AOT export."""
         inputs = [
-            fake_tensor(dtype, view, transposed)
+            fake_tensor(dtype, view, transposed, dynamic=dynamic)
             for dtype, view, transposed in zip(
                 storage_types, layout.inputs, layout.transposed, strict=True
             )
         ]
-        return inputs, [fake_tensor(self.out_types[0], layout.output)]
+        return inputs, [fake_tensor(self.out_types[0], layout.output, dynamic=dynamic)]
 
     @cute.jit
     def __call__(
