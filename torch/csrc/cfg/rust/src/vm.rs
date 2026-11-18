@@ -249,7 +249,7 @@ struct Callee {
 }
 
 /// The Python functions called from a function compiled with
-/// torch.cfg_compile, or from anything compiled under it, each compiled the
+/// torch.vm, or from anything compiled under it, each compiled the
 /// first time it is called.
 pub struct Callees {
     table: OpcodeTable,
@@ -1007,7 +1007,7 @@ impl Compiled {
         if boxed.is_null() {
             // The reference was consumed either way.
             *regs.get_unchecked_mut(v as usize) = null_mut();
-            panic!("cfg_compile: could not create the Python object of a tensor");
+            panic!("torch.vm: could not create the Python object of a tensor");
         }
         *regs.get_unchecked_mut(v as usize) = boxed;
         self.boxed_later.fetch_add(1, Ordering::Relaxed);
@@ -1817,7 +1817,7 @@ impl Compiled {
         unsafe { self.specialize(block) };
     }
 
-    /// `call` for the function that was handed to torch.cfg_compile, which
+    /// `call` for the function that was handed to torch.vm, which
     /// is measured against the interpreter as its callees are.
     pub unsafe fn call_measured(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
         let phase = self.settled.trial.get().phase;
@@ -2820,7 +2820,7 @@ impl Compiled {
                     None => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_size ran without its guard".to_string(),
+                            "torch.vm: tensor_size ran without its guard".to_string(),
                         );
                         Err(())
                     }
@@ -2835,7 +2835,7 @@ impl Compiled {
                     _ => {
                         set_error(
                             ffi::PyExc_SystemError,
-                            "cfg_compile: tensor_dim ran without its guard".to_string(),
+                            "torch.vm: tensor_dim ran without its guard".to_string(),
                         );
                         Err(())
                     }
