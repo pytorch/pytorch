@@ -34,6 +34,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     set_default_dtype,
+    skipIfCppFakeTensor,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
@@ -1145,6 +1147,7 @@ user_stack=None)
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_tensor_match_guard_throw_restores_torch_function(self):
         # The root disables the TorchFunction TLS while its accessors run and
         # restores it on scope exit, so a C++ throw out of an accessor leaves
@@ -1559,7 +1562,9 @@ user_stack=None)
                 self.assertTrue(root.check(int))
                 self.assertTrue(root.check_verbose(int).result)
                 self.assertFalse(root.check(None))
-                self.assertFalse(root.check_verbose(None).result)
+                debug = root.check_verbose(None)
+                self.assertFalse(debug.result)
+                self.assertIn("expected a type", debug.verbose_code_parts[0])
 
     def test_type_manager(self):
         guard_manager = RootGuardManager()
@@ -2780,41 +2785,30 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertIs(create_fn.args[0][1][1], opaque)
 
     @parametrize(
-        "case",
+        "left,right,expected",
         [
-            "identity",
-            "type",
-            "scalar",
-            "source",
-            "nested",
-            "length",
-            "keys",
-            "opaque",
-            "float",
+            subtest((Ellipsis, Ellipsis, True), name="identity"),
+            subtest((True, 1, False), name="type"),
+            subtest((int("257"), int("257"), True), name="scalar"),
+            subtest((LocalSource("same"), LocalSource("same"), True), name="source"),
+            subtest(
+                (
+                    ({"a": (1, LocalSource("x"))},),
+                    ({"a": (1, LocalSource("x"))},),
+                    True,
+                ),
+                name="nested",
+            ),
+            subtest(((1,), (1, 2), False), name="length"),
+            subtest(({"a": 1}, {"b": 1}, False), name="keys"),
+            subtest((object(), object(), False), name="opaque"),
+            subtest((float("1.25"), float("1.25"), False), name="float"),
         ],
     )
-    def test_guard_equivalence_payload_policy(self, case):
-        marker = object()
-        cases = {
-            "identity": (marker, marker, True),
-            "type": (True, 1, False),
-            "scalar": (int("257"), int("257"), True),
-            "source": (LocalSource("same"), LocalSource("same"), True),
-            "nested": (
-                ({"a": (1, LocalSource("x"))},),
-                ({"a": (1, LocalSource("x"))},),
-                True,
-            ),
-            "length": ((1,), (1, 2), False),
-            "keys": ({"a": 1}, {"b": 1}, False),
-            "opaque": (object(), object(), False),
-            "float": (float("1.25"), float("1.25"), False),
-        }
-
+    def test_guard_equivalence_payload_policy(self, left, right, expected):
         def create_fn(payload, builder, guard):
             pass
 
-        left, right, expected = cases[case]
         guard = self._make_guard(functools.partial(create_fn, left))
         other = self._make_guard(functools.partial(create_fn, right))
         self.assertIs(guard.is_equivalent_to(other), expected)
