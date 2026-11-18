@@ -357,6 +357,7 @@ struct CachingHostAllocatorImpl {
     std::exception_ptr free_blocks() {
       std::exception_ptr error;
       for (auto* block : std::exchange(blocks_, {})) {
+        // Separate tries: a failed trace must not skip the free.
         try {
           // Before free_block(), after which the address can be allocated again.
           allocator_->record_trace(
@@ -366,6 +367,12 @@ struct CachingHostAllocatorImpl {
               nullptr,
               block->owning_pool_,
               nullptr);
+        } catch (...) {
+          if (!error) {
+            error = std::current_exception();
+          }
+        }
+        try {
           allocator_->free_block(block);
         } catch (...) {
           if (!error) {
