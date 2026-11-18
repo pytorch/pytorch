@@ -3910,7 +3910,7 @@ class InstructionTranslatorBase(
         wrapper_name = self.output.install_global_by_id(
             "__checkpoint_with_dynamo_reenabled", _checkpoint_with_dynamo_reenabled
         )
-        self.stack[callable_idx] = SkipFunctionVariable(
+        self.stack[callable_idx] = VariableBuilder.create_internal_skip_function(
             _checkpoint_with_dynamo_reenabled, source=GlobalSource(wrapper_name)
         )
 
