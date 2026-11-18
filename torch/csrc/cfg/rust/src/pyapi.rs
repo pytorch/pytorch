@@ -83,7 +83,7 @@ impl CfgFunction {
     }
 
     fn __repr__(&self) -> String {
-        format!("<cfg_compile function {}>", self.func.qualname)
+        format!("<torch.vm function {}>", self.func.qualname)
     }
 
     /// The SSA control-flow graph as text.
