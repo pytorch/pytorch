@@ -6,8 +6,10 @@ import dis
 import functools
 import gc
 import importlib
+import io
 import math
 import os
+import pdb
 import random
 import shutil
 import signal
@@ -85,6 +87,11 @@ def call_outcome(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except Exception as e:
         return type(e), str(e)
+
+
+# How pdb can listen: with a trace function, and from 3.14 on, where
+# pdb.set_trace() and breakpoint() make it do so, through sys.monitoring.
+PDB_BACKENDS = ("settrace", "monitoring")[: 1 + (sys.version_info >= (3, 14))]
 
 
 def block_stats(fn, key):
@@ -3864,6 +3871,56 @@ class TestCfgFrames(TestCase):
             self.assertEqual(returns(compiled), returns(f))
         self.assertEqual(returns(compiled), [("middle", "return"), ("f", "return")])
         self.assertEqual(compiled.stats()["interpreted_callees"], [])
+
+    @parametrize("backend", PDB_BACKENDS)
+    def test_pdb_stops_in_a_callee_and_on_the_way_out(self, backend):
+        def leaf(x):
+            return x + 1
+
+        def stops(x):
+            debugger.set_trace(sys._getframe())
+            return leaf(x)
+
+        def middle(x):
+            return stops(x) * 2
+
+        def f(x):
+            return leaf(middle(x))
+
+        def session(fn):
+            nonlocal debugger
+            commands = ["tbreak leaf", "continue", *["return"] * 4, "continue"]
+            out = io.StringIO()
+            debugger = pdb.Pdb(
+                stdin=io.StringIO("\n".join(commands) + "\n"),
+                stdout=out,
+                nosigint=True,
+                readrc=False,
+                **({"backend": backend} if len(PDB_BACKENDS) > 1 else {}),
+            )
+            debugger.use_rawinput = False
+            try:
+                self.assertEqual(fn(1), 5)
+            finally:
+                sys.settrace(None)
+                debugger.clear_all_breaks()
+                if backend == "monitoring":
+                    sys.monitoring.free_tool_id(sys.monitoring.DEBUGGER_ID)
+            # "> file(line)function()->value" is where it stopped.
+            stops = [line for line in out.getvalue().splitlines() if line[:1] == ">"]
+            return [line.split(")", 1)[1] for line in stops]
+
+        debugger = None
+        compiled = torch.rewrite(f, fallback=False, passes=without("inline"))
+        for _ in range(3):
+            self.assertEqual(session(compiled), session(f))
+        # Where it was entered, the breakpoint in a function that was called
+        # afterwards, and the returns of that function and of the three
+        # frames it was entered under, two of them rewritten.
+        self.assertEqual(
+            session(compiled),
+            ["stops()", "leaf()", "leaf()->2", "stops()->2", "middle()->4", "f()->5"],
+        )
 
     def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
