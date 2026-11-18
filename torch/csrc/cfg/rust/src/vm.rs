@@ -771,8 +771,11 @@ impl Compiled {
             d.set(d.get() + 1);
             d.get()
         });
+        // Where compiled functions have frames, pushing one counts the call
+        // in the interpreter's own counter.
+        let too_deep = !capi::has_frames() && depth > ffi::Py_GetRecursionLimit() as usize;
         let here = std::ptr::addr_of!(depth) as usize;
-        if depth > ffi::Py_GetRecursionLimit() as usize || here < STACK_FLOOR.with(|floor| *floor) {
+        if too_deep || here < STACK_FLOOR.with(|floor| *floor) {
             DEPTH.with(|d| d.set(d.get() - 1));
             set_error(ffi::PyExc_RecursionError, "maximum recursion depth exceeded".to_string());
             return null_mut();
