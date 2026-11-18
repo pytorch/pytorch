@@ -1,6 +1,6 @@
 #pragma once
 
-// C++ side of torch.cfg_compile.
+// C++ side of torch.vm.
 
 #include <torch/csrc/python_headers.h>
 
