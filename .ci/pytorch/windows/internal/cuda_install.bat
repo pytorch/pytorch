@@ -20,13 +20,9 @@ set CUDA_VERSION_STR=%CUDA_VER_MAJOR%.%CUDA_VER_MINOR%
 set CUDNN_FOLDER=cuda
 set CUDNN_LIB_FOLDER=lib\x64
 
-:: If CUDA is already installed, skip CUDA installation but still verify cuDNN
-if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto check_cudnn
-
 if %CUDA_VER% EQU 126 goto cuda126
 if %CUDA_VER% EQU 128 goto cuda128
 if %CUDA_VER% EQU 129 goto cuda129
-if %CUDA_VER% EQU 130 goto cuda130
 if %CUDA_VER% EQU 132 goto cuda132
 if %CUDA_VER% EQU 134 goto cuda134
 
@@ -56,13 +52,6 @@ set "ARGS=cuda_profiler_api_12.9 thrust_12.9 nvcc_12.9 cuobjdump_12.9 nvprune_12
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.28.1.4_cuda12-archive
 goto cuda_download
 
-:cuda130
-set CUDA_INSTALL_VERSION=13.0.0
-set CUDA_INSTALL_EXE=cuda_13.0.0_windows.exe
-set "ARGS="
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.28.1.4_cuda13-archive
-goto cuda_download
-
 :cuda132
 set CUDA_INSTALL_VERSION=13.2.2
 set CUDA_INSTALL_EXE=cuda_13.2.2_windows.exe
@@ -79,6 +68,9 @@ goto cuda_download
 
 :: Common download logic for CUDA toolkit and cuDNN
 :cuda_download
+:: If CUDA is already installed, skip CUDA installation but still verify cuDNN
+if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto check_cudnn
+
 set CUDNN_LIB_FOLDER=lib
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
@@ -184,10 +176,6 @@ if %CUDA_VER% EQU 128 (
 )
 if %CUDA_VER% EQU 129 (
     set CUDNN_FOLDER=cudnn-windows-x86_64-9.28.1.4_cuda12-archive
-    set EXPECTED_CUDNN_VERSION=9.28.1
-)
-if %CUDA_VER% EQU 130 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.28.1.4_cuda13-archive
     set EXPECTED_CUDNN_VERSION=9.28.1
 )
 if %CUDA_VER% EQU 132 (
