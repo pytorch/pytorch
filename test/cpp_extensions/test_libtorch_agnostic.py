@@ -1314,6 +1314,62 @@ for warning in w:
             actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
             self.assertEqual(actual, name == flag)
 
+    @skipIfTorchVersionLessThan(2, 9)
+    @onlyCPU
+    @parametrize("initial_enabled", [False, True])
+    @parametrize("requested_enabled", [False, True])
+    def test_grad_mode_set_enabled(self, device, initial_enabled, requested_enabled):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        with torch.set_grad_enabled(initial_enabled):
+            libtorch_agnostic.ops.my_grad_mode_set_enabled(requested_enabled)
+            self.assertEqual(torch.is_grad_enabled(), requested_enabled)
+
+    @skipIfTorchVersionLessThan(2, 9)
+    @onlyCPU
+    @parametrize("enabled", [False, True])
+    def test_grad_mode_is_enabled(self, device, enabled):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        with torch.set_grad_enabled(enabled):
+            self.assertEqual(libtorch_agnostic.ops.my_grad_mode_is_enabled(), enabled)
+
+    @skipIfTorchVersionLessThan(2, 9)
+    @onlyCPU
+    @parametrize("outer_enabled", [False, True])
+    @parametrize("inner_enabled", [None, False, True])
+    def test_grad_mode_guard(self, device, outer_enabled, inner_enabled):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        with torch.set_grad_enabled(outer_enabled):
+            if inner_enabled is None:
+                actual = libtorch_agnostic.ops.my_no_grad_guard()
+            else:
+                actual = libtorch_agnostic.ops.my_auto_grad_mode_guard(inner_enabled)
+            self.assertEqual(
+                actual,
+                (False if inner_enabled is None else inner_enabled, outer_enabled),
+            )
+            # check that grad mode is restored to the outer value after the guard
+            self.assertEqual(torch.is_grad_enabled(), outer_enabled)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("outer_enabled", [False, True])
+    @parametrize("inner_enabled", [False, True])
+    def test_auto_fw_grad_mode_guard(self, device, outer_enabled, inner_enabled):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.autograd.forward_ad._set_fwd_grad_enabled(outer_enabled):
+            self.assertEqual(
+                libtorch_agnostic.ops.my_auto_fw_grad_mode_guard(inner_enabled),
+                (inner_enabled, outer_enabled),
+            )
+            # check that forward grad mode is restored to the outer value after the guard
+            self.assertEqual(
+                torch.autograd.forward_ad._is_fwd_grad_enabled(), outer_enabled
+            )
+
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
     @parametrize("memory_format", [None, torch.channels_last, torch.contiguous_format])

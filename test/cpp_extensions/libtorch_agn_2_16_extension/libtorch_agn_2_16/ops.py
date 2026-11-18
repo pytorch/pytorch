@@ -34,6 +34,10 @@ def my_is_inference(t: torch.Tensor) -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_inference.default(t)
 
 
+def my_auto_fw_grad_mode_guard(enabled: bool) -> tuple[bool, bool]:
+    return torch.ops.libtorch_agn_2_16.my_auto_fw_grad_mode_guard.default(enabled)
+
+
 def my_is_warn_always_enabled() -> bool:
     """Stable ``torch_is_warn_always_enabled`` (2.16+)."""
     return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()
