@@ -1,18 +1,18 @@
-//! The compiler behind `torch.cfg_compile`.
+//! The compiler and virtual machine behind `torch.cfg_compile`.
 //!
 //! A Python function is turned into a control-flow graph in SSA form
-//! (`frontend`), in an IR whose instructions have the semantics of the
-//! bytecode (`ir`).
+//! (`frontend`), which a register VM executes (`vm`).
 
-// The frontend already records what the VM of the next commit needs to run
-// the graph (kill lists, the calling convention of the function).
+// Parts of the analyses are only read by the tiers that later commits add.
 #![allow(dead_code)]
 
+mod analysis;
 mod bytecode;
 mod frontend;
 mod ir;
 mod pyapi;
 mod pyffi;
+mod vm;
 
 use pyo3::prelude::*;
 
