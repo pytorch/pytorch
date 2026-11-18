@@ -578,6 +578,7 @@ class BaseSetVariable(VariableTracker):
             )
 
     tp_methods = {
+        "__contains__": Method.from_slot(sq_contains_impl),
         "isdisjoint": Method(isdisjoint),
     }
 
@@ -1277,6 +1278,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
     tp_methods = {
+        "__contains__": Method.from_slot(BaseSetVariable.sq_contains_impl),
         "copy": Method(copy),
         "difference": Method(difference),
         "intersection": Method(intersection),

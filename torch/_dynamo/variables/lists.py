@@ -1439,6 +1439,7 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
+        "__getitem__": Method.from_slot(BaseListVariable.mp_subscript_impl),
         "append": Method(BaseListVariable.list_append),
         "extend": Method(BaseListVariable.list_extend),
         "insert": Method(BaseListVariable.list_insert),

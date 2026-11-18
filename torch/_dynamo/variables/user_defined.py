@@ -5550,18 +5550,6 @@ class DefaultDictVariable(ConstDictVariable):
         self.call_method(tx, "__setitem__", [key, default_var], {})
         return default_var
 
-    def mp_subscript_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: "VariableTracker",
-    ) -> "VariableTracker":
-        """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        hashed = self._lookup_key(tx, key)
-        value = self.items.get(hashed)
-        if value is not None:
-            return value
-        return self.call_method(tx, "__missing__", [key], {})
-
     def nb_or_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -5641,13 +5629,6 @@ class DefaultDictVariable(ConstDictVariable):
         # Remaining args go to dict.__init__ (== dict.update) on this object.
         return ConstDictVariable.tp_init_impl(self, tx, args, kwargs)
 
-    def _getitem(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker":
-        if len(args) != 1:
-            raise_args_mismatch(tx, "__getitem__", "1 args", f"{len(args)} args")
-        return self.mp_subscript_impl(tx, args[0])
-
     def _missing(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
     ) -> "VariableTracker":
@@ -5702,7 +5683,6 @@ class DefaultDictVariable(ConstDictVariable):
         return super().call_method(tx, name, args, kwargs)
 
     tp_methods = {
-        "__getitem__": Method(_getitem),
         "__missing__": Method(_missing),
         "copy": Method(_copy),
         "__copy__": Method(_copy),
