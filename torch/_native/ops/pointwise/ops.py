@@ -31,6 +31,7 @@ def _opmath(x: StorageScalar) -> ComputeScalar:
 class _UnaryMath:
     def __init__(self, fn: MathFn) -> None:
         self.fn: MathFn = fn
+        self.__name__: str = fn.__name__
 
     @cute.jit
     def __call__(self, x: StorageScalar) -> ComputeScalar:
