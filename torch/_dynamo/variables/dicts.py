@@ -621,25 +621,20 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             item = self.original_items.get(key.vt)
             if self.is_new_item(item, value) or self.should_reconstruct_all:
                 key_var = key.vt
+                positional = isinstance(key_var.source, ConstDictKeySource) and (
+                    key_var.source.base == self.source
+                )
                 if (
-                    not self.should_reconstruct_all
+                    positional
+                    and not self.should_reconstruct_all
                     and (literal := _get_literal_key(key_var)) is not NO_SUCH_SUBOBJ
-                    and isinstance(key_var.source, ConstDictKeySource)
-                    and key_var.source.base == self.source
                     and not _contains_nan(literal)
                 ):
+                    # Updating an existing literal key retains its identity and order.
                     key_var = key_var.clone(source=None)
-                # Updating an existing literal key retains its identity and order.
-                # External keys and full reconstruction still need their sources.
-                if isinstance(
+                elif (positional or self.should_reconstruct_all) and isinstance(
                     self.mutation_type,
                     (ValueMutationExisting, AttributeMutationExisting),
-                ) and (
-                    self.should_reconstruct_all
-                    or (
-                        isinstance(key_var.source, ConstDictKeySource)
-                        and key_var.source.base == self.source
-                    )
                 ):
                     guard_order = True
                 codegen(key_var)
@@ -858,7 +853,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         from .iter import DictIterator
 
         ConstDictVariable.install_dict_order_guard(self, tx)
-        return DictIterator.create(self.items)
+        return DictIterator.create(self.items, owner=self)
 
     def tp_init_impl(
         self,
@@ -1098,14 +1093,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
         *,
         method_name: str = "update",
-        can_fast_merge: bool = False,
+        fast_merge_verified: bool = False,
     ) -> VariableTracker:
         check_positional(tx, method_name, len(args), 0, 1)
         self.install_dict_keys_match_guard()
         if args or kwargs:
             tx.output.side_effects.mutation(self)
         if args:
-            self.dict_update_arg(tx, args[0], can_fast_merge=can_fast_merge)
+            self.dict_update_arg(tx, args[0], fast_merge_verified=fast_merge_verified)
         if kwargs:
             items = {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
             self.dict_merge(tx, ConstDictVariable(items))
@@ -1116,14 +1111,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
         *,
-        can_fast_merge: bool = False,
+        fast_merge_verified: bool = False,
     ) -> None:
-        if can_fast_merge and isinstance(other, ConstDictVariable):
+        if fast_merge_verified and isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
             self._update_items(other.materialize_keys())
             return
         # Probe subclass keys before dict_merge considers its raw-storage fast path.
-        if not can_fast_merge and (
+        if not fast_merge_verified and (
             pydict_checkexact(other) or generic_hasattr_str(tx, other, "keys")
         ):
             self.dict_merge(tx, other)
@@ -1132,7 +1127,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             pairs = lazily_unpack(
                 tx,
                 other,
-                allow_fast_path=can_fast_merge or self._can_fast_merge(other),
+                allow_fast_path=fast_merge_verified or self._can_fast_merge(other),
             )
             for idx, item in enumerate(pairs):
                 pair = _unpack_dict_update_pair(tx, item, idx)
@@ -1437,6 +1432,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return super().tp_getattro_impl(tx, name)
 
 
+def _ordered_view(method: Callable[..., VariableTracker]) -> Method:
+    return Method(lambda *args: method(*args).clone(is_ordered=True))
+
+
 class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     _cpython_type = collections.OrderedDict
     # self.items is actually a collections.OrderedDict at runtime for this
@@ -1488,7 +1487,9 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         fast_keywords = all(type(key) is str for key in kwargs)
         exact_mutable = pyodict_checkexact(self) and fast_keywords and self.is_mutable()
         if exact_mutable and (not args or self._can_fast_merge(args[0])):
-            return self.dict_update_common(tx, args, kwargs, can_fast_merge=bool(args))
+            return self.dict_update_common(
+                tx, args, kwargs, fast_merge_verified=bool(args)
+            )
         update = VariableTracker.build(tx, polyfills.odict_update)
         if exact_mutable and args:
             source = args[0].realize()
@@ -1519,7 +1520,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         from .iter import DictIterator
 
         self.install_dict_order_guard(tx)
-        return DictIterator.create(self.items, ordered=True)
+        return DictIterator.create(self.items, ordered=True, owner=self)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -1698,30 +1699,6 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
-    def dict_keys(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return super().dict_keys(tx, args, kwargs).clone(is_ordered=True)
-
-    def dict_values(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return super().dict_values(tx, args, kwargs).clone(is_ordered=True)
-
-    def dict_items(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return super().dict_items(tx, args, kwargs).clone(is_ordered=True)
-
     def dict_reversed(
         self,
         tx: "InstructionTranslatorBase",
@@ -1766,9 +1743,9 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         "update": Method(odict_update),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
-        "keys": Method(dict_keys),
-        "values": Method(dict_values),
-        "items": Method(dict_items),
+        "keys": _ordered_view(ConstDictVariable.dict_keys),
+        "values": _ordered_view(ConstDictVariable.dict_values),
+        "items": _ordered_view(ConstDictVariable.dict_items),
         "__reversed__": Method(dict_reversed),
     }
 
@@ -2007,6 +1984,14 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         if self.source:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # A missing OrderedDict-only attribute raises before call_method runs.
+        if not hasattr(dict, name):
+            self._guard_type()
+        return super().tp_getattro_impl(tx, name)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2059,7 +2044,10 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         # Key lookups, mutations and detached copies can observe IDs without
         # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
-            key.vt = specialize_symnode(key.vt.realize())
+            original = key.vt
+            key.vt = specialize_symnode(original.realize())
+            if key.vt is not original and original in self.original_items:
+                self.original_items[key.vt] = self.original_items.pop(original)
         return self.items
 
     def clone(self, **kwargs: Any) -> VariableTracker:
@@ -2083,7 +2071,7 @@ class NNModuleHooksOrderedDictVariable(NNModuleHooksDictVariable, OrderedDictVar
     pass
 
 
-class _NNModuleHookFlagsDictVariable(ConstDictVariable):
+class NNModuleHookFlagsDictVariable(NNModuleHooksDictVariable):
     GLOBAL_FLAGS = False
 
     _nonvar_fields = {
@@ -2154,21 +2142,13 @@ class _NNModuleHookFlagsDictVariable(ConstDictVariable):
         return super().sq_contains_impl(tx, item)
 
 
-class NNModuleHookFlagsDictVariable(
-    _NNModuleHookFlagsDictVariable, NNModuleHooksDictVariable
-):
-    pass
-
-
 class NNModuleHookFlagsOrderedDictVariable(
     NNModuleHookFlagsDictVariable, OrderedDictVariable
 ):
     pass
 
 
-class NNModuleGlobalHooksDictVariable(
-    _NNModuleHookFlagsDictVariable, NNModuleHooksDictVariable
-):
+class NNModuleGlobalHooksDictVariable(NNModuleHookFlagsDictVariable):
     # Global IDs may be pinned while local IDs vary across equivalent modules.
     GLOBAL_FLAGS = True
 
@@ -2385,7 +2365,9 @@ class DictKeysVariable(DictViewVariable):
         from .iter import DictKeysIterator
 
         self.install_order_guard(tx)
-        return DictKeysIterator.create(self.dv_dict.items, ordered=self.is_ordered)
+        return DictKeysIterator.create(
+            self.dv_dict.items, ordered=self.is_ordered, owner=self
+        )
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -2494,7 +2476,9 @@ class DictValuesVariable(DictViewVariable):
         from .iter import DictValuesIterator
 
         self.install_order_guard(tx)
-        return DictValuesIterator.create(self.dv_dict.items, ordered=self.is_ordered)
+        return DictValuesIterator.create(
+            self.dv_dict.items, ordered=self.is_ordered, owner=self
+        )
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -2582,7 +2566,9 @@ class DictItemsVariable(DictViewVariable):
         from .iter import DictItemsIterator
 
         self.install_order_guard(tx)
-        return DictItemsIterator.create(self.dv_dict.items, ordered=self.is_ordered)
+        return DictItemsIterator.create(
+            self.dv_dict.items, ordered=self.is_ordered, owner=self
+        )
 
 
 kV = HashableTracker | str
