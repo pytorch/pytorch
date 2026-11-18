@@ -245,6 +245,15 @@ class LazyConstantVariableTests(TestCase):
         self.assertFalse(lazy.is_hashable_lazy())
         self.assertFalse(lazy.is_realized())
 
+        def read(x, mapping):
+            return x + mapping["used"]
+
+        x, mapping = torch.ones(1), {"used": 2, (Key(),): 3}
+        self.assertEqual(
+            torch.compile(read, backend="eager", fullgraph=True)(x, mapping),
+            read(x, mapping),
+        )
+
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)

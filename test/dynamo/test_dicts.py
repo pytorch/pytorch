@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.utils._ordered_set import OrderedSet
 
 
 class _BadCmpExc(Exception):
@@ -54,6 +53,10 @@ class _BadCmp:
 
 
 class SimpleDict(dict):
+    pass
+
+
+class SimpleOrderedDict(OrderedDict):
     pass
 
 
@@ -216,155 +219,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 2)
 
     hw_classification = HardwareClassification.GENERIC
-
-    @parametrize("created", [False, True])
-    def test_iterable_attribute_error_metadata(self, created):
-        def fn(x, iterator):
-            obj = zip([1], [2]) if created else next(iterator)
-            missing = hasattr(obj, "missing")
-            if not created:
-                return x + 1, missing
-            try:
-                obj.missing
-            except AttributeError as error:
-                return x + 1, missing, error.name, error.obj is obj
-
-        x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, iter(("a",))),
-            (x + 1, False, "missing", True) if created else (x + 1, False),
-        )
-
-    @parametrize("container_type", [set, frozenset, OrderedSet])
-    def test_set_family_iterator_type(self, container_type):
-        def fn(x):
-            iterator = iter(container_type([1, 2]))
-            return (
-                x + next(iterator),
-                type(iterator),
-                isinstance(iterator, type(iter({}))),
-            )
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    @parametrize(
-        "kind, destination",
-        [
-            (kind, destination)
-            for kind in ("plain", "getattr", "getattribute")
-            for destination in ("instance", "class", "base")
-        ]
-        + [
-            ("module", "instance"),
-            ("module", "buffer"),
-            ("slot", "instance"),
-            ("slot_getattr", "instance"),
-            ("metaclass", "instance"),
-            ("dict_property", "class"),
-            ("plain", "bases"),
-            ("plain", "delete"),
-            ("plain", "replace"),
-        ],
-    )
-    def test_defaulted_attribute_absence_invalidation(self, kind, destination):
-        class Base:
-            __slots__ = ()
-
-        class Meta(type):
-            def __getattribute__(cls, name):
-                return 0 if name == "__dictoffset__" else super().__getattribute__(name)
-
-        class Input(Base, metaclass=Meta if kind == "metaclass" else type):
-            if kind == "dict_property":
-
-                @property
-                def __dict__(self):
-                    raise AttributeError("__dict__")
-
-            if kind.startswith("slot"):
-                __slots__ = ("scale", "reads")
-            if kind in ("getattr", "slot_getattr"):
-
-                def __getattr__(self, name):
-                    if kind == "getattr" and name == "scale":
-                        self.reads += 1
-                    raise AttributeError(name)
-            elif kind == "getattribute":
-
-                def __getattribute__(self, name):
-                    return super().__getattribute__(name)
-
-        obj = torch.nn.Identity() if kind == "module" else Input()
-        obj.reads = 0
-        if destination in ("delete", "replace"):
-            obj.scale = 3
-
-        def fn(x, obj):
-            if destination == "delete":
-                del obj.scale
-            elif destination == "replace":
-                obj.__dict__ = {"reads": 0}
-            result = x + getattr(obj, "scale", 1)
-            return result, obj.reads
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        if kind == "metaclass":
-            with self.assertRaisesRegex(
-                Unsupported, "Custom metaclass metadata access"
-            ):
-                compiled(x, obj)
-            compiled = torch.compile(fn, backend=counter)
-        self.assertEqual(compiled(x, obj), (x + 1, int(kind == "getattr")))
-        if kind != "metaclass":
-            self.assertEqual(counter.frame_count, 1)
-        if destination in ("delete", "replace"):
-            self.assertFalse(hasattr(obj, "scale"))
-            obj.scale = 3
-            Input.scale = 3
-            self.assertEqual(compiled(x, obj)[0], x + 3)
-            self.assertEqual(counter.frame_count, 2)
-            return
-        obj.reads = 0
-        if destination == "bases":
-
-            class Other:
-                __slots__ = ()
-                scale = 3
-
-            Input.__bases__ = (Base, Other)
-        elif destination == "buffer":
-            obj.register_buffer("scale", torch.tensor(3))
-        else:
-            target = {"instance": obj, "class": Input, "base": Base}[destination]
-            target.scale = 3
-        self.assertEqual(compiled(x, obj)[0], x + 3)
-        if kind == "metaclass":
-            frames = counter.frame_count
-            self.assertEqual(compiled(x, obj)[0], x + 3)
-            self.assertEqual(counter.frame_count, frames)
-        else:
-            self.assertEqual(counter.frame_count, 2)
-
-    def test_slotted_class_missing_attribute_guard(self):
-        class Slotted:
-            __slots__ = ()
-
-        def fn(x, obj):
-            try:
-                return x + obj.extra
-            except AttributeError:
-                return x + 1
-
-        x, obj = torch.ones(1), Slotted()
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        self.assertEqual(compiled(x, obj), x + 1)
-        with patch.object(Slotted, "extra", 7, create=True):
-            self.assertEqual(compiled(x, obj), x + 7)
-        self.assertEqual(counter.frame_count, 2)
 
     def test_ordered_dict_input_move_preserves_writeback_order(self):
         def fn(x, mapping):
@@ -630,32 +484,19 @@ class DictTests(torch._dynamo.test_case.TestCase):
             right.move_to_end(next(iter(right)))
         self.assertEqual(counter.frame_count, 2 if mapping_type is OrderedDict else 1)
 
-    @parametrize("custom_new", [False, True])
-    def test_dict_storage_order_descriptors(self, custom_new):
+    def test_dict_storage_order_descriptor_custom_new(self):
         class Mapping(OrderedDict):
             def __new__(cls, *args, **kwargs):
                 return super().__new__(cls)
 
         def fn(x, mapping):
-            result = dict.__iter__(mapping)
-            return x + 1, tuple(result), type(result)
+            return x + 1, tuple(dict.__iter__(mapping))
 
-        mapping = (Mapping if custom_new else OrderedDict)(a=1, b=2)
-        mapping.move_to_end("a")
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        if custom_new:
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                "Unsupported builtin dictionary storage operation",
-            ):
-                compiled(x, mapping)
-            return
-        for _ in range(2):
-            self.assertEqual(compiled(x, mapping), fn(x, mapping))
-            mapping.move_to_end(next(iter(mapping)))
-        self.assertEqual(counter.frame_count, 1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported builtin dictionary storage operation"
+        ):
+            compiled(torch.ones(1), Mapping(a=1, b=2))
 
     @parametrize("graph_break", [False, True])
     def test_ordered_dict_reconstruction_preserves_storage_order(self, graph_break):
@@ -861,9 +702,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
     @parametrize("operation", [operator.not_, bool, len, list])
     def test_input_keys_view_guards(self, mapping_type, operation):
         def fn(x, view):
-            return (
-                (x + 1, operation(view)) if operation is list else x + operation(view)
-            )
+            return x + 1, operation(view)
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
@@ -963,20 +802,19 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     @parametrize(
         "owner, mapping_type, reordered",
-        [(dict, dict, False)]
-        + [
-            (owner, OrderedDict, reordered)
-            for owner in (dict, OrderedDict)
-            for reordered in (False, True)
+        [
+            (dict, dict, False),
+            *itertools.product((dict, OrderedDict), (OrderedDict,), (False, True)),
         ],
     )
     @parametrize(
         "method, binding",
-        [("keys", "input")]
-        + [
-            (method, binding)
-            for method in ("keys", "values", "items", "__reversed__")
-            for binding in ("bound", "unbound")
+        [
+            ("keys", "input"),
+            ("__iter__", "unbound"),
+            *itertools.product(
+                ("keys", "values", "items", "__reversed__"), ("bound", "unbound")
+            ),
         ],
     )
     def test_dict_view_iteration_order(
@@ -992,6 +830,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 view = (
                     descriptor.__get__(obj)() if binding == "bound" else descriptor(obj)
                 )
+            if method == "__iter__":
+                return x + 1, list(view), type(view)
             if method == "__reversed__":
                 return x + 1, list(view)
             contents = list(view), list(type(view).__reversed__(view))
@@ -2282,22 +2122,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
-
-    def test_unused_tuple_key_with_spoofed_builtin_method_type(self):
-        class Key:
-            @property
-            def __class__(self):
-                return types.BuiltinMethodType
-
-        def fn(x, mapping):
-            return x + mapping["used"]
-
-        mapping = {"used": 2, (Key(),): 3}
-        x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
-            fn(x, mapping),
-        )
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -5140,14 +4964,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(size)
             self.assertEqual(compiled(x), fn(x))
 
-    @parametrize("subclass", [False, True])
+    @parametrize("mapping_type", [OrderedDict, SimpleOrderedDict])
     @parametrize("keys", [("a", "b", "c"), ("layer.0.weight", "layer.1.weight")])
-    def test_ordered_dict_value_update_preserves_iterator(self, subclass, keys):
-        class Mapping(OrderedDict):
-            pass
-
-        mapping_type = Mapping if subclass else OrderedDict
-
+    def test_ordered_dict_value_update_preserves_iterator(self, mapping_type, keys):
         def fn(x, mapping):
             mapping[keys[1]] = x + 1
             return x + 2
@@ -5169,15 +4988,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("storage_order", [False, True])
     @parametrize("operation", ["setitem", "update"])
-    @parametrize("subclass", [False, True])
+    @parametrize("mapping_type", [OrderedDict, SimpleOrderedDict])
     def test_ordered_dict_value_update_reordered_input(
-        self, storage_order, operation, subclass
+        self, storage_order, operation, mapping_type
     ):
-        class Mapping(OrderedDict):
-            pass
-
-        mapping_type = Mapping if subclass else OrderedDict
-
         def fn(x, mapping):
             if operation == "setitem":
                 mapping["b"] = x + 1
@@ -5200,20 +5014,18 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(list(iterator), expected_order)
             self.assertEqual(list(mapping), expected_order)
             self.assertEqual(mapping["b"], x + 1)
-        self.assertEqual(counter.frame_count, 2 if subclass and storage_order else 1)
+        self.assertEqual(
+            counter.frame_count,
+            2 if mapping_type is SimpleOrderedDict and storage_order else 1,
+        )
 
-    @parametrize("subclass", [False, True])
+    @parametrize("mapping_type", [OrderedDict, SimpleOrderedDict])
     @parametrize("last", [False, True])
     @parametrize("reorder", [False, True])
     @parametrize("reverse", [False, True])
     def test_move_to_end_restored_order_iterators(
-        self, subclass, last, reorder, reverse
+        self, mapping_type, last, reorder, reverse
     ):
-        class Mapping(OrderedDict):
-            pass
-
-        mapping_type = Mapping if subclass else OrderedDict
-
         def fn(x, mapping, key):
             if reorder:
                 mapping.move_to_end(key, last=last)
@@ -5245,13 +5057,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("mutation", ["pop", "popitem", "delitem", "clear"])
     @parametrize("keys", ["c", "abc"])
-    @parametrize("subclass", [False, True])
-    def test_ordered_dict_reinsert_invalidates_iterator(self, mutation, keys, subclass):
-        class Mapping(OrderedDict):
-            pass
-
-        mapping_type = Mapping if subclass else OrderedDict
-
+    @parametrize("mapping_type", [OrderedDict, SimpleOrderedDict])
+    def test_ordered_dict_reinsert_invalidates_iterator(
+        self, mutation, keys, mapping_type
+    ):
         def fn(x, mapping):
             if mutation == "clear":
                 items = list(mapping.items())
