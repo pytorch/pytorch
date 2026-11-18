@@ -77,6 +77,7 @@ from torch.utils._sympy.functions import FloorDiv
 
 
 nested_compile_region = torch.compiler.nested_compile_region
+_shape_bucket = {4: 0, 8: 1}.get
 
 
 def _dynamic_capture(size):
@@ -3718,20 +3719,16 @@ class TestInvokeSubgraphReuse(TestCase):
 
         @nested_compile_region
         def region(x, pair):
-            return x + (
-                list.count.__get__(pair.left, list)
-                == list.count.__get__(pair.right, list)
-            )
+            return x + (list.count.__get__(pair.left) == list.count.__get__(pair.right))
 
         def fn(x, first, second):
             return region(x, first) + region(x, second)
 
         x, shared = torch.ones(1), []
         first, second = Pair([], []), Pair(shared, shared)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
         with self._count_speculate_calls() as count:
-            result = torch.compile(fn, backend="eager", fullgraph=True)(
-                x, first, second
-            )
+            result = compiled(x, first, second)
         self.assertEqual(result, 2 * x + 1)
         self.assertEqual(count(), 2)
 
@@ -3919,13 +3916,15 @@ class TestInvokeSubgraphReuse(TestCase):
         ["prebuilt", "size", "stride", "offset", "remapped_stride", "remapped_offset"],
     )
     def test_reused_region_shared_capture_symbol(self, kind):
+        stride = kind.endswith("stride")
+
         @_map_nested_region
         def region(x, holder, fixed):
             if kind == "prebuilt":
                 return x.sum() + holder.tensor
             data = holder.tensor + 2
             other = holder.layout if kind.startswith("remapped") else fixed.tensor
-            if kind.endswith("stride"):
+            if stride:
                 other = x.expand(other.stride(0))
             elif kind.endswith("offset"):
                 other = x.expand(other.storage_offset())
@@ -3939,9 +3938,7 @@ class TestInvokeSubgraphReuse(TestCase):
             return x + 100 if outputs[1].shape[0] == size else x - 100
 
         def layout():
-            if kind.endswith("stride"):
-                return torch.ones(3, 5)[:, 0]
-            return torch.ones(10)[5:]
+            return torch.ones(3, 5)[:, 0] if stride else torch.ones(10)[5:]
 
         x, fixed = torch.ones(1), SimpleNamespace(tensor=layout())
         first = _dynamic_capture(5) if kind == "prebuilt" else torch.ones(5)
@@ -4005,9 +4002,7 @@ class TestInvokeSubgraphReuse(TestCase):
     def test_reused_region_dynamic_capture_branch(self, reject_candidate):
         @_map_nested_region
         def fn(x, holder):
-            if holder.tensor.shape[0] >= 6:
-                return x + holder.tensor.sum() + 17
-            return x + holder.tensor.sum()
+            return x + holder.tensor.sum() + (17 if holder.tensor.shape[0] >= 6 else 0)
 
         x = torch.ones(1)
         holders = [SimpleNamespace(tensor=_dynamic_capture(5)) for _ in range(2)]
@@ -4111,11 +4106,11 @@ class TestInvokeSubgraphReuse(TestCase):
             run(x, layers, 0, traces=1)
             if metadata == "buffer":
                 layers[1].value.add_(2)
+                run(x, layers, 1, traces=2, frames=2)
             else:
                 value = torch.ones(5, 3) if metadata == "size" else torch.ones(3, 3).t()
                 layers[-1].value = torch.nn.Parameter(value)
-            mode = int(metadata == "buffer")
-            run(x, layers, mode, traces=2 if metadata == "buffer" else 3, frames=2)
+                run(x, layers, 0, traces=3, frames=2)
 
     def test_reused_region_explicit_spec_parameter_captures(self):
         fn = _map_nested_region(lambda x, layer: x @ layer.weight)
@@ -6697,7 +6692,7 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
         """Hash fn that uses tensor shape to differentiate inputs."""
 
         def hash_fn(x):
-            return x.shape[0]
+            return _shape_bucket(x.shape[0])
 
         @nested_compile_region(reuse_hash_fn=hash_fn)
         def gn(x):
