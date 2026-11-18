@@ -60,6 +60,7 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
+    RemovedArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -1215,37 +1216,22 @@ class TritonTemplateKernel(TritonKernel):
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def smem_operand_ring_first(self) -> str:
-        """
-        Hook called from the autoWS loop header of the Blackwell persistent
-        template. Expands to ``smem_operand_ring_first=True,`` when an epilogue
-        staging slot is at least 16 KB at the final (fused) output dtype on a
-        1-CTA config. There the autoWS memory planner otherwise grows the
-        staging ring at the expense of the A/B operand ring. Smaller slots
-        overlap their stores cheaply and measured slower with it, and 2-CTA
-        output staging is pinned to one copy.
-        """
+        """autoWS loop-header kwarg for large epilogue staging slots."""
 
         def hook() -> str:
             meta = self.meta
-            from torch._inductor.autows_utils import has_smem_operand_ring_first
-
-            if (
-                not has_smem_operand_ring_first()
-                or meta.get("TWO_CTAS")
-                or not meta.get("USE_META_WS")
-            ):
+            if meta.get("TWO_CTAS") or not meta.get("USE_META_WS"):
                 return ""
-            from torch._inductor.codegen.common import RemovedArg
-
+            buffers = {**self.args.output_buffers, **self.args.inplace_buffers}
             names = [
-                name
-                for name, arg in self.args.output_buffers.items()
-                if not isinstance(arg, RemovedArg)
+                name for name, arg in buffers.items() if not isinstance(arg, RemovedArg)
             ] or [self.output_node.get_name()]
             elem = max(V.graph.get_dtype(name).itemsize for name in names)
-            dp = int(meta.get("DATA_PARTITION_FACTOR") or 1)
-            subtile = int(meta.get("EPILOGUE_SUBTILE") or 1)
-            slot = (int(meta["BLOCK_M"]) // dp) * (int(meta["BLOCK_N"]) // subtile)
+            slot = (meta["BLOCK_M"] // meta.get("DATA_PARTITION_FACTOR", 1)) * (
+                meta["BLOCK_N"] // meta.get("EPILOGUE_SUBTILE", 1)
+            )
+            # 16 KB from local testing; 1-CTA only: 2-CTA output staging is
+            # pinned to one copy (fb-triton #3543), so there is nothing to trade.
             return "smem_operand_ring_first=True," if slot * elem >= 16384 else ""
 
         return self._register_hook("<SMEM_OPERAND_RING_FIRST>", hook)
