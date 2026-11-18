@@ -159,6 +159,8 @@ pub fn compile(
         }
         memory = pointer as usize;
     }
+    // From the first function on: see `chunks`.
+    crate::chunks::keep();
     let table = OpcodeTable::load(py)?;
     let options = Options {
         specialize,
