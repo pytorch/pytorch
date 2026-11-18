@@ -5122,6 +5122,24 @@ class TestPrecompileDynamoCapture(TestCase):
         wrapper = torch._TorchCompileInductorWrapper(None, remote, None)
         with self.assertRaisesRegex(PackageError, "remote autotune cache miss"):
             precompile_capture(single, backend=wrapper)
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph_policy": None})
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph-policy": None})
+        on = {"triton.cudagraphs": True}
+        with torch._inductor.config.patch(cudagraph_policy=object()):
+            with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
+                self._capture(single, options=on)
+            # Without CUDA graphs a policy cannot change what the capture records.
+            self._capture(single)
+        # It is checked on every call, so one set after capture() began refuses too,
+        # before compiling: a capture that recovers still saves.
+        with self._capture(single, options=on) as cap:
+            with torch._inductor.config.patch(cudagraph_policy=object()):
+                with self.assertRaisesRegex(PrecompileError, "Unset it while"):
+                    cap(self.model, self.x2)
+            cap(self.model, self.x2)
+        self.assertTrue(os.path.exists(self.artifact))
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,
@@ -6582,6 +6600,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
 _CUDAGRAPH_MODULE = """
 import torch
+from torch._inductor.cudagraph_utils import CUDAGraphPolicy
 
 
 class Model(torch.nn.Module):
@@ -6624,6 +6643,11 @@ def overrides_the_forward(model, x):
 def turns_cudagraphs_on(model, x):
     with torch._dynamo.override_cudagraphs(fwd=True):
         return step(model, x)
+
+
+class WrapsNoGraph(CUDAGraphPolicy):
+    def should_wrap(self, compiled_graph):
+        return False
 """
 
 _CUDAGRAPH_LOADER = """
@@ -6656,6 +6680,8 @@ def cudagraph_config():
 
 
 torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
+if saved["policy"]:
+    torch._inductor.config.cudagraph_policy = getattr(mod, saved["policy"])()
 ambient = cudagraph_config()
 f = torch.compiler.precompile.load(artifact, cache)
 # load() patches the artifact's config around the post-compile, and sets nothing.
@@ -6731,7 +6757,13 @@ class TestPrecompileCudagraphs(TestCase):
         return self.model.lin.weight.grad.clone()
 
     def _serve_in_fresh_process(
-        self, expected, env=None, mark_step=False, expected_grad=None, args=None
+        self,
+        expected,
+        env=None,
+        mark_step=False,
+        expected_grad=None,
+        args=None,
+        policy=None,
     ):
         # Calls the loaded artifact three times, on the model and args (self.x
         # by default; a list gives each call its own args and expected), in a
@@ -6742,6 +6774,7 @@ class TestPrecompileCudagraphs(TestCase):
         #   trees: whether it made a CUDA graph tree manager
         #   skips: its cudagraph skips
         # With expected_grad, each call also runs the backward.
+        # policy names the module's CUDAGraphPolicy the process sets before load().
         state = os.path.join(self.dir, "state.pt")
         calls = [((self.x,) if args is None else args, expected)]
         if isinstance(args, list):
@@ -6750,6 +6783,7 @@ class TestPrecompileCudagraphs(TestCase):
             "calls": calls,
             "expected_grad": expected_grad,
             "mark_step": mark_step,
+            "policy": policy,
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6895,6 +6929,12 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
         served = self._serve_in_fresh_process(y, expected_grad=self._eager_grad(fn))
         self.assertEqual(served["captured"], 0)
+
+    def test_a_cudagraph_policy_set_in_the_loading_process_decides_wrapping(self):
+        y, _ = self._capture_step(self.mod.step, mode="reduce-overhead")
+        served = self._serve_in_fresh_process(y, policy="WrapsNoGraph")
+        # The policy declines the one graph, which counts as a skip.
+        self.assertEqual((served["captured"], served["skips"]), (0, 1))
 
 
 def _exception_chain(exc: BaseException | None) -> str:
