@@ -18,6 +18,7 @@ import os
 import pickle
 import subprocess
 import sys
+import threading
 import traceback
 import types
 import typing
@@ -2212,7 +2213,7 @@ class TestFX(JitTestCase):
             return x
 
         def resolve(d):
-            _wrapped_fns_to_patch[(id(d), "leaf")] = d
+            exec("__import__('torch').fx.wrap('leaf')", d)
             return math.sqrt
 
         frame_dict = self._lazy_globals("bar", resolve, leaf=leaf)
@@ -2225,6 +2226,82 @@ class TestFX(JitTestCase):
         finally:
             for key in keys:
                 _wrapped_fns_to_patch.pop(key, None)
+
+    def test_wrap_registered_on_another_thread_while_patching_is_not_applied(self):
+        # Another thread's module body may not have defined the name yet, or may be
+        # about to script a caller of it.
+        from torch.fx._symbolic_trace import (
+            _Patcher,
+            _patch_wrapped_functions,
+            _wrapped_fns_to_patch,
+        )
+
+        def helper(x):
+            return x
+
+        defined = {"__builtins__": builtins, "helper": helper}
+        undefined = {"__builtins__": builtins}
+
+        def resolve(d):
+            for module_globals in (defined, undefined):
+                body = "__import__('torch').fx.wrap('helper')"
+                t = threading.Thread(target=exec, args=(body, module_globals))
+                t.start()
+                t.join()
+            return math.sqrt
+
+        frame_dict = self._lazy_globals("bar", resolve)
+        keys = [(id(frame_dict), "bar"), (id(defined), "helper"), (id(undefined), "helper")]
+        _wrapped_fns_to_patch[keys[0]] = frame_dict
+        try:
+            with self._patch_is_lazy_import(), _Patcher() as patcher:
+                _patch_wrapped_functions(patcher)
+                self.assertIs(defined["helper"], helper)
+        finally:
+            for key in keys:
+                _wrapped_fns_to_patch.pop(key, None)
+
+    def test_symbolic_trace_skips_a_wrap_whose_function_is_not_defined_yet(self):
+        # E.g. a module body another thread is running, between torch.fx.wrap("name")
+        # and def name, when the trace starts.
+        from torch.fx._symbolic_trace import _wrapped_fns_to_patch
+
+        module_globals = {"__builtins__": builtins}
+        exec("__import__('torch').fx.wrap('not_defined_yet')", module_globals)
+
+        def f(x):
+            return x + 1
+
+        try:
+            gm = torch.fx.symbolic_trace(f)
+        finally:
+            _wrapped_fns_to_patch.pop((id(module_globals), "not_defined_yet"))
+        self.assertEqual(gm(torch.ones(1)), torch.full((1,), 2.0))
+
+    def test_script_a_caller_of_a_wrapped_function_on_another_thread_during_a_trace(self):
+        # TorchScript compiling FX's wrapper for ``scaled`` resolves ``Scale`` in
+        # torch/fx/_symbolic_trace.py's globals and fails with "Unknown type name".
+        from fx import lazy_wrap_helper
+
+        results = []
+
+        def script_double():
+            double = lazy_wrap_helper.double
+            fn = types.FunctionType(double.__code__, double.__globals__)
+            try:
+                results.append(torch.jit._script.script(fn)(torch.ones(1)).item())
+            except Exception as e:
+                results.append(e)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                t = threading.Thread(target=script_double)
+                t.start()
+                t.join()
+                return x
+
+        torch.fx.symbolic_trace(M())
+        self.assertEqual(results, [2.0])
 
     def test_lazy_import_body_scripts_a_function_calling_a_wrapped_helper(self):
         # TorchScript compiling FX's wrapper for ``scaled`` resolves ``Scale`` in
