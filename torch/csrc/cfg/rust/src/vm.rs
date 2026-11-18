@@ -120,8 +120,8 @@ pub struct Compiled {
     /// Python object after all.
     pub unboxed_results: AtomicU64,
     pub boxed_later: AtomicU64,
-    name_c: CString,
-    filename_c: CString,
+    /// Function name and file name of each origin, for traceback entries.
+    origin_c: Vec<(CString, CString)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -328,8 +328,16 @@ impl Compiled {
             global_cache: empty(),
             module_attr_cache: empty(),
             plain_name,
-            name_c: CString::new(func.name.clone()).unwrap_or_default(),
-            filename_c: CString::new(func.filename.clone()).unwrap_or_default(),
+            origin_c: func
+                .origins
+                .iter()
+                .map(|o| {
+                    (
+                        CString::new(o.name.clone()).unwrap_or_default(),
+                        CString::new(o.filename.clone()).unwrap_or_default(),
+                    )
+                })
+                .collect(),
             func,
             analysis,
             generic,
@@ -521,8 +529,18 @@ impl Compiled {
     }
 
     unsafe fn fail(&self, bc: u32) -> Obj {
-        let line = self.func.line_of(bc);
-        pyffi::_PyTraceback_Add(self.name_c.as_ptr(), self.filename_c.as_ptr(), line);
+        // One entry per frame the interpreter would have had: the inlined
+        // function the instruction came from, then each call it sits under.
+        let mut bc = bc;
+        loop {
+            let origin = (bc >> ORIGIN_SHIFT) as usize;
+            let (name, filename) = &self.origin_c[origin];
+            pyffi::_PyTraceback_Add(name.as_ptr(), filename.as_ptr(), self.func.line_of(bc));
+            if origin == 0 {
+                break;
+            }
+            bc = self.func.origins[origin].call_bc;
+        }
         null_mut()
     }
 
@@ -926,6 +944,14 @@ impl Compiled {
                     return Err(());
                 }
                 Ok(v)
+            }
+            Op::IsFunction { v, func, code } => {
+                let o = self.obj(regs, *v);
+                Ok(py_bool(
+                    o == f.consts.get_unchecked(*func as usize).as_ptr()
+                        && ffi::PyFunction_GetCode(o)
+                            == f.consts.get_unchecked(*code as usize).as_ptr(),
+                ))
             }
             Op::CheckBound(v, name) => {
                 if reg(regs, *v).is_null() {
