@@ -343,7 +343,6 @@
   "test/inductor/test_b2b_gemm.py",
   "test/inductor/test_backward_symint_guards.py",
   "test/inductor/test_benchmark_fusion.py",
-  "test/inductor/test_benchmarking.py",
   "test/inductor/test_best_config.py",
   "test/inductor/test_binary_folding.py",
   "test/inductor/test_choices_composition.py",

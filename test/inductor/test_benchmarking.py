@@ -23,13 +23,17 @@ from torch._inductor.runtime.benchmarking import (
     TritonBenchmarker,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyCPU,
+)
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CPU, requires_triton
 
 
 ALL_BENCHMARKER_CLASSES = (
@@ -38,8 +42,9 @@ ALL_BENCHMARKER_CLASSES = (
 )
 
 
-@instantiate_parametrized_tests
 class TestBenchmarker(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch.manual_seed(12345)
@@ -57,14 +62,13 @@ class TestBenchmarker(TestCase):
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         return (fn, fn_args, fn_kwargs), _callable
 
-    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
+    @requires_triton()
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["benchmarker_cls"] is Benchmarker
-        and params["device"] == GPU_TYPE,
+        and params["device"] != "cpu",
     )
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
-    @parametrize("device", (GPU_TYPE, "cpu"))
     def test_benchmark_smoke(self, benchmarker_cls, device):
         benchmarker = benchmarker_cls()
         (fn, fn_args, fn_kwargs), _ = self.make_params(device)
@@ -78,52 +82,55 @@ class TestBenchmarker(TestCase):
             1,
         )
 
+    @onlyCPU
     @unittest.skipIf(not HAS_CPU, "requires CPU")
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
-    def test_benchmark_cpu_smoke(self, benchmarker_cls, device="cpu"):
+    def test_benchmark_cpu_smoke(self, benchmarker_cls, device):
         benchmarker = benchmarker_cls()
         _, _callable = self.make_params(device)
         timing = benchmarker.benchmark_cpu(_callable)
         self.assertGreater(timing, 0)
         self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_cpu"), 1)
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @onlyAccelerator
+    @requires_triton()
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["benchmarker_cls"] is Benchmarker,
     )
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
-    def test_benchmark_gpu_smoke(self, benchmarker_cls, device=GPU_TYPE):
+    def test_benchmark_gpu_smoke(self, benchmarker_cls, device):
         benchmarker = benchmarker_cls()
         _, _callable = self.make_params(device)
         timing = benchmarker.benchmark_gpu(_callable)
         self.assertGreater(timing, 0)
         self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1)
 
-    @unittest.skipIf(not HAS_CPU and not HAS_GPU, "requires CPU or GPU")
+    @requires_triton()
     @unittest.expectedFailure
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
     def test_benchmark_safely_infers_device_no_devices(
-        self, benchmarker_cls, device="cpu" if HAS_CPU else GPU_TYPE
+        self, benchmarker_cls, device
     ):
         benchmarker = benchmarker_cls()
         (fn, _, _), _ = self.make_params(device)
         benchmarker.benchmark(fn, (), {})
 
-    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
+    @requires_triton()
     @unittest.expectedFailure
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
-    def test_benchmark_safely_infers_device_many_devices(self, benchmarker_cls):
+    def test_benchmark_safely_infers_device_many_devices(self, benchmarker_cls, device):
         benchmarker = benchmarker_cls()
         (fn, cpu_args, cpu_kwargs), _ = self.make_sum("cpu")
-        (_, gpu_args, gpu_kwargs), _ = self.make_sum(GPU_TYPE)
+        (_, gpu_args, gpu_kwargs), _ = self.make_sum(torch.device(device).type)
         many_devices_args = cpu_args + gpu_args
         many_devices_kwargs = cpu_kwargs
         many_devices_kwargs.update(gpu_kwargs)
         benchmarker.benchmark(fn, many_devices_args, many_devices_kwargs)
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
-    def test_benchmark_warmup_and_rep_defaults(self):
+    @onlyAccelerator
+    @requires_triton()
+    def test_benchmark_warmup_and_rep_defaults(self, device):
         """Test that benchmark_gpu receives default warmup and rep values when not specified."""
         captured_kwargs = {}
 
@@ -132,7 +139,7 @@ class TestBenchmarker(TestCase):
             return 1.0  # Return a dummy timing
 
         benchmarker = TritonBenchmarker()
-        (fn, fn_args, fn_kwargs), _ = self.make_params(GPU_TYPE)
+        (fn, fn_args, fn_kwargs), _ = self.make_params(device)
 
         with patch.object(TritonBenchmarker, "benchmark_gpu", capture_benchmark_gpu):
             benchmarker.benchmark(fn, fn_args, fn_kwargs)
@@ -140,8 +147,9 @@ class TestBenchmarker(TestCase):
         self.assertEqual(captured_kwargs["warmup"], inductor_default_autotune_warmup)
         self.assertEqual(captured_kwargs["rep"], inductor_default_autotune_rep)
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
-    def test_benchmark_warmup_and_rep_custom_values(self):
+    @onlyAccelerator
+    @requires_triton()
+    def test_benchmark_warmup_and_rep_custom_values(self, device):
         """Test that benchmark_gpu receives custom warmup and rep values when specified."""
         captured_kwargs = {}
 
@@ -150,7 +158,7 @@ class TestBenchmarker(TestCase):
             return 1.0  # Return a dummy timing
 
         benchmarker = TritonBenchmarker()
-        (fn, fn_args, fn_kwargs), _ = self.make_params(GPU_TYPE)
+        (fn, fn_args, fn_kwargs), _ = self.make_params(device)
 
         custom_warmup = 50
         custom_rep = 200
@@ -163,9 +171,10 @@ class TestBenchmarker(TestCase):
         self.assertEqual(captured_kwargs["warmup"], custom_warmup)
         self.assertEqual(captured_kwargs["rep"], custom_rep)
 
+    @onlyCPU
     @unittest.skipIf(not HAS_CPU, "requires CPU")
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
-    def test_benchmarker_cpu_override_dispatch(self, benchmarker_cls, device="cpu"):
+    def test_benchmarker_cpu_override_dispatch(self, benchmarker_cls, device):
         # Registers a custom handler for 'cpu' and verifies dispatch uses it instead of the default path.
         from torch._inductor.runtime import benchmarking as _bench
 
@@ -210,11 +219,10 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
 
+    @onlyCPU
     @unittest.skipIf(not HAS_CPU, "requires CPU")
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
-    def test_benchmarker_cpu_override_runs_callable(
-        self, benchmarker_cls, device="cpu"
-    ):
+    def test_benchmarker_cpu_override_runs_callable(self, benchmarker_cls):
         from torch._inductor.runtime import benchmarking as _bench
 
         benchmarker = benchmarker_cls()
@@ -790,6 +798,8 @@ _BENCHMARKING = "torch._inductor.runtime.benchmarking"
 
 
 class TestTritonBenchmarkingContext(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _triton_benchmarking_context.cache_clear()
@@ -912,6 +922,10 @@ class TestTritonBenchmarkingContext(TestCase):
         with self._patch_compile_iq(collect=None, collector=self._fake_collector()):
             self.assertIs(_triton_benchmarking_context(), contextlib.nullcontext)
 
+
+instantiate_device_type_tests(
+    TestBenchmarker, globals(), allow_xpu=True, allow_mps=True
+)
 
 if __name__ == "__main__":
     run_tests()
