@@ -1096,7 +1096,8 @@ impl Compiled {
             }
             Op::StoreDeref(i, v) => {
                 let cell = self.closure_cell(regs, *i)?;
-                if pyffi::PyCell_Set(cell, self.obj(regs, *v)) < 0 {
+                let value = if *v == UNDEF { null_mut() } else { self.obj(regs, *v) };
+                if pyffi::PyCell_Set(cell, value) < 0 {
                     return Err(());
                 }
                 Ok(null_mut())
@@ -1124,7 +1125,7 @@ impl Compiled {
                 Ok(v)
             }
             Op::CellSet(cell, v) => {
-                let value = self.obj(regs, *v);
+                let value = if *v == UNDEF { null_mut() } else { self.obj(regs, *v) };
                 if pyffi::PyCell_Set(self.obj(regs, *cell), value) < 0 {
                     return Err(());
                 }
@@ -1198,8 +1199,22 @@ impl Compiled {
             Op::StoreAttr { obj, name, val } => status(ffi::PyObject_SetAttr(
                 self.obj(regs, *obj),
                 f.consts[*name as usize].as_ptr(),
-                self.obj(regs, *val),
+                if *val == UNDEF { null_mut() } else { self.obj(regs, *val) },
             )),
+            Op::StoreGlobal(name, v) if *v == UNDEF => {
+                let name = f.consts[*name as usize].as_ptr();
+                if ffi::PyDict_DelItem(f.globals.as_ptr(), name) < 0 {
+                    if ffi::PyErr_ExceptionMatches(ffi::PyExc_KeyError) != 0 {
+                        ffi::PyErr_Clear();
+                        set_error(
+                            ffi::PyExc_NameError,
+                            format!("name '{}' is not defined", pyffi::str_to_string(name)),
+                        );
+                    }
+                    return Err(());
+                }
+                Ok(null_mut())
+            }
             Op::StoreGlobal(name, v) => status(ffi::PyDict_SetItem(
                 f.globals.as_ptr(),
                 f.consts[*name as usize].as_ptr(),
