@@ -1,0 +1,522 @@
+{
+  "source_run": {
+    "id": 44370897732,
+    "run_attempt": 2,
+    "workflow_id": 422814113,
+    "path": ".github/workflows/ci-security-ordinary-artifact-attempt-e94e6bc53f124f34.yml",
+    "event": "pull_request",
+    "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+    "head_branch": "d4l3k/release-artifact-attempt-audit",
+    "repository": {
+      "id": 65600975,
+      "full_name": "pytorch/pytorch"
+    },
+    "head_repository": {
+      "id": 1372177501,
+      "full_name": "ptdbot/pytorch"
+    },
+    "status": "completed",
+    "conclusion": "failure",
+    "actor": {
+      "login": "ptdbot",
+      "id": 283013143
+    },
+    "triggering_actor": {
+      "login": "d4l3k",
+      "id": 909104
+    },
+    "referenced_workflows": [
+      {
+        "path": "pytorch/pytorch/.github/workflows/_check-ci.yml@ffcac291514276b187d762809e280a21ef9fb3af",
+        "sha": "ffcac291514276b187d762809e280a21ef9fb3af",
+        "ref": "refs/pull/205523/merge"
+      }
+    ],
+    "previous_attempt_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732/attempts/1",
+    "run_started_at": "2026-11-18T18:35:23Z"
+  },
+  "current_run": {
+    "id": 44370897732,
+    "run_attempt": 3,
+    "workflow_id": 422814113,
+    "path": ".github/workflows/ci-security-ordinary-artifact-attempt-e94e6bc53f124f34.yml",
+    "event": "pull_request",
+    "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+    "head_branch": "d4l3k/release-artifact-attempt-audit",
+    "repository": {
+      "id": 65600975,
+      "full_name": "pytorch/pytorch"
+    },
+    "head_repository": {
+      "id": 1372177501,
+      "full_name": "ptdbot/pytorch"
+    },
+    "status": "completed",
+    "conclusion": "failure",
+    "actor": {
+      "login": "ptdbot",
+      "id": 283013143
+    },
+    "triggering_actor": {
+      "login": "d4l3k",
+      "id": 909104
+    },
+    "referenced_workflows": [
+      {
+        "path": "pytorch/pytorch/.github/workflows/_check-ci.yml@ffcac291514276b187d762809e280a21ef9fb3af",
+        "sha": "ffcac291514276b187d762809e280a21ef9fb3af",
+        "ref": "refs/pull/205523/merge"
+      }
+    ],
+    "previous_attempt_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732/attempts/2",
+    "run_started_at": "2026-11-18T18:39:11Z"
+  },
+  "source_jobs": {
+    "total_count": 3,
+    "jobs": [
+      {
+        "id": 135038722005,
+        "run_id": 44370897732,
+        "workflow_name": "CI security ordinary artifact attempt audit e94e6bc53f124f34",
+        "head_branch": "d4l3k/release-artifact-attempt-audit",
+        "run_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732",
+        "run_attempt": 2,
+        "node_id": "CR_kwDOA-j9z88AAAAfcO9f1Q",
+        "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+        "url": "https://api.github.com/repos/pytorch/pytorch/actions/jobs/135038722005",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/44370897732/job/135038722005",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-18T18:35:26Z",
+        "started_at": "2026-11-18T18:35:31Z",
+        "completed_at": "2026-11-18T18:35:36Z",
+        "name": "check-ci / check-ci",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-18T18:35:31Z",
+            "completed_at": "2026-11-18T18:35:32Z"
+          },
+          {
+            "name": "Check for disabled CI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-18T18:35:32Z",
+            "completed_at": "2026-11-18T18:35:34Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-18T18:35:34Z",
+            "completed_at": "2026-11-18T18:35:34Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/pytorch/pytorch/check-runs/135038722005",
+        "labels": [
+          "ubuntu-24.04"
+        ],
+        "runner_id": 1064449148,
+        "runner_name": "GitHub Actions 1064449148",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      },
+      {
+        "id": 135038833723,
+        "run_id": 44370897732,
+        "workflow_name": "CI security ordinary artifact attempt audit e94e6bc53f124f34",
+        "head_branch": "d4l3k/release-artifact-attempt-audit",
+        "run_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732",
+        "run_attempt": 2,
+        "node_id": "CR_kwDOA-j9z88AAAAfcPEUOw",
+        "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+        "url": "https://api.github.com/repos/pytorch/pytorch/actions/jobs/135038833723",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/44370897732/job/135038833723",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-18T18:35:36Z",
+        "started_at": "2026-11-18T18:35:42Z",
+        "completed_at": "2026-11-18T18:36:30Z",
+        "name": "exact-owned-producer",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-18T18:35:42Z",
+            "completed_at": "2026-11-18T18:35:43Z"
+          },
+          {
+            "name": "Checkout exact-owned head",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-18T18:35:43Z",
+            "completed_at": "2026-11-18T18:35:54Z"
+          },
+          {
+            "name": "Verify exact-owned draft PR and bound attempt",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-18T18:35:54Z",
+            "completed_at": "2026-11-18T18:36:00Z"
+          },
+          {
+            "name": "Checkout immutable artifact SDK lock",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-18T18:36:00Z",
+            "completed_at": "2026-11-18T18:36:01Z"
+          },
+          {
+            "name": "Verify dependency inputs",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-18T18:36:01Z",
+            "completed_at": "2026-11-18T18:36:08Z"
+          },
+          {
+            "name": "Install locked artifact runtime",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-18T18:36:08Z",
+            "completed_at": "2026-11-18T18:36:12Z"
+          },
+          {
+            "name": "Prove deletion and upload the ordinary archive",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-18T18:36:12Z",
+            "completed_at": "2026-11-18T18:36:21Z"
+          },
+          {
+            "name": "Retain for controller or clean failed producer",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-18T18:36:21Z",
+            "completed_at": "2026-11-18T18:36:28Z"
+          },
+          {
+            "name": "Post Checkout immutable artifact SDK lock",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 15,
+            "started_at": "2026-11-18T18:36:28Z",
+            "completed_at": "2026-11-18T18:36:28Z"
+          },
+          {
+            "name": "Post Checkout exact-owned head",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16,
+            "started_at": "2026-11-18T18:36:28Z",
+            "completed_at": "2026-11-18T18:36:28Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17,
+            "started_at": "2026-11-18T18:36:28Z",
+            "completed_at": "2026-11-18T18:36:28Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/pytorch/pytorch/check-runs/135038833723",
+        "labels": [
+          "ubuntu-22.04"
+        ],
+        "runner_id": 1064449299,
+        "runner_name": "GitHub Actions 1064449299",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      },
+      {
+        "id": 135039409990,
+        "run_id": 44370897732,
+        "workflow_name": "CI security ordinary artifact attempt audit e94e6bc53f124f34",
+        "head_branch": "d4l3k/release-artifact-attempt-audit",
+        "run_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732",
+        "run_attempt": 2,
+        "node_id": "CR_kwDOA-j9z88AAAAfcPnfRg",
+        "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+        "url": "https://api.github.com/repos/pytorch/pytorch/actions/jobs/135039409990",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/44370897732/job/135039409990",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-11-18T18:36:30Z",
+        "started_at": "2026-11-18T18:36:37Z",
+        "completed_at": "2026-11-18T18:37:06Z",
+        "name": "exact-owned-consumer",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-18T18:36:38Z",
+            "completed_at": "2026-11-18T18:36:39Z"
+          },
+          {
+            "name": "Checkout exact-owned head",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-18T18:36:39Z",
+            "completed_at": "2026-11-18T18:36:53Z"
+          },
+          {
+            "name": "Verify exact-owned draft PR and bound attempt",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-18T18:36:53Z",
+            "completed_at": "2026-11-18T18:36:58Z"
+          },
+          {
+            "name": "Await exact-job controller rerun",
+            "status": "completed",
+            "conclusion": "failure",
+            "number": 4,
+            "started_at": "2026-11-18T18:36:58Z",
+            "completed_at": "2026-11-18T18:37:03Z"
+          },
+          {
+            "name": "Checkout unchanged downloader source",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 5,
+            "started_at": "2026-11-18T18:37:03Z",
+            "completed_at": "2026-11-18T18:37:03Z"
+          },
+          {
+            "name": "Install exact isolated Python inputs",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 6,
+            "started_at": "2026-11-18T18:37:03Z",
+            "completed_at": "2026-11-18T18:37:03Z"
+          },
+          {
+            "name": "Observe unchanged same-run attempt selection",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 7,
+            "started_at": "2026-11-18T18:37:03Z",
+            "completed_at": "2026-11-18T18:37:03Z"
+          },
+          {
+            "name": "Clean local consumer fixture",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 8,
+            "started_at": "2026-11-18T18:37:03Z",
+            "completed_at": "2026-11-18T18:37:03Z"
+          },
+          {
+            "name": "Post Checkout exact-owned head",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16,
+            "started_at": "2026-11-18T18:37:03Z",
+            "completed_at": "2026-11-18T18:37:03Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17,
+            "started_at": "2026-11-18T18:37:03Z",
+            "completed_at": "2026-11-18T18:37:04Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/pytorch/pytorch/check-runs/135039409990",
+        "labels": [
+          "ubuntu-22.04"
+        ],
+        "runner_id": 1064450041,
+        "runner_name": "GitHub Actions 1064450041",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      }
+    ]
+  },
+  "current_jobs": {
+    "total_count": 3,
+    "jobs": [
+      {
+        "id": 135041148089,
+        "run_id": 44370897732,
+        "workflow_name": "CI security ordinary artifact attempt audit e94e6bc53f124f34",
+        "head_branch": "d4l3k/release-artifact-attempt-audit",
+        "run_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732",
+        "run_attempt": 3,
+        "node_id": "CR_kwDOA-j9z88AAAAfcRRkuQ",
+        "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+        "url": "https://api.github.com/repos/pytorch/pytorch/actions/jobs/135041148089",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/44370897732/job/135041148089",
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-11-18T18:39:15Z",
+        "started_at": "2026-11-18T18:39:37Z",
+        "completed_at": "2026-11-18T18:40:01Z",
+        "name": "exact-owned-consumer",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-18T18:39:38Z",
+            "completed_at": "2026-11-18T18:39:38Z"
+          },
+          {
+            "name": "Checkout exact-owned head",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-18T18:39:38Z",
+            "completed_at": "2026-11-18T18:39:54Z"
+          },
+          {
+            "name": "Verify exact-owned draft PR and bound attempt",
+            "status": "completed",
+            "conclusion": "failure",
+            "number": 3,
+            "started_at": "2026-11-18T18:39:54Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          },
+          {
+            "name": "Await exact-job controller rerun",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 4,
+            "started_at": "2026-11-18T18:40:00Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          },
+          {
+            "name": "Checkout unchanged downloader source",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 5,
+            "started_at": "2026-11-18T18:40:00Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          },
+          {
+            "name": "Install exact isolated Python inputs",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 6,
+            "started_at": "2026-11-18T18:40:00Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          },
+          {
+            "name": "Observe unchanged same-run attempt selection",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 7,
+            "started_at": "2026-11-18T18:40:00Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          },
+          {
+            "name": "Clean local consumer fixture",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 8,
+            "started_at": "2026-11-18T18:40:00Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          },
+          {
+            "name": "Post Checkout exact-owned head",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16,
+            "started_at": "2026-11-18T18:40:00Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17,
+            "started_at": "2026-11-18T18:40:00Z",
+            "completed_at": "2026-11-18T18:40:00Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/pytorch/pytorch/check-runs/135041148089",
+        "labels": [
+          "ubuntu-22.04"
+        ],
+        "runner_id": 1064452733,
+        "runner_name": "GitHub Actions 1064452733",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      },
+      {
+        "id": 135041149011,
+        "run_id": 44370897732,
+        "workflow_name": "CI security ordinary artifact attempt audit e94e6bc53f124f34",
+        "head_branch": "d4l3k/release-artifact-attempt-audit",
+        "run_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732",
+        "run_attempt": 3,
+        "node_id": "CR_kwDOA-j9z88AAAAfcRRoUw",
+        "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+        "url": "https://api.github.com/repos/pytorch/pytorch/actions/jobs/135041149011",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/44370897732/job/135041149011",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-18T18:39:15Z",
+        "started_at": "2026-11-18T18:35:31Z",
+        "completed_at": "2026-11-18T18:35:36Z",
+        "name": "check-ci / check-ci",
+        "steps": [],
+        "check_run_url": "https://api.github.com/repos/pytorch/pytorch/check-runs/135041149011",
+        "labels": [
+          "ubuntu-24.04"
+        ],
+        "runner_id": 1064449148,
+        "runner_name": "GitHub Actions 1064449148",
+        "runner_group_id": null,
+        "runner_group_name": "GitHub Actions"
+      },
+      {
+        "id": 135041149791,
+        "run_id": 44370897732,
+        "workflow_name": "CI security ordinary artifact attempt audit e94e6bc53f124f34",
+        "head_branch": "d4l3k/release-artifact-attempt-audit",
+        "run_url": "https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732",
+        "run_attempt": 3,
+        "node_id": "CR_kwDOA-j9z88AAAAfcRRrXw",
+        "head_sha": "84c127b5e17c8f395afff68e73ffd0f2f546c9dd",
+        "url": "https://api.github.com/repos/pytorch/pytorch/actions/jobs/135041149791",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/44370897732/job/135041149791",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-18T18:39:15Z",
+        "started_at": "2026-11-18T18:35:42Z",
+        "completed_at": "2026-11-18T18:36:30Z",
+        "name": "exact-owned-producer",
+        "steps": [],
+        "check_run_url": "https://api.github.com/repos/pytorch/pytorch/check-runs/135041149791",
+        "labels": [
+          "ubuntu-22.04"
+        ],
+        "runner_id": 1064449299,
+        "runner_name": "GitHub Actions 1064449299",
+        "runner_group_id": null,
+        "runner_group_name": "GitHub Actions"
+      }
+    ]
+  }
+}

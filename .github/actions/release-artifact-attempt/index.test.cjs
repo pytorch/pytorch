@@ -206,7 +206,9 @@ function metadata(ctx = {...context, attempt: 3, job_id: 202, job_name: a.CONSUM
   const hold = {...job(a.CONSUMER_JOB, 201, 2, ctx, 'failure'), steps: finishedSteps(['Set up job', a.CHECKOUT_STEP, a.GUARD_STEP, a.HOLD_STEP, ...a.CONSUMER_STEPS, `Post ${a.CHECKOUT_STEP}`, 'Complete job'], a.HOLD_STEP, a.CONSUMER_STEPS)};
   const current = {...job(a.CONSUMER_JOB, ctx.job_id, 3, ctx, null), status: 'in_progress'};
   const artifact = {id: 99, name: p.artifactName({...ctx, artifact_attempt: 2}, 'ordinary'), digest: `sha256:${p.digest(p.archive('ordinary'))}`, size_in_bytes: p.archive('ordinary').length, expired: false, workflow_run: {id: ctx.run_id, repository_id: p.REPOSITORY_ID, head_repository_id: p.HEAD_REPOSITORY_ID, head_branch: p.BRANCH, head_sha: ctx.head}};
-  return {ctx, run, check, producer, hold, current, artifact};
+  const currentRun = {...run, run_attempt: 3, previous_attempt_url: `https://api.github.com/repos/${p.REPOSITORY}/actions/runs/${ctx.run_id}/attempts/2`, run_started_at: '2026-11-18T18:39:11Z'};
+  Object.assign(ctx, {source_jobs_digest: a.sourceFingerprint({check, producer, hold}), current_run_started_at: currentRun.run_started_at});
+  return {ctx, run, currentRun, check, producer, hold, current, artifact};
 }
 
 function priorJobs(data) { return {total_count: 3, jobs: [data.check, data.producer, data.hold]}; }
@@ -215,6 +217,7 @@ function currentJobs(data) { return {total_count: 3, jobs: [data.check, data.pro
 function requestFixture(data) {
   return async endpoint => {
     if (endpoint.endsWith('/attempts/2')) return data.run;
+    if (endpoint.endsWith('/attempts/3')) return data.currentRun;
     if (endpoint.endsWith('/attempts/2/jobs?per_page=100')) return priorJobs(data);
     if (endpoint.endsWith('/attempts/3/jobs?per_page=100')) return currentJobs(data);
     if (endpoint.endsWith('/artifacts?per_page=100')) return {total_count: data.extra ? 2 : 1, artifacts: data.extra ? [data.artifact, data.extra] : [data.artifact]};
@@ -277,15 +280,15 @@ test('numeric source and consumer job substitutions reject', async () => {
 test('partial rerun retains prerequisite IDs and never permits all-jobs selection', () => {
   const data = metadata();
   const source = a.validateSourceJobs(priorJobs(data), {...data.ctx, attempt: 2});
-  assert.equal(a.validateCurrentJobs(currentJobs(data), data.ctx, source).id, 202);
-  assert.equal(a.validateCurrentJobs({total_count: 1, jobs: [data.current]}, data.ctx, source).id, 202);
+  assert.equal(a.validateCurrentJobs(currentJobs(data), data.ctx, source, data.currentRun).id, 202);
+  assert.equal(a.validateCurrentJobs({total_count: 1, jobs: [data.current]}, data.ctx, source, data.currentRun).id, 202);
   for (const field of ['id', 'run_attempt', 'runner_id', 'head_sha']) {
     const changed = structuredClone(data); changed.producer[field] = field === 'head_sha' ? 'c'.repeat(40) : 999;
-    assert.throws(() => a.validateCurrentJobs(currentJobs(changed), data.ctx, source), /Unexpected prerequisite rerun/);
+    assert.throws(() => a.validateCurrentJobs(currentJobs(changed), data.ctx, source, data.currentRun), /Unexpected prerequisite rerun|strictly equal|Invalid job chronology|must be of type/);
   }
-  assert.throws(() => a.validateCurrentJobs({total_count: 1, jobs: [{...data.current, id: 201}]}, {...data.ctx, job_id: 201}, source), /Hold job was not rerun/);
+  assert.throws(() => a.validateCurrentJobs({total_count: 1, jobs: [{...data.current, id: 201}]}, {...data.ctx, job_id: 201}, source, data.currentRun), /Hold job was not rerun/);
   const target = a.rerunTarget(CONFIG, data.ctx, data.run, priorJobs(data));
-  assert.deepEqual(target, {method: 'POST', endpoint: `repos/${p.REPOSITORY}/actions/jobs/201/rerun`, expected_status: 201, body: {enable_debug_logging: false}, producer_job_id: 200, consumer_job_id: 201});
+  assert.deepEqual(target, {method: 'POST', endpoint: `repos/${p.REPOSITORY}/actions/jobs/201/rerun`, expected_status: 201, body: {enable_debug_logging: false}, producer_job_id: 200, consumer_job_id: 201, source_jobs: source, source_jobs_digest: a.sourceFingerprint(source)});
   for (const endpoint of [`repos/${p.REPOSITORY}/actions/runs/100/rerun`, `repos/${p.REPOSITORY}/actions/runs/100/rerun-failed-jobs`, `repos/${p.REPOSITORY}/actions/jobs/200/rerun`]) assert.throws(() => a.rerunTarget(CONFIG, data.ctx, data.run, priorJobs(data), endpoint), /Only the exact consumer-job/);
 });
 
@@ -342,7 +345,7 @@ test('runtime guard binds the owned draft, actors, workflow, runner and exact tu
   for (const [name, attempt, phase] of [[a.PRODUCER_JOB, 2, 'produce'], [a.CONSUMER_JOB, 2, 'hold'], [a.CONSUMER_JOB, 3, 'consume']]) {
     Object.assign(process.env, {GITHUB_JOB: name, GITHUB_RUN_ATTEMPT: String(attempt)});
     const data = metadata({...metadata().ctx, head});
-    const run = {...data.run, run_attempt: attempt, status: 'in_progress', conclusion: null};
+    const run = {...(attempt === 3 ? data.currentRun : data.run), run_attempt: attempt, status: 'in_progress', conclusion: null};
     const current = phase === 'produce' ? data.producer : phase === 'hold' ? data.hold : data.current;
     const workflow = {id: 456, path: p.WORKFLOW, name: a.WORKFLOW_NAME};
     const request = async endpoint => endpoint.endsWith(`/attempts/${attempt}`) ? run : endpoint.endsWith('/pulls/123') ? pr : endpoint.endsWith(`/attempts/${attempt}/jobs?per_page=100`) ? (attempt === 2 ? priorJobs(data) : currentJobs(data)) : endpoint.endsWith('/workflows/456') ? workflow : requestFixture(data)(endpoint);
@@ -417,3 +420,118 @@ test('selected merge authenticates real Git workflow, approval and entire action
   fs.appendFileSync(path.join(source, a.ACTION_DIRECTORY, 'README.md'), '\nunit source mismatch\n');
   assert.throws(() => a.localSource(source), /Working action source changed/);
 }));
+
+function genuineJobs() {
+  const fixed = structuredClone(require('./jobs.test.json'));
+  const run = fixed.current_run;
+  const current = fixed.current_jobs.jobs.find(item => item.name === a.CONSUMER_JOB);
+  const ctx = {run_id: run.id, attempt: run.run_attempt, producer_attempt: 2, workflow_id: run.workflow_id, job_id: current.id, job_name: a.CONSUMER_JOB, head: run.head_sha, merge_sha: run.referenced_workflows[0].sha, pr: 205523, phase: 'consume', current_run_started_at: run.run_started_at};
+  const config = a.configuration();
+  a.validateSourceRun(config, ctx, fixed.source_run);
+  const source = a.validateSourceJobs(fixed.source_jobs, {...ctx, attempt: 2});
+  Object.assign(ctx, {producer_job_id: source.producer.id, hold_job_id: source.hold.id, check_ci_job_id: source.check.id, source_jobs_digest: a.sourceFingerprint(source)});
+  return {...fixed, ctx, config, source, current};
+}
+
+function genuineRequest(data) {
+  const artifact = {id: 99, name: p.artifactName({...data.ctx, artifact_attempt: 2}, 'ordinary'), digest: `sha256:${p.digest(p.archive('ordinary'))}`, size_in_bytes: p.archive('ordinary').length, expired: false, workflow_run: {id: data.ctx.run_id, repository_id: p.REPOSITORY_ID, head_repository_id: p.HEAD_REPOSITORY_ID, head_branch: p.BRANCH, head_sha: data.ctx.head}};
+  return async endpoint => {
+    if (endpoint.endsWith('/attempts/2')) return data.source_run;
+    if (endpoint.endsWith('/attempts/3')) return data.current_run;
+    if (endpoint.endsWith('/attempts/2/jobs?per_page=100')) return data.source_jobs;
+    if (endpoint.endsWith('/attempts/3/jobs?per_page=100')) return data.current_jobs;
+    if (endpoint.endsWith('/artifacts?per_page=100')) return {total_count: 1, artifacts: [artifact]};
+    if (endpoint.endsWith('/artifacts/99')) return artifact;
+    throw new Error('Unexpected genuine-regression request');
+  };
+}
+
+test('genuine preserved jobs accept exact copies, originals, omissions and mixed views', async () => {
+  const data = genuineJobs();
+  assert.equal(data.ctx.source_jobs_digest, a.sourceFingerprint(a.rerunTarget(data.config, data.ctx, data.source_run, data.source_jobs).source_jobs));
+  for (const oldCheck of [false, true]) for (const oldProducer of [false, true]) {
+    const jobs = data.current_jobs.jobs.map(item => item.name === a.CHECK_CI_JOB && oldCheck ? data.source.check : item.name === a.PRODUCER_JOB && oldProducer ? data.source.producer : item);
+    assert.equal(a.validateCurrentJobs({total_count: 3, jobs}, data.ctx, data.source, data.current_run).id, 135041148089);
+    assert.equal((await a.priorArtifact(data.config, data.ctx, genuineRequest({...data, current_jobs: {total_count: 3, jobs}}))).id, 99);
+  }
+  assert.equal(a.validateCurrentJobs({total_count: 1, jobs: [data.current]}, data.ctx, data.source, data.current_run).id, data.current.id);
+  assert.deepEqual([data.ctx.check_ci_job_id, data.ctx.producer_job_id, data.ctx.hold_job_id], [135038722005, 135038833723, 135039409990]);
+  const reordered = Object.fromEntries(Object.entries(data.source).reverse().map(([key, item]) => [key, Object.fromEntries(Object.entries(item).reverse())]));
+  assert.equal(a.sourceFingerprint(reordered), data.ctx.source_jobs_digest);
+});
+
+test('each copied prerequisite rejects every noncanonical or newly executed shape', () => {
+  const baseline = genuineJobs();
+  const sourceIds = Object.values(baseline.source).map(item => item.id);
+  const changes = [
+    ...[0, '135041149791', Number.MAX_SAFE_INTEGER + 1, ...sourceIds, baseline.current.id].map(value => ['id', value]),
+    ['run_attempt', 2], ['run_attempt', 4], ['steps', undefined], ['steps', null], ['steps', [{}]],
+    ['runner_group_id', 0], ['runner_group_id', undefined], ['runner_group_id', 'null'],
+    ['runner_id', 7], ['runner_name', 'other'], ['runner_group_name', 'other'], ['labels', ['ubuntu-24.04', 'extra']],
+    ['head_sha', 'f'.repeat(40)], ['head_branch', 'other'], ['run_id', 7], ['run_url', 'https://api.github.com/other'], ['workflow_name', 'other'], ['name', 'other'], ['status', 'in_progress'], ['conclusion', 'failure'],
+    ['started_at', undefined], ['started_at', null], ['started_at', 'invalid'], ['started_at', '2026-11-18T18:39:11Z'],
+    ['completed_at', undefined], ['completed_at', null], ['completed_at', 'invalid'], ['completed_at', '2026-11-18T18:39:11Z'],
+    ['created_at', undefined], ['created_at', null], ['created_at', 'invalid'], ['created_at', '2026-02-30T18:39:15Z'], ['created_at', '2026-11-18T18:39:10Z'],
+    ['url', 'https://api.github.com/repos/pytorch/pytorch/actions/jobs/7'], ['html_url', 'https://github.com/pytorch/pytorch/actions/runs/7/job/7'], ['check_run_url', 'https://api.github.com/repos/pytorch/pytorch/check-runs/7'],
+    ['node_id', undefined], ['node_id', null], ['node_id', ''], ['node_id', baseline.current.node_id], ...Object.values(baseline.source).map(item => ['node_id', item.node_id]),
+    ['unrecognized_field', 'different']
+  ];
+  for (const name of [a.CHECK_CI_JOB, a.PRODUCER_JOB]) for (const [key, value] of changes) {
+    const data = genuineJobs();
+    const item = data.current_jobs.jobs.find(job => job.name === name);
+    if (value === undefined) delete item[key]; else item[key] = value;
+    assert.throws(() => a.validateCurrentJobs(data.current_jobs, data.ctx, data.source, data.current_run), `${name}: ${key}=${JSON.stringify(value)}`);
+  }
+  const data = genuineJobs();
+  const producer = data.current_jobs.jobs.find(item => item.name === a.PRODUCER_JOB);
+  Object.assign(producer, {started_at: '2026-11-18T18:39:16Z', completed_at: '2026-11-18T18:40:00Z', runner_id: 7, runner_name: 'new runner', runner_group_id: 0, steps: data.source.producer.steps});
+  assert.throws(() => a.validateCurrentJobs(data.current_jobs, data.ctx, data.source, data.current_run));
+});
+
+test('copied chronology requires valid original dates and exact current-attempt backlink', () => {
+  for (const name of [a.CHECK_CI_JOB, a.PRODUCER_JOB]) {
+    for (const [key, value] of [['started_at', undefined], ['started_at', null], ['started_at', 'invalid'], ['started_at', '2026-11-18T18:39:10Z'], ['completed_at', undefined], ['completed_at', null], ['completed_at', 'invalid'], ['completed_at', '2026-11-18T18:39:11Z'], ['completed_at', '2026-11-18T18:39:12Z'], ['completed_at', '2026-11-18T18:30:00Z'], ['url', 'other'], ['html_url', 'other'], ['check_run_url', 'other'], ['run_url', 'other']]) {
+      const data = genuineJobs();
+      for (const item of [data.source_jobs.jobs.find(job => job.name === name), data.current_jobs.jobs.find(job => job.name === name)]) if (value === undefined) delete item[key]; else item[key] = value;
+      assert.throws(() => a.validateCurrentJobs(data.current_jobs, data.ctx, data.source, data.current_run), `${name}: ${key}`);
+    }
+  }
+  for (const [key, value] of [['previous_attempt_url', undefined], ['previous_attempt_url', null], ['previous_attempt_url', 'https://api.github.com/repos/pytorch/pytorch/actions/runs/44370897732/attempts/1'], ['run_started_at', undefined], ['run_started_at', null], ['run_started_at', 'invalid'], ['run_started_at', '2026-11-18T18:35:30Z'], ['run_started_at', '2026-11-18T18:39:16Z'], ['id', 7], ['run_attempt', 4], ['workflow_id', 7], ['path', 'other'], ['head_sha', 'f'.repeat(40)], ['event', 'push'], ['head_branch', 'other']]) {
+    const data = genuineJobs();
+    if (value === undefined) delete data.current_run[key]; else data.current_run[key] = value;
+    assert.throws(() => a.validateCurrentJobs(data.current_jobs, data.ctx, data.source, data.current_run), key);
+  }
+});
+
+test('consumer rechecks cannot reset changed full original evidence', async () => fixture(async () => {
+  for (const name of [a.CHECK_CI_JOB, a.PRODUCER_JOB, a.CONSUMER_JOB]) {
+    const data = genuineJobs();
+    data.source_jobs.jobs.find(item => item.name === name).unrecognized_field = 'added to source';
+    const copy = data.current_jobs.jobs.find(item => item.name === name);
+    copy.unrecognized_field = 'added to source';
+    await assert.rejects(a.priorArtifact(data.config, data.ctx, genuineRequest(data)), /Source job evidence changed/);
+  }
+  const data = genuineJobs();
+  await a.execute('guard', data.config, data.ctx);
+  await assert.rejects(a.execute('consume', data.config, {...data.ctx, source_jobs_digest: 'f'.repeat(64)}));
+  await a.execute('finish', data.config, data.ctx);
+  for (const name of [a.CHECK_CI_JOB, a.PRODUCER_JOB, a.CONSUMER_JOB]) {
+    const changed = genuineJobs(); changed.source_jobs.jobs = changed.source_jobs.jobs.filter(item => item.name !== name); changed.source_jobs.total_count--;
+    await assert.rejects(a.priorArtifact(changed.config, changed.ctx, genuineRequest(changed)));
+  }
+  const changed = genuineJobs(); changed.current_run.run_started_at = '2026-11-18T18:39:12Z';
+  await assert.rejects(a.priorArtifact(changed.config, changed.ctx, genuineRequest(changed)), /Current run start changed/);
+}));
+
+test('copy support does not weaken current-consumer uniqueness or role checks', () => {
+  for (const mutate of [
+    d => { d.current.runner_group_id = null; }, d => { d.current.runner_name = ''; }, d => { d.current.id = d.source.producer.id; }, d => { d.current.name = a.PRODUCER_JOB; },
+    d => { d.current_jobs.jobs.push({...d.current, id: 7}); d.current_jobs.total_count++; },
+    d => { d.current_jobs.jobs.find(item => item.name === a.CHECK_CI_JOB).id = d.current.id; },
+    d => { d.current_jobs.jobs.push({...d.current, id: 7, name: 'extra'}); d.current_jobs.total_count++; },
+    d => { d.current_jobs.jobs.find(item => item.name === a.PRODUCER_JOB).node_id = d.current_jobs.jobs.find(item => item.name === a.CHECK_CI_JOB).node_id; }
+  ]) {
+    const data = genuineJobs(); mutate(data);
+    assert.throws(() => a.validateCurrentJobs(data.current_jobs, data.ctx, data.source, data.current_run));
+  }
+});

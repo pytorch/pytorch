@@ -161,6 +161,33 @@ function exactSteps(job, expected) {
 
 function successfulSteps(names) { return names.map(name => [name, 'success']); }
 
+function sourceFingerprint(source) {
+  const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+  return p.digest(Buffer.from(JSON.stringify(canonical(source))));
+}
+
+function timestamp(value) {
+  assert.equal(typeof value, 'string');
+  assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  const time = Date.parse(value);
+  assert(Number.isFinite(time) && new Date(time).toISOString() === value.replace('Z', '.000Z'), 'Invalid job chronology');
+  return time;
+}
+
+function validateConsumerRun(run, context) {
+  assert.equal(run.id, context.run_id);
+  assert.equal(run.run_attempt, context.producer_attempt + 1);
+  assert.equal(run.run_attempt, context.attempt);
+  assert.equal(run.workflow_id, context.workflow_id);
+  assert.equal(run.path, p.WORKFLOW);
+  assert.equal(run.event, 'pull_request');
+  assert.equal(run.head_sha, context.head);
+  assert.equal(run.head_branch, p.BRANCH);
+  assert.equal(run.previous_attempt_url, `https://api.github.com/repos/${p.REPOSITORY}/actions/runs/${context.run_id}/attempts/${context.producer_attempt}`);
+  timestamp(run.run_started_at);
+  if (context.current_run_started_at !== undefined) assert.equal(run.run_started_at, context.current_run_started_at, 'Current run start changed');
+}
+
 function validateSourceJobs(value, context) {
   const jobs = jobList(value);
   assert.equal(jobs.length, 3);
@@ -211,18 +238,40 @@ function rerunTarget(config, context, run, jobs, requestedEndpoint) {
   const source = validateSourceJobs(jobs, {...context, attempt: config.producer_attempt});
   const endpoint = `repos/${p.REPOSITORY}/actions/jobs/${source.hold.id}/rerun`;
   if (requestedEndpoint !== undefined) assert.equal(requestedEndpoint, endpoint, 'Only the exact consumer-job rerun is permitted');
-  return {method: 'POST', endpoint, expected_status: 201, body: {enable_debug_logging: false}, producer_job_id: source.producer.id, consumer_job_id: source.hold.id};
+  return {method: 'POST', endpoint, expected_status: 201, body: {enable_debug_logging: false}, producer_job_id: source.producer.id, consumer_job_id: source.hold.id, source_jobs: structuredClone(source), source_jobs_digest: sourceFingerprint(source)};
 }
 
-function validateCurrentJobs(value, context, source) {
+function validateCurrentJobs(value, context, source, run) {
+  validateConsumerRun(run, context);
   const jobs = jobList(value);
   const current = onlyJob(jobs, CONSUMER_JOB);
   validateJob(current, context, process.env.RUNNER_NAME);
   assert.notEqual(current.id, source.hold.id, 'Hold job was not rerun');
+  const originalIds = Object.values(source).map(job => job.id);
+  assert(!originalIds.includes(current.id), 'Current job aliases a source job');
   for (const job of jobs) {
     if (job.name === CONSUMER_JOB) continue;
     const original = job.name === PRODUCER_JOB ? source.producer : source.check;
-    for (const key of ['id', 'run_id', 'run_attempt', 'head_sha', 'workflow_name', 'name', 'status', 'conclusion', 'runner_id', 'runner_name', 'runner_group_id', 'runner_group_name', 'labels']) assert.deepEqual(job[key], original[key], 'Unexpected prerequisite rerun');
+    if (job.id === original.id) {
+      assert.deepEqual(job, original, 'Unexpected prerequisite rerun');
+      continue;
+    }
+    assert(Number.isSafeInteger(job.id) && job.id > 0 && !originalIds.includes(job.id) && job.id !== current.id, 'Unexpected prerequisite rerun');
+    assert.equal(original.runner_group_id, 0);
+    assert.equal(original.head_branch, p.BRANCH);
+    assert.equal(original.run_url, `https://api.github.com/repos/${p.REPOSITORY}/actions/runs/${context.run_id}`);
+    assert.equal(original.url, `https://api.github.com/repos/${p.REPOSITORY}/actions/jobs/${original.id}`);
+    assert.equal(original.html_url, `https://github.com/${p.REPOSITORY}/actions/runs/${context.run_id}/job/${original.id}`);
+    assert.equal(original.check_run_url, `https://api.github.com/repos/${p.REPOSITORY}/check-runs/${original.id}`);
+    assert.equal(typeof original.node_id, 'string');
+    assert(original.node_id.length > 0);
+    assert.equal(typeof job.node_id, 'string');
+    assert(job.node_id.length > 0 && !Object.values(source).some(item => item.node_id === job.node_id) && !jobs.some(item => item !== job && item.node_id === job.node_id));
+    assert(timestamp(original.started_at) <= timestamp(original.completed_at));
+    assert(timestamp(original.completed_at) < timestamp(run.run_started_at));
+    assert(timestamp(run.run_started_at) <= timestamp(job.created_at));
+    const expected = {...original, id: job.id, run_attempt: context.attempt, node_id: job.node_id, url: `https://api.github.com/repos/${p.REPOSITORY}/actions/jobs/${job.id}`, html_url: `https://github.com/${p.REPOSITORY}/actions/runs/${context.run_id}/job/${job.id}`, check_run_url: `https://api.github.com/repos/${p.REPOSITORY}/check-runs/${job.id}`, created_at: job.created_at, steps: [], runner_group_id: null};
+    assert.deepEqual(job, expected, 'Unexpected prerequisite rerun');
   }
   return current;
 }
@@ -254,8 +303,8 @@ async function guard(config, cleanup = false, request = api, verifySource = sele
   await verifySource(run, context, request);
   if (phase === 'consume') {
     const source = await sourceAttempt(config, context, request);
-    validateCurrentJobs(response, context, source);
-    Object.assign(context, {producer_job_id: source.producer.id, hold_job_id: source.hold.id, check_ci_job_id: source.check.id});
+    validateCurrentJobs(response, context, source, run);
+    Object.assign(context, {producer_job_id: source.producer.id, hold_job_id: source.hold.id, check_ci_job_id: source.check.id, source_jobs_digest: sourceFingerprint(source), current_run_started_at: run.run_started_at});
     return context;
   }
   completedJob(onlyJob(jobs, CHECK_CI_JOB), context, CHECK_CI_JOB, 'success');
@@ -288,11 +337,13 @@ async function priorArtifact(config, context, request = api, expectedId) {
   assert.equal(source.producer.id, context.producer_job_id);
   assert.equal(source.hold.id, context.hold_job_id);
   assert.equal(source.check.id, context.check_ci_job_id);
-  const [jobs, inventory] = await Promise.all([
+  assert.equal(sourceFingerprint(source), context.source_jobs_digest, 'Source job evidence changed');
+  const [run, jobs, inventory] = await Promise.all([
+    request(`repos/${p.REPOSITORY}/actions/runs/${context.run_id}/attempts/${context.attempt}`),
     request(`repos/${p.REPOSITORY}/actions/runs/${context.run_id}/attempts/${context.attempt}/jobs?per_page=100`),
     request(`repos/${p.REPOSITORY}/actions/runs/${context.run_id}/artifacts?per_page=100`)
   ]);
-  validateCurrentJobs(jobs, context, source);
+  validateCurrentJobs(jobs, context, source, run);
   assert(Array.isArray(inventory.artifacts));
   assert.equal(inventory.total_count, 1, 'Unexpected run artifacts');
   assert.equal(inventory.artifacts.length, 1);
@@ -381,6 +432,7 @@ async function execute(mode, config, context) {
   }
   if (mode === 'consume') {
     assert.equal(context.phase, 'consume');
+    p.readState(context);
     await consume(config, context);
     return 0;
   }
@@ -398,5 +450,5 @@ async function main() {
   process.exitCode = await execute(mode, config, context);
 }
 
-module.exports = {PRODUCER_JOB, CONSUMER_JOB, CHECK_CI_JOB, WORKFLOW_NAME, SOURCE_COMMIT, SOURCE_DIRECTORY, ACTION_DIRECTORY, CHECK_CI, CHECKOUT_STEP, GUARD_STEP, HOLD_STEP, HOLD_MARKER, CONSUMER_STEPS, PRODUCER_STEPS, markStage, configuration, phaseFor, validateJob, validateSelectedWorkflow, localSource, selectedSource, jobList, validateSourceJobs, validateSourceRun, sourceAttempt, rerunTarget, validateCurrentJobs, guard, validateArtifact, priorArtifact, completed, execute};
+module.exports = {PRODUCER_JOB, CONSUMER_JOB, CHECK_CI_JOB, WORKFLOW_NAME, SOURCE_COMMIT, SOURCE_DIRECTORY, ACTION_DIRECTORY, CHECK_CI, CHECKOUT_STEP, GUARD_STEP, HOLD_STEP, HOLD_MARKER, CONSUMER_STEPS, PRODUCER_STEPS, markStage, configuration, phaseFor, validateJob, validateSelectedWorkflow, localSource, selectedSource, jobList, sourceFingerprint, validateConsumerRun, validateSourceJobs, validateSourceRun, sourceAttempt, rerunTarget, validateCurrentJobs, guard, validateArtifact, priorArtifact, completed, execute};
 if (require.main === module) main().catch(() => { console.error(`::error::Exact-owned artifact attempt audit failed closed at ${stage}`); process.exitCode = 1; });

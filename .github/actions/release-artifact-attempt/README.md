@@ -14,9 +14,14 @@ proves genuine same-job deletion, then retains one deterministic, ordinary
 `canary.txt` ZIP. It emits only its run/head/job/attempt and artifact identity.
 The controller authenticates that identity through GitHub, stores the immutable
 receipt locally, then reruns only the authenticated numeric consumer job ID. Never use an
-all-jobs rerun. Excluded prerequisite jobs must retain their original IDs and
-attempt; any new producer execution fails closed. The exported `rerunTarget`
-selector only describes that numeric job endpoint; it never sends a request.
+all-jobs rerun. The controller retains the full authenticated source jobs and
+their canonical fingerprint. Excluded prerequisites may retain their original
+records, or use the narrowly authenticated GitHub copied-record shape: new ID,
+current attempt, empty steps, null runner-group ID, and unchanged original
+execution metadata. Their original completion must precede the current run
+start, which must precede creation of the copy. Any new producer execution or
+changed source evidence fails closed. The exported `rerunTarget` selector only
+describes that numeric job endpoint; it never sends a request.
 
 `N` consumer hold has no SDK client, archive operation, helper invocation or
 fixture directory. Only its fixed named hold step may fail. `N+1` has no
