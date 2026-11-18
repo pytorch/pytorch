@@ -70,14 +70,17 @@ def _nccl_version_at_least(version):
 
 class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return dist.get_default_backend_for_device(device_type)
 
     @classmethod
     def opts(cls, high_priority_stream=False):
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
         pg_cls = (
             c10d.ProcessGroupXCCL
-            if cls.backend_str() == "xccl"
+            if cls.backend_str(device) == "xccl"
             else c10d.ProcessGroupNCCL
         )
         opts = pg_cls.Options()
@@ -87,7 +90,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, self.backend_str())
+        return init_multigpu_helper(self.world_size, self.backend_str(self.device_type))
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
