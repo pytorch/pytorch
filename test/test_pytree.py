@@ -1831,14 +1831,13 @@ if spec != other or hash(spec) != hash(other):
 if repr(spec) != repr(cxx_pytree.tree_structure(tree)):
     raise RuntimeError("unknown node spec representation differs from Optree")
 """
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-            )
-        except subprocess.CalledProcessError as error:
-            self.fail(error.output.decode("utf-8"))
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_pytree_custom_type_serialize(self):
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
@@ -1871,6 +1870,17 @@ if repr(spec) != repr(cxx_pytree.tree_structure(tree)):
         self.assertEqual(roundtrip_spec, spec)
 
 
+parametrize_matching_dict_type = parametrize(
+    "match_type",
+    [
+        dict,
+        OrderedDict,
+        functools.partial(defaultdict, None),
+        getattr(builtins, "frozendict", dict),
+    ],
+)
+
+
 @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
 @instantiate_parametrized_tests
 class TestFrozenDictPytree(TestCase):
@@ -1888,24 +1898,17 @@ class TestFrozenDictPytree(TestCase):
         self.assertEqual(pytree.treespec_loads(pytree.treespec_dumps(spec)), spec)
 
     @parametrize_pytree_module
-    @parametrize(
-        "match_type",
-        [
-            dict,
-            OrderedDict,
-            functools.partial(defaultdict, None),
-            getattr(builtins, "frozendict", dict),
-        ],
-    )
-    def test_map_and_flatten_up_to(self, pytree, match_type):
+    def test_tree_map(self, pytree):
         tree = builtins.frozendict(b=[1, 2], a=3)
         result = pytree.tree_map(lambda x: x + 1, tree)
         self.assertIs(type(result), builtins.frozendict)
         self.assertEqual(list(result.items()), [("b", [2, 3]), ("a", 4)])
-        spec = pytree.tree_structure(tree)
-        self.assertEqual(
-            spec.flatten_up_to(builtins.frozendict(b=[4, 5], a=6)), [4, 5, 6]
-        )
+
+    @parametrize_pytree_module
+    @parametrize_matching_dict_type
+    def test_flatten_up_to(self, pytree, match_type):
+        spec = pytree.tree_structure(builtins.frozendict(b=[1, 2], a=3))
+        self.assertEqual(spec.flatten_up_to(match_type(b=[4, 5], a=6)), [4, 5, 6])
         self.assertEqual(spec.flatten_up_to(match_type(a=6, b=[4, 5])), [4, 5, 6])
         with self.assertRaisesRegex(ValueError, "[Kk]eys? mismatch"):
             spec.flatten_up_to(match_type(a=6, c=[4, 5]))
@@ -1926,15 +1929,7 @@ class TestFrozenDictPytree(TestCase):
         )
 
     @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
-    @parametrize(
-        "match_type",
-        [
-            dict,
-            OrderedDict,
-            functools.partial(defaultdict, None),
-            getattr(builtins, "frozendict", dict),
-        ],
-    )
+    @parametrize_matching_dict_type
     def test_optree_spec_polyfill(self, match_type):
         tree = builtins.frozendict(b=[1, 2], a=3)
         leaves, spec = cxx_pytree.tree_flatten(tree)
@@ -1949,8 +1944,9 @@ class TestFrozenDictPytree(TestCase):
         self.assertEqual(
             [accessor(tree) for accessor in polyfill_spec.accessors()], leaves
         )
-        self.assertEqual(polyfill_spec.unflatten(leaves), tree)
-        self.assertIs(type(polyfill_spec.unflatten(leaves)), builtins.frozendict)
+        result = polyfill_spec.unflatten(leaves)
+        self.assertIs(type(result), builtins.frozendict)
+        self.assertEqual(result, tree)
         self.assertEqual(repr(polyfill_spec), repr(spec))
         self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
         other = match_type(a=6, b=[4, 5])

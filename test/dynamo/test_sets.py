@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+from torch.utils._ordered_set import OrderedSet
 
 
 class SetSubclass(set):
@@ -395,7 +396,38 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 2)
 
 
+@instantiate_parametrized_tests
 class TestSetGuards(LoggingTestCase):
+    @parametrize("container_type", [set, frozenset, OrderedSet])
+    def test_set_family_iterator_type(self, container_type):
+        def fn(x):
+            iterator = iter(container_type([1, 2]))
+            return (
+                x + next(iterator),
+                type(iterator),
+                isinstance(iterator, type(iter({}))),
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_ordered_set_class_attribute_invalidation(self):
+        def fn(x):
+            obj = OrderedSet([1])
+            try:
+                return x + obj.extra
+            except AttributeError:
+                return x - 1
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+        with unittest.mock.patch.object(OrderedSet, "extra", 3, create=True):
+            self.assertEqual(compiled(x), fn(x))
+            OrderedSet.extra = 7
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+
     def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,
