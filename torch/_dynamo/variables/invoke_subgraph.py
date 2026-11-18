@@ -113,7 +113,8 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # Paired with an InvokeSubgraphReuseCondition containing:
 #   - input_checks: (tag, tensor_metadata) per input
-#   - guards: metadata checks and source dependencies keyed by the original guard
+#   - guards, guard_on_key_order and lexical_sources: checks, dictionary order and scoped reads
+#   - tensor_sources, aliases and overlapping_args: captured tensors and alias constraints
 #   - treespec: pytree structure of the args
 #   - traced_sources: sources accessed during the trace
 #
@@ -145,7 +146,7 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #       VariableBuilder. Deduplicates via input_source_to_var.
 #
 #   LiftedBoundSymbol: reuse the explicit binding or rebuild the captured property.
-#
+#   The winning match installs remapped guards and predicates and propagates key order and reads.
 #   LiftedSyntheticObject(ctor_fn, ctor_args, ctor_arg_sources)
 #       Synthetic object (opaque type with SyntheticLocalSource).
 #       Reconstructed via synthetic_graph_input with cached constructor info.
@@ -1393,7 +1394,7 @@ def trace_reuse_hash_fn(
     """
     from torch._dynamo.exc import Unsupported
 
-    with tx.output.tracing_context.guards_context.skip_guard_install():
+    with tx.output.tracing_context.guards_context.skip_guard_install(reuse_hash=True):
         try:
             result = _make_inlined(tx, reuse_hash_fn)(*fn_args_vt, **kwargs)
         except Unsupported as e:
