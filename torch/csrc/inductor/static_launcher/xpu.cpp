@@ -30,6 +30,7 @@
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include <level_zero/ze_api.h>
@@ -384,6 +385,16 @@ bool useEventlessSubmit(const sycl::device& device) {
   const auto env = c10::utils::check_env("TORCHINDUCTOR_XPU_EVENTLESS_SUBMIT");
   if (env) {
     return *env;
+  }
+  // Below 1.6.35096+9 the device-side assert and printf buffers are harvested
+  // only when the host waits on the kernel's event. A version that does not
+  // parse counts as too old.
+  const auto ver = device.get_info<sycl::info::device::driver_version>();
+  std::array<unsigned, 4> v{}; // major, minor, patch, build
+  // NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion)
+  int n = std::sscanf(ver.c_str(), "%u.%u.%u+%u", &v[0], &v[1], &v[2], &v[3]);
+  if (n < 3 || v < std::array<unsigned, 4>{1, 6, 35096, 9}) {
+    return false;
   }
   namespace syclex = sycl::ext::oneapi::experimental;
   return device.get_info<syclex::info::device::architecture>() >=
