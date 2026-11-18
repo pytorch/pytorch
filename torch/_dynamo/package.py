@@ -1617,8 +1617,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases and the ___unnamed_scope keys below are the only names
-                # install() records that are ever seeded that way.
+                # same ownership rule applies to generated constant-result names
+                # and the ___unnamed_scope keys below.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
