@@ -13,6 +13,7 @@ from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.reinplace import _get_view_type, _is_view_op, _ViewType
+from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
@@ -628,14 +629,9 @@ class BatchLinearLHSFusion(BatchFusion):
                     if default is not None and default.namespace == "aten":
                         continue
                 count = 0
-                stack: list[Any] = [user.args]
-                while stack:
-                    arg = stack.pop()
-                    if isinstance(arg, torch.fx.Node):
-                        if arg in closure:
-                            count += 1
-                    elif isinstance(arg, (tuple, list)):
-                        stack.extend(arg)
+                for arg in pytree.arg_tree_leaves(*user.args, **user.kwargs):
+                    if isinstance(arg, torch.fx.Node) and arg in closure:
+                        count += 1
                 if count > 1:
                     return True
         return False

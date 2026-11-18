@@ -59,6 +59,16 @@ def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return torch.empty(1)
 
 
+@torch.library.custom_op("_batch_linear_lhs_test::same_ptr_out", mutates_args=("out",))
+def _same_ptr_out(x: torch.Tensor, y: torch.Tensor, out: torch.Tensor) -> None:
+    out.copy_(torch.tensor([float(x.data_ptr() == y.data_ptr())]))
+
+
+@_same_ptr_out.register_fake
+def _(x: torch.Tensor, y: torch.Tensor, out: torch.Tensor) -> None:
+    pass
+
+
 @contextlib.contextmanager
 def _record_fusion_subsets():
     from unittest import mock
@@ -1232,6 +1242,38 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         # The pass refuses to fuse when a consumer observes two aliases, so
         # eager aliasing (and this data_ptr comparison) is preserved.
+        self.assertEqual(actual[0].item(), 1.0)
+        self.assertEqual(subsets, [])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_preserves_alias_observation_kwargs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                out = torch.empty(1)
+                _same_ptr_out(large, large.t(), out)
+                return out, torch.sin(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # auto_functionalized keeps the aliases in kwargs; the guard must
+        # still see them and refuse the fusion.
         self.assertEqual(actual[0].item(), 1.0)
         self.assertEqual(subsets, [])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
