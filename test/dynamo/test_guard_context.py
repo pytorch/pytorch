@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
 
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
@@ -8,8 +10,19 @@ from torch._dynamo.guards import GuardBuilder
 from torch._dynamo.source import AttrSource, LocalSource
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.variables.lazy import LazyConstantVariable
-from torch._guards import Guard, GuardsContext, GuardSource, GuardsSet
-from torch.testing._internal.common_utils import HardwareClassification
+from torch._guards import (
+    Guard,
+    GuardsContext,
+    GuardSource,
+    GuardsSet,
+    tracing,
+    TracingContext,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -265,6 +278,401 @@ class GuardsSetTests(torch._dynamo.test_case.TestCase):
         context.restore_graphstate(checkpoint)
         self.assertEqual(list(context.dynamo_guards), [guard])
         self.assertEqual(list(context.dynamo_guards._get_guard_labels(key)), ["outer"])
+
+
+@instantiate_parametrized_tests
+class GuardContextTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_guard_label_nested_and_exception(self):
+        context = GuardsContext()
+        self.assertIsNone(context.current_guard_label)
+        with context.guard_label("outer"):
+            self.assertEqual(context.current_guard_label, "outer")
+            with context.guard_label(None):
+                self.assertIsNone(context.current_guard_label)
+            with self.assertRaisesRegex(RuntimeError, "inner failure"):
+                with context.guard_label("inner"):
+                    self.assertEqual(context.current_guard_label, "inner")
+                    raise RuntimeError("inner failure")
+            self.assertEqual(context.current_guard_label, "outer")
+        self.assertIsNone(context.current_guard_label)
+
+    def test_guard_label_checkpoint_restore(self):
+        context = GuardsContext()
+        empty = context.copy_graphstate()
+        self.assertIsNone(empty.current_guard_label)
+        with context.guard_label("outer"):
+            checkpoint = context.copy_graphstate()
+            with context.guard_label("inner"):
+                context.restore_graphstate(checkpoint)
+                self.assertEqual(context.current_guard_label, "outer")
+                context.restore_graphstate(empty)
+                self.assertIsNone(context.current_guard_label)
+                context.restore_graphstate(checkpoint)
+                self.assertEqual(context.current_guard_label, "outer")
+            self.assertEqual(checkpoint.current_guard_label, "outer")
+        self.assertIsNone(context.current_guard_label)
+
+    def test_public_guard_ctx_validation(self):
+        self.assertIn("guard_ctx", torch.compiler.__all__)
+        for label in (None, 1, [], False):
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(TypeError, "non-empty string"):
+                    torch.compiler.guard_ctx(label)
+        with self.assertRaisesRegex(ValueError, "non-empty string"):
+            torch.compiler.guard_ctx("")
+
+    def test_pending_labels_nested_reentrant_and_exception(self):
+        self.assertIsNone(TracingContext.try_get())
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+        manager = torch.compiler.guard_ctx("outer")
+        for _ in range(2):
+            with manager:
+                self.assertEqual(
+                    TracingContext(None).guards_context.current_guard_label, "outer"
+                )
+                with torch.compiler.guard_ctx("inner"):
+                    with manager:
+                        self.assertEqual(
+                            TracingContext(None).guards_context.current_guard_label,
+                            "outer",
+                        )
+                    self.assertEqual(
+                        TracingContext(None).guards_context.current_guard_label, "inner"
+                    )
+                with self.assertRaisesRegex(RuntimeError, "pending failure"):
+                    with torch.compiler.guard_ctx("exception"):
+                        raise RuntimeError("pending failure")
+                self.assertEqual(
+                    TracingContext(None).guards_context.current_guard_label, "outer"
+                )
+            self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    def test_active_trace_is_authoritative_and_nested_trace_isolated(self):
+        with torch.compiler.guard_ctx("pending"):
+            outer = TracingContext(None)
+            self.assertEqual(outer.guards_context.current_guard_label, "pending")
+            with tracing(outer):
+                manager = torch.compiler.guard_ctx("outer")
+                with manager:
+                    self.assertEqual(outer.guards_context.current_guard_label, "outer")
+                    nested = TracingContext(None)
+                    self.assertIsNone(nested.guards_context.current_guard_label)
+                    with tracing(nested):
+                        with torch.compiler.guard_ctx("inner"):
+                            with manager:
+                                self.assertEqual(
+                                    nested.guards_context.current_guard_label, "outer"
+                                )
+                            self.assertEqual(
+                                nested.guards_context.current_guard_label, "inner"
+                            )
+                            self.assertIsNone(
+                                TracingContext(None).guards_context.current_guard_label
+                            )
+                        self.assertIsNone(nested.guards_context.current_guard_label)
+                    self.assertEqual(outer.guards_context.current_guard_label, "outer")
+                self.assertEqual(outer.guards_context.current_guard_label, "pending")
+                with self.assertRaisesRegex(RuntimeError, "trace failure"):
+                    with torch.compiler.guard_ctx("exception"):
+                        raise RuntimeError("trace failure")
+                self.assertEqual(outer.guards_context.current_guard_label, "pending")
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "pending"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    def test_decorator_recursive_and_repeated(self):
+        @torch.compiler.guard_ctx("decorated")
+        def decorated(depth):
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "decorated"
+            )
+            if depth:
+                with torch.compiler.guard_ctx("recursive"):
+                    decorated(depth - 1)
+                    self.assertEqual(
+                        TracingContext(None).guards_context.current_guard_label,
+                        "recursive",
+                    )
+            return depth
+
+        for _ in range(2):
+            with torch.compiler.guard_ctx("ambient"):
+                self.assertEqual(decorated(2), 2)
+                self.assertEqual(
+                    TracingContext(None).guards_context.current_guard_label, "ambient"
+                )
+            self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("termination", ["exhaust", "throw", "close"])
+    def test_generator_decorator_resume_and_cleanup(self, termination):
+        labels = []
+        backend_labels = []
+        events = []
+
+        def check_label(ctx):
+            labels.append(TracingContext.get().guards_context.current_guard_label)
+
+        def backend(graph, inputs):
+            backend_labels.append(
+                TracingContext.get().guards_context.current_guard_label
+            )
+            return graph.forward
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def compiled(x):
+            comptime(check_label)
+            return x.sin()
+
+        @torch.compiler.guard_ctx("generator")
+        def generate(x):
+            try:
+                events.append(
+                    ("entry", TracingContext(None).guards_context.current_guard_label)
+                )
+                increment = yield compiled(x)
+                events.append(
+                    ("send", TracingContext(None).guards_context.current_guard_label)
+                )
+                yield compiled(x + increment)
+            finally:
+                events.append(
+                    ("finally", TracingContext(None).guards_context.current_guard_label)
+                )
+
+        x = torch.ones(2)
+        iterator = generate(x)
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+        with torch.compiler.guard_ctx("ambient"):
+            self.assertEqual(next(iterator), x.sin())
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "ambient"
+            )
+            self.assertEqual(iterator.send(2), (x + 2).sin())
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "ambient"
+            )
+            if termination == "throw":
+                with self.assertRaisesRegex(RuntimeError, "generator failure"):
+                    iterator.throw(RuntimeError("generator failure"))
+            elif termination == "close":
+                iterator.close()
+            else:
+                with self.assertRaises(StopIteration):
+                    next(iterator)
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "ambient"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+        self.assertEqual(labels, ["generator"])
+        self.assertEqual(backend_labels, ["generator"])
+        self.assertEqual(
+            events,
+            [(phase, "generator") for phase in ("entry", "send", "finally")],
+        )
+
+    def test_masked_nested_trace_isolation_and_explicit_label(self):
+        with torch.compiler.guard_ctx("pending"):
+            outer = TracingContext(None)
+            with tracing(outer), torch.compiler.guard_ctx("outer"):
+                with self.assertRaisesRegex(RuntimeError, "masked failure"):
+                    with tracing(None):
+                        self.assertIsNone(TracingContext.try_get())
+                        nested = TracingContext(None)
+                        self.assertIsNone(nested.guards_context.current_guard_label)
+                        with tracing(nested):
+                            self.assertIsNone(nested.guards_context.current_guard_label)
+                        with torch.compiler.guard_ctx("explicit"):
+                            explicit = TracingContext(None)
+                            self.assertEqual(
+                                explicit.guards_context.current_guard_label, "explicit"
+                            )
+                            with tracing(explicit):
+                                self.assertEqual(
+                                    explicit.guards_context.current_guard_label,
+                                    "explicit",
+                                )
+                        self.assertIsNone(
+                            TracingContext(None).guards_context.current_guard_label
+                        )
+                        raise RuntimeError("masked failure")
+                self.assertIs(TracingContext.get(), outer)
+                self.assertEqual(outer.guards_context.current_guard_label, "outer")
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "pending"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("fullgraph", [False, True])
+    @parametrize("decorator", [False, True])
+    def test_external_context_seeds_compiled_call(self, fullgraph, decorator):
+        labels = []
+        backend_labels = []
+
+        def check_label(ctx):
+            context = TracingContext.get().guards_context
+            labels.append(context.current_guard_label)
+            self.assertEqual(context.dynamo_guards.guard_labels, {})
+
+        def backend(graph, inputs):
+            backend_labels.append(
+                TracingContext.get().guards_context.current_guard_label
+            )
+            return graph.forward
+
+        def fn(x):
+            comptime(check_label)
+            return x.sin() + 1
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=fullgraph)
+        manager = torch.compiler.guard_ctx("compiled")
+        x = torch.ones(2)
+        if decorator:
+            run = manager(compiled)
+            self.assertEqual(run(x), fn(x))
+            self.assertEqual(run(x), fn(x))
+        else:
+            with manager:
+                self.assertEqual(compiled(x), fn(x))
+                self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(labels, ["compiled"])
+        self.assertEqual(backend_labels, ["compiled"])
+        self.assertIsNone(TracingContext.try_get())
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    def test_external_context_survives_nested_graph_breaks(self):
+        labels = []
+
+        def check_label(ctx):
+            labels.append(
+                (
+                    ctx.get_local("_phase").as_python_constant(),
+                    TracingContext.get().guards_context.current_guard_label,
+                )
+            )
+
+        def inner(x):
+            _phase = "inner_entry"
+            comptime(check_label)
+            x = x.sin()
+            torch._dynamo.graph_break()
+            _phase = "inner_resume"
+            comptime(check_label)
+            return x.cos()
+
+        def fn(x):
+            _phase = "outer_entry"
+            comptime(check_label)
+            x = x + 1
+            x = inner(x)
+            _phase = "outer_after_inner"
+            comptime(check_label)
+            torch._dynamo.graph_break()
+            _phase = "outer_resume"
+            comptime(check_label)
+            return x + 2
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        x = torch.ones(2)
+        with torch.compiler.guard_ctx("outer"):
+            with torch.compiler.guard_ctx("inner"):
+                self.assertEqual(compiled(x), fn(x))
+                self.assertEqual(
+                    set(labels),
+                    {
+                        (phase, "inner")
+                        for phase in (
+                            "outer_entry",
+                            "inner_entry",
+                            "inner_resume",
+                            "outer_after_inner",
+                            "outer_resume",
+                        )
+                    },
+                )
+                observed = labels.copy()
+                frames = counter.frame_count
+                self.assertEqual(compiled(x), fn(x))
+                self.assertEqual(labels, observed)
+                self.assertEqual(counter.frame_count, frames)
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "outer"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    def test_external_context_unwinds_compiled_exception(self):
+        labels = []
+
+        def check_label(ctx):
+            labels.append(
+                (
+                    ctx.get_local("_phase").as_python_constant(),
+                    TracingContext.get().guards_context.current_guard_label,
+                )
+            )
+
+        def fn(x):
+            _phase = "entry"
+            comptime(check_label)
+            x = x.sin()
+            torch._dynamo.graph_break()
+            _phase = "resume"
+            comptime(check_label)
+            raise RuntimeError("compiled failure")
+
+        compiled = torch.compile(fn, backend="eager")
+        with torch.compiler.guard_ctx("outer"):
+            with self.assertRaisesRegex(RuntimeError, "compiled failure"):
+                with torch.compiler.guard_ctx("inner"):
+                    compiled(torch.ones(2))
+            self.assertEqual(set(labels), {("entry", "inner"), ("resume", "inner")})
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "outer"
+            )
+        self.assertIsNone(TracingContext.try_get())
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    def test_pending_labels_thread_isolation(self):
+        barrier = Barrier(2)
+        first_entered = Event()
+        first_exited = Event()
+        manager = torch.compiler.guard_ctx("shared")
+
+        def worker(label):
+            self.assertIsNone(TracingContext.try_get())
+            self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+            if label == "two":
+                self.assertTrue(first_entered.wait(timeout=10))
+            with torch.compiler.guard_ctx(label):
+                with manager:
+                    if label == "one":
+                        first_entered.set()
+                    barrier.wait(timeout=10)
+                    if label == "two":
+                        self.assertTrue(first_exited.wait(timeout=10))
+                    self.assertEqual(
+                        TracingContext(None).guards_context.current_guard_label,
+                        "shared",
+                    )
+                self.assertEqual(
+                    TracingContext(None).guards_context.current_guard_label, label
+                )
+                if label == "one":
+                    first_exited.set()
+            self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+        with torch.compiler.guard_ctx("main"):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(worker, label) for label in ("one", "two")]
+                for future in futures:
+                    future.result(timeout=20)
+            self.assertEqual(
+                TracingContext(None).guards_context.current_guard_label, "main"
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
 
 
 class LazyGuardRemovalTests(torch._dynamo.test_case.TestCase):
