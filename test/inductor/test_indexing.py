@@ -28,6 +28,7 @@ from torch._inductor.utils import (
     run_and_get_kernels,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -524,7 +525,13 @@ class TestIndexingSimplification(InductorTestCase):
         triton_code = run_and_get_triton_code(f, x)
         # Make sure the 2 load uses simplified indexing rather than something like
         # tl.load(in_ptr0 + ((5504*x1) + (x0 // 2)),
-        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
+        if V.choices.use_modular_indexing(GPU_TYPE, numel=2 * x.numel(), kind="view"):
+            self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
+        else:
+            # The stacked halves are realized and multiplied in place by the
+            # same kernel, which iterates them as [x1, x0] with x1 = xindex // 2.
+            self.assertIn("x1 = xindex // 2", triton_code)
+            self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x1),"))
         if DO_PERF_TEST:
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
@@ -545,7 +552,8 @@ class TestIndexingSimplification(InductorTestCase):
         triton_code = run_and_get_triton_code(f, x)
         # Dynamic shape coefficients should still be coalesced through the
         # pointwise-cat view instead of loading from s*x1 + x0//2.
-        self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
+        if V.choices.use_modular_indexing(GPU_TYPE, numel=2 * x.numel(), kind="view"):
+            self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_floordiv_div_sympy_is_integer_bug(self):

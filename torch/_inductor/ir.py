@@ -88,6 +88,7 @@ from torch.utils._sympy.functions import (
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from . import config, dependencies
 from .codegen.common import (
@@ -129,6 +130,7 @@ from .utils import (
     is_affine_indexing,
     is_dynamic,
     is_gpu,
+    ModularIndexingUse,
     sympy_dot,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -2340,9 +2342,42 @@ class Reduction(Loops):
         return None if pos == len(reduction_sizes) - 1 else pos
 
     @classmethod
+    def _flat_reduction_is_affine(
+        cls,
+        inner_fns: Sequence[Callable[..., Any]],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
+        input_node: IRNode | None,
+    ) -> bool:
+        """
+        Whether inner_fns load with affine indices through the flattened
+        reduction index: the reduced dims are row-major contiguous in every
+        operand, so the flat split leaves at most the modulus of its masked
+        tail in the kernel.
+        """
+        numel = sympy_product(reduction_ranges)
+        dense = cls.check_for_split_dense_dim_reindexing(numel, input_node)
+        reindex = View.dynamic_reshape_indexer(reduction_ranges, [numel], dense)
+
+        def flat(index: Sequence[Expr], reduction_index: Sequence[Expr]) -> None:
+            for fn in inner_fns:
+                fn(index, reindex(reduction_index))
+
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            rw = dependencies.extract_read_writes(flat, ranges, [numel])
+        var_ranges = rw.var_ranges or {}
+        simplify = V.graph.sizevars.simplify_with_ranges
+        return all(
+            is_affine_indexing(simplify(dep.index, var_ranges))
+            for dep in rw.reads
+            if isinstance(dep, dependencies.MemoryDep)
+        )
+
+    @classmethod
     def _split_reduction_ranges(
         cls,
         device: torch.device,
+        inner_fns: Sequence[Callable[..., Any]],
         ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
         split: _IntLike,
@@ -2356,20 +2391,28 @@ class Reduction(Loops):
         uneven one needs a mask). Like the flat split, a full reduction over
         an input whose dense dim is not the last one reduces the dense dim
         innermost. Returns None when the flat split stays: the backend keeps
-        it, a range is symbolic or there is one reduction dim, whose flat
-        split is affine as it is.
+        it, a range is symbolic, there is one reduction dim, whose flat split
+        is affine as it is, or the backend keeps it for reduced dims that are
+        row-major contiguous in every operand.
         """
-        if V.choices.use_modular_indexing(
+        use_modular_indexing = functools.partial(
+            V.choices.use_modular_indexing,
             device,
             numel=sympy_product([*ranges, *reduction_ranges]),
             reduction_numel=sympy_product(reduction_ranges),
-            kind="reduction",
-        ):
+        )
+        if use_modular_indexing(kind="reduction"):
             return None
         if not all(_is_static(r) for r in [*reduction_ranges, split]):
             return None
         sizes = [int(r) for r in reduction_ranges]
         if sum(s != 1 for s in sizes) <= 1:
+            return None
+        if use_modular_indexing(
+            kind="reduction_linear"
+        ) and cls._flat_reduction_is_affine(
+            inner_fns, ranges, reduction_ranges, input_node
+        ):
             return None
         perm = None
         dense = cls._dense_reduction_dim(sizes, input_node)
@@ -2534,7 +2577,7 @@ class Reduction(Loops):
             None
             if strict_reduction
             else cls._split_reduction_ranges(
-                device, ranges, reduction_ranges, split, input_node
+                device, [inner_fn], ranges, reduction_ranges, split, input_node
             )
         )
         if aligned is not None:
@@ -2932,7 +2975,7 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
     ) -> Sequence[TensorBox]:
         reduction_numel = sympy_product(reduction_ranges)
         aligned = cls._split_reduction_ranges(
-            device, ranges, reduction_ranges, split, input_node
+            device, [inner_fn], ranges, reduction_ranges, split, input_node
         )
         if aligned is not None:
             aligned_split = aligned
@@ -3197,7 +3240,9 @@ class WelfordReduction(MultiOutputReduction):
         recursively
         """
         reduction_numel = sympy_product(reduction_ranges)
-        aligned = cls._split_reduction_ranges(device, ranges, reduction_ranges, split)
+        aligned = cls._split_reduction_ranges(
+            device, inner_fns, ranges, reduction_ranges, split
+        )
         if aligned is not None:
             need_mask = aligned.need_mask
         else:
@@ -4264,7 +4309,9 @@ class View(GenericView):
             if reindex is not None and (
                 all(map(is_affine_indexing, reindex(cls._view_symbols(new_size))))
                 or V.choices.use_modular_indexing(
-                    x.get_device(), numel=sympy_product(new_size), kind="view"
+                    x.get_device(),
+                    numel=sympy_product(new_size),
+                    kind=lambda: cls._merge_kind(x, new_size, reindex),
                 )
             ):
                 return cls(data=x, size=list(new_size), reindex=reindex)
@@ -4354,6 +4401,94 @@ class View(GenericView):
 
         V.graph.sizevars.check_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
+
+    _COPY_LIKE_OPS = OrderedSet(["load", "to_dtype", "constant", "index_expr"])
+
+    @classmethod
+    def _merge_kind(
+        cls,
+        x: IRNode,
+        new_size: Sequence[Expr],
+        reindex: Callable[[Sequence[Expr]], Sequence[Expr]],
+    ) -> ModularIndexingUse:
+        """
+        Classify a view that merges dims of x for
+        InductorChoices.use_modular_indexing:
+        "view_linear" when the loads are affine once the view is inlined (a
+        row-major merge of row-major loads) or the only non-affine loads touch
+        far fewer elements than the view (labels or position tables broadcast
+        over the merged dims, whose index arithmetic is negligible next to the
+        affine traffic), "view_copy" when realizing x only copies an existing
+        buffer (x is realized, or a load/cast of one), and "view" for fresh
+        compute whose inlined loads need ModularIndexing.
+        """
+        if is_storage_and_layout(x):
+            return "view_copy"
+        loader = x.make_loader()
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            rw = dependencies.extract_read_writes(
+                lambda index: loader(reindex(index)), new_size
+            )
+        # the raw loads carry the reindex's FloorDiv/ModularIndexing; a
+        # row-major merge of row-major loads simplifies back to affine, which
+        # is what the kernel will see
+        var_ranges = rw.var_ranges or {}
+        sizevars = V.graph.sizevars
+
+        def spans_modulus(e: Expr) -> bool:
+            # A merged dim whose size is its own symbol (x.view(y.shape))
+            # equals the product of the dims it merges only through the
+            # view's size guard, which the range simplification does not
+            # use: the modulus is left over, the load is still row-major.
+            return (
+                isinstance(e, ModularIndexing)
+                and e.args[1] == 1
+                and e.args[0] in var_ranges
+                and sizevars.statically_known_leq(var_ranges[e.args[0]], e.args[2])
+            )
+
+        modular = [
+            index
+            for dep in rw.reads
+            if isinstance(dep, dependencies.MemoryDep)
+            and not is_affine_indexing(
+                index := sizevars.simplify_with_ranges(dep.index, var_ranges).replace(
+                    spans_modulus, lambda e: e.args[0]
+                )
+            )
+        ]
+        if not modular:
+            return "view_linear"
+        # the value range of an index bounds the elements the load touches
+        # (a table indexed by d0 % 8 spans 8 rows, not the merged range);
+        # symbolic sizes and indirect indices count as large
+        if all(isinstance(s, (int, sympy.Integer)) for s in var_ranges.values()):
+            bounds = {v: ValueRanges(0, int(s) - 1) for v, s in var_ranges.items()}
+            spans: list[int] = []
+            for index in modular:
+                if not index.free_symbols <= bounds.keys():
+                    break
+                b = bound_sympy(index, bounds)
+                span = b.upper - b.lower + 1
+                if not isinstance(span, sympy.Integer):
+                    break  # int_oo is not an Integer
+                spans.append(int(span))
+            else:
+                hint = V.graph.sizevars.optimization_hint
+                if 4 * sum(spans) <= hint(sympy_product(new_size)):
+                    return "view_linear"
+        inner = x
+        while isinstance(inner, (MutableBox, BaseView)) and not isinstance(
+            inner, ReinterpretView
+        ):
+            inner = inner.data
+        # a view chain over a realized buffer, or a load/cast of one
+        if isinstance(inner, (ReinterpretView, Buffer)) or (
+            isinstance(inner, Pointwise)
+            and inner.inner_fn_opcount().used_ops <= cls._COPY_LIKE_OPS
+        ):
+            return "view_copy"
+        return "view"
 
     @staticmethod
     def _view_symbols(new_size: Sequence[_IntLike]) -> list[sympy.Symbol]:

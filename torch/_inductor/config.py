@@ -992,27 +992,41 @@ keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == 
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
 
-# Keep load/store indices affine in the loop variables, as the scheduler's
-# memory dependencies see them: no ModularIndexing, FloorDiv, Min/Max/Abs/Where
-# of loop variables and no products of them (the Triton backend still splits
-# its flat block index with // and %). Views that merge dims are realized (a
-# copy, unless the producer's layout is still flexible) instead of being
-# inlined, split reductions split at a dim boundary, repeat, roll and strided
-# slice_scatter are lowered without modular arithmetic, a loop reindexing
-# during fusion is undone when it leaves a non-affine index, and non-affine
-# index arithmetic (%, //, abs, clamp) stays a value computation behind an
-# indirect variable. The indirect variable does not remove the %, //: it is
+# Whether load/store indices may contain ModularIndexing/FloorDiv of loop
+# variables (views that merge dims, flat split reductions, repeat, roll,
+# strided slice_scatter, loop reindexing during fusion and %, // index
+# arithmetic) or must stay affine as the scheduler's memory dependencies see
+# them (realize the view, split the reduction at a dim boundary, undo a loop
+# reindexing that leaves a non-affine index, keep the index arithmetic behind
+# an indirect variable; the Triton backend still splits its flat block index
+# with // and %). The indirect variable does not remove the %, //: it is
 # computed as a value and the load becomes a data-dependent gather, like
 # aten.index or an embedding lookup. That helps a backend that lowers direct
 # loads only from affine addresses but has a gather path (MTIA); it is not
-# faster elsewhere. Best effort: adaptive pooling and
-# upsample_nearest2d_backward with non-divisible sizes, split reductions over
-# symbolic ranges and a strided slice_scatter whose dim is not provably a
-# multiple of the step still produce modular addresses. Helps backends with
-# restricted memory addressing at the cost of extra buffers and copies. Each of
-# these choices is made by InductorChoices.use_modular_indexing, which follows
-# this option by default and can be overridden through V.set_choices_handler.
-avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
+# faster elsewhere. None decides per backend: those declaring
+# BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas) keep indices affine,
+# Triton GPU backends follow the per-construct heuristic in
+# InductorChoices.use_modular_indexing (overridable like every choice), the
+# rest inline. True forces affine indices wherever a lowering has an affine
+# form, False forces inlining; TORCHINDUCTOR_AVOID_MODULAR_INDEXING=0 restores
+# the previous inlining on every backend. With the heuristic, split reductions
+# on Triton GPUs regroup partial sums and no longer match the previous release
+# bitwise (batch_invariant keeps the flat split). Index arithmetic on Pallas,
+# which prefers affine indices but has no indirect indexing, stays inlined in
+# every mode; adaptive pooling and upsample_nearest2d_backward with
+# non-divisible sizes, split reductions over symbolic ranges and a strided
+# slice_scatter whose dim is not provably a multiple of the step still use
+# ModularIndexing.
+avoid_modular_indexing: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_AVOID_MODULAR_INDEXING"
+)
+
+# In the automatic mode above, a dim-merging view of unrealized compute whose
+# inlined loads would need ModularIndexing is realized into its own kernel
+# instead when it has at least this many elements (Triton GPU backends only).
+# Measured on CUDA: realizing such views of 25M+ elements was 4-5% faster at
+# the model level, realizing 3M-12M element views was neutral to 7% slower.
+realize_modular_view_min_numel = 2**24
 
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
