@@ -108,6 +108,7 @@ from torch.testing._internal.common_utils import (
     runOnRocm,
     set_cwd,
     skipIfCachingAllocatorDisabled,
+    skipIfCppFakeTensor,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -7720,6 +7721,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 3, device=self.device), [3, 4])
         self.check_model(Model(), example_inputs)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_jagged(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -10360,6 +10362,54 @@ class AOTInductorTestsTemplate:
         del runner
         for name, tensor in external_weights.items():
             self.assertEqual(tensor._use_count(), external_weight_use_counts[name])
+
+    @skip_if_device(lambda device: device != "cuda", "requires CUDA")
+    def test_run_single_threaded_after_constant_fold(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(8, 16, device=device))
+                self.b = torch.nn.Parameter(torch.randn(8, device=device))
+
+            def forward(self, x):
+                return x @ torch.relu(self.w.t()) + self.b
+
+        model = Model(self.device)
+        x = torch.randn(4, 16, device=self.device)
+        with config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(
+            so_path, 1, self.device, "", True
+        )
+        params = dict(model.named_parameters())
+        new_weights = {
+            name: params[fqn].detach() + 1
+            for name, fqn in runner.get_constant_names_to_original_fqns().items()
+            if fqn in params
+        }
+        # What AOTInductorModelContainerCreateWithExternalConstants does, and
+        # it leaves the only model in flight.
+        runner.update_constant_buffer(new_weights, False, False, True)
+        runner.run_const_fold(False)
+        with torch.no_grad():
+            for param in params.values():
+                param.add_(1)
+        self.assertEqual(runner.run([x])[0], model(x))
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            (out,) = runner.run([x])
+        x.copy_(torch.randn_like(x))
+        graph.replay()
+        self.assertEqual(out, model(x))
 
     def test_user_managed_buffer_tensor_handle_lifetime(self):
         class Model(torch.nn.Module):
