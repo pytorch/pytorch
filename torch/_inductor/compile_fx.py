@@ -1829,7 +1829,7 @@ class _InProcessFxCompile(FxCompile):
                 # graph while config.triton.cudagraphs stays on.
                 partition_plan = (
                     GraphPartitionPlan(
-                        GraphPartitionMode.CONFIG,
+                        GraphPartitionMode.FROM_CONFIG,
                         cudagraphs_per_partition=bool(cudagraphs)
                         or _unstable_customized_partition_wrapper.wrapper is not None,
                     )
