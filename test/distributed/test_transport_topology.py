@@ -209,13 +209,13 @@ class TestSelectNics(TestCase):
 class TestAccelerator(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def accelerator(self, device, initialized, current=3, local_rank=None):
+    def accelerator(self, device, initialized, current=3, local_rank=None, count=8):
         module = SimpleNamespace(is_initialized=lambda: initialized)
         index = MagicMock(return_value=current)
         env = {} if local_rank is None else {"LOCAL_RANK": local_rank}
         with (
             patch.dict(os.environ, env),
-            patch.object(torch.accelerator, "device_count", return_value=8),
+            patch.object(torch.accelerator, "device_count", return_value=count),
             patch.object(
                 torch.accelerator,
                 "current_accelerator",
@@ -245,10 +245,11 @@ class TestAccelerator(TestCase):
                 self.accelerator(None, True, current=0, local_rank="3"),
                 (None, True),
             )
-        self.assertEqual(
-            self.accelerator(None, True, current=0, local_rank="0"),
-            (torch.device("cuda", 0), True),
-        )
+        for local_rank, count in (("0", 8), ("3", 1)):
+            self.assertEqual(
+                self.accelerator(None, True, 0, local_rank, count),
+                (torch.device("cuda", 0), True),
+            )
 
     def test_device_without_index(self):
         device = torch.device("cuda")

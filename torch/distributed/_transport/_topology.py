@@ -55,8 +55,9 @@ def _accelerator(device: torch.device | None) -> torch.device | None:
         and torch.accelerator.device_count() > 1
     ):
         logger.warning(
-            "transport has no device index and the current %s device is 0 "
-            "with LOCAL_RANK=%s; call set_device first to select RDMA NICs",
+            "transport has no device index and the current %s device is 0 with "
+            "LOCAL_RANK=%s; using the backend's default RDMA NICs. Call "
+            "set_device or pass an indexed device to select the nearest NICs",
             accelerator.type,
             os.environ["LOCAL_RANK"],
         )

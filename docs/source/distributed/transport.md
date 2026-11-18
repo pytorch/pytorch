@@ -90,9 +90,10 @@ index, otherwise the current `torch.accelerator` device: call
 creating the transport. If `device` is CPU or `None`, the current device is used
 only once the accelerator runtime is initialized, so processes that never
 initialize an accelerator are left unrestricted. Selection is also skipped
-when the current device is 0 while `LOCAL_RANK` is nonzero on a multi-device
-host, since that usually means `set_device` was not called. An accelerator
-`device` initializes its runtime when the transport is created.
+when the current device is 0 while `LOCAL_RANK` is nonzero and more than one
+device is visible, since that usually means `set_device` was not called; pass
+an indexed `device` to select device 0 anyway. When selection runs, an
+accelerator `device` initializes its runtime.
 
 Only active physical NICs at the fastest link rate are considered, which
 excludes slower frontend NICs and SR-IOV virtual functions. The nearest NICs
@@ -114,8 +115,8 @@ default NIC discovery. To choose NICs explicitly, pass
 by `", "`) or `device_name="mlx5_0,mlx5_1"` to Mooncake (separated by `","`);
 list every NIC to use them all. Setting `UCX_NET_DEVICES` disables selection
 for NIXL (for example `UCX_NET_DEVICES=all`, also needed for UCX TCP
-transports), and `MC_TE_FILTERS`, `MC_CUSTOM_TOPO_JSON` or `MC_RDMA_DATA_DIRECT_PAIRING`
-disables it for Mooncake.
+transports), and `MC_TE_FILTERS`, `MC_CUSTOM_TOPO_JSON` or
+`MC_RDMA_DATA_DIRECT_PAIRING` disables it for Mooncake.
 
 ## NIXL backend
 
