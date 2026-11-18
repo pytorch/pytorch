@@ -20,6 +20,7 @@ from typing_extensions import dataclass_transform
 
 import torch
 from torch.utils import _pytree as pytree
+from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
@@ -32,7 +33,7 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import dis
     from collections.abc import Callable, Generator, Iterable, Iterator
-    from types import CodeType
+    from types import CodeType, TracebackType
 
     import sympy
 
@@ -543,16 +544,19 @@ class GuardsCheckpointState:
 
     dynamo_guards: OrderedSet[Guard]
     guard_labels: dict[GuardKey, OrderedSet[str]]
+    current_guard_label: str | None
 
     def __init__(
         self,
         dynamo_guards: OrderedSet[Guard],
         guard_labels: dict[GuardKey, OrderedSet[str]] | None = None,
+        current_guard_label: str | None = None,
     ) -> None:
         self.dynamo_guards = dynamo_guards
         self.guard_labels = {
             key: OrderedSet(labels) for key, labels in (guard_labels or {}).items()
         }
+        self.current_guard_label = current_guard_label
 
     def diff(self, other: GuardsCheckpointState) -> OrderedSet[Guard] | None:
         """
@@ -809,6 +813,16 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: list[GuardEnvExpr] = []
         self.skip_install: bool = False
+        self.current_guard_label: str | None = None
+
+    @contextlib.contextmanager
+    def guard_label(self, label: str | None) -> Generator[None, None, None]:
+        old = self.current_guard_label
+        self.current_guard_label = label
+        try:
+            yield
+        finally:
+            self.current_guard_label = old
 
     @contextlib.contextmanager
     def skip_guard_install(self) -> Generator[None, None, None]:
@@ -821,7 +835,9 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
     def copy_graphstate(self) -> GuardsCheckpointState:
         return GuardsCheckpointState(
-            OrderedSet(self.dynamo_guards), self.dynamo_guards.guard_labels
+            OrderedSet(self.dynamo_guards),
+            self.dynamo_guards.guard_labels,
+            self.current_guard_label,
         )
 
     def restore_graphstate(self, state: GuardsCheckpointState) -> None:
@@ -830,6 +846,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = GuardsSet(
             state.dynamo_guards, guard_labels=state.guard_labels
         )
+        self.current_guard_label = state.current_guard_label
 
 
 class HopSubgraphCache:
@@ -1102,6 +1119,7 @@ class _TLSStorage(threading.local):
     def __init__(self) -> None:
         self.tracing_context: TracingContext | None = None
         self.compile_context: CompileContext | None = None
+        self.pending_guard_label: str | None = None
 
 
 _TLS = _TLSStorage()
@@ -1194,6 +1212,8 @@ class TracingContext:
 
     def __init__(self, fake_mode: FakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
+        if TracingContext.try_get() is None:
+            self.guards_context.current_guard_label = _TLS.pending_guard_label
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
@@ -1421,6 +1441,11 @@ def tracing(
     will return None.
     """
     old_context = getattr(_TLS, "tracing_context", None)
+    old_pending_guard_label = _TLS.pending_guard_label
+    masking_context = context is None and old_context is not None
+    if masking_context:
+        # Internal nested traces must not inherit the outer call's pending label.
+        _TLS.pending_guard_label = None
     _TLS.tracing_context = context
     try:
         yield context
@@ -1436,6 +1461,48 @@ def tracing(
         ):
             context.fake_mode.shape_env.cleanup()
         _TLS.tracing_context = old_context
+        if masking_context:
+            _TLS.pending_guard_label = old_pending_guard_label
+
+
+class _GuardContext(_DecoratorContextManager):
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self._local = threading.local()
+
+    def clone(self) -> _GuardContext:
+        return self.__class__(self.label)
+
+    @contextmanager
+    def _guard_label(self) -> Generator[None, None, None]:
+        context = TracingContext.try_get()
+        if context is not None:
+            with context.guards_context.guard_label(self.label):
+                yield
+        else:
+            old = _TLS.pending_guard_label
+            _TLS.pending_guard_label = self.label
+            try:
+                yield
+            finally:
+                _TLS.pending_guard_label = old
+
+    def __enter__(self) -> None:
+        # Keep entries per thread so a reusable context or decorator can nest.
+        stack = getattr(self._local, "stack", None)
+        if stack is None:
+            stack = self._local.stack = []
+        manager = self._guard_label()
+        manager.__enter__()
+        stack.append(manager)
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._local.stack.pop().__exit__(exc_type, exc_value, traceback)
 
 
 @overload
