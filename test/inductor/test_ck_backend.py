@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocmVersionLessThan,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -202,6 +203,7 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("num_gemms", (1, 2))
+    @skipIfRocmVersionLessThan((10, 3))
     def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
         """
         Verify that CK GEMM templates work under JIT cpp_wrapper mode.
