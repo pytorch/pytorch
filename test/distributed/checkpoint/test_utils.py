@@ -222,8 +222,11 @@ class TestReaderView(TestCase):
         self.assertEqual(self.middle_view.seek(2, os.SEEK_CUR), 2)
         self.assertEqual(self.middle_view.read(2), b"MN")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "negative seek value"):
             self.middle_view.seek(-1, os.SEEK_SET)
+
+        with self.assertRaisesRegex(ValueError, "invalid whence"):
+            self.middle_view.seek(0, 99)
 
     def testShortReadinto(self):
         ba = bytearray(3)

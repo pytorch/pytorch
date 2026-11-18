@@ -855,21 +855,18 @@ class FileSystemReader(StorageReader):
         path: Directory that contains the checkpoint.
         _extension_registry: Experimental registry used to decode stream
             transform descriptors present in checkpoint metadata.
-        mmap: If ``True``, eligible local tensor regions are loaded from a
-            private whole-file mapping of each backing ``.distcp`` file.
-            Default is ``False``.
+        mmap: If ``True``, eligible tensor regions are loaded from a private
+            whole-file mapping of each backing ``.distcp`` file. Default is
+            ``False``. Requires the built-in local ``FileSystem`` (exact type
+            match) and no stream transforms; unsupported regions fall back to
+            ``torch.load``. Checkpoint files must remain unchanged for the
+            duration of the load. Per-record CRCs of tensor payloads are not
+            eagerly verified.
 
-            Notes:
-            - Checkpoint files must remain unchanged for the duration of the
-              load; truncating or rewriting a mapped file can raise ``SIGBUS``.
-            - The mmap path validates ZIP structure and storage bounds but does
-              not eagerly verify per-record CRCs of tensor payloads.
-            - Regions with stream transforms, or regions that raise
-              :class:`torch.serialization._UnsupportedZipRegion`, fall back to
-              the native ``torch.load`` path.
-            - Subclasses that replace ``self.fs`` (for example ``FsspecReader``
-              or ``HuggingFaceStorageReader``) ignore this option because the
-              mmap path requires ``type(self.fs) is FileSystem``.
+    Note:
+        ``mmap`` is specific to ``FileSystemReader``. Other storage readers
+        such as ``FsspecReader`` and ``HuggingFaceStorageReader`` do not
+        accept this argument.
     """
 
     def __init__(
@@ -932,6 +929,30 @@ class FileSystemReader(StorageReader):
         )
         return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
 
+    def _load_item_mmap(
+        self,
+        req: ReadItem,
+        file_slice: IO[bytes],
+        *,
+        mapped_storage: torch.UntypedStorage,
+        storage_base_offset: int,
+    ) -> Tensor | None:
+        """Deserialize via mapped storage; return ``None`` to fall back."""
+        try:
+            tensor = torch.serialization._load_zip_region(
+                file_slice,
+                overall_storage=mapped_storage,
+                storage_base_offset=storage_base_offset,
+            )
+        except torch.serialization._UnsupportedZipRegion as e:
+            logger.debug(
+                "mmap load falling back to torch.load for %s: %s",
+                req.storage_index,
+                e,
+            )
+            return None
+        return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
+
     def _resolve_item(
         self, req: ReadItem, decoded: Tensor, planner: LoadPlanner
     ) -> Tensor:
@@ -951,6 +972,7 @@ class FileSystemReader(StorageReader):
             path = item_md.relative_path
             per_file.setdefault(path, []).append(read_item)
 
+        can_mmap = self.mmap and type(self.fs) is FileSystem
         for relative_path, reqs in per_file.items():
             new_path = self.fs.concat_path(self.path, relative_path)
             with self.fs.create_stream(new_path, "rb") as stream:
@@ -965,17 +987,16 @@ class FileSystemReader(StorageReader):
                         planner.load_bytes(req, cast(io.BytesIO, item))
                     else:
                         tensor: Tensor | None = None
-                        if (
-                            self.mmap
-                            and type(self.fs) is FileSystem
-                            and not (item_md.transform_descriptors or ())
-                        ):
+                        if can_mmap and not (item_md.transform_descriptors or ()):
                             if file_size is None:
                                 file_size = os.fstat(stream.fileno()).st_size
                             end = item_md.offset + item_md.length
                             if not 0 <= item_md.offset < end <= file_size:
                                 raise RuntimeError(
-                                    "DCP storage range is outside the backing file"
+                                    "DCP storage range is outside the backing file: "
+                                    f"path={new_path}, storage_index={req.storage_index}, "
+                                    f"offset={item_md.offset}, length={item_md.length}, "
+                                    f"file_size={file_size}"
                                 )
                             if mapped_storage is None:
                                 # from_file stubs as TypedStorage | _StorageBase.
@@ -987,24 +1008,14 @@ class FileSystemReader(StorageReader):
                                         nbytes=file_size,
                                     ),
                                 )
-                            try:
-                                tensor = torch.serialization._load_zip_region(
-                                    file_slice,
-                                    overall_storage=mapped_storage,
-                                    storage_base_offset=item_md.offset,
-                                )
-                            except torch.serialization._UnsupportedZipRegion as e:
-                                logger.debug(
-                                    "mmap load falling back to torch.load for %s: %s",
-                                    req.storage_index,
-                                    e,
-                                )
+                            tensor = self._load_item_mmap(
+                                req,
+                                file_slice,
+                                mapped_storage=mapped_storage,
+                                storage_base_offset=item_md.offset,
+                            )
                         if tensor is None:
                             tensor = cast(Tensor, self._load_item(req, file_slice))
-                        else:
-                            tensor = narrow_tensor_by_index(
-                                tensor, req.storage_offsets, req.lengths
-                            )
                         target_tensor = self._resolve_item(req, tensor, planner)
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)

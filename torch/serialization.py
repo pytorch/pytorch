@@ -13,7 +13,6 @@ import tarfile
 import tempfile
 import threading
 import warnings
-import zipfile
 from collections.abc import Callable
 from contextlib import closing, contextmanager
 from enum import Enum
@@ -848,6 +847,19 @@ class _UnsupportedZipRegion(RuntimeError):
     """Raised when a bounded ZIP cannot safely use mapped storage."""
 
 
+def _region_load_byteorder(zip_file) -> bytes | None:
+    """Resolve the effective byte order the same way :func:`_load` does."""
+    if zip_file.has_record("byteorder"):
+        return zip_file.get_record("byteorder")
+    endian = get_default_load_endianness()
+    if endian == LoadEndianness.NATIVE:
+        return None
+    if endian == LoadEndianness.BIG:
+        return b"big"
+    # LITTLE or unset defaults to little, matching _load.
+    return b"little"
+
+
 def _load_zip_region(
     zip_view: IO[bytes],
     *,
@@ -858,27 +870,22 @@ def _load_zip_region(
 
     Uses the same ``weights_only`` unpickler setup as :func:`torch.load`
     (``encoding="utf-8"`` and :func:`_get_wo_message` on ``UnpicklingError``).
+
+    Raises :class:`_UnsupportedZipRegion` when the region would require an
+    in-place ``byteswap`` on the shared mapped storage (cross-endian loads).
     """
     original_position = zip_view.tell()
     try:
         region_length = zip_view.seek(0, os.SEEK_END)
         zip_view.seek(0)
-        # Structure-only check: DCP regions come from torch.save and never write
-        # compressed/encrypted data/ records, so skip per-record payload opens.
-        try:
-            with zipfile.ZipFile(zip_view) as archive:
-                records = [
-                    info
-                    for info in archive.infolist()
-                    if info.filename.split("/", 1)[-1].startswith("data/")
-                ]
-                if not records:
-                    raise _UnsupportedZipRegion("ZIP has no tensor storage")
-        except zipfile.BadZipFile as e:
-            raise RuntimeError("invalid bounded ZIP region") from e
-        zip_view.seek(0)
         try:
             with _open_zipfile_reader(zip_view) as zip_file:
+                order = _region_load_byteorder(zip_file)
+                if order is not None and order != sys.byteorder.encode():
+                    raise _UnsupportedZipRegion(
+                        "mapped ZIP regions cannot be byteswapped "
+                        f"(region={order!r}, host={sys.byteorder!r})"
+                    )
                 return _load(
                     zip_file,
                     map_location="cpu",
@@ -2182,10 +2189,18 @@ def _load(
                 storage_offset = zip_file.get_record_offset(name)
             record_size = zip_file.get_record_size(name)
             if record_size != nbytes:
-                raise RuntimeError(f"{name} size {record_size} does not match {nbytes}")
+                raise RuntimeError(
+                    f"record size ({record_size} bytes) does not match expected "
+                    f"size ({nbytes} bytes) for {name}"
+                )
             storage_end = storage_offset + nbytes
-            if not 0 <= storage_offset <= storage_end <= overall_storage.nbytes():
-                raise RuntimeError(f"mapped storage for {name} is out of bounds")
+            mapped_nbytes = overall_storage.nbytes()
+            if not 0 <= storage_offset <= storage_end <= mapped_nbytes:
+                raise RuntimeError(
+                    f"mapped storage for {name} is out of bounds: "
+                    f"offset={storage_offset}, nbytes={nbytes}, "
+                    f"mapped_nbytes={mapped_nbytes}"
+                )
             storage = overall_storage[storage_offset:storage_end]
         else:
             if can_calculate_storage_offsets and run_debug_asserts:
