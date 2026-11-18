@@ -6424,6 +6424,7 @@ class CheckFunctionManager:
                         obj_weakref=None,
                         guarded_class_weakref=None,
                         create_fn=portable_create_fn(guard.create_fn),
+                        creation_label=None,
                     )
                     for guard in sorted_guards
                 )
@@ -7441,7 +7442,10 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
             raise AssertionError(f"Expected Guard, got {type(guard)}")
         if is_from_skip_guard_source(guard.originating_source):
             continue
-        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
+        label = guard.creation_label
+        if label is None:
+            label = guards_context.current_guard_label
+        add(guard, label=label, collect_debug_stack=collect_debug_stack, skip=skip + 1)
 
 
 # ---------------------------------------------------------------------------
