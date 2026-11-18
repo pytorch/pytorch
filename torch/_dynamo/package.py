@@ -1210,6 +1210,7 @@ class CompilePackage:
     """
 
     records_graph_break_ops = False
+    supports_regional_guard_filter_drops = True
 
     def __init__(
         self,
