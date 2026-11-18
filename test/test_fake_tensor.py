@@ -2607,12 +2607,11 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("op", ["detach", "data", "shallow_copy_data"])
     @parametrize("active", [False, True])
     @parametrize("symbolic", [False, True])
     def test_metadata_copy(self, device, op, active, symbolic):
-        if torch._dynamo.config.use_cpp_fake_tensor and TEST_WITH_TORCHDYNAMO:
-            self.skipTest(_CPP_FAKE_DYNAMO_SKIP)
         mode = FakeTensorMode(shape_env=ShapeEnv() if symbolic else None)
         source = mode.from_tensor(torch.arange(3.0, device=device))
         target = mode.from_tensor(torch.zeros(3, device=device))
