@@ -1198,7 +1198,6 @@ class TestExport(TestCase):
                     )
                 self.assertEqual(export(m, (x,)).module()(x), m(x))
 
-    @testing.expectedFailureStrictV2
     @skipIfCrossRef
     def test_custom_tag_metadata_re_export(self):
         class Foo(torch.nn.Module):
@@ -2037,7 +2036,7 @@ graph():
         )
 
     def test_inline_script_function(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def _forward(x: torch.Tensor):
             if torch.jit.is_scripting():
                 return x.cos()
@@ -2152,7 +2151,7 @@ graph():
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
             @staticmethod
-            @torch.jit.script
+            @torch.jit._script.script
             def _forward(x: torch.Tensor):
                 if torch.jit.is_scripting():
                     return x.cos()
@@ -2288,13 +2287,13 @@ def forward(self, primals, tangents):
         i = 2
         s = "foo"
 
-        @torch.jit.script
+        @torch.jit._script.script
         def _inner(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s_len: int):
             return x * y * f * i * s_len
 
         class M(torch.nn.Module):
             @staticmethod
-            @torch.jit.script
+            @torch.jit._script.script
             def _forward(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s: str):
                 if torch.jit.is_scripting():
                     return _inner(x.cos(), y.cos(), f, i, len(s))
@@ -2318,7 +2317,7 @@ def forward(self, primals, tangents):
 
     def test_inline_script_method(self):
         class M(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def _forward(self, x: torch.Tensor):
                 if torch.jit.is_scripting():
                     return x.cos()
@@ -4987,7 +4986,7 @@ graph():
                 return rv + i
 
         foo = Foo()
-        foo_script = torch.jit.script(foo)
+        foo_script = torch.jit._script.script(foo)
         inp = (torch.zeros(3, 4), torch.tensor(7))
 
         with self.assertRaisesRegex(
@@ -18380,10 +18379,10 @@ def forward(self, x):
             _maybe_run_with_interpreter,
             autograd_not_implemented,
             reenter_make_fx,
+            register_fake,
             unique_graph_id,
         )
         from torch._ops import HigherOrderOperator
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.proxy_tensor import (
             ProxyTorchDispatchMode,
             track_tensor_tree,
@@ -18432,10 +18431,6 @@ def forward(self, x):
             )
             return fn(x)
 
-        def fake_hop(mode, fn, x, schema):
-            with mode:
-                return dense_hop(fn, x, schema)
-
         def func_hop(ctx, fn, x, schema):
             unwrapped_x = ctx.unwrap_tensors(x)
             functional_fn = ctx.functionalize(_maybe_run_with_interpreter(fn))
@@ -18444,7 +18439,7 @@ def forward(self, x):
         test_hop = TestFunctionSchemaHop()
         test_hop.py_impl(ProxyTorchDispatchMode)(trace_hop)
         test_hop.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)(dense_hop)
-        test_hop.py_impl(FakeTensorMode)(fake_hop)
+        register_fake(test_hop, dense_hop, skip_cache=True)
         test_hop.py_autograd_impl(
             autograd_not_implemented(test_hop, deferred_error=True)
         )
@@ -19797,6 +19792,7 @@ instantiate_device_type_tests(TestExportDevice, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestExportCustomClass(TorchTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -19879,7 +19875,7 @@ class TestExportCustomClass(TorchTestCase):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.add_mod = torch.jit.script(Add())._c
+                self.add_mod = torch.jit._script.script(Add())._c
 
             def forward(self, x, y):
                 return self.add_mod.forward(x, y)

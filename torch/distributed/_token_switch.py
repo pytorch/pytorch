@@ -271,9 +271,10 @@ class TokenSwitch(abc.ABC):
     ) -> Routing:
         """Create expert routing for the current phase (e.g. top-k indices).
 
-        ``per_expert_token_counts`` is optional 1D int32, length >= local experts:
-        output buffer for per-expert receive counts (NCCL EP ``RECV_EXPERT_COUNTER``),
-        i.e. the number of received (token, local expert) pairs per local expert.
+        ``per_expert_token_counts`` is optional 1D int32 with exactly
+        ``num_experts // world_size`` elements: output buffer for per-expert
+        receive counts (NCCL EP ``RECV_EXPERT_COUNTER``), i.e. the number of
+        received (token, local expert) pairs per local expert.
         ``layout`` selects the dispatch output memory layout.
         """
         raise NotImplementedError
@@ -658,6 +659,18 @@ class TokenSwitchMoRI(TokenSwitch):
                 f"top_k is fixed at {self._top_k}, got {topk_idx.shape[1]}"
             )
         if per_expert_token_counts is not None:
+            c = per_expert_token_counts
+            if (
+                c.dim() != 1
+                or c.dtype != torch.int32
+                or c.device != topk_idx.device
+                or c.numel() != self._experts_per_rank
+            ):
+                raise ValueError(
+                    f"per_expert_token_counts must be a 1D int32 tensor on {topk_idx.device} "
+                    f"with {self._experts_per_rank} elements; got {c.dtype} on {c.device} "
+                    f"with shape {tuple(c.shape)}"
+                )
             ids = topk_idx.flatten().long()
             counts = torch.bincount(ids, minlength=self._num_experts)
             dist.all_reduce(counts, group=self._pg)
