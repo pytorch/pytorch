@@ -178,6 +178,59 @@ class PrivateUse1BackendTest(TestCase):
         self.assertEqual(flat.requires_grad, requires_grad)
         self.assertIs(flat._base, fake)
 
+    @parametrize("tracing", [False, True])
+    @torch._dynamo.disable
+    def test_make_subclass_meta_detach_preserves_callback_dispatch(self, tracing):
+        base = torch.empty(2, device="meta", requires_grad=True)
+        data = torch.Tensor._make_subclass(
+            torch.Tensor, base, True, device_for_backend_keys=torch.device("npy")
+        )
+        cpu_a = torch.ones(2)
+        cpu_b = torch.ones(2)
+        detach_devices = []
+        trace_devices = []
+        wrapped = []
+
+        def detach_on_meta(t):
+            detach_devices.append((cpu_a + cpu_b).device.type)
+            return aten.detach.default._op_dk(
+                torch.DispatchKey.CompositeExplicitAutograd, t
+            )
+
+        def lookup_name(t):
+            if t.device.type == "meta":
+                trace_devices.append((cpu_a + cpu_b).device.type)
+            return ""
+
+        def make_subclass(t):
+            result = torch.Tensor._make_subclass(
+                torch.Tensor, t, device_for_backend_keys=torch.device("meta")
+            )
+            wrapped.append(result)
+            return result
+
+        with torch.library._scoped_library("aten", "IMPL", "Meta") as lib:
+            lib.impl("detach", detach_on_meta)
+            if tracing:
+                fn = torch._C._create_function_from_trace(
+                    "make_subclass", make_subclass, (data,), lookup_name, True, False
+                )
+                self.assertIn("aten::detach", str(fn.graph))
+            else:
+                make_subclass(data)
+
+        if tracing:
+            self.assertEqual(trace_devices, ["cpu"])
+        self.assertEqual(detach_devices, ["cpu"])
+        (result,) = wrapped
+        self.assertTrue(torch._C._is_alias_of(result, data))
+        self.assertTrue(data.requires_grad)
+        self.assertFalse(result.requires_grad)
+        torch.autograd.graph.increment_version(data)
+        self.assertEqual(result._version, data._version)
+        real = torch.empty(2, device="npy")
+        self.assertIs(unwrap(real.detach()), unwrap(real))
+
     def test_ldexp(self):
         a_cpu = torch.tensor([1.0, 2.0], dtype=torch.float32)
         b_cpu = torch.tensor([1, 2], dtype=torch.int32)

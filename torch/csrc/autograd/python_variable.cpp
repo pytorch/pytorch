@@ -2,7 +2,6 @@
 #include <ATen/native/Resize.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
-#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/SmallVector.h>
@@ -653,22 +652,8 @@ static PyObject* THPVariable_make_subclass(
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
-  auto data = r.tensor(1);
-  const bool change_backend_keys = !r.isNone(6);
-  {
-    std::optional<c10::impl::IncludeDispatchKeyGuard> meta_guard;
-    const auto keys = data.key_set();
-    if (change_backend_keys &&
-        keys.highestBackendKey() != c10::BackendComponent::MetaBit &&
-        !keys.has_any(c10::DispatchKeySet(
-            {c10::DispatchKey::Python, c10::DispatchKey::Fake})) &&
-        data.is_meta()) {
-      // A plain Meta result can retain the backend key of its fake input.
-      // Run detach on Meta before assigning the new backend keys.
-      meta_guard.emplace(c10::DispatchKey::Meta);
-    }
-    data = data.detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
-  }
+  auto data =
+      r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we
   // want to allow the following use case for backward compatibility:
   //
@@ -691,7 +676,7 @@ static PyObject* THPVariable_make_subclass(
   if (r.toBool(5)) {
     data.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
-  if (change_backend_keys) {
+  if (!r.isNone(6)) {
     data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
   }
 
