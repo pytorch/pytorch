@@ -16,42 +16,25 @@ from torch.testing._internal.common_utils import HardwareClassification, IS_LINU
 from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
-def _fused_attention_available(device: str) -> bool:
-    if device == "cuda":
-        return bool(PLATFORM_SUPPORTS_FUSED_ATTENTION)
-    # Out-of-tree accelerator backends do not report fused SDPA through
-    # PLATFORM_SUPPORTS_FUSED_ATTENTION, and fused attention is intentionally
-    # not a registered Capability (see #194039), so probe the actual device
-    # instead of assuming support.
-    try:
-        q = torch.randn(2, 2, 8, 16, device=device, dtype=torch.float16)
-        with torch.nn.attention.sdpa_kernel(
-            [
-                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
-                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
-                torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
-            ]
-        ):
-            torch.nn.functional.scaled_dot_product_attention(q, q, q)
-        return True
-    except Exception:
-        return False
+try:
+    import pydot  # noqa: F401
+
+    HAS_PYDOT = True
+except ImportError:
+    HAS_PYDOT = False
+
+
+HAS_DOT = shutil.which("dot") is not None
 
 
 class TestGraphTransformObserver(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "requires fused attention support")
+    @skipIf(not HAS_PYDOT, "Requires pydot")
+    @skipIf(not HAS_DOT, "Requires dot")
     def test_sdpa_rewriter(self, device):
-        if not _fused_attention_available(device):
-            self.skipTest("requires fused attention support")
-        if shutil.which("dot") is None:
-            self.skipTest("Requires dot")
-        try:
-            import pydot  # noqa: F401
-        except ImportError:
-            self.skipTest("Requires pydot")
-
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -87,7 +70,9 @@ class TestGraphTransformObserver(TestCase):
         self.assertTrue(found_output_svg)
 
 
-instantiate_device_type_tests(TestGraphTransformObserver, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestGraphTransformObserver, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
