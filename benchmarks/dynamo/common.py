@@ -1033,6 +1033,66 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     return msg
 
 
+_REWRITTEN: dict[Any, Any] = {}
+
+
+def rewritten(model_iter_fn):
+    """What ``torch.rewrite`` makes of a function of the runner, with Inductor
+    behind it. The same function every time it is asked for: the calls that
+    are timed must be of the one that was warmed up, and where
+    ``torch.compile`` finds its code in Dynamo's cache, ``torch.rewrite``
+    would start over."""
+    key = (
+        id(getattr(model_iter_fn, "__self__", None)),
+        getattr(model_iter_fn, "__func__", model_iter_fn),
+    )
+    found = _REWRITTEN.get(key)
+    if found is None:
+        # As Dynamo does for its process the first time it compiles: the eager
+        # calls and the compiled ones are then timed as they are for it.
+        torch.distributions.Distribution.set_default_validate_args(False)
+
+        def iterate(model, example_inputs, collect_outputs=True):
+            return model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
+
+        passes = [torch.rewrite.inductor, *torch.rewrite.canonical]
+        found = _REWRITTEN[key] = torch.rewrite(iterate, passes=passes)
+    return found
+
+
+def settle_rewritten(fn, model, example_inputs, most=1000, seconds=600.0, calm=16):
+    """Calls what ``rewritten`` returned until it has stopped compiling and
+    measuring: ``torch.rewrite`` compiles a region after some calls of it, and
+    then times the function and what it calls against the interpreter for a
+    while, one level of calls after the other: a training step, which goes
+    through an optimizer, takes some hundred calls where a model's forward
+    takes twenty. Over when ``calm`` calls in a row changed nothing; a call
+    that is slow is given fewer. Returns the number of calls that took, and
+    the time of one of the calm ones (0 if there was none)."""
+    quiet, before, start, calls = 0, None, time.perf_counter(), 0
+    calm_start = start
+    while calls < most:
+        fn(model, example_inputs)
+        calls += 1
+        regions = torch.rewrite.regions(fn)
+        now = (len(regions), sum(r.get("variants", 0) for r in regions))
+        if fn.stats()["measuring"] or now != before:
+            synchronize()
+            quiet, calm_start = 0, time.perf_counter()
+        else:
+            quiet += 1
+        before = now
+        elapsed = time.perf_counter() - start
+        enough = calls >= 12 or (calls >= 6 and elapsed > 60)
+        # At a second a call, three calm ones are what there is time for.
+        needed = max(3, min(calm, int(calm * calls / max(elapsed, 1e-9) / 16)))
+        if enough and (quiet >= needed or elapsed > seconds):
+            break
+    synchronize()
+    steady = (time.perf_counter() - calm_start) / quiet if quiet else 0.0
+    return calls, steady
+
+
 def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
@@ -1072,6 +1132,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         frozen_model_iter_fn = export_nativert(model, example_inputs)
     elif args.aot_precompile:
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
+    elif args.rewrite:
+        frozen_model_iter_fn = rewritten(model_iter_fn)
     else:
         if kwargs["hf_llm"]:
             # If it's an llm, we want to optimize model.forward, and use
@@ -2383,6 +2445,12 @@ class BenchmarkRunner:
                             )
                     else:
                         optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        if self.args.rewrite and not self.args.training:
+                            # Its first calls run before any graph is made:
+                            # what is compared is a call once it has settled.
+                            settle_rewritten(
+                                optimized_model_iter_fn, model_copy, example_inputs
+                            )
                         new_result = self.run_n_iterations(
                             model_copy, example_inputs, optimized_model_iter_fn
                         )
@@ -2918,6 +2986,11 @@ class BenchmarkRunner:
                     self.model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
+        # How many calls the compiled function's warmup was, how many an eager
+        # one is, and what a call costs once torch.rewrite has settled: what
+        # the compile time is taken from.
+        settled = {"calls": measure_iters, "eager": measure_iters, "steady": 0.0}
+
         def warmup(
             fn, model, example_inputs, mode, measure_iters=5, stabilization_iters=0
         ):
@@ -2933,6 +3006,12 @@ class BenchmarkRunner:
                 t0 = time.perf_counter()
                 for _ in range(measure_iters):
                     fn(model, example_inputs)
+                if self.args.rewrite and mode == "dynamo":
+                    # Its compile time is spread over the calls it takes to
+                    # settle, not all in the first one.
+                    calls, steady = settle_rewritten(fn, model, example_inputs)
+                    settled["calls"] = measure_iters + calls
+                    settled["steady"] = steady
                 t1 = time.perf_counter()
                 latency = t1 - t0
                 for _ in range(stabilization_iters):
@@ -3065,7 +3144,27 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency
+            compilation_time = (
+                dynamo_latency - eager_latency * settled["calls"] / settled["eager"]
+            )
+            if settled["steady"]:
+                # Some hundred calls of a training step went by: what they
+                # took beyond calls of the function as it ended up, which is
+                # the compiling, the measuring, and the calls that ran before
+                # there was a graph.
+                compilation_time = dynamo_latency - settled["steady"] * settled["calls"]
+            if self.args.rewrite:
+                found = [
+                    r
+                    for r in torch.rewrite.regions(optimized_model_iter_fn)
+                    if r["state"] == "compiled"
+                ]
+                print(
+                    f"torch.rewrite: {sum(r['variants'] for r in found)} graphs of "
+                    f"{sum(r['ops'] for r in found)} operations after "
+                    f"{settled['calls']} calls, "
+                    f"demoted: {optimized_model_iter_fn.stats()['demoted']}"
+                )
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3801,6 +3900,12 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--rewrite",
+        action="store_true",
+        help="Measure speedup with torch.rewrite and TorchInductor behind it "
+        "(--performance, and --accuracy for inference)",
+    )
+    group.add_argument(
         "--optimus",
         choices=["vertical_opt", "horizontal_opt", "all"],
         default=None,
@@ -4486,6 +4591,10 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
+    elif args.rewrite:
+        optimize_ctx = rewritten
+        experiment = speedup_experiment
+        output_filename = "rewrite.csv"
     elif args.export:
         optimize_ctx = export
         experiment = speedup_experiment
@@ -4607,6 +4716,7 @@ def run(runner, args, original_dir=None):
 
     if (
         args.inductor
+        or args.rewrite
         or args.backend == "inductor"
         or args.export_aot_inductor
         or args.backend == "optimus"
