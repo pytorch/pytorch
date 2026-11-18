@@ -1447,10 +1447,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 loss.backward()
                 optimizer.step()
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1477,10 +1476,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for data in dataloader:
                 f(torch.randn(5, device=self.rank), data)
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1509,10 +1507,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     torch.randn(data, device=self.rank),
                 )
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1543,10 +1540,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     torch.randn(data, device=self.rank),
                 )
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1598,9 +1594,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             f(self.rank, xs)
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1622,9 +1617,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             f(self.rank, xs)
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1660,9 +1654,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             # Ranks take different code paths (tensor vs int), so compilation counts
             # can differ. Check that every rank triggered compilation at least once.
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res:
                 self.assertGreaterEqual(r, 1, "each rank should compile at least once")
 
@@ -1722,9 +1715,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 log.exception("Caught exception running f")
                 raise
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1768,16 +1760,15 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 log.exception("Caught exception running f")
                 raise
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
             print(f"Result from {self.rank} is {f(a, b, c)}")
 
             # Store the initial compilation count
-            initial_compile_count = len(metrics)
+            initial_compile_count = compile_count()
 
             # # Test with different sizes to ensure dynamic shapes work without recompilation
             a2 = torch.randn(512, 512, device=self.rank, dtype=torch.bfloat16)
@@ -1792,8 +1783,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 raise
 
             # Verify no recompilation occurred
-            metrics_after = torch._dynamo.utils.get_compilation_metrics()
-            final_compile_count = len(metrics_after)
+            final_compile_count = compile_count()
             self.assertEqual(
                 initial_compile_count,
                 final_compile_count,
@@ -1876,10 +1866,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.accelerator.synchronize(device)
             dist.set_timeout(dist.constants.default_pg_nccl_timeout, pg)
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
