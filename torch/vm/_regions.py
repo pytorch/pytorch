@@ -1,6 +1,6 @@
 """Runs of a basic block compiled by a graph backend.
 
-With ``torch.cfg_compile(fn, backend="inductor")`` the VM hands the tensor work
+With ``torch.vm.passes.Graphs()`` in its list of passes the VM hands the tensor work
 of each basic block to AOTAutograd and Inductor. The unit is a *region*: a run
 of consecutive instructions of one block that have no effect a trace cannot
 capture (calls, arithmetic, attribute reads, building containers). A region is
