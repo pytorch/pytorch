@@ -348,11 +348,14 @@ class AOTInductorModelContainer {
     AOTI_RUNTIME_CHECK(
         !pool_.use_stream_affinity(),
         "Stream affinity cannot be used with single-threaded execution");
-    auto* model = pool_.first_available_model_unsynchronized();
+    // Always the primary model, whatever its pool state: a constant fold may
+    // have left it in flight, and waiting for it would query its completion
+    // event, which can't be done inside a CUDA graph capture.
+    auto& model = pool_.primary_model();
 
     auto& const_folded = active().fold_state;
     if (const_folded == ConstantState::INITIALIZED) {
-      auto folded_const_map = model->run_const_fold(
+      auto folded_const_map = model.run_const_fold(
           stream, proxy_executor, /* initialization = */ true);
       update_constant_buffer(
           std::move(folded_const_map),
@@ -365,7 +368,7 @@ class AOTInductorModelContainer {
           "Unknown constant state: " + toStringConstantState(const_folded));
     }
 
-    model->run_single_threaded(
+    model.run_single_threaded(
         input_handles, output_handles, stream, proxy_executor);
   }
 
