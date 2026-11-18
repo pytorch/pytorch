@@ -4,9 +4,16 @@
 #include <ATen/core/Tensor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
+
+
+#include <atomic>
 
 namespace at {
 namespace {
+
+std::atomic<at::impl::ModelessFakeFallback*> modeless_fake_fallback{nullptr};
 
 bool isIndexedDeviceType(c10::DeviceType type) {
   return type == kCUDA || type == kHIP || type == kHPU || type == kXPU ||
@@ -30,6 +37,15 @@ c10::Device normalizeFakeDevice(c10::Device device) {
     }
   }
   return c10::Device(type, 0);
+}
+
+Tensor fake_shallow_copy(
+    const Tensor& self,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) {
+  TORCH_INTERNAL_ASSERT(!c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+  return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
+      version_counter, allow_tensor_metadata_change));
 }
 
 } // namespace
@@ -72,10 +88,43 @@ void init_cpp_fake(
 
 namespace impl {
 
+bool may_turn_const(const Tensor& t) {
+  return t.numel() <= 1 && !t.is_fake() && !t.is_sparse() &&
+      !t.unsafeGetTensorImpl()->is_sparse_compressed() && !t.device().is_meta();
+}
+
 Tensor fake_detach(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(!c10::impl::FakeTensorModeTLS::in_kernel_invocation());
-  return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
-      /*version_counter=*/0, /*allow_tensor_metadata_change=*/false));
+  return fake_shallow_copy(
+      self, /*version_counter=*/0, /*allow_tensor_metadata_change=*/false);
+}
+
+Tensor fake_tensor_data(
+    const Tensor& self,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) {
+  const bool python_hook =
+      !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Python) &&
+      (c10::impl::TorchDispatchModeTLS::stack_len() > 0 ||
+       self.key_set().has(c10::DispatchKey::Python));
+  auto result =
+      fake_shallow_copy(self, version_counter, allow_tensor_metadata_change);
+  if (!python_hook) {
+    if (auto real = self.unsafeGetTensorImpl()->real_tensor()) {
+      result.unsafeGetTensorImpl()->set_real_tensor(real->shallow_copy_and_detach(
+          real->version_counter(), /*allow_tensor_metadata_change=*/false));
+    }
+    if (auto mode = self.unsafeGetTensorImpl()->fake_tensor_mode()) {
+      if (auto constant = mode->get_constant(self.unsafeGetTensorImpl())) {
+        // ExtraMeta's shallow copy drops constants; register this storage alias.
+        mode->set_constant(
+            result.unsafeGetTensorImpl(),
+            constant->shallow_copy_and_detach(
+                constant->version_counter(),
+                /*allow_tensor_metadata_change=*/false));
+      }
+    }
+  }
+  return result;
 }
 
 Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source) {
@@ -83,6 +132,14 @@ Tensor& fake_shallow_copy_data_(Tensor& self, const Tensor& source) {
   // Keep set_data's type/dtype checks and gradient accumulator reset.
   self.set_data(source);
   return self;
+}
+
+void setModelessFakeFallback(ModelessFakeFallback* fn) {
+  modeless_fake_fallback.store(fn);
+}
+
+ModelessFakeFallback* getModelessFakeFallback() {
+  return modeless_fake_fallback.load();
 }
 
 } // namespace impl
