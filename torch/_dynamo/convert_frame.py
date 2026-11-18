@@ -218,9 +218,7 @@ class TODO_UNKNOWN:
 
 
 def _clear_fake_mode_weakrefs(
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
-    | torch._subclasses.fake_tensor.CppFakeTensorMode
-    | None,
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
 ) -> None:
     """Clear WeakIdRef entries from a FakeTensorMode's describer."""
     if fake_mode is None:
@@ -1129,10 +1127,7 @@ class BackendInput:
     backend_id: str
     graph_module: torch.fx.GraphModule
     example_inputs: Any
-    fake_mode: (
-        torch._subclasses.fake_tensor.FakeTensorMode
-        | torch._subclasses.fake_tensor.CppFakeTensorMode
-    )
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
     tensor_to_context: WeakIdKeyDictionary
 
 

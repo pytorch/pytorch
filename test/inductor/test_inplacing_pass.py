@@ -18,7 +18,7 @@ from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.virtualized import V
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -701,8 +701,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         with V.set_fake_mode(detect_fake_mode([base.meta["val"]])):
             updater.incremental_update()
         self.assertIs(wrapped.args[1], aten.index_put_.default)
-        self.assertTrue(is_fake_tensor(wrapped.meta["val"][0]))
-        self.assertTrue(is_fake_tensor(wrapped.meta["val"][1]))
+        self.assertIsInstance(wrapped.meta["val"][0], FakeTensor)
+        self.assertIsInstance(wrapped.meta["val"][1], FakeTensor)
         self.assertEqual(
             wrapped.meta["val"][1].untyped_storage()._cdata, get_node_storage(base)
         )

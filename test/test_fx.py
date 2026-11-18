@@ -6886,6 +6886,5 @@ class TestVisionTracing(JitTestCase):
 if HAS_TORCHVISION:
     TestVisionTracing.generate_tests()
 
-
 if __name__ == "__main__":
     run_tests()

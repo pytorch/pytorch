@@ -2,7 +2,6 @@
 #include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/PyInterpreter.h>
 
-#include <array>
 #include <mutex>
 #include <new>
 #include <type_traits>
@@ -193,18 +192,6 @@ static PyObject* get_mode_pyobject(PyObject* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* clear_non_cpu_constants(PyObject* self, PyObject* unused) {
-  HANDLE_TH_ERRORS
-  getCppFakeTensorMode(self)->clear_non_cpu_constants();
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static std::array<PyMethodDef, 2> mode_methods = {{
-    {"clear_non_cpu_constants", clear_non_cpu_constants, METH_NOARGS, nullptr},
-    {nullptr},
-}};
-
 static PyGetSetDef mode_properties[] = {
     {"avoid_device_init",
      get_mode_field<&c10::FakeTensorMode::avoid_device_init_>,
@@ -296,7 +283,7 @@ PyTypeObject PyCppFakeTensorModeType = {
     offsetof(PyCppFakeTensorMode, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    mode_methods.data(), /* tp_methods */
+    nullptr, /* tp_methods */
     nullptr, /* tp_members */
     mode_properties, /* tp_getset */
     nullptr, /* tp_base */

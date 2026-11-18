@@ -932,9 +932,8 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        # Python FakeTensor needs its wrapper state preserved across conversion.
-        # Native fakes carry that state in TensorImpl and support the usual
-        # set_data path.
+        # _apply is traced by dynamo at the bytecode level, and torch._subclasses
+        # is in dynamo's MOD_SKIPLIST, revisit later for c++
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:

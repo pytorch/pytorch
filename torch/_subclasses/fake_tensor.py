@@ -366,7 +366,14 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # Note [Fake mode lookups and CppFakeTensorMode]
 # maybe_get_fake_mode returns a CppFakeTensorMode for a C++ fake or a wrapper of
 # one, active_fake_mode while a C++ mode is installed, and detect_fake_mode in
-# either case. CppFakeTensorMode is not a FakeTensorMode subclass.
+# either case. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
+# its interface yet. Its from_tensor does not support tensors with nested ints.
+# Its converter's from_real_tensor rejects constants that are fakes or not plain
+# tensors, and its converter's from_meta_and_device raises NotImplementedError
+# for a pytype other than Tensor. So a caller that needs a Python
+# FakeTensorMode narrows the result with
+# torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
+# mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
     wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
@@ -512,22 +519,6 @@ def maybe_get_fake_constant(x: object) -> Tensor | None:
     return None
 
 
-def maybe_set_fake_constant(x: Any, constant: Tensor) -> None:
-    fake_mode = maybe_get_fake_mode(x)
-    if isinstance(fake_mode, FakeTensorMode) or (
-        isinstance(fake_mode, CppFakeTensorMode) and not is_fake_tensor(x)
-    ):
-        # Wrapper subclasses carry the constant on the outer object.
-        x.constant = constant
-    elif isinstance(fake_mode, CppFakeTensorMode):
-        real_constant = (
-            maybe_get_fake_constant(constant) if is_fake_tensor(constant) else constant
-        )
-        maybe_clear_fake_constant(x)
-        if real_constant is not None and not is_fake(real_constant):
-            torch._C._set_fake_constant(x, real_constant)
-
-
 def maybe_clear_fake_constant(x: object) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.constant = None
@@ -554,8 +545,6 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
 def maybe_get_fake_pytype(x: object) -> type[Tensor] | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.pytype
-    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        return getattr(x, "_fake_pytype", None)
     return None
 
 
@@ -1056,11 +1045,16 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         static_shapes: bool | None = None,
         export: bool = False,
     ) -> None:
+        if export:
+            raise NotImplementedError(
+                "CppFakeTensorMode does not support export=True yet"
+            )
+
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(
-            FakeTensorConverter(copy_data=copy_data, export=export, cpp_fakes=True),
+            FakeTensorConverter(copy_data=copy_data, cpp_fakes=True),
             shape_env,
             creation_traceback=CapturedTraceback.extract(),
         )
@@ -1081,10 +1075,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     ) -> None:
         # HOP backward caches reuse metadata hashing without the Python dispatch cache.
         FakeTensorMode._prep_args_for_hash(self, result, args, state, id_hashed_objects)
-
-    def reset_nt_tensor_id_counter(self) -> None:
-        # C++ fake modes do not maintain a NestedTensor id counter.
-        pass
 
     def maybe_run_unsafe_fallback(
         self,
@@ -1148,11 +1138,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
     ) -> Tensor:
+        if pytype not in (None, Tensor):
+            raise NotImplementedError(
+                f"C++ fake tensors of type {pytype} are not supported yet"
+            )
         out = torch._C._from_meta_and_device(t, torch.device(device), self)
-        # Guard metadata belongs to this Python object, like FakeTensor.pytype;
-        # new tensors produced by detach/clone do not inherit it.
-        if pytype is not None:
-            out._fake_pytype = pytype
         if dispatch_keys is not None:
             torch._C._set_fake_dispatch_keys(out, dispatch_keys)
         return out
@@ -4475,7 +4465,7 @@ def _set_cache_key(
 # Just for use to allow copying a module to fake tensors,
 # does not apply elsewhere
 class FakeCopyMode(TorchFunctionMode):
-    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode) -> None:
         self.fake_mode = fake_mode
 
     def __torch_function__(
@@ -4484,7 +4474,7 @@ class FakeCopyMode(TorchFunctionMode):
         types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] | None = None,
-    ) -> Tensor:
+    ) -> FakeTensor:
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
@@ -4500,7 +4490,7 @@ class FakeCopyMode(TorchFunctionMode):
                     f"Expected 2 args and 0 kwargs for __deepcopy__, got {len(args)} args and {len(kwargs)} kwargs"
                 )
             tensor = cast(Tensor, args[0])
-            memo = cast(dict[int, Tensor], args[1])
+            memo = cast(dict[int, FakeTensor], args[1])
 
             if id(tensor) in memo:
                 return memo[id(tensor)]

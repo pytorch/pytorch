@@ -94,7 +94,7 @@ bool may_turn_const(const Tensor& t) {
 }
 
 Tensor fake_detach(const Tensor& self) {
-  return fake_tensor_data(
+  return fake_shallow_copy(
       self, /*version_counter=*/0, /*allow_tensor_metadata_change=*/false);
 }
 
