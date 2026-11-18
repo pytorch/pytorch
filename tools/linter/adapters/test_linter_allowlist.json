@@ -487,7 +487,6 @@
   "test/mobile/test_upgrader_codegen.py",
   "test/nn/test_convolution.py",
   "test/nn/test_pooling.py",
-  "test/optim/test_swa_utils.py",
   "test/package/test_analyze.py",
   "test/package/test_dependency_api.py",
   "test/package/test_directory_reader.py",
