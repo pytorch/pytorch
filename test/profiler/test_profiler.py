@@ -1317,25 +1317,20 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    @unittest.skipIf(IS_WINDOWS, "uses libc exit() through ctypes")
     @parametrize("stop", [False, True])
     def test_global_profiler_left_running_at_exit(self, stop):
-        # The first global session registers a std::atexit handler that closes
-        # the session before Kineto and the global profiler state are destroyed.
-        script = f"""
-import torch
-from torch.profiler import profile, ProfilerActivity
-config = torch._C._profiler._ExperimentalConfig(profile_all_threads=True)
-p = profile(activities=[ProfilerActivity.CPU], experimental_config=config)
-p.start()
-torch.ones(10) * 2
-if {stop}:
-    p.stop()
-"""
+        # A worker thread keeps dispatching ops while static destructors run.
+        # Without the std::atexit close, its callbacks reach destroyed Kineto
+        # and profiler state.
+        loc = os.path.dirname(os.path.abspath(__file__))
+        cmd = [sys.executable, f"{loc}/global_profiler_exit.py"]
+        if stop:
+            cmd.append("--stop")
         env = {**os.environ, "TORCH_CPP_LOG_LEVEL": "WARNING"}
-        proc = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True, env=env
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "True", "worker finished before exit")
         warning = "Process is exiting without stopping the profiler"
         self.assertEqual(proc.stderr.count(warning), int(not stop), proc.stderr)
 
