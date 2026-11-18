@@ -3,7 +3,7 @@
 Two functions of ``nn.Module`` sit in front of nearly everything a model does:
 ``Module.__call__``, which calls ``forward`` unless the module has hooks, and
 ``Module.__getattr__``, which finds parameters, buffers and submodules in
-three dicts. The runtime of ``torch.cfg_compile`` can skip both: this module
+three dicts. The runtime of ``torch.vm`` can skip both: this module
 tells it under which conditions and to what effect.
 
 What is said here restates the source of those functions, so it is only
