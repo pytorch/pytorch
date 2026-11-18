@@ -119,6 +119,7 @@ struct CUDACachingHostAllocatorImpl
       // as it is freed, and inserts its own entry.
       use_host_register.erase(ptr);
     }
+    at::cuda::CUDAStreamCaptureModeGuard capture_mode{cudaStreamCaptureModeRelaxed};
     if (use_register) {
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
