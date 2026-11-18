@@ -5490,16 +5490,26 @@ class TestCfgRegions(TestCase):
 
         expected_state, expected_losses, _, _ = train(False)
         state, losses, nodes, step = train(True)
-        self.assertEqual(losses, expected_losses)
-        # Parameters, and the running statistics the forward updates in place.
-        for name, value in state.items():
-            self.assertTrue(torch.equal(value, expected_state[name]), name)
+        if optimizer == "sgd":
+            self.assertEqual(losses, expected_losses)
+            # Parameters, and the running statistics the forward updates in
+            # place.
+            for name, value in state.items():
+                self.assertTrue(torch.equal(value, expected_state[name]), name)
+        else:
+            # The update of Adam is a graph of its own, in which the
+            # corrections for the first steps are float32 where the
+            # interpreter has Python floats: a last digit apart, which Adam
+            # makes a step of where a gradient is zero but for rounding (the
+            # bias of a convolution in front of a batch norm).
+            self.assertEqual(losses, expected_losses, rtol=1e-3, atol=1e-4)
         self.assertEqual(state["bn.num_batches_tracked"].item(), 10)
         # Forward and loss became one graph whose backward was traced ahead
         # of time; the engine runs it as a single node.
         self.assertEqual(nodes[-1], "CompiledFunctionBackward")
-        (region,) = self.compiled_regions(step)
-        self.assertTrue(region["where"].startswith("region_step"))
+        where = sorted(r["where"].split(" (")[0] for r in self.compiled_regions(step))
+        update = "SGD.step" if optimizer == "sgd" else "Adam.step"
+        self.assertEqual(where, [update, "region_step"])
         # What a graph cannot hold stayed with the VM, each for its reason.
         reasons = " / ".join(self.left_to_vm(step, "region_step"))
         self.assertIn("Tensor.backward has an effect", reasons)
@@ -6180,12 +6190,75 @@ class TestCfgRegions(TestCase):
         for _ in range(8):
             step(model, opt, torch.randn(4, 3, 6, 6), torch.randint(0, 5, (4,)))
         callees = step.stats()["compiled_callees"]
-        self.assertIn("Adam.step", callees)
+        self.assertIn("_engine_run_backward", callees)
         where = {r["where"].split(" (")[0] for r in torch.rewrite.regions(step)}
         self.assertIn("region_step", where)
-        # The optimizer is compiled by the VM, but nothing in it is a region.
-        plumbing = ("Adam", "Optimizer", "_single_tensor", "_multi_tensor", "adam")
+        # The front end of autograd is compiled by the VM, but nothing in
+        # it is a region. The update of the optimizer is tensor work.
+        plumbing = ("_engine_run_backward", "_make_grads", "backward")
         self.assertEqual([w for w in where if w.startswith(plumbing)], [])
+        self.assertIn("Adam.step", where)
+
+    @parametrize("optimizer", ("sgd", "adam"))
+    def test_the_update_of_an_optimizer_is_a_graph(self, optimizer):
+        def train(compile_step):
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(6, 8), torch.nn.Tanh(), torch.nn.Linear(8, 5)]
+            model = torch.nn.Sequential(*layers)
+            if optimizer == "sgd":
+                opt = torch.optim.SGD(
+                    model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4
+                )
+            else:
+                opt = torch.optim.Adam(model.parameters(), lr=0.01)
+            step = region_step
+            if compile_step:
+                step = torch.rewrite(
+                    step, passes=with_graphs("aot_eager"), fallback=False
+                )
+            for i in range(12):
+                if i == 8:
+                    # Another rate is another graph, not the old one's.
+                    opt.param_groups[0]["lr"] *= 0.5
+                step(model, opt, torch.randn(4, 6), torch.randint(0, 5, (4,)))
+            return model.state_dict(), step
+
+        expected, _ = train(False)
+        state, step = train(True)
+        for name, value in state.items():
+            self.assertEqual(value, expected[name], rtol=1e-4, atol=1e-6, msg=name)
+        update = "SGD.step" if optimizer == "sgd" else "Adam.step"
+        compiled = {r["where"].split(" (")[0]: r for r in self.compiled_regions(step)}
+        self.assertEqual(compiled[update]["variants"], 2)
+
+    def test_other_numbers_on_each_of_the_first_calls_get_no_graph(self):
+        def scaled(model, x, rate):
+            return model(x) * rate + rate
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        graphs = []
+        passes = with_graphs(self.counting(graphs))
+        compiled = torch.rewrite(scaled, passes=passes, fallback=False)
+        with torch.no_grad():
+            for i in range(10):
+                rate = 0.5 / (i + 1)
+                self.assertEqual(compiled(model, x, rate), scaled(model, x, rate))
+        # A rate that is another on every call (one on a schedule) is in no
+        # graph: the one there is, is the model's.
+        self.assertEqual(len(graphs), 1)
+        left = [r for r in torch.rewrite.regions(compiled) if r["state"] == "vm"]
+        reasons = {r["reason"] for r in left if "scaled" in r["where"]}
+        self.assertIn("its inputs take ever new values", reasons)
+        # Two rates that come again are two graphs.
+        graphs.clear()
+        compiled = torch.rewrite(scaled, passes=passes, fallback=False)
+        with torch.no_grad():
+            for i in range(10):
+                rate = (0.5, 0.25)[i % 2]
+                self.assertEqual(compiled(model, x, rate), scaled(model, x, rate))
+        self.assertEqual(len(graphs), 2)
 
     def test_a_graph_is_made_for_the_default_device_it_runs_under(self):
         def made(x):
