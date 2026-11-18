@@ -1,6 +1,6 @@
-//! What a user's library of passes looks like: see test_rewrite.py.
+//! What a user's library of passes looks like: see test_vm.py.
 
-use torch_rewrite_pass::{export_passes, Bound, Error, Pass, Region};
+use torch_vm_pass::{export_passes, Bound, Error, Pass, Region};
 
 /// Replaces x * rsqrt(mean(x ** 2) + eps) by the kernel it is bound to.
 #[derive(Default)]
