@@ -3,6 +3,9 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/core/SymNodeImpl.h>
 
+#include <atomic>
+#include <mutex>
+
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/pybind.h>
@@ -13,6 +16,7 @@ TORCH_PYTHON_API py::handle get_symint_class();
 TORCH_PYTHON_API py::handle get_symfloat_class();
 TORCH_PYTHON_API py::handle get_symbool_class();
 TORCH_PYTHON_API py::handle get_dynint_class();
+TORCH_PYTHON_API void initSymNodeCache(py::module_& module);
 
 // NB: These functions must not be called too early, otherwise torch not setup.
 // Alternate design is to have torch "register" the object to us
@@ -31,21 +35,21 @@ inline bool is_dynint(py::handle obj) {
 
 namespace impl {
 
-// This c10::SymNodeImpl simply backends to a Python object that
-// implements the API.   The Python object is the source of truth,
-// this is just an adapter so C++ calls can get to the object.
-class PythonSymNodeImpl : public c10::SymNodeImpl {
- public:
-  PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
-    pyobj_ = std::make_shared<c10::SafePyObject>(
-        pyobj.release().ptr(), getPyInterpreter());
-  }
+struct SymNodeCache;
+struct SymNodeCacheData;
 
-  c10::SymNode wrap_int(int64_t num) override {
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr("wrap_int")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
-  }
+// This c10::SymNodeImpl simply backends to a Python object that
+// implements the API. Cached nodes snapshot immutable expression, type and hint
+// fields; mutable ShapeEnv state is tracked by cache invalidation.
+class TORCH_PYTHON_API PythonSymNodeImpl : public c10::SymNodeImpl {
+ public:
+  explicit PythonSymNodeImpl(py::object pyobj);
+  PythonSymNodeImpl(
+      std::shared_ptr<SymNodeCache> cache,
+      std::shared_ptr<SymNodeCacheData> data,
+      std::shared_ptr<c10::SafePyObject> shape_env);
+
+  c10::SymNode wrap_int(int64_t num) override;
 
   c10::SymNode wrap_float(double num) override {
     py::gil_scoped_acquire acquire;
@@ -84,20 +88,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("bool_")().is(py::handle(Py_True));
   }
 
-  bool is_int() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("is_int")().is(py::handle(Py_True));
-  }
+  bool is_int() override;
 
-  bool is_float() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("is_float")().is(py::handle(Py_True));
-  }
+  bool is_float() override;
 
-  bool is_bool() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("is_bool")().is(py::handle(Py_True));
-  }
+  bool is_bool() override;
 
   bool is_nested_int() const override {
     py::gil_scoped_acquire acquire;
@@ -161,15 +156,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("int_")().cast<int64_t>();
   }
 
-  std::optional<int64_t> maybe_as_int() override {
-    py::gil_scoped_acquire acquire;
-    const auto& r = getPyObj().attr("maybe_as_int")();
-    if (r.is_none()) {
-      return std::nullopt;
-    } else {
-      return r.cast<int64_t>();
-    }
-  }
+  std::optional<int64_t> maybe_as_int() override;
 
   std::string str() override {
     py::gil_scoped_acquire acquire;
@@ -194,13 +181,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return c10::make_intrusive<PythonSymNodeImpl>(r);
   }
 
-  c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
-    auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
-    TORCH_CHECK(pother);
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
-  }
+  c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other);
 
   c10::SymNode dispatch_common_(const char* fname) {
     py::gil_scoped_acquire acquire;
@@ -324,10 +305,17 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__);
   }
 
-  py::handle getPyObj() const {
-    return py::handle(pyobj_->ptr(getPyInterpreter()));
-  }
-  std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
+  py::handle getPyObj() const;
+
+ private:
+  bool init_cache_();
+  mutable std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
+  std::shared_ptr<SymNodeCache> cache_;
+  std::shared_ptr<SymNodeCacheData> data_;
+  std::shared_ptr<c10::SafePyObject> shape_env_;
+  mutable std::mutex init_mutex_;
+  mutable std::atomic<bool> pyobj_ready_{false};
+  std::atomic<bool> cache_ready_{false};
 };
 
 } // namespace impl
