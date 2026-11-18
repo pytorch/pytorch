@@ -42,6 +42,35 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    @parametrize("layout", ("dense", "rowgap", "strided"))
+    def test_callable_without_name(self, device: str, layout: str) -> None:
+        from functools import partial
+
+        import cutlass
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        with torch.backends.python_native.cutedsl.disabled():
+            base = torch.arange(128, device=device, dtype=torch.float32).reshape(8, 16)
+            x = base[:, ::2] if layout == "strided" else base[:, :8]
+            if layout == "dense":
+                x = x.contiguous()
+            fn = partial(ops.get_fn("_mul"), y=2.0)
+            (actual,) = kernel.run(
+                fn,
+                ("unnamed_callable",),
+                1,
+                1,
+                (),
+                cutlass.Float32,
+                [x],
+                (x.dtype,),
+                load="direct",
+            )
+            self.assertEqual(actual, x * 2)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     def test_supplied_output_index_span(self, device: str) -> None:
         import cutlass
 
@@ -187,8 +216,8 @@ class TestPointwiseKernel(TestCase):
             return x + x.__class__(i)
 
         with torch.backends.python_native.cutedsl.disabled():
-            x = torch.full((4,), 1.5, device=device, dtype=torch.float32)
-            expected = x + torch.arange(4, device=device)
+            x = torch.full((3, 2), 1.5, device=device, dtype=torch.float32).t()
+            expected = x + torch.arange(6, device=device).reshape(2, 3)
         (actual,) = kernel.run(
             indexed,
             ("indexed_input",),
@@ -375,33 +404,45 @@ class TestPointwiseKernel(TestCase):
         from torch._native.cutedsl.dtypes import torch2cute
         from torch._native.ops.pointwise import kernel, ops
 
+        count = None
         with torch.backends.python_native.cutedsl.disabled():
-            x = torch.arange(128, device=device, dtype=torch.float32).reshape(8, 16)[
-                :, :8
-            ]
-            expected = -x
-        for transposed in (False, True, False):
-            out = torch.empty((8, 8), device=device)
-            if transposed:
-                out = out.t()
-            strides = out.stride()
-            (actual,) = kernel.run(
-                ops.get_fn("_neg"),
-                ("rowgap_output", tuple(x.shape)),
-                1,
-                1,
-                (),
-                torch2cute[x.dtype],
-                [x],
-                (x.dtype,),
-                out=[out],
-                ept=ept,
-                load="direct",
-            )
-            self.assertIs(actual, out)
-            self.assertEqual(out.stride(), strides)
-            with torch.backends.python_native.cutedsl.disabled():
-                self.assertEqual(actual, expected, atol=0, rtol=0)
+            for rows, cols, pitch in (
+                (8, 8, 16),
+                (12, 16, 20),
+                (4, 12, 24),
+                (5, 8, 9),
+                (8, 8, 16),
+            ):
+                x = torch.arange(
+                    rows * pitch, device=device, dtype=torch.float32
+                ).reshape(rows, pitch)[:, :cols]
+                expected = -x
+                for transposed in (False, True, False):
+                    out = torch.empty(
+                        (cols, rows) if transposed else (rows, cols), device=device
+                    )
+                    if transposed:
+                        out = out.t()
+                    strides = out.stride()
+                    (actual,) = kernel.run(
+                        ops.get_fn("_neg"),
+                        ("rowgap_output",),
+                        1,
+                        1,
+                        (),
+                        torch2cute[x.dtype],
+                        [x],
+                        (x.dtype,),
+                        out=[out],
+                        ept=ept,
+                        load="direct",
+                    )
+                    self.assertIs(actual, out)
+                    self.assertEqual(out.stride(), strides)
+                    self.assertEqual(actual, expected, atol=0, rtol=0)
+                if count is None:
+                    count = len(kernel._KERNELS)
+                self.assertEqual(len(kernel._KERNELS), count)
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -438,26 +479,111 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
-    def test_fixed_key_preserves_changing_shapes(self, device: str) -> None:
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    @parametrize("name", ("sin", "add"))
+    def test_dense_presets_reuse_changing_shapes(
+        self, device: str, dtype: torch.dtype, name: str
+    ) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
         from torch._native.ops.pointwise import kernel, ops
 
-        for size in (64, 256, 1024, 128, 32, 0, 64):
-            x = torch.arange(size, device=device, dtype=torch.float32)
-            with torch.backends.python_native.cutedsl.disabled():
-                expected = -x
+        ct = torch2cute[torch.float64 if dtype is torch.float64 else torch.float32]
+        with torch.backends.python_native.cutedsl.disabled():
+            before = len(kernel._KERNELS)
+            for size in (64, 256, 8 * 1024**2, 4 * 1024**2, 1024, 0, 64):
+                x = torch.randn(size, device=device, dtype=dtype)
+                inputs = [x, x] if name == "add" else [x]
+                expected = getattr(torch, name)(*inputs)
+                (actual,) = kernel.run(
+                    ops.get_fn("_" + name),
+                    ("changing_shape",),
+                    len(inputs),
+                    1,
+                    (ct(1),) if name == "add" else (),
+                    ct,
+                    inputs,
+                    (dtype,),
+                )
+                self.assertEqual(actual.shape, expected.shape)
+                self.assertEqual(actual, expected)
+                limit = 1 if name == "sin" and dtype is not torch.float16 else 2
+                self.assertLessEqual(len(kernel._KERNELS) - before, limit)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("cols", (1024, 1028, 4096))
+    def test_rowgap_wide_preset_handles_vector_tails(
+        self, device: str, cols: int
+    ) -> None:
+        import cutlass
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        with torch.backends.python_native.cutedsl.disabled():
+            rows = 4096 if cols == 4096 else 2048
+            x, y = [
+                torch.randn(rows, cols + 16, device=device, dtype=torch.float16)[
+                    :, :cols
+                ]
+                for _ in range(2)
+            ]
+            expected = x + y
             (actual,) = kernel.run(
-                ops.get_fn("_neg"),
-                ("changing_shape",),
+                ops.get_fn("_add"),
+                ("rowgap_tail",),
+                2,
                 1,
-                1,
-                (),
-                torch2cute[x.dtype],
-                [x],
+                (cutlass.Float32(1),),
+                cutlass.Float32,
+                [x, y],
                 (x.dtype,),
             )
-            self.assertEqual(actual.shape, expected.shape)
-            self.assertEqual(actual, expected, atol=0, rtol=0)
+            self.assertEqual(actual, expected)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    def test_generic_kernel_reuses_collapsed_runtime_layouts(self, device: str) -> None:
+        import cutlass
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        def view(shape: tuple[int, ...], strides: tuple[int, ...]) -> torch.Tensor:
+            span = sum((n - 1) * s for n, s in zip(shape, strides)) + 1
+            return torch.randn(span + 2, device=device).as_strided(shape, strides, 1)
+
+        cases = (
+            ((7,), (2,), (1,), (1,), (4,)),
+            ((5, 7), (19, 2), (1, 7), (0, 3), (1, 8)),
+            ((2, 3, 5), (55, 17, 2), (2, 1, 5), (23, 0, 3), (49, 1, 7)),
+            ((), (), (), (), ()),
+            ((1,) * 30 + (3, 5), (0,) * 30 + (13, 2), (1,), (1,), (0,) * 30 + (17, 3)),
+        )
+        count = None
+        with torch.backends.python_native.cutedsl.disabled():
+            for shape, strides, rhs_shape, rhs_strides, out_strides in cases * 2:
+                x, y, out = (
+                    view(shape, strides),
+                    view(rhs_shape, rhs_strides),
+                    view(shape, out_strides),
+                )
+                expected = x + y
+                (actual,) = kernel.run(
+                    ops.get_fn("_add"),
+                    ("runtime_layouts",),
+                    2,
+                    1,
+                    (cutlass.Float32(1),),
+                    cutlass.Float32,
+                    [x, y],
+                    (torch.float32,),
+                    out=[out],
+                    load="direct",
+                )
+                self.assertIs(actual, out)
+                self.assertEqual(actual, expected)
+                if count is None:
+                    count = len(kernel._KERNELS)
+                self.assertEqual(len(kernel._KERNELS), count)
 
     @onlyCUDA
     @skipIfNoCuteDSL
