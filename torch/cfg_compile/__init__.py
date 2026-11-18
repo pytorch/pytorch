@@ -156,6 +156,7 @@ def cfg_compile(
     fallback: bool = True,
     specialize: bool = True,
     skip_autograd: bool = True,
+    unboxed: bool = True,
     max_versions: int = 4,
     max_respecializations: int = 6,
 ) -> Any:
@@ -174,6 +175,9 @@ def cfg_compile(
         skip_autograd: let a call site enter below the Autograd kernel when
             the call it was captured from tracked no gradient. Such a site is
             guarded on that still being the case.
+        unboxed: keep the tensors that kernels return without a Python object
+            until Python code needs one. A tensor that only flows from one
+            kernel call into others then never gets one.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -187,6 +191,7 @@ def cfg_compile(
         "fallback": fallback,
         "specialize": specialize,
         "skip_autograd": skip_autograd,
+        "unboxed": unboxed,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
     }
@@ -209,6 +214,7 @@ def cfg_compile(
             list(pipeline.passes),
             specialize=specialize,
             skip_autograd=skip_autograd,
+            unboxed=unboxed,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
