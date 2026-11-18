@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
@@ -5202,6 +5203,7 @@ from user code:
         self.assertNotIn("SystemError", warned)
         self.assertEqual(len(logs.output), 2, warned)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # RootGuardManager disables TorchFunction while its accessors run and
         # restores it on scope exit, so a tree that THROWS out of C++ leaves the
@@ -5275,6 +5277,7 @@ from user code:
         )
         self.assertEqual(torch._C._get_torch_function_state(), state)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
         # load_compiled_function returns an AOTCompiledFunction, whose guard
         # check evaluates the same kind of tree, so a C++ throw without the
@@ -5356,6 +5359,7 @@ from user code:
         self.assertTrue(advice.endswith(caveat), advice)
         self.assertNotIn("Every guard tree raised", message)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_no_match_message_resets_relational_guards_after_a_cpp_throw(self):
         # TENSOR_MATCH on a strided nested tensor throws after checking x.
         # Both dispatch passes must report y, without stale tensor-alias state.
@@ -7912,8 +7916,7 @@ from user code:
         (captured,) = model.forward.compiled_results
         return model, load_guards_state(captured._artifacts.guards_state).output_graph
 
-    def _reload_filtered_module(self, model, module):
-        data = model._save_aot_compiled_module()
+    def _load_filtered_module(self, data, module):
         torch._dynamo.reset()
         loaded = torch.compile(module, backend="eager", fullgraph=True)
         loaded._load_aot_compiled_module(data)
@@ -7944,7 +7947,7 @@ from user code:
         if not retain:
             self.assertNotIn("mapping", state.local_scope)
         self.assertEqual(model(x, mapping), x + 2)
-        loaded = self._reload_filtered_module(model, Module())
+        loaded = self._load_filtered_module(model._save_aot_compiled_module(), Module())
         self.assertEqual(loaded(x, mapping), x + 2)
         reordered = {"b": 3, "a": 2}
         if retain:
@@ -7974,9 +7977,8 @@ from user code:
                 return x + len(tuple(AOT_IMPLICIT_ORDER_ROOT)) + hasattr(self, member)
 
         module = Module()
-        AOT_IMPLICIT_ORDER_ROOT = (
-            module.mapping if member == "mapping" else module._parameters
-        )
+        original = module.mapping if member == "mapping" else module._parameters
+        AOT_IMPLICIT_ORDER_ROOT = original
 
         def guard_filter(entries):
             return [
@@ -8002,16 +8004,11 @@ from user code:
             AOT_IMPLICIT_ORDER_ROOT = changed._parameters
         with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
             captured(changed, x)
-        AOT_IMPLICIT_ORDER_ROOT = (
-            module.mapping if member == "mapping" else module._parameters
-        )
+        AOT_IMPLICIT_ORDER_ROOT = original
         data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-        loaded = torch.compile(Module(), backend="eager", fullgraph=True)
-        loaded._load_aot_compiled_module(data)
+        loaded = self._load_filtered_module(data, Module())
         self.assertEqual(loaded(x), x + 3)
-        invalid = torch.compile(changed, backend="eager", fullgraph=True)
-        invalid._load_aot_compiled_module(data)
+        invalid = self._load_filtered_module(data, changed)
         if member == "weight":
             AOT_IMPLICIT_ORDER_ROOT = changed._parameters
         with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
@@ -8093,16 +8090,15 @@ from user code:
             {source.name for source in state.guard_on_key_order},
             {"L['mapping']['inner']"} if mapping_type is dict else set(),
         )
-        self.assertEqual(model(x, mapping), x + 3)
         invalid = {"inner": mapping_type({2: None})}
-        if mapping_type is dict:
-            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
-                model(x, invalid)
-        loaded = self._reload_filtered_module(model, Module())
-        self.assertEqual(loaded(x, mapping), x + 3)
-        if mapping_type is dict:
-            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
-                loaded(x, invalid)
+        loaded = self._load_filtered_module(model._save_aot_compiled_module(), Module())
+        for compiled in (model, loaded):
+            self.assertEqual(compiled(x, mapping), x + 3)
+            if mapping_type is dict:
+                with self.assertRaisesRegex(
+                    RuntimeError, "No AOT compiled graph matched"
+                ):
+                    compiled(x, invalid)
 
     def _assert_forward_refused(self, mod, namespace, reason):
         # Both halves of a refusal, each on the artifact that can show it: the

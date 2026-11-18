@@ -707,10 +707,19 @@ class TpReprTests(TestCase):
             return x + 1, s.isdigit()
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "FakeIdVariable"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Conversion of compile-time-only hash value"
+        ):
             compiled(torch.randn(4))
         x = torch.randn(4)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+        def index_of_hash(x):
+            first, second = Obj(), Obj()
+            return x + [hash(first), hash(second)].index(hash(second))
+
+        compiled = torch.compile(index_of_hash, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), index_of_hash(x))
 
     def test_object_repr_placeholder_address(self):
         # Sourced and compile-time objects both get the placeholder address,
