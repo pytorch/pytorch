@@ -9,6 +9,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -128,6 +130,18 @@ T wait_or_abort(std::future<T>& future) {
   return future.get();
 }
 
+// Returns the message of the std::runtime_error fn throws, as every
+// AOTI_RUNTIME_CHECK does, or "" if it throws none.
+template <typename Fn>
+std::string runtime_error_of(Fn&& fn) {
+  try {
+    fn();
+  } catch (const std::runtime_error& e) {
+    return e.what();
+  }
+  return "";
+}
+
 [[nodiscard]] Pool::Lease checkout(Pool& pool, Stream stream = nullptr) {
   auto future =
       std::async(std::launch::async, [&] { return pool.checkout(stream); });
@@ -136,7 +150,7 @@ T wait_or_abort(std::future<T>& future) {
 
 // Starts a checkout that should block on the pool's condition variable. Nothing
 // signals from inside that wait, so this checks only that the checkout hasn't
-// returned kBlocked after its thread called it.
+// returned within kBlocked of its thread calling it.
 constexpr auto kBlocked = std::chrono::milliseconds(100);
 
 std::future<Pool::Lease> blocked_checkout(Pool& pool) {
@@ -186,7 +200,7 @@ TEST(ModelPoolTest, WaitsForOldestInFlightRun) {
 }
 
 // A checkout that finds no available model reclaims every finished run, oldest
-// first, so it reuses the most recently launched one.
+// first, so it reuses the most recently launched finished run.
 TEST(ModelPoolTest, ReusesNewestFinishedRun) {
   TestPool t(3);
   FakeModel* oldest = start_run(t.pool);
@@ -205,7 +219,11 @@ TEST(ModelPoolTest, FailedRunWakesWaitingCheckout) {
   TestPool t(1);
   auto failed_run = checkout(t.pool);
   auto waiter = blocked_checkout(t.pool);
-  EXPECT_THROW(fail_run(std::move(failed_run)), std::runtime_error);
+  // On another thread, so that the test aborts instead of hanging if dropping
+  // the lease waits for the run's device work, which never finishes here.
+  auto failing =
+      std::async(std::launch::async, [&] { fail_run(std::move(failed_run)); });
+  EXPECT_EQ(runtime_error_of([&] { wait_or_abort(failing); }), "run failed");
   EXPECT_EQ(model_of(wait_or_abort(waiter)), t.models[0]);
 }
 
@@ -214,7 +232,8 @@ TEST(ModelPoolTest, FailedRunWakesWaitingCheckout) {
 TEST(ModelPoolTest, DeviceFailureReturnsModelToPool) {
   TestPool t(1);
   start_run(t.pool)->fail();
-  EXPECT_THROW((void)checkout(t.pool), std::runtime_error);
+  EXPECT_EQ(
+      runtime_error_of([&] { (void)checkout(t.pool); }), "device failure");
   EXPECT_EQ(model_of(checkout(t.pool)), t.models[0]);
 }
 
@@ -222,8 +241,12 @@ TEST(ModelPoolTest, LeaseMarksInFlightOnlyOnce) {
   TestPool t(1);
   auto lease = checkout(t.pool);
   lease.mark_in_flight();
-  EXPECT_THROW(lease.mark_in_flight(), std::runtime_error);
-  EXPECT_THROW(lease.operator->(), std::runtime_error);
+  EXPECT_EQ(
+      runtime_error_of([&] { lease.mark_in_flight(); }),
+      "The lease no longer holds a model");
+  EXPECT_EQ(
+      runtime_error_of([&] { (void)lease.operator->(); }),
+      "The lease no longer holds a model");
 }
 
 TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
@@ -232,8 +255,10 @@ TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
   {
     auto lease = checkout(t.pool);
     holder.emplace(std::move(lease));
-    // NOLINTNEXTLINE(bugprone-use-after-move)
-    EXPECT_THROW(lease.operator->(), std::runtime_error);
+    EXPECT_EQ(
+        // NOLINTNEXTLINE(bugprone-use-after-move)
+        runtime_error_of([&] { (void)lease.operator->(); }),
+        "The lease no longer holds a model");
   }
   auto waiter = blocked_checkout(t.pool);
   holder.reset();
@@ -271,7 +296,9 @@ TEST(ModelPoolTest, DeviceFailureClearsStreamBinding) {
   TestPool t(1);
   t.pool.set_use_stream_affinity(true);
   start_run(t.pool, stream_handle(1))->fail();
-  EXPECT_THROW((void)checkout(t.pool, stream_handle(1)), std::runtime_error);
+  EXPECT_EQ(
+      runtime_error_of([&] { (void)checkout(t.pool, stream_handle(1)); }),
+      "device failure");
   EXPECT_EQ(
       t.pool.get_stream_affinity_model_index(stream_handle(1)),
       AOTI_STREAM_AFFINITY_UNBOUND);
