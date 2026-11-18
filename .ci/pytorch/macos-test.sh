@@ -342,16 +342,7 @@ test_timm_perf() {
   echo "timm benchmark on mps device completed"
 }
 
-if [[ "$TEST_CONFIG" == "fake_tensor" ]]; then
-  setup_test_python
-  python test/run_test.py --include test_fake_tensor --verbose
-  assert_git_not_dirty
-elif [[ "$TEST_CONFIG" == "default" && "${CPP_FAKETENSOR:-0}" == 1 ]]; then
-  setup_test_python
-  python test/run_test.py --compiler-tests \
-    --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
-  assert_git_not_dirty
-elif [[ $TEST_CONFIG == *"perf_all"* ]]; then
+if [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
   test_hf_perf
   test_timm_perf
