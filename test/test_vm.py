@@ -28,14 +28,23 @@ from torch.utils._python_dispatch import TorchDispatchMode
 # dynamo test configurations interpose on exactly that.
 UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
 
-# The Rust runtime is only in builds made with USE_CFG_COMPILE=1, and only
+# The Rust runtime is only in builds made with USE_TORCH_VM=1, and only
 # understands CPython 3.12 bytecode.
 try:
     cfg_rs = importlib.import_module("torch._cfg_rs")
 except ImportError:
     cfg_rs = None
 HAS_RUNTIME = UNDISTURBED and cfg_rs is not None and sys.version_info[:2] == (3, 12)
-Pipeline = torch.cfg_compile.Pipeline
+P = torch.vm.passes
+DEFAULT = torch.vm.DEFAULT_PASSES
+# The default passes over the control-flow graph, which the tests of one pass over a block keep.
+CFG = tuple(p for p in DEFAULT if p.kind == "cfg")
+
+
+def narrowing():
+    """The default passes with NarrowDims in front of Fold."""
+    at = DEFAULT.index(P.Fold())
+    return (*DEFAULT[:at], P.NarrowDims(), *DEFAULT[at:])
 
 
 def block_stats(fn, key):
@@ -403,7 +412,7 @@ class TestCallSite(TestCase):
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
 class TestDispatchCapture(TestCase):
-    """The dispatcher hook that cfg_compile records kernels with."""
+    """The dispatcher hook that torch.vm records kernels with."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -634,8 +643,8 @@ PY_FUNCTIONS = [
 ]
 
 
-@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
-class TestCfgFrontend(TestCase):
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmFrontend(TestCase):
     """Bytecode -> SSA graph, and the generic tier that runs it."""
 
     hw_classification = HardwareClassification.GENERIC
@@ -683,7 +692,7 @@ class TestCfgFrontend(TestCase):
             except Exception as e:
                 return type(e), str(e)
 
-        compiled = torch.cfg_compile(fn, fallback=False)
+        compiled = torch.vm(fn, fallback=False)
         for _ in range(2):
             self.assertEqual(outcome(compiled), outcome(fn))
 
@@ -696,7 +705,7 @@ class TestCfgFrontend(TestCase):
                     x = x + 2
             return x
 
-        text = torch.cfg_compile(f, fallback=False).dump()
+        text = torch.vm(f, fallback=False).dump()
         self.assertIn("phi", text)
         self.assertIn("br_exhausted", text)
         self.assertIn("binary - ", text)
@@ -706,7 +715,7 @@ class TestCfgFrontend(TestCase):
         def f(a, b=2, *args, c=3, **kw):
             return a, b, args, c, sorted(kw.items())
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         for args, kwargs in [
             ((1,), {}),
             ((1, 5, 6, 7), {}),
@@ -725,7 +734,7 @@ class TestCfgFrontend(TestCase):
         def fact(n):
             return k if n <= 1 else n * compiled(n - 1)
 
-        compiled = torch.cfg_compile(fact, fallback=False)
+        compiled = torch.vm(fact, fallback=False)
         self.assertEqual(compiled(5), 360)
 
     def test_exceptions(self):
@@ -739,7 +748,7 @@ class TestCfgFrontend(TestCase):
                 return a
             return math.sqrt(a)
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         self.assertEqual(compiled(4), 2.0)
         with self.assertRaisesRegex(ValueError, "negative"):
             compiled(-1)
@@ -752,7 +761,7 @@ class TestCfgFrontend(TestCase):
         # source.
         namespace = {}
         exec("def checked(a):\n    assert a != 1, 'not one'\n    return a\n", namespace)
-        compiled = torch.cfg_compile(namespace["checked"], fallback=False)
+        compiled = torch.vm(namespace["checked"], fallback=False)
         self.assertEqual(compiled(2), 2)
         with self.assertRaisesRegex(AssertionError, "not one"):
             compiled(1)
@@ -762,7 +771,7 @@ class TestCfgFrontend(TestCase):
             z = x + 1
             return z @ y
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         for _ in range(3):
             try:
                 compiled(torch.randn(2, 3), torch.randn(2, 3))
@@ -779,14 +788,14 @@ class TestCfgFrontend(TestCase):
             except RuntimeError:
                 return x
 
-        with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "try/except"):
-            torch.cfg_compile(f, fallback=False)
-        self.assertTrue(torch.cfg_compile.is_available())
+        with self.assertRaisesRegex(torch.vm.Unsupported, "try/except"):
+            torch.vm(f, fallback=False)
+        self.assertTrue(torch.vm.is_available())
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            self.assertIs(torch.cfg_compile(f), f)
+            self.assertIs(torch.vm(f), f)
         self.assertIn(
-            "left f uncompiled", str(caught[0].message).replace(f.__qualname__, "f")
+            "left f as it is", str(caught[0].message).replace(f.__qualname__, "f")
         )
 
     def test_methods_and_modules(self):
@@ -800,22 +809,22 @@ class TestCfgFrontend(TestCase):
 
         m = M()
         x = torch.randn(3)
-        for compiled in (torch.cfg_compile(m), torch.cfg_compile(m.forward)):
+        for compiled in (torch.vm(m), torch.vm(m.forward)):
             for _ in range(3):
                 self.assertEqual(compiled(x), m(x))
 
 
-instantiate_parametrized_tests(TestCfgFrontend)
+instantiate_parametrized_tests(TestVmFrontend)
 
 
-@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
-class TestCfgCompile(TestCase):
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmDevices(TestCase):
     """Profiling on real tensors and direct kernel calls."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
     def assertCompiledEqual(self, fn, argsets, **kwargs):
-        compiled = torch.cfg_compile(fn, fallback=False, **kwargs)
+        compiled = torch.vm(fn, fallback=False, **kwargs)
         for args in argsets:
             self.assertEqual(compiled(*args), fn(*args))
         return compiled
@@ -897,7 +906,7 @@ class TestCfgCompile(TestCase):
                 y = y + 1
             return (y * y).sum()
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         with torch.no_grad():
             for _ in range(2):
                 compiled(
@@ -920,7 +929,7 @@ class TestCfgCompile(TestCase):
         def f(x, y):
             return x * y
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         x = torch.randn(3, device=device)
         compiled(x, x)
         compiled(x, x.clone().requires_grad_())
@@ -929,7 +938,7 @@ class TestCfgCompile(TestCase):
         self.assertEqual([v["entry_level"] for v in site["variants"]], [1, 0])
         self.assertEqual((site["hits"], site["misses"]), (1, 1))
 
-        strict = torch.cfg_compile(f, fallback=False, skip_autograd=False)
+        strict = torch.vm(f, fallback=False, skip_autograd=False)
         strict(x, x)
         (site,) = strict.sites()
         self.assertEqual([v["entry_level"] for v in site["variants"]], [0])
@@ -943,7 +952,7 @@ class TestCfgCompile(TestCase):
             t.sub_(1)
             return x
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         for _ in range(3):
             a = torch.randn(3, 3, device=device)
             b = torch.randn(3, 3, device=device)
@@ -957,7 +966,7 @@ class TestCfgCompile(TestCase):
         def leaf(x):
             return x.add_(1)
 
-        compiled = torch.cfg_compile(leaf, fallback=False)
+        compiled = torch.vm(leaf, fallback=False)
         x = torch.randn(3, device=device, requires_grad=True)
         for _ in range(3):
             with self.assertRaisesRegex(RuntimeError, "leaf Variable"):
@@ -967,7 +976,7 @@ class TestCfgCompile(TestCase):
         def f(x, y):
             return (x * y + 2).sum()
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         makers = [
             lambda: torch.randn(4, device=device),
             lambda: torch.randn(4, device=device, dtype=torch.float64),
@@ -1010,7 +1019,7 @@ class TestCfgCompile(TestCase):
         def f(x, y):
             return (x + y).relu() * y
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         x, y = torch.randn(3, device=device), torch.randn(3, device=device)
         for _ in range(3):
             compiled(x, y)
@@ -1027,7 +1036,7 @@ class TestCfgCompile(TestCase):
         def f(x, w):
             return x @ w
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         x, w = torch.randn(2, 3, device=device), torch.randn(3, 3, device=device)
         for _ in range(3):
             self.assertEqual(compiled(x, w), f(x, w))
@@ -1046,7 +1055,7 @@ class TestCfgCompile(TestCase):
                 return x
             return compiled(x * 2, n - 1) + 1
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         x = torch.ones(2, device=device)
         self.assertEqual(compiled(x, 3), torch.full((2,), 11.0))
 
@@ -1071,7 +1080,7 @@ class TestCfgCompile(TestCase):
             calls.append(1)
             return x * 2
 
-        compiled = torch.cfg_compile(f, fallback=False)
+        compiled = torch.vm(f, fallback=False)
         x = torch.ones(2, device=device)
         self.assertEqual(compiled(x), x * 2)
         # The function ran once, on the real input: no separate tracing run.
@@ -1079,27 +1088,47 @@ class TestCfgCompile(TestCase):
         self.assertEqual(block_stats(compiled, "versions"), [1])
 
 
-instantiate_device_type_tests(TestCfgCompile, globals())
+instantiate_device_type_tests(TestVmDevices, globals())
 
 
-@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
-class TestCfgPasses(TestCase):
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmPasses(TestCase):
     """The pass pipeline, guards, and recompilation of single blocks."""
 
     hw_classification = HardwareClassification.GENERIC
 
-    def test_pipeline_descriptor(self):
-        default = Pipeline.default()
-        self.assertNotIn("narrow_dims", default.passes)
-        narrowing = Pipeline.narrowing()
-        self.assertEqual(
-            narrowing.passes.index("narrow_dims") + 1, narrowing.passes.index("fold")
-        )
-        self.assertEqual(default.remove("dce").append("dce").passes, default.passes)
-        with self.assertRaisesRegex(ValueError, "unknown pass 'nope'"):
-            torch.cfg_compile(lambda x: x, pipeline=Pipeline(["nope"]))
-        with self.assertRaises(TypeError):
-            Pipeline([3])
+    def test_what_passes_takes(self):
+        self.assertNotIn(P.NarrowDims(), DEFAULT)
+        with self.assertRaisesRegex(TypeError, "passes has a str"):
+            torch.vm(lambda x: x, passes=["fold"])
+        with self.assertRaisesRegex(TypeError, "passes has a int"):
+            torch.vm(lambda x: x, passes=[3])
+        with self.assertRaisesRegex(ValueError, "Fold is given more than once"):
+            torch.vm(lambda x: x, passes=[P.Fold(), P.Fold()])
+        self.assertEqual(repr(P.Fold()), "torch.vm.passes.Fold()")
+
+    def test_passes_are_applied_in_the_order_of_the_list(self):
+        def f(x):
+            return x * 2 + 1
+
+        def run(place):
+            seen = []
+
+            def look(region):
+                seen.append({i["op"] for i in region.instructions()})
+                return False
+
+            passes = [P.ResolveDispatch()]
+            passes.insert(place, look)
+            compiled = torch.vm(f, passes=passes, fallback=False)
+            for _ in range(3):
+                self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 3.0))
+            return seen[0]
+
+        # In front of resolve_dispatch a pass sees what the function wrote, and
+        # behind it the kernel calls that those became.
+        self.assertNotIn("dispatch", run(0))
+        self.assertIn("dispatch", run(1))
 
     def test_generic_tier_only(self):
         def f(x, n):
@@ -1107,18 +1136,18 @@ class TestCfgPasses(TestCase):
                 x = x * 2 + 1
             return x
 
-        compiled = torch.cfg_compile(f, specialize=False, fallback=False)
+        compiled = torch.vm(f, passes=[], fallback=False)
         for _ in range(3):
             self.assertEqual(compiled(torch.ones(2), 3), torch.full((2,), 15.0))
         self.assertEqual(sum(block_stats(compiled, "versions")), 0)
         self.assertEqual(sum(block_stats(compiled, "profile_runs")), 0)
         self.assertNotIn("specialized", compiled.dump())
 
-    def test_without_passes_nothing_is_specialized(self):
+    def test_without_passes_over_a_block_nothing_is_specialized(self):
         def f(x):
             return x + 1
 
-        compiled = torch.cfg_compile(f, pipeline=Pipeline([]), fallback=False)
+        compiled = torch.vm(f, passes=CFG, fallback=False)
         for _ in range(3):
             self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 2.0))
         self.assertEqual(block_stats(compiled, "versions"), [0])
@@ -1132,7 +1161,7 @@ class TestCfgPasses(TestCase):
                 z = z * 2 + 1
             return z
 
-        compiled = torch.cfg_compile(f, pipeline=Pipeline.narrowing(), fallback=False)
+        compiled = torch.vm(f, passes=narrowing(), fallback=False)
 
         def run(n):
             x, y = torch.ones(n, 3), torch.ones(1, 3)
@@ -1167,7 +1196,7 @@ class TestCfgPasses(TestCase):
                 return y.sum()
             return y * 2
 
-        compiled = torch.cfg_compile(f, pipeline=Pipeline.narrowing(), fallback=False)
+        compiled = torch.vm(f, passes=narrowing(), fallback=False)
         for n in (3, 4, 1, 5, 2, 1, 7):
             x = torch.randn(2, n)
             self.assertEqual(compiled(x), f(x))
@@ -1191,8 +1220,9 @@ class TestCfgPasses(TestCase):
         def f(x):
             return x.sum() * x.shape[0]
 
-        pipeline = Pipeline.default().insert_after("tensor_accessors", pin_first_dim)
-        compiled = torch.cfg_compile(f, pipeline=pipeline, fallback=False)
+        passes = list(DEFAULT)
+        passes.insert(passes.index(P.TensorAccessors()) + 1, pin_first_dim)
+        compiled = torch.vm(f, passes=passes, fallback=False)
         for n in (3, 3, 5, 3, 5):
             x = torch.ones(n, 2)
             self.assertEqual(compiled(x), f(x))
@@ -1209,9 +1239,7 @@ class TestCfgPasses(TestCase):
             kept.append(region)
             return False
 
-        compiled = torch.cfg_compile(
-            lambda x: x + 1, pipeline=Pipeline([keep]), fallback=False
-        )
+        compiled = torch.vm(lambda x: x + 1, passes=[*CFG, keep], fallback=False)
         compiled(torch.ones(1))
         with self.assertRaisesRegex(RuntimeError, "only valid while its pass runs"):
             kept[0].instructions()
@@ -1223,9 +1251,7 @@ class TestCfgPasses(TestCase):
         def f(x):
             return x * 3
 
-        compiled = torch.cfg_compile(
-            f, pipeline=Pipeline.default().append(broken), fallback=False
-        )
+        compiled = torch.vm(f, passes=[*DEFAULT, broken], fallback=False)
         for _ in range(3):
             self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 3.0))
         stats = compiled.stats()
