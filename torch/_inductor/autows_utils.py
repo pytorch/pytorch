@@ -32,3 +32,12 @@ def has_two_ctas() -> bool:
     except ImportError:
         return False
     return "two_ctas" in inspect.signature(tl.dot).parameters
+
+
+@functools.cache
+def has_smem_operand_ring_first() -> bool:
+    try:
+        import triton.language as tl
+    except ImportError:
+        return False
+    return "smem_operand_ring_first" in inspect.signature(tl.range).parameters

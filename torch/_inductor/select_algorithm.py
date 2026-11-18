@@ -54,6 +54,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
     use_pipelined_autotuning,
 )
+from .autows_utils import has_smem_operand_ring_first
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
@@ -1220,7 +1221,11 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook() -> str:
             meta = self.meta
-            if meta.get("TWO_CTAS") or not meta.get("USE_META_WS"):
+            if (
+                meta.get("TWO_CTAS")
+                or not meta.get("USE_META_WS")
+                or not has_smem_operand_ring_first()
+            ):
                 return ""
             buffers = {**self.args.output_buffers, **self.args.inplace_buffers}
             names = [
@@ -1230,9 +1235,17 @@ class TritonTemplateKernel(TritonKernel):
             slot = (meta["BLOCK_M"] // meta.get("DATA_PARTITION_FACTOR", 1)) * (
                 meta["BLOCK_N"] // meta.get("EPILOGUE_SUBTILE", 1)
             )
+            m, n = (
+                V.graph.sizevars.optimization_hint(s)
+                for s in self.output_node.get_size()[-2:]
+            )
+            tiles = ceildiv(m, meta["BLOCK_M"]) * ceildiv(n, meta["BLOCK_N"])
             # 16 KB from local testing; 1-CTA only: 2-CTA output staging is
             # pinned to one copy (fb-triton #3543), so there is nothing to trade.
-            return "smem_operand_ring_first=True," if slot * elem >= 16384 else ""
+            # With at most one tile per SM it measured slower.
+            if slot * elem >= 16384 and tiles > meta["NUM_SMS"]:
+                return "smem_operand_ring_first=True,"
+            return ""
 
         return self._register_hook("<SMEM_OPERAND_RING_FIRST>", hook)
 

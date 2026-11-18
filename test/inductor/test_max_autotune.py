@@ -1128,14 +1128,16 @@ class TestMaxAutotune(TestCase):
         not has_datacenter_blackwell_tma_device(), "Need data-center Blackwell TMA"
     )
     def test_blackwell_ws_operand_ring_first_large_staging(self):
+        from torch._inductor.autows_utils import has_smem_operand_ring_first
         from torch._inductor.heuristics.template.triton import USE_META_WS
 
-        if not USE_META_WS:
-            raise unittest.SkipTest("Needs Meta autoWS")
+        if not USE_META_WS or not has_smem_operand_ring_first():
+            raise unittest.SkipTest("Needs Meta autoWS with smem_operand_ring_first")
 
-        a = torch.randn(1024, 512, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
-        # 128x32 staging slot: 16 KB in fp32 (option on), 8 KB in bf16 (off).
+        a = torch.randn(4096, 512, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(512, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        # 128x32 staging slot: 16 KB in fp32 (option on), 8 KB in bf16 (off);
+        # 256 output tiles > NUM_SMS.
         desc = (
             r"(?=.*BLOCK_M=256)(?=.*BLOCK_N=256)(?=.*DATA_PARTITION_FACTOR=2)"
             r"(?=.*EPILOGUE_SUBTILE=8)(?=.*TWO_CTAS=False)"
@@ -1154,6 +1156,7 @@ class TestMaxAutotune(TestCase):
             ):
                 out, code = run_and_get_code(torch.compile(fn), a, b)
             torch.testing.assert_close(out, fn(a, b), atol=5e-2, rtol=5e-2)
+            self.assertIn("data_partition_factor=", code[0])
             self.assertEqual("smem_operand_ring_first=True" in code[0], expected)
 
     @unittest.skipIf(
