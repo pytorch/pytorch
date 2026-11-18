@@ -45,7 +45,7 @@ struct ValueMapper {
     // temporary node to put the aliasing properties of the node before its
     // merged and destroyed
     placeholder_node_ = g->insertNode(g->create(prim::Uninitialized, 0));
-    for (size_t i = 0; i < to_merge->outputs().size(); ++i) {
+    for (const auto i : c10::irange(to_merge->outputs().size())) {
       Value* existing = to_merge->outputs().at(i);
       Value* new_value = placeholder_node_->insertOutput(i)->copyMetadata(
           to_merge->outputs().at(i));
@@ -297,7 +297,7 @@ void mergeNodeIntoSubgraph(
     idx++;
   }
 
-  for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
+  for (const auto i : c10::irange(subgraphNode->outputs().size())) {
     externalValuesMap[subgraphNode->outputs().at(i)] =
         subgraph->outputs().at(i);
   }
@@ -358,7 +358,7 @@ void mergeNodeIntoSubgraph(
     // x = f(w); group(x, y, z) becomes group(w, y, z).
     // x, y, z = f(w); group(x, y, z) becomes group(w).
     auto inputs = subgraphNode->inputs();
-    for (size_t i = 0; i < toMerge->outputs().size(); ++i) {
+    for (const auto i : c10::irange(toMerge->outputs().size())) {
       auto it = std::find(inputs.begin(), inputs.end(), toMerge->outputs()[i]);
       if (it != inputs.end()) {
         size_t p = it - inputs.begin();

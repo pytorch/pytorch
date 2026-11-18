@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
@@ -334,7 +335,7 @@ Tensor computeChunk(
         size_t step = buf_info->dims[norm_dim] / chunks;
 
         std::vector<ExprHandle> new_indices;
-        for (int64_t i = 0; i < static_cast<int64_t>(indices.size()); ++i) {
+        for (const auto i : c10::irange(static_cast<int64_t>(indices.size()))) {
           if (i == norm_dim) {
             new_indices.push_back(
                 indices[i] + ExprHandle(immLike(indices[i], chunkIdx * step)));
@@ -430,7 +431,7 @@ Tensor computeReshape(
         auto ndim = dims.size();
         std::vector<ExprPtr> strides(ndim);
         strides[ndim - 1] = immLike(dims[ndim - 1], 1);
-        for (size_t i = 1; i < ndim; i++) {
+        for (const auto i : c10::irange(1, ndim)) {
           strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
         }
 
@@ -568,7 +569,7 @@ static Tensor computeCatWoConditionals(
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
     std::vector<ExprPtr> store_indices(dims.size());
-    for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
+    for (const auto i : c10::irange(static_cast<int64_t>(dims.size()))) {
       for_vars[i] = alloc<Var>(
           "i" + std::to_string(inp_pos) + "_" + std::to_string(i),
           dims[i].dtype());
@@ -659,7 +660,7 @@ Tensor computeCat(
         auto offset = ExprHandle(nonEmptyInputs[0].node()->dim(dim));
         newAxes[dim] = newAxes[dim] - offset;
 
-        for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
+        for (const auto ii : c10::irange(1, nonEmptyInputs.size())) {
           auto input = nonEmptyInputs[ii];
           load = ifThenElse(
               CompareSelect::make(axes[dim], offset, kLT),

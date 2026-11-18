@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 namespace torch::jit {
 
@@ -57,10 +58,10 @@ std::vector<at::Tensor> debugLaunchGraph(
   Node* fusion_group = wrapper_graph->insertNode(
       wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
-  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(graph.inputs().size())) {
     fusion_group->addInput(wrapper_graph->addInput());
   }
-  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(graph.outputs().size())) {
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 
@@ -79,10 +80,10 @@ std::string debugGetFusedKernelCode(
   Node* fusion_group = wrapper_graph->insertNode(
       wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
-  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(graph.inputs().size())) {
     fusion_group->addInput(wrapper_graph->addInput());
   }
-  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(graph.outputs().size())) {
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 

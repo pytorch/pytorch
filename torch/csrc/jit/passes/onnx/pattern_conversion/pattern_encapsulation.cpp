@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 
@@ -51,7 +52,7 @@ Node* EncapsulateInplaceIndexPutForONNX(Node* index_put_node) {
     auto n = *it;
     auto cloned_n = subblock->appendNode(graph->createClone(
         n, [&](Value* v) { return env.contains(v) ? env[v] : v; }));
-    for (size_t i = 0; i < cloned_n->outputs().size(); ++i) {
+    for (const auto i : c10::irange(cloned_n->outputs().size())) {
       env[n->outputs().at(i)] = cloned_n->outputs().at(i);
     }
   }

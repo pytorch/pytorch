@@ -95,7 +95,7 @@ StringCordView StringCordView::substr(size_t start, size_t size) const {
       // end is within the string
       last_line = end.line_;
     }
-    for (size_t i = begin.line_ + 1; i < last_line; i++) {
+    for (const auto i : c10::irange(begin.line_ + 1, last_line)) {
       pieces.push_back(pieces_[i]);
     }
     if (end.has_next()) {

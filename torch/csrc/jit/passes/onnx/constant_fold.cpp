@@ -313,7 +313,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
       }
       auto axes_a = inputTensorValues[1].accessor<int64_t, 1>();
       std::vector<int64_t> axes;
-      for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+      for (const auto i : c10::irange(inputTensorValues[1].sizes()[0])) {
         // ONNX unsqueeze accepts negative axes
         // From https://pytorch.org/docs/stable/generated/torch.unsqueeze.html
         // Negative dim will correspond to unsqueeze() applied at dim = dim +
@@ -324,7 +324,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
       }
       std::sort(axes.begin(), axes.end());
       updated_val = inputTensorValues[0];
-      for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+      for (const auto i : c10::irange(inputTensorValues[1].sizes()[0])) {
         updated_val = at::unsqueeze(updated_val, axes[i]);
       }
       return std::optional<at::Tensor>(updated_val);
@@ -362,13 +362,13 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
         }
         auto axes_a = inputTensorValues[1].accessor<int64_t, 1>();
         std::vector<int64_t> axes;
-        for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+        for (const auto i : c10::irange(inputTensorValues[1].sizes()[0])) {
           // ONNX Squeeze accepts negative axes
           axes_a[i] += axes_a[i] < 0 ? inputTensorValues[0].sizes().size() : 0;
           axes.push_back(axes_a[i]);
         }
         std::sort(axes.begin(), axes.end());
-        for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+        for (const auto i : c10::irange(inputTensorValues[1].sizes()[0])) {
           updated_val = at::squeeze(updated_val, axes[i]);
         }
       }
@@ -416,7 +416,8 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
     if (node->hasAttributeS("allowzero")) {
       allowzero = node->i(attr::allowzero);
     }
-    for (size_t i = 0; i < (size_t)(inputTensorValues[1].sizes()[0]); ++i) {
+    for (const auto i :
+         c10::irange((size_t)(inputTensorValues[1].sizes()[0]))) {
       // All shape dim values should be >= -1
       // onnx::Reshape supports a shape dim value to be zero, in
       // which case the actual dim value remains unchanged. However,

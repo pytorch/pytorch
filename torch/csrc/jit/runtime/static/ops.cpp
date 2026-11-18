@@ -155,7 +155,7 @@ static at::Tensor& flatten_copy_out(
     shape.push_back(self.sizes()[i]);
   }
   shape.push_back(slice_numel);
-  for (int64_t i = end_dim + 1; i < self.dim(); i++) {
+  for (const auto i : c10::irange(end_dim + 1, self.dim())) {
     shape.push_back(self.sizes()[i]);
   }
   return reshape_copy_out(out, self, shape, false);
@@ -313,7 +313,7 @@ static Tensor& c2_argmin_out(
           // input is a [prev_size, n] tensor.
           // output is a [prev_size,] tensor.
           // Thus, access is contiguous/coalesced.
-          for (int i = 0; i < prev_size; ++i) {
+          for (const auto i : c10::irange(prev_size)) {
             auto v = std::min_element(
                 in_ptr + i * n,
                 in_ptr + (i + 1) * n,
@@ -342,10 +342,10 @@ static Tensor& c2_argmin_out(
 
           std::memset(out_ptr, 0, prev_size * next_size * sizeof(int64_t));
 
-          for (int i = 0; i < prev_size; ++i) {
+          for (const auto i : c10::irange(prev_size)) {
             const scalar_t* cur_in_ptr = in_ptr + i * n * next_size + next_size;
             for (int k = 1; k < n; ++k) {
-              for (int j = 0; j < next_size; ++j) {
+              for (const auto j : c10::irange(next_size)) {
                 int64_t* cur_out_ptr = out_ptr + i * next_size + j;
                 if (less_or_nan(
                         *cur_in_ptr,

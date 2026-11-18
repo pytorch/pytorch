@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -155,7 +156,7 @@ void transferInputOutputBackends(std::shared_ptr<Graph>& graph) {
 
   // Move outputs to CPU backend
   at::ArrayRef<Value*>&& outputs = graph->outputs();
-  for (size_t i = 0; i < outputs.size(); i++) {
+  for (const auto i : c10::irange(outputs.size())) {
     Value* output = outputs[i];
     NamedValue named_output = NamedValue("", output);
     if (named_output.type()->kind() == TypeKind::TensorType) {

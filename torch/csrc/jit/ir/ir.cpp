@@ -716,7 +716,7 @@ void Block::cloneFrom(Block* src, std::function<Value*(Value*)> value_map) {
 
   for (auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
+    for (const auto i : c10::irange(node->outputs().size())) {
       auto oo = node->outputs()[i];
       auto no = new_node->outputs()[i];
       local_map[oo] = no;
@@ -2207,7 +2207,7 @@ std::vector<Value*> insertGraph(
   }
   for (auto* node : callee.nodes()) {
     auto* new_node = g.insertNode(g.createClone(node, value_map_func));
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
+    for (const auto i : c10::irange(node->outputs().size())) {
       value_map[node->outputs()[i]] = new_node->outputs()[i];
     }
   }

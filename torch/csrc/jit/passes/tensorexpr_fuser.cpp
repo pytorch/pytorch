@@ -349,7 +349,7 @@ void insertTypeGuard(
   Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
 
   std::unordered_map<Value*, Value*> typechecked_inputs;
-  for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
+  for (const auto i : c10::irange(typecheck_node->inputs().size())) {
     typechecked_inputs[typecheck_node->input(i)] = typecheck_node->output(i);
   }
 
@@ -1410,7 +1410,7 @@ static Operation createTensorExprOp(const Node* node) {
   }
   std::vector<std::string> output_desc =
       node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
-  for (size_t i = 0; i < subgraph->outputs().size(); ++i) {
+  for (const auto i : c10::irange(subgraph->outputs().size())) {
     stride_map[subgraph->outputs().at(i)] = {
         strideInputFromString(output_desc.at(i))};
   }

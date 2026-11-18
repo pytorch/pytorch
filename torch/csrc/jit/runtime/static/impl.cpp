@@ -81,7 +81,7 @@ static void sequentialExecute(
     ProcessedNode* nodes,
     size_t num_nodes,
     void* /*ctx*/) {
-  for (size_t i = 0; i < num_nodes; ++i) {
+  for (const auto i : c10::irange(num_nodes)) {
     nodes[i].run();
     // Check for incorrect schema alias info.
     block_runner.verify_and_correct_memory_overlap(nodes[i]);
