@@ -2045,6 +2045,7 @@ class _Variant:
         "stamp",
         "state",
         "watch",
+        "written",
     )
 
     def __init__(
@@ -2087,6 +2088,8 @@ class _Variant:
         # clone that keeps its memory shared (see ``_watched``).
         self.watch: list[tuple[int, int, torch.Tensor]] = []
         self.moves = 0
+        # Which tensors of a call the graph writes to in place.
+        self.written: list[int] = []
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
@@ -2274,10 +2277,24 @@ class _Region:
         made can fail where the instructions would not (or would with another
         error): then they run instead, this time and from now on."""
         generator = torch.get_rng_state()
+        # What the graph writes to, as it is before a graph that has never
+        # run gets to it.
+        flat = inputs.flat
+        saved = [
+            (flat[i], flat[i]._version, flat[i].detach().clone())
+            for i in ([] if variant.proven else variant.written)
+            if not flat[i].is_inference()
+        ]
         try:
             outputs = variant.run(inputs)
         except Exception as e:
             torch.set_rng_state(generator)
+            # The instructions that run instead write again what the graph
+            # wrote before it failed.
+            with torch.no_grad():
+                for tensor, version, before in saved:
+                    if tensor._version != version:
+                        tensor.copy_(before)
             if variant.stamp is not None:
                 # The graph without the weights built in may do.
                 self.melt(variant, [])
@@ -2569,6 +2586,7 @@ class _Region:
         compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
         variant = _Variant(compiled, found["recipes"], ops, keep)
         variant.affects(*found["effects"])
+        variant.written = sorted(found["written"])
         if built is not None:
             variant.freeze(flat, *built)
         if opening is not None:
@@ -3096,6 +3114,7 @@ class _Path(_Region):
         variant.leap = found["leap"]
         variant.guards = found["guards"]
         variant.affects(*found["effects"])
+        variant.written = sorted(found["written"])
         if built is not None:
             variant.freeze(inputs.flat, *built)
         if opening is not None:
