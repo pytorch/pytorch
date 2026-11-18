@@ -1312,6 +1312,25 @@ jobs:
           name: hardened-pr-review-verdict
           path: out
 
+      - name: Check the merge base's age
+        # Before the terminal row, and before the AWS credentials, which it
+        # does not need: a stale merge base makes emit_row.py record the
+        # verdict as changes_requested, so Dr. CI does not hand the PR to a
+        # human until it is rebased. A failed lookup writes an empty file, and
+        # a step that fails anyway leaves none; both count as not stale and
+        # must not cost the terminal row. Only a succeeded review's row takes
+        # the note, so the lookup is skipped when the review job failed or
+        # left no verdict.
+        if: steps.fetch.outcome == 'success' && needs.review.result == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
+        run: python3 scripts/pr_review/post_review.py --stale-base stale-base.txt
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -1360,6 +1379,7 @@ jobs:
               --phase terminal \
               --verdict-file out/verdict.json \
               --usage-file out/usage.json \
+              --stale-base-file stale-base.txt \
               ${STATUS_OVERRIDE:+--status "$STATUS_OVERRIDE"} \
               --out terminal.json
 

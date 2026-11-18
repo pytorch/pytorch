@@ -480,6 +480,7 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
 
         self.assertEqual(fpc.MARKER, post_review.MARKER)
         self.assertEqual(fpc.TOO_LARGE_TAG, post_review.TOO_LARGE_TAG)
+        self.assertEqual(fpc.STALE_BASE_TAG, post_review.STALE_BASE_TAG)
         self.assertEqual(fpc.REVIEW_AUTHOR, post_review.DEFAULT_AUTHOR)
 
     def test_the_author_follows_post_reviews_override(self):
@@ -701,6 +702,24 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertIn(11, ids)
         self.assertIn(20, ids)
         self.assertNotIn(10, ids)
+
+    def test_the_latest_review_has_its_rebase_note_replaced(self):
+        import post_review
+
+        for verdict in ("changes_requested", "ready_for_human_review"):
+            body = post_review._compose(
+                verdict, "One bug.", "a" * 40, REPO, 0, [], [], 0,
+                note="Please rebase before merging.",
+            )  # fmt: skip
+            lines = body.split("\n")
+            i = lines.index(post_review.STALE_BASE_TAG)
+            self.assertTrue(lines[i + 1].startswith("Please rebase before merging."))
+            want = "\n".join([*lines[:i], fpc.STALE_BASE_STUB, *lines[i + 2 :]])
+            for eol in ("\n", "\r\n"):
+                sent = body.replace("\n", eol)
+                api = FakeApi(reviews=[ours(body=sent)])
+                (item,) = fpc.collect(api, REPO, PR)["items"]
+                self.assertEqual(item["body"], want.replace("\n", eol))
 
     def test_the_latest_review_is_the_highest_id(self):
         api = FakeApi(
