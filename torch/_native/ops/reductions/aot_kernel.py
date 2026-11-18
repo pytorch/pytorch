@@ -5,6 +5,7 @@ import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Float32, Int32, Int64
 
+from ...cutedsl import launch as _L
 from . import _aot_data as data, kernel_general as general, tile, traits
 
 
@@ -46,6 +47,34 @@ class _RowAdapter:
             [mOut],
             nchunks,
             nwaves,
+            n,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            stream,
+        )
+
+
+class _RaggedAdapter:
+    """The runtime-width ragged row kernel derives its own groups and waves."""
+
+    def __init__(self, op):
+        self.op = op
+
+    @cute.jit
+    def __call__(
+        self, mX: cute.Tensor, mOut: cute.Tensor, n: Int32, stream: cuda.CUstream
+    ):
+        self.op(
+            [mX],
+            [mOut],
+            None,
+            None,
             n,
             None,
             None,
@@ -142,17 +171,12 @@ def _build_row(spec):
         use_tma=False,
         order="linear",
     )
-    m = cute.sym_int()
-    n = cute.sym_int(divisibility=vec)
-    x_fake = cute.runtime.make_fake_compact_tensor(
-        dtype,
-        (m, n),
-        stride_order=(1, 0),
-        assumed_align=16,
-    )
+    # A runtime 64-bit pitch of whole vectors, so TI's pitched row views share the
+    # kernel, as on the JIT path.
+    x_fake = _L.fake_rows(dtype, cute.sym_int(divisibility=vec), vec, align=16)
     out_fake = cute.runtime.make_fake_tensor(
         out_dtype,
-        (m,),
+        (x_fake.shape[0],),
         stride=(1,),
         assumed_align=16,
     )
@@ -185,6 +209,55 @@ def _build_row(spec):
             {"name": "nwaves", "ctype": "int32_t"},
             {"name": "n", "ctype": "int32_t"},
         ],
+    }
+
+
+def _build_ragged(spec):
+    dtype = _DTYPES[spec["dtype"]]
+    out_dtype = _DTYPES[spec["out_dtype"]]
+    trait = _TRAITS[spec["trait"]]()
+    threads_per_row, threads_per_block = data.RAGGED_CLASSES[spec["row_class"]]
+    op = tile.TileReduce(
+        trait,
+        dtype,
+        "row",
+        data.RAGGED_MIN_N,  # placeholder: the runtime width ignores the plan's N
+        threads_per_row=threads_per_row,
+        threads_per_block=threads_per_block,
+        nouts=1,
+        final=True,
+        unroll=4,
+        use_tma=False,
+        order="linear",
+        ragged_vector=True,
+    )
+    x_fake = _L.fake_rows(dtype, cute.sym_int(), 1, align=16)
+    out_fake = cute.runtime.make_fake_tensor(
+        out_dtype, (cute.sym_int(),), stride=(1,), assumed_align=16
+    )
+    in_tag = _DTYPE_TAG[spec["dtype"]]
+    out_tag = _DTYPE_TAG[spec["out_dtype"]]
+    return {
+        "prefix": (
+            f"reduction_ragged_{spec['trait']}_{in_tag}_{out_tag}_{spec['row_class']}"
+        ),
+        "fn": _RaggedAdapter(op),
+        "fake_args": [
+            x_fake,
+            out_fake,
+            Int32(data.RAGGED_MIN_N),
+            cute.runtime.make_fake_stream(),
+        ],
+        "tensor_args": [
+            {
+                "name": "mX",
+                "dynamic_sizes": [0, 1],
+                "dynamic_strides": [0],
+                "read_only": True,
+            },
+            {"name": "mOut", "dynamic_sizes": [0]},
+        ],
+        "scalar_args": [{"name": "n", "ctype": "int32_t"}],
     }
 
 
@@ -282,6 +355,7 @@ def _build_xcta(spec):
 
 _BUILDERS = {
     "row": _build_row,
+    "ragged": _build_ragged,
     "xcta": _build_xcta,
 }
 
