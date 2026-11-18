@@ -41,7 +41,10 @@ from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_ver_lessthan_multiprocess,
+)
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP, MLPStack
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -125,6 +128,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
             mesh_dim_names=("dp", "tp"),
         )
 
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(4)
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
