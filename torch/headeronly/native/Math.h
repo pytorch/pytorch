@@ -245,6 +245,88 @@ inline typename std::enable_if_t<std::is_floating_point_v<T>, T> calc_erfinv(
  */
 
 /*
+ * This function is derived from the implementation of the zeta function in the
+ * Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
+ * Library].
+ */
+template <typename scalar_t, bool is_cuda = false>
+C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q)
+    __ubsan_ignore_float_divide_by_zero__ {
+  using acc_t = acc_type<scalar_t, is_cuda>;
+  const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
+  constexpr acc_t zero = acc_t{0.0};
+  constexpr acc_t half = acc_t{0.5};
+  constexpr acc_t one = acc_t{1.0};
+  static const acc_t A[] = {
+      12.0,
+      -720.0,
+      30240.0,
+      -1209600.0,
+      47900160.0,
+      -1.8924375803183791606e9, /*1.307674368e12/691*/
+      7.47242496e10,
+      -2.950130727918164224e12, /*1.067062284288e16/3617*/
+      1.1646782814350067249e14, /*5.109094217170944e18/43867*/
+      -4.5979787224074726105e15, /*8.028576626982912e20/174611*/
+      1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
+      -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
+  };
+
+  acc_t a, b, k, s, t, w;
+  if (x == one) {
+    return std::numeric_limits<scalar_t>::infinity();
+  }
+
+  if (x < one) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+
+  if (q <= zero) {
+    if (q == std::floor(q)) {
+      return std::numeric_limits<scalar_t>::infinity();
+    }
+    if (x != std::floor(x)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+  }
+
+  s = std::pow(q, -x);
+  a = q;
+  int i = 0;
+  b = zero;
+  while ((i < 9) || (a <= acc_t{9.0})) {
+    i += 1;
+    a += one;
+    b = ::pow(a, -x);
+    s += b;
+    if ((-MACHEP * s < b) && (b < MACHEP * s)) {
+      return static_cast<scalar_t>(s);
+    }
+  };
+
+  w = a;
+  s += b * w / (x - one);
+  s -= half * b;
+  a = one;
+  k = zero;
+  for (i = 0; i < 12; i++) {
+    a *= x + k;
+    b /= w;
+    t = a * b / A[i];
+    s = s + t;
+    t = ::fabs(t / s);
+    if (t < MACHEP) {
+      return static_cast<scalar_t>(s);
+    }
+    k += one;
+    a *= x + k;
+    b /= w;
+    k += one;
+  }
+  return static_cast<scalar_t>(s);
+}
+
+/*
  * This function is derived from the implementation of the digamma function in
  * the Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
  * Library].
@@ -267,6 +349,46 @@ C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
     result = result * x + A[i];
   }
   return result;
+}
+
+inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
+  double sign = +1;
+  double result = 0;
+  if (x < 0.5) {
+    sign = -1;
+    const double sin_pi_x = ::sin(pi<double> * x);
+    result -= (pi<double> * pi<double>) / (sin_pi_x * sin_pi_x);
+    x = 1 - x;
+  }
+  for (int i = 0; i < 6; ++i) {
+    result += 1 / (x * x);
+    x += 1;
+  }
+  const double ixx = 1 / (x * x);
+  result +=
+      (1 + 1 / (2 * x) + ixx * (1. / 6 - ixx * (1. / 30 - ixx * (1. / 42)))) /
+      x;
+  return sign * result;
+}
+
+inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
+  float sign = +1;
+  float result = 0;
+  if (x < 0.5f) {
+    sign = -1;
+    const float sin_pi_x = ::sinf(pi<float> * x);
+    result -= (pi<float> * pi<float>) / (sin_pi_x * sin_pi_x);
+    x = 1 - x;
+  }
+  for (int i = 0; i < 6; ++i) {
+    result += 1 / (x * x);
+    x += 1;
+  }
+  const float ixx = 1 / (x * x);
+  result += (1 + 1 / (2 * x) +
+             ixx * (1.f / 6 - ixx * (1.f / 30 - ixx * (1.f / 42)))) /
+      x;
+  return sign * result;
 }
 
 /*
@@ -397,6 +519,15 @@ inline BFloat16 calc_digamma(BFloat16 a) {
 
 inline Half calc_digamma(Half a) {
   return calc_digamma(static_cast<float>(a));
+}
+
+template <typename scalar_t, bool is_cuda = false>
+inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
+  // already blocked if n <= 1
+  const auto one = scalar_t{1};
+  return ((n % 2) ? one : -one) *
+      std::exp(std::lgamma(static_cast<scalar_t>(n) + one)) *
+      zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 
 // regularized lower incomplete gamma
@@ -1275,137 +1406,6 @@ inline BFloat16 calc_i0(BFloat16 a) {
 }
 inline Half calc_i0(Half a) {
   return calc_i0(static_cast<float>(a));
-}
-
-/*
- * This function is derived from the implementation of the zeta function in the
- * Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
- * Library].
- */
-template <typename scalar_t, bool is_cuda = false>
-C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q)
-    __ubsan_ignore_float_divide_by_zero__ {
-  using acc_t = acc_type<scalar_t, is_cuda>;
-  const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
-  constexpr acc_t zero = acc_t{0.0};
-  constexpr acc_t half = acc_t{0.5};
-  constexpr acc_t one = acc_t{1.0};
-  static const acc_t A[] = {
-      12.0,
-      -720.0,
-      30240.0,
-      -1209600.0,
-      47900160.0,
-      -1.8924375803183791606e9, /*1.307674368e12/691*/
-      7.47242496e10,
-      -2.950130727918164224e12, /*1.067062284288e16/3617*/
-      1.1646782814350067249e14, /*5.109094217170944e18/43867*/
-      -4.5979787224074726105e15, /*8.028576626982912e20/174611*/
-      1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
-      -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
-  };
-
-  acc_t a, b, k, s, t, w;
-  if (x == one) {
-    return std::numeric_limits<scalar_t>::infinity();
-  }
-
-  if (x < one) {
-    return std::numeric_limits<scalar_t>::quiet_NaN();
-  }
-
-  if (q <= zero) {
-    if (q == std::floor(q)) {
-      return std::numeric_limits<scalar_t>::infinity();
-    }
-    if (x != std::floor(x)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
-    }
-  }
-
-  s = std::pow(q, -x);
-  a = q;
-  int i = 0;
-  b = zero;
-  while ((i < 9) || (a <= acc_t{9.0})) {
-    i += 1;
-    a += one;
-    b = ::pow(a, -x);
-    s += b;
-    if ((-MACHEP * s < b) && (b < MACHEP * s)) {
-      return static_cast<scalar_t>(s);
-    }
-  };
-
-  w = a;
-  s += b * w / (x - one);
-  s -= half * b;
-  a = one;
-  k = zero;
-  for (i = 0; i < 12; i++) {
-    a *= x + k;
-    b /= w;
-    t = a * b / A[i];
-    s = s + t;
-    t = ::fabs(t / s);
-    if (t < MACHEP) {
-      return static_cast<scalar_t>(s);
-    }
-    k += one;
-    a *= x + k;
-    b /= w;
-    k += one;
-  }
-  return static_cast<scalar_t>(s);
-}
-
-inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
-  double sign = +1;
-  double result = 0;
-  if (x < 0.5) {
-    sign = -1;
-    const double sin_pi_x = ::sin(pi<double> * x);
-    result -= (pi<double> * pi<double>) / (sin_pi_x * sin_pi_x);
-    x = 1 - x;
-  }
-  for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
-    x += 1;
-  }
-  const double ixx = 1 / (x * x);
-  result +=
-      (1 + 1 / (2 * x) + ixx * (1. / 6 - ixx * (1. / 30 - ixx * (1. / 42)))) /
-      x;
-  return sign * result;
-}
-
-inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
-  float sign = +1;
-  float result = 0;
-  if (x < 0.5f) {
-    sign = -1;
-    const float sin_pi_x = ::sinf(pi<float> * x);
-    result -= (pi<float> * pi<float>) / (sin_pi_x * sin_pi_x);
-    x = 1 - x;
-  }
-  for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
-    x += 1;
-  }
-  const float ixx = 1 / (x * x);
-  result += (1 + 1 / (2 * x) +
-             ixx * (1.f / 6 - ixx * (1.f / 30 - ixx * (1.f / 42)))) /
-      x;
-  return sign * result;
-}
-
-template <typename scalar_t, bool is_cuda = false>
-inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
-  // already blocked if n <= 1
-  const auto one = scalar_t{1};
-  return ((n % 2) ? one : -one) *
-      std::exp(std::lgamma(static_cast<scalar_t>(n) + one)) *
-      zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 
 HIDDEN_NAMESPACE_END(torch, headeronly)
