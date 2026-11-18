@@ -999,10 +999,10 @@ def nested_compile_region(
             with ``triton.cudagraphs`` on, a region set to ``False`` runs
             outside CUDA Graph capture, in its own graph partition (turned on
             for that compile if ``graph_partition`` is off). Opting in, setting
-            it on a region nested in
-            another region, and combining it with
+            it on a region nested in another region, and combining it with
             ``torch._dynamo.override_cudagraphs`` raise an error. AOTInductor
-            ignores it, and a region compiled on its own (e.g. by
+            does not apply the setting but still rejects the last two, and a
+            region compiled on its own (e.g. by
             ``regional_inductor_invoke_subgraph``) rejects it.
             Warning: this is an experimental feature under development and
             not ready for use yet.
