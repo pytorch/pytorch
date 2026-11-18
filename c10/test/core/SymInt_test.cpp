@@ -347,4 +347,31 @@ TEST(SymIntTest, SetSymbolicContiguousSizesKeepsStorageOffset) {
 
   EXPECT_EQ(unwrap(impl->sym_storage_offset()), 5);
 }
+
+// Setting a tensor's sizes/strides from its own sym_sizes()/sym_strides()
+// (e.g. `t.as_strided_(t.sym_sizes(), t.sym_strides())` in squeeze_) must not
+// read the SymInts after they have been destroyed.
+TEST(SymIntTest, SetSymbolicSizesAndStridesFromOwnSizesAndStrides) {
+  Storage storage(
+      Storage::use_byte_size_t(), /*size_bytes=*/0, GetCPUAllocator());
+  auto impl = c10::make_intrusive<TensorImpl>(
+      std::move(storage),
+      DispatchKeySet(DispatchKey::CPU),
+      caffe2::TypeMeta::Make<float>());
+  {
+    // Scoped so that impl holds the only references to the SymNodes.
+    std::vector<SymInt> sizes{
+        create_symbolic_symint(2), create_symbolic_symint(3)};
+    std::vector<SymInt> strides{
+        create_symbolic_symint(3), create_symbolic_symint(1)};
+    impl->set_sizes_and_strides(sizes, strides);
+  }
+
+  impl->set_sizes_and_strides(impl->sym_sizes(), impl->sym_strides());
+
+  const std::vector<int64_t> expected_sizes{2, 3};
+  const std::vector<int64_t> expected_strides{3, 1};
+  EXPECT_EQ(impl->sizes(), IntArrayRef(expected_sizes));
+  EXPECT_EQ(impl->strides(), IntArrayRef(expected_strides));
+}
 #endif
