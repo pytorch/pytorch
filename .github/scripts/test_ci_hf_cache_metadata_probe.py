@@ -137,6 +137,7 @@ def environment():
         ACTIONS_ID_TOKEN_REQUEST_URL="https://fixture.invalid/never-called",
         ACTIONS_ID_TOKEN_REQUEST_TOKEN="NONSECRET-FIXTURE",
         AWS_EC2_METADATA_DISABLED="true",
+        AWS_MAX_ATTEMPTS="1",
         AWS_CONFIG_FILE="/dev/null",
         AWS_SHARED_CREDENTIALS_FILE="/dev/null",
     )
@@ -208,7 +209,7 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
         self.assertTrue(
             out["identity_matches"] and out["all_metadata_requests_attempted"]
         )
-        self.assertEqual(calls, ["identity", *probe.OPERATIONS, "identity"])
+        self.assertEqual(calls, ["identity", *probe.OPERATIONS])
         self.assertEqual(
             out["operations"]["GetBucketVersioning"]["state"], "never-enabled"
         )
@@ -223,7 +224,7 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
         for key, value, expected in (
             ("identity", (200, {}, identity(account="000000000000")), ["identity"]),
             ("identity", (200, {}, identity(role="other-role")), ["identity"]),
-            ("HeadBucket", (403, {}, b""), ["identity", "HeadBucket", "identity"]),
+            ("HeadBucket", (403, {}, b""), ["identity", "HeadBucket"]),
             (
                 "HeadBucket",
                 (200, {"x-amz-bucket-region": "us-west-2"}, b""),
@@ -232,7 +233,7 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
             (
                 "GetBucketLocation",
                 error(),
-                ["identity", "HeadBucket", "GetBucketLocation", "identity"],
+                ["identity", "HeadBucket", "GetBucketLocation"],
             ),
             (
                 "GetBucketLocation",
@@ -245,20 +246,6 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
             self.assertEqual(calls, expected)
             self.assertFalse(out.get("all_metadata_requests_attempted", False))
             self.assertFalse(out["write_authorized"])
-        invoke, _ = responder()
-        count = 0
-
-        def changed_identity(operation):
-            nonlocal count
-            if operation == "identity":
-                count += 1
-                if count == 2:
-                    return 200, {}, identity(role="other-role")
-            return invoke(operation)
-
-        out = probe.run_probe(changed_identity)
-        self.assertTrue(out["probe_error"])
-        self.assertEqual(out["failure_stage"], "final-identity")
 
     def test_config_denial_is_not_absence(self):
         for operation in probe.CONFIG_QUERIES:
@@ -282,7 +269,7 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
         )
         out = probe.run_probe(invoke)
         self.assertFalse(out["probe_error"])
-        self.assertEqual(len(calls), 18)
+        self.assertEqual(calls, ["identity", *probe.OPERATIONS])
         self.assertFalse(out["write_authorized"])
 
     def test_version_lock_notification_boundaries(self):
@@ -303,14 +290,20 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
             (
                 "GetBucketVersioning",
                 s3("VersioningConfiguration", "<Status>Disabled</Status>"),
+                "S3 value",
             ),
-            ("GetBucketVersioning", s3("VersioningConfiguration", "<Unknown/>")),
+            (
+                "GetBucketVersioning",
+                s3("VersioningConfiguration", "<Unknown/>"),
+                "S3 XML shape",
+            ),
             (
                 "GetBucketVersioning",
                 s3(
                     "VersioningConfiguration",
                     "<Status>Enabled</Status><Status>Enabled</Status>",
                 ),
+                "S3 value",
             ),
             (
                 "GetObjectLockConfiguration",
@@ -318,14 +311,17 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
                     "ObjectLockConfiguration",
                     "<ObjectLockEnabled>Disabled</ObjectLockEnabled>",
                 ),
+                "S3 value",
             ),
             (
                 "GetBucketNotificationConfiguration",
                 s3("NotificationConfiguration", "<Unexpected/>"),
+                "S3 XML shape",
             ),
             (
                 "GetBucketPolicyStatus",
                 s3("PolicyStatus", "<IsPublic>unknown</IsPublic>"),
+                "S3 value",
             ),
             (
                 "GetBucketOwnershipControls",
@@ -333,11 +329,13 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
                     "OwnershipControls",
                     "<Rule><ObjectOwnership>unknown</ObjectOwnership></Rule>",
                 ),
+                "S3 value",
             ),
         )
-        for operation, body in cases:
-            with self.assertRaises(ValueError):
-                probe.project(operation, (200, {}, body))
+        for operation, body, expected in cases:
+            with self.subTest(operation=operation, body=body):
+                with self.assertRaisesRegex(ValueError, f"^{expected}$"):
+                    probe.project(operation, (200, {}, body))
         lock = probe.project(
             "GetObjectLockConfiguration",
             (
@@ -398,40 +396,51 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
     def test_listing_errors_fail_closed(self):
         normal = list_response()
         changes = (
-            normal.replace(b"<IsTruncated>false", b"<IsTruncated>true"),
-            normal.replace(b"<MaxKeys>8", b"<MaxKeys>9"),
-            normal.replace(b"<KeyCount>0", b"<KeyCount>1"),
-            normal.replace(probe.BUCKET.encode(), b"other-bucket"),
-            normal.replace(probe.OBJECT_NAME.encode(), b"other-prefix"),
-            normal.replace(
-                b"</ListBucketResult>",
-                b"<NextContinuationToken>opaque</NextContinuationToken></ListBucketResult>",
+            (normal.replace(b"<IsTruncated>false", b"<IsTruncated>true"), "S3 value"),
+            (normal.replace(b"<MaxKeys>8", b"<MaxKeys>9"), "list limit"),
+            (normal.replace(b"<KeyCount>0", b"<KeyCount>1"), "key count"),
+            (normal.replace(probe.BUCKET.encode(), b"other-bucket"), "list scope"),
+            (normal.replace(probe.OBJECT_NAME.encode(), b"other-prefix"), "list scope"),
+            (
+                normal.replace(
+                    b"</ListBucketResult>",
+                    b"<NextContinuationToken>opaque</NextContinuationToken></ListBucketResult>",
+                ),
+                "S3 XML shape",
             ),
-            list_response(rows="<Contents><Key>other</Key></Contents>", count=1),
-            list_response(
-                rows=(f"<Contents><Key>{probe.OBJECT_NAME}</Key></Contents>" * 9),
-                count=9,
+            (
+                list_response(rows="<Contents><Key>other</Key></Contents>", count=1),
+                "listed key",
+            ),
+            (
+                list_response(
+                    rows=(f"<Contents><Key>{probe.OBJECT_NAME}</Key></Contents>" * 9),
+                    count=9,
+                ),
+                "list count",
             ),
         )
-        for body in changes:
-            with self.assertRaises(ValueError):
-                probe.project("ListObjectsV2", (200, {}, body))
+        for body, expected in changes:
+            with self.subTest(body=body):
+                with self.assertRaisesRegex(ValueError, f"^{expected}$"):
+                    probe.project("ListObjectsV2", (200, {}, body))
         body = list_response(True).replace(
             b"</ListVersionsResult>",
             b"<NextKeyMarker>opaque</NextKeyMarker></ListVersionsResult>",
         )
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "^S3 XML shape$"):
             probe.project("ListObjectVersions", (200, {}, body))
 
     def test_policy_xml_and_header_redaction(self):
-        for body in (
-            b'{"Statement":[],"Statement":[]}',
-            b"[]",
-            b'{"Statement":["bad"]}',
-            b'{"Statement":[],"unexpected":true}',
+        for body, expected in (
+            (b'{"Statement":[],"Statement":[]}', "duplicate key"),
+            (b"[]", "policy shape"),
+            (b'{"Statement":["bad"]}', "policy statements"),
+            (b'{"Statement":[],"unexpected":true}', "policy shape"),
         ):
-            with self.assertRaises(ValueError):
-                probe.project("GetBucketPolicy", (200, {}, body))
+            with self.subTest(body=body):
+                with self.assertRaisesRegex(ValueError, f"^{expected}$"):
+                    probe.project("GetBucketPolicy", (200, {}, body))
         with self.assertRaisesRegex(ValueError, "XML boundary"):
             probe.xml(b"<!ENTITY example>")
         with self.assertRaisesRegex(ValueError, "XML boundary"):
@@ -445,7 +454,7 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
                     s3("VersioningConfiguration", "<MfaDelete>Enabled</MfaDelete>"),
                 ),
             )
-        with self.assertRaises(ET.ParseError):
+        with self.assertRaisesRegex(ET.ParseError, "^syntax error"):
             probe.xml(b"not xml")
         with self.assertRaisesRegex(ValueError, "projection boundary"):
             probe.project("GetBucketPolicy", (200, {}, b"x" * (probe.LIMIT + 1)))
@@ -486,9 +495,10 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
                 transport.request("HeadObject")
             self.assertEqual(factory.call_count, 1)
             transport.request("identity")
-            transport.request("identity")
             with self.assertRaisesRegex(ValueError, "request budget"):
                 transport.request("identity")
+            self.assertEqual(transport.counts["identity"], 1)
+            self.assertEqual(factory.call_count, 2)
             with self.assertRaisesRegex(ValueError, "operation"):
                 transport.request("GetObject")
         self.assertTrue(connection.close.called)
@@ -555,6 +565,17 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
                     probe.preflight(env | {key: "forbidden"})
             creds_env = env | dict(zip(probe.CREDENTIAL_KEYS, CREDS))
             self.assertEqual(probe.runtime_inputs(creds_env), CREDS)
+            for invalid in (None, "", "0", "2", "01", "1junk", "1.0", " 1", "1 "):
+                with self.subTest(max_attempts=invalid):
+                    for inputs, validate in (
+                        (env, probe.preflight),
+                        (creds_env, probe.runtime_inputs),
+                    ):
+                        bad = inputs | {"AWS_MAX_ATTEMPTS": invalid}
+                        if invalid is None:
+                            del bad["AWS_MAX_ATTEMPTS"]
+                        with self.assertRaisesRegex(ValueError, "^configuration$"):
+                            validate(bad)
             with self.assertRaisesRegex(ValueError, "credentials"):
                 probe.runtime_inputs(
                     creds_env | {"AWS_ACCESS_KEY_ID": "AKIA" + "A" * 16}
@@ -584,6 +605,9 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
         )
         self.assertIn("persist-credentials: false", text)
         self.assertIn("@ececac1a45f3b08a01d2dd070d28d111c5fe6722", text)
+        self.assertEqual(text.count("AWS_MAX_ATTEMPTS:"), 1)
+        self.assertIn("      AWS_MAX_ATTEMPTS: '1'\n", text)
+        self.assertLess(text.index("AWS_MAX_ATTEMPTS:"), text.index("    steps:"))
         self.assertIn("disable-retry: true", text)
         policy_text = text.split(
             "          inline-session-policy: >-\n            ", 1
@@ -641,6 +665,78 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
         self.assertEqual(stream.getvalue(), "")
         self.assertTrue(out["probe_error"])
         self.assertNotIn("NEVER_PRINT", json.dumps(out))
+
+    def test_cli_result_contract(self):
+        for name, overrides, status, complete, count in (
+            ("complete", {}, 0, True, 16),
+            ("owner-unavailable", {"HeadBucket": (403, {}, b"")}, 0, False, 1),
+            ("config-unavailable", {"GetBucketReplication": error()}, 0, True, 16),
+            (
+                "identity-rejected",
+                {"identity": (200, {}, identity(role="other-role"))},
+                1,
+                None,
+                0,
+            ),
+        ):
+            with self.subTest(name=name):
+                respond, calls = responder(overrides)
+                counts = dict.fromkeys(("identity", *probe.OPERATIONS), 0)
+
+                def invoke(operation):
+                    counts[operation] += 1
+                    return respond(operation)
+
+                stream = io.StringIO()
+                with (
+                    mock.patch.object(probe, "runtime_inputs", return_value=CREDS),
+                    mock.patch.object(
+                        probe,
+                        "Transport",
+                        return_value=mock.Mock(request=invoke, counts=counts),
+                    ),
+                    mock.patch.object(probe.resource, "setrlimit"),
+                    mock.patch.object(probe.signal, "signal"),
+                    mock.patch.object(probe.signal, "alarm"),
+                    contextlib.redirect_stdout(stream),
+                ):
+                    self.assertEqual(probe.main(), status)
+                out = json.loads(stream.getvalue())
+                self.assertEqual(out["probe_error"], bool(status))
+                self.assertEqual(out["identity_matches"], not status)
+                self.assertEqual(out.get("all_metadata_requests_attempted"), complete)
+                self.assertEqual(out["request_counts"]["identity"], 1)
+                self.assertEqual(len(out["operations"]), count)
+                self.assertEqual(len(calls), count + 1)
+                self.assertFalse(out["write_authorized"])
+                self.assertTrue(out["collector_cleanup_confirmed"])
+                if name == "config-unavailable":
+                    self.assertEqual(
+                        out["operations"]["GetBucketReplication"]["state"],
+                        "unavailable",
+                    )
+
+        stream = io.StringIO()
+        with (
+            mock.patch.object(
+                probe, "runtime_inputs", side_effect=ValueError("NEVER_PRINT")
+            ),
+            mock.patch.object(probe, "Transport") as transport,
+            mock.patch.object(probe.resource, "setrlimit"),
+            mock.patch.object(probe.signal, "signal"),
+            mock.patch.object(probe.signal, "alarm"),
+            contextlib.redirect_stdout(stream),
+        ):
+            self.assertEqual(probe.main(), 1)
+        transport.assert_not_called()
+        self.assertEqual(
+            json.loads(stream.getvalue()),
+            {
+                "probe_error": True,
+                "write_authorized": False,
+                "collector_cleanup_confirmed": True,
+            },
+        )
 
 
 SIGNATURES = {

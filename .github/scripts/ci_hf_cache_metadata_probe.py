@@ -34,6 +34,7 @@ CREDENTIAL_KEYS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TO
 FIXED_AWS_ENV = {
     "AWS_REGION": REGION,
     "AWS_DEFAULT_REGION": REGION,
+    "AWS_MAX_ATTEMPTS": "1",
     "AWS_EC2_METADATA_DISABLED": "true",
     "AWS_CONFIG_FILE": "/dev/null",
     "AWS_SHARED_CREDENTIALS_FILE": "/dev/null",
@@ -167,8 +168,8 @@ class Transport:
 
     def request(self, operation):
         spec = request_spec(operation)
-        maximum = 2 if operation == "identity" else 1
-        if self.counts[operation] >= maximum:
+        # The pinned credentials action performs the other identity read.
+        if self.counts[operation] >= 1:
             raise ValueError("request budget")
         self.counts[operation] += 1
         _, host, method, path, query, _, body = spec
@@ -493,6 +494,26 @@ def project(operation, response):
 
 
 def run_probe(invoke):
+    """Collect redacted metadata using invoke(operation) -> (status, headers, body).
+
+    The callback accepts only "identity" and OPERATIONS. It must make at most
+    one HTTP request per operation, without retries or redirects, and return
+    an integer status, lowercase allowlisted headers, and at most LIMIT bytes.
+    Transport errors or invalid responses must raise. Transport enforces this
+    contract. The initial exact-account/role check is the collector's only STS
+    identity request; the pinned credentials action makes the other (total <=2).
+
+    The result has identity_matches, operations, probe_error and
+    write_authorized. operations maps attempted, successfully projected S3
+    operation names to redacted state dictionaries. Exceptions set probe_error
+    and failure_stage without exposing the exception or raw response; the
+    all_metadata_requests_attempted field can then be absent. Otherwise that
+    field reports whether all 16 responses were projected, not their success.
+    Consumers must require identity_matches and all_metadata_requests_attempted
+    to be true, then inspect every expected operation's state. Unavailable and
+    present-unreviewed do not establish safe configuration. write_authorized is
+    always false: it states this collector's scope, not the role's permissions.
+    """
     out = {
         "identity_matches": False,
         "operations": {},
@@ -513,10 +534,6 @@ def run_probe(invoke):
                 break
             if operation == "GetBucketLocation" and result["state"] != "region-matched":
                 break
-        stage = "final-identity"
-        status, _, data = invoke("identity")
-        if status != 200 or not identity_matches(data):
-            raise ValueError("identity")
         out["all_metadata_requests_attempted"] = len(out["operations"]) == len(
             OPERATIONS
         )
@@ -551,6 +568,7 @@ def validate_environment(env, after_action=False):
         raise ValueError("workflow scope")
     for key in (
         "AWS_EC2_METADATA_DISABLED",
+        "AWS_MAX_ATTEMPTS",
         "AWS_CONFIG_FILE",
         "AWS_SHARED_CREDENTIALS_FILE",
     ):
@@ -614,6 +632,14 @@ def deadline(_signum, _frame):
 
 
 def main():
+    """Print one JSON result and exit int(probe_error).
+
+    Exit 0 alone does not imply complete or available metadata. The outer error
+    fallback can omit identity_matches, operations and completion. request_counts,
+    when present, counts collector attempts only, not the credentials action's
+    one identity request. collector_cleanup_confirmed records local completion;
+    it is not evidence of cloud permissions or remote cleanup.
+    """
     try:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         signal.signal(signal.SIGALRM, deadline)

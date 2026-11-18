@@ -38,6 +38,7 @@ jobs:
       CANARY_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
       CANARY_HEAD_REF: ${{ github.event.pull_request.head.ref }}
       AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_MAX_ATTEMPTS: '1'
       AWS_CONFIG_FILE: /dev/null
       AWS_SHARED_CREDENTIALS_FILE: /dev/null
     permissions:
