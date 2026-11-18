@@ -183,26 +183,6 @@ void _check_scales_blocked(
   }
 }
 
-void check_scale(
-    const Tensor& mat,
-    const Tensor& scale,
-    const int dim,
-    const int arg_idx,
-    const int scale_multiplier = 1) {
-  bool using_fp8_rowwise = scale.scalar_type() == kFloat;
-  bool using_mx = scale.scalar_type() == at::kFloat8_e8m0fnu;
-  if (using_fp8_rowwise) {
-    _check_scales_fp8_rowwise(mat, scale, dim, arg_idx, scale_multiplier);
-  } else if (using_mx) {
-    _check_scales_blocked(mat, scale, dim, arg_idx);
-  } else {
-    TORCH_CHECK(
-        false,
-        "scale must be float32 or float8_e8m0fnu, but got ",
-        scale.dtype());
-  }
-}
-
 template <class ArrayType>
 void check_swizzle(ArrayType& swizzle_enums) {
   for (auto swizzle_enum : swizzle_enums) {
