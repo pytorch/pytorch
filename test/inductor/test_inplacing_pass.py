@@ -534,12 +534,13 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
         self.assertEqual(self._count_copies(gm.graph), 1)
 
-    def test_copy_back_of_other_base_numerics_functionalize_v2(self):
+    @parametrize("enable_v2", [False, True])
+    def test_copy_back_of_other_base_numerics(self, enable_v2):
         def f(inp, x, y):
             sin_cos(inp, x, y)
             x.copy_(y)
 
-        with inductor_config.patch({"enable_auto_functionalized_v2": True}):
+        with inductor_config.patch({"enable_auto_functionalized_v2": enable_v2}):
             inp = torch.randn(3, device=device)
             x, y = (torch.randn(3, device=device) for _ in range(2))
             x2, y2 = x.clone(), y.clone()
