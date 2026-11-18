@@ -98,6 +98,7 @@ from torch._dynamo.package import (
     SerializedCode,
 )
 from torch._dynamo.source import (
+    ComputedLazyConstantSource,
     get_global_source_name,
     get_local_source_name,
     IndexedSource,
@@ -997,6 +998,15 @@ def uninteresting_files() -> set[str]:
 
 
 _CLOSURE_VARS: dict[str, object] | None = None
+
+
+def is_safe_dict_key(value: object) -> bool:
+    value_type = type(value)
+    if value_type in common_constant_types:
+        return True
+    if value_type in (tuple, frozenset, torch.Size):
+        return all(is_safe_dict_key(item) for item in cast(Any, value))
+    return False
 
 
 def _get_closure_vars() -> dict[str, object]:
@@ -2463,6 +2473,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: int(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ComputedLazyConstantSource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x, src=source: src.eval_with_base(x),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
