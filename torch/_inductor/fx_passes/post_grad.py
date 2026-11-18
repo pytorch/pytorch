@@ -36,6 +36,9 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import (
+    GraphTransformObserver as GraphTransformObserverBase,
+)
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._ordered_set import OrderedSet
 
@@ -378,7 +381,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     The IR here has been normalized and functionalized.
     """
     GraphTransformObserver = functools.partial(
-        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        GraphTransformObserverBase,
         subsystem="post_grad_passes",
     )
 
@@ -690,16 +693,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         if introduced_mutation:
             fake_tensor_updater.incremental_update()
-    auto_functionalized_decomposition = GraphTransformObserver(
-        gm, "decompose_auto_functionalized"
+    auto_functionalized_decomposition_enabled = (
+        not GraphTransformObserverBase.is_pass_disabled(
+            "decompose_auto_functionalized", "post_grad_passes"
+        )
     )
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(
             reinplace_inplaceable_ops,
             fake_tensor_updater,
-            rewire_auto_functionalized_outputs=(
-                not auto_functionalized_decomposition._check_disable_pass()
-            ),
+            rewire_auto_functionalized_outputs=auto_functionalized_decomposition_enabled,
         ),
     )
 
@@ -713,7 +716,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_user_kernel_wrapper_functional)
-    auto_functionalized_decomposition.apply_graph_pass(decompose_auto_functionalized)
+    if auto_functionalized_decomposition_enabled:
+        GraphTransformObserver(
+            gm, "decompose_auto_functionalized", subsystem=None
+        ).apply_graph_pass(decompose_auto_functionalized)
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
     )
