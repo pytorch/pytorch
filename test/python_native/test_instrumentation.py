@@ -753,7 +753,9 @@ _USER_KERNEL_COMPILE_SITES = (("cutedsl/user_kernel.py", "_compile"),)
 # The exporter warm-up, which compiles a function without kernels once per process
 # for the LLVM state export_to_c needs: a cached compile would not set it up, and there
 # is no kernel to instrument. The export of a user-defined kernel compiles outside
-# torch._native (torch/_inductor/codegen/cutedsl/user_kernel_aot.py).
+# torch._native (torch/_inductor/codegen/cutedsl/user_kernel_aot.py), through
+# instrument_cutedsl_compile, which test/inductor/test_cutedsl_kernels.py checks at
+# runtime.
 _EXPORT_COMPILE_SITES = (("cutedsl/export.py", "warm_up_exporter"),)
 # Each names a module-level function: a method or nested function of that name is not
 # exempt.

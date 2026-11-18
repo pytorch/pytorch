@@ -59,6 +59,7 @@ __all__ = [
     "emit_cpp_launch",
     "export_cutedsl_kernel",
     "export_for_link",
+    "host_target_option",
     "parse_exported_header",
     "scalar_ctype",
     "validate_exported_abi",
@@ -611,14 +612,36 @@ def cutedsl_kernel_prefix(
     return f"cutedsl_{name}_{arch.replace('_', '')}_{h.hexdigest()[:16]}"
 
 
+def _cute_dtype(host_fn: Callable[..., Any], spec: TensorParamSpec) -> Any:
+    """The CuTe type of tensor parameter ``spec`` (torch2cute); a dtype the table does
+    not map is refused with an error that names the kernel and the parameter."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
+    from torch._native.cutedsl.dtypes import torch2cute
+
+    if spec.dtype not in torch2cute:
+        supported = ", ".join(map(str, torch2cute))
+        raise NotImplementedError(
+            f"CuTeDSL kernel {cutedsl_kernel_name(host_fn)}: parameter {spec.name!r}: "
+            f"tensor dtype {spec.dtype} is not supported by the C++ wrapper "
+            f"(AOTInductor or cpp_wrapper); supported: {supported}"
+        )
+    return torch2cute[spec.dtype]
+
+
 def _fake_args(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> list[Any]:
     """Compile-time stand-ins: fake tensors with a fresh 32-bit symbol per dynamic size
-    and a 64-bit symbol per dynamic stride, hint values for runtime scalars, the
-    constants and a fake stream."""
+    and a 64-bit symbol per dynamic stride, hint values for runtime scalars, copies of
+    the constants and a fake stream. As in the eager compile
+    (torch._native.cutedsl.user_kernel._compile), the constants are copied (see
+    _snapshot) because the host code that the compile runs can change one (cache a
+    layout on a kernel object, say): the C++ wrapper passes the side table's own
+    snapshots, which must keep the contents that the side table and the export key
+    (_export_key) keyed them by."""
     import cutlass.cute as cute
     from cutlass.cute.runtime import make_fake_stream, make_fake_tensor
 
-    from torch._native.cutedsl.dtypes import torch2cute
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+    from torch._higher_order_ops.user_kernel_hop import _snapshot
 
     args: list[Any] = []
     for spec in specs:
@@ -627,13 +650,13 @@ def _fake_args(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> list[
             stride = tuple(cute.sym_int64() if s is None else s for s in spec.strides)
             args.append(
                 make_fake_tensor(
-                    torch2cute[spec.dtype], shape, stride, assumed_align=spec.align
+                    _cute_dtype(host_fn, spec), shape, stride, assumed_align=spec.align
                 )
             )
         elif isinstance(spec, ScalarParamSpec):
             args.append(spec.annotation(spec.hint))
         elif isinstance(spec, ConstantParamSpec):
-            args.append(spec.value)
+            args.append(_snapshot(spec.value, CUTEDSL_CONSTANT_RULES))
         else:
             args.append(make_fake_stream())
     return args
@@ -682,6 +705,23 @@ def _check_specs(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> Non
     for s in specs:  # fail before a compile the export would reject
         if isinstance(s, ScalarParamSpec):
             scalar_ctype(s.annotation)
+        elif isinstance(s, TensorParamSpec):
+            _cute_dtype(host_fn, s)
+
+
+def host_target_option() -> str | None:
+    """The cute.compile option that compiles an export's host code (its module load
+    and launch wrapper) for the generic CPU of this machine's architecture
+    (torch._native.cutedsl.export.host_target), so that it also runs on hosts with
+    older CPUs; None for a DSL without --host-target (nvidia-cutlass-dsl 4.6.1 and
+    later have it), which compiles it for this machine's CPU."""
+    import cutlass.base_dsl.compiler
+
+    from torch._native.cutedsl.export import host_target
+
+    if getattr(cutlass.base_dsl.compiler, "HostTarget", None) is None:
+        return None
+    return f"--host-target {shlex.quote(host_target())}"
 
 
 def export_cutedsl_kernel(
@@ -694,6 +734,12 @@ def export_cutedsl_kernel(
 ) -> CuteDSLExportedKernel:
     """Compile ``host_fn`` for ``specs`` and ``arch`` and export it as
     ``out_dir/<prefix>.h`` + ``out_dir/<prefix>.o``.
+
+    The object's host code is compiled for the generic CPU of this machine's
+    architecture where the DSL can do so (see host_target_option). The compile gets
+    copies of the constants (see _fake_args) and is logged to native_dsl_compile
+    (TORCH_LOGS and TLParse) under the kernel's name, keyed by ``prefix``, as the
+    eager compile is (see torch._native.cutedsl.plan_cache.cached_plan).
 
     Files are written to a private temporary directory, validated (header ABI vs
     specs, object symbols vs prefix) and only then moved into ``out_dir``, the header
@@ -710,17 +756,26 @@ def export_cutedsl_kernel(
 
     import cutlass.cute as cute
 
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
     from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
     from torch._native.cutedsl.export import warm_up_exporter
+    from torch._native.instrumentation import instrument_cutedsl_compile
 
     options = f"--gpu-arch {arch}"
+    host_opt = host_target_option()
+    if host_opt is not None:
+        options += f" {host_opt}"
     warm_up_exporter()
     os.makedirs(out_dir, exist_ok=True)
     tmp_dir = tempfile.mkdtemp(prefix=f".{prefix}.", dir=out_dir)
     try:
         args = _fake_args(host_fn, specs)
+        # compiled=True: every call compiles (export_for_link caches the exports).
+        compile_ = instrument_cutedsl_compile(
+            cutedsl_kernel_name(host_fn), key_fn=lambda: prefix, compiled=True
+        )(lambda: cute.compile(host_fn, *args, options=options))
         with CUTEDSL_COMPILE_LOCK:
-            compiled = cute.compile(host_fn, *args, options=options)
+            compiled = compile_()
             compiled.export_to_c(
                 file_path=tmp_dir, file_name=prefix, function_prefix=prefix
             )
@@ -748,15 +803,15 @@ def _export_key(
     host_fn: Callable[..., Any], specs: Sequence[ParamSpec], arch: str
 ) -> tuple[Any, ...]:
     """The key of an export of ``host_fn`` in _exports (see export_for_link)."""
-    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
-    from torch._higher_order_ops.user_kernel_hop import constant_key
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
+    from torch._native.cutedsl.user_kernel import key_constants
 
+    constants = {s.name: s.value for s in specs if isinstance(s, ConstantParamSpec)}
+    keys = key_constants(cutedsl_kernel_name(host_fn), constants)
     return (
         arch,
         *(
-            (s.name, constant_key(s.value, CUTEDSL_CONSTANT_RULES))
-            if isinstance(s, ConstantParamSpec)
-            else _spec_key(s)
+            (s.name, keys[s.name]) if isinstance(s, ConstantParamSpec) else _spec_key(s)
             for s in specs
         ),
     )
@@ -784,10 +839,12 @@ def export_for_link(
 
     Exports are reused within this process only, keyed by the host function object
     and the specs: the prefix does not cover every value a kernel reads, so a new
-    process exports again. The files go to ``out_root/<prefix>.<hash of their bytes>``,
-    so exporting the same kernel again under the same prefix (see _stable_repr)
-    yields the same paths (and with them the same JIT wrapper cache key) and no new
-    files.
+    process exports again. The constants are keyed by key_constants
+    (torch._native.cutedsl.user_kernel), which refuses a constant that constant_key
+    refuses with the eager launch's error, naming the kernel and the parameter. The
+    files go to ``out_root/<prefix>.<hash of their bytes>``, so exporting the same
+    kernel again under the same prefix (see _stable_repr) yields the same paths (and
+    with them the same JIT wrapper cache key) and no new files.
     """
     specs = tuple(specs)
     key = _export_key(host_fn, specs, arch)
