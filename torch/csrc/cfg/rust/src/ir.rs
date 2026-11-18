@@ -134,6 +134,12 @@ pub enum Op {
     /// Whether v is the function object consts[func] and still has the code
     /// object consts[code]: the guard of an inlined call.
     IsFunction { v: V, func: u32, code: u32 },
+    /// Where an inlined function starts: pushes an interpreter frame for the
+    /// function (a constant), so that the stack shows the call the inlining
+    /// removed.
+    FrameEnter(u32),
+    /// Where an inlined function returns: pops that frame.
+    FrameLeave,
 
     // ---- specialized tier only ----
     Dispatch(Box<DispatchOp>),
@@ -231,6 +237,8 @@ impl Op {
             | Op::LoadDeref(_)
             | Op::LoadClosure(_)
             | Op::LoadSlot(_)
+            | Op::FrameEnter(_)
+            | Op::FrameLeave
             | Op::CaughtException => {}
             Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
                 f(*code);
@@ -617,6 +625,8 @@ impl Function {
             Op::IsFunction { v, func, .. } => {
                 format!("is_function {} {}", n(v), self.const_repr(*func))
             }
+            Op::FrameEnter(func) => format!("frame_enter {}", self.const_repr(*func)),
+            Op::FrameLeave => "frame_leave".to_string(),
             Op::Dispatch(d) => format!(
                 "dispatch {}({})    ; else {}",
                 d.slot.describe(),
