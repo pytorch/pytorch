@@ -7188,6 +7188,9 @@ class TypeDictGuardAccessor : public GuardAccessor {
   // reference, so we must decref after use.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return false;
+    }
 #if PY_VERSION_HEX >= 0x030C0000
     PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
     if (x == nullptr) {
@@ -7207,6 +7210,9 @@ class TypeDictGuardAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return GuardDebugInfo(false, "expected a type on " + repr(), 0);
+    }
 #if PY_VERSION_HEX >= 0x030C0000
     PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
     if (x == nullptr) {
@@ -7268,13 +7274,22 @@ class TypeMROGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return false;
+    }
     PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    return x != nullptr && _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return GuardDebugInfo(false, "expected a type on " + repr(), 0);
+    }
     PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
+    if (x == nullptr) {
+      return GuardDebugInfo(false, "null type MRO on " + repr(), 0);
+    }
     return _guard_manager->check_verbose_nopybind(x);
   }
 

@@ -50,7 +50,11 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
-from torch._C._dynamo.eval_frame import code_framelocals_names
+from torch._C._dynamo.eval_frame import (
+    _invalidate_cache_entry,
+    _update_diff_guard_root_manager,
+    code_framelocals_names,
+)
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -205,7 +209,6 @@ from .source import (
 from .types import (  # noqa: F401
     CacheEntry,
     DynamoFrameType,
-    ExtraState,
     GuardedCode,
     GuardFail,
     GuardFilterEntry,
@@ -457,8 +460,8 @@ class GuardManagerWrapper:
         self.verbose_code_parts: list[str] | None = None
         self.global_scope: dict[str, Any] | None = None
         self.guard_fail_fn: Callable[[GuardFail], None] | None = None
-        self.cache_entry: CacheEntry | None = None
-        self.extra_state: ExtraState | None = None
+        # Set when the guard manager is cached, to find its cache entry.
+        self.code_ref: ReferenceType[types.CodeType] | None = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
         self.no_tensor_aliasing_sources: list[Source] = []
 
@@ -816,15 +819,11 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
-        # Ensure that C++ side points to the updated diff guard manager.
-        # When a new GuardManagerWrapper is created, it does not have a
-        # cache_entry attribute, so it relies on the CacheEntry constructor to
-        # set the diff_guard_root in C++.  But once it is saved in the Dynamo
-        # cache, C++ side adds a cache_entry attribute. On recompiles, this
-        # cache_entry is visible, so we update the C++ side to point to the
-        # update guard manager.
-        if self.cache_entry:
-            self.cache_entry.update_diff_guard_root_manager()
+        # Ensure that C++ side points to the updated diff guard manager.  A new
+        # GuardManagerWrapper is not cached yet, so this does nothing and the
+        # CacheEntry constructor reads diff_guard_root instead.  On recompiles,
+        # the guard managers already in the cache are updated in place.
+        _update_diff_guard_root_manager(self)
 
     def clone_with_chosen_sources(
         self, chosen_sources: OrderedSet[str]
@@ -3604,12 +3603,13 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _sequence_length(value),
         eval_fn=lambda value, metadata: _sequence_length(value) == metadata,
     )
-    def SEQUENCE_LENGTH(self, guard: Guard) -> None:
+    def SEQUENCE_LENGTH(self, guard: Guard, *, length: int | None = None) -> None:
         # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard)
-        length = _sequence_length(value)
+        if length is None:
+            length = _sequence_length(value)
 
         if not issubclass(type(value), dict) and not istype(
             guard.originating_source, TypeMROSource
@@ -5546,6 +5546,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             return obj._torch_unpickler, (obj._torch_handler_name,)
 
         elif _is_nested_named_tuple_type(obj):
+            if id(obj) in self.guard_tree_values and _resolves_by_reference(obj):
+                return NotImplemented
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -5847,8 +5849,7 @@ def _resolves_by_reference(value: object) -> bool:
             and getattr(owner, value.name, None) is value
         )
     if _is_nested_named_tuple_type(value):
-        # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
-        return False
+        return type(value) is type and FunctionPicklerBase._fqn_resolves(value)
     if isinstance(value, type) and type(value).__qualname__ != type(value).__name__:
         # GuardsStatePickler.reducer_override refuses a nested or local metaclass.
         return False
@@ -6400,8 +6401,26 @@ class CheckFunctionManager:
                 used_local_vars.add(name)
 
         output_graph_guards_state = output_graph.dump_guards_state()
-        # Only serialize the global variables that are actually used in guards.
+
+        def is_mro_entry(source: Source) -> bool:
+            return isinstance(source, GetItemSource) and isinstance(
+                source.base, TypeMROSource
+            )
+
+        mro_guard_values: dict[Source, object] = {}
         for guard in sorted_guards:
+            source = guard.originating_source
+            if guard.create_fn is GuardBuilder.CLASS_MATCH and is_mro_entry(source):
+                mro_guard_values[source] = builder.get(guard)
+            elif (
+                guard.create_fn is GuardBuilder.CONSTANT_MATCH
+                and isinstance(source, DictGetItemSource)
+                and isinstance(source.base, TypeDictSource)
+                and is_mro_entry(source.base.base)
+            ):
+                value = builder.get(guard)
+                if FunctionPicklerBase._is_literal(value):
+                    mro_guard_values[source] = value
             if isinstance(guard.originating_source, ShapeEnvSource):
                 if not self.shape_code_parts:
                     raise AssertionError(
@@ -6429,7 +6448,11 @@ class CheckFunctionManager:
 
             return x
 
-        def portable_create_fn(x: Callable[..., None]) -> Callable[..., None]:
+        def portable_create_fn(guard: Guard) -> Callable[..., None]:
+            x: Callable[..., None] = guard.create_fn
+            source = guard.originating_source
+            if x is GuardBuilder.SEQUENCE_LENGTH and isinstance(source, TypeMROSource):
+                return functools.partial(x, length=len(builder.get(guard)))
             if x is GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS:
                 fingerprint = builder.saved_tensors_hooks_fingerprint
                 if fingerprint is _LIVE_SAVED_TENSORS_HOOKS:
@@ -6439,6 +6462,7 @@ class CheckFunctionManager:
                 return functools.partial(x, hooks_fingerprint=fingerprint)
             return normalize_create_fn(x)
 
+        # Only serialize the global variables that are actually used in guards.
         global_scope_state = {
             k: v
             for k, v in output_graph_guards_state.global_scope.items()
@@ -6460,6 +6484,7 @@ class CheckFunctionManager:
                 if k in used_local_vars or k in self.additional_used_local_vars
             },
             global_scope=global_scope_state,
+            mro_guard_values=mro_guard_values,
             constant_result_names=(
                 output_graph_guards_state.constant_result_names
                 & global_scope_state.keys()
@@ -6470,7 +6495,7 @@ class CheckFunctionManager:
                         guard,
                         obj_weakref=None,
                         guarded_class_weakref=None,
-                        create_fn=portable_create_fn(guard.create_fn),
+                        create_fn=portable_create_fn(guard),
                     )
                     for guard in sorted_guards
                 )
@@ -6533,6 +6558,9 @@ class CheckFunctionManager:
             runtime_global_scope=self.runtime_global_scope,
             guard_filter_fn=guard_filter_fn,
         )
+
+        if output_graph.mro_guard_values:
+            builder.src_get_value_cache.update(output_graph.mro_guard_values)
 
         # Break retain cycle. See test_release_scope_memory
         def cleanup_builder(weak_b: weakref.ref[GuardBuilder]) -> None:
@@ -6790,10 +6818,6 @@ class CheckFunctionManager:
         # Grab only G, but preserve "G" because guards access it as "G"
         self.guard_manager.global_scope = globals_for_guard_fn
         self.guard_manager.guard_fail_fn = guard_fail_fn
-        # will be populated by a non-owning reference to CacheEntry/ExtraState
-        # when the CacheEntry is constructed
-        self.guard_manager.cache_entry = None
-        self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = (
             builder.no_tensor_aliasing_sources
         )
@@ -6802,22 +6826,13 @@ class CheckFunctionManager:
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
-        if (
-            hasattr(self, "guard_manager")
-            and not isinstance(self.guard_manager, DeletedGuardManagerWrapper)
-            and (cache_entry := self.guard_manager.cache_entry) is not None
-            and (extra_state := self.guard_manager.extra_state) is not None
+        if hasattr(self, "guard_manager") and not isinstance(
+            self.guard_manager, DeletedGuardManagerWrapper
         ):
-            if not isinstance(cache_entry, CacheEntry):
-                raise AssertionError(f"Expected CacheEntry, got {type(cache_entry)}")
-
-            if not isinstance(extra_state, ExtraState):
-                raise AssertionError(f"Expected ExtraState, got {type(extra_state)}")
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
-
-            extra_state.invalidate(cache_entry, deleted_guard_manager)
-            self.guard_manager = deleted_guard_manager
+            if _invalidate_cache_entry(self.guard_manager, deleted_guard_manager):
+                self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
         """add a weakref, return the id"""
@@ -7155,6 +7170,7 @@ def get_guard_fail_reason_helper(
     f_locals: dict[str, object],
     compile_id: CompileId | None,
     backend: Callable[..., object] | None,
+    cache_entry_backend: Callable[..., object] | None = None,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -7169,10 +7185,6 @@ def get_guard_fail_reason_helper(
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
-
-    cache_entry_backend = None
-    if guard_manager.cache_entry:
-        cache_entry_backend = guard_manager.cache_entry.backend
 
     no_tensor_aliasing_check_failed = False
 
@@ -7269,20 +7281,24 @@ def get_guard_fail_reason(
     compile_id: CompileId,
     backend: Callable[..., object],
     skip_logging: bool = False,
+    cache_entry_backend: Callable[..., object] | None = None,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(
-        guard_manager, f_locals, compile_id, backend
+        guard_manager, f_locals, compile_id, backend, cache_entry_backend
     )
-    if skip_logging:
+    # A reset clears orig_code_map, and can run after a compile but before its
+    # entry is cached, leaving the entry with nothing to attribute it to.
+    orig_code = orig_code_map.get(code)
+    if skip_logging or orig_code is None:
         return reason_str
-    guard_failures[orig_code_map[code]].append(reason_str)
+    guard_failures[orig_code].append(reason_str)
 
     try:
         if guard_manager.guard_fail_fn is not None:
             guard_manager.guard_fail_fn(
-                GuardFail(reason_str or "unknown reason", orig_code_map[code])
+                GuardFail(reason_str or "unknown reason", orig_code)
             )
     except Exception:
         log.exception(
@@ -7313,6 +7329,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.compile_id,
             backend,
             skip_logging,
+            cache_entry.backend,
         )
         if reason:
             reasons.append(reason)

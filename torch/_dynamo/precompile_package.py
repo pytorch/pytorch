@@ -334,9 +334,8 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     nested nor local and whose reduction (its ``copyreg.dispatch_table``
     entry, else ``__reduce_ex__``) names that global, such as
     ``typing.List``. A ``<locals>`` class, a module missing from
-    ``sys.modules``, a ``functools.wraps`` wrapper, a NamedTuple class nested
-    in a class (the guard-state pickler rebuilds it as a fresh class) and a
-    singleton stored as a class attribute are still dropped, and so is a class
+    ``sys.modules``, a ``functools.wraps`` wrapper and a singleton stored
+    as a class attribute are still dropped, and so is a class
     whose metaclass is nested or local. An object defined in
     ``__main__`` is kept like any other and resolves against the loading
     process's ``__main__``: a serving script that does not define it fails the
@@ -2232,11 +2231,13 @@ class PrecompileSession(Generic[_P, _R]):
             )
         if require_no_risky_drops and summary.risky_dropped_guards:
             mro_advice = (
-                "Keep mutable MRO bases and their metaclasses importable through stable "
-                "module/name references; nested namedtuple classes cannot be serialized by reference."
+                "Keep mutable MRO bases and classes returned by assume_constant_result "
+                "importable under stable qualified names, with module-level metaclasses."
                 if any(
-                    ".__mro__[" in name or name.endswith(".__mro__")
-                    for _, name in summary.risky_dropped_guards
+                    kind == "CLASS_MATCH"
+                    or ".__mro__[" in name
+                    or name.endswith(".__mro__")
+                    for kind, name in summary.risky_dropped_guards
                 )
                 else ""
             )
