@@ -3867,6 +3867,23 @@ def region_remember(model, x, memory):
     return out * 2
 
 
+class RegionState:
+    def __init__(self):
+        self.steps = []
+        self.total = None
+
+
+class RegionStarts(torch.nn.Module):
+    # Makes an object that has nothing of its input in it, as a model does
+    # that starts a cache.
+    def __init__(self):
+        super().__init__()
+        self.net = RegionLinears()
+
+    def forward(self, x):
+        return self.net(x), RegionState()
+
+
 def region_note(log, x, out):
     log.append(out.shape[0])
     x.add_(1)
@@ -4693,6 +4710,26 @@ class TestCfgRegions(TestCase):
                 )
         (region,) = self.compiled_regions(compiled)
         self.assertTrue(region["where"].startswith("region_remember"))
+
+    def test_object_made_in_a_region_is_made_on_every_call(self):
+        torch.manual_seed(0)
+        model = RegionStarts().eval()
+        compiled = torch.cfg_compile(region_infer, backend="aot_eager", fallback=False)
+        states = []
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(4, 6)
+                out, state = compiled(model, x)
+                self.assertEqual(out, model.net(x), atol=0, rtol=0)
+                # Not the object of an earlier call, with what was done to it.
+                self.assertIs(type(state), RegionState)
+                self.assertEqual(state.steps, [])
+                state.steps.append(out)
+                states.append(state)
+        self.assertEqual(len({id(state) for state in states}), 8)
+        self.assertEqual(len({id(state.steps) for state in states}), 8)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
 
     def test_path_ends_before_a_call_that_fails_part_way(self):
         torch.manual_seed(0)
