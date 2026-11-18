@@ -156,7 +156,7 @@ JOIN_TIMEOUT = 60.0  # seconds
 supported_multiprocessing_contexts = [None] + [
     method
     for method in torch.multiprocessing.get_all_start_methods()
-    if not (IS_MACOS and method == "fork")
+    if not (IS_MACOS and method in ("fork", "forkserver"))
 ]
 
 
