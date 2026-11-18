@@ -125,6 +125,8 @@ if BACKEND in _allowed_backends:
             self._spawn_processes()
             torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
+    TestDistBackendWithSpawn.mark_statically_skipped()
+
     # instantiate_device_type_tests only inspects the generic class's own
     # __dict__, so promote the tests inherited from _AcceleratorDistTestBase
     # into TestDistBackendWithSpawnAccel before instantiation. The original
