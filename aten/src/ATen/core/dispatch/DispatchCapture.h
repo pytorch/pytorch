@@ -20,7 +20,7 @@ class TORCH_API OperatorHandle;
 // backend) reports the DispatchKeySet it was handed. The last redispatch of a
 // chain is therefore the post-dispatch kernel, which is what a compiler needs
 // to record in order to replay the operator without dispatching again (see
-// torch.cfg_compile).
+// torch.vm).
 //
 // Not reported: a kernel invoked by key through callBoxedForDispatchKey. That
 // is how the Python dispatcher calls the kernel of a key, so while it is
