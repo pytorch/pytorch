@@ -38,16 +38,17 @@ class ModelPool {
   // goes back to the available pool at once, without waiting for completion
   // and with any stream binding cleared, so the next checkout may get it while
   // device work the failed run launched is still in flight.
-  class Lease {
+  class ModelLease {
    public:
-    Lease(const Lease&) = delete;
-    Lease& operator=(const Lease&) = delete;
-    Lease(Lease&& other) noexcept : pool_(other.pool_), model_(other.model_) {
+    ModelLease(const ModelLease&) = delete;
+    ModelLease& operator=(const ModelLease&) = delete;
+    ModelLease(ModelLease&& other) noexcept
+        : pool_(other.pool_), model_(other.model_) {
       other.model_ = nullptr;
     }
-    Lease& operator=(Lease&&) = delete;
+    ModelLease& operator=(ModelLease&&) = delete;
 
-    ~Lease() {
+    ~ModelLease() {
       if (model_ != nullptr) {
         pool_->return_model_to_available(model_);
       }
@@ -72,7 +73,7 @@ class ModelPool {
 
    private:
     friend class ModelPool;
-    Lease(ModelPool& pool, Model* model) : pool_(&pool), model_(model) {}
+    ModelLease(ModelPool& pool, Model* model) : pool_(&pool), model_(model) {}
 
     ModelPool* pool_;
     Model* model_;
@@ -156,12 +157,12 @@ class ModelPool {
     AOTI_RUNTIME_CHECK(false, "Stream affinity refers to an unknown model");
   }
 
-  [[nodiscard]] Lease checkout() {
-    return Lease(*this, get_available_model());
+  [[nodiscard]] ModelLease checkout() {
+    return ModelLease(*this, get_available_model());
   }
 
-  [[nodiscard]] Lease checkout(Stream stream) {
-    return Lease(*this, get_available_model(stream));
+  [[nodiscard]] ModelLease checkout(Stream stream) {
+    return ModelLease(*this, get_available_model(stream));
   }
 
   StreamLock acquire_stream_lock(Stream stream) {
