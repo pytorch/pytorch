@@ -170,11 +170,6 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  // For run_single_threaded(), which bypasses the pool's locking entirely.
-  Model* first_available_model_unsynchronized() {
-    return available_models_[0];
-  }
-
  private:
   Model* checkout_available_model(std::unique_lock<std::mutex>& lk) {
     return take_available_model(lk, /*prefer_unbound=*/use_stream_affinity_);
