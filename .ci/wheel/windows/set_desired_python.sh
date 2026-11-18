@@ -55,8 +55,7 @@ case "$PYTHON_BASE" in
     3.12) PYTHON_FULL="3.12.10" ;;
     3.13) PYTHON_FULL="3.13.14" ;;
     3.14) PYTHON_FULL="3.14.6" ;;
-    # 3.15 is still pre-release; python.org ships only pre-release installers so far.
-    3.15) PYTHON_FULL="3.15.0rc2" ;;
+    3.15) PYTHON_FULL="3.15.2" ;;
     *)
         echo "No patch pin for Python ${PYTHON_BASE}; add one to set_desired_python.sh" >&2
         exit 1
@@ -64,7 +63,7 @@ case "$PYTHON_BASE" in
 esac
 echo "Resolved ${DESIRED_PYTHON} to ${PYTHON_FULL}"
 # python.org keeps prerelease installers (aN/bN/rcN) under the final release
-# directory, e.g. /ftp/python/3.15.0/python-3.15.0rc2-amd64.exe, so strip any
+# directory, e.g. /ftp/python/3.16.0/python-3.16.0rc1-amd64.exe, so strip any
 # prerelease suffix to get the download directory. Released versions such as
 # 3.14.6 are unchanged.
 PYTHON_DL_DIR="${PYTHON_FULL%%[a-z]*}"
