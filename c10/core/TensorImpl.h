@@ -2221,10 +2221,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     ;
   }
 
- protected:
-  // Returns null when the copy does not need Python dispatch.
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_via_python() const;
-
  private:
   template <typename VariableVersion>
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(

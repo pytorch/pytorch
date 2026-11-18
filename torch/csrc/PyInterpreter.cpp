@@ -1,4 +1,3 @@
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
@@ -56,8 +55,7 @@ struct ConcretePyInterpreterVTable final
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
   // operate upon a PyObjectSlot rather than a TensorImpl
   c10::intrusive_ptr<c10::TensorImpl> detach(
-      const c10::TensorImpl* self,
-      bool pre_dispatch) const override;
+      const c10::TensorImpl* self) const override;
 
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
@@ -390,19 +388,9 @@ void ConcretePyInterpreterVTable::python_dispatcher(
 }
 
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::detach(
-    const c10::TensorImpl* self,
-    bool pre_dispatch) const {
+    const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  if (pre_dispatch) {
-    at::Tensor self_t(
-        c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
-    at::AutoDispatchBelowADInplaceOrView below_autograd;
-    return self_t.detach().getIntrusivePtr();
-  }
 
   auto out = torchDispatchFromTensorImpl(
       self,

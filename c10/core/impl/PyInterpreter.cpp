@@ -29,8 +29,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   }
 
   c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* /*self*/,
-      bool /*pre_dispatch*/) const override {
+      const TensorImpl* /*self*/) const override {
     PANIC(detach);
   }
 
