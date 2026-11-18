@@ -70,7 +70,6 @@ from torch._guards import (
     compile_context,
     CompileContext,
     detect_fake_mode,
-    require_python_fake_mode,
     tracing,
     TracingContext,
 )
@@ -350,7 +349,7 @@ def _extract_fake_inputs(gm, args, kwargs):
     # both. Unfortunately we can't see what fake mode is attached to the shape
     # env, then we can just compare fake modes.
     fake_inputs = fake_inps + fake_vals
-    detected_fake_mode = require_python_fake_mode(detect_fake_mode(fake_inputs))
+    detected_fake_mode = detect_fake_mode(fake_inputs)
     detected_shape_env = detect_shape_env(fake_inputs)
 
     if detected_fake_mode:
@@ -1085,6 +1084,7 @@ def _export_to_torch_ir(
                     # Once we delete the old strict export, we can use this fake mode in the
                     # subsequent logic when lowering to aten IR.
                     del gm_torch_level.meta["fake_mode"]
+                    gm_torch_level.meta.pop("tracing_context", None)
 
                 else:
                     if is_shapes_spec:
