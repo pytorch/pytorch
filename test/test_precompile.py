@@ -6688,13 +6688,14 @@ f = torch.compiler.precompile.load(artifact, cache)
 assert cudagraph_config() == ambient
 training = saved["expected_grad"] is not None
 with contextlib.nullcontext() if training else torch.no_grad():
-    for _ in range(3):
+    for i in range(3):
         if saved["mark_step"]:
             torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
+        args, expected = saved["calls"][i % len(saved["calls"])]
         # y stays alive into the next call, as in a loop that uses its output.
-        y = f(model, *saved["args"])
-        torch.testing.assert_close(y, saved["expected"])
+        y = f(model, *args)
+        torch.testing.assert_close(y, expected)
         if training:
             y.sum().backward()
             torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
@@ -6765,8 +6766,9 @@ class TestPrecompileCudagraphs(TestCase):
         policy=None,
     ):
         # Calls the loaded artifact three times, on the model and args (self.x
-        # by default), in a fresh process whose triton.cudagraphs is off unless
-        # env turns it on, and returns what that process counted:
+        # by default; a list gives each call its own args and expected), in a
+        # fresh process whose triton.cudagraphs is off unless env turns it on,
+        # and returns what that process counted:
         #   recorded: the nodes in its CUDA graph tree
         #   captured: every CUDA graph captured, a tree manager's pool graph too
         #   trees: whether it made a CUDA graph tree manager
@@ -6774,9 +6776,11 @@ class TestPrecompileCudagraphs(TestCase):
         # With expected_grad, each call also runs the backward.
         # policy names the module's CUDAGraphPolicy the process sets before load().
         state = os.path.join(self.dir, "state.pt")
+        calls = [((self.x,) if args is None else args, expected)]
+        if isinstance(args, list):
+            calls = list(zip(args, expected))
         saved = {
-            "args": (self.x,) if args is None else args,
-            "expected": expected,
+            "calls": calls,
             "expected_grad": expected_grad,
             "mark_step": mark_step,
             "policy": policy,
@@ -6837,8 +6841,10 @@ class TestPrecompileCudagraphs(TestCase):
             ) as cap:
                 cap(self.model, self.x, 1.0)
                 cap(self.model, self.x, 2.0)
-            expected = fn(self.model, self.x, 3.0)
-        served = self._serve_in_fresh_process(expected, args=(self.x, 3.0))
+            # A value per call: a replay must not bake in the one it recorded.
+            args = [(self.x, scale) for scale in (3.0, 4.0, 5.0)]
+            expected = [fn(self.model, *a) for a in args]
+        served = self._serve_in_fresh_process(expected, args=args)
         self.assertGreater(served["recorded"], 0)
         self.assertEqual(served["skips"], 0)
 
