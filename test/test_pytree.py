@@ -1798,6 +1798,48 @@ class TestCxxPytree(TestCase):
         self.assertEqual(repr(polyfill_spec), expected_repr)
         self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
 
+    @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
+    def test_optree_unknown_builtin_handler(self):
+        script = """
+import torch.utils._pytree as pytree
+
+class Unknown:
+    def __init__(self, child):
+        self.child = child
+
+pytree.register_pytree_node(
+    Unknown,
+    lambda node: ([node.child], ["context"]),
+    lambda children, context: Unknown(children[0]),
+)
+pytree.BUILTIN_TYPES |= {Unknown}
+from torch._dynamo.polyfills import pytree as polyfill
+from torch.utils import _cxx_pytree as cxx_pytree
+
+if Unknown in polyfill.BUILTIN_TYPES or Unknown in polyfill.STANDARD_DICT_TYPES:
+    raise RuntimeError("unknown Optree handler classified as builtin")
+if tuple not in polyfill.BUILTIN_TYPES:
+    raise RuntimeError("known Optree builtin handler was excluded")
+flatten = polyfill.tree_flatten.__torch_dynamo_polyfill__
+tree = Unknown((1, 2))
+leaves, spec = flatten(tree, none_is_leaf=True, namespace="torch")
+if leaves != [1, 2] or spec.flatten_up_to(Unknown((3, 4))) != [3, 4]:
+    raise RuntimeError("unknown node flattened incorrectly")
+other = flatten(tree, none_is_leaf=True, namespace="torch")[1]
+if spec != other or hash(spec) != hash(other):
+    raise RuntimeError("unknown node spec hash is inconsistent")
+if repr(spec) != repr(cxx_pytree.tree_structure(tree)):
+    raise RuntimeError("unknown node spec representation differs from Optree")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as error:
+            self.fail(error.output.decode("utf-8"))
+
     def test_pytree_custom_type_serialize(self):
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
@@ -1882,31 +1924,6 @@ class TestFrozenDictPytree(TestCase):
             fx_pytree.tree_flatten_spec(builtins.frozendict(a=6, b=[4, 5]), spec),
             [4, 5, 6],
         )
-
-    @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
-    def test_optree_unknown_builtin_handler(self):
-        script = """
-import torch.utils._pytree as pytree
-
-class Unknown:
-    pass
-
-pytree.BUILTIN_TYPES |= {Unknown}
-from torch._dynamo.polyfills import pytree as polyfill
-
-if Unknown in polyfill.BUILTIN_TYPES or Unknown in polyfill.STANDARD_DICT_TYPES:
-    raise RuntimeError("unknown Optree handler classified as builtin")
-if tuple not in polyfill.BUILTIN_TYPES:
-    raise RuntimeError("known Optree builtin handler was excluded")
-"""
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-            )
-        except subprocess.CalledProcessError as error:
-            self.fail(error.output.decode("utf-8"))
 
     @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
     @parametrize(
