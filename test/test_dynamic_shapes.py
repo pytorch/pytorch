@@ -876,7 +876,9 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
 
     def test_canonicalize_simple_bound_respects_evaluation_mode(self):
         dim = sympy.Symbol("dim", integer=True)
-        self.assertEqual(canonicalize_bool_expr(dim >= 3), sympy.Le(3, dim))
+        reduce = "torch.fx.experimental.symbolic_shapes._reduce_to_lowest_terms"
+        with unittest.mock.patch(reduce, side_effect=AssertionError):
+            self.assertEqual(canonicalize_bool_expr(dim >= 3), sympy.Le(3, dim))
         bound = sympy.Le(0, dim, evaluate=False)
         self.assertEqual(canonicalize_bool_expr(bound), bound)
         with sympy.evaluate(False):

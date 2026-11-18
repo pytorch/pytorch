@@ -77,6 +77,8 @@ env:
 
 jobs:
   test:
+    env:
+      CPP_FAKETENSOR: ${{ matrix.fake_tensor == 'cpp' && '1' || '0' }}
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
@@ -244,6 +246,7 @@ jobs:
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
+            -e CPP_FAKETENSOR \
             -e NUM_TEST_SHARDS \
             -e REENABLED_ISSUES \
             -e PYTORCH_RETRY_TEST_CASES \
