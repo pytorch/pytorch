@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import abc
+import ctypes
 import functools
 import gc
 import inspect
@@ -750,6 +751,88 @@ def less_match_verbose_code_parts(expected):
 @instantiate_parametrized_tests
 class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def _legacy_clone_case(self, kind):
+        storage = torch.empty(4)
+        values = {"x": storage[:2], "y": storage[1:3]}
+        if kind == "alias":
+            values["y"] = values["x"]
+        elif kind == "symbolic":
+            values = {"x": (0, 1), "y": (1, 2)}
+        invalid = {**values, "y": torch.empty(2)}
+        if kind == "no_alias":
+            invalid["y"] = values["x"]
+        elif kind == "symbolic":
+            invalid["y"] = (1, 4)
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in values.items()
+        ]
+        callback_ref = None
+        if kind == "alias":
+            install_object_aliasing_guard(*managers, [], None)
+        elif kind == "no_alias":
+            install_no_tensor_aliasing_guard(managers, ["x", "y"], [], None)
+        elif kind == "overlap":
+            install_storage_overlapping_guard(managers, [], [], None)
+        elif kind == "partition":
+            guards.install_storage_overlap_partition_guard(
+                managers, ((0, 1),), [], None
+            )
+        else:
+            signature = ctypes.CFUNCTYPE(
+                ctypes.c_int8,
+                ctypes.POINTER(ctypes.c_int64),
+                ctypes.POINTER(ctypes.c_double),
+            )
+            callback = signature(lambda ints, floats: ints[0] + ints[1] == 3)
+            callback_ref = weakref.ref(callback)
+            address = ctypes.cast(callback, ctypes.c_void_p).value
+            guards.install_symbolic_shape_guard(
+                managers, 2, 0, address, callback, [], None
+            )
+        return root, managers, values, invalid, callback_ref
+
+    @parametrize("kind", ["alias", "no_alias", "overlap", "partition", "symbolic"])
+    def test_legacy_relational_clone_reentry(self, kind):
+        root, managers, values, invalid, _ = self._legacy_clone_case(kind)
+        clone = root.clone_manager(lambda manager: True)
+        self.assertTrue(root.check(values))
+        self.assertTrue(clone.check(values))
+        calls = []
+
+        def check_clone(value):
+            calls.append(clone.check_verbose(values).result)
+            return True
+
+        managers[0].add_lambda_guard(check_clone, ["nested clone check"], None)
+        self.assertTrue(root.check(values))
+        self.assertFalse(root.check(invalid))
+        self.assertTrue(all(calls))
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(root.check(values))
+        self.assertFalse(clone.check_verbose(invalid).result)
+        self.assertTrue(clone.check(values))
+
+    @parametrize("kind", ["alias", "no_alias", "overlap", "partition", "symbolic"])
+    def test_legacy_relational_clone_filter_and_lifetime(self, kind):
+        root, managers, values, invalid, callback_ref = self._legacy_clone_case(kind)
+        clone = root.clone_manager(lambda manager: True)
+        partial = root.clone_manager(lambda manager: manager.get_source() != "y")
+        self.assertTrue(partial.check(invalid))
+        self.assertFalse(clone.check(invalid))
+        self.assertTrue(clone.check(values))
+        del root, managers
+        gc.collect()
+        self.assertTrue(clone.check(values))
+        self.assertFalse(clone.check_verbose(invalid).result)
+        if callback_ref is not None:
+            self.assertIsNotNone(callback_ref())
+        del clone, partial
+        gc.collect()
+        if callback_ref is not None:
+            self.assertIsNone(callback_ref())
 
     @parametrize("invalid", ["empty", "count", "label", "root", "noncanonical"])
     def test_object_alias_pattern_invalid_install_is_atomic(self, invalid):
@@ -1866,6 +1949,21 @@ user_stack=None)
         self.assertTrue(guard_manager.check(global_pair))
         global_pair.y = "foo"
         self.assertFalse(guard_manager.check(global_pair))
+
+    def test_type_metadata_accessors_reject_non_types(self):
+        for accessor, value in (
+            ("type_dict_manager", dict(vars(int))),
+            ("type_mro_manager", int.__mro__),
+        ):
+            with self.subTest(accessor=accessor):
+                root = RootGuardManager()
+                # A custom guard filter can retain this accessor without CLASS_MATCH.
+                child = getattr(root, accessor)(accessor, value, default_mgr_enum)
+                child.add_type_match_guard(id(type(value)), ["metadata type"], None)
+                self.assertTrue(root.check(int))
+                self.assertTrue(root.check_verbose(int).result)
+                self.assertFalse(root.check(None))
+                self.assertFalse(root.check_verbose(None).result)
 
     def test_type_manager(self):
         guard_manager = RootGuardManager()

@@ -418,12 +418,16 @@ class DictTests(torch._dynamo.test_case.TestCase):
         [
             (kind, operation)
             for kind in (dict, OrderedDict)
-            for operation in ("extend", "copy", "update", "union")
+            for operation in ("iter", "extend", "copy", "update", "union")
         ]
         + [(OrderedDict, "popitem")],
     )
     def test_sourced_mapping_order_consumers(self, mapping_type, operation):
         def fn(x, mapping):
+            if operation == "iter":
+                views = mapping.keys(), mapping.values(), mapping.items()
+                iterables = (mapping, *views, dict.items(mapping))
+                return x + 1, tuple((type(it), next(it)) for it in map(iter, iterables))
             if operation == "popitem":
                 key, value = mapping.popitem(last=False)
                 return x + value, key
@@ -532,13 +536,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x, view):
             return x + 1, tuple(view)
 
-        view = Mapping(a=1).keys()
+        x, view = torch.ones(1), Mapping(a=1).keys()
         with self.assertRaisesRegex(Unsupported, "Unsupported dictionary view owner"):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1), view)
-        self.assertEqual(
-            torch.compile(fn, backend="eager")(torch.ones(1), view),
-            fn(torch.ones(1), view),
-        )
+            torch.compile(fn, backend="eager", fullgraph=True)(x, view)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, view), fn(x, view))
 
     def test_ordered_dict_comparison_checks_values_before_order(self):
         class Value:
@@ -1884,11 +1885,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x * d["foo"] * d["bar"]
 
         # Replay must resolve builtin operations independently of the frame's globals.
-        fn = types.FunctionType(
-            fn.__code__, {**fn.__globals__, "type": None, "dict": None}
-        )
+        frame_globals = {**fn.__globals__, "type": None, "dict": None}
+        fn = types.FunctionType(fn.__code__, frame_globals)
         fn = torch.compile(fn, backend="eager")
-        fn(torch.randn(4), d)
+        self.assertEqual(fn(torch.ones(4), d), torch.full((4,), 2.0))
+        self.assertEqual(list(dict.items(d)), [("foo", 1), ("bar", 2), ("baz", 4)])
+        self.assertEqual(d.sample, 1)
         # This is intentional because the dict is mutated, so we will have a recompilation.
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
