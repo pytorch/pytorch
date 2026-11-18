@@ -430,11 +430,6 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
 class TestFullyShard2DStateDict(DTensorContinuousTestBase):
     world_size = 4
 
-    @property
-    def backend(self):
-        # need to specify gloo backend for testing cpu offload
-        return f"cpu:gloo,{device_type}:{curr_backend}"
-
     @skip_if_lt_x_gpu(4)
     def test_fully_shard_tp_2d_set_full_state_dict(self):
         dummy_model = SimpleModel().to(device_type)
@@ -675,11 +670,6 @@ class TestNew2dParallelTraining(DTensorContinuousTestBase):
 # and consolidate all the state_dict test in test.distributed.checkpoint.
 class TestNew2dParallelStateDict(DTensorContinuousTestBase):
     world_size = 4
-
-    @property
-    def backend(self):
-        # need to specify gloo backend for testing cpu offload
-        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     @skip_if_lt_x_gpu(4)
     def test_fsdp_2d_extension(self):

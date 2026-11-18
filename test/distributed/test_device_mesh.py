@@ -90,8 +90,8 @@ def _with_torchcomm_env(func):
 
 @unittest.skipIf(TEST_XPU or TEST_HPU, "XPU/HPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
-    @property
-    def backend(self):
+    @classmethod
+    def backend_str(cls, device) -> str:
         return "gloo"
 
     @with_comms
@@ -246,7 +246,7 @@ class DeviceMeshTest(DTensorTestBase):
 
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl":
+        if self.backend_str(self.device_type) == "nccl":
             curr_device = torch.cuda.current_device()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
