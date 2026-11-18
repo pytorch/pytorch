@@ -386,21 +386,26 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
     )
 
 
-def _method_identity_guards_filtered(tx: InstructionTranslatorBase) -> bool:
+def _method_identity_guards_filtered(
+    tx: InstructionTranslatorBase, *, binding_only: bool = False
+) -> bool:
+    if tx.output.package is not None:
+        return True
+    guards = tx.output.tracing_context.guards_context
+    if guards.skip_install:
+        return not (binding_only and guards.tracing_reuse_hash)
+    if tx.export or torch.compiler.is_exporting():
+        # Export can call a bound method on the captured module. Its graph
+        # still cannot preserve observations of process-local wrapper identities.
+        return not binding_only
     context = CompileContext.try_get()
-    return (
-        context is not None
-        and context.is_aot_capture
-        or config.caching_precompile
-        or tx.export
-        or TracingContext.get().guards_context.skip_install
-    )
+    return context is not None and context.is_aot_capture
 
 
 def install_builtin_method_guard(
     tx: InstructionTranslatorBase, source: Source, value: object = None
 ) -> None:
-    filtered = _method_identity_guards_filtered(tx)
+    filtered = _method_identity_guards_filtered(tx, binding_only=True)
     if value is None:
         value = tx.output.resolve_source_value(source)
     expected = _native_method_metadata(value, portable=filtered)
@@ -3655,7 +3660,8 @@ class GuardBuilder(GuardBuilderBase):
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
         if self.save_guards and type(expected.receiver) is tuple:
             raise torch._dynamo.exc.PackageError(
-                "Instance methods need receiver identity; bind them in the saved function."
+                f"Instance method {expected.name!r} at {guard.name} needs receiver identity. "
+                "Bind it in the saved function."
             )
         last_match: weakref.ReferenceType[object] | None = None
 
@@ -3668,15 +3674,16 @@ class GuardBuilder(GuardBuilderBase):
             last_match = weakref.ref(value)
             return True
 
-        owner = cast(
-            type,
-            expected.receiver[0]
-            if type(expected.receiver) is tuple
-            else expected.receiver,
-        )
+        binding = expected.receiver
+        owner = cast(type, binding[0] if type(binding) is tuple else binding)
         method = f"{owner.__module__}.{owner.__qualname__}.{expected.name}"
         code = f"___check_native_method({self.arg_ref(guard)}, {method})"
         self._set_guard_export_info(guard, [code])
+        token = (id(owner), binding[1] if type(binding) is tuple else None)
+        key = f"{code} {token}"
+        if key in self.already_added_code_parts:
+            return
+        self.already_added_code_parts.add(key)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
@@ -6526,24 +6533,46 @@ class CheckFunctionManager:
 
         output_graph_guards_state = output_graph.dump_guards_state()
 
-        def is_mro_entry(source: Source) -> bool:
-            return isinstance(source, GetItemSource) and isinstance(
-                source.base, TypeMROSource
-            )
+        def tuple_example(value: tuple[Any, ...]) -> tuple[Any, ...]:
+            # Keep the shape and the guarded paths without pickling unread members.
+            if id(value) in builder.value_guarded_containers:
+                return value
+            items = []
+            for item in value:
+                if id(item) not in builder.guard_tree_values:
+                    item = None
+                elif type(item) is tuple:
+                    item = tuple_example(item)
+                items.append(item)
+            return tuple(items)
 
         mro_guard_values: dict[Source, object] = {}
         for guard in sorted_guards:
             source = guard.originating_source
-            if guard.create_fn is GuardBuilder.CLASS_MATCH and is_mro_entry(source):
-                mro_guard_values[source] = builder.get(guard)
-            elif (
-                guard.create_fn is GuardBuilder.CONSTANT_MATCH
-                and isinstance(source, DictGetItemSource)
-                and isinstance(source.base, TypeDictSource)
-                and is_mro_entry(source.base.base)
+            if (
+                guard.create_fn is GuardBuilder.CLASS_MATCH
+                and isinstance(source, GetItemSource)
+                and isinstance(source.base, TypeMROSource)
             ):
+                mro_guard_values[source] = builder.get(guard)
+            elif isinstance(source, DictGetItemSource) and isinstance(
+                source.base, TypeDictSource
+            ):
+                # A direct owner has no intervening TypeMROSource. The class is
+                # loaded by reference, so its dictionary can have changed at load.
                 value = builder.get(guard)
-                if FunctionPicklerBase._is_literal(value):
+                if type(value) is tuple and guard.create_fn in (
+                    GuardBuilder.SEQUENCE_LENGTH,
+                    GuardBuilder.CONSTANT_MATCH,
+                    GuardBuilder.EQUALS_MATCH,
+                ):
+                    mro_guard_values[source] = tuple_example(value)
+                elif (
+                    guard.create_fn is GuardBuilder.CONSTANT_MATCH
+                    and FunctionPicklerBase._is_literal(value)
+                    or guard.create_fn is GuardBuilder.ID_MATCH
+                    and isinstance(value, enum.Enum)
+                ):
                     mro_guard_values[source] = value
             if isinstance(guard.originating_source, ShapeEnvSource):
                 if not self.shape_code_parts:
@@ -6683,6 +6712,8 @@ class CheckFunctionManager:
             guard_filter_fn=guard_filter_fn,
         )
 
+        # Descendant sources must also rebuild their guards against the capture-time
+        # example. Their runtime accessors still read the live class and its attributes.
         if output_graph.mro_guard_values:
             builder.src_get_value_cache.update(output_graph.mro_guard_values)
 
