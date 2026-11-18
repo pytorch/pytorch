@@ -511,7 +511,8 @@ class BlockStackEntry:
     with_context: ContextWrappingVariable | GenericContextWrappingVariable | None = None
 
     def can_restore(self) -> bool:
-        return self.with_context is not None
+        ctx = self.with_context
+        return ctx is not None and ctx.supports_graph_breaks()
 
     def resume_fn(self) -> ReenterWith:
         if self.stack_index is None:
@@ -1892,6 +1893,16 @@ class InstructionTranslatorBase(
 
         if (
             not self.stack
+            # Entry RESUME does no user work; defer only to an unprotected immediate successor.
+            # A protected successor cannot checkpoint, so retain this frame's entry checkpoint.
+            and not (
+                inst.opname == "RESUME"
+                and inst.arg == 0
+                and not self.block_stack
+                and inst.exn_tab_entry is None
+                and self.instruction_pointer < len(self.instructions)
+                and self.next_instruction.exn_tab_entry is None
+            )
             and self.should_compile_partial_graph()
             and self.is_non_empty_graph()
         ):
@@ -4052,7 +4063,7 @@ class InstructionTranslatorBase(
         ):
             return False
         return (
-            all(b.can_restore() for b in self.block_stack)
+            (not self.block_stack or all(b.can_restore() for b in self.block_stack))
             and not self.one_graph
             # Only the leaf tracer's error_on_graph_break should be used
             and (self.is_child_tracer_active or not self.error_on_graph_break)
@@ -5136,10 +5147,14 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
-        if self.output.count_calls() > 1:
-            # perf optimization only
-            self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
-            return True
+        calls = 0
+        for node in self.output.graph.nodes:
+            if "call" in node.op:
+                calls += 1
+                if calls > 1:
+                    # perf optimization only
+                    self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
+                    return True
         return False
 
     def format_frame_summary(
