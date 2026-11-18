@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfHpu,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -721,6 +722,7 @@ class TestExecutionTrace(TestCase):
             if not found_root_node:
                 raise AssertionError("Expected to find root node")
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
         def fn(nt):

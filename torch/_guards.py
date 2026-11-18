@@ -842,15 +842,18 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: list[GuardEnvExpr] = []
         self.skip_install: bool = False
+        self.tracing_reuse_hash: bool = False
 
     @contextlib.contextmanager
-    def skip_guard_install(self) -> Generator[None, None, None]:
-        old = self.skip_install
-        self.skip_install = True
+    def skip_guard_install(
+        self, *, reuse_hash: bool = False
+    ) -> Generator[None, None, None]:
+        old = self.skip_install, self.tracing_reuse_hash
+        self.skip_install, self.tracing_reuse_hash = True, reuse_hash
         try:
             yield
         finally:
-            self.skip_install = old
+            self.skip_install, self.tracing_reuse_hash = old
 
     def copy_graphstate(self) -> GuardsCheckpointState:
         return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))

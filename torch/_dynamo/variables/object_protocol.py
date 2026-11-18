@@ -1064,7 +1064,7 @@ def pynumber_tobase(
     """
     index = pynumber_index(tx, obj)
     format_fn = {2: bin, 8: oct, 16: hex}[base]
-    return ConstantVariable.create(format_fn(index.as_python_constant()))
+    return ConstantVariable.create(format_fn(index.guard_as_python_constant()))
 
 
 def pyiter_next(

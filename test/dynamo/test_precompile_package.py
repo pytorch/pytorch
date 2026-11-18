@@ -281,6 +281,11 @@ _RISKY_DROP_CASES = {
 }  # fmt: skip
 
 
+class _MROChoice(enum.Enum):
+    FIRST = 1
+    SECOND = 2
+
+
 class _MROBase:
     scale = 1
 
@@ -354,35 +359,30 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         fresh_globals[name] = object
         self.assertFalse(loaded.guard_check(x))
 
-    def test_builtin_method_comparison_alias_guard(self):
-        def fn(x, left, right):
-            return x + (
-                list.count.__get__(left, list) == list.count.__get__(right, list)
-            )
-
+    def _check_reloaded_guard(self, fn, initial, valid, invalid):
         x = torch.ones(1)
-        compiled = _aot_compile(fn, x, [], [])
+        compiled = _aot_compile(fn, x, *initial)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
-        left, right = [], []
-        self.assertTrue(loaded.guard_check(x, left, right))
-        self.assertEqual(loaded(x, left, right), x)
-        self.assertFalse(loaded.guard_check(x, left, left))
+        self.assertTrue(loaded.guard_check(x, *valid))
+        self.assertEqual(loaded(x, *valid), fn(x, *valid))
+        self.assertFalse(loaded.guard_check(x, *invalid))
 
-    def test_slot_wrapper_declaring_owner_survives_serialization(self):
-        def fn(x, method):
+    def test_native_method_receiver_alias_guard_survives_serialization(self):
+        def compare(x, left, right):
+            return x + (list.count.__get__(left) == list.count.__get__(right))
+
+        left, right = [], []
+        self._check_reloaded_guard(compare, ([], []), (left, right), (left, left))
+
+    def test_native_method_descriptor_guard_survives_serialization(self):
+        def metadata(x, method):
             return x + 1, method.__qualname__
 
         receiver = collections.OrderedDict()
-        initial = dict.__setitem__.__get__(receiver)
-        replacement = collections.OrderedDict.__setitem__.__get__(receiver)
-        x = torch.ones(1)
-        compiled = _aot_compile(fn, x, initial)
-        data = AOTCompiledFunction.serialize(compiled).serialized_data
-        loaded = AOTCompiledFunction.deserialize(data)
-        self.assertTrue(loaded.guard_check(x, initial))
-        self.assertEqual(loaded(x, initial), fn(x, initial))
-        self.assertFalse(loaded.guard_check(x, replacement))
+        base = dict.__setitem__.__get__(receiver)
+        derived = type(receiver).__setitem__.__get__(receiver)
+        self._check_reloaded_guard(metadata, (base,), (base,), (derived,))
 
     def test_constant_mro_length_changed_before_reload(self):
         x = torch.ones(1)
@@ -396,38 +396,49 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             _MROLeft.__bases__ = (_MROBase,)
         self.assertTrue(loaded.guard_check(x))
 
-    def test_inherited_constant_changed_before_reload(self):
+    @parametrize("instance_type", [_MROBase, _MROLeft])
+    @parametrize("kind", ["scalar", "tuple", "enum"])
+    def test_class_attribute_changed_before_reload(self, instance_type, kind):
+        def fn(x, obj):
+            if kind == "tuple":
+                return x + obj.scale[0]
+            if kind == "enum":
+                return x + (1 if obj.scale is _MROChoice.FIRST else 7)
+            return x + obj.scale
+
+        x, obj = torch.ones(1), instance_type()
+        initial, changed = {
+            "scalar": (1, 7),
+            "tuple": ((1, threading.Lock()), (7, None)),
+            "enum": (_MROChoice.FIRST, _MROChoice.SECOND),
+        }[kind]
+        with mock.patch.object(_MROBase, "scale", initial):
+            compiled = _aot_compile(fn, x, obj)
+            data = AOTCompiledFunction.serialize(compiled).serialized_data
+            with mock.patch.object(_MROBase, "scale", changed):
+                self.assertFalse(compiled.guard_check(x, obj))
+                loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+                self.assertFalse(loaded.guard_check(x, obj))
+            self.assertTrue(loaded.guard_check(x, obj))
+            self.assertEqual(loaded(x, obj), fn(x, obj))
+
+    @parametrize("base", [_MROBase, _MROLeft])
+    def test_mro_guard_survives_serialization(self, base):
         x, left, right = torch.ones(1), _MROLeft(), _MRORight()
+        self.addCleanup(setattr, _MRORight, "__bases__", _MRORight.__bases__)
+        _MRORight.__bases__ = (base,)
         compiled = _aot_compile(_mro_sum, x, left, right)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
-        with mock.patch.object(_MROBase, "scale", 7):
-            loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
-            self.assertFalse(loaded.guard_check(x, left, right))
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
         self.assertTrue(loaded.guard_check(x, left, right))
+        self.assertEqual(loaded(x, left, right), x + 2)
 
-    def test_mro_guard_survives_serialization(self):
-        x, left, right = torch.ones(1), _MROLeft(), _MRORight()
-        try:
-            for base in (_MROBase, _MROLeft):
-                with self.subTest(base=base):
-                    _MRORight.__bases__ = (base,)
-                    compiled = _aot_compile(_mro_sum, x, left, right)
-                    data = AOTCompiledFunction.serialize(compiled).serialized_data
-                    loaded = AOTCompiledFunction.deserialize(
-                        data, guard_globals=globals()
-                    )
-                    self.assertTrue(loaded.guard_check(x, left, right))
-                    self.assertEqual(loaded(x, left, right), x + 2)
-                    _MRORight.__bases__ = (_MROOther,)
-                    self.assertFalse(loaded.guard_check(x, left, right))
-                    reloaded = AOTCompiledFunction.deserialize(
-                        data, guard_globals=globals()
-                    )
-                    self.assertFalse(reloaded.guard_check(x, left, right))
-                    _MRORight.__bases__ = (base,)
-                    self.assertTrue(reloaded.guard_check(x, left, right))
-        finally:
-            _MRORight.__bases__ = (_MROBase,)
+        _MRORight.__bases__ = (_MROOther,)
+        self.assertFalse(loaded.guard_check(x, left, right))
+        reloaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertFalse(reloaded.guard_check(x, left, right))
+        _MRORight.__bases__ = (base,)
+        self.assertTrue(reloaded.guard_check(x, left, right))
 
     def test_importable_nested_named_tuple_base(self):
         x, obj = torch.ones(1), _MROTupleInput(0)
@@ -2918,22 +2929,23 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def test_non_mro_guard_name_does_not_get_mro_advice(self):
         # An ordinary local name containing `__mro__` is not a `TypeMROSource` access.
-        def step(x__mro__tag):
-            return x__mro__tag + 1
+        def step(x__mro__tag, cls):
+            return x__mro__tag + (1 if cls is _MROBase else 2)
 
         default = precompile_package.default_guard_filter_fn
         session = precompile_package.precompile_capture(
             step,
             backend="eager",
             guard_filter_fn=lambda entries: [
-                keep and entry.name != "x__mro__tag"
+                keep and entry.name not in ("x__mro__tag", "cls")
                 for keep, entry in zip(default(entries), entries)
             ],
         )
         with session as call:
-            self.assertEqual(call(torch.ones(1)), torch.full((1,), 2.0))
+            self.assertEqual(call(torch.ones(1), _MROBase), torch.full((1,), 2.0))
         self.assertEqual(
-            session.summary().risky_dropped_guards, (("TENSOR_MATCH", "x__mro__tag"),)
+            session.summary().risky_dropped_guards,
+            (("CLASS_MATCH", "cls"), ("TENSOR_MATCH", "x__mro__tag")),
         )
         with self.assertRaisesRegex(PackageError, "can affect dispatch") as error:
             session.snapshot_artifact()
