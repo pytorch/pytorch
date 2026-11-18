@@ -24,6 +24,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      set_default_backend
      get_default_backend
      guard_ctx
+     register_guard_filter
      set_stance
      set_enable_guard_collectives
      cudagraph_mark_step_begin

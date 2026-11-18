@@ -104,8 +104,25 @@ def reset() -> None:
 def guard_ctx(label: str) -> "_GuardContext":
     """Apply a compile-time guard label within a context or decorated call.
 
-    Labels must be non-empty strings. Nested contexts use the innermost label
-    and restore the previous label on exit.
+    Use as ``with torch.compiler.guard_ctx(label):`` or as a function decorator.
+    It also works around a compiled call before tracing starts. Labels alone do
+    not drop guards; use :func:`register_guard_filter` to register a policy.
+
+    Labels must be non-empty strings. Use exact built-in ``str`` labels for
+    uninterrupted ``fullgraph=True`` tracing; string subclasses work eagerly
+    but require fallback when traced. Nested contexts use the innermost label
+    at actual Guard creation and restore the previous label on exit, including
+    across graph breaks and exceptions. Nested traces do not inherit the outer
+    trace's label. Context entry and exit add no FX graph operations.
+
+    A Guard created in region A and installed later in region B keeps A's
+    label. The current label is used at installation only if the Guard has no
+    creation label. Lazy variable allocation does not itself create guards;
+    guards first created during realization receive the label active then.
+    Semantically duplicate installations accumulate the union of their labels.
+    Labels are transient metadata and are not saved in serialized artifacts.
+
+    A context affects newly traced guards, not artifacts reused on cache hits.
     """
     from torch._guards import _GuardContext
 
@@ -119,15 +136,45 @@ def guard_ctx(label: str) -> "_GuardContext":
 def register_guard_filter(label: str) -> Callable[[F], F]:
     """Register a compile-time guard filter for a non-empty context label.
 
-    The callback receives only entries carrying this label, before guard
-    construction, and must return one bool per entry. Matching callbacks are
-    ORed; guards with no registered label are kept. The global guard_filter_fn
-    subsequently applies to the survivors. Dropping guards is unsafe unless
-    the caller guarantees the assumptions they would have checked.
+    Use as a decorator on a callback and pair with :func:`guard_ctx`::
 
-    Regional entries have has_value=False and empty derived_guard_types and
-    code_parts because they precede guard construction. Registrations persist
-    for this process; registering the same label twice raises ValueError.
+        @torch.compiler.register_guard_filter("my_app.region")
+        def keep_region(entries):
+            return [True for entry in entries]
+
+    Each callback receives a batch containing only entries carrying its label,
+    before C++ guard construction. Return a sequence of the same length with
+    one built-in ``bool`` per entry: ``True`` keeps, ``False`` rejects. Every
+    matching callback runs and their decisions are ORed. A guard with no
+    registered matching label is kept. The global ``guard_filter_fn`` then
+    applies to the survivors with its existing built-entry metadata.
+
+    Entries expose ``name``, ``guard_type``, ``is_global``, ``orig_guard``, and
+    all attached ``labels`` as a frozenset. Regional entries have
+    ``has_value=False`` and empty ``derived_guard_types`` and ``code_parts``;
+    source values and built guard code are unavailable at this stage. Guard
+    types and inspection data have no backward compatibility guarantee.
+
+    Register unique names before compiling. Registrations are process-global,
+    survive compiler resets, and cannot be unregistered through a public API.
+    Registering the same label twice raises ``ValueError``. Finalization takes
+    a registry snapshot before invoking callbacks; registrations made during a
+    callback affect later finalizations. Callbacks do not run on cache hits,
+    and registration does not change cached artifacts retroactively.
+
+    .. warning::
+
+        Dropping guards is unsafe unless you guarantee their assumptions. A
+        changed assumption can silently produce stale, incorrect results.
+        Rejecting ``DICT_KEYS_MATCH`` can leave key-order managers required by
+        surviving child guards. Unlabeled ambient guards and backend AOT alias
+        or storage relations are outside this regional policy.
+
+    Ordinary AOT and legacy ``caching_precompile`` save/load retain the filtered
+    survivors without serializing label metadata or rerunning callbacks on
+    load. Prototype ``torch.compiler.precompile.capture`` with ``DynamoTracer``
+    rejects actual regional drops before guard construction; keep-all filters
+    work with that path.
     """
     if not isinstance(label, str):
         raise TypeError("register_guard_filter label must be a non-empty string")
