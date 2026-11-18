@@ -271,7 +271,8 @@ def _is_gpu_triton_backend(
         return False
     device_type = node1.get_device().type  # type: ignore[union-attr]
     return (
-        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
+        device_type in ("cuda", "xpu", "npu")
+        and get_current_backend(device_type) == "triton"
     )
 
 
@@ -361,7 +362,18 @@ class MixOrderReduction:
                 raise AssertionError("expected xnumel to be set")
             return (xnumel, rnumel)
         else:
-            return node.group[1]  # type: ignore[return-value]
+            numel, rnumel = node.group[1]  # type: ignore[index]
+            # torch_npu wraps node groups in NumelList -- a tuple whose
+            # dunders all reduce to the element product. Upstream consumers
+            # of this helper need bare scalars (sympy comparisons sympify
+            # the tuple subclass into a sympy Tuple, not an Expr, and
+            # sympy.expand maps over containers element-wise), so unwrap it
+            # here.
+            if hasattr(numel, "numels"):
+                numel = numel.numels()
+            if hasattr(rnumel, "numels"):
+                rnumel = rnumel.numels()
+            return numel, rnumel
 
     @classmethod
     def has_mix_reduction_orders(
@@ -532,6 +544,18 @@ class MixOrderReduction:
             )
             for subnode in contiguous_node.get_nodes()
             if subnode.is_reduction()
+        ):
+            return False
+
+        # NPU (torch_npu fork): a mix-order persistent kernel tiles as
+        # [XBLOCK, next_power_of_2(ncol)]. The NPU unified buffer (192KB)
+        # caps that tile at 8192 fp32 elements, and XBLOCK=1 kernels
+        # deadlock the device when two instances are enqueued back-to-back,
+        # so reductions wider than 4096 (which would need XBLOCK < 2)
+        # cannot use mix-order on npu.
+        if (
+            node1.get_device().type == "npu"
+            and not V.graph.sizevars.statically_known_leq(ncol, 4096)
         ):
             return False
 
