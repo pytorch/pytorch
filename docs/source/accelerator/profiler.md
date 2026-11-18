@@ -110,7 +110,7 @@ A real vendor's equivalent would be their device tracing SDK (e.g., CUPTI for CU
 
 Implement the two Kineto interfaces from `torch/csrc/profiler/kineto/libkineto/include/IActivityProfiler.h`. In OpenReg, these live in `torch_openreg/csrc/profiler/` — the backend extension integration layer.
 
-* **`IActivityProfiler`** — stateless factory. Two `configure()` overloads both create and return a session:
+* **`IActivityProfiler`** — stateless factory. Two `configure()` overloads both return a session, or `nullptr` when `config.deviceTracingEnabled()` is false. PyTorch sets that for sessions that request no device activity, such as CPU-only ones, and the device tracer must stay off for them:
   - `configure(activity_types, config)` — synchronous overload; required by the interface. The OpenReg stub implements this as the core session-creation path.
   - `configure(ts_ms, duration_ms, activity_types, config)` — Kineto's child-profiler path calls this overload for all traces (including on-demand), passing `profileStartTime()` epoch ms and `profileDuration()` ms. The OpenReg stub ignores scheduling and delegates to the first overload; vendors use `ts_ms`/`duration_ms` to defer device-SDK activation.
 * **`IActivityProfilerSession`** — per-trace session. `start()`/`stop()` manage the profiling window and toggle activity tracing via `orActivityEnableTracing()`/`orActivityDisableTracing()`; `getTraceBuffer()` returns the buffer to Kineto.
