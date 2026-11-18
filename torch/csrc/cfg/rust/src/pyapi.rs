@@ -24,7 +24,7 @@ pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
     let api = capsule.pointer() as *mut TcfgApi;
     if api.is_null() || unsafe { (*api).version } != TCFG_API_VERSION {
         return Err(PyRuntimeError::new_err(
-            "torch._C and the torch.rewrite runtime were built from different sources",
+            "torch._C and the torch.vm runtime were built from different sources",
         ));
     }
     capi::set_api(api);
@@ -307,7 +307,7 @@ impl CfgFunction {
     }
 
     fn __repr__(&self) -> String {
-        format!("<torch.rewrite function {}>", self.inner.func.qualname)
+        format!("<torch.vm function {}>", self.inner.func.qualname)
     }
 
     /// The names of the passes this function is specialized with, in order.
@@ -1253,7 +1253,7 @@ unsafe extern "C" fn native_swap(
     let py = region.py();
     let kernel = Bound::from_borrowed_ptr(py, kernel as Obj);
     let result = py
-        .import_bound("torch.rewrite._passes")
+        .import_bound("torch.vm._passes")
         .and_then(|module| module.getattr("fuse_checked"))
         .and_then(|fuse| fuse.call1((&region, start, end, kernel, checks)))
         .and_then(|done| done.extract::<bool>());
@@ -1296,7 +1296,7 @@ impl NativePass {
     }
 
     fn __repr__(&self) -> String {
-        format!("<torch.rewrite pass {} of {}>", self.name, self.library)
+        format!("<torch.vm pass {} of {}>", self.name, self.library)
     }
 
     /// The pass with `object` handed to it each time it runs: the kernel it
@@ -1352,11 +1352,11 @@ pub fn load_passes(py: Python<'_>, path: &str) -> PyResult<PyObject> {
             let why = if why.is_null() { String::new() } else { std::ffi::CStr::from_ptr(why).to_string_lossy().into_owned() };
             return Err(PyRuntimeError::new_err(format!("cannot load {path}: {why}")));
         }
-        let abi = dlsym(handle, c"torch_rewrite_abi".as_ptr());
-        let table = dlsym(handle, c"torch_rewrite_passes".as_ptr());
+        let abi = dlsym(handle, c"torch_vm_abi".as_ptr());
+        let table = dlsym(handle, c"torch_vm_passes".as_ptr());
         if abi.is_null() || table.is_null() {
             return Err(PyRuntimeError::new_err(format!(
-                "{path} exports no passes: it needs export_passes! of the torch-rewrite-pass crate"
+                "{path} exports no passes: it needs export_passes! of the torch-vm-pass crate"
             )));
         }
         let abi: unsafe extern "C" fn() -> u32 = std::mem::transmute(abi);
