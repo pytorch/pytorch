@@ -108,11 +108,15 @@ class MooncakeTransport(Transport):
         host = _format_host(host)
         backend = _load_backend()
         user_nics = any(name in os.environ for name in _USER_NIC_ENVS)
+        selected = ""
         if protocol == "rdma" and not device_name and not user_nics:
-            device_name = ",".join(select_nics(self.device) or ())
+            device_name = selected = ",".join(select_nics(self.device) or ())
         engine = backend.TransferEngine()
         if engine.initialize(host, metadata_server, protocol, device_name) != 0:
-            raise RuntimeError("Mooncake transport initialization failed")
+            msg = "Mooncake transport initialization failed"
+            if selected:
+                msg += f" with selected NICs {selected}; set device_name to override"
+            raise RuntimeError(msg)
         self._backend = backend
         self._engine: Any = engine
         self._endpoint = f"{host}:{engine.get_rpc_port()}"

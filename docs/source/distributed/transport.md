@@ -99,8 +99,8 @@ explicitly (see below) to use them all. Every registered buffer, including CPU m
 on other NUMA nodes, uses only the selected NICs; with a single selected NIC, a
 local NIC failure fails the transfer instead of moving to another NIC.
 
-Only active physical NICs at the fastest link rate are considered, which
-excludes slower frontend NICs and SR-IOV virtual functions. The nearest NICs
+Only physical NICs with an active port 1 at the fastest link rate are
+considered, which excludes slower frontend NICs and SR-IOV virtual functions. The nearest NICs
 share the longest PCIe path with the accelerator, with ties broken by NUMA
 node. Accelerators with the same nearest NICs, including those hidden by
 `CUDA_VISIBLE_DEVICES`, form a group. In PCI address order, each member gets an

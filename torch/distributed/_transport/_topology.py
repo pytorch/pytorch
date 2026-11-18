@@ -58,7 +58,8 @@ def _accelerator(device: torch.device | None) -> torch.device | None:
         logger.warning(
             "transport has no device index and the current %s device is 0 with "
             "LOCAL_RANK=%s; using the backend's default RDMA NICs. Call "
-            "set_device, pass an indexed device, or list the NICs explicitly",
+            "set_device, pass an indexed device, or list the NICs explicitly "
+            "(Mooncake device_name)",
             accelerator.type,
             os.environ["LOCAL_RANK"],
         )

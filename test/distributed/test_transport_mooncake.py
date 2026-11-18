@@ -145,11 +145,7 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             patch.object(_mooncake, "_load_backend", return_value=_backend()),
             patch.dict(os.environ),
         ):
-            for name in (
-                "MC_TE_FILTERS",
-                "MC_CUSTOM_TOPO_JSON",
-                "MC_RDMA_DATA_DIRECT_PAIRING",
-            ):
+            for name in _mooncake._USER_NIC_ENVS:
                 os.environ.pop(name, None)
             with new_transport("mooncake", device="cpu", host="127.0.0.1") as transport:
                 self.assertEqual(transport._engine.options[2], "mlx5_0,mlx5_1")
@@ -162,14 +158,11 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
                 "mooncake", host="127.0.0.1", protocol="tcp"
             ) as transport:
                 self.assertEqual(transport._engine.options[2], "")
-            for name in (
-                "MC_TE_FILTERS",
-                "MC_CUSTOM_TOPO_JSON",
-                "MC_RDMA_DATA_DIRECT_PAIRING",
-            ):
+            for name in _mooncake._USER_NIC_ENVS:
                 with patch.dict(os.environ, {name: "x"}):
                     with new_transport("mooncake", host="127.0.0.1") as transport:
                         self.assertEqual(transport._engine.options[2], "")
+            self.select_nics.assert_called_once()
 
     def test_ipv6_host_requires_mc_use_ipv6(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
@@ -186,8 +179,13 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
     def test_initialization_failure_raises(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
             with patch.object(_Engine, "initialize", return_value=-1):
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(RuntimeError) as ctx:
                     new_transport("mooncake")
+                self.assertNotIn("NICs", str(ctx.exception.__cause__))
+                self.select_nics.return_value = ["mlx5_0"]
+                with self.assertRaises(RuntimeError) as ctx:
+                    new_transport("mooncake")
+        self.assertIn("NICs mlx5_0; set device_name", str(ctx.exception.__cause__))
 
     def test_descriptor_roundtrip_excludes_metadata_blob(self):
         descriptor = MooncakeRemoteBuffer("[::1]:20001", 4096, 64, 0, "DRAM")
