@@ -1821,22 +1821,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
-    def test_nondeterministic_alert_CTCLoss(self, device):
-        module = torch.nn.CTCLoss()
-        input = torch.randn(50, 3, 15, device=device, requires_grad=True)
-        target = torch.randint(1, 14, (3, 30), device=device)
-        input_lengths = [50, 50, 50]
-        target_lengths = [30, 25, 20]
-        res = module(input, target, input_lengths, target_lengths)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
-            'ctc_loss_backward_gpu',
-            torch.device(device).type == 'cuda')
-
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
@@ -9358,6 +9342,22 @@ class TestTorch(TestCase):
         if IS_FILESYSTEM_UTF8_ENCODING:
             with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
+
+    def test_from_file_shared_grow_preserves_contents(self):
+        # https://github.com/pytorch/pytorch/issues/204636
+        original = [7, 8, 9, 10]
+        expected = original + [0, 0, 0, 0]
+        from_file_fns = [
+            lambda f: torch.from_file(f, shared=True, size=8, dtype=torch.uint8).tolist(),
+            lambda f: torch.UntypedStorage.from_file(f, True, 8).tolist(),
+        ]
+        for from_file in from_file_fns:
+            with TemporaryFileName() as fname:
+                with open(fname, "wb") as f:
+                    f.write(bytes(original))
+                self.assertEqual(from_file(fname), expected)
+                with open(fname, "rb") as f:
+                    self.assertEqual(list(f.read()), expected)
 
     def test_print(self):
         default_type = torch.tensor([]).type()

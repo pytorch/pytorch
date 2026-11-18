@@ -177,7 +177,9 @@ class ModularIndexingDecisionTest(TestCase):
     def test_choices_override(self):
         # a backend can replace the whole decision, config check included
         class AlwaysAffine(InductorChoices):
-            def use_modular_indexing(self, device, *, numel=None, kind):
+            def use_modular_indexing(
+                self, device, *, numel=None, reduction_numel=None, kind
+            ):
                 return False
 
         with (
@@ -851,7 +853,9 @@ class AvoidModularIndexingTest(TestCase):
 
     def test_choices_override_realizes_merge(self, device):
         class AlwaysAffine(InductorChoices):
-            def use_modular_indexing(self, device, *, numel=None, kind):
+            def use_modular_indexing(
+                self, device, *, numel=None, reduction_numel=None, kind
+            ):
                 return False
 
         def fn(a, b):
@@ -869,6 +873,59 @@ class AvoidModularIndexingTest(TestCase):
             ),
         ):
             self.check(fn, a, b, kernel_count=1)
+
+    def test_decision_receives_sizes(self, device):
+        # every call site tells the decision how many elements the affected
+        # kernel touches, and a split reduction also how many of them each
+        # output reduces, so that an override can depend on the size
+        calls: dict[str, set[tuple[int | None, int | None]]] = {}
+
+        class Recording(InductorChoices):
+            def use_modular_indexing(
+                self, device, *, numel=None, reduction_numel=None, kind
+            ):
+                sizes = tuple(
+                    None if n is None else int(n) for n in (numel, reduction_numel)
+                )
+                calls.setdefault("view" if callable(kind) else kind, set()).add(sizes)
+                return super().use_modular_indexing(
+                    device, numel=numel, reduction_numel=reduction_numel, kind=kind
+                )
+
+        def roll(x):
+            return torch.roll(x, 3, 1) + 1
+
+        def index(x):
+            i = torch.arange(16, device=x.device)
+            return x[i % 4] + x[i // 2]
+
+        def reduction(x, y):
+            return (x * y).sum((1, 2))
+
+        def reindex(x, b, w):
+            h = (x + b[:, None]).view(-1, 128)
+            var = (h * h).mean(-1, keepdim=True)
+            return h * torch.rsqrt(var + 1e-6) * w
+
+        x = torch.randn(4, 64, 4097, device=device)
+        y = torch.randn(4, 64, 1, device=device)
+        h = torch.randn(256, 8192, device=device)
+        b = torch.randn(256, device=device)
+        w = torch.randn(128, device=device)
+        with V.set_choices_handler(Recording()):
+            self.check(roll, torch.randn(4, 16, device=device))
+            self.check(index, torch.randn(8, 3, device=device))
+            self.check(reduction, x, y)
+            self.check(reindex, h, b, w)
+        self.assertEqual(calls["roll"], {(64, None)})
+        self.assertEqual(calls["index"], {(48, None)})
+        self.assertEqual(calls["view"], {(h.numel(), None)})
+        if device != "cpu":
+            # the CPU backend neither splits reductions nor reindexes loops
+            reduction_sizes = {(x.numel(), x[0].numel())}
+            self.assertEqual(calls["reduction"], reduction_sizes)
+            self.assertEqual(calls["reduction_linear"], reduction_sizes)
+            self.assertEqual(calls["reindex"], {(h.numel(), None)})
 
     def test_auto_mode_keeps_broadcast_merge_inlined(self, device):
         # the only modular load is the table broadcast over the batch (the

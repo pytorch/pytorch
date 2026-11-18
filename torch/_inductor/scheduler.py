@@ -4127,7 +4127,11 @@ class SchedulerNode(BaseSchedulerNode):
         FloorDiv/ModularIndexing, which would undo affine indexing after every
         lowering kept its indices affine.
         """
-        return V.choices.use_modular_indexing(self.get_device(), kind="reindex")
+        return V.choices.use_modular_indexing(
+            self.get_device(),
+            numel=sympy_product(itertools.chain.from_iterable(self._sizes)),
+            kind="reindex",
+        )
 
     def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> bool:
         if self._body is None:
@@ -13430,14 +13434,9 @@ class Scheduler:
         for node in self.nodes:
             if node.is_gpu():
                 for read in node.read_writes.reads:
-                    buffer = V.graph.name_to_buffer.get(read.name)
                     if (
-                        buffer
-                        and get_device_type(buffer) == "cpu"
-                        and not isinstance(
-                            buffer.layout, (NoneLayout, MultiOutputLayout)
-                        )
-                        and buffer.get_size() == []
+                        read.name in V.graph.name_to_buffer
+                        and V.graph.is_zero_dim_cpu_buffer(read.name)
                     ):
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
 

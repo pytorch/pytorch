@@ -44,6 +44,7 @@ from torch._refs import (
 )
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
+    optimization_hint,
     statically_known_true,
     sym_eq,
 )
@@ -261,7 +262,12 @@ def adaptive_max_pool3d(input, output_size):
 
 @register_decomposition([aten.roll.default])
 def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor:
-    if V.choices.use_modular_indexing(a.device, kind="roll"):
+    if V.choices.use_modular_indexing(
+        a.device,
+        # no graph (and so no sizevars) yet: pass the hint instead of an expr
+        numel=optimization_hint(a.numel(), fallback=config.unbacked_symint_fallback),
+        kind="roll",
+    ):
         return decomp_roll(a, shifts, dims)
     if not isinstance(shifts, Sequence):
         shifts = (shifts,)

@@ -557,6 +557,7 @@ class InductorChoices:
         device: torch.device | str | None,
         *,
         numel: int | sympy.Expr | None = None,
+        reduction_numel: int | sympy.Expr | None = None,
         kind: ModularIndexingUse | Callable[[], ModularIndexingUse],
     ) -> bool:
         """
@@ -565,10 +566,14 @@ class InductorChoices:
         a dim-merging view, splitting a reduction at a dim boundary, lowering
         repeat/roll/strided slice_scatter without modular arithmetic, keeping
         %, // index arithmetic behind an indirect variable, or skipping a loop
-        reindexing during fusion. numel is the number of elements the affected
-        kernel touches and kind names the construct; a callable kind
+        reindexing during fusion. kind names the construct; a callable kind
         (View.create classifies a view by tracing its loads) is only called
-        when the answer depends on it.
+        when the answer depends on it. Every call site passes numel, the
+        number of elements the affected kernel touches (an int or an
+        expression of the graph's size variables); the reduction kinds also
+        pass reduction_numel, the number of elements reduced into each
+        output, so that an override can tell 64 sums of 4097 elements from
+        4097 sums of 64. The heuristic below only uses numel, for views.
 
         config.avoid_modular_indexing forces the answer. Otherwise backends
         that declare BackendFeature.PREFER_AFFINE_INDEXING (MTIA, Pallas) get
