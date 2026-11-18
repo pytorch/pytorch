@@ -11,60 +11,149 @@
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.configure
+.. autodata:: torch.vm.DEFAULT_PASSES
 ```
 
 ```{eval-rst}
-.. autodata:: torch.vm.DefaultCFGPasses
+.. autofunction:: torch.vm.is_exact
 ```
 
 ```{eval-rst}
-.. autodata:: torch.vm.DefaultBlockPasses
+.. autoclass:: torch.vm.Type
 ```
 
 ```{eval-rst}
-.. autodata:: torch.vm.FAST
+.. autoclass:: torch.vm.TensorType
+    :members:
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.inlining_pass
+.. autoclass:: torch.vm.IntType
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.loop_unrolling_pass
+.. autoclass:: torch.vm.Interval
+    :members:
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.module_shortcuts_pass
+.. autofunction:: torch.vm.type_of
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.graphs_pass
+.. autofunction:: torch.vm.materialize
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.resolve_dispatch_pass
+.. autofunction:: torch.vm.guard
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.tensor_accessors_pass
+.. autoclass:: torch.vm.Check
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.method_calls_pass
+.. autoclass:: torch.vm.Dtype
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.narrow_dims_pass
+.. autoclass:: torch.vm.Device
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.fold_pass
+.. autoclass:: torch.vm.Dim
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.dce_pass
+.. autoclass:: torch.vm.Stride
 ```
 
-What a pass of one's own is made with (`swap`, `fuse_checked`, `Mismatch`, `load_passes`), what reports on a function (`regions`, `memory`),
-`is_available` and `Unsupported` are those of {mod}`torch.rewrite`, under the same names.
+```{eval-rst}
+.. autoclass:: torch.vm.Contiguous
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.Aligned
+```
+
+```{eval-rst}
+.. autofunction:: torch.vm.swap
+```
+
+```{eval-rst}
+.. autofunction:: torch.vm.fuse_checked
+```
+
+```{eval-rst}
+.. autoexception:: torch.vm.Mismatch
+```
+
+```{eval-rst}
+.. autofunction:: torch.vm.load_passes
+```
+
+```{eval-rst}
+.. autofunction:: torch.vm.regions
+```
+
+```{eval-rst}
+.. autofunction:: torch.vm.memory
+```
+
+```{eval-rst}
+.. autofunction:: torch.vm.is_available
+```
+
+```{eval-rst}
+.. autoexception:: torch.vm.Unsupported
+```
+
+## torch.vm.passes
+
+```{eval-rst}
+.. automodule:: torch.vm.passes
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.BuiltinPass
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.Inline
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.Unroll
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.ModuleShortcuts
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.Graphs
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.ResolveDispatch
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.TensorAccessors
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.MethodCalls
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.NarrowDims
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.Fold
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.DCE
+```

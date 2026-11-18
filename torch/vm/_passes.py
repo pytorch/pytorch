@@ -5,28 +5,10 @@ operations in the function, replaces it by one call of the kernel, and checks
 the kernel against the operations it replaced.
 """
 
-import dataclasses
 from collections.abc import Callable, Iterable
 from typing import Any
 
 import torch
-
-
-@dataclasses.dataclass(frozen=True)
-class Builtin:
-    """A pass the engine has: the name it goes by there, whether it rewrites
-    the control-flow graph of the function (once) or one basic block (after it
-    was profiled), and what it was configured with. ``torch.vm`` makes these
-    (``torch.vm.loop_unrolling_pass(8)``)."""
-
-    name: str
-    cfg: bool
-    made_by: str
-    settings: tuple[tuple[str, Any], ...] = ()
-
-    def __repr__(self) -> str:
-        inner = ", ".join(f"{key}={value!r}" for key, value in self.settings)
-        return f"torch.vm.{self.made_by}({inner})"
 
 
 class Mismatch(RuntimeError):
@@ -188,8 +170,8 @@ def swap(
 
     The pass goes in front of the passes that rewrite single instructions::
 
-        passes = [torch.rewrite.swap(["pow", "mean", "add", "rsqrt", "mul"], kernel)]
-        torch.rewrite(fn, passes=[*passes, *torch.rewrite.canonical])
+        fuse = torch.vm.swap(["pow", "mean", "add", "rsqrt", "mul"], kernel)
+        torch.vm(fn, passes=[fuse, *torch.vm.DEFAULT_PASSES])
     """
     wanted = list(ops)
     if not wanted:
