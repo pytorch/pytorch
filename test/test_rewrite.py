@@ -7678,5 +7678,165 @@ class TestCfgRegions(TestCase):
 instantiate_parametrized_tests(TestCfgRegions)
 
 
+def vm_twelve(x):
+    for _ in range(12):
+        x = x + 1
+    return x
+
+
+def vm_thirteen(x):
+    return vm_twelve(x) + 1
+
+
+def vm_scaled(x, y):
+    return unr_loop(x, y)[0] * 2
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.rewrite runtime not built")
+class TestVm(TestCase):
+    """torch.vm: the engine of torch.rewrite, with its passes in two lists."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_the_decorator_with_and_without_arguments(self):
+        @torch.vm
+        def bare(x, y):
+            return unr_loop(x, y)[0] * 2
+
+        @torch.vm(
+            cfg_passes=torch.vm.DefaultCFGPasses,
+            block_passes=torch.vm.DefaultBlockPasses,
+        )
+        def spelled(x, y):
+            return unr_loop(x, y)[0] * 2
+
+        called = torch.vm(vm_scaled, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        for fn in (bare, spelled, called):
+            for _ in range(3):
+                self.assertEqual(fn(x, y), vm_scaled(x, y))
+            # The defaults: the call is inlined, and the inlined loop unrolled.
+            self.assertEqual(len(fn.stats()["inlined"]), 1)
+            self.assertEqual(fn.stats()["unrolled_loops"], 1)
+        # The same as the standard list of torch.rewrite.
+        old = torch.rewrite(vm_scaled, fallback=False)
+        old(x, y)
+        self.assertEqual(called.dump(), old.dump())
+
+    def test_empty_lists_change_nothing(self):
+        plain = torch.vm(vm_scaled, cfg_passes=(), block_passes=(), fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(plain(x, y), vm_scaled(x, y))
+        self.assertEqual(plain.stats()["inlined"], [])
+        self.assertEqual(plain.stats()["unrolled_loops"], 0)
+        specialized = [b["specialized_executions"] for b in plain.stats()["blocks"]]
+        self.assertEqual(sum(specialized), 0)
+
+    def test_loop_unrolling_pass_takes_the_number_of_iterations(self):
+        x = torch.zeros(2)
+        usual = torch.vm(vm_twelve, fallback=False)
+        self.assertEqual(usual(x), x + 12)
+        self.assertEqual(usual.stats()["unrolled_loops"], 0)
+        unrolling = torch.vm.loop_unrolling_pass
+        for most, unrolled in ((11, 0), (12, 1), (16, 1)):
+            cfg_passes = (torch.vm.inlining_pass(), unrolling(most))
+            fn = torch.vm(vm_twelve, cfg_passes=cfg_passes, fallback=False)
+            self.assertEqual(fn(x), x + 12)
+            self.assertEqual(fn.stats()["unrolled_loops"], unrolled)
+        # A loop that comes in with an inlined call is unrolled as well.
+        cfg_passes = (torch.vm.inlining_pass(), unrolling(12))
+        outer = torch.vm(vm_thirteen, cfg_passes=cfg_passes, fallback=False)
+        self.assertEqual(outer(x), x + 13)
+        self.assertEqual(len(outer.stats()["inlined"]), 1)
+        self.assertEqual(outer.stats()["unrolled_loops"], 1)
+        said = "torch.vm.loop_unrolling_pass(max_trip_count=16)"
+        self.assertEqual(repr(unrolling(16)), said)
+        with self.assertRaisesRegex(ValueError, "at least one iteration"):
+            unrolling(0)
+        with self.assertRaisesRegex(TypeError, "number of iterations"):
+            unrolling("8")
+
+    def test_configure_sets_passes_of_the_defaults(self):
+        vm = torch.vm
+        passes = vm.configure(loop_unrolling_pass=16)
+        self.assertEqual(sorted(passes), ["block_passes", "cfg_passes"])
+        self.assertEqual(passes["block_passes"], vm.DefaultBlockPasses)
+        inlining, shortcuts = vm.inlining_pass(), vm.module_shortcuts_pass()
+        expected = (inlining, vm.loop_unrolling_pass(16), shortcuts)
+        self.assertEqual(passes["cfg_passes"], expected)
+
+        @torch.vm(**passes)
+        def twelve(x):
+            for _ in range(12):
+                x = x + 1
+            return x
+
+        self.assertEqual(twelve(torch.zeros(2)), torch.full((2,), 12.0))
+        self.assertEqual(twelve.stats()["unrolled_loops"], 1)
+
+        # Left out, put in where it belongs, and from another start.
+        fewer = vm.configure(loop_unrolling_pass=False, dce_pass=None)
+        self.assertEqual(fewer["cfg_passes"], (inlining, shortcuts))
+        self.assertEqual(fewer["block_passes"], vm.DefaultBlockPasses[:-1])
+        added = {"narrow_dims_pass": True, "graphs_pass": "aot_eager"}
+        more = vm.configure(fewer, loop_unrolling_pass=True, **added)
+        self.assertEqual(more["cfg_passes"], vm.DefaultCFGPasses)
+        names = [repr(one) for one in more["block_passes"]]
+        self.assertEqual(names[0], "torch.vm.graphs_pass('aot_eager')")
+        last = ["torch.vm.narrow_dims_pass()", "torch.vm.fold_pass()"]
+        self.assertEqual(names[-2:], last)
+        graphs = {"backend": "aot_eager", "min_ops": 1}
+        tuned = vm.configure(graphs_pass=graphs, demote=False)
+        self.assertEqual(tuned["block_passes"][0].min_ops, 1)
+        self.assertIs(tuned["demote"], False)
+        defaults = {"cfg_passes": vm.DefaultCFGPasses}
+        defaults["block_passes"] = vm.DefaultBlockPasses
+        self.assertEqual(vm.configure(), defaults)
+        with self.assertRaisesRegex(TypeError, "does not know 'loop_unrolling'"):
+            vm.configure(loop_unrolling=8)
+
+    def test_fast_is_the_defaults_behind_a_graph_compiler(self):
+        vm = torch.vm
+        self.assertEqual(vm.FAST["cfg_passes"], vm.DefaultCFGPasses)
+        first, *rest = vm.FAST["block_passes"]
+        self.assertEqual(repr(first), "torch.vm.graphs_pass('inductor')")
+        self.assertEqual(tuple(rest), vm.DefaultBlockPasses)
+        with self.assertRaises(TypeError):
+            vm.FAST["block_passes"] = ()
+
+        # The same shape with a backend that compiles nothing: a region is made.
+        block_passes = (vm.graphs_pass("aot_eager"), *vm.DefaultBlockPasses)
+
+        @torch.vm(block_passes=block_passes, fallback=False)
+        def forward(model, x):
+            return model(x).relu().sum()
+
+        layers = (torch.nn.Linear(8, 8), torch.nn.Tanh(), torch.nn.Linear(8, 8))
+        model = torch.nn.Sequential(*layers)
+        x = torch.randn(4, 8)
+        with torch.no_grad():
+            expected = model(x).relu().sum()
+            for _ in range(6):
+                self.assertEqual(forward(model, x), expected)
+        states = [r["state"] for r in vm.regions(forward)]
+        self.assertIn("compiled", states)
+
+    def test_a_pass_in_the_wrong_list_is_told(self):
+        vm = torch.vm
+        fold, inlining = vm.fold_pass(), vm.inlining_pass()
+        with self.assertRaisesRegex(TypeError, "it goes in block_passes"):
+            vm(vm_twelve, cfg_passes=(fold,))
+        with self.assertRaisesRegex(TypeError, "it goes in cfg_passes"):
+            vm(vm_twelve, block_passes=(inlining,))
+        with self.assertRaisesRegex(TypeError, "block_passes has a str"):
+            vm(vm_twelve, block_passes=("fold",))
+        with self.assertRaisesRegex(ValueError, "fold_pass is given more than once"):
+            vm(vm_twelve, block_passes=(fold, vm.fold_pass()))
+        with self.assertRaisesRegex(ValueError, "the engine inlines first"):
+            vm(vm_twelve, cfg_passes=(vm.loop_unrolling_pass(), inlining))
+        with self.assertRaisesRegex(ValueError, "so it goes first"):
+            vm(vm_twelve, block_passes=(fold, vm.graphs_pass("aot_eager")))
+
+
 if __name__ == "__main__":
     run_tests()

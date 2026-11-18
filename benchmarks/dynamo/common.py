@@ -1055,8 +1055,7 @@ def rewritten(model_iter_fn):
         def iterate(model, example_inputs, collect_outputs=True):
             return model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
-        passes = [torch.rewrite.inductor, *torch.rewrite.canonical]
-        found = _REWRITTEN[key] = torch.rewrite(iterate, passes=passes)
+        found = _REWRITTEN[key] = torch.vm(iterate, **torch.vm.FAST)
     return found
 
 
