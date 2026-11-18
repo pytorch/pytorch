@@ -705,13 +705,30 @@ class _Known:
     is one of those, in one pass over the places the tensors are kept at
     instead of three over the tensors."""
 
-    __slots__ = ("kinds", "numbers", "offsets", "seen", "shared", "snapshot", "tensors")
+    __slots__ = (
+        "epoch",
+        "kinds",
+        "numbers",
+        "offsets",
+        "seen",
+        "shared",
+        "snapshot",
+        "tensors",
+    )
 
     def __init__(
-        self, snapshot: Any, tensors: list[torch.Tensor], shared: list[torch.Tensor]
+        self,
+        snapshot: Any,
+        tensors: list[torch.Tensor],
+        shared: list[torch.Tensor],
+        epoch: int | None,
     ) -> None:
         self.snapshot = snapshot
         self.tensors = tensors
+        # What ``module_epoch`` gave when the places were last found to hold
+        # these tensors, if the dicts they are in are watched: a call that is
+        # given the same has no need to look at the places.
+        self.epoch = epoch
         # The tensors of the module that the call had before it came to the
         # module: something else it was handed holds them too.
         self.shared = frozenset(id(tensor) for tensor in shared)
@@ -952,12 +969,21 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         inputs.inside.append(state.ids)
         known = state.known
         same = 0
+        places: dict[int, int] = {}
         if known is not None:
             places = known.places(len(flat))
             # The call has the tensors it had before this module that the
             # look had, and no others of the module's.
             if seen.keys() >= known.shared and seen.keys().isdisjoint(places):
-                same = known.snapshot.holds(state.accessors)
+                epoch = state.epoch
+                if epoch is not None and known.epoch == epoch:
+                    # No dict a place is in has changed since the places
+                    # were looked at: they hold what they held.
+                    same = known.snapshot.holds_in_place()
+                else:
+                    same = known.snapshot.holds(state.accessors)
+                    if same:
+                        known.epoch = epoch
         if same:
             # The tensors it had when they were last looked at.
             inputs.known.append((len(flat), known))  # type: ignore[arg-type]
@@ -990,7 +1016,7 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
                 if snapshot is None:
                     state.known = None
                 else:
-                    state.known = _Known(snapshot, tensors, shared)
+                    state.known = _Known(snapshot, tensors, shared, state.epoch)
         return _module_part(obj, cls, state)
     if cls is types.MethodType:
         return (
