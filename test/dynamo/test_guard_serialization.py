@@ -3308,6 +3308,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
 
+    def test_dict_guard_on_the_globals_of_a_deleted_global(self):
+        def fn(x):
+            global DELETE_GLOBAL_GUARD
+            DELETE_GLOBAL_GUARD = 1
+            del DELETE_GLOBAL_GUARD
+            return x + 1
+
+        x = torch.randn(3)
+        self.assertNotIn("DELETE_GLOBAL_GUARD", globals())
+        ref, loaded = self._test_serialization("DICT_NOT_CONTAINS", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"DELETE_GLOBAL_GUARD": 1}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_guard_through_globals_of_a_wrapper_from_another_module(self):
         # A guard reads through wrapper.__globals__, so the dict it read travels
         # as a snapshot; __module__ is the wrapped function's and is restored as
@@ -4290,6 +4304,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         class Local:
             pass
 
+        impostor = collections.namedtuple("Point", ["x"], module=__name__)
+        impostor.__qualname__ = _TupleOwner.Point.__qualname__
         cases = [
             (math, True),
             (math.sqrt, True),
@@ -4320,7 +4336,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
             (_wraps_wrapper, False),
-            (_TupleOwner.Point, False),
+            (_TupleOwner.Point, True),
+            (impostor, False),
             # The guard-state pickler refuses a class with a nested metaclass.
             (_WithNestedMeta, False),
             # Bound to the module's Random instance, with no __module__.
@@ -4358,11 +4375,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 return x
             return x + 1
 
-        # The guard-state pickler rebuilds a nested NamedTuple as a fresh class.
-        with self.assertRaisesRegex(
-            PackageError, "CLASS_MATCH guard cannot be serialized."
-        ):
-            self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(_TupleOwner, "Point", tuple):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_guarded_user_object_prunes_unguarded_attributes(self):
         def fn(x, holder):
