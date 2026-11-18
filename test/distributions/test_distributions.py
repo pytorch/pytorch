@@ -1304,6 +1304,30 @@ class DistributionsTestCase(TestCase):
         for i, (val, log_prob) in enumerate(zip(s_data_flat, log_probs_data_flat)):
             asset_fn(i, val.squeeze(), log_prob)
 
+    def _check_moments(self, samples, mean, variance, gaussian=False, num_se=5):
+        # Check the sample mean and variance against the analytic moments to
+        # within num_se standard errors. For Gaussian samples the standard
+        # error of the sample variance is variance * sqrt(2 / (n - 1));
+        # otherwise it is estimated from the empirical fourth central moment.
+        n = samples.shape[0]
+        empirical_mean = samples.mean(0)
+        empirical_var = samples.var(0)
+        mean_se = (variance / n).sqrt()
+        if gaussian:
+            var_se = variance * (2 / (n - 1)) ** 0.5
+        else:
+            fourth = ((samples - empirical_mean) ** 4).mean(0)
+            var_se = ((fourth - empirical_var**2) / n).sqrt()
+        mean_z = (empirical_mean - mean) / mean_se
+        var_z = (empirical_var - variance) / var_se
+        msg = (
+            f"expected mean {mean}, got {empirical_mean} (z-scores {mean_z}); "
+            f"expected variance {variance}, got {empirical_var} (z-scores {var_z})"
+        )
+        zeros = torch.zeros_like(mean_z)
+        self.assertEqual(mean_z, zeros, atol=num_se, rtol=0, msg=msg)
+        self.assertEqual(var_z, zeros, atol=num_se, rtol=0, msg=msg)
+
     def _check_sampler_sampler(
         self,
         torch_dist,
@@ -3089,13 +3113,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         cov_diag = torch.randn(5).abs()
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         samples = d.rsample((100000,))
-        num_samples = samples.shape[0]
-        # Check each moment to within 5 standard errors (Gaussian formulas).
-        mean_se = (d.variance / num_samples).sqrt()
-        var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
-        zeros = torch.zeros_like(d.mean)
-        self.assertEqual((samples.mean(0) - d.mean) / mean_se, zeros, atol=5, rtol=0)
-        self.assertEqual((samples.var(0) - d.variance) / var_se, zeros, atol=5, rtol=0)
+        self._check_moments(samples, d.mean, d.variance, gaussian=True)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -3327,13 +3345,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         d = MultivariateNormal(mean, scale_tril=scale_tril)
         samples = d.rsample((100000,))
-        num_samples = samples.shape[0]
-        # Check each moment to within 5 standard errors (Gaussian formulas).
-        mean_se = (d.variance / num_samples).sqrt()
-        var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
-        zeros = torch.zeros_like(d.mean)
-        self.assertEqual((samples.mean(0) - d.mean) / mean_se, zeros, atol=5, rtol=0)
-        self.assertEqual((samples.var(0) - d.variance) / var_se, zeros, atol=5, rtol=0)
+        self._check_moments(samples, d.mean, d.variance, gaussian=True)
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
     @expectedFailureMPS
@@ -3568,16 +3580,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
         d = Wishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((ndim * ndim * 100000,))
-        num_samples = samples.shape[0]
-        empirical_mean = samples.mean(0)
-        empirical_var = samples.var(0)
-        # Check each moment to within 5 standard errors.
-        mean_se = (empirical_var / num_samples).sqrt()
-        fourth = ((samples - empirical_mean) ** 4).mean(0)
-        var_se = ((fourth - empirical_var**2).clamp(min=0) / num_samples).sqrt()
-        zeros = torch.zeros_like(empirical_mean)
-        self.assertEqual((d.mean - empirical_mean) / mean_se, zeros, atol=5, rtol=0)
-        self.assertEqual((d.variance - empirical_var) / var_se, zeros, atol=5, rtol=0)
+        self._check_moments(samples, d.mean, d.variance)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
