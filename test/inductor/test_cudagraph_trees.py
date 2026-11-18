@@ -356,7 +356,48 @@ def _force_partition_plan(plan):
         yield
 
 
+@instantiate_parametrized_tests
 class GraphTreeBackendTests(TestCase):
+    @parametrize("num_generators", [0, 2])
+    def test_xpu_create_graph(self, num_generators):
+        from torch._inductor import graph_tree_backend as backend
+
+        with mock.patch.object(torch.xpu, "XPUGraph") as graph_factory:
+            graph = backend.XPUGraphTreeGraphInterface().create_graph(
+                num_generators=num_generators
+            )
+
+        graph_factory.assert_called_once_with()
+        self.assertIs(graph, graph_factory.return_value)
+
+    @parametrize("data_ptr", [0, 4096])
+    def test_xpu_create_storage(self, data_ptr):
+        from torch._inductor import graph_tree_backend as backend
+
+        metadata = {
+            "data_ptr": data_ptr,
+            "device": torch.device("xpu:0"),
+            "nbytes": 64 if data_ptr else 0,
+        }
+        with (
+            mock.patch.object(torch, "UntypedStorage") as empty_storage,
+            mock.patch.object(
+                torch._C, "_construct_storage_from_data_pointer"
+            ) as storage_from_pointer,
+        ):
+            storage = backend.XPUGraphTreeAllocatorInterface().create_storage(metadata)
+
+        if data_ptr == 0:
+            self.assertIs(storage, empty_storage.return_value)
+            empty_storage.assert_called_once_with(0, device=metadata["device"])
+            storage_from_pointer.assert_not_called()
+        else:
+            self.assertIs(storage, storage_from_pointer.return_value)
+            storage_from_pointer.assert_called_once_with(
+                data_ptr, metadata["device"], metadata["nbytes"]
+            )
+            empty_storage.assert_not_called()
+
     def test_graph_tree_backend_registration(self):
         with fresh_graph_tree_backend() as backend:
             graph_interface = backend.CUDAGraphTreeGraphInterface()

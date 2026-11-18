@@ -3,6 +3,7 @@ import importlib
 import os
 import sys
 import unittest
+from unittest import mock
 
 import torch
 from torch._inductor import config
@@ -67,11 +68,11 @@ class XpuBasicTests(TestCase):
     )
     def test_unregistered_graph_tree_backend_fallback(self):
         from torch._dynamo.utils import counters
+        from torch._inductor import graph_tree_backend
         from torch._inductor.cudagraph_utils import cudagraphs_log
-        from torch._inductor.graph_tree_backend import is_graph_tree_backend_available
 
         self.assertEqual(torch.accelerator.current_accelerator().type, "xpu")
-        self.assertFalse(is_graph_tree_backend_available())
+        self.assertTrue(graph_tree_backend.is_graph_tree_backend_available())
         counters.clear()
 
         def fn(x):
@@ -79,9 +80,18 @@ class XpuBasicTests(TestCase):
 
         x = torch.randn(16, device="xpu")
         expected = fn(x)
-        with self.assertLogs(cudagraphs_log, level="WARNING") as logs:
-            actual = torch.compile(fn)(x)
+        with mock.patch.multiple(
+            graph_tree_backend,
+            _registered_device_type=None,
+            _graph_interface=None,
+            _allocator_interface=None,
+            _initialized=False,
+        ):
+            self.assertFalse(graph_tree_backend.is_graph_tree_backend_available())
+            with self.assertLogs(cudagraphs_log, level="WARNING") as logs:
+                actual = torch.compile(fn)(x)
 
+        self.assertTrue(graph_tree_backend.is_graph_tree_backend_available())
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
         self.assertIn("no Graph Trees backend registered", "\n".join(logs.output))
