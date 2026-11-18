@@ -112,6 +112,36 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertIs(picked, extern_choice)
 
+    def test_extern_choice_benchmarked_last_and_kept_within_margin(self):
+        template = select_algorithm.ChoiceCaller("template", [], None, "")
+        extern = self._extern_kernel_caller("mm")
+
+        order = []
+
+        def record(cls, choice, autotune_args):
+            order.append(choice)
+            return 1.0
+
+        with (
+            config.patch(max_autotune_benchmark_extern_last=True),
+            patch.object(
+                select_algorithm.AlgorithmSelectorCache,
+                "benchmark_choice",
+                classmethod(record),
+            ),
+        ):
+            select_algorithm.AlgorithmSelectorCache.benchmark_choices(
+                [extern, template], None
+            )
+        self.assertEqual(order, [template, extern])
+
+        pick = select_algorithm.min_choice_with_extern_margin
+        with config.patch(max_autotune_extern_margin=0.03):
+            self.assertIs(pick({template: 1.0, extern: 1.02}), extern)
+            self.assertIs(pick({template: 1.0, extern: 1.05}), template)
+        with config.patch(max_autotune_extern_margin=0.0):
+            self.assertIs(pick({template: 1.0, extern: 1.02}), template)
+
     def test_classify_kernel_operation_uses_extern_kernel_caller_name(self):
         cases = (
             ("mm", "mm"),

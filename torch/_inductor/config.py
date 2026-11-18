@@ -870,6 +870,24 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
+# Benchmark extern choices (ATen and subgraph choices such as decompose-K) after
+# the generated kernels during autotuning. Benchmarked first, right after the GPU
+# idled through precompilation, ATen kernels land in the clock dip of the
+# idle-to-load power transient and read slower than they run. Ignored when CUTLASS
+# choices are benchmarked in-process, which need valid ATen timings first, and by
+# pipelined autotuning (pipeline_max_autotune_gemm).
+max_autotune_benchmark_extern_last: bool = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_BENCHMARK_EXTERN_LAST", "1") == "1"
+)
+
+# Keep the fastest ExternKernelCaller (ATen) choice unless another choice beats it
+# by more than this fraction of its own time; protects against picks inside
+# benchmark noise. Applies to the unfused choice, not to fused-epilogue timings.
+# 0 disables.
+max_autotune_extern_margin: float = float(
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_EXTERN_MARGIN", "0.03")
+)
+
 # The following three timeouts are applicable if autotune_in_subproc is True:
 
 # Max time that a valid benchmark result may take during autotuning
