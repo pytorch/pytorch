@@ -37,7 +37,7 @@ import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
 from torch._inductor.custom_graph_pass import CustomGraphPass
-from torch._precompile import _write_artifact, PrecompileError
+from torch._precompile import _parse_artifact_metadata, _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
     capture,
@@ -49,7 +49,10 @@ from torch.compiler.precompile import (
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
@@ -3748,6 +3751,10 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
 
 
+def _precompile_pointwise(x):
+    return x.sin() * 2 + 1
+
+
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
@@ -4279,6 +4286,95 @@ class TestPrecompileNumerics(TestCase):
         code, cache = _precompile_pair(lambda a: a.t(), x, backend="eager")
         f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), x.t())
+
+    @onlyCUDA
+    def test_runtime_serves_incremental_autotune_without_compilation(self, device):
+        try:
+            from torch._inductor.runtime.fb.incremental._plugin import (
+                _shared_autotuner_registry,
+            )
+        except ImportError:
+            self.skipTest("requires the incremental autotuner")
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        # A rerun in this process must compile again, not reuse a tuned kernel.
+        torch._dynamo.reset()
+        x = make_tensor((1 << 22,), device=device, dtype=torch.float32)
+        expected = _precompile_pointwise(x)
+        launches = []
+        run = CachingAutotuner.run
+
+        def record(kernel, *args, **kwargs):
+            launches.append((kernel, args, kwargs))
+            return run(kernel, *args, **kwargs)
+
+        with (
+            fresh_cache(),
+            mock.patch.object(_runtime_cache, "_frozen_triton_kernels", {}),
+            mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
+            torch._inductor.config.patch(
+                {
+                    "incremental_autotune": True,
+                    "max_autotune_pointwise": True,
+                    "use_static_triton_launcher": True,
+                    "compile_threads": 1,
+                    "triton.cudagraphs": False,
+                    "fx_graph_remote_cache": False,
+                    "autotune_remote_cache": False,
+                    "bundled_autotune_remote_cache": False,
+                }
+            ),
+        ):
+            with (
+                mock.patch.dict(_shared_autotuner_registry, clear=True),
+                mock.patch.object(CachingAutotuner, "run", record),
+            ):
+                compiled = torch.compile(_precompile_pointwise, backend="inductor")
+                for _ in range(2):
+                    self.assertEqual(compiled(x), expected)
+            # A short capture leaves the kernel mid incremental tuning.
+            kernel, args, kwargs = launches[0]
+            self.assertEqual(kernel.launchers, [])
+            self.assertGreater(len(kernel.compile_results), 1)
+            out = next(
+                arg for arg in args if isinstance(arg, torch.Tensor) and arg is not x
+            )
+            payload, tuning = _runtime_cache._freeze_triton_kernel("source", [kernel])
+            self.assertTrue(tuning)
+            _runtime_cache._frozen_triton_kernels["source"] = payload
+            with (
+                mock.patch.dict(_shared_autotuner_registry, clear=True),
+                torch.compiler.precompile.no_compilation(),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "precompile",
+                    side_effect=AssertionError("precompiled kernel"),
+                ),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "autotune_to_one_config",
+                    side_effect=AssertionError("benchmarked kernel"),
+                ),
+                mock.patch.object(
+                    CachingAutotuner,
+                    "bench",
+                    side_effect=AssertionError("benchmarked kernel"),
+                ),
+            ):
+                loaded = _runtime_cache.load_triton_kernel("source")
+                self.assertEqual(len(loaded.launchers), len(kernel.compile_results))
+                for step in range(5000):
+                    loaded.run(*args, **kwargs)
+                    if step % 100 == 99:
+                        torch.cuda.synchronize()
+                        if len(loaded.launchers) == 1:
+                            break
+                self.assertEqual(len(loaded.launchers), 1)
+                out.zero_()
+                loaded.run(*args, **kwargs)
+                self.assertEqual(out, expected)
 
 
 instantiate_device_type_tests(TestPrecompileNumerics, globals())
@@ -6465,6 +6561,128 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
+_CUDAGRAPH_MODULE = """
+import torch
+
+
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+
+def step(model, x):
+    return (model(x).sin() * 2).cos()
+
+
+def breaking_helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos()
+
+
+def calls_breaking_helper(model, x):
+    return breaking_helper(model(x)) + 1
+"""
+
+_CUDAGRAPH_LOADER = """
+import json
+import sys
+import torch
+from torch._inductor import cudagraph_trees
+
+tmp, module, artifact, cache, state = sys.argv[1:6]
+sys.path.insert(0, tmp)
+mod = __import__(module)
+saved = torch.load(state)
+model = mod.Model().cuda()
+model.load_state_dict(saved["state_dict"])
+f = torch.compiler.precompile.load(artifact, cache)
+with torch.no_grad():
+    for _ in range(3):
+        if saved["mark_step"]:
+            torch.compiler.cudagraph_mark_step_begin()
+        # y stays alive into the next call, as in a loop that uses its output.
+        y = f(model, saved["x"])
+        torch.testing.assert_close(y, saved["expected"])
+manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
+nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
+for node in nodes:
+    nodes.extend(child for children in node.children.values() for child in children)
+print(json.dumps({"recorded": len(nodes)}))
+"""
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@unittest.skipUnless(TEST_CUDA and HAS_TRITON, "needs CUDA + Triton for CUDA graphs")
+@instantiate_parametrized_tests
+class TestPrecompileCudagraphs(TestCase):
+    """How a DynamoTracer artifact serves CUDA graphs."""
+
+    def setUp(self):
+        super().setUp()
+        self.dir = self.enterContext(tempfile.TemporaryDirectory())
+        self.artifact = os.path.join(self.dir, "m.py")
+        self.cache = os.path.join(self.dir, "m.cache")
+        self.module_name = f"precompile_cudagraph_{uuid.uuid4().hex}"
+        with open(os.path.join(self.dir, self.module_name + ".py"), "w") as f:
+            f.write(_CUDAGRAPH_MODULE)
+        self.enterContext(mock.patch.object(sys, "path", [self.dir, *sys.path]))
+        self.mod = importlib.import_module(self.module_name)
+        self.addCleanup(sys.modules.pop, self.module_name, None)
+        self.model = self.mod.Model().cuda()
+        self.x = torch.randn(4, 8, device="cuda")
+        # Captures with CUDA graphs on leave cudagraph trees, which this clears.
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
+
+    def _capture_step(self, fn, **kwargs):
+        with torch.no_grad():
+            with capture(
+                fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs
+            ) as cap:
+                y = cap(self.model, self.x).clone()
+        with open(self.artifact) as f:
+            return y, _parse_artifact_metadata(f.read())
+
+    def _serve_in_fresh_process(self, expected, env=None, mark_step=False):
+        # Calls the loaded artifact three times in a process run under env, and
+        # returns what that process counted: "recorded" is the number of nodes in
+        # its CUDA graph tree.
+        state = os.path.join(self.dir, "state.pt")
+        saved = {"x": self.x, "expected": expected, "mark_step": mark_step}
+        torch.save({"state_dict": self.model.state_dict(), **saved}, state)
+        argv = [self.dir, self.module_name, self.artifact, self.cache, state]
+        out = subprocess.run(
+            [sys.executable, "-c", _CUDAGRAPH_LOADER, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+            env={**os.environ, **(env or {})},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout.splitlines()[-1])
+
+    @parametrize("serving", ["standalone", "installed"])
+    @parametrize("mark_step", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_served_artifact_records_its_cudagraphs(self, serving, mark_step):
+        # Each call starts a new CUDA graph tree generation, as under
+        # torch.compile, so warmup ends without cudagraph_mark_step_begin() too.
+        mod = self.mod
+        fn = mod.step if serving == "standalone" else mod.calls_breaking_helper
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            y, meta = self._capture_step(fn)
+        self.assertEqual(meta["SERVING_MODE"], serving)
+        # The loading process's flag decides whether the graphs are wrapped.
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
+        served = self._serve_in_fresh_process(y, env, mark_step)
+        self.assertGreater(served["recorded"], 0)
+
+
 def _exception_chain(exc: BaseException | None) -> str:
     parts = []
     while exc is not None:
@@ -7967,7 +8185,7 @@ class TestPrecompileRuntimeCache(TestCase):
         original_launchers = kernel.launchers
         original_fn = kernel.fn.fn
         with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
-            payload = _freeze_triton_kernel("source", [unexecuted, kernel])
+            payload, _ = _freeze_triton_kernel("source", [unexecuted, kernel])
         saved = pickle.loads(payload)
         self.assertEqual(saved.cache_key, "source")
         self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
@@ -8018,6 +8236,91 @@ class TestPrecompileRuntimeCache(TestCase):
         kernel.launchers = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_static_export_keeps_incremental_candidates(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotunerPlugin
+        from torch.compiler._runtime_cache import _freeze_triton_kernel
+
+        class Holding(CachingAutotunerPlugin):
+            def holds_candidates(self, autotuner):
+                return True
+
+        kernel = _static_runtime_kernel(32)
+        kernel.compile_results = [
+            _static_runtime_kernel(block).compile_results[0] for block in (32, 64, 128)
+        ]
+        launchers = kernel.launchers = []
+        kernel._cached_launcher = None
+        # As incremental autotuning does while it is still timing the candidates.
+        kernel._plugins = [Holding()]
+        kernel.inductor_meta["coordinate_descent_tuning"] = True
+        kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
+        # A sibling that finished tuning, recorded later and never fast-path cached.
+        tuned = _static_runtime_kernel(256)
+        tuned._cached_launcher = None
+        payload, tuning = _freeze_triton_kernel("source", [kernel])
+        sibling, sibling_tuning = _freeze_triton_kernel("source", [kernel, tuned])
+        saved = pickle.loads(payload).kernel
+        blocks = [result.config.kwargs["XBLOCK"] for result in saved.compile_results]
+        self.assertEqual(blocks, [32, 64, 128])
+        self.assertTrue(tuning)
+        self.assertFalse(saved.inductor_meta["coordinate_descent_tuning"])
+        self.assertIsNone(saved.inductor_meta["combo_tuning_groups"])
+        self.assertTrue(kernel.inductor_meta["coordinate_descent_tuning"])
+        self.assertEqual(len(kernel.compile_results), 3)
+        self.assertIs(kernel.launchers, launchers)
+        self.assertEqual(launchers, [])
+        results = pickle.loads(sibling).kernel.compile_results
+        self.assertEqual([result.config.kwargs["XBLOCK"] for result in results], [256])
+        self.assertFalse(sibling_tuning)
+        # A plugin that does not hold the candidates leaves the kernel refused.
+        kernel._plugins = [CachingAutotunerPlugin()]
+        with self.assertRaises(RuntimeError) as cm:
+            _freeze_triton_kernel("source", [kernel])
+        (instance,) = cm.exception.sources[0]["instances"]
+        self.assertEqual(instance["reason"], "launcher_count_not_one")
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("incremental", (True, False))
+    def test_static_load_serves_incremental_candidates(self, incremental):
+        from torch._inductor.runtime import triton_heuristics
+        from torch._inductor.runtime.triton_heuristics import (
+            CachingAutotuner,
+            StaticTritonCompileResult,
+        )
+        from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
+        from torch.compiler import _runtime_cache
+
+        class Tuning(triton_heuristics.CachingAutotunerPlugin):
+            def tunes_prebuilt_launchers(self, autotuner):
+                return True
+
+        kernel = _static_runtime_kernel(32)
+        kernel.compile_results = [
+            _static_runtime_kernel(block).compile_results[0] for block in (32, 64)
+        ]
+        kernel.prepare_for_pickle()
+        record = StaticallyLaunchedAutotuner("source", "runtime_kernel", kernel)
+        frozen = {"source": pickle.dumps(record)}
+        plugins = [Tuning()] if incremental else []
+        warns = self.assertLogs("torch.compiler._runtime_cache", "WARNING")
+        with (
+            contextlib.nullcontext() if incremental else warns,
+            mock.patch.object(_runtime_cache, "_frozen_triton_kernels", frozen),
+            mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
+            # The plugins unpickling gives the kernel in the serving process.
+            mock.patch.object(
+                triton_heuristics, "get_caching_autotuner_plugins", return_value=plugins
+            ),
+            mock.patch.object(StaticTritonCompileResult, "reload_cubin_path") as reload,
+            mock.patch.object(CachingAutotuner, "_make_launchers") as make_launchers,
+        ):
+            loaded = _runtime_cache.load_triton_kernel("source")
+        blocks = [result.config.kwargs["XBLOCK"] for result in loaded.compile_results]
+        self.assertEqual(blocks, [32, 64] if incremental else [32])
+        self.assertEqual(reload.call_count, len(blocks))
+        make_launchers.assert_called_once()
 
     def test_static_records_follow_cache_reset(self):
         import hashlib
@@ -8799,7 +9102,7 @@ class TestPrecompileRuntimeCache(TestCase):
                     side_effect=check_live_kernel,
                 ),
             ):
-                payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+                payload, _ = _runtime_cache._freeze_triton_kernel("source", [kernel])
         saved = pickle.loads(payload).kernel
         self.assertEqual(saved.compile_results[0].kernel.cubin_raw, b"from disk")
         self.assertIsNone(live_binary.cubin_raw)
