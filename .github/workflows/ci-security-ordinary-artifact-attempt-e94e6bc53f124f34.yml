@@ -1,0 +1,98 @@
+# Owner(s): ["module: ci"]
+name: CI security ordinary artifact attempt audit e94e6bc53f124f34
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch' && github.repository == 'pytorch/pytorch' && github.event_name == 'pull_request' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-artifact-attempt-audit' && github.actor == 'ptdbot' && (github.triggering_actor == 'ptdbot' || github.triggering_actor == 'd4l3k')
+    uses: ./.github/workflows/_check-ci.yml
+
+  exact-owned-attempt:
+    needs: check-ci
+    if: github.repository_owner == 'pytorch' && github.repository == 'pytorch/pytorch' && github.event_name == 'pull_request' && github.event.pull_request.number == 0 && github.event.pull_request.user.login == 'ptdbot' && github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' && github.event.pull_request.head.repo.id == 1372177501 && github.event.pull_request.head.ref == 'd4l3k/release-artifact-attempt-audit' && github.actor == 'ptdbot' && (github.triggering_actor == 'ptdbot' || github.triggering_actor == 'd4l3k')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ptdbot/pytorch
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact-owned draft PR and bound attempt
+        id: guard
+        uses: ./.github/actions/release-artifact-attempt
+        with:
+          mode: guard
+          github-token: ${{ github.token }}
+      - name: Checkout immutable artifact SDK lock
+        if: steps.guard.outputs.phase == 'producer'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: actions/download-artifact
+          ref: d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+          path: .artifact-attempt-sdk
+          persist-credentials: false
+      - name: Verify dependency inputs
+        if: steps.guard.outputs.phase == 'producer'
+        uses: ./.github/actions/release-artifact-attempt
+        with:
+          mode: dependencies
+          github-token: ${{ github.token }}
+      - name: Install locked artifact runtime
+        if: steps.guard.outputs.phase == 'producer'
+        working-directory: .artifact-attempt-sdk
+        env:
+          NPM_CONFIG_CACHE: ${{ steps.guard.outputs.fixture_root }}/npm-cache
+        run: npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+      - name: Prove deletion and upload the ordinary archive
+        if: steps.guard.outputs.phase == 'producer'
+        uses: ./.github/actions/release-artifact-attempt
+        with:
+          mode: produce
+          github-token: ${{ github.token }}
+      - name: Checkout unchanged downloader source
+        if: steps.guard.outputs.phase == 'consumer'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pytorch/pytorch
+          ref: 93fdc6758e5513edcd0d86a09e313b5aca05bd64
+          path: .artifact-attempt-source
+          sparse-checkout: tools/stats
+          persist-credentials: false
+      - name: Install exact isolated Python inputs
+        if: steps.guard.outputs.phase == 'consumer'
+        env:
+          FIXTURE: ${{ steps.guard.outputs.fixture_root }}
+          UV_CACHE_DIR: ${{ steps.guard.outputs.fixture_root }}/uv-cache
+          UV_PYTHON_INSTALL_DIR: ${{ steps.guard.outputs.fixture_root }}/python
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-unknown-linux-gnu.tar.gz -o "$FIXTURE/uv.tar.gz"
+          echo 'a7fbaff2b9a271d85c1bdb540941090fd1ce011797b4abeb48e4dcd39c2471d5  '"$FIXTURE/uv.tar.gz" | sha256sum --check --strict
+          tar --extract --gzip --no-same-owner --file "$FIXTURE/uv.tar.gz" --directory "$FIXTURE"
+          UV="$FIXTURE/uv-x86_64-unknown-linux-gnu/uv"
+          "$UV" venv --managed-python --python 3.13.13 "$FIXTURE/venv"
+          "$UV" pip install --python "$FIXTURE/venv/bin/python" --require-hashes --no-deps --only-binary=:all: -r .github/actions/release-artifact-attempt/requirements.txt
+      - name: Observe unchanged same-run attempt selection
+        if: steps.guard.outputs.phase == 'consumer'
+        uses: ./.github/actions/release-artifact-attempt
+        with:
+          mode: consume
+          github-token: ${{ github.token }}
+      - name: Retain for controller or clean failed producer
+        if: always() && steps.guard.outcome == 'success'
+        uses: ./.github/actions/release-artifact-attempt
+        with:
+          mode: finish
+          github-token: ${{ github.token }}

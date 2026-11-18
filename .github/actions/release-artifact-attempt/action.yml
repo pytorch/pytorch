@@ -1,0 +1,17 @@
+name: Ordinary artifact attempt audit
+description: Run the exact-owned inert artifact attempt audit
+inputs:
+  mode:
+    required: true
+    description: Fixed audit operation
+  github-token:
+    required: true
+    description: Current owned workflow token
+outputs:
+  phase:
+    description: Bound producer or consumer attempt
+  fixture_root:
+    description: Owned disposable fixture root
+runs:
+  using: node20
+  main: index.cjs
