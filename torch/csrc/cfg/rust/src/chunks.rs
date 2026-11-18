@@ -6,8 +6,12 @@
 //! and unmaps it again, and so does the next call from the same place. The
 //! code of a compiled graph has one large frame and launches its kernels from
 //! it: when that frame ends within a few hundred bytes of a chunk's end, each
-//! launch pays for a pair of system calls, some 15 us. Whether it does
+//! launch pays for a pair of system calls, up to 15 us. Whether it does
 //! depends on the depth of the caller, to the byte, and not on the graph.
+//!
+//! CPython 3.11 and 3.12 do that. Later ones keep one freed chunk per thread
+//! themselves (python/cpython#142183, in the 3.13 and 3.14 releases since
+//! March 2026), and there this is seldom asked for anything.
 //!
 //! So a chunk of that size that the interpreter frees is kept for its next
 //! request of one. The interpreter asks its arena allocator for chunks, which
