@@ -466,6 +466,7 @@ PickleOpCode Unpickler::readInstruction() {
           " and start index is ",
           start,
           ", but stack_ is iterated by two elements at a time");
+      dict.reserve((stack_.size() - start) / 2);
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }
@@ -488,6 +489,7 @@ PickleOpCode Unpickler::readInstruction() {
           " and start index is ",
           start,
           ", but stack_ is iterated by two elements at a time");
+      dict.reserve(dict.size() + (stack_.size() - start) / 2);
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }

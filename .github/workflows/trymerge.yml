@@ -81,6 +81,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
         run: |
           set -x
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"

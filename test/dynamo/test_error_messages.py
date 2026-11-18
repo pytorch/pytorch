@@ -302,19 +302,18 @@ Backend compiler exception
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0219.html""",
         )
 
-        if sys.version_info >= (3, 11):
-            msg_with_carets = munge_exc(
-                cm.exception,
-                suppress_suffix=True,
-                strip_carets=False,
-            )
-            self.assertIn(
-                """\
+        msg_with_carets = munge_exc(
+            cm.exception,
+            suppress_suffix=True,
+            strip_carets=False,
+        )
+        self.assertIn(
+            """\
       File "test_error_messages.py", line N, in fn
         return x + 1
         ^^^^^^^^^^^^""",
-                msg_with_carets,
-            )
+            msg_with_carets,
+        )
 
     @make_logging_test()
     def test_backend_fake_tensor_exc_no_warning(self, records):
@@ -2351,7 +2350,7 @@ from user code:
 
         expected = """\
 RuntimeError when making fake tensor call
-  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1')
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
 
   Developer debug context:

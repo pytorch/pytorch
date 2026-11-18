@@ -12,26 +12,6 @@ on:
 permissions: read-all
 
 jobs:
-  update-commit-hash:
-    if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
-    environment: update-commit-hash
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-      - name: update-xla-commit-hash
-        continue-on-error: true
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        with:
-          repo-name: xla
-          branch: master
-          pin-folder: .github/ci_commit_pins
-          test-infra-ref: main
-          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-
   update-slow-tests:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-24.04
