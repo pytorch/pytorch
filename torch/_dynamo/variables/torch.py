@@ -3327,6 +3327,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     "to assert that all elements are true.",
                 )
 
+            predicate_is_constant = predicate_vt.is_python_constant()
+            if predicate_is_constant and predicate_vt.as_python_constant() is True:
+                return ConstantVariable.create(None)
+
             message_eager = None
             message_graph_arg = None
             # Realize a possible LazyVariableTracker so the exact-type checks
@@ -3385,7 +3389,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ],
                     )
 
-            if predicate_vt.is_python_constant():
+            if predicate_is_constant:
                 if predicate_vt.as_python_constant():
                     return ConstantVariable.create(None)
                 msg = (
