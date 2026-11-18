@@ -1006,13 +1006,16 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         drains = []
         entered = threading.Event()
         polled = threading.Event()
+        start = 0
 
         def record():
+            nonlocal start
             drain()
             drains.append(threading.current_thread())
-            if len(set(drains)) == 4:
+            if not entered.is_set() and len(set(drains)) == 4:
+                start = len(drains)
                 entered.set()
-            if entered.is_set() and len(drains) >= 40:
+            if entered.is_set() and len(drains) >= start + 40:
                 polled.set()
 
         errors = []
@@ -1028,7 +1031,6 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             for waiter in waiters:
                 waiter.start()
             self.assertTrue(entered.wait(30))
-            start = len(drains)
             self.assertTrue(polled.wait(30))
             self.assertEqual(len(set(drains[start:])), 1)
             second.close()
