@@ -108,32 +108,33 @@ def multiply_forward_hook(module, args, *rest):
 class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @staticmethod
+    def compile_counted(fn):
+        counter = torch._dynamo.testing.CompileCounter()
+        return torch.compile(fn, backend=counter, fullgraph=True), counter
+
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("subclass", [False, True])
     @parametrize(
-        "operation, with_kwargs",
-        [("forward", False), ("forward", True)]
-        + [
-            (operation, False)
-            for operation in (
-                "call_values",
-                "keys",
-                "values",
-                "items",
-                "len_keys",
-                "unpack",
-                "empty_unpack",
-            )
+        "operation",
+        [
+            "forward",
+            "forward_kwargs",
+            "call_values",
+            "keys",
+            "values",
+            "items",
+            "len_keys",
+            "unpack",
+            "empty_unpack",
         ],
     )
-    def test_hook_dict_iteration_order(
-        self, mapping_type, with_kwargs, operation, subclass
-    ):
+    def test_hook_dict_iteration_order(self, mapping_type, operation, subclass):
         if subclass:
             mapping_type = type("HookDict", (mapping_type,), {})
 
         def fn(x, module):
-            if operation == "forward":
+            if operation in ("forward", "forward_kwargs"):
                 return module(x)
             if operation in ("unpack", "empty_unpack"):
                 keys, pairs = [*module._forward_hooks], [*module._forward_hooks.items()]
@@ -149,8 +150,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             view = getattr(module._forward_hooks, operation)()
             return x + len(view), type(view), list(view)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
@@ -158,7 +158,9 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 () if operation == "empty_unpack" else (add_one, multiply_forward_hook)
             )
             for callback in callbacks:
-                module.register_forward_hook(callback, with_kwargs=with_kwargs)
+                module.register_forward_hook(
+                    callback, with_kwargs=operation == "forward_kwargs"
+                )
             module._forward_hooks = mapping_type(module._forward_hooks)
             self.assertEqual(compiled(x, module), fn(x, module))
             self.assertEqual(counter.frame_count, 1)
@@ -189,33 +191,11 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         module = torch.nn.Identity()
         module._forward_hooks = Hooks({1: add_one, 2: multiply_forward_hook})
         x = torch.ones(1)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         self.assertEqual(compiled(x, module), fn(x, module))
         self.assertEqual(counter.frame_count, 1)
         with patch.object(Hooks, "items", mapping_type.items):
             self.assertEqual(compiled(x, module), fn(x, module))
-        self.assertEqual(counter.frame_count, 2)
-
-    @parametrize("ordered", [False, True])
-    @parametrize("populated", [False, True])
-    def test_hook_mapping_protocol_fallback(self, ordered, populated):
-        class Hooks(OrderedDict if ordered else dict):
-            marker = 3
-
-        def fn(x, module):
-            return module(x) + module._forward_hooks.marker
-
-        module = torch.nn.Identity()
-        module._forward_hooks = Hooks()
-        if populated:
-            module._forward_hooks[1] = identity_forward_hook
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for marker in (3, 7):
-            module._forward_hooks.marker = marker
-            self.assertEqual(compiled(x, module), x + marker)
         self.assertEqual(counter.frame_count, 2)
 
     @parametrize("mapping_type", [dict, OrderedDict])
@@ -223,31 +203,34 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     @parametrize("mutation", ["attribute", "content"])
     def test_hook_subclass_attribute_mutation(self, mapping_type, populated, mutation):
         class Hooks(mapping_type):
-            pass
+            marker = 3
 
         def fn(x, module):
             hooks = module._forward_hooks
             if mutation == "attribute":
+                previous = hooks.marker
                 hooks.marker = x + 2
-                return module(x) + 1, hooks.marker
+                return module(x) + previous, hooks.marker
             hooks[1] = multiply_forward_hook
             return module(x) + 1, hooks[1] is multiply_forward_hook
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
-        for _ in range(2):
+        for marker in (3, 3, 7):
             module = torch.nn.Identity()
             module._forward_hooks = Hooks(
                 {1: identity_forward_hook} if populated else {}
             )
-            expected = (x + 1, x + 2) if mutation == "attribute" else (x * 2 + 1, True)
+            module._forward_hooks.marker = marker
+            expected = (
+                (x + marker, x + 2) if mutation == "attribute" else (x * 2 + 1, True)
+            )
             self.assertEqual(compiled(x, module), expected)
             if mutation == "attribute":
                 self.assertEqual(module._forward_hooks.marker, x + 2)
             else:
                 self.assertIs(module._forward_hooks[1], multiply_forward_hook)
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.frame_count, 2 if mutation == "attribute" else 1)
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("spoof_type", [False, True])
@@ -307,8 +290,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             return module(x) + 1
 
         module = torch.nn.Identity()
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for amount in (1, 3):
 
@@ -367,8 +349,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 2)
 
     def test_always_call_hook(self):
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt = torch.compile(lambda x, module: module(x), backend=cnt, fullgraph=True)
+        opt, cnt = self.compile_counted(lambda x, module: module(x))
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
@@ -390,8 +371,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             hooks[1] = identity_forward_hook
             return x + len(hooks)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
@@ -459,8 +439,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def fn(x, key, module):
             return x + (key in module._forward_hooks_with_kwargs)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         module = torch.nn.Identity()
         for key in (3, 4):
@@ -550,8 +529,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def fn(x, module):
             return x + 1, container(operation(module._forward_hooks))
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
@@ -574,8 +552,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             return x + 1 if truth_fn(module._forward_hooks) else x - 1
 
         module = torch.nn.Linear(2, 2)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         self.assertEqual(compiled(x, module), fn(x, module))
         for _ in range(2):
@@ -586,34 +563,32 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 2)
 
     @parametrize("with_kwargs", [False, True])
-    @parametrize("unsafe", [False, True])
-    def test_forward_pre_hook_reuse(self, with_kwargs, unsafe):
+    def test_forward_pre_hook_reuse(self, with_kwargs):
         def hook(module, args, *rest):
             return ((args[0] + 3,), rest[0]) if rest else (args[0] + 2,)
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt = torch.compile(lambda x, module: module(x), backend=cnt, fullgraph=True)
+        opt, cnt = self.compile_counted(lambda x, module: module(x))
         x = torch.ones(1)
-        for flag in (with_kwargs, with_kwargs, not with_kwargs):
+
+        def check(flag):
             module = torch.nn.Identity()
             module.register_forward_pre_hook(hook, with_kwargs=flag)
             self.assertEqual(opt(x, module), module(x))
+
+        for flag in (with_kwargs, with_kwargs, not with_kwargs):
+            check(flag)
         self.assertEqual(cnt.frame_count, 2)
-        if unsafe:
-            with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
-                for flag in (with_kwargs, not with_kwargs):
-                    module = torch.nn.Identity()
-                    module.register_forward_pre_hook(hook, with_kwargs=flag)
-                    self.assertEqual(opt(x, module), module(x))
-            self.assertEqual(cnt.frame_count, 2)
+        with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
+            check(with_kwargs)
+            check(not with_kwargs)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_hook_flag_mutated_before_dispatch(self):
         def fn(x, module):
             module._forward_hooks_with_kwargs.clear()
             return module(x)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         for _ in range(2):
             module = torch.nn.Identity()
             module.register_forward_hook(hook_arity, with_kwargs=True)
@@ -630,8 +605,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         first, second = torch.nn.Identity(), torch.nn.Identity()
         first._forward_hooks[1] = identity_forward_hook
         second._forward_hooks_with_kwargs[1] = True
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         self.assertEqual(compiled(x, first, second), x + 1)
         second._forward_hooks_with_kwargs.clear()
@@ -640,10 +614,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("suppressed", [False, True])
     def test_hook_membership_guard_objects(self, suppressed):
-        module = torch.nn.Identity()
-        for with_kwargs in (False, True, True, False):
-            module.register_forward_hook(hook_arity, with_kwargs=with_kwargs)
-
         def prime(ctx):
             tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
             module = ctx.get_local(
@@ -665,16 +635,17 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             nopython=True,
             guard_export_fn=lambda guards: exported.append(list(guards)),
         )(fn)
-        self.assertEqual(compiled(torch.ones(1), module), module(torch.ones(1)))
-        fresh = torch.nn.Identity()
-        for with_kwargs in (False, True, True, False):
-            fresh.register_forward_hook(hook_arity, with_kwargs=with_kwargs)
-        self.assertEqual(compiled(torch.ones(1), fresh), fresh(torch.ones(1)))
+        x = torch.ones(1)
+        module, fresh = torch.nn.Identity(), torch.nn.Identity()
+        for current in (module, fresh):
+            for with_kwargs in (False, True, True, False):
+                current.register_forward_hook(hook_arity, with_kwargs=with_kwargs)
+            self.assertEqual(compiled(x, current), current(x))
         self.assertEqual(len(exported), 1)
         keys = list(module._forward_hooks)
         module._forward_hooks_with_kwargs.clear()
         module._forward_hooks_with_kwargs.update({keys[0]: True, keys[-1]: True})
-        self.assertEqual(compiled(torch.ones(1), module), module(torch.ones(1)))
+        self.assertEqual(compiled(x, module), module(x))
         self.assertEqual(len(exported), 2)
         guards = [
             guard
@@ -790,8 +761,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def kwargs_hook(module, args, kwargs, output):
             return output + 2
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt = torch.compile(lambda x, module: module(x), backend=cnt, fullgraph=True)
+        opt, cnt = self.compile_counted(lambda x, module: module(x))
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
@@ -806,8 +776,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def fn(x, module):
             return module(x)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for first, second in ((1, 2), (3, 4)):
             module = torch.nn.Identity()
@@ -864,8 +833,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             expected = (
                 (x + len(initial_flags), x) if global_flags else (x * 121, x * 112)
             )
-            counter = torch._dynamo.testing.CompileCounter()
-            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            compiled, counter = self.compile_counted(fn)
             self.assertEqual(fn(x, *modules), expected)
             self.assertEqual(compiled(x, *modules), expected)
             if global_flags:
@@ -1021,11 +989,19 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         self._check_materialized_hook_keys(sum_hook_keys)
 
     def _check_materialized_hook_keys(self, operation, mapping_type=OrderedDict):
-        def fn(x, module):
-            return x + operation(module._forward_hooks)
+        def check(ctx):
+            hooks = ctx.get_local("hooks")
+            self.assertFalse(
+                hooks._i_will_not_complain_if_bc_breaks_VariableTracker().has_new_items()
+            )
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        def fn(x, module):
+            hooks = module._forward_hooks
+            result = operation(hooks)
+            comptime(check)
+            return x + result
+
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for keys in ((2, 3), (4, 3), (1, 3), (4, 3)):
             module = torch.nn.Identity()
@@ -1098,8 +1074,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 return result + (5 in hooks)
             return result + len(hooks)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for key in (3, second_key, second_key):
             eager, actual = torch.nn.Identity(), torch.nn.Identity()
@@ -1115,44 +1090,39 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("global_flags", [False, True])
     @parametrize(
-        "operation, pops, populated",
+        "operation, populated",
         [
-            subtest((type, False, False), name="type"),
-            subtest((type, False, True), name="populated_type"),
-            subtest((lambda d: d.copy(), False, True), name="populated_copy"),
-            subtest((repr, False, False), name="repr"),
-            subtest((ascii, False, False), name="ascii"),
-            subtest((lambda d: ascii((d,)), False, False), name="nested_ascii"),
-            subtest((lambda d: f"{d}", False, False), name="fstring"),
-            subtest(("{}".format, False, False), name="format"),
-            subtest((str, False, False), name="str"),
-            subtest((lambda d: d.copy(), False, False), name="copy"),
-            subtest((lambda d: {} | d, False, False), name="reflected_union"),
-            subtest(
-                (lambda d: isinstance(d, OrderedDict), False, False), name="instance"
-            ),
-            subtest(
-                (lambda d: hasattr(d, "move_to_end"), False, False), name="hasattr"
-            ),
-            subtest((lambda d: d.popitem(last=False), True, False), name="popitem"),
+            subtest((type, False), name="type"),
+            subtest((type, True), name="populated_type"),
+            subtest((lambda d: d.copy(), True), name="populated_copy"),
+            subtest((repr, False), name="repr"),
+            subtest((ascii, False), name="ascii"),
+            subtest((lambda d: ascii((d,)), False), name="nested_ascii"),
+            subtest((lambda d: f"{d}", False), name="fstring"),
+            subtest(("{}".format, False), name="format"),
+            subtest((str, False), name="str"),
+            subtest((lambda d: d.copy(), False), name="copy"),
+            subtest((lambda d: {} | d, False), name="reflected_union"),
+            subtest((lambda d: isinstance(d, OrderedDict), False), name="instance"),
+            subtest((lambda d: hasattr(d, "move_to_end"), False), name="hasattr"),
+            subtest((lambda d: d.popitem(last=False), False), name="popitem"),
+            subtest((lambda d: d.move_to_end(1), False), name="move_to_end"),
+            subtest((lambda d: d.move_to_end is not None, False), name="read_method"),
         ],
     )
-    def test_hook_dict_observable_type(self, operation, pops, populated, global_flags):
+    def test_hook_dict_observable_type(self, operation, populated, global_flags):
         hook_api = torch.nn.modules.module
 
         def fn(x, module):
             hooks = module._forward_hooks
             if global_flags:
                 hooks = hook_api._global_forward_hooks_with_kwargs
-            if pops:
-                try:
-                    return x + 1, operation(hooks)
-                except (TypeError, KeyError) as error:
-                    return x + 1, type(error)
-            return x + 1, operation(hooks)
+            try:
+                return x + 1, operation(hooks)
+            except (TypeError, KeyError, AttributeError) as error:
+                return x + 1, type(error)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled, counter = self.compile_counted(fn)
         x = torch.ones(1)
         for kind in (dict, OrderedDict, dict, OrderedDict):
             module = torch.nn.Identity()
@@ -1164,8 +1134,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 actual = compiled(x, module)
                 self.assertEqual(actual, expected)
                 self.assertIs(type(actual[1]), type(expected[1]))
-                if pops:
-                    self.assertIs(actual[1], TypeError if kind is dict else KeyError)
         self.assertEqual(counter.frame_count, 2)
 
     @torch._dynamo.config.patch(skip_nnmodule_hook_guards=True)
