@@ -11,21 +11,25 @@ from unittest.mock import Mock, patch
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.aot_compile import AOTCompiledFunction
+from torch._dynamo.comptime import comptime
 from torch._dynamo.guards import (
     _filter_labeled_guards,
     CheckFunctionManager,
     GuardBuilder,
+    install_guard,
     make_guard_filter_entry,
 )
 from torch._dynamo.output_graph import OutputGraphGuardsState
 from torch._dynamo.source import DictGetItemSource, GlobalSource, LocalSource
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.variables.lazy import LazyConstantVariable
 from torch._guards import (
     DuplicateInputs,
     Guard,
     GuardsSet,
     StorageOverlap,
     StorageOverlapPartition,
+    TracingContext,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -562,6 +566,190 @@ class GuardFilterTests(torch._dynamo.test_case.TestCase):
         for label, entries in seen.items():
             self.assertTrue(entries, label)
             self.assertTrue(all(label in entry.labels for entry in entries))
+
+    @parametrize("nested_graph_breaks", [False, True])
+    @parametrize("graph_break", [False, True])
+    def test_decorator_region_sources_and_policy(
+        self, nested_graph_breaks, graph_break
+    ):
+        seen = {"outer": [], "inner": []}
+        sources = {"outer": set(), "inner": set()}
+
+        def record_outer(ctx):
+            sources["outer"].add(
+                ctx.get_local("value")
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .source.name
+            )
+
+        def record_inner(ctx):
+            sources["inner"].add(
+                ctx.get_local("value")
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .source.name
+            )
+
+        @torch.compiler.register_guard_filter("outer")
+        def outer(entries):
+            seen["outer"].extend(entries)
+            return [True] * len(entries)
+
+        @torch.compiler.register_guard_filter("inner")
+        def inner(entries):
+            seen["inner"].extend(entries)
+            return [entry.guard_type != "CONSTANT_MATCH" for entry in entries]
+
+        def fn2(args):
+            value = args[1]
+            x = args[0] + len(value)
+            comptime(record_outer)
+            return x
+
+        def fn3(x, args):
+            value = args[2]
+            x = x + len(value)
+            comptime(record_inner)
+            if graph_break:
+                torch._dynamo.graph_break()
+            return x.sin()
+
+        @torch.compiler.guard_ctx("outer")
+        def fn(args):
+            x = fn2(args)
+            with torch.compiler.guard_ctx("inner"):
+                return fn3(x, args)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=not graph_break)
+        x = torch.ones(2)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            self.assertEqual(compiled((x, "aa", "bbb")), (x + 5).sin())
+            frames = counter.frame_count
+            callbacks = sum(map(len, seen.values()))
+            with torch.compiler.set_stance("fail_on_recompile"):
+                # Dropping the inner constant guard deliberately permits stale output.
+                self.assertEqual(compiled((x, "aa", "changed")), (x + 5).sin())
+            self.assertEqual(counter.frame_count, frames)
+            self.assertEqual(sum(map(len, seen.values())), callbacks)
+            # The outer specialization remains guarded and must recompile.
+            self.assertEqual(compiled((x, "longer", "bbb")), (x + 9).sin())
+            self.assertGreater(counter.frame_count, frames)
+
+        for label in seen:
+            self.assertTrue(sources[label])
+            # Graph breaks can abandon an inline attempt observed by comptime.
+            matching = [
+                entry
+                for entry in seen[label]
+                if entry.guard_type == "CONSTANT_MATCH"
+                and entry.orig_guard.name in sources[label]
+            ]
+            self.assertTrue(matching, (label, sources[label]))
+            self.assertTrue(
+                all(entry.labels == frozenset({label}) for entry in matching)
+            )
+            self.assertFalse(
+                any(
+                    entry.orig_guard.name in sources[label]
+                    for entry in seen["inner" if label == "outer" else "outer"]
+                )
+            )
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
+    @parametrize("nested_graph_breaks", [False, True])
+    @parametrize("graph_break", [False, True])
+    @parametrize("duplicate", [False, True])
+    def test_delayed_guard_filter_and_duplicate_union(
+        self, nested_graph_breaks, graph_break, duplicate
+    ):
+        held, seen = [], {"creation": [], "installation": []}
+
+        def create_guard(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["_value"]
+            self.assertIs(type(value), LazyConstantVariable)
+            self.assertFalse(value.is_realized())
+            guard = value.source.make_guard(GuardBuilder.CONSTANT_MATCH)
+            self.assertEqual(guard.creation_label, "creation")
+            self.assertFalse(value.is_realized())
+            held.append(guard)
+            if duplicate:
+                install_guard(guard)
+
+        def install_delayed(ctx):
+            self.assertEqual(
+                TracingContext.get().guards_context.current_guard_label, "installation"
+            )
+            install_guard(held[-1])
+            if duplicate:
+                guard = held[-1].originating_source.make_guard(
+                    GuardBuilder.CONSTANT_MATCH
+                )
+                self.assertEqual(guard.creation_label, "installation")
+                install_guard(guard)
+
+        @torch.compiler.register_guard_filter("creation")
+        def creation(entries):
+            seen["creation"].extend(entries)
+            return [entry.orig_guard.name != held[-1].name for entry in entries]
+
+        @torch.compiler.register_guard_filter("installation")
+        def installation(entries):
+            seen["installation"].extend(entries)
+            return [True] * len(entries)
+
+        def fn(x, values):
+            with torch.compiler.guard_ctx("creation"):
+                _value = values[0]
+                comptime(create_guard)
+                x = x.sin()
+                if graph_break:
+                    torch._dynamo.graph_break()
+            with torch.compiler.guard_ctx("installation"):
+                comptime(install_delayed)
+                return x + len(values)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=not graph_break)
+        x = torch.ones(2)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            self.assertEqual(compiled(x, ["first"]), x.sin() + 1)
+            frames = counter.frame_count
+            self.assertEqual(compiled(x, ["changed"]), x.sin() + 1)
+            if duplicate:
+                self.assertGreater(counter.frame_count, frames)
+            else:
+                self.assertEqual(counter.frame_count, frames)
+            frames = counter.frame_count
+            callbacks = sum(map(len, seen.values()))
+            self.assertEqual(compiled(x, ["changed"]), x.sin() + 1)
+            self.assertEqual(counter.frame_count, frames)
+            self.assertEqual(sum(map(len, seen.values())), callbacks)
+
+        expected = frozenset(
+            {"creation", "installation"} if duplicate else {"creation"}
+        )
+        for label in seen:
+            matching = [
+                entry
+                for entry in seen[label]
+                if entry.orig_guard.name == held[0].name
+                and entry.guard_type == "CONSTANT_MATCH"
+            ]
+            if label == "creation" or duplicate:
+                self.assertTrue(matching)
+                self.assertIn(expected, [entry.labels for entry in matching])
+                allowed = {expected}
+                if duplicate and graph_break and label == "creation":
+                    allowed.add(frozenset({"creation"}))
+                    self.assertIn(
+                        frozenset({"creation"}), [entry.labels for entry in matching]
+                    )
+                self.assertTrue(all(entry.labels in allowed for entry in matching))
+            else:
+                self.assertEqual(matching, [])
+        self.assertTrue(all(guard.creation_label == "creation" for guard in held))
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
 
     @parametrize("caching_precompile", [False, True])
     def test_aot_save_load_keeps_filtered_survivors(self, caching_precompile):
