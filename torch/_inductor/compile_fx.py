@@ -2954,7 +2954,7 @@ def compile_fx_forward(
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
 
-    # AOTAutograd regenerates output aliases from these bases at runtime.
+    # AOTAutograd regenerates output aliases using both output and base layouts.
     if fw_metadata is not None:
         num_mutated_inputs = fw_metadata.num_mutated_inp_runtime_indices
         intermediate_base_start = num_mutated_inputs + fw_metadata.num_outputs
@@ -2965,7 +2965,16 @@ def compile_fx_forward(
             )
         )
         alias_of_output = OutputType.alias_of_intermediate_base_is_user_output
-        for info in fw_metadata.output_info:
+        alias_types = (
+            OutputType.alias_of_intermediate,
+            OutputType.alias_of_intermediate_save_as_output,
+            alias_of_output,
+        )
+        for idx, info in enumerate(fw_metadata.output_info):
+            if info.output_type in alias_types:
+                output_idx = num_mutated_inputs + idx
+                if output_idx not in user_visible_output_idxs:
+                    user_visible_output_idxs.append(output_idx)
             if info.output_type == alias_of_output:
                 if info.base_idx is None:
                     raise AssertionError("Expected a user output base index")

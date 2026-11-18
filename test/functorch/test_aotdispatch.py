@@ -83,7 +83,7 @@ from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, S
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -5025,23 +5025,31 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("case", ["hidden_base", "returned_base", "symbolic_view_replay"])
+    @parametrize("dense", [False, True])
     @torch._dynamo.config.patch(suppress_errors=False)
-    def test_output_aliases_intermediate_layout_optimization(self, device, case):
+    def test_output_aliases_intermediate_layout_optimization(self, device, case, dense):
         def f(conv, a, b, n):
             params = torch.cat((a, b), 1)
-            s = conv(params)
-            y, r = params[:, :n], params[:, n:]
+            if dense:
+                y, r = params[:n], params[n:]
+                s = conv(y)
+            else:
+                s = conv(params)
+                y, r = params[:, :n], params[:, n:]
             outputs = (y, s, r, params) if case == "returned_base" else (y, s, r)
             torch._dynamo.graph_break()
             return outputs
 
         dtype = torch.float32
+        n = 2 if dense else 8
         conv = nn.Conv2d(16, 16, 3, padding=1, device=device, dtype=dtype)
-        a = torch.randn(2, 8, 16, 16, device=device, dtype=dtype, requires_grad=True)
+        a = torch.randn(
+            4 if dense else 2, 8, 16, 16, device=device, dtype=dtype, requires_grad=True
+        )
         b = torch.randn_like(a, requires_grad=False)
         conv_ref = copy.deepcopy(conv).cpu().double()
         ref_a = a.detach().cpu().double().requires_grad_()
-        ref = f(conv_ref, ref_a, b.cpu().double(), 8)
+        ref = f(conv_ref, ref_a, b.cpu().double(), n)
         ref_grads = torch.autograd.grad(
             sum(c * x.square().mean() for c, x in zip((1.0, 0.37, 0.13), ref[:3])),
             (ref_a, *conv_ref.parameters()),
@@ -5051,12 +5059,13 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             torch._functorch.config.patch(view_replay_for_aliased_outputs=dynamic),
             torch._inductor.config.patch(
                 layout_optimization=True,
-                keep_output_stride=case != "returned_base",
+                force_layout_optimization=True,
+                keep_output_stride=not dense and case != "returned_base",
             ),
-            torch.backends.cudnn.flags(allow_tf32=False),
+            tf32_off(),
         ):
             for fn in (f, torch.compile(f, backend="inductor", dynamic=dynamic)):
-                outputs = fn(conv, a, b, 8)
+                outputs = fn(conv, a, b, n)
                 grads = torch.autograd.grad(
                     sum(
                         c * x.cpu().double().square().mean()
