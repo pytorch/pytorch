@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
+import threading
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -580,8 +581,7 @@ def wrap_numpy(fn):
 # restore (#202042). Plain caller-spawned threads never inherit the flags.
 # The autograd engine installs an at::ThreadLocalState copy on its worker
 # per GraphTask (engine.cpp), so backward started inside the session
-# observes it while that task runs; an unused mid-session copy is never
-# updated when the parent session exits early.
+# observes it while that task runs.
 _IS_COMPILING = "torch.compiler.is_compiling"
 _IS_EXPORTING = "torch.compiler.is_exporting"
 _IS_NON_STRICT_TRACING = "torch.compiler.is_non_strict_tracing"
@@ -592,6 +592,16 @@ _IS_KEY_IN_TLS = torch._C._is_key_in_tls
 _STASH_OBJ_IN_TLS = torch._C._stash_obj_in_tls
 _REMOVE_OBJ_FROM_TLS = torch._C._remove_obj_from_tls
 
+# Sessions entered and not yet exited, counted across all threads. The readers
+# below short-circuit on this count so the common case of no session running
+# costs a module global load instead of a TLS probe, which the runtime overhead
+# paths measured by pr_time_benchmarks are sensitive to. A stale inherited copy
+# (e.g. an autograd worker's mid-session snapshot) is therefore visible only
+# while some session is still running. The count is raised before stashing and
+# lowered after erasing, so it can err only in the direction of probing more.
+_SESSIONS_ACTIVE = 0
+_SESSIONS_ACTIVE_LOCK = threading.Lock()
+
 
 @contextlib.contextmanager
 def _session_flags(*keys: str):
@@ -601,14 +611,21 @@ def _session_flags(*keys: str):
     so nested sessions and inherited (at::ThreadLocalState-copied) flags are
     left alone.
     """
+    global _SESSIONS_ACTIVE
     newly_set = [k for k in keys if not _IS_KEY_IN_TLS(k)]
-    for k in newly_set:
-        _STASH_OBJ_IN_TLS(k, True)
+    with _SESSIONS_ACTIVE_LOCK:
+        _SESSIONS_ACTIVE += 1
     try:
+        for k in newly_set:
+            _STASH_OBJ_IN_TLS(k, True)
         yield
     finally:
-        for k in newly_set:
-            _REMOVE_OBJ_FROM_TLS(k)
+        try:
+            for k in newly_set:
+                _REMOVE_OBJ_FROM_TLS(k)
+        finally:
+            with _SESSIONS_ACTIVE_LOCK:
+                _SESSIONS_ACTIVE -= 1
 
 
 def is_compiling() -> bool:
@@ -634,16 +651,14 @@ def is_compiling() -> bool:
     if torch.jit.is_scripting():
         return False
     else:
-        return _IS_KEY_IN_TLS(_IS_COMPILING)
+        return _SESSIONS_ACTIVE != 0 and _IS_KEY_IN_TLS(_IS_COMPILING)
 
 
 def _is_non_strict_tracing() -> bool:
     """
     Indicates whether we are inside a non-strict make_fx-based tracing session.
     """
-    if torch.jit.is_scripting():
-        return False
-    return _IS_KEY_IN_TLS(_IS_NON_STRICT_TRACING)
+    return _SESSIONS_ACTIVE != 0 and _IS_KEY_IN_TLS(_IS_NON_STRICT_TRACING)
 
 
 def _non_strict_tracing_context():
@@ -771,10 +786,7 @@ def is_exporting() -> bool:
         >>>
         >>>     # ...rest of the function...
     """
-    if torch.jit.is_scripting():
-        return False
-    else:
-        return _IS_KEY_IN_TLS(_IS_EXPORTING)
+    return _SESSIONS_ACTIVE != 0 and _IS_KEY_IN_TLS(_IS_EXPORTING)
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:

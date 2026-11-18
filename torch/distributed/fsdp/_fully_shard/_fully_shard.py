@@ -15,13 +15,19 @@ from torch.distributed._composable import contract
 
 from ._fsdp_api import (
     AllGather,
+    AllReduce,
     DataParallelMeshDims,
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import _default_reduce_scatter_input_fn
-from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_collectives import _default_reduce_scatter_input_fn, DefaultAllReduce
+from ._fsdp_common import (
+    _dynamo_disable,
+    DDPMeshInfo,
+    FSDPMeshInfo,
+    ShardPlacementFnResult,
+)
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -230,9 +236,16 @@ def fully_shard(
               use cases like Mixture of Experts where expert params use a
               different mesh than regular params.
 
-            If sharding on a nonzero dim, we currently require even sharding,
-            i.e. the tensor dim size on that dim must be divisible by the FSDP
-            shard mesh size.
+            Any dim may be sharded unevenly, as ``torch.chunk`` splits it, so later
+            ranks may hold fewer or no rows. On a nonzero dim, all-gather
+            extensions of such parameters need the 5-argument
+            ``fsdp_pre_all_gather``, must pad their inputs on those ranks, and
+            must drop the padding in ``fsdp_post_all_gather`` (see
+            :class:`~torch.distributed.fsdp.experimental.AllGatherInput`).
+            Inputs left unpadded raise on those ranks only, while the others
+            wait in the all-gather.
+            :func:`~torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_native_copy`
+            does not support such parameters.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
@@ -803,6 +816,39 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._reduce_scatter_comm = comm
 
+    def set_custom_all_reduce(self, comm: AllReduce) -> None:
+        """Override HSDP or ``replicate_with_fsdp`` all-reduce communication.
+
+        See ``AllReduce`` for the in-place reduction and stream contract. The
+        primitive runs on FSDP's internal all-reduce stream, which is distinct
+        from the compute stream. FSDP handles gradient scaling, accumulation,
+        and buffer lifetime, and runs the optional all-reduce hook afterward.
+        ``set_requires_all_reduce(False)`` suppresses this collective.
+
+        This applies to this module's parameter group, not child FSDP modules.
+
+        .. warning::
+            This API is experimental and may change without backward
+            compatibility.
+
+        Args:
+            comm (Optional[AllReduce]): Custom all-reduce communication.
+                ``None`` restores ``DefaultAllReduce``.
+        """
+        state = self._get_fsdp_state()
+        if not state._fsdp_param_groups:
+            return
+        if len(state._fsdp_param_groups) > 1:
+            raise ValueError(
+                "set_custom_all_reduce is not supported with multiple param groups"
+            )
+        for fsdp_param_group in state._fsdp_param_groups:
+            if not isinstance(fsdp_param_group.mesh_info, DDPMeshInfo):
+                raise ValueError("set_custom_all_reduce requires a replication mesh")
+            fsdp_param_group._all_reduce_comm = (
+                DefaultAllReduce() if comm is None else comm
+            )
+
     def set_all_reduce_hook(
         self,
         hook: Callable[[torch.Tensor], None],
@@ -1113,6 +1159,48 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_symm_mem(backend)
+
+    def set_unshard_in_current_stream(
+        self, unshard_in_current_stream: bool, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets whether FSDP issues its pre-forward and pre-backward all-gathers
+        on the current stream instead of on its separate all-gather streams.
+        The current stream is the one that is current when FSDP issues the
+        unshard, normally the one the module's forward and backward run on, so
+        the all-gather buffers share that stream's memory. Defaults to
+        ``False``.
+
+        Setting this to ``True`` avoids inter-stream memory fragmentation: the
+        CUDA caching allocator does not reuse memory freed on one stream for
+        allocations on another. In return, the copy-in and dtype cast before
+        each all-gather run on the current stream and do not overlap with
+        compute.
+
+        With this set, FSDP's own unshards run like your own :meth:`unshard`
+        calls, on the current stream: the pre-forward and pre-backward unshard
+        like ``unshard(async_op=False)``, and a prefetch like
+        ``unshard(async_op=True)``.
+
+        An all-gather issued on the current stream overlaps with compute only
+        if it is issued ahead of time. In forward, configure explicit
+        prefetching with :meth:`set_modules_to_forward_prefetch` or call
+        :meth:`unshard` with ``async_op=True``; otherwise each module's
+        all-gather is exposed. Backward prefetching needs no configuration.
+
+        Args:
+            unshard_in_current_stream (bool): Whether to issue the all-gathers
+                on the current stream.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.unshard_async_op = unshard_in_current_stream
 
     def _set_unshard_async_op(self, async_op: bool):
         """

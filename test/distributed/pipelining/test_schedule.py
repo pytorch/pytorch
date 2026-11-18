@@ -232,9 +232,12 @@ class P2PInitializationTest(TestCase):
             (((0, 1),), ((1, 0),)),
         )
 
-    def test_shared_preconnect_exercises_each_physical_pair_once(self):
+    def test_shared_preconnect_exercises_both_directions_of_each_physical_pair(self):
         parent = MagicMock()
-        works = [MagicMock(), MagicMock()]
+        works = [MagicMock() for _ in range(4)]
+        p2p = MagicMock()
+        p2p.isend.side_effect = works[0::2]
+        p2p.irecv.side_effect = works[1::2]
         with (
             patch(
                 "torch.distributed.pipelining._p2p.dist.get_world_size",
@@ -244,10 +247,8 @@ class P2PInitializationTest(TestCase):
                 "torch.distributed.pipelining._p2p.dist.get_rank",
                 return_value=0,
             ),
-            patch(
-                "torch.distributed.pipelining._p2p.dist.isend",
-                side_effect=works,
-            ) as isend,
+            patch("torch.distributed.pipelining._p2p.dist.isend", p2p.isend),
+            patch("torch.distributed.pipelining._p2p.dist.irecv", p2p.irecv),
             patch("torch.distributed.pipelining._p2p.dist.all_reduce") as sync,
         ):
             _preconnect_shared_p2p_edges(
@@ -256,13 +257,12 @@ class P2PInitializationTest(TestCase):
                 torch.device("cpu"),
             )
 
-        self.assertEqual(
-            [call.kwargs["group_dst"] for call in isend.call_args_list],
-            [1, 3],
-        )
-        self.assertTrue(
-            all(call.kwargs["group"] is parent for call in isend.call_args_list)
-        )
+        ops = [
+            (name, kwargs.get("group_dst", kwargs.get("group_src")))
+            for name, _, kwargs in p2p.mock_calls
+        ]
+        self.assertEqual(ops, [("isend", 1), ("irecv", 1), ("isend", 3), ("irecv", 3)])
+        self.assertTrue(all(call.kwargs["group"] is parent for call in p2p.mock_calls))
         self.assertTrue(all(work.wait.call_count == 1 for work in works))
         self.assertEqual(sync.call_count, 2)
 
