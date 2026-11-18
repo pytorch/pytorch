@@ -1067,14 +1067,20 @@ def settle_rewritten(fn, model, example_inputs, most=1000, seconds=600.0, calm=1
     while, one level of calls after the other: a training step, which goes
     through an optimizer, takes some hundred calls where a model's forward
     takes twenty. Over when ``calm`` calls in a row changed nothing; a call
-    that is slow is given fewer. Returns the number of calls that took."""
+    that is slow is given fewer. Returns the number of calls that took, and
+    the time of one of the calm ones (0 if there was none)."""
     quiet, before, start, calls = 0, None, time.perf_counter(), 0
+    calm_start = start
     while calls < most:
         fn(model, example_inputs)
         calls += 1
         regions = torch.rewrite.regions(fn)
         now = (len(regions), sum(r.get("variants", 0) for r in regions))
-        quiet = 0 if fn.stats()["measuring"] or now != before else quiet + 1
+        if fn.stats()["measuring"] or now != before:
+            synchronize()
+            quiet, calm_start = 0, time.perf_counter()
+        else:
+            quiet += 1
         before = now
         elapsed = time.perf_counter() - start
         enough = calls >= 12 or (calls >= 6 and elapsed > 60)
@@ -1082,7 +1088,9 @@ def settle_rewritten(fn, model, example_inputs, most=1000, seconds=600.0, calm=1
         needed = max(3, min(calm, int(calm * calls / max(elapsed, 1e-9) / 16)))
         if enough and (quiet >= needed or elapsed > seconds):
             break
-    return calls
+    synchronize()
+    steady = (time.perf_counter() - calm_start) / quiet if quiet else 0.0
+    return calls, steady
 
 
 def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
@@ -2978,9 +2986,10 @@ class BenchmarkRunner:
                     self.model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
-        # How many calls the compiled function's warmup was, and how many an
-        # eager one is: what the compile time is taken from.
-        settled = {"calls": measure_iters, "eager": measure_iters}
+        # How many calls the compiled function's warmup was, how many an eager
+        # one is, and what a call costs once torch.rewrite has settled: what
+        # the compile time is taken from.
+        settled = {"calls": measure_iters, "eager": measure_iters, "steady": 0.0}
 
         def warmup(
             fn, model, example_inputs, mode, measure_iters=5, stabilization_iters=0
@@ -3000,9 +3009,9 @@ class BenchmarkRunner:
                 if self.args.rewrite and mode == "dynamo":
                     # Its compile time is spread over the calls it takes to
                     # settle, not all in the first one.
-                    settled["calls"] = measure_iters + settle_rewritten(
-                        fn, model, example_inputs
-                    )
+                    calls, steady = settle_rewritten(fn, model, example_inputs)
+                    settled["calls"] = measure_iters + calls
+                    settled["steady"] = steady
                 t1 = time.perf_counter()
                 latency = t1 - t0
                 for _ in range(stabilization_iters):
@@ -3138,6 +3147,12 @@ class BenchmarkRunner:
             compilation_time = (
                 dynamo_latency - eager_latency * settled["calls"] / settled["eager"]
             )
+            if settled["steady"]:
+                # Some hundred calls of a training step went by: what they
+                # took beyond calls of the function as it ended up, which is
+                # the compiling, the measuring, and the calls that ran before
+                # there was a graph.
+                compilation_time = dynamo_latency - settled["steady"] * settled["calls"]
             if self.args.rewrite:
                 found = [
                     r
