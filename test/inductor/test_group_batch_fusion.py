@@ -69,6 +69,16 @@ def _(x: torch.Tensor, y: torch.Tensor, out: torch.Tensor) -> None:
     pass
 
 
+@torch.library.custom_op("_batch_linear_lhs_test::mutate_input", mutates_args=("x",))
+def _mutate_input(x: torch.Tensor) -> None:
+    x.add_(1)
+
+
+@_mutate_input.register_fake
+def _(x: torch.Tensor) -> None:
+    pass
+
+
 @contextlib.contextmanager
 def _record_fusion_subsets():
     from unittest import mock
@@ -1207,7 +1217,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(subsets, [2])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
-    @parametrize("alias", ["self", "transpose", "view", "contiguous"])
+    @parametrize("alias", ["self", "transpose", "view"])
     @torch._inductor.config.patch(
         post_grad_fusion_options={
             "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
@@ -1226,10 +1236,8 @@ class TestGroupBatchFusion(TestCase):
                     other = large
                 elif alias == "transpose":
                     other = large.t()
-                elif alias == "view":
-                    other = large.view(32, 4, 12)
                 else:
-                    other = large.contiguous()
+                    other = large.view(32, 4, 12)
                 return _same_ptr(large, other), torch.sin(self.b(x))
 
         counters.clear()
@@ -1277,6 +1285,65 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual[0].item(), 1.0)
         self.assertEqual(subsets, [])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_preserves_mutated_view(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                _mutate_input(large.t())
+                return large, torch.sin(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # auto_functionalized_v2 rebuilds the mutated view from the base, so
+        # fusing would let it write into sibling columns.
+        self.assertEqual(subsets, [])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_single_alias_consumer_fuses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                return _same_ptr(large, x), torch.sin(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # A consumer with one aliased input does not observe alias identity.
+        self.assertEqual(actual[0].item(), 0.0)
+        self.assertEqual(subsets, [2])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
     def test_batch_linear_lhs_match_ignores_mm_dtype(self):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion

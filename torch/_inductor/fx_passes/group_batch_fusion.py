@@ -602,8 +602,9 @@ class BatchLinearLHSFusion(BatchFusion):
     @staticmethod
     def _consumes_multiple_aliases(node: torch.fx.Node) -> bool:
         # Opaque consumers can observe that two inputs are aliases of the same
-        # projection. Value-only aten ops and the graph output cannot, so keep
-        # fusing across those.
+        # projection, and auto_functionalized rebuilds a mutated view from the
+        # base with eager strides. Value-only aten ops and the graph output
+        # cannot observe aliasing, so keep fusing across those.
         closure = OrderedSet([node])
         pending = [node]
         while pending:
@@ -621,6 +622,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 if user in closure or user.op == "output":
                     continue
                 target = user.target
+                is_hop = isinstance(target, torch._ops.HigherOrderOperator)
                 if isinstance(target, torch._ops.OpOverload):
                     if target.namespace == "aten":
                         continue
@@ -632,7 +634,9 @@ class BatchLinearLHSFusion(BatchFusion):
                 for arg in pytree.arg_tree_leaves(*user.args, **user.kwargs):
                     if isinstance(arg, torch.fx.Node) and arg in closure:
                         count += 1
-                if count > 1:
+                # A mutated view under auto_functionalized_v2 is rebuilt from
+                # its base, so even one aliased input is unsafe.
+                if count > 1 or (is_hop and count > 0):
                     return True
         return False
 
@@ -661,8 +665,9 @@ class BatchLinearLHSFusion(BatchFusion):
         # an aliased consumer such as t().as_strided() also blocks the fusion.
         if self._reaches_raw_storage_op(node):
             return None
-        # A consumer that receives two aliases of the projection would see
-        # different storage after the split, so do not fuse across it.
+        # Aliases copied separately during lowering, or a mutated view rebuilt
+        # by auto_functionalized, would observe changed storage. Do not fuse
+        # across such consumers.
         if self._consumes_multiple_aliases(node):
             return None
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
