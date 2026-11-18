@@ -1805,6 +1805,11 @@ void* frameSwap(void* frame) {
   tstate->cframe->current_frame = static_cast<_PyInterpreterFrame*>(frame);
   return previous;
 }
+
+int32_t frameTraced() {
+  PyThreadState* tstate = PyThreadState_Get();
+  return tstate->c_tracefunc != nullptr;
+}
 #endif
 
 int32_t isTracing() {
@@ -1836,7 +1841,9 @@ const TcfgApi api_table = {
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
     &framePush,       &framePop,          &frameHeld,         &frameSwap,
+    &frameTraced,
 #else
+    nullptr,
     nullptr,
     nullptr,
     nullptr,
