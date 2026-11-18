@@ -1480,7 +1480,7 @@ class PatternPrettyPrinter:
 
 class _PassDictsType(Protocol):
     def __getitem__(
-        self, k: tuple[str, torch.fx.node.Target]
+        self, k: tuple[str, torch.fx.node.Target], /
     ) -> list[PatternEntry]: ...
 
 
