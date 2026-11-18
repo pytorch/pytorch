@@ -439,6 +439,7 @@ class TestShapeOps(TestCase):
 
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
+    @dtypesIfXPU(*all_passthru_types_and(torch.chalf))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -446,7 +447,7 @@ class TestShapeOps(TestCase):
         def test_flip_impl(input_t, dims, output_t):
             def all_t():
                 yield input_t, output_t
-                if dtype is torch.float and self.device_type != "mps":
+                if dtype is torch.float and self.device_type not in ("mps", "xpu"):
                     # We generate quantized versions as well
                     for qdtype in (torch.quint8, torch.qint8, torch.qint32):
                         qinput_t = torch.quantize_per_tensor(input_t, 0.1, 5, qdtype)
@@ -872,7 +873,7 @@ class TestShapeOpsCPUOnly(TestCase):
         torch.flip(qt, dims=(0,))
 
 
-instantiate_device_type_tests(TestShapeOps, globals(), allow_mps=True)
+instantiate_device_type_tests(TestShapeOps, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestShapeOpsCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":

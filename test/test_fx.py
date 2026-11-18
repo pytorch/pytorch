@@ -34,6 +34,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
     preserves_device_selection,
+    expectedFailureXPU,
 )
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
@@ -5850,8 +5851,8 @@ def run_getitem_target():
         _wrapped_methods_to_patch.pop()
 
 
-class TestFXCUDA(JitTestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestFXDevice(JitTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -5893,6 +5894,7 @@ class TestFXCUDA(JitTestCase):
                 f"node={node}: no stack trace containing {required_substrings}; got {stacks}",
             )
 
+    @expectedFailureXPU   # "https://github.com/intel/torch-xpu-ops/issues/6076"
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     @blas_library_context("cublaslt")
     def test_profiler_stack_trace_augmentation(self, device):
@@ -5976,6 +5978,7 @@ event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
 event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             self.assertExpectedInline(actual_traces, expected)
 
+    @expectedFailureXPU   # "https://github.com/intel/torch-xpu-ops/issues/6076"
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_multiple_modules(self, device):
         """
@@ -6021,6 +6024,7 @@ event=aten::sub node=sub stack_trace=return x - 1
 event={kernel_event} node=sub stack_trace=return x - 1""",
         )
 
+    @expectedFailureXPU   # "https://github.com/intel/torch-xpu-ops/issues/6076"
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self, device):
         """
@@ -6143,7 +6147,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c""",
         )
 
 
-instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFXDevice, globals(), except_for=("cpu"), allow_xpu=True)
 
 
 class TestOperatorSignatures(JitTestCase):
