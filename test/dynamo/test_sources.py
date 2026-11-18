@@ -130,24 +130,34 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         class Child(Parent):
             pass
 
+        class Meta(type):
+            __mro__ = ("shadow",)
+
+        class Shadowed(Parent, metaclass=Meta):
+            pass
+
         @torch._dynamo.assume_constant_result
         def get_class():
-            return Child
+            return cls
 
         def fn(x, read_mro):
             return x + len(read_mro(get_class()))
 
+        def descriptor(cls):
+            return type.__dict__["__mro__"].__get__(cls)
+
         x = torch.ones(1)
-        for read_mro in (
-            lambda cls: cls.mro(),
-            lambda cls: cls.__mro__,
-            lambda cls: type.__dict__["__mro__"].__get__(cls),
+        for cls, read_mro in (
+            (Child, lambda cls: cls.mro()),
+            (Child, lambda cls: cls.__mro__),
+            (Child, descriptor),
+            (Shadowed, descriptor),
         ):
             counter = CompileCounter()
             compiled = torch.compile(fn, backend=counter, fullgraph=True)
-            Child.__bases__ = (Parent,)
+            cls.__bases__ = (Parent,)
             self.assertEqual(compiled(x, read_mro), x + 3)
-            Child.__bases__ = (Intermediate,)
+            cls.__bases__ = (Intermediate,)
             self.assertEqual(compiled(x, read_mro), x + 4)
             self.assertEqual(counter.frame_count, 2)
 

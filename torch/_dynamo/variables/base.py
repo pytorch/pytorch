@@ -1821,7 +1821,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             getter=lambda self, tx: VariableTracker.build(
                 tx,
                 self.python_type(),
-                AttrSource(self.source, "__class__") if self.source else None,
+                AttrSource(self.source, "__class__")
+                if self.source and self.source.subguards_allowed()
+                else None,
             ),
             setter=unmodeled_setter,
         ),

@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import enum
 import io
 import operator
 import time
@@ -25,9 +26,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-pytree_modules = {
-    "python": python_pytree,
-}
+pytree_modules = {"python": python_pytree}
 if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 
@@ -378,7 +377,8 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 SourcelessBuilder.create(tx, literal).as_python_constant(), literal
             )
 
-    def test_constructed_metaclass_key_reconstruction(self):
+    @parametrize("allowed", [False, True])
+    def test_constructed_metaclass_key_reconstruction(self, allowed):
         class Meta(type):
             def __hash__(cls):
                 return cls.hash_value
@@ -386,19 +386,32 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         class Key(metaclass=Meta):
             hash_value = 1
 
+        def consume(mapping):
+            return mapping
+
+        if allowed:
+            torch.compiler.allow_in_graph(consume)
+
         def fn(x):
             Key.hash_value = 1
             mapping = builtins.frozendict([(Key, x)])
             Key.hash_value = 2
-            return x + 1, mapping
+            return x + 1, consume(mapping) if allowed else mapping
 
-        x = torch.ones(1)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "stored key hashes"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        result, mapping = torch.compile(fn, backend="eager")(x)
-        self.assertEqual(result, x + 1)
-        self.assertEqual(list(mapping.items()), [(Key, x)])
-        self.assertNotIn(Key, mapping)
+        try:
+            x, counter = torch.ones(1), CompileCounter()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "stored key hashes"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            result, mapping = torch.compile(fn, backend=counter)(x)
+            self.assertEqual(result, x + 1)
+            self.assertEqual(list(mapping.items()), [(Key, x)])
+            self.assertNotIn(Key, mapping)
+            self.assertEqual(counter.frame_count, 0)
+        finally:
+            if allowed:
+                torch._dynamo.trace_rules._allowed_callable_ids.remove(id(consume))
 
     def test_class_getitem(self):
         def fn(x):
@@ -438,18 +451,10 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("construct", [False, True])
-    @parametrize(
-        "name,args",
-        [
-            ("get", ("a",)),
-            ("keys", ()),
-            ("values", ()),
-            ("items", ()),
-            ("__getitem__", ("a",)),
-            ("__len__", ()),
-        ],
-    )
-    def test_dict_descriptor_rejects_frozen_receiver(self, construct, name, args):
+    @parametrize("name", ["get", "keys", "values", "items", "__getitem__", "__len__"])
+    def test_dict_descriptor_rejects_frozen_receiver(self, construct, name):
+        args = ("a",) if name in ("get", "__getitem__") else ()
+
         def fn(x, mapping):
             if construct:
                 mapping = builtins.frozendict(a=x)
@@ -521,9 +526,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         ],
     )
     def test_preexisting_custom_key_hash(self, wrap):
-        Key = _ChangingHashKey
-
-        key = Key()
+        key = _ChangingHashKey()
         wrapped = wrap(key)
         mapping = builtins.frozendict([(wrapped, 1)])
         key.value = 2
@@ -591,20 +594,20 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
 
     @parametrize(
-        "key_type, changed_field",
+        "key_type, field",
         [
-            (kind, True)
-            for kind in (
-                python_pytree.MappingKey,
-                python_pytree.SequenceKey,
-                python_pytree.GetAttrKey,
-            )
+            (python_pytree.MappingKey, "key"),
+            (python_pytree.SequenceKey, "idx"),
+            (python_pytree.GetAttrKey, "name"),
+            (enum.Enum, "_name_"),
         ]
-        + [(kind, False) for kind in (object, type, types.ModuleType, torch.Tensor)],
+        + [(kind, None) for kind in (object, type, types.ModuleType, torch.Tensor)],
     )
-    def test_preexisting_changed_key_hash(self, key_type, changed_field):
-        if changed_field:
-            key = key_type("a" if key_type is python_pytree.GetAttrKey else 0)
+    def test_preexisting_changed_key_hash(self, key_type, field):
+        if key_type is enum.Enum:
+            key = enum.Enum("Key", ["before"]).before
+        elif field:
+            key = key_type("a" if field == "name" else 0)
         else:
 
             class Key(key_type):
@@ -619,16 +622,18 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 else Key()
             )
         mapping = builtins.frozendict([(key, 7)])
-        if changed_field:
-            changed = "b" if key_type is python_pytree.GetAttrKey else 1
-            object.__setattr__(key, next(iter(key_type.__dataclass_fields__)), changed)
+        if field:
+            changed = "b" if field in ("name", "_name_") else 1
+            object.__setattr__(key, field, changed)
+            while field == "_name_" and key in mapping:
+                key._name_ += "_"
         elif key_type is type or key_type is object:
             Key.__hash__ = object.__hash__
         else:
             key.__class__ = key_type
 
         def fn(x, mapping):
-            return x + (mapping.get(key, 0) if changed_field else key in mapping)
+            return x + (mapping.get(key, 0) if field else key in mapping)
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
@@ -651,10 +656,8 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("with_kwargs", [False, True])
     def test_conversion_preserves_stored_key_hashes(self, with_kwargs):
-        Key = _ChangingHashKey
-
         def fn(x):
-            key = Key()
+            key = _ChangingHashKey()
             mapping = builtins.frozendict([(key, x)])
             key.value = 2
             copied = dict(mapping, extra=x + 1) if with_kwargs else dict(mapping)
@@ -700,21 +703,17 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
-    def test_guard_invalidation(self):
+    @torch._dynamo.config.patch(specialize_int=False, specialize_float=False)
+    @parametrize("key_type", [str, int, float])
+    def test_guard_invalidation(self, key_type):
         counter = CompileCounter()
 
         def fn(mapping):
             return next(iter(mapping.values())) + len(mapping), list(mapping)
 
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        for items in (
-            [("a", torch.randn(3))],
-            [("a", torch.randn(3))],
-            [("b", torch.randn(3))],
-            [("a", torch.randn(3)), ("b", torch.randn(3))],
-            [("b", torch.randn(3)), ("a", torch.randn(3))],
-        ):
-            mapping = builtins.frozendict(items)
+        for keys in ((3,), (3,), (4,), (3, 4), (4, 3)):
+            mapping = builtins.frozendict((key_type(k), torch.randn(3)) for k in keys)
             self.assertEqual(compiled(mapping), fn(mapping))
         self.assertEqual(counter.frame_count, 4)
 
