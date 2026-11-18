@@ -13,6 +13,7 @@ These classes integrate with Dynamo's variable tracking system to enable proper
 handling of iterator operations during code transformation and optimization.
 """
 
+import collections
 import inspect
 import itertools
 import operator
@@ -945,16 +946,18 @@ class DictViewIterator(IteratorVariable):
     }
 
     view_type: str = "keys"
+    linked_order = False
 
     def __init__(
         self,
         items: dict[HashableTracker, VariableTracker],
         *,
-        use_dict_storage: bool = False,
+        view_type: str,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        if use_dict_storage and isinstance(items, dict):
+        self.view_type = view_type
+        if not self.linked_order and isinstance(items, dict):
             self._iter = iter(getattr(dict, self.view_type)(items))
         elif self.view_type == "keys":
             self._iter = iter(items)
@@ -969,12 +972,10 @@ class DictViewIterator(IteratorVariable):
 
     @classmethod
     def create(
-        cls,
-        items: dict[HashableTracker, VariableTracker],
-        *,
-        use_dict_storage: bool = False,
+        cls, items: dict[HashableTracker, VariableTracker], *, ordered: bool = False
     ) -> "DictViewIterator":
-        return cls(items, use_dict_storage=use_dict_storage)
+        iterator_cls = OrderedDictIterator if ordered else cls
+        return iterator_cls(items, view_type=cls.view_type)
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # dictiter_iternextitem: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5538-L5578
@@ -1041,6 +1042,18 @@ class DictValuesIterator(DictViewIterator):
 class DictItemsIterator(DictViewIterator):
     _cpython_type = type(iter({}.items()))
     view_type = "items"
+
+
+_ORDERED_DICT_ITERATOR_TYPE = type(iter(collections.OrderedDict().items()))
+
+
+class OrderedDictIterator(DictViewIterator):
+    linked_order = True
+    _cpython_type = _ORDERED_DICT_ITERATOR_TYPE
+    view_type = "items"
+
+    def python_type(self) -> type:
+        return _ORDERED_DICT_ITERATOR_TYPE
 
 
 class SetIterator(DictViewIterator):
