@@ -1233,6 +1233,74 @@ class CommentLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class SizeAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    size: list[sympy.Expr]
+    stride: list[sympy.Expr]
+    op_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        size_str = self.wrapper.codegen_python_shape_tuple(self.size)
+        stride_str = self.wrapper.codegen_python_shape_tuple(self.stride)
+        if self.op_name is not None:
+            code.writeline(
+                f"assert_size_stride({self.name}, {size_str}, {stride_str}, {self.op_name!r})"
+            )
+        else:
+            code.writeline(f"assert_size_stride({self.name}, {size_str}, {stride_str})")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_assert_size_stride
+
+
+@dataclasses.dataclass
+class NanAssertLine(WrapperLine):
+    """
+    Checks for both NaN and Inf values.  This matches the existing behavior of
+    PythonWrapperCodegen.codegen_input_nan_asserts() which checks both despite
+    the config flag being named ``nan_asserts``.
+    """
+
+    wrapper: PythonWrapperCodegen
+    name: str
+    tensor_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        if self.tensor_name is None:
+            code.writeline(f"assert not {self.name}.isnan().any().item()")
+            code.writeline(f"assert not {self.name}.isinf().any().item()")
+        else:
+            nan_msg = f"{self.tensor_name} contains NaN"
+            inf_msg = f"{self.tensor_name} contains Inf"
+            code.writeline(f"assert not {self.name}.isnan().any().item(), {nan_msg!r}")
+            code.writeline(f"assert not {self.name}.isinf().any().item(), {inf_msg!r}")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_nan_assert
+
+
+@dataclasses.dataclass
+class ScalarAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    scalar: sympy.Basic
+    msg: str
+    output_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        sizevar = self.wrapper.codegen_python_sizevar(self.scalar, simplify=False)
+        code.writeline(f"if not ({sizevar}):")
+        code.writeline(f"    raise RuntimeError({repr(self.msg)})")
+        code.writeline(f"{self.output_name} = None")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_scalar_assert
+
+
+@dataclasses.dataclass
 class DynamicScalarLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.DynamicScalar
@@ -2205,14 +2273,19 @@ class UnbackedSymbolDefsLine(WrapperLine):
 class AssertSizeStrideLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     name: str
-    size: str
-    stride: str
+    size: Sequence[Expr]
+    stride: Sequence[Expr]
     op_name: str = "input"
     dtype: torch.dtype | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._codegen_assert_size_stride(
-            code, self.name, self.size, self.stride, self.op_name, self.dtype
+            code,
+            self.name,
+            self.wrapper.codegen_shape_tuple(self.size),
+            self.wrapper.codegen_shape_tuple(self.stride),
+            self.op_name,
+            self.dtype,
         )
 
     @staticmethod
@@ -2223,12 +2296,21 @@ class AssertSizeStrideLine(WrapperLine):
 @dataclasses.dataclass
 class GroupedAssertSizeStrideLine(WrapperLine):
     wrapper: PythonWrapperCodegen
-    asserts: list[tuple[str, str, str]]
+    asserts: list[tuple[str, Sequence[Expr], Sequence[Expr]]]
     op_name: str = "input"
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._codegen_assert_size_stride_grouped(
-            code, self.asserts, self.op_name
+            code,
+            [
+                (
+                    name,
+                    self.wrapper.codegen_shape_tuple(size),
+                    self.wrapper.codegen_shape_tuple(stride),
+                )
+                for name, size, stride in self.asserts
+            ],
+            self.op_name,
         )
 
     @staticmethod
@@ -2329,7 +2411,9 @@ class PythonWrapperCodegen(CodeGen):
     def __init__(self):
         super().__init__()
         self._last_default_stream_device: int | None = None
-        self._pending_input_asserts: dict[str, tuple[str, str]] = {}
+        self._pending_input_asserts: dict[
+            str, tuple[Sequence[Expr], Sequence[Expr]]
+        ] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         # Inputs read on more than one stream get a copy_if_misaligned per
         # consuming stream (each cloning a preserved copy of the original), so
@@ -2850,19 +2934,51 @@ class PythonWrapperCodegen(CodeGen):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
-            size = self.codegen_shape_tuple(buf.get_size())
-            stride = self.codegen_shape_tuple(buf.get_stride())
-            self._pending_input_asserts[name] = (size, stride)
+            self._codegen_input_size_assert(name, buf)
+
+    def _codegen_input_size_assert(self, name: str, buf: ir.IRNode) -> None:
+        self._pending_input_asserts[name] = (
+            tuple(buf.get_size()),
+            tuple(buf.get_stride()),
+        )
 
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
         for name, buf in self.get_graph_inputs().items():
             if isinstance(buf, (sympy.Basic, ir.TorchBindObject)):
                 continue
-            line = f"assert not {name}.isnan().any().item()"
-            self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
-            self.prefix.writeline(line)
+            self._codegen_input_nan_assert(name)
+
+    def _codegen_input_nan_assert(self, name: str) -> None:
+        NanAssertLine(self, name).codegen(self.prefix)
+
+    def codegen_nan_assert(self, name: str, tensor_name: str | None = None) -> None:
+        if V.graph.cpp_wrapper:
+            self.writeline(
+                f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{tensor_name or name}", {name}));'
+            )
+        else:
+            self.writeline(NanAssertLine(self, name, tensor_name))
+
+    def codegen_scalar_assert(
+        self,
+        scalar: sympy.Basic,
+        msg: str,
+        output_name: str,
+        symbol: sympy.Symbol | None,
+    ) -> None:
+        if V.graph.cpp_wrapper:
+            symbol_str = (
+                f"std::to_string({symbol})"
+                if symbol is not None
+                else f'std::string("{scalar}")'
+            )
+            sizevar = self.codegen_cpp_sizevar(scalar, simplify=False)
+            self.writeline(
+                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {msg} but received " + {symbol_str}); }}'
+            )
+        else:
+            self.writeline(ScalarAssertLine(self, scalar, msg, output_name))
 
     def write_async_compile_wait(self) -> None:
         # None of these lines is a use of async_compile: a module that compiles nothing
@@ -2964,7 +3080,7 @@ class PythonWrapperCodegen(CodeGen):
     # a block of N sequential assert calls (~1 us each) on the critical path
     # before the first GPU kernel launch. Called from the scheduler codegen loop.
     def codegen_deferred_input_asserts(self, input_names: Iterable[str]) -> None:
-        grouped_asserts: list[tuple[str, str, str]] = []
+        grouped_asserts: list[tuple[str, Sequence[Expr], Sequence[Expr]]] = []
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
@@ -2978,13 +3094,15 @@ class PythonWrapperCodegen(CodeGen):
     def write_assert_size_stride(
         self,
         name: str,
-        size: str,
-        stride: str,
+        size: Sequence[Expr],
+        stride: Sequence[Expr],
         op_name: str,
         dtype: torch.dtype | None = None,
     ) -> None:
         """Queue an assert_size_stride for emission during replay."""
-        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name, dtype))
+        self.writeline(
+            AssertSizeStrideLine(self, name, tuple(size), tuple(stride), op_name, dtype)
+        )
 
     def _codegen_assert_size_stride(
         self,
@@ -3031,7 +3149,9 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def write_assert_size_stride_grouped(
-        self, asserts: list[tuple[str, str, str]], op_name: str
+        self,
+        asserts: list[tuple[str, Sequence[Expr], Sequence[Expr]]],
+        op_name: str,
     ) -> None:
         """Queue a grouped assert_size_stride for emission during replay."""
         self.writeline(GroupedAssertSizeStrideLine(self, asserts, op_name))
