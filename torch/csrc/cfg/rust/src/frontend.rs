@@ -1428,6 +1428,8 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::LoadDeref(_)
         | Op::LoadClosure(_)
         | Op::LoadSlot(_)
+        | Op::FrameEnter(_)
+        | Op::FrameLeave
         | Op::CaughtException => {}
         Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
             r!(code, defaults, kwdefaults, annotations, closure)

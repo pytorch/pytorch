@@ -2398,14 +2398,20 @@ class TestCfgFrames(TestCase):
                 warnings.simplefilter("ignore")
                 self.assertEqual(torch.cfg_compile(f)(*args), f(*args))
 
-    def test_the_stack_shows_compiled_functions(self):
-        compiled = torch.cfg_compile(frame_outer, fallback=False, inline=False)
+    @parametrize("inline", (False, True))
+    def test_the_stack_shows_compiled_functions(self, inline):
+        compiled = torch.cfg_compile(frame_outer, fallback=False, inline=inline)
         self.assertEqual(compiled(), frame_outer())
-        self.assertEqual(
-            compiled()[0][1],
-            ["frame_inner", "frame_outer", "test_the_stack_shows_compiled_functions"],
-        )
-        self.assertIn("frame_inner", compiled.stats()["compiled_callees"])
+        self.assertEqual(compiled()[0][1][:2], ["frame_inner", "frame_outer"])
+        stats = compiled.stats()
+        if inline:
+            # An inlined function has a frame of its own while it runs.
+            self.assertEqual(stats["inlined"], ["frame_inner", "frame_caller"])
+            dump = compiled.dump(versions=False)
+            self.assertEqual(dump.count("frame_enter <function frame_"), 2)
+            self.assertEqual(dump.count("frame_leave"), 2)
+        else:
+            self.assertIn("frame_inner", stats["compiled_callees"])
 
     def test_new_classes_belong_to_the_module_of_the_compiled_function(self):
         compiled = torch.cfg_compile(frame_new_classes, fallback=False)
@@ -2422,7 +2428,8 @@ class TestCfgFrames(TestCase):
         self.assertEqual(caught(compiled), caught(frame_warns))
         self.assertEqual(caught(compiled)[0][0], __file__)
 
-    def test_traceback_has_frames_lines_and_columns(self):
+    @parametrize("inline", (False, True))
+    def test_traceback_has_frames_lines_and_columns(self, inline):
         def entries(fn):
             try:
                 fn(3)
@@ -2434,11 +2441,18 @@ class TestCfgFrames(TestCase):
                 back = last.tb_frame.f_back.f_code.co_name
                 return [(f.name, f.lineno, f.colno, f.end_colno) for f in frames], back
 
-        compiled = torch.cfg_compile(frame_calls_divides, fallback=False, inline=False)
+        compiled = torch.cfg_compile(frame_calls_divides, fallback=False, inline=inline)
         self.assertEqual(entries(compiled), entries(frame_calls_divides))
         self.assertEqual(
             [entry[0] for entry in entries(compiled)[0]],
             ["frame_calls_divides", "frame_divides"],
+        )
+        self.assertEqual(
+            compiled.stats()["inlined"], ["frame_divides"] if inline else []
+        )
+        # The frames of inlined functions are popped on the way out.
+        self.assertTrue(
+            sys._getframe().f_code.co_name.startswith("test_traceback_has_frames")
         )
 
     def test_callee_that_reads_its_frame_runs_in_the_interpreter(self):
@@ -2559,6 +2573,7 @@ class TestCfgLifetimes(TestCase):
         )
 
 
+instantiate_parametrized_tests(TestCfgFrames)
 instantiate_parametrized_tests(TestCfgLifetimes)
 
 
