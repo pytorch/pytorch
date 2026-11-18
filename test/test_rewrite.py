@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import traceback
+import types as types_module
 import unittest
 import unittest.mock
 import warnings
@@ -6528,6 +6529,66 @@ class TestCfgRegions(TestCase):
             self.assertIsNotNone(usual.look((1,)))
             model.note = 1
             self.assertIsNone(usual.look((1,)))
+
+    def test_usual_takes_a_module_as_a_look_found_it(self):
+        # A module comes with the tensors a look found it to hold, for as
+        # long as they are what they were.
+        torch.rewrite._load_runtime()
+        types = (torch.Tensor, torch.nn.Parameter)
+        a = torch.ones(2, 3)
+        model = torch.nn.Linear(3, 2)
+        places = [(model._parameters, "weight"), (model._parameters, "bias")]
+        tensors = [model.weight, model.bias]
+        kinds, numbers, offsets = cfg_rs.tensor_key(tensors, [])
+        found = types_module.SimpleNamespace(
+            snapshot=cfg_rs.snapshot(places, tensors),
+            tensors=tensors,
+            kinds=kinds,
+            numbers=numbers,
+            offsets=offsets,
+        )
+        state = types_module.SimpleNamespace(known=found)
+        with torch.no_grad():
+            cfg_rs.module_look(model, types, True)
+            known = [(1, found)]
+            spec = [("tensor", 0), ("module", model, state, found, 1), ("tensor", 1)]
+            usual = cfg_rs.Usual(
+                [0, 1, 2], spec, ("parts",), (), known, types, 1 << 62, ()
+            )
+            key, flat, _, _, _, same, unwritten = usual.look((a, model, model.weight))
+            self.assertTrue(all(x is y for x, y in zip(flat, [a, *tensors])))
+            self.assertEqual(key[1:3], cfg_rs.tensor_key([a, *tensors], [])[:2])
+            self.assertTrue(same is known and unwritten)
+            # One of them written to: still like it, and said so.
+            model.weight.mul_(2)
+            self.assertFalse(usual.look((a, model, model.weight))[6])
+            # A tensor of its own that comes before it, another look than
+            # the one that was taken, a tensor of another kind: not like it.
+            self.assertIsNone(usual.look((model.bias, model, model.weight)))
+            state.known = None
+            self.assertIsNone(usual.look((a, model, model.weight)))
+            state.known = found
+            model.bias.requires_grad_(False)
+            self.assertIsNone(usual.look((a, model, model.weight)))
+
+        # A variable of a nested function and a pytree node are what they
+        # hold.
+        cell = types_module.CellType(a)
+        made = RegionMade(a, 2)
+        flatten = torch.utils._pytree.SUPPORTED_NODES[RegionMade].flatten_fn
+        spec = [
+            ("cell", ("tensor", 0)),
+            ("node", RegionMade, flatten, "None", [("tensor", 0), ("int",)]),
+        ]
+        with torch.no_grad():
+            usual = cfg_rs.Usual([0, 1], spec, ("parts",), (), [], types, 1 << 62, ())
+            key, flat, held, ints, _, _, _ = usual.look((cell, made))
+            self.assertTrue(flat[0] is a and held[0] is cell and len(flat) == 1)
+            self.assertEqual(ints, [2])
+            self.assertIsNone(usual.look((cell, RegionMade(a + 1, 2))))
+            self.assertIsNone(usual.look((cell, RegionMade(a, 2.5))))
+            self.assertIsNone(usual.look((types_module.CellType(3), made)))
+            self.assertIsNone(usual.look((cell, cell)))
 
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
