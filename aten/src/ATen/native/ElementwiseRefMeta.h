@@ -59,6 +59,6 @@ bool is_symbolic_operand(const Tensor& t);
 
 void check_inplace_broadcast(c10::SymIntArrayRef self_shape, c10::SymIntArrayRef other_shape);
 
-Tensor fast_binary_impl(const Tensor& self, const Tensor& other, ELEMENTWISE_TYPE_PROMOTION_KIND kind);
+TORCH_API Tensor fast_binary_impl(const Tensor& self, const Tensor& other, ELEMENTWISE_TYPE_PROMOTION_KIND kind);
 
 } // namespace at::native
