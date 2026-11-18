@@ -468,6 +468,87 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
 
+    def _count_copies(self, graph):
+        return sum(node.target is aten.copy_.default for node in graph.nodes)
+
+    @parametrize("enable_v2", [False, True])
+    def test_copy_back_removed_after_reinplace(self, enable_v2):
+        def f(x):
+            if enable_v2:
+                af = auto_functionalized_v2(
+                    torch.ops.test_view.boo.default, _x_base_index=0, _all_bases=[x]
+                )
+            else:
+                af = auto_functionalized(torch.ops.test_view.boo.default, x=x)
+            aten.copy_.default(x, af[1])
+            return ()
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(3, device=device))
+        self.assertEqual(self._count_copies(gm.graph), 1)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
+        self.assertEqual(self._count_copies(gm.graph), 0)
+
+    def test_copy_back_removed_for_each_base_functionalize_v2(self):
+        def f(x, y):
+            af = auto_functionalized_v2(
+                torch.ops._reinplacing.sin_cos.default,
+                x=x.clone(),
+                _out_sin_base_index=0,
+                _out_cos_base_index=1,
+                _all_bases=[x, y],
+            )
+            aten.copy_.default(x, af[1])
+            aten.copy_.default(y, af[2])
+            return ()
+
+        x, y = (torch.randn(3, device=device) for _ in range(2))
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
+        self.assertEqual(self._count_copies(gm.graph), 0)
+
+    def test_copy_back_of_other_base_kept_functionalize_v2(self):
+        # x is overwritten with the updated value of y, which is not the base
+        # the op mutated in place into x, so that copy_ must stay.
+        def f(x, y):
+            af = auto_functionalized_v2(
+                torch.ops._reinplacing.sin_cos.default,
+                x=x.clone(),
+                _out_sin_base_index=0,
+                _out_cos_base_index=1,
+                _all_bases=[x, y],
+            )
+            aten.copy_.default(x, af[2])
+            return ()
+
+        x, y = (torch.randn(3, device=device) for _ in range(2))
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
+        self.assertEqual(self._count_copies(gm.graph), 1)
+
+    @parametrize("enable_v2", [False, True])
+    def test_copy_back_of_other_base_numerics(self, enable_v2):
+        def f(inp, x, y):
+            sin_cos(inp, x, y)
+            x.copy_(y)
+
+        with inductor_config.patch({"enable_auto_functionalized_v2": enable_v2}):
+            inp = torch.randn(3, device=device)
+            x, y = (torch.randn(3, device=device) for _ in range(2))
+            x2, y2 = x.clone(), y.clone()
+            f(inp, x, y)
+            torch.compile(f)(inp, x2, y2)
+            self.assertEqual(x2, x)
+            self.assertEqual(y2, y)
+
     def test_multi_output_intermediate(self):
         for requires_grad in [False, True]:
             for enable_v2 in [False, True]:

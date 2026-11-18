@@ -517,6 +517,30 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
+def _is_auto_functionalized_updated_value(
+    src: torch.fx.Node, dst: torch.fx.Node
+) -> bool:
+    """Return whether getitem node src is the updated value of dst. Both HOPs
+    return the op's outputs followed by one updated value per mutable arg (v1)
+    or per entry of _all_bases (v2)."""
+    hop, index = cast(tuple[torch.fx.Node, int], src.args)
+    val = hop.meta.get("val")
+    if val is None:
+        return False
+    updated: list[torch.fx.Node]
+    if hop.target is torch.ops.higher_order.auto_functionalized:
+        from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+        names, _ = get_mutable_args(cast(torch._ops.OpOverload, hop.args[0]))
+        updated = [cast(torch.fx.Node, hop.kwargs[name]) for name in names]
+    elif hop.target is torch.ops.higher_order.auto_functionalized_v2:
+        updated = cast(list[torch.fx.Node], hop.kwargs["_all_bases"])
+    else:
+        return False
+    i = index - (len(val) - len(updated))
+    return 0 <= i < len(updated) and updated[i] is dst
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -562,7 +586,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
-                or (src.args[0].target is torch.ops.higher_order.auto_functionalized)
+                or _is_auto_functionalized_updated_value(src, dst)
             ):
                 src = src.args[0]
 
