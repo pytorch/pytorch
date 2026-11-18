@@ -2379,6 +2379,9 @@ class _Region:
             self.decide(args)
             if self.hot:
                 return self(*args)
+        # Slower than the function will be either way: no measurement of it
+        # against the interpreter should be decided by calls like this one.
+        _runtime.unsettled()
         self.calls += 1
         _state.pending += 1
         try:
