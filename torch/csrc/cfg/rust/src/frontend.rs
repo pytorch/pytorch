@@ -398,6 +398,32 @@ impl<'a> Builder<'a> {
                     let v = emit!(off, Op::LoadAttr(obj, self.names_base + (arg >> 1)));
                     stack.push(v);
                 }
+                Bc::LoadSuperAttr => {
+                    // super(class, self).name, spelled out.
+                    let this = pop_value!();
+                    let class = pop_value!();
+                    let super_ = pop_value!();
+                    let bound = emit!(off, Op::Call { callee: super_, args: vec![class, this], kwnames: NONE });
+                    if arg & 1 != 0 {
+                        stack.push(NULLMARK);
+                    }
+                    let v = emit!(off, Op::LoadAttr(bound, self.names_base + (arg >> 2)));
+                    stack.push(v);
+                }
+                Bc::ImportName => {
+                    let fromlist = pop_value!();
+                    let level = pop_value!();
+                    let v = emit!(off, Op::ImportName { name: self.names_base + arg, fromlist, level });
+                    stack.push(v);
+                }
+                Bc::ImportFrom => {
+                    let module = peek!(1);
+                    if module == NULLMARK {
+                        return unsupported("unexpected NULL on the stack");
+                    }
+                    let v = emit!(off, Op::ImportFrom(module, self.names_base + arg));
+                    stack.push(v);
+                }
                 Bc::StoreAttr => {
                     let obj = pop_value!();
                     let val = pop_value!();
@@ -599,6 +625,17 @@ impl<'a> Builder<'a> {
                     let seq = pop_value!();
                     let tuple = emit!(off, Op::Unpack(seq, arg));
                     for i in (0..arg).rev() {
+                        let v = emit!(off, Op::TupleGet(tuple, i));
+                        stack.push(v);
+                    }
+                }
+                Bc::UnpackEx => {
+                    // a, *b, c = seq: the low byte counts the names before the
+                    // star, the next one those after it.
+                    let seq = pop_value!();
+                    let (before, after) = (arg & 0xff, arg >> 8);
+                    let tuple = emit!(off, Op::UnpackEx(seq, before, after));
+                    for i in (0..before + 1 + after).rev() {
                         let v = emit!(off, Op::TupleGet(tuple, i));
                         stack.push(v);
                     }
@@ -1316,7 +1353,9 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
             r!(code, defaults, kwdefaults, annotations, closure)
         }
+        Op::ImportName { fromlist, level, .. } => r!(fromlist, level),
         Op::LoadAttr(a, _)
+        | Op::ImportFrom(a, _)
         | Op::StoreDeref(_, a)
         | Op::StoreSlot(_, a)
         | Op::PushExcInfo(a)
@@ -1330,6 +1369,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::IsNone(a, _)
         | Op::ListToTuple(a)
         | Op::Unpack(a, _)
+        | Op::UnpackEx(a, _, _)
         | Op::TupleGet(a, _)
         | Op::GetIter(a)
         | Op::IterNext(a)
