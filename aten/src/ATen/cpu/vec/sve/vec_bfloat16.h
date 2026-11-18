@@ -23,6 +23,12 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
 
+// loadu and convert access BFloat16 values as their only member (see loadu).
+static_assert(
+    std::is_standard_layout_v<BFloat16> &&
+    std::is_same_v<decltype(BFloat16::x), uint16_t> &&
+    sizeof(BFloat16) == sizeof(uint16_t));
+
 template <>
 struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
 
@@ -56,7 +62,7 @@ class Vectorized<BFloat16> {
       typename... Args,
       typename = std::enable_if_t<(sizeof...(Args) == size())>>
   Vectorized(Args... vals) {
-    __at_align__ BFloat16 buffer[size()] = {vals...};
+    __at_align__ uint16_t buffer[size()] = {BFloat16(vals).x...};
     values = loadu(buffer);
   }
 
@@ -81,9 +87,9 @@ class Vectorized<BFloat16> {
   static Vectorized<BFloat16> arange(
       BFloat16 base = 0.f,
       step_t step = static_cast<step_t>(1)) {
-    __at_align__ BFloat16 buffer[size()];
+    __at_align__ uint16_t buffer[size()];
     for (int64_t i = 0; i < size(); i++) {
-      buffer[i] = base + i * step;
+      buffer[i] = BFloat16(base + i * step).x;
     }
     return loadu(buffer);
   }
@@ -99,8 +105,9 @@ class Vectorized<BFloat16> {
     return b;
   }
   static Vectorized<BFloat16> loadu(const void* ptr, int64_t count = size()) {
-    // Load c10::BFloat16 values as their uint16_t member: GCC assumes that
-    // bfloat16_t loads cannot read them, and drops earlier stores to them.
+    // Load BFloat16 values through the type of their only member, uint16_t,
+    // which may access them: bfloat16_t may not (strict aliasing), so GCC
+    // would assume that such loads don't read them, and drop earlier stores.
     auto p = reinterpret_cast<const uint16_t*>(ptr);
     if (count == size())
       return svreinterpret_bf16_u16(svld1_u16(ptrue, p));
