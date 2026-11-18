@@ -12259,6 +12259,12 @@ op_db: list[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
                    skips=(
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                                    'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
@@ -12959,6 +12965,9 @@ op_db: list[OpInfo] = [
                        precisionOverride({torch.bfloat16: 1e-2}),
                    ],
                    skips=(
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
@@ -12986,6 +12995,15 @@ op_db: list[OpInfo] = [
                    supports_sparse_bsc=True,
                    promotes_int_to_float=True,
                    skips=(
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                                    'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                                    'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                    device_type='xpu', dtypes=[torch.cfloat, torch.cdouble, torch.chalf]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
@@ -14299,7 +14317,12 @@ op_db: list[OpInfo] = [
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
                    assert_autodiffed=True,
-                   promotes_int_to_float=True),
+                   promotes_int_to_float=True,
+                   skips=(
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
+                   )),
     BinaryUfuncInfo('ge',
                     ref=np.greater_equal,
                     aliases=('greater_equal',),
@@ -14535,6 +14558,9 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                    ),
                    # log(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
@@ -14552,6 +14578,9 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                    ),
                    # log10(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
@@ -17681,7 +17710,7 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
                                             torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
-                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cuda', 'xpu')),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
@@ -18425,10 +18454,10 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits'),
                        DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                                     "TestUnaryUfuncs", "test_reference_numerics_extremal",
-                                    device_type="cuda"),
+                                    device_type=("cuda", "xpu")),
                        DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                                     "TestUnaryUfuncs", "test_reference_numerics_normal",
-                                    device_type="cuda"),
+                                    device_type=("cuda", "xpu")),
                    ),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -18852,6 +18881,9 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='xpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='xpu', dtypes=(torch.chalf,), active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
@@ -18906,6 +18938,9 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='xpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
+                       # intel/torch-xpu-ops/issues/5552
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='xpu', dtypes=(torch.chalf,), active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
@@ -23317,6 +23352,11 @@ python_ref_db = [
         "_refs.acos",
         torch_opinfo_name="acos",
         skips=(
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                         'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_normal',
                          device_type='cuda', dtypes=[torch.cdouble],
@@ -23341,6 +23381,14 @@ python_ref_db = [
         "_refs.acosh",
         torch_opinfo_name="acosh",
         skips=(
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                         'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large',
+                         device_type='xpu', dtypes=[torch.cfloat]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_normal',
                          device_type='cuda', dtypes=[torch.cdouble],
@@ -23384,6 +23432,10 @@ python_ref_db = [
             precisionOverride({torch.bfloat16: 1e-2}),
         ],
         skips=(
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
                          device_type='cuda', dtypes=[torch.cdouble],
@@ -23399,6 +23451,18 @@ python_ref_db = [
         torch_opinfo_name="asinh",
         decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
         skips=(
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                         'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                         'TestUnaryUfuncs',
+                         'test_reference_numerics_normal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large',
+                         device_type='xpu', dtypes=[torch.cfloat, torch.cdouble, torch.chalf]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -24305,11 +24369,21 @@ python_ref_db = [
                          'test_reference_numerics_extremal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                          active_if=IS_WINDOWS),
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
+        skips=(
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log10",
@@ -24320,6 +24394,10 @@ python_ref_db = [
                          'test_reference_numerics_extremal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                          active_if=IS_WINDOWS),
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -24589,7 +24667,7 @@ python_ref_db = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cuda', 'xpu')),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -24604,6 +24682,10 @@ python_ref_db = [
                          'test_reference_numerics_extremal',
                          device_type='xpu', dtypes=[torch.cfloat, torch.cdouble],
                          active_if=IS_WINDOWS),
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
                          device_type='xpu',
@@ -24631,6 +24713,10 @@ python_ref_db = [
                          'test_reference_numerics_extremal',
                          device_type='xpu', dtypes=[torch.cfloat, torch.cdouble],
                          active_if=IS_WINDOWS),
+            # intel/torch-xpu-ops/issues/5552
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                         'test_reference_numerics_extremal',
+                         device_type='xpu', dtypes=[torch.cfloat]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
                          device_type='xpu',
@@ -25007,7 +25093,10 @@ python_ref_db = [
             DecorateInfo(
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02),
                                    torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cuda', 'xpu')),
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='xpu'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
