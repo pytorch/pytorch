@@ -151,6 +151,9 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
   });
 }
 
+// Implements deterministic index_put with accumulation by sorting the indices
+// and then executing one thread per output element. Since each thread
+// accumulates only one output element, it avoids using atomic-add.
 static void index_put_accumulate_deterministic(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   if (iter.numel() == 0) {
     return;
