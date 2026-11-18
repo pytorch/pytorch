@@ -26,7 +26,12 @@ if not TEST_CUTEDSL:
 import cutlass
 
 from torch._native.cutedsl import launch as _L
-from torch._native.ops.reductions import kernel_xcta, tile, traits as T
+from torch._native.ops.reductions import (
+    kernel_general as kg,
+    kernel_xcta,
+    tile,
+    traits as T,
+)
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -145,6 +150,27 @@ class TestKernelXcta(TestCase):
         want = torch.var_mean(x.double(), dim=1, correction=0)
         self.assertEqual(res, tuple(w.float() for w in want), atol=1e-4, rtol=1e-4)
 
+    def test_b200_welford_subrow_target_follows_rows(self):
+        """Take the sub-row target from select_xcta_config: at B200's 256 MiB fp16
+        Welford anchor, one row splits into longer sub-rows than each of two rows."""
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
+            self.skipTest("the xcta Welford rule is measured on B200 only")
+        n = (256 << 20) // 2
+        trait = T.WelfordOps(correction=0, acc=cutlass.Float32)
+        splits = {}
+        for m in (1, 2):
+            x = torch.randn(m, n, device="cuda", dtype=torch.float16)
+            key = f"subrow_rows{m}"
+            got = kernel_xcta.reduce_row_xcta(trait, key, x, torch.float32)
+            # Geometry entries lead with the sub-row count C.
+            splits[m] = {
+                geom[0] for k, geom in kernel_xcta._GEOM.items() if k[0] == key
+            }
+            want = x.double().var(dim=1, correction=0).float()
+            self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
+            del x, got
+        self.assertEqual(splits, {1: {n // 16384}, 2: {n // 8192}})
+
 
 class TestXctaConfig(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -153,6 +179,9 @@ class TestXctaConfig(TestCase):
         "case,updates,subrow_target",
         [
             ("var_256mib", {}, 16384),
+            ("bf16_256mib", {"dtype": torch.bfloat16}, 16384),
+            ("fp16_2gib", {"N": 1 << 30}, 16384),
+            ("bf16_2gib", {"dtype": torch.bfloat16, "N": 1 << 30}, 16384),
             ("fp32_2gib", {"dtype": torch.float32, "N": 512 << 20}, 16384),
             ("var_mean", {"nouts": 2, "welford_outs": 2}, 16384),
             (

@@ -6,6 +6,8 @@
 # tree's warps, loading rows strided by C; worker 0 merges their roots.
 # Inputs must be on the current device.
 
+import functools
+import math
 from collections.abc import Sequence
 from typing import Any, Literal, NamedTuple
 
@@ -31,7 +33,16 @@ from .kernel_general import (
     ReduceBlock,
 )
 from .kernel_rowtile import trait_itree_plan
-from .traits import AMaxOps, ArgMaxOps, WARP, welford_outputs
+from .traits import (
+    AMaxOps,
+    AMinOps,
+    ArgMaxOps,
+    MeanOps,
+    ProdOps,
+    SumOps,
+    WARP,
+    welford_outputs,
+)
 
 
 _compile = _L.compile_kernel
@@ -139,18 +150,17 @@ def select_ordered_col_config(
     acc_bits: int,
     out_dtypes: tuple[torch.dtype, ...],
     rows: int | None = None,
-    full_tiles: bool = False,
 ) -> OrderedColConfig | None:
     """Return the mapping for an ordered column view, or None: looped plans then take the
     default mapping and split plans decline.
 
-    Entries are keyed by trait type. Split plans (partials > 1) without an entry take a
-    fallback on _ORDERED_COL_CCS that applies to any outputs, with full_tiles as its
-    tile mode; looped plans take their entry's own full_tiles, and ragged splits are
-    clamped regardless. Mappings apply to unbatched _ORDERED_COL_DTYPES views with
-    32-bit accumulators and, if the mapping has out_dtypes, only to those outputs. With
-    rows, B200 single-field views whose mapping has full tiles (cfg.full_tiles) take
-    16-column tiles at measured shapes and over a band, R 32768-65536 at C 128-257.
+    Entries are keyed by trait type. Single-field split plans (partials > 1) without an
+    entry take a full-tile fallback on _B200_CCS that applies to any outputs; looped
+    plans take their entry's own full_tiles, and ragged splits are clamped regardless.
+    Mappings apply to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and,
+    if the mapping has out_dtypes, only to those outputs. With rows, B200 single-field
+    split views take 16-column tiles at measured shapes and over a band, R 32768-65536
+    at C 128-257.
     Views filling fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_type)
@@ -158,18 +168,19 @@ def select_ordered_col_config(
     # only split plans take the fallback.
     if (
         cfg is None
-        and cc in kg._ORDERED_COL_CCS
+        and cc in kg._B200_CCS
         and dtype in kg._ORDERED_COL_DTYPES
         and partials > 1
+        and nfields == 1
     ):
-        cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=full_tiles)
+        cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=True)
     if cfg is None or dtype not in kg._ORDERED_COL_DTYPES or batches != 1:
         return None
     measured = cfg.out_dtypes
     if acc_bits != 32 or measured is not None and tuple(out_dtypes) != measured:
         return None
     # Measured on routed split views only (one field, B = 1, C >= 128).
-    if cc in kg._B200_CCS and cfg.full_tiles and rows is not None and nfields == 1:
+    if cc in kg._B200_CCS and partials > 1 and rows is not None and nfields == 1:
         if rows == 65536 and columns == 1024:
             cfg = cfg._replace(tile_columns=16)
         # A band of shapes rather than measured anchors; its R bounds are its own, not
@@ -199,6 +210,10 @@ class ColConfig(NamedTuple):
     col_group: int = 1
 
 
+# The one-field traits of the B200 ragged-column rules.
+_B200_RAGGED_COL_ONE_FIELD = (SumOps, ProdOps, MeanOps, AMaxOps, AMinOps)
+
+
 def select_col_config(
     cc: tuple[int, int],
     dtype: torch.dtype,
@@ -215,28 +230,22 @@ def select_col_config(
     threads_per_block: int | None = None,
     npar: int | None = None,
     vec: int | None = None,
+    itree: bool = True,
 ) -> ColConfig:
     """Select the column kernel, geometry, and partial layout. Any explicit
     threads_per_block, npar or vec overrides the geometry and disables the policy rules.
-    welford_outs is traits.welford_outputs(trait).
+    welford_outs is traits.welford_outputs(trait). itree=False skips B200's C = 4095
+    hand-off (b200_ragged_c4095_ordered), for views the ordered kernel declined.
 
     Whether a view reaches the column kernel at all is `kernel_general._col_route_ok`'s call.
     """
     explicit = any(v is not None for v in (threads_per_block, npar, vec))
     threads = _WIDE_ACC_THREADS_PER_BLOCK if nfields >= 3 else _THREADS_PER_BLOCK
-    # Partials are indexed in Int32 up to outputs * npar.
-    outputs = batches * columns
-    max_npar = (_INT32_LIMIT - 1) // max(1, outputs)
-    if npar is not None and npar > max_npar:
-        raise ValueError(f"npar={npar} overflows Int32 partials for {outputs} outputs")
-    if npar is not None and npar > _MAX_NPAR:
-        raise ValueError(f"npar={npar} exceeds grid y's {_MAX_NPAR} blocks")
-    auto_npar, auto_vec = _col_geometry(rows, columns, batches, itemsize, max_npar)
+    geometry = _col_geometry(rows, columns, batches, itemsize, npar=npar, vec=vec)
     cfg = ColConfig(
-        "explicit" if explicit else "default",
+        "default" if npar is None and vec is None else "explicit",
         threads if threads_per_block is None else threads_per_block,
-        auto_npar if npar is None else npar,
-        auto_vec if vec is None else vec,
+        *geometry,
         "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",
     )
     row_bytes = columns * itemsize
@@ -258,11 +267,11 @@ def select_col_config(
         # Two-output Welford views never reach these anchors through kg._col_route_ok.
         welford = welford_outs == nouts == 1
         # The grouped rules below launch vec=1 tiles.
-        grouped = welford and tile.col_group_ok(trait_type, vec=1)
+        grouped = welford and tile._col_group_issue(trait_type, "col", False, 1) is None
         # Only argmax with int32 indices (32-bit accumulators) was measured.
         index = trait_type is ArgMaxOps
-        one_field = trait_type in kg._B200_RAGGED_COL_ONE_FIELD
-        if columns == 4095 and anchor == 16 << 20 and (one_field or welford):
+        one_field = trait_type in _B200_RAGGED_COL_ONE_FIELD
+        if itree and columns == 4095 and anchor == 16 << 20 and (one_field or welford):
             return cfg._replace(
                 rule="b200_ragged_c4095_ordered",
                 kernel_order="inner_tree",
@@ -337,19 +346,47 @@ def select_col_config(
 
 
 def _col_geometry(
-    rows: int, columns: int, batches: int, itemsize: int, max_npar: int
+    rows: int,
+    columns: int,
+    batches: int,
+    itemsize: int,
+    *,
+    npar: int | None = None,
+    vec: int | None = None,
 ) -> tuple[int, int]:
-    """Default (npar, vec) for stage one."""
-    vec = tile.vec_size(columns, itemsize)
-    while vec > 1 and batches * columns // vec < _MIN_LANES:
-        vec //= 2
+    """Stage-one (npar, vec): validate the given ones and default the others."""
+    # Partials are indexed in Int32 up to outputs * npar.
+    outputs = batches * columns
+    max_npar = (_INT32_LIMIT - 1) // max(1, outputs)
+    if max_npar == 0:
+        raise ValueError(f"{outputs} outputs overflow Int32 partials")
+    if npar is not None and npar <= 0:
+        raise ValueError(f"npar must be positive, got {npar}")
+    if npar is not None and npar > max_npar:
+        raise ValueError(f"npar={npar} overflows Int32 partials for {outputs} outputs")
+    if npar is not None and npar > _MAX_NPAR:
+        raise ValueError(f"npar={npar} exceeds grid y's {_MAX_NPAR} blocks")
+    if vec is not None and vec <= 0:
+        raise ValueError(f"vec must be positive, got {vec}")
+    if vec is not None and columns % vec:
+        # A nondivisor vec would leave trailing outputs uninitialized.
+        raise ValueError(f"vec must divide the column count: {columns=} {vec=}")
+    fixed_vec = vec is not None
+    if vec is None:
+        vec = tile.vec_size(columns, itemsize)
+        while vec > 1 and outputs // vec < _MIN_LANES:
+            vec //= 2
+        if rows <= _SHORT_R:
+            vec = min(vec, 2)
+    if npar is not None:
+        return npar, vec
     if rows <= _SHORT_R:
-        return 1, min(vec, 2)
+        return 1, vec
     while True:
-        lanes = batches * columns // vec
+        lanes = outputs // vec
         npar = min(rows // _Q_MIN, -(-_TARGET_LANES // lanes), max_npar, _MAX_NPAR)
         npar = max(1, npar)
-        if rows // npar >= _Q_VEC or vec == 1:
+        if rows // npar >= _Q_VEC or vec == 1 or fixed_vec:
             return npar, vec
         vec //= 2
 
@@ -792,7 +829,6 @@ def reduce_ordered_col(
             acc_bits=max(dt.width for dt in trait.fdtypes),
             out_dtypes=tuple(out_dtypes[:nouts]),
             rows=R,
-            full_tiles=split,
         )
         if config is None:
             if split:
@@ -857,9 +893,10 @@ def reduce_col_tile(
     npar: int | None = None,
     vec: int | None = None,
 ) -> torch.Tensor:
-    """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways. Inner-tree
-    policies, such as the B200 C = 4095 / 16 MiB anchor (b200_ragged_c4095_ordered),
-    hand off to the ordered inner-tree kernel instead when it accepts the view."""
+    """Reduce dim 0 of unit-column-stride 2D x to (C,), splitting it npar ways.
+    Inner-tree policies, such as the B200 C = 4095 / 16 MiB anchor
+    (b200_ragged_c4095_ordered), hand off to the ordered inner-tree kernel instead when
+    it accepts the view."""
     if x.dim() != 2:
         raise AssertionError(f"want 2D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
@@ -883,7 +920,7 @@ def reduce_col_tile_2out(
     npar: int | None = None,
     vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Reduce dim 0 of contiguous 2D x to two outputs per column, like reduce_col_tile."""
+    """Reduce dim 0 of 2D x to two outputs per column, like reduce_col_tile."""
     if x.dim() != 2:
         raise AssertionError(f"want 2D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
@@ -908,7 +945,7 @@ def reduce_batched_col_tile(
     npar: int | None = None,
     vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Reduce dim 1 of contiguous 3D x to nouts (B, C) outputs."""
+    """Reduce dim 1 of 3D x, batches packing their rows, to nouts (B, C) outputs."""
     if x.dim() != 3:
         raise AssertionError(f"want 3D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
@@ -926,9 +963,11 @@ def _reduce_col_tile(
     npar: int | None,
     vec: int | None,
 ) -> tuple[torch.Tensor, ...]:
-    # Stage one compiles a packed row-major descriptor.
-    if x.dim() not in (2, 3) or not x.is_cuda or not x.is_contiguous():
-        raise AssertionError(f"want contiguous 2D/3D CUDA, got {tuple(x.shape)}")
+    # Stage one compiles a row-major descriptor at a runtime row pitch; batches must pack
+    # their rows so (B * R, C) addresses every row.
+    packed = x.dim() == 2 or x.stride(0) == x.shape[1] * x.stride(1)
+    if x.dim() not in (2, 3) or not x.is_cuda or x.stride(-1) != 1 or not packed:
+        raise AssertionError(f"want 2D/3D CUDA rows, got {tuple(x.shape)} {x.stride()}")
     device = x.get_device()
     check_current(device)
     if len(out_dtypes) < nouts:
@@ -939,16 +978,20 @@ def _reduce_col_tile(
         out_shape = (C,)
     else:
         B, R, C = x.shape
-        # Stage one indexes batched rows as batch * R + row in Int32.
-        if B * R >= _INT32_LIMIT:
-            raise AssertionError(f"want B * R < 2^31, got B={B}, R={R}")
-        rows = x.reshape(B * R, C)
+        rows = torch.as_strided(x, (B * R, C), (x.stride(1), 1), x.storage_offset())
         out_shape = (B, C)
+    # Stage one indexes rows as batch * R + row in Int32.
+    if B * R >= _INT32_LIMIT:
+        raise AssertionError(f"want B * R < 2^31, got B={B}, R={R}")
     if B * C >= _INT32_LIMIT:
         raise AssertionError(f"want B * C < 2^31 outputs, got B={B}, C={C}")
-    align = _L.supported_alignment(rows, tile.align_bytes(C, x.element_size()))
+    align = min(
+        _L.supported_alignment(rows, tile.align_bytes(C, x.element_size())),
+        tile.align_bytes(rows.stride(0), x.element_size()),
+    )
     cc = _hw.caps(x.device).cc
-    cfg = select_col_config(
+    select = functools.partial(
+        select_col_config,
         cc,
         x.dtype,
         R,
@@ -964,25 +1007,22 @@ def _reduce_col_tile(
         npar=npar,
         vec=vec,
     )
-    if cfg.kernel_order not in ("linear", "inner_tree"):
-        raise ValueError(f"unknown kernel order {cfg.kernel_order!r}")
+    cfg = select()
     if cfg.kernel_order == "inner_tree":
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
         if ordered is not None:
             return ordered
-    threads_per_block, npar, vec = cfg.threads_per_block, cfg.npar, cfg.vec
-    if vec <= 0:
-        raise ValueError(f"vec must be positive, got {vec}")
-    if C % vec:
-        # An explicit nondivisor vec would leave trailing outputs uninitialized.
-        raise AssertionError(f"vec must divide the column count: {C=} {vec=}")
-    if npar <= 0:
-        raise ValueError(f"npar must be positive, got {npar}")
+        # Declined views (e.g. pitched ones) take the shape's measured linear rule.
+        cfg = select(itree=False)
+    # A default vec narrows to the row pitch; an explicit one must divide it.
+    pitch_vec = math.gcd(cfg.vec, rows.stride(0)) if vec is None else cfg.vec
+    threads_per_block, npar, vec = cfg.threads_per_block, cfg.npar, pitch_vec
+    if rows.stride(0) % vec:
+        raise ValueError(f"vec must divide the row pitch: {rows.stride(0)=} {vec=}")
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
     ]
-    kernel_x = rows
     kernel_outs = [out.reshape(-1) for out in outs]
     total = B * C
     nchunks = Int32(total // vec)
@@ -1000,7 +1040,7 @@ def _reduce_col_tile(
     tiled = PartialColumns(trait, width, nouts) if width else None
     op = tile.TileReduce(
         trait,
-        torch2cute[kernel_x.dtype],
+        torch2cute[rows.dtype],
         "col",
         C,
         threads_per_block=threads_per_block,
@@ -1024,21 +1064,13 @@ def _reduce_col_tile(
             for f in range(trait.nfields)
         ]
     )
-    dsts = outs if single else parts
-    kernel_dsts = [dst.reshape(-1) for dst in dsts]
+    dsts = kernel_outs if single else parts
 
     def _fake():
         # Dynamic descriptors require vec divisibility; None avoids a 1.27x unused argument.
         return (
-            [
-                _L.fake_compact(
-                    torch2cute[kernel_x.dtype],
-                    (_L.sym(), _L.sym(vec)),
-                    stride_order=(1, 0),
-                    align=align,
-                )
-            ],
-            [_L.fake_compact(torch2cute[d.dtype], (_L.sym(),)) for d in kernel_dsts],
+            [_L.fake_rows(torch2cute[rows.dtype], _L.sym(vec), vec, align=align)],
+            [_L.fake_compact(torch2cute[d.dtype], (_L.sym(),)) for d in dsts],
             nchunks,
             batch_chunks,  # nwaves slot: column chunks per batch
             nrows,
@@ -1064,8 +1096,8 @@ def _reduce_col_tile(
     ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
-        [_L.read_only(kernel_x)],
-        kernel_dsts,
+        [_L.read_only(rows)],
+        dsts,
         nchunks,
         batch_chunks,
         nrows,
@@ -1082,8 +1114,8 @@ def _reduce_col_tile(
     if single:
         return tuple(outs)
 
+    pdt = tuple(pp.dtype for pp in parts)
     if tiled is not None:
-        pdt = tuple(pp.dtype for pp in parts)
         key2 = (
             "coltile2t",
             trait_key,
@@ -1123,7 +1155,6 @@ def _reduce_col_tile(
             final=True,
             block=128,
         )
-        pdt = tuple(pp.dtype for pp in parts)
         key2 = (
             "coltile2b",
             trait_key,
@@ -1133,10 +1164,10 @@ def _reduce_col_tile(
         _launch(s2, key2, parts, kernel_outs)
         return tuple(outs)
 
-    # Shared combine mode uses nchunks as C and nrows as true R; q is unused.
+    # Shared combine mode uses nchunks as B * C and nrows as true R; q is unused.
     op2 = tile.TileReduce(
         trait,
-        torch2cute[kernel_x.dtype],
+        torch2cute[rows.dtype],
         "col",
         total,
         threads_per_block=threads_per_block,
@@ -1167,7 +1198,6 @@ def _reduce_col_tile(
             _stream(device),
         )
 
-    pdt = tuple(pp.dtype for pp in parts)
     key2 = (
         "coltile2",
         trait_key,
