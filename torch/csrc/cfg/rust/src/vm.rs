@@ -231,9 +231,36 @@ impl Frame {
         Ok(frame)
     }
 
-    unsafe fn pop(self) {
-        if !self.ptr.is_null() {
-            (capi::api().unwrap_unchecked().frame_pop.unwrap_unchecked())(self.ptr);
+    /// `kept` (consumed, may be null) goes on living with the frame object,
+    /// if there is one that outlives the frame.
+    unsafe fn pop(self, kept: Obj) {
+        if self.ptr.is_null() {
+            xdecref(kept);
+        } else {
+            (capi::api().unwrap_unchecked().frame_pop.unwrap_unchecked())(self.ptr, kept);
+        }
+    }
+
+    /// Whether something refers to the frame object: the traceback of the
+    /// exception that is leaving the function, as a rule.
+    unsafe fn held(&self) -> bool {
+        !self.ptr.is_null()
+            && capi::api().and_then(|api| api.frame_held).is_some_and(|held| held(self.ptr) != 0)
+    }
+
+    /// The instruction the frame is on, as the index the interpreter calls
+    /// lasti (a new reference to an int); None without a frame.
+    unsafe fn lasti(&self) -> Obj {
+        if self.instr.is_null() {
+            return new_ref(ffi::Py_None());
+        }
+        ffi::PyLong_FromSsize_t((*self.instr).offset_from(self.code))
+    }
+
+    /// Puts the frame back on the instruction `lasti` named.
+    unsafe fn restore(&self, lasti: Obj) {
+        if !self.instr.is_null() && !lasti.is_null() && ffi::PyLong_Check(lasti) != 0 {
+            *self.instr = self.code.offset(ffi::PyLong_AsSsize_t(lasti));
         }
     }
 
@@ -290,7 +317,7 @@ impl Frames {
             return;
         }
         if self.depth < Frames::CAPACITY {
-            self.frames[self.depth].pop();
+            self.frames[self.depth].pop(null_mut());
         }
         self.depth -= 1;
     }
@@ -560,6 +587,19 @@ type OpResult = Result<Obj, ()>;
 unsafe fn set_error(exc: Obj, msg: String) {
     let c = CString::new(msg).unwrap_or_default();
     ffi::PyErr_SetString(exc, c.as_ptr());
+}
+
+/// A NameError carries the name it is about, as the interpreter's does (an
+/// UnboundLocalError does not).
+unsafe fn set_name_error(exc: Obj, msg: String, name: Obj) {
+    set_error(exc, msg);
+    let raised = ffi::PyErr_GetRaisedException();
+    if !raised.is_null() {
+        if !name.is_null() && ffi::PyObject_SetAttrString(raised, c"name".as_ptr(), name) < 0 {
+            ffi::PyErr_Clear();
+        }
+        ffi::PyErr_SetRaisedException(raised);
+    }
 }
 
 #[inline(always)]
@@ -981,9 +1021,32 @@ impl Compiled {
             Ok(()) => match Frame::push(function) {
                 Ok(frame) => {
                     let result = self.exec(&mut regs, frame);
+                    // The traceback of an exception that leaves the function
+                    // refers to its frame, and through it the interpreter
+                    // keeps the locals alive: so do the registers here.
+                    let mut kept = null_mut();
+                    if result.is_null() && frame.held() {
+                        // The values that were bound to a variable, not the
+                        // temporaries: the exception itself is one of those,
+                        // and would be kept by its own traceback.
+                        let live: Vec<Obj> = regs[..nregs - 1]
+                            .iter()
+                            .zip(&self.func.value_names)
+                            .filter(|(o, name)| {
+                                name.is_some() && !o.is_null() && !capi::is_unboxed(**o)
+                            })
+                            .map(|(o, _)| *o)
+                            .collect();
+                        kept = ffi::PyTuple_New(live.len() as isize);
+                        for (i, o) in live.iter().enumerate() {
+                            if !kept.is_null() {
+                                ffi::PyTuple_SET_ITEM(kept, i as isize, new_ref(*o));
+                            }
+                        }
+                    }
                     // Before the registers are released, as the interpreter
                     // unlinks a frame before it clears its locals.
-                    frame.pop();
+                    frame.pop(kept);
                     result
                 }
                 Err(()) => null_mut(),
@@ -1247,9 +1310,10 @@ impl Compiled {
                     v = ffi::PyDict_GetItemWithError(f.builtins.as_ptr(), name);
                     if v.is_null() {
                         if ffi::PyErr_Occurred().is_null() {
-                            set_error(
+                            set_name_error(
                                 ffi::PyExc_NameError,
                                 format!("name '{}' is not defined", pyffi::str_to_string(name)),
+                                name,
                             );
                         }
                         return Err(());
@@ -1268,14 +1332,18 @@ impl Compiled {
                 let v = pyffi::PyCell_Get(cell);
                 if v.is_null() {
                     if ffi::PyErr_Occurred().is_null() {
-                        set_error(
+                        let name = f.freevars.get(*i as usize).map_or("?", |s| s.as_str());
+                        let name_obj = ffi::PyUnicode_FromStringAndSize(name.as_ptr().cast(), name.len() as isize);
+                        set_name_error(
                             ffi::PyExc_NameError,
                             format!(
                                 "cannot access free variable '{}' where it is not associated \
                                  with a value in enclosing scope",
-                                f.freevars.get(*i as usize).map_or("?", |s| s.as_str())
+                                name
                             ),
+                            name_obj,
                         );
+                        xdecref(name_obj);
                     }
                     return Err(());
                 }
@@ -1333,6 +1401,7 @@ impl Compiled {
             }
             // The block loop runs these two; it has the frames.
             Op::Hold(_) | Op::FrameEnter(_) | Op::FrameLeave => Ok(null_mut()),
+            Op::CaughtLasti => Ok(new_ref(ffi::Py_None())),
             Op::LoadSlot(slot) => {
                 let o = reg(regs, *slot);
                 capi::retain(o);
@@ -1520,9 +1589,10 @@ impl Compiled {
                 if ffi::PyDict_DelItem(f.globals.as_ptr(), name) < 0 {
                     if ffi::PyErr_ExceptionMatches(ffi::PyExc_KeyError) != 0 {
                         ffi::PyErr_Clear();
-                        set_error(
+                        set_name_error(
                             ffi::PyExc_NameError,
                             format!("name '{}' is not defined", pyffi::str_to_string(name)),
+                            name,
                         );
                     }
                     return Err(());
@@ -2491,6 +2561,7 @@ impl Compiled {
                                 frames.leave();
                                 Ok(null_mut())
                             }
+                            Op::CaughtLasti => Ok(frames.top().lasti()),
                             op => {
                                 frames.top().at(inst.bc & OFFSET_MASK);
                                 if mode == Mode::Profile {
@@ -2524,6 +2595,9 @@ impl Compiled {
                         if mode == Mode::Profile {
                             self.specialize(cur);
                         }
+                        // What a frame that was left reports as its line.
+                        let term_bc = func.blocks.get_unchecked(cur).term_bc;
+                        frames.top().at(term_bc & OFFSET_MASK);
                         let next = match &code_ref.term {
                             Term::Jump(b) => *b as usize,
                             Term::Br { cond, then_, else_ } => {
@@ -2535,7 +2609,7 @@ impl Compiled {
                                 } else {
                                     let r = ffi::PyObject_IsTrue(c);
                                     if r < 0 {
-                                        self.fail(frames, func.blocks[cur].bc_start);
+                                        self.fail(frames, term_bc);
                                         raised!('blocks, cur);
                                     }
                                     r != 0
@@ -2551,7 +2625,7 @@ impl Compiled {
                                 return take(regs, *v);
                             }
                             Term::Raise { exc, cause } => {
-                                let bc = code_ref.insts.last().map_or(func.blocks[cur].bc_start, |i| i.bc);
+                                let bc = term_bc;
                                 let handled =
                                     if *exc == NONE { pyffi::PyErr_GetHandledException() } else { null_mut() };
                                 if !handled.is_null() && handled != ffi::Py_None() {
@@ -2573,7 +2647,10 @@ impl Compiled {
                                 }
                                 raised!('blocks, cur);
                             }
-                            Term::Reraise(exc) => {
+                            Term::Reraise(exc, lasti) => {
+                                if *lasti != NONE {
+                                    frames.top().restore(reg(regs, *lasti));
+                                }
                                 ffi::PyErr_SetRaisedException(new_ref(self.obj(regs, *exc)));
                                 raised!('blocks, cur);
                             }

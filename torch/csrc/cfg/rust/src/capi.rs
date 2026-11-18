@@ -84,7 +84,8 @@ pub struct TcfgApi {
     pub frame_push: Option<
         unsafe extern "C" fn(Obj, *mut *mut *mut u16, *mut *mut u16) -> *mut std::ffi::c_void,
     >,
-    pub frame_pop: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+    pub frame_pop: Option<unsafe extern "C" fn(*mut std::ffi::c_void, Obj)>,
+    pub frame_held: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
 }
 
 /// Whether compiled functions run under an interpreter frame of their own.
