@@ -95,12 +95,23 @@ class TestColumnConfig(TestCase):
         for kw in ({"columns": 8192}, {"columns": 1024, "batches": 8}):
             self.assertEqual(self.select(**kw).partial_layout, "partition")
 
-    def test_explicit_partitions_are_bounded(self):
-        """Reject explicit partitions past Int32 partial indices or grid y."""
+    def test_explicit_geometry_is_validated(self):
+        """Reject explicit partitions past Int32 partial indices or grid y, nonpositive
+        sizes, and vec that does not divide the columns; past 2^31 outputs even one
+        partition overflows."""
         with self.assertRaisesRegex(ValueError, "overflows Int32"):
             self.select(rows=1 << 20, columns=1 << 20, npar=2048)
         with self.assertRaisesRegex(ValueError, "grid y"):
             self.select(rows=1 << 20, columns=2, npar=65536)
+        with self.assertRaisesRegex(ValueError, "npar must be positive"):
+            self.select(npar=0)
+        with self.assertRaisesRegex(ValueError, "vec must be positive"):
+            self.select(vec=0)
+        with self.assertRaisesRegex(ValueError, "vec must divide the column count"):
+            self.select(columns=30, vec=4)
+        for npar in (None, 1):
+            with self.assertRaisesRegex(ValueError, "overflow Int32"):
+                self.select(rows=4, columns=1 << 31, npar=npar)
 
     @parametrize(
         "dtype,size,columns,key,rule,expected",
@@ -447,48 +458,105 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg is not None, welford_outs == 1)
 
     @parametrize(
-        "kwargs",
-        [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}],
-        name_fn=lambda kwargs: "_".join(f"{k}_{v}" for k, v in kwargs.items()),
+        "kwargs,rule,geometry",
+        [
+            ({"threads_per_block": 128}, "default", (128, 4)),
+            ({"npar": 7}, "explicit", (7, 4)),
+            # Two-wide vectors make 2048 lanes, which want 64 partitions, not 128.
+            ({"vec": 2}, "explicit", (64, 2)),
+        ],
+        name_fn=lambda kw, r, g: "_".join(f"{k}_{v}" for k, v in kw.items()),
     )
     @parametrize("cc", [(10, 3), (10, 7)], name_fn=lambda cc: f"sm{cc[0]}{cc[1]}")
-    def test_explicit_geometry_disables_policy(self, cc, kwargs):
+    def test_explicit_geometry_disables_policy(self, cc, kwargs, rule, geometry):
         """Honor explicit column geometry without rewriting it through policy, even at
-        SM107's rubin_sum_c4096_tiled anchor."""
+        SM107's rubin_sum_c4096_tiled anchor, and derive the free field from the explicit
+        one."""
         cfg = self.select(cc=cc, **kwargs)
-        self.assertEqual(cfg.rule, "explicit")
+        self.assertEqual(cfg.rule, rule)
+        self.assertEqual((cfg.npar, cfg.vec), geometry)
         for key, value in kwargs.items():
             self.assertEqual(getattr(cfg, key), value)
         self.assertEqual(cfg.partial_layout, "column")
         self.assertEqual(cfg.combine_columns, 0)
 
+    @parametrize("nouts", [1, 2])
+    @parametrize("shape", [(1100, 8192), (4, 64, 16)], name_fn=lambda s: f"{len(s)}d")
+    def test_route_gate_by_architecture(self, shape, nouts):
+        # Off H100 and B200, only 2D one-output column views leave the general kernel.
+        view = torch.empty(shape, device="meta")
+        self.assertTrue(kg._col_route_ok(view, nouts, (9, 0)))
+        self.assertTrue(kg._col_route_ok(view, nouts, (10, 0)))
+        self.assertEqual(
+            kg._col_route_ok(view, nouts, (12, 0)), view.dim() == 2 and nouts == 1
+        )
+
     @parametrize(
-        "dtype,trait_type,rows,columns,partials,full_tiles,expected",
+        "shape,nouts,routed",
         [
-            # Looped views keep the default mapping, with or without full tiles.
-            (torch.float32, T.SumOps, 8192, 4096, 1, False, None),
-            (torch.float16, T.SumOps, 8192, 4096, 1, True, None),
-            (torch.float32, T.SumOps, 65536, 1024, 8, True, (0, 16)),
-            (torch.float32, T.SumOps, 32768, 257, 4, True, (0, 16)),
-            (torch.float32, T.SumOps, 131072, 257, 16, True, (0, 32)),
+            ((4, 64, 2), 1, True),
+            ((4, 65, 2), 1, False),
+            ((4, 65, 15), 1, False),
+            ((4, 65, 16), 1, True),
+            ((1, 65, 8191), 2, False),
+            ((2, 65, 4096), 2, True),
+        ],
+        name_fn=lambda shape, nouts, routed: "x".join(map(str, shape)) + f"_{nouts}",
+    )
+    def test_route_gate_boundaries(self, shape, nouts, routed):
+        view = torch.empty(shape, device="meta")
+        self.assertEqual(kg._col_route_ok(view, nouts, (10, 0)), routed)
+
+    def test_physical_col_view_declines(self):
+        """Decline unaligned pitches, unpacked batches, reduced axes out of logical
+        order and batched rows past Int32."""
+
+        def view(x, dims, count, num_o):
+            pairs = kg._ti_pairs(x, kg._probe(x, dims))
+            return kg._physical_col_view(x, dims, *pairs, count, num_o)
+
+        base = torch.empty(64, 68, device="meta")
+        self.assertEqual(view(base[:, :64], {0}, 64, 64).stride(), (68, 1))
+        unaligned = torch.empty(64, 66, device="meta")[:, :64]
+        self.assertIsNone(view(unaligned, {0}, 64, 64))
+        unpacked = torch.empty(4, 10, 32, device="meta")[:, :8]
+        self.assertIsNone(view(unpacked, {1}, 8, 128))
+        # Reduced (6, 5) axes at strides (32, 192) merge in storage order.
+        permuted = torch.empty(5, 6, 32, device="meta").permute(1, 0, 2)
+        self.assertIsNone(view(permuted, {0, 1}, 30, 32))
+        # Stage one indexes batched rows as batch * R + row in Int32.
+        packed = torch.empty(2, 2**30 - 1, 2, device="meta")
+        self.assertEqual(view(packed, {1}, 2**30 - 1, 4).dim(), 3)
+        wide = torch.empty(2, 2**30, 2, device="meta")
+        self.assertIsNone(view(wide, {1}, 2**30, 4))
+
+    @parametrize(
+        "dtype,trait_type,rows,columns,partials,expected",
+        [
+            # Looped views keep the default mapping.
+            (torch.float32, T.SumOps, 8192, 4096, 1, None),
+            (torch.float16, T.SumOps, 8192, 4096, 1, None),
+            (torch.float32, T.SumOps, 65536, 1024, 8, (0, 16)),
+            (torch.float32, T.SumOps, 32768, 257, 4, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 257, 16, (0, 32)),
             # The band stops at 65536 rows.
-            (torch.float32, T.SumOps, 65536, 256, 8, True, (0, 16)),
-            (torch.float32, T.SumOps, 65537, 256, 9, True, (0, 32)),
-            (torch.float32, T.SumOps, 65536, 128, 8, True, (0, 16)),
-            (torch.float32, T.SumOps, 65537, 128, 9, True, (0, 32)),
-            (torch.float16, T.MeanOps, 65536, 191, 8, True, (0, 16)),
-            (torch.float32, T.SumOps, 131072, 191, 16, True, (0, 32)),
+            (torch.float32, T.SumOps, 65536, 256, 8, (0, 16)),
+            (torch.float32, T.SumOps, 65537, 256, 9, (0, 32)),
+            (torch.float32, T.SumOps, 65536, 128, 8, (0, 16)),
+            (torch.float32, T.SumOps, 65537, 128, 9, (0, 32)),
+            (torch.float16, T.MeanOps, 65536, 191, 8, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 191, 16, (0, 32)),
             # It starts at 32768 rows and spans 128-257 columns.
-            (torch.float32, T.SumOps, 32767, 256, 4, True, (0, 32)),
-            (torch.float32, T.SumOps, 32768, 127, 4, True, (0, 32)),
-            (torch.float32, T.SumOps, 32768, 258, 4, True, (0, 32)),
-            (torch.bfloat16, T.AMaxOps, 32768, 4096, 4, True, (0, 16)),
-            (torch.bfloat16, T.AMaxOps, 262144, 4096, 32, True, (0, 32)),
-            (torch.bfloat16, T.AMinOps, 32768, 4096, 4, True, (0, 32)),
+            (torch.float32, T.SumOps, 32767, 256, 4, (0, 32)),
+            (torch.float32, T.SumOps, 32768, 127, 4, (0, 32)),
+            (torch.float32, T.SumOps, 32768, 258, 4, (0, 32)),
+            (torch.bfloat16, T.AMaxOps, 32768, 4096, 4, (0, 16)),
+            (torch.bfloat16, T.AMaxOps, 262144, 4096, 32, (0, 32)),
+            (torch.bfloat16, T.AMinOps, 32768, 4096, 4, (0, 32)),
         ],
     )
     def test_b200_ordered_column_mappings(
-        self, dtype, trait_type, rows, columns, partials, full_tiles, expected
+        self, dtype, trait_type, rows, columns, partials, expected
     ):
         """Pin B200 ordered column widths, which apply to any outputs, independent of
         SM107 guards."""
@@ -507,18 +575,16 @@ class TestColumnConfig(TestCase):
                     acc_bits=32,
                     out_dtypes=(output,),
                     rows=rows,
-                    full_tiles=full_tiles,
                 )
                 if expected is None:
                     self.assertIsNone(cfg)
                     continue
                 min_blocks, tile_columns = expected
                 want = ct.OrderedColConfig(min_blocks, tile_columns=tile_columns)
-                self.assertEqual(cfg, want._replace(full_tiles=full_tiles))
+                self.assertEqual(cfg, want._replace(full_tiles=True))
 
     def test_b200_ordered_column_mapping_guards(self):
-        """Split views the fallback does not serve get None; multi-field split views keep
-        full-warp tiles."""
+        """Split views the fallback does not serve get None, multi-field ones too."""
         args = dict(
             cc=(10, 0),
             dtype=torch.float32,
@@ -532,15 +598,11 @@ class TestColumnConfig(TestCase):
             acc_bits=32,
             out_dtypes=(torch.float32,),
             rows=65536,
-            full_tiles=True,
         )
-        for updates in ({"batches": 2}, {"acc_bits": 64}, {"cc": (10, 3)}):
+        index = {"trait_type": T.ArgMaxOps, "nfields": 2, "out_dtypes": (torch.int32,)}
+        for updates in ({"batches": 2}, {"acc_bits": 64}, {"cc": (10, 3)}, index):
             with self.subTest(**updates):
                 self.assertIsNone(ct.select_ordered_col_config(**(args | updates)))
-        index = {"trait_type": T.ArgMaxOps, "nfields": 2, "out_dtypes": (torch.int32,)}
-        cfg = ct.select_ordered_col_config(**(args | index))
-        want = ct.OrderedColConfig(0, tile_columns=ct.WARP, full_tiles=True)
-        self.assertEqual(cfg, want)
 
 
 class TestColumnCombine(TestCase):
