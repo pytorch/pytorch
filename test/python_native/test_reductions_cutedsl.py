@@ -352,20 +352,21 @@ class TestCuTeDSLReductionWiring(TestCase):
         x = torch.randn(8192, 1024, device=device)
         f = lambda: torch.sum(x, dim=-1)  # noqa: E731
         self.assertEqual(self._run(f)[1], 1)
-        for _ in range(2):
-            f()
-        torch.cuda.synchronize()
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
-            for _ in range(3):
+        with _aot_masked():
+            for _ in range(2):
                 f()
-        torch.cuda.current_stream().wait_stream(s)
-        torch.cuda.synchronize()
-        g = torch.cuda.CUDAGraph()
-        # Capture replays the launches the first call recorded.
-        with torch.cuda.graph(g):
-            out = f()
+            torch.cuda.synchronize()
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    f()
+            torch.cuda.current_stream().wait_stream(s)
+            torch.cuda.synchronize()
+            g = torch.cuda.CUDAGraph()
+            # Capture replays the launches the first call recorded.
+            with torch.cuda.graph(g):
+                out = f()
         for _ in range(2):
             with _disabled():
                 ref = f()

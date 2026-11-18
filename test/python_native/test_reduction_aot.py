@@ -50,13 +50,18 @@ for n in (1536, 131072):
 print("RESULTS=" + json.dumps(results))
 """
 
-# (op, shape, dtype, PYTORCH_NATIVE_INNER_TREE): row and cross-CTA callables, each
-# called functionally and with out=, and ordered requests, which the stubs decline.
+# Calls through the embedded stubs, functionally and with out=, checked against ATen:
+# label -> (op, input, dim, keepdim, dtype=, out= dtype, PYTORCH_NATIVE_INNER_TREE).
+# Prod inputs stay near 1 so that products stay finite.
 _PATH_PROBE = r"""
 import json
 import os
 import torch
 from torch.profiler import profile, ProfilerActivity
+
+f16, bf16, f32 = torch.float16, torch.bfloat16, torch.float32
+TOL = {f16: 1e-2, bf16: 1e-2, f32: 1e-4}
+
 
 def run(fn):
     with profile(activities=[ProfilerActivity.CUDA]) as prof:
@@ -65,33 +70,127 @@ def run(fn):
     events = [e for e in prof.events() if e.device_type.name == "CUDA"]
     return out, sum("torch_nativeopsreductions" in e.name for e in events)
 
-cases = (
-    ("sum", (8, 1024), torch.float32, "0"),
-    ("mean", (8, 1024), torch.float16, "0"),
-    ("amax", (8, 4096), torch.float32, "0"),
-    ("amin", (4, 131072), torch.bfloat16, "0"),
-    ("mean", (4, 131072), torch.bfloat16, "0"),
-    ("prod", (8, 1024), torch.float32, "0"),
-    ("sum", (4, 32), torch.float32, "1"),
-    ("prod", (4, 32), torch.float16, "1"),
-    ("mean", (4, 32768), torch.float32, "1"),
-)
-results = []
-for name, shape, dtype, order in cases:
+
+def randn(*shape, dtype=f32):
+    return torch.randn(*shape, device="cuda").to(dtype)
+
+
+def near_one(*shape, dtype=f32):
+    return (1 + 0.01 * torch.randn(*shape, device="cuda")).to(dtype)
+
+
+def channels_last():
+    return randn(2, 64, 8, 8).to(memory_format=torch.channels_last)
+
+
+cases = {
+    "sum_t32_b128": ("sum", lambda: randn(8, 1024), -1, False, None, None, "0"),
+    "mean_fp16": ("mean", lambda: randn(8, 1024, dtype=f16), -1, False, None, None, "0"),
+    "amax_t64_b128": ("amax", lambda: randn(8, 4096), -1, False, None, None, "0"),
+    "sum_t128_b128": ("sum", lambda: randn(8, 7168, dtype=bf16), -1, False, None, None, "0"),
+    "prod": ("prod", lambda: near_one(8, 1024), -1, False, None, None, "0"),
+    "amin_xcta": ("amin", lambda: randn(4, 131072, dtype=bf16), -1, False, None, None, "0"),
+    "mean_xcta": ("mean", lambda: randn(4, 131072, dtype=bf16), -1, False, None, None, "0"),
+    "amax_xcta": ("amax", lambda: randn(4, 131072), -1, False, None, None, "0"),
+    "mean_ragged": ("mean", lambda: randn(8, 1001, dtype=bf16), -1, False, None, None, "0"),
+    "sum_ragged_t64": ("sum", lambda: randn(8, 4097, dtype=bf16), -1, False, None, None, "0"),
+    "sum_pitched": ("sum", lambda: randn(8, 1040)[:, :1024], -1, False, None, None, "0"),
+    "amax_pitched_ragged": ("amax", lambda: randn(8, 1032)[:, :1001], -1, False, None, None, "0"),
+    "sum_two_dims": ("sum", lambda: randn(2, 4, 4096), [-2, -1], False, None, None, "0"),
+    "mean_permuted": ("mean", lambda: randn(64, 1024).t(), 0, False, None, None, "0"),
+    "sum_channels_last": ("sum", channels_last, 1, False, None, None, "0"),
+    "amin_keepdim": ("amin", lambda: randn(8, 1024), -1, True, None, None, "0"),
+    "sum_reduce_all": ("sum", lambda: randn(1024), -1, False, None, None, "0"),
+    "mean_widened": ("mean", lambda: randn(8, 1024, dtype=bf16), -1, False, f32, None, "0"),
+    "prod_widened": ("prod", lambda: near_one(8, 1024, dtype=f16), -1, False, f32, None, "0"),
+    "sum_out_fp32": ("sum", lambda: randn(8, 1024, dtype=f16), -1, False, None, f32, "0"),
+    "sum_ordered": ("sum", lambda: randn(4, 32), -1, False, None, None, "1"),
+    "prod_ordered": ("prod", lambda: near_one(4, 32, dtype=f16), -1, False, None, None, "1"),
+    "mean_ordered": ("mean", lambda: randn(4, 32768), -1, False, None, None, "1"),
+}
+results = {}
+for label, (name, make, dim, keepdim, dtype, out_dtype, order) in cases.items():
     os.environ["PYTORCH_NATIVE_INNER_TREE"] = order
     torch.manual_seed(0)
-    x = (1 + 0.01 * torch.randn(shape, device="cuda")).to(dtype)
+    x = make()
     op = getattr(torch, name)
+    kw = {} if dtype is None else {"dtype": dtype}
+    out_kw = kw if out_dtype is None else {"dtype": out_dtype}
     with torch.backends.python_native.cutedsl.disabled():
-        ref = op(x, -1)
-    got, launches = run(lambda: op(x, -1))
-    out = torch.empty_like(ref)
-    _, out_launches = run(lambda: op(x, -1, out=out))
-    tol = 0 if name in ("amax", "amin") else 1e-2
-    ok = [torch.allclose(t, ref, atol=tol, rtol=tol) for t in (got, out)]
-    results.append([launches, out_launches, *ok])
+        ref, out_ref = op(x, dim, keepdim, **kw), op(x, dim, keepdim, **out_kw)
+    got, launches = run(lambda: op(x, dim, keepdim, **kw))
+    out = torch.empty_like(out_ref)
+    _, out_launches = run(lambda: op(x, dim, keepdim, **kw, out=out))
+    ok = []
+    for t, want in ((got, ref), (out, out_ref)):
+        tol = 0 if name in ("amax", "amin") else TOL[want.dtype]
+        ok.append(t.dtype == want.dtype and torch.allclose(t, want, atol=tol, rtol=tol))
+    results[label] = [launches, out_launches, *ok]
 print("RESULTS=" + json.dumps(results))
 """
+# Row and ragged callables launch once, cross-CTA ones twice, and the stubs decline
+# ordered requests.
+_PATH_LAUNCHES = {
+    "sum_t32_b128": 1,
+    "mean_fp16": 1,
+    "amax_t64_b128": 1,
+    "sum_t128_b128": 1,
+    "prod": 1,
+    "amin_xcta": 2,
+    "mean_xcta": 2,
+    "amax_xcta": 2,
+    "mean_ragged": 1,
+    "sum_ragged_t64": 1,
+    "sum_pitched": 1,
+    "amax_pitched_ragged": 1,
+    "sum_two_dims": 1,
+    "mean_permuted": 1,
+    "sum_channels_last": 1,
+    "amin_keepdim": 1,
+    "sum_reduce_all": 1,
+    "mean_widened": 1,
+    "prod_widened": 1,
+    "sum_out_fp32": 1,
+    "sum_ordered": 0,
+    "prod_ordered": 0,
+    "mean_ordered": 0,
+}
+_OPS = [d.ATEN_OP for d in load_declarations(str(_DECL))]
+
+
+def _covers_inputs(device):
+    """Views across the row classes, the ragged and cross-CTA paths, and declines."""
+    flat = torch.randn(8 * 1024 + 1, device=device)
+    nchw = torch.randn(2, 64, 8, 8, device=device)
+    return [
+        torch.randn(4, 32, device=device),  # t32_b128
+        torch.randn(8, 1024, device=device),  # t32_b128
+        torch.randn(8, 4096, device=device, dtype=torch.bfloat16),  # t64_b128
+        torch.randn(8, 7168, device=device, dtype=torch.bfloat16),  # t128_b128
+        torch.randn(2, 4, 4096, device=device),  # t256_b256
+        torch.randn(256, device=device),  # t64_b64 as a reduce-all
+        torch.randn(2, 32768, device=device),  # t256_b256
+        torch.randn(2, 131072, device=device, dtype=torch.bfloat16),  # xcta
+        torch.randn(4, 1001, device=device),  # ragged rows
+        torch.randn(4, 4097, device=device, dtype=torch.bfloat16),  # t64 ragged
+        torch.randn(4, 9001, device=device),  # t256 ragged
+        torch.randn(1, 1001, device=device),  # a single ragged row: JIT reduce_all
+        torch.randn(4, 258, device=device, dtype=torch.float16),  # even, too narrow
+        torch.randn(4, 1026, device=device, dtype=torch.float16),  # even ragged
+        torch.randn(4, 259, device=device, dtype=torch.float16)[:, :258],  # odd pitch
+        torch.randn(8, 1040, device=device)[:, :1024],  # pitched rows
+        torch.randn(8, 1032, device=device)[:, :1001],  # pitched ragged rows
+        torch.randn(4, 8, 1024, device=device)[:, :4],  # kept dims that do not coalesce
+        torch.randn(8, 1, 1024, device=device),  # a size-1 dim
+        nchw.to(memory_format=torch.channels_last),
+        torch.randn(64, 32, device=device).t(),  # dense permuted
+        torch.randn(1024, device=device).expand(8, 1024),  # overlapping rows
+        flat[1:].view(8, 1024),  # misaligned
+        torch.randn(4096, 32, device=device),  # narrow rows, not a reduce-all
+        # A row over 192 KiB that is not a multiple of 8192 elements.
+        torch.randn(2, 98312, device=device, dtype=torch.bfloat16),
+        torch.randn(8, 1024, device=device, dtype=torch.float16),  # fp16
+    ]
 
 
 class TestReductionAOT(TestCase):
@@ -118,9 +217,10 @@ class TestReductionAOT(TestCase):
                 "mean.dim",
                 "prod.dim_int",
             }
-            # 6 points per dtype pair; dtype= adds only FP16->FP32 and BF16->FP32.
-            self.assertEqual(len(grid), 30 if has_dtype else 18)
-            self.assertEqual({point["path"] for point in grid}, {"row", "xcta"})
+            # 10 points per dtype pair; dtype= adds only FP16->FP32 and BF16->FP32.
+            self.assertEqual(len(grid), 50 if has_dtype else 30)
+            paths = {point["path"] for point in grid}
+            self.assertEqual(paths, {"row", "ragged", "xcta"})
             same = {(dtype, dtype) for dtype in ("float16", "bfloat16", "float32")}
             widened = {("float16", "float32"), ("bfloat16", "float32")}
             self.assertEqual(
@@ -137,39 +237,41 @@ class TestReductionAOT(TestCase):
                     "t256_b256",
                 },
             )
+            self.assertEqual(
+                {point["row_class"] for point in grid if point["path"] == "ragged"},
+                {"t32_b128", "t64_b128", "t128_b128", "t256_b256"},
+            )
 
 
 class TestReductionAOTCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @parametrize(
-        "probe,env,expected",
+        "probe,expected",
         [
             subtest(
-                (_AOT_PROBE, {}, [[1, True], [2, True]]),
+                (_AOT_PROBE, [[1, True], [2, True]]),
                 name="sum",
                 decorators=[skipIfNoNativeAot("sum.dim_IntList")],
             ),
             subtest(
                 (
                     _PATH_PROBE,
-                    {},
-                    [[k, k, True, True] for k in (1, 1, 1, 2, 2, 1, 0, 0, 0)],
+                    {k: [n, n, True, True] for k, n in _PATH_LAUNCHES.items()},
                 ),
                 name="paths",
-                decorators=[skipIfNoNativeAot("mean.dim")],
+                decorators=[skipIfNoNativeAot(op) for op in _OPS],
             ),
         ],
     )
-    def test_embedded_callables_own_reduction_launches(
-        self, device, probe, env, expected
-    ):
+    def test_embedded_callables_own_reduction_launches(self, device, probe, expected):
+        gates = {"PYTORCH_NATIVE_INNER_TREE": "0", "PYTORCH_SUM_INNER_TREE": "0"}
         proc = subprocess.run(
             [sys.executable, "-c", probe],
             capture_output=True,
             text=True,
-            env=dict(os.environ, TORCH_DISABLE_NATIVE_JIT="1", **env),
-            timeout=120,
+            env=dict(os.environ, TORCH_DISABLE_NATIVE_JIT="1", **gates),
+            timeout=300,
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         line = next(
@@ -177,7 +279,8 @@ class TestReductionAOTCUDA(TestCase):
         )
         self.assertEqual(json.loads(line.removeprefix("RESULTS=")), expected)
 
-    @parametrize("op", [d.ATEN_OP for d in load_declarations(str(_DECL))])
+    @skipIfNoCuteDSL
+    @parametrize("op", _OPS)
     @parametrize("gate", ["", "PYTORCH_NATIVE_INNER_TREE", "PYTORCH_SUM_INNER_TREE"])
     def test_cpp_covers_matches_python_coverage(self, device, op, gate):
         """The generated covers_<op> predicate decides exactly what covered_axes does."""
@@ -192,23 +295,7 @@ class TestReductionAOTCUDA(TestCase):
         python = aot_manifest._Coverage(op, decl.covered_axes, grid)
         python._cpp_probed = True  # leaves _cpp_covers unset: the Python path decides
 
-        flat = torch.randn(8 * 1024 + 1, device=device)
-        inputs = [
-            torch.randn(4, 32, device=device),  # t32_b128
-            torch.randn(8, 1024, device=device),  # t32_b128
-            torch.randn(8, 4096, device=device, dtype=torch.bfloat16),  # t64_b128
-            torch.randn(8, 7168, device=device, dtype=torch.bfloat16),  # t128_b128
-            torch.randn(2, 4, 4096, device=device),  # t256_b256
-            torch.randn(256, device=device),  # t64_b64 as a reduce-all
-            torch.randn(2, 32768, device=device),  # t256_b256
-            torch.randn(2, 131072, device=device, dtype=torch.bfloat16),  # xcta
-            torch.randn(4, 1001, device=device),  # ragged rows
-            flat[1:].view(8, 1024),  # misaligned
-            torch.randn(4096, 32, device=device),  # narrow rows, not a reduce-all
-            # A row over 192 KiB that is not a multiple of 8192 elements.
-            torch.randn(2, 98312, device=device, dtype=torch.bfloat16),
-            torch.randn(8, 1024, device=device, dtype=torch.float16),  # fp16
-        ]
+        inputs = _covers_inputs(device)
         if op == "prod.dim_int":
             dims = [-1, 0]
         elif op in ("amax", "amin"):
@@ -237,6 +324,59 @@ class TestReductionAOTCUDA(TestCase):
             self.assertEqual(covered, 0)
         else:
             self.assertGreater(covered, 0)
+
+    @skipIfNoCuteDSL
+    @parametrize("op", _OPS)
+    def test_cpp_coverage_matches_what_the_stub_serves(self, device, op):
+        """covers_<op> is what drops a call's JIT route, so a call it claims but the stub
+        declines loses both accelerated routes: the two must agree call for call."""
+        from torch._native import aot_manifest
+        from torch.profiler import profile, ProfilerActivity
+
+        cpp = aot_manifest.get_coverage(op, "CUDA")
+        if cpp is None or not cpp.is_available(torch.device(device)):
+            self.skipTest(f"no native-AOT kernels for {op} on {device}")
+        name, _, overload = op.partition(".")
+        aten = getattr(torch.ops.aten, name)
+        out_op = {"sum": "IntList_out", "prod": "int_out"}.get(name, "out")
+        functional = getattr(aten, overload or "default")
+        with_out = getattr(aten, out_op)
+        dim = -1 if op == "prod.dim_int" else [-1]
+        calls = [((x, dim, False), {}) for x in _covers_inputs(device)]
+        # out= dtypes the stubs serve (the input's, or widened) and decline (narrowed),
+        # and a non-contiguous out=. amax and amin outputs keep the input dtype.
+        x16 = torch.randn(8, 1024, device=device, dtype=torch.float16)
+        out_dtypes = (torch.float16, torch.float32, torch.bfloat16)
+        for out_dtype in out_dtypes if op not in ("amax", "amin") else out_dtypes[:1]:
+            out = torch.empty(8, device=device, dtype=out_dtype)
+            calls.append(((x16, dim, False), {"out": out}))
+        strided = torch.empty(8, 2, device=device, dtype=torch.float16)[:, 0]
+        calls.append(((x16, dim, False), {"out": strided}))
+
+        def fired(fn, args, kwargs):
+            # With the JIT overrides deregistered, reduction kernels are the stubs'.
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                fn(*args, **kwargs)
+                torch.cuda.synchronize()
+            events = [e for e in prof.events() if e.device_type.name == "CUDA"]
+            return any("torch_nativeopsreductions" in e.name for e in events)
+
+        gates = {"PYTORCH_NATIVE_INNER_TREE": "0", "PYTORCH_SUM_INNER_TREE": "0"}
+        cutedsl = torch.backends.python_native.cutedsl
+        was_enabled = cutedsl.enabled
+        cutedsl.disable()
+        try:
+            with mock.patch.dict(os.environ, gates):
+                for args, kwargs in calls:
+                    claimed = cpp.covers(args, kwargs)
+                    fn = with_out if "out" in kwargs else functional
+                    x, out = args[0], kwargs.get("out")
+                    out_dtype = None if out is None else out.dtype
+                    msg = f"{tuple(x.shape)} {x.stride()} {x.dtype} {out_dtype=}"
+                    self.assertEqual(claimed, fired(fn, args, kwargs), msg=msg)
+        finally:
+            if was_enabled:
+                cutedsl.enable()
 
     @skipIfNoCuteDSL
     def test_dynamic_row_builder_converts_output(self, device):
@@ -278,7 +418,9 @@ class TestReductionAOTCUDA(TestCase):
         x = torch.randn(8, 1536, device=device, dtype=torch.bfloat16)
         out = torch.empty(8, device=device, dtype=torch.float32)
         compiled(x, out, 192, 6, 1536, torch.cuda.current_stream().cuda_stream)
-        self.assertEqual(out, x.sum(dim=1, dtype=torch.float32))
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1, dtype=torch.float32)
+        self.assertEqual(out, want)
 
     @skipIfNoCuteDSL
     def test_xcta_builder_sequences_both_stages(self, device):
@@ -310,7 +452,9 @@ class TestReductionAOTCUDA(TestCase):
             n,
             torch.cuda.current_stream().cuda_stream,
         )
-        self.assertEqual(out, x.sum(dim=1, dtype=torch.float32), atol=2e-2, rtol=1e-4)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1, dtype=torch.float32)
+        self.assertEqual(out, want, atol=2e-2, rtol=1e-4)
 
     @skipIfNoCuteDSL
     def test_trailing_dims_and_ordered_coverage(self, device):
@@ -340,6 +484,15 @@ class TestReductionAOTCUDA(TestCase):
                 )["path"],
                 "xcta",
             )
+
+            covers = declarations["sum.dim_IntList"].covered_axes
+            x16 = torch.randn(4, 1040, device=device, dtype=torch.bfloat16)
+            self.assertEqual(covers(x16[:, :512], [-1])["path"], "row")
+            r = covers(x16[:, :511], [-1])
+            self.assertEqual((r["path"], r["row_class"]), ("ragged", "t32_b128"))
+            # A pitch that is not whole vectors takes the ragged kernel at a whole width.
+            narrow = x16.view(-1)[: 4 * 1028].view(4, 1028)[:, :1024]
+            self.assertEqual(covers(narrow, [-1])["path"], "ragged")
 
             misaligned = torch.randn(4 * 512 + 1, device=device)[1:].view(4, 512)
             self.assertIsNone(
