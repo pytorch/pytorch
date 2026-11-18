@@ -1392,9 +1392,18 @@ def inl_calls_raises(x):
     return inl_raises(y)
 
 
+def unr_loop(x, y):
+    total = x
+    for i in range(3):
+        total = total * 2 + y
+        if i == 1:
+            total = total - 1
+    return total, i
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphTransforms(TestCase):
-    """Inlining, which rewrites the graph before it runs."""
+    """Inlining and loop unrolling, which rewrite the graph before it runs."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -1445,6 +1454,79 @@ class TestVmGraphTransforms(TestCase):
         self.assertEqual(off(x, y), inl_outer(x, y))
         self.assertEqual(off.stats()["inlined"], [])
 
+    def test_unrolls_constant_range_loops(self):
+        compiled = torch.vm(unr_loop, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        for _ in range(3):
+            total, i = compiled(x, y)
+            expected, expected_i = unr_loop(x, y)
+            self.assertEqual(total, expected)
+            self.assertEqual(i, expected_i)
+        self.assertEqual(compiled.stats()["unrolled_loops"], 1)
+        off = torch.vm(unr_loop, fallback=False, passes=without(P.Unroll))
+        self.assertEqual(off(x, y)[0], unr_loop(x, y)[0])
+        self.assertEqual(off.stats()["unrolled_loops"], 0)
+
+    def test_unrolled_loop_is_guarded_on_range(self):
+        compiled = torch.vm(unr_loop, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(compiled(x, y)[1], 2)
+        try:
+            globals()["range"] = lambda k: (0, 1)
+            total, i = compiled(x, y)
+            self.assertEqual(total, unr_loop(x, y)[0])
+            self.assertEqual(i, 1)
+        finally:
+            del globals()["range"]
+        self.assertEqual(compiled(x, y)[1], 2)
+
+    def test_unrolling_nested_and_empty_loops(self):
+        def nested(x):
+            for i in range(2):
+                for j in range(3):
+                    x = x + i * j
+            else:
+                x = x * 2
+            return x
+
+        def empty(x):
+            for i in range(0):
+                x = x + 1
+            return x, i
+
+        x = torch.randn(3)
+        compiled = torch.vm(nested, fallback=False)
+        self.assertEqual(compiled(x), nested(x))
+        self.assertGreaterEqual(compiled.stats()["unrolled_loops"], 3)
+        compiled = torch.vm(empty, fallback=False)
+        self.assertEqual(compiled.stats()["unrolled_loops"], 1)
+        with self.assertRaisesRegex(UnboundLocalError, "'i'"):
+            compiled(x)
+
+    def test_loops_that_are_not_unrolled(self):
+        def breaks(x):
+            for i in range(4):
+                x = x + 1
+                if i == 2:
+                    break
+            return x
+
+        def long(x):
+            for _ in range(100):
+                x = x + 1
+            return x
+
+        def not_constant(x, n):
+            for _ in range(n):
+                x = x + 1
+            return x
+
+        x = torch.zeros(2)
+        for fn, args in ((breaks, (x,)), (long, (x,)), (not_constant, (x, 3))):
+            compiled = torch.vm(fn, fallback=False)
+            self.assertEqual(compiled(*args), fn(*args))
+            self.assertEqual(compiled.stats()["unrolled_loops"], 0)
+
     def test_error_in_inlined_function_has_both_frames(self):
         compiled = torch.vm(inl_calls_raises, fallback=False)
         self.assertEqual(compiled.stats()["inlined"], ["inl_raises"])
@@ -1461,6 +1543,48 @@ class TestVmGraphTransforms(TestCase):
                 ("inl_raises", "return x + inl_missing_name  # noqa: F821"),
             ],
         )
+
+
+def vm_scaled(x, y):
+    return unr_loop(x, y)[0] * 2
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmApi(TestCase):
+    """How torch.vm is asked for things."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_the_decorator_with_and_without_arguments(self):
+        @torch.vm
+        def bare(x, y):
+            return unr_loop(x, y)[0] * 2
+
+        @torch.vm(passes=torch.vm.DEFAULT_PASSES)
+        def spelled(x, y):
+            return unr_loop(x, y)[0] * 2
+
+        called = torch.vm(vm_scaled, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        for fn in (bare, spelled, called):
+            for _ in range(3):
+                self.assertEqual(fn(x, y), vm_scaled(x, y))
+            # The defaults: the call is inlined, and the inlined loop unrolled.
+            self.assertEqual(len(fn.stats()["inlined"]), 1)
+            self.assertEqual(fn.stats()["unrolled_loops"], 1)
+
+    def test_an_empty_list_changes_nothing(self):
+        plain = torch.vm(vm_scaled, passes=(), fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(plain(x, y), vm_scaled(x, y))
+        self.assertEqual(plain.stats()["inlined"], [])
+        self.assertEqual(plain.stats()["unrolled_loops"], 0)
+        specialized = [b["specialized_executions"] for b in plain.stats()["blocks"]]
+        self.assertEqual(sum(specialized), 0)
+
+    def test_unroll_goes_behind_inline(self):
+        with self.assertRaisesRegex(ValueError, "the engine inlines first"):
+            torch.vm(lambda x: x, passes=(P.Unroll(), P.Inline()))
 
 
 if __name__ == "__main__":
