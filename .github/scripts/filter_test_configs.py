@@ -12,7 +12,6 @@ import warnings
 from enum import Enum
 from functools import cache
 from logging import info, warning
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from urllib.request import Request, urlopen
 
@@ -71,8 +70,6 @@ def parse_args() -> Any:
     parser.add_argument(
         "--test-matrix", type=str, required=True, help="the original test matrix"
     )
-    parser.add_argument("--cpp-faketensor", action="store_true")
-    parser.add_argument("--tests-to-include", default="")
     parser.add_argument(
         "--selected-test-configs",
         type=str,
@@ -631,74 +628,6 @@ def enforce_lf_allowlist(
     return test_matrix
 
 
-def add_cpp_faketensor_configs(
-    test_matrix: dict[str, list[Any]],
-    job_name: str | None,
-    tests_to_include: str = "",
-) -> dict[str, list[Any]]:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from tools.testing.discover_tests import COMPILER_TEST_PREFIXES
-
-    if not job_name or any(
-        name in job_name for name in ("libtorch", "mobile-lightweight-dispatch")
-    ):
-        return test_matrix
-    entries = test_matrix.get("include", [])
-    if any("fake_tensor" in entry for entry in entries):
-        return test_matrix
-    requested = {
-        test.split("::")[0].split(".", 1)[0] for test in tests_to_include.split()
-    }
-    compiler_requested = not requested or any(
-        test.startswith(COMPILER_TEST_PREFIXES) for test in requested
-    )
-    # C++ default jobs select compiler suites; other configs keep their own routes.
-    configs = {
-        "default",
-        "dynamo_core",
-        "dynamo_wrapped",
-        "inductor",
-        "inductor_core",
-        "inductor_amx",
-        "inductor_distributed",
-        "inductor_cpp_wrapper",
-        "inductor_cpp_wrapper_cpu",
-        "inductor_aoti_fallback",
-        "inductor_avx2",
-    }
-    cpp_entries = [
-        {**entry, "fake_tensor": "cpp"}
-        for entry in entries
-        if entry.get("config") in configs
-        and (entry.get("config") != "default" or compiler_requested)
-    ]
-    additions = []
-    default = next((e for e in entries if e.get("config") == "default"), None)
-    accelerator = any(
-        device in job_name.lower() for device in ("cuda", "rocm", "xpu", "tpu")
-    )
-    if (
-        default is not None
-        and not accelerator
-        and (not requested or "test_fake_tensor" in requested)
-    ):
-        # GENERIC FakeTensor classes run on CPU; GPU jobs exclude them.
-        additions = [
-            {
-                **default,
-                "config": "fake_tensor",
-                "shard": 1,
-                "num_shards": 1,
-                "fake_tensor": backend,
-            }
-            for backend in ("python", "cpp")
-        ]
-    return {
-        **test_matrix,
-        "include": entries + additions + cpp_entries,
-    }
-
-
 def main() -> None:
     args = parse_args()
     # Load the original test matrix set by the workflow. Its format, however,
@@ -711,11 +640,6 @@ def main() -> None:
         # We handle invalid test matrix gracefully by marking it as empty
         set_output("is-test-matrix-empty", True)
         sys.exit(0)
-
-    if args.cpp_faketensor:
-        test_matrix = add_cpp_faketensor_configs(
-            test_matrix, args.job_name, args.tests_to_include
-        )
 
     pr_number = args.pr_number
     tag = args.tag
