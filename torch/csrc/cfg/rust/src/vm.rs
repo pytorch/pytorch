@@ -14,9 +14,12 @@
 //!     guards; a failed guard resumes the profiling tier, in this block only.
 
 use crate::analysis::{self, Analysis};
+use crate::bytecode::OpcodeTable;
 use crate::capi::{self, SiteSlot, TcfgApi, TcfgPyOp, TcfgTensorInfo};
 use crate::ir::*;
-use crate::pyffi::{self, new_ref, py_bool, xdecref, Obj, Shared};
+use crate::pyffi::{self, new_ref, py_bool, xdecref, Obj, PyObj, Shared};
+use crate::{frontend, inline, unroll};
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use crate::spec::{self, PassCx, Pipeline, Unit, ValueObs};
 use pyo3::ffi;
@@ -26,6 +29,7 @@ use std::ptr::null_mut;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct Options {
     /// Run the profiling tier and specialize. Off: generic tier only.
     pub specialize: bool,
@@ -38,6 +42,12 @@ pub struct Options {
     pub max_site_variants: usize,
     /// Keep the tensors kernels return unboxed until Python code needs them.
     pub unboxed: bool,
+    /// Inline calls of functions of the same module.
+    pub inline: bool,
+    /// Unroll loops over a small constant range.
+    pub unroll: bool,
+    /// Compile the Python functions that compiled code calls.
+    pub callees: bool,
 }
 
 impl Default for Options {
@@ -49,6 +59,9 @@ impl Default for Options {
             max_respecializations: 6,
             max_site_variants: 4,
             unboxed: true,
+            inline: true,
+            unroll: true,
+            callees: true,
         }
     }
 }
@@ -104,7 +117,104 @@ unsafe fn dict_version(dict: Obj) -> u64 {
     (*(dict as *mut ffi::PyDictObject)).ma_version_tag
 }
 
+/// Lowers a Python function to the graph the VM runs.
+pub fn lower(
+    py: pyo3::Python<'_>,
+    table: &OpcodeTable,
+    func: &pyo3::Bound<'_, pyo3::PyAny>,
+    options: &Options,
+) -> pyo3::PyResult<Function> {
+    use pyo3::prelude::*;
+    let mut function = frontend::build(py, table, func)?;
+    if options.inline {
+        inline::inline_calls(py, table, &mut function, &func.getattr("__code__")?);
+    }
+    if options.unroll {
+        function.unrolled = unroll::unroll_loops(&mut function);
+    }
+    Ok(function)
+}
+
+/// A function that compiled code called, compiled. It is valid while the
+/// function keeps this code and these defaults.
+struct Callee {
+    func: PyObj,
+    compiled: Arc<Compiled>,
+    code: Obj,
+    defaults: Obj,
+    kwdefaults: Obj,
+}
+
+/// The Python functions called from a function compiled with
+/// torch.cfg_compile, or from anything compiled under it, each compiled the
+/// first time it is called.
+pub struct Callees {
+    table: OpcodeTable,
+    /// Keyed by the address of the function object, which the entry keeps
+    /// alive.
+    entries: Shared<HashMap<usize, Callee>>,
+    /// How many function objects were compiled per code object: a function
+    /// that is created anew for every call is not worth compiling.
+    per_code: Shared<HashMap<usize, u32>>,
+    /// Code objects the frontend does not support, by address: their
+    /// functions run in the interpreter.
+    interpreted: Shared<HashMap<usize, PyObj>>,
+    call_name: PyObj,
+}
+
+unsafe impl Send for Callees {}
+unsafe impl Sync for Callees {}
+
+const MAX_FUNCTIONS_PER_CODE: u32 = 8;
+const MAX_CALLEES: usize = 4096;
+
+impl Callees {
+    pub fn new(table: OpcodeTable) -> Callees {
+        Callees {
+            table,
+            entries: Shared::new(HashMap::new()),
+            per_code: Shared::new(HashMap::new()),
+            interpreted: Shared::new(HashMap::new()),
+            call_name: unsafe {
+                PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__call__".as_ptr()))
+            },
+        }
+    }
+
+    /// Qualified names of the functions that were compiled, and of those the
+    /// frontend turned down.
+    pub fn summary(&self) -> (Vec<String>, Vec<String>) {
+        let name = |obj: Obj, attr: &std::ffi::CStr| unsafe {
+            let name = ffi::PyObject_GetAttrString(obj, attr.as_ptr());
+            if name.is_null() {
+                ffi::PyErr_Clear();
+                return "?".to_string();
+            }
+            let text = pyffi::str_to_string(name);
+            ffi::Py_DECREF(name);
+            text
+        };
+        let mut compiled: Vec<String> =
+            self.entries.borrow().values().map(|c| name(c.func.as_ptr(), c"__qualname__")).collect();
+        let mut interpreted: Vec<String> =
+            self.interpreted.borrow().values().map(|c| name(c.as_ptr(), c"co_qualname")).collect();
+        compiled.sort();
+        interpreted.sort();
+        (compiled, interpreted)
+    }
+
+    /// Drops everything compiled so far, which also breaks the reference
+    /// cycle between this table and what it compiled.
+    pub fn clear(&self) {
+        let dropped = std::mem::take(&mut *self.entries.borrow_mut());
+        drop(dropped);
+        self.interpreted.borrow_mut().clear();
+        self.per_code.borrow_mut().clear();
+    }
+}
+
 pub struct Compiled {
+    pub callees: Arc<Callees>,
     global_cache: LoadCaches,
     module_attr_cache: LoadCaches,
     /// Per constant: usable as a cached module attribute name.
@@ -114,7 +224,7 @@ pub struct Compiled {
     pub generic: Vec<Arc<BlockCode>>,
     pub state: Shared<State>,
     pub options: Options,
-    pub pipeline: Pipeline,
+    pub pipeline: Arc<Pipeline>,
     frames: Shared<Vec<Vec<Obj>>>,
     /// Kernel results that were kept unboxed, and how many of those got a
     /// Python object after all.
@@ -276,7 +386,12 @@ impl Compiled {
         boxed
     }
 
-    pub fn new(func: Function, options: Options, pipeline: Pipeline) -> Compiled {
+    pub fn new(
+        func: Function,
+        options: Options,
+        pipeline: Arc<Pipeline>,
+        callees: Arc<Callees>,
+    ) -> Compiled {
         let analysis = analysis::analyze(&func);
         let mut generic = Vec::with_capacity(func.blocks.len());
         for (b, block) in func.blocks.iter().enumerate() {
@@ -325,6 +440,7 @@ impl Compiled {
             })
             .collect();
         Compiled {
+            callees,
             global_cache: empty(),
             module_attr_cache: empty(),
             plain_name,
@@ -568,12 +684,125 @@ impl Compiled {
             (kw, ffi::PyTuple_GET_SIZE(kw) as usize)
         };
         let npos = args.len() - nkw;
+        if let Some((compiled, receiver)) = self.compiled_callee(callee) {
+            return self.call_compiled(&compiled, receiver, &buf[1..args.len() + 1], kw);
+        }
         ffi::PyObject_Vectorcall(
             callee,
             buf.as_ptr().add(1),
             npos | ffi::PY_VECTORCALL_ARGUMENTS_OFFSET,
             kw,
         )
+    }
+
+    /// The compiled form of what calling `callee` runs, if it is a Python
+    /// function the frontend supports, and the object it is bound to (null for
+    /// a plain function): a function, a bound method, or an instance of a
+    /// class whose `__call__` is a Python function.
+    unsafe fn compiled_callee(&self, callee: Obj) -> Option<(Arc<Compiled>, Obj)> {
+        if !self.options.callees {
+            return None;
+        }
+        let (func, receiver) = if ffi::PyFunction_Check(callee) != 0 {
+            (callee, null_mut())
+        } else if ffi::Py_TYPE(callee) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type) {
+            (pyffi::PyMethod_Function(callee), pyffi::PyMethod_Self(callee))
+        } else {
+            let ty = ffi::Py_TYPE(callee);
+            if ffi::PyType_HasFeature(ty, ffi::Py_TPFLAGS_HEAPTYPE) == 0 || ffi::PyType_Check(callee) != 0 {
+                return None;
+            }
+            (pyffi::_PyType_Lookup(ty, self.callees.call_name.as_ptr()), callee)
+        };
+        if func.is_null() || ffi::PyFunction_Check(func) == 0 {
+            return None;
+        }
+        self.compiled_function(func).map(|compiled| (compiled, receiver))
+    }
+
+    unsafe fn compiled_function(&self, func: Obj) -> Option<Arc<Compiled>> {
+        let callees = &self.callees;
+        let code = ffi::PyFunction_GetCode(func);
+        let defaults = ffi::PyFunction_GetDefaults(func);
+        let kwdefaults = ffi::PyFunction_GetKwDefaults(func);
+        let mut stale = false;
+        if let Some(c) = callees.entries.borrow().get(&(func as usize)) {
+            if (c.code, c.defaults, c.kwdefaults) == (code, defaults, kwdefaults) {
+                return Some(c.compiled.clone());
+            }
+            // The function was changed since: compile it again.
+            stale = true;
+        }
+        if callees.interpreted.borrow().contains_key(&(code as usize)) {
+            return None;
+        }
+        let per_code = callees.per_code.borrow().get(&(code as usize)).copied().unwrap_or(0);
+        if !stale && (per_code >= MAX_FUNCTIONS_PER_CODE || callees.entries.borrow().len() >= MAX_CALLEES) {
+            return None;
+        }
+        let py = pyo3::Python::assume_gil_acquired();
+        let bound = pyo3::Bound::from_borrowed_ptr(py, func);
+        match lower(py, &callees.table, &bound, &self.options) {
+            Ok(function) => {
+                let compiled = Arc::new(Compiled::new(
+                    function,
+                    self.options.clone(),
+                    self.pipeline.clone(),
+                    callees.clone(),
+                ));
+                callees.per_code.borrow_mut().insert(code as usize, per_code + 1);
+                callees.entries.borrow_mut().insert(
+                    func as usize,
+                    Callee {
+                        func: PyObj::from_borrowed(func),
+                        compiled: compiled.clone(),
+                        code,
+                        defaults,
+                        kwdefaults,
+                    },
+                );
+                Some(compiled)
+            }
+            // Unsupported by the frontend: the interpreter runs it.
+            Err(_) => {
+                callees.entries.borrow_mut().remove(&(func as usize));
+                callees.interpreted.borrow_mut().insert(code as usize, PyObj::from_borrowed(code));
+                None
+            }
+        }
+    }
+
+    /// Calls a compiled callee with arguments in the vectorcall layout.
+    unsafe fn call_compiled(&self, compiled: &Compiled, receiver: Obj, args: &[Obj], kwnames: Obj) -> Obj {
+        let nkw = if kwnames.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(kwnames) as usize };
+        let npos = args.len() - nkw;
+        let bound = !receiver.is_null() as usize;
+        let tuple = ffi::PyTuple_New((npos + bound) as isize);
+        if tuple.is_null() {
+            return null_mut();
+        }
+        if bound == 1 {
+            ffi::PyTuple_SET_ITEM(tuple, 0, new_ref(receiver));
+        }
+        for (i, arg) in args[..npos].iter().enumerate() {
+            ffi::PyTuple_SET_ITEM(tuple, (i + bound) as isize, new_ref(*arg));
+        }
+        let mut kwargs = null_mut();
+        if nkw > 0 {
+            kwargs = ffi::PyDict_New();
+            for i in 0..nkw {
+                let name = ffi::PyTuple_GET_ITEM(kwnames, i as isize);
+                if kwargs.is_null() || ffi::PyDict_SetItem(kwargs, name, args[npos + i]) < 0 {
+                    ffi::Py_DECREF(tuple);
+                    xdecref(kwargs);
+                    return null_mut();
+                }
+            }
+        }
+        let result = compiled.call(tuple, kwargs);
+        ffi::Py_DECREF(tuple);
+        xdecref(kwargs);
+        result
     }
 
     unsafe fn exec_op(&self, regs: &mut [Obj], op: &Op) -> OpResult {
@@ -914,12 +1143,32 @@ impl Compiled {
                     let kw = f.consts[*kwnames as usize].as_ptr();
                     (kw, ffi::PyTuple_GET_SIZE(kw) as usize)
                 };
-                checked(ffi::PyObject_VectorcallMethod(
-                    f.consts[*name as usize].as_ptr(),
-                    buf.as_ptr(),
-                    args.len() + 1 - nkw,
-                    kw,
-                ))
+                let mut method: Obj = null_mut();
+                let unbound =
+                    pyffi::_PyObject_GetMethod(buf[0], f.consts[*name as usize].as_ptr(), &mut method);
+                if method.is_null() {
+                    return Err(());
+                }
+                // A method takes the receiver as its first argument; any
+                // other attribute is called on its own.
+                let (first, receiver) = if unbound == 1 { (0, buf[0]) } else { (1, null_mut()) };
+                let r = match (ffi::PyFunction_Check(method) != 0)
+                    .then(|| self.compiled_function(method))
+                    .flatten()
+                    .filter(|_| self.options.callees && unbound == 1)
+                {
+                    Some(compiled) => {
+                        self.call_compiled(&compiled, receiver, &buf[1..args.len() + 1], kw)
+                    }
+                    None => ffi::PyObject_Vectorcall(
+                        method,
+                        buf.as_ptr().add(first),
+                        args.len() + 1 - first - nkw,
+                        kw,
+                    ),
+                };
+                ffi::Py_DECREF(method);
+                checked(r)
             }
             Op::CallEx { callee, args, kwargs } => {
                 let args = self.obj(regs, *args);
@@ -933,7 +1182,28 @@ impl Compiled {
                     t
                 };
                 let kwargs = if *kwargs == NONE { null_mut() } else { self.obj(regs, *kwargs) };
-                let r = ffi::PyObject_Call(self.obj(regs, *callee), tuple, kwargs);
+                let callee = self.obj(regs, *callee);
+                let plain_kwargs = kwargs.is_null() || ffi::PyDict_CheckExact(kwargs) != 0;
+                let r = match self.compiled_callee(callee).filter(|_| plain_kwargs) {
+                    Some((compiled, receiver)) if receiver.is_null() => compiled.call(tuple, kwargs),
+                    Some((compiled, receiver)) => {
+                        // The receiver goes in front of the positional arguments.
+                        let n = ffi::PyTuple_GET_SIZE(tuple);
+                        let bound = ffi::PyTuple_New(n + 1);
+                        if bound.is_null() {
+                            ffi::Py_DECREF(tuple);
+                            return Err(());
+                        }
+                        ffi::PyTuple_SET_ITEM(bound, 0, new_ref(receiver));
+                        for i in 0..n {
+                            ffi::PyTuple_SET_ITEM(bound, i + 1, new_ref(ffi::PyTuple_GET_ITEM(tuple, i)));
+                        }
+                        let r = compiled.call(bound, kwargs);
+                        ffi::Py_DECREF(bound);
+                        r
+                    }
+                    None => ffi::PyObject_Call(callee, tuple, kwargs),
+                };
                 ffi::Py_DECREF(tuple);
                 checked(r)
             }

@@ -159,6 +159,7 @@ def cfg_compile(
     unboxed: bool = True,
     inline: bool = True,
     unroll: bool = True,
+    callees: bool = True,
     max_versions: int = 4,
     max_respecializations: int = 6,
 ) -> Any:
@@ -185,6 +186,10 @@ def cfg_compile(
             as the other side of that guard.
         unroll: replace ``for i in range(k)`` loops with a small constant ``k``
             by ``k`` copies of their body, under a guard on ``range``.
+        callees: compile the Python functions that the compiled code calls
+            (functions, methods, and objects whose ``__call__`` is a Python
+            function) the first time each is called, with the same options.
+            A callee the compiler does not support runs in the interpreter.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -201,6 +206,7 @@ def cfg_compile(
         "unboxed": unboxed,
         "inline": inline,
         "unroll": unroll,
+        "callees": callees,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
     }
@@ -226,6 +232,7 @@ def cfg_compile(
             unboxed=unboxed,
             inline=inline,
             unroll=unroll,
+            callees=callees,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
