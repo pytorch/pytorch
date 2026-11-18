@@ -994,6 +994,16 @@ def nested_compile_region(
             ``inductor_config_patches``; its ``bw_inductor_config_patches``
             argument retains the same name. Both mappings accept only the
             Inductor config keys {supported_config_keys}.
+            ``triton.cudagraphs`` is accepted in
+            ``fw_inductor_config_patches`` only and covers the backward too:
+            with ``triton.cudagraphs`` on, a region set to ``False`` runs
+            outside CUDA Graph capture, in its own graph partition (turned on
+            for that compile if ``graph_partition`` is off). Opting in, setting
+            it on a region nested in
+            another region, and combining it with
+            ``torch._dynamo.override_cudagraphs`` raise an error. AOTInductor
+            ignores it, and a region compiled on its own (e.g. by
+            ``regional_inductor_invoke_subgraph``) rejects it.
             Warning: this is an experimental feature under development and
             not ready for use yet.
         max_reuse_entries: Maximum number of reuse cache entries per function
