@@ -30,7 +30,9 @@ def _filter_instructions(instructions, opname):
     return list(filter(lambda x: x.opname == opname, instructions))
 
 
-def _store_subscr_targets(instructions: list[dis.Instruction]) -> list[tuple[str, object]]:
+def _store_subscr_targets(
+    instructions: list[dis.Instruction],
+) -> list[tuple[str, object]]:
     targets = []
 
     for idx, instruction in enumerate(instructions):

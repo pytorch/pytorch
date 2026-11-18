@@ -83,7 +83,7 @@ if(WIN32 AND BUILD_PYTHON)
     install(FILES "${_libomp140}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
-  # libuv (uv.dll) - required by torch distributed (gloo transport).
+  # libuv (uv.dll) - required by torch distributed (gloo transport, TCPStore).
   # libuv_DLL_PATH is an optional CI hint (forwarded via EnvVarForwarding.cmake);
   # fall back to libuv_ROOT/bin/uv.dll which Windows CI sets.
   if(USE_DISTRIBUTED)
