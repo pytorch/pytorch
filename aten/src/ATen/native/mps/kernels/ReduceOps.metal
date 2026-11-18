@@ -1131,6 +1131,9 @@ REGISTER_NORM_INF(bfloat);
 REGISTER_STD_VAR(float);
 REGISTER_STD_VAR(half);
 REGISTER_STD_VAR(bfloat);
+// Unfinalized Welford merge, for inputs split by 64-bit indexing
+REGISTER_REDUCTION("var_", float3, float3, WelfordOp<float3, false>);
+REGISTER_REDUCTION("std_", float3, float3, WelfordOp<float3, true>);
 
 // =============================================================================
 // argmax/argmin: per output element find the (linear) index of the max/min

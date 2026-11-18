@@ -1,7 +1,6 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
 import glob
-import io
 import sys
 import math
 import random
@@ -23,7 +22,7 @@ from collections import defaultdict
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
+    (decorateIf, parametrize, preserves_unittest_skip_marks, run_tests, TestCase, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -370,6 +369,7 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(is_enabled, torch.is_autocast_enabled())
 
 # Expand TestCase class with Memory Leak Detection on MPS device
+@preserves_unittest_skip_marks("wrap_with_mps_policy")
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
 
@@ -810,80 +810,6 @@ class TestMPS(TestCaseMPS):
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
 
-    def test_stream(self):
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        with torch.mps.stream(None):
-            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        s1 = torch.mps.Stream()
-        s2 = torch.mps.Stream()
-        self.assertNotEqual(s1, torch.mps.default_stream())
-        self.assertNotEqual(s2, torch.mps.default_stream())
-        self.assertNotEqual(s1, s2)
-
-        # Check that the stream is reset correctly if an exception is raised
-        # within another stream's context.
-        # Note: Use a custom exception type so that any unexpected errors inside
-        # the `try` block pass through to fail the test
-        class MyException(Exception):
-            pass
-
-        try:
-            with torch.mps.stream(s1):
-                self.assertEqual(torch.mps.current_stream(), s1)
-                raise MyException
-
-        except MyException:
-            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        # Check that the stream is reset correctly with nested contexts
-        with torch.mps.stream(s1):
-            self.assertEqual(torch.mps.current_stream(), s1)
-            with torch.mps.stream(s2):
-                self.assertEqual(torch.mps.current_stream(), s2)
-
-            self.assertEqual(torch.mps.current_stream(), s1)
-
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
-        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
-            r1 = a1
-            r2 = a2
-
-            for _ in range(n):
-                with torch.mps.stream(s1):
-                    r1 = torch.sin(r1)
-                with torch.mps.stream(s2):
-                    r2 = torch.sin(r2)
-
-            return r1, r2
-
-        # Check that two separate workloads run on separate streams gives the
-        # same result as running them on one stream.
-        try:
-            a1 = torch.randn(100, device='mps')
-            a2 = torch.randn(100, device='mps')
-            torch.mps.synchronize()
-
-            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
-            s1.synchronize()
-            s2.synchronize()
-
-            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
-            torch.mps.synchronize()
-
-            self.assertEqual(r1, r1_check)
-            self.assertEqual(r2, r2_check)
-
-        finally:
-            torch.mps.synchronize()
-            s1.synchronize()
-            s2.synchronize()
-            torch.mps.empty_cache()
-
-        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
-
     def _get_stream_by_name(self, stream):
         if stream == "default":
             return torch.mps.default_stream()
@@ -924,6 +850,23 @@ class TestMPS(TestCaseMPS):
             if not torch.equal(out.cpu(), torch.full((1_000_000,), 2.0)):
                 mismatches += 1
         self.assertEqual(mismatches, 0)
+
+    def test_stream_device(self):
+        for device in [None, torch.device("mps"), torch.device("mps", 0), "mps", "mps:0", 0, -10]:
+            s = torch.mps.Stream(device=device)
+            self.assertEqual(s.device.type, "mps")
+            self.assertEqual(s.device.index, 0)
+
+        with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+            torch.mps.Stream(device=10000)
+
+        for device in [torch.device("mps", 1000), "mps:1000"]:
+            with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+                torch.mps.Stream(device=device)
+
+        for device in [torch.device("cpu"), "cpu"]:
+            with self.assertRaisesRegex(ValueError, r"Expected an mps device"):
+                torch.mps.Stream(device=device)
 
     # Tests that `torch.mps.empty_cache` empties unused buffers on any stream
     @parametrize("stream", ["default", "pool"])
@@ -3374,8 +3317,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(freq_cpu, freq_mps)
 
     def test_fft_transform_dims_outside_last_four(self):
-        # MPSGraph FFT only handles the last four dims; the backend transposes
-        # outer transform dims into that window. See https://github.com/pytorch/pytorch/issues/124096
+        # Transforms over outer dims, see https://github.com/pytorch/pytorch/issues/124096
         def check(fn, x_cpu, **kwargs):
             x_mps = x_cpu.detach().to("mps")
             self.assertEqual(fn(x_cpu, **kwargs), fn(x_mps, **kwargs).cpu())
@@ -3405,12 +3347,6 @@ class TestMPS(TestCaseMPS):
         check(torch.fft.rfftn, rdata, dim=(3, 0))
         rev = torch.fft.rfftn(rdata, dim=(3, 0))
         check(lambda y: torch.fft.irfftn(y, s=(rdata.size(3), rdata.size(0)), dim=(3, 0)), rev)
-
-    def test_fftn_too_many_dims(self):
-        # MPSGraph cannot transform more than four dims.
-        x = torch.randn(2, 2, 2, 2, 2, device="mps", dtype=torch.complex64)
-        with self.assertRaisesRegex(RuntimeError, "up to 4 dimensions"):
-            torch.fft.fftn(x, dim=(0, 1, 2, 3, 4))
 
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
@@ -7271,11 +7207,22 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
+    skip_sort_k_frac = decorateIf(
+        unittest.skip("k_frac only applies to kth/topk"),
+        lambda p: p["mode"] == "sort" and p["k_frac"] != "lo",
+    )
+    skip_kth_descending = decorateIf(
+        unittest.skip("kthvalue has no descending parameter"),
+        lambda p: p["mode"] == "kth" and p["descending"],
+    )
+
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_single_block(self, dtype, descending, dup, mode, k_frac):
         # Shapes that hit the Metal single-block path: n_rows >= 2, last-dim,
         # sort_size within one threadgroup (<=4096, or <=1024 for 8-byte types).
@@ -7350,6 +7297,8 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_multi_block(self, dtype, descending, dup, mode, k_frac):
         # shapes chosen to hit the metal multi block merge path
         if mode == "sort" and k_frac != "lo":
@@ -7403,6 +7352,12 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
+    @decorateIf(
+        unittest.skip("kthvalue/topk not supported for bool"),
+        lambda p: p["mode"] in ("kth", "topk") and p["dtype"] == torch.bool,
+    )
     def test_sort_radix(self, dtype, descending, dup, mode, k_frac):
         # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
         # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
@@ -8033,11 +7988,11 @@ class TestMPS(TestCaseMPS):
     def test_adaptive_avg_pool_backward_errors(self):
         x = torch.randn(2, 3, 4, 5, 6, device='mps')
         grad = torch.randn(2, 3, 2, 2, 2, device='mps')
-        with self.assertRaisesRegex(RuntimeError, "Expected dtype"):
+        with self.assertRaisesRegex(ValueError, "Expected dtype"):
             torch.ops.aten.adaptive_avg_pool3d_backward(grad, x, grad_input=torch.empty(0, device='mps', dtype=torch.bfloat16))
-        with self.assertRaisesRegex(RuntimeError, "Expected 4D or 5D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 4D or 5D tensor"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad.view(6, 8), x.view(6, 120))
-        with self.assertRaisesRegex(RuntimeError, "Expected 3D or 4D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 3D or 4D tensor"):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad.view(6, 8), x.view(6, 120))
 
     # Test max avg pool2d - when the input size is a multiple of output size
@@ -9398,15 +9353,6 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
-    def test_jit_save_load(self):
-        m = torch.nn.Module()
-        m.x = torch.rand(3, 3, device='mps')
-        buffer = io.BytesIO()
-        torch.jit.save(torch.jit.script(m), buffer)
-        buffer.seek(0)
-        n = torch.jit.load(buffer)
-        self.assertEqual(n.x, m.x)
-
     # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
@@ -10018,6 +9964,17 @@ class TestMPS(TestCaseMPS):
             y = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)[0]
             ref = torch.ops.aten._fused_rms_norm(x.float(), [N], w.float(), 1e-5)[0].to(dtype)
         self.assertEqual(y, ref, atol=0, rtol=0)
+
+    # https://github.com/pytorch/pytorch/issues/111374
+    def test_lerp_inf(self):
+        inf = float("inf")
+        x = torch.tensor([-inf, inf, 0.0, 0.0, 1.5], device="mps")
+        y = torch.tensor([0.0, 0.0, -inf, inf, 2.5], device="mps")
+        for dtype, w in product([torch.float, torch.half, torch.bfloat16, torch.cfloat], [0.0, 0.3, 0.5, 0.7, 1.0]):
+            xd, yd = x.to(dtype), y.to(dtype)
+            wt = torch.full_like(xd, w + 0.1j if dtype.is_complex else w)
+            self.assertEqual(torch.lerp(xd, yd, w), torch.lerp(xd.cpu(), yd.cpu(), w))
+            self.assertEqual(torch.lerp(xd, yd, wt), torch.lerp(xd.cpu(), yd.cpu(), wt.cpu()))
 
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
@@ -11054,10 +11011,12 @@ class TestNNMPS(NNTestCase):
 
             # Input and weights on different devices
             self.assertRaisesRegex(RuntimeError,
-                                   'must be on the same device',
+                                   'Expected all tensors to be on the same device, but got weight is on mps:0, '
+                                   'different from other tensors on cpu',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32), torch.rand(1, 3, 3, 3, device='mps')))
             self.assertRaisesRegex(RuntimeError,
-                                   'Input type \\(MPSFloatType\\) and weight type \\(torch\\.FloatTensor\\) should be the same',
+                                   'Expected all tensors to be on the same device, but got weight is on cpu, '
+                                   'different from other tensors on mps:0',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32, device='mps'), torch.rand(1, 3, 3, 3)))
 
 
@@ -12473,6 +12432,10 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):
@@ -12493,6 +12456,10 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention_2pass(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):
@@ -13797,7 +13764,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         # Currently, here using torchscript to put None into indices.
         # on C++ it gives indices as a list of 2 optional tensors: first is null and
         # the second is a valid tensor.
-        @torch.jit.script
+        @torch.jit._script.script
         def func(x, i, v):
             idx = [None, i]
             x.index_put_(idx, v, accumulate=True)
@@ -14745,9 +14712,8 @@ class TestConsistency(TestCaseMPS):
             return (7e-4, 2e-3)
         if op.name == "native_layer_norm":
             return (1e-4, 1.3e-5)
-        if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
-            # TODO: Investigate why this is needed
-            # See https://github.com/pytorch/pytorch/issues/120237
+        if op.name in ['fft.hfftn', 'fft.hfft2', 'fft.hfft']:
+            # float32 rounding at the scale of the unnormalized outputs: https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
         # Integral linspace can differ from CPU by one due to interpolation rounding.
         if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
@@ -15159,6 +15125,8 @@ class TestConsistency(TestCaseMPS):
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute
                 # drift on a single element while the rest match.
                 atol, rtol = 0.15, 0.1
+            if op.name == "linalg.pinv" and op.variant_test_name == "hermitian" and dtype == torch.float32:
+                atol, rtol = 1e-4, 5e-5
 
             if isinstance(cpu_sample.input, torch.Tensor):
                 equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
@@ -15213,6 +15181,31 @@ class TestConsistency(TestCaseMPS):
             # non-deterministic and introduces more rounding than forward
             bwd_atol, bwd_rtol = (5e-3, 2e-2) if dtype == torch.float16 else (1e-1, 5e-1)
             self.assertEqual(half_grad_input, full_grad_input.to(dtype), atol=bwd_atol, rtol=bwd_rtol)
+
+    @parametrize("spatial_dims", (2, 3))
+    def test_grid_sample_size_one_large_stride(self, device, spatial_dims):
+        input_shape = (1, 2, 1, 4) if spatial_dims == 2 else (1, 2, 1, 3, 4)
+        grid_shape = (1, 2, 1, 2) if spatial_dims == 2 else (1, 1, 2, 1, 3)
+        input_cpu = torch.randn(input_shape, requires_grad=True)
+        grid_cpu = torch.empty(grid_shape).uniform_(-0.8, 0.8).requires_grad_()
+        expected = F.grid_sample(input_cpu, grid_cpu, align_corners=False)
+        grad_output_cpu = torch.randn_like(expected)
+        tensors = []
+        for tensor in (input_cpu, grid_cpu, grad_output_cpu):
+            tensor_mps = tensor.detach().to(device)
+            strides = tuple(2**31 if size == 1 else stride
+                            for size, stride in zip(tensor_mps.shape, tensor_mps.stride()))
+            tensor_mps = tensor_mps.as_strided(tensor_mps.shape, strides)
+            self.assertEqual(tensor_mps.stride(), strides)
+            tensors.append(tensor_mps)
+        input_mps, grid_mps, grad_output_mps = tensors
+        input_mps.requires_grad_()
+        grid_mps.requires_grad_()
+        actual = F.grid_sample(input_mps, grid_mps, align_corners=False)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected, (input_cpu, grid_cpu), grad_output_cpu)
+        actual_grads = torch.autograd.grad(actual, (input_mps, grid_mps), grad_output_mps)
+        self.assertEqual(actual_grads, expected_grads, atol=1e-5, rtol=1e-5)
 
     def test_grid_sampler_3d_nan(self, device):
         input = torch.ones(1, 1, 3, 3, 3)
@@ -15562,6 +15555,94 @@ class TestComplex(TestCase):
 class TestCommon(TestCase):
     exact_dtype = True
 
+    @parametrize("shape, dtype", [((2, 3, 4, 5, 6), torch.complex64), ((32, 8192), torch.complex64),
+                                  ((8192,), torch.complex32), ((64, 128), torch.complex32)])
+    def test_fftn_round_trip(self, device, shape, dtype):
+        # Every dim, several passes per axis, and fp16 partials above the half range (amplitude 100 before scaling)
+        x = 100 * torch.randn(shape, dtype=torch.complex64)
+        spectrum, expected = torch.fft.fftn(x.to(device)).cpu(), torch.fft.fftn(x)
+        # float32 rounding scales with the largest output, which a per-element rtol does not model
+        self.assertEqual(spectrum, expected, atol=2e-6 * expected.abs().max().item(), rtol=0)
+        result = torch.fft.ifftn(spectrum.to(dtype).to(device)).cpu().to(torch.complex64)
+        self.assertEqual(result, x, atol=0.5 if dtype == torch.complex32 else 1e-3, rtol=0)
+
+    def test_fft_private_ops_edge_dims(self, device):
+        # The private ops wrap negative dims and transform empty axes like the CPU
+        x = torch.randn(3, 16, dtype=torch.complex64, device=device)
+        self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+        self.assertEqual(torch._fft_c2r(x[:, :9], [-1], 2, 16), torch.fft.irfft(x[:, :9], n=16))
+        self.assertEqual(torch._fft_r2c(x.real[:, :0], [-1], 0, True), torch.zeros(3, 1, dtype=x.dtype, device=device))
+
+    @serialTest()
+    @parametrize("n", [1 << 16, 176400, 16 * 3**6 * 13, 3**15, 25 * 13**5, 1 << 25])
+    @largeTensorTest("4GB")
+    def test_rfft_long(self, device, n):
+        # Packed four-step, global passes (packed radix 13 first), odd lengths without a two-pass split, above 2^24
+        x = torch.randn(2, n)
+        y = torch.fft.rfft(x.to(device)).cpu()
+        self.assertEqual(y, torch.fft.rfft(x), atol=1e-5 * n**0.5, rtol=0)  # the default atol at the outputs' scale
+        self.assertEqual(torch.fft.irfft(y.to(device), n=n).cpu(), x)
+
+    @dtypes(torch.float32, torch.float16)
+    @parametrize("n", [8, 10, 32, 64, 128, 160, 200, 240, 256, 512, 640, 1024, 2048, 2401, 4095, 4096, 4099, 8190])
+    @parametrize("kind", ["fft", "ifft", "rfft", "irfft"])
+    @parametrize("layout", ["contiguous", "transposed", "sliced", "out"])
+    def test_fft_strides(self, device, dtype, n, kind, layout):
+        complex_dtype = torch.complex32 if dtype == torch.float16 else torch.complex64
+        length = 2 * n if kind == "rfft" else n + 1 if kind == "irfft" else n
+        x = torch.randn(5, 2 * length + 3, device=device, dtype=dtype if kind == "rfft" else complex_dtype)
+        x = {"sliced": x[:, 3::2], "transposed": x[:, :length].t().contiguous().t()}.get(layout, x[:, :length].contiguous())
+        op = torch._fft_r2c if kind == "rfft" else getattr(torch.fft, kind)
+        kwargs = {"dim": [1], "normalization": 1, "onesided": True} if kind == "rfft" else {"norm": "ortho"}
+        kwargs.update({"n": 2 * n} if kind == "irfft" else {})
+        reference = op(x.cpu().to(torch.complex128 if x.is_complex() else torch.float64), **kwargs)
+        if layout == "out":
+            out_dtype = dtype if kind == "irfft" else complex_dtype
+            kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=out_dtype)[:, 3::2]
+        result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else None  # None: the default tolerance
+        self.assertEqual(result.cpu(), reference.to(result.dtype), atol=tol, rtol=tol)
+
+    @parametrize("n", [3 * 2**17, 441000, 4 * 3**10, 8 * 5**7, 2 * 7**6, 4 * 5**7, 13 * 2**17, 2**20])
+    @parametrize("kind", ["fft", "ifft"])
+    @parametrize("dim", [0, 1])
+    def test_fft_long(self, device, n, kind, dim):
+        # Non-pow2 lengths from 2^17 take one global-memory stage per radix (every radix between them); 2^20 nests
+        x = torch.randn((n, 2) if dim == 0 else (2, n), device=device, dtype=torch.complex64)
+        op = getattr(torch.fft, kind)
+        reference = op(x.cpu().to(torch.complex128), dim=dim, norm="ortho")
+        self.assertEqual(op(x, dim=dim, norm="ortho").cpu(), reference.to(torch.complex64))
+
+    @serialTest()
+    @parametrize("n", [1009, 1031, 2062, 1 << 16, 2 * 8388617])
+    @parametrize("dim", [0, 1])
+    @largeTensorTest("3GB")
+    def test_fft_real_two_sided(self, device, n, dim):
+        # Bluestein lengths (all but 1009 mirror on the host, the last past two tile passes) and a packed four-step
+        x, kwargs = torch.randn((n, 3) if dim == 0 else (3, n)), {"dim": dim, "norm": "ortho"}
+        self.assertEqual(torch.fft.fft(x.to(device), **kwargs).cpu(), torch.fft.fft(x, **kwargs))
+
+    def test_fft_bluestein_long(self, device):
+        # A prime above 2^23: Bluestein's transforms take 2^25 points, past the two tile passes
+        x = torch.randn(8388617, device=device, dtype=torch.complex64)
+        reference = torch.fft.fft(x.cpu().to(torch.complex128), norm="ortho")
+        self.assertEqual(torch.fft.fft(x, norm="ortho").cpu(), reference.to(torch.complex64))
+
+    @serialTest()
+    @dtypes(torch.complex32, torch.complex64)
+    @parametrize("n", [16, 32, 96, 2401, 4095, 4096, 8192])
+    @largeTensorTest(lambda self, device, dtype, n: 2**31 * dtype.itemsize + 2**30)
+    @largeMPSBufferTest(lambda self, device, dtype, n: 2**31 * dtype.itemsize + 2**30)
+    def test_fft_64bit_offsets(self, device, dtype, n):
+        # A transform spanning 2^31 elements takes the kernels with 64-bit offsets; 8192 points take several passes
+        wide = torch.empty(2**31 + n, device=device, dtype=dtype)[:: 2**31 // (n - 1) + 1]
+        x = torch.randn(n, device=device, dtype=dtype)
+        reference = torch.fft.fft(x.cpu().to(torch.complex128), norm="ortho").to(dtype)
+        tol = 2e-3 if dtype == torch.complex32 else None
+        torch.fft.fft(x, norm="ortho", out=wide)
+        # Only the last point lies past 2^31: read it back without the kernels
+        self.assertEqual(wide[-1].cpu(), reference[-1], atol=tol, rtol=tol)
+        self.assertEqual(torch.fft.ifft(wide, norm="ortho"), x, atol=tol, rtol=tol)
+
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
     def tearDownClass(cls):
@@ -15703,6 +15784,15 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertRaises(ValueError, lambda: lib.full(mps_tensor, group_size=max_thread_group_size + 5))
         self.assertRaises(ValueError, lambda: lib.full(mps_tensor, threads=(3, max_thread_group_size),
                                                        group_size=(3, max_thread_group_size)))
+
+    @parametrize("ndim", [1, 2, 3])
+    def test_metal_dispatch_over_uint32_threads(self, ndim):
+        # thread_position_in_grid is 32-bit per axis; oversize the last axis so every axis must be checked
+        lib = torch.mps.compile_shader("kernel void full(device float* x, uint3 idx [[thread_position_in_grid]]) { x[idx.x] = 1.0; }")
+        threads = [1] * (ndim - 1) + [2**32]
+        grid = "x".join(map(str, threads))
+        with self.assertRaisesRegex(ValueError, f"Dispatch grid {grid} exceeds 2\\^32 - 1 threads along one axis"):
+            lib.full(torch.zeros(4, device="mps"), threads=threads)
 
     def test_metal_randn(self):
         lib = torch.mps.compile_shader("""

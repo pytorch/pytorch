@@ -1494,6 +1494,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     ):
         if not int8_mixed_bf16 and dtype == torch.bfloat16:
             return
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            self.skipTest(
+                "oneDNN qlinear binary with a bf16 operand needs bf16 hardware support"
+            )
         B = (2, batch_size) if input_3d else (batch_size,)
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
         input2 = torch.randn(*B, in_features).to(dtype=torch.float32)
