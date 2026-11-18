@@ -4,12 +4,14 @@
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/disable.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
 
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <optional>
 #include <unordered_set>
@@ -17,6 +19,37 @@
 extern "C" {
 extern PyObject* guard_complete_hook;
 }
+
+namespace torch::dynamo {
+
+DisableDynamoGuard::DisableDynamoGuard() {
+  if (eval_frame_callback_get() != Py_None) {
+    py::gil_scoped_acquire gil;
+    // Keep the module alive without a decref during Python finalization.
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+        storage;
+    module_ = storage
+                  .call_once_and_store_result([]() -> py::object {
+                    return py::module::import("torch._C")
+                        .attr("_dynamo")
+                        .attr("eval_frame");
+                  })
+                  .get_stored()
+                  .ptr();
+    callback_ = dynamo_set_eval_frame(Py_None, module_);
+  }
+}
+
+DisableDynamoGuard::~DisableDynamoGuard() {
+  if (callback_ != nullptr) {
+    auto gil = PyGILState_Ensure();
+    Py_DECREF(dynamo_set_eval_frame(callback_, module_));
+    Py_DECREF(callback_);
+    PyGILState_Release(gil);
+  }
+}
+
+} // namespace torch::dynamo
 
 // Bytecode debugger callback - stored as raw PyObject* to avoid
 // shutdown issues with static py::object destructor running after Python
@@ -103,7 +136,6 @@ py::list _get_frame_value_stack_with_depth(
     return result;
   }
 
-#if IS_PYTHON_3_11_PLUS
   PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
   _PyInterpreterFrame* iframe = frame->f_frame;
   if (iframe == nullptr) {
@@ -151,7 +183,7 @@ py::list _get_frame_value_stack_with_depth(
     return result;
   }
   _PyStackRef* stack_base = iframe->localsplus + nlocalsplus;
-  for (int i = 0; i < depth; i++) {
+  for (const auto i : c10::irange(depth)) {
     PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
     if (obj == nullptr) {
       result.append(get_null_stack_value());
@@ -161,7 +193,7 @@ py::list _get_frame_value_stack_with_depth(
   }
 #else
   int stack_start = nlocalsplus;
-  for (int i = 0; i < depth; i++) {
+  for (const auto i : c10::irange(depth)) {
     PyObject* obj = iframe->localsplus[stack_start + i];
     if (obj == nullptr) {
       result.append(get_null_stack_value());
@@ -175,33 +207,6 @@ py::list _get_frame_value_stack_with_depth(
     }
   }
 #endif
-
-#else
-  // Python 3.10 and earlier - use f_valuestack
-  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
-  if (frame->f_valuestack == nullptr) {
-    return result;
-  }
-
-  PyCodeObject* code = frame->f_code;
-  if (code == nullptr) {
-    return result;
-  }
-
-  int stacksize = code->co_stacksize;
-  if (depth > stacksize) {
-    depth = stacksize;
-  }
-
-  for (int i = 0; i < depth; i++) {
-    PyObject* obj = frame->f_valuestack[i];
-    if (obj == nullptr) {
-      result.append(get_null_stack_value());
-    } else {
-      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
-    }
-  }
-#endif // IS_PYTHON_3_11_PLUS
 
   return result;
 }
@@ -344,22 +349,12 @@ PyObject* dynamo__custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback_py) {
-#if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
       get_frame_name(frame),
       PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
       F_CODE(frame)->co_firstlineno,
       _PyInterpreterFrame_LASTI(frame));
-#else
-  DEBUG_TRACE(
-      "begin %s %s %i %i %i",
-      get_frame_name(frame),
-      PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
-      frame->f_lineno,
-      frame->f_lasti,
-      frame->f_iblock);
-#endif
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==

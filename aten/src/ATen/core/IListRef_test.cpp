@@ -4,6 +4,7 @@
 #include <ATen/ops/empty.h>
 #endif
 #include <ATen/core/IListRef.h>
+#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 
 using namespace c10;
@@ -12,7 +13,7 @@ static std::vector<at::Tensor> get_tensor_vector() {
   std::vector<at::Tensor> tensors;
   const size_t SIZE = 5;
   tensors.reserve(SIZE);
-  for (size_t i = 0; i < SIZE; i++) {
+  for ([[maybe_unused]] const auto _ : c10::irange(SIZE)) {
     tensors.emplace_back(at::empty({0}));
   }
   return tensors;
@@ -21,7 +22,7 @@ static std::vector<at::Tensor> get_tensor_vector() {
 static std::vector<std::optional<at::Tensor>> get_boxed_opt_tensor_vector() {
   std::vector<std::optional<at::Tensor>> optional_tensors;
   const size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE * 2; i++) {
+  for (const auto i : c10::irange(SIZE * 2)) {
     auto opt_tensor = (i % 2 == 0) ? std::optional<at::Tensor>(at::empty({0})) : std::nullopt;
     optional_tensors.emplace_back(opt_tensor);
   }
@@ -32,7 +33,7 @@ static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
   static std::vector<at::Tensor> tensors;
   std::vector<at::OptionalTensorRef> optional_tensors;
   constexpr size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE; i++) {
+  for (const auto i : c10::irange(SIZE)) {
     tensors.push_back(at::empty({0}));
     optional_tensors.emplace_back(tensors[i]);
     optional_tensors.emplace_back();

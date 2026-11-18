@@ -161,6 +161,11 @@ def _reserve_rng_state(device: torch.device, used_offset):
     return seed_t, base
 
 
+def rand_eager_vec(dtype: torch.dtype | None) -> int:
+    """Vector width of eager CUDA dropout (fused_dropout_kernel_vec) for an aligned tensor."""
+    return 8 if dtype in (torch.float16, torch.bfloat16) else 4
+
+
 def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:
     """
     Reserve `offset` 32-bit Philox samples and return a 1-element int64 tensor

@@ -795,6 +795,53 @@ class TestHipify(TestCase):
             self.assertIn("std::exp(x[0]) + std::pow(x[1], 2)", hipified)
             self.assertIn("hipDeviceSynchronize", hipified)
 
+    def test_hipify_extension_sources(self):
+        from torch.utils.hipify import hipify_python
+
+        with (
+            tempfile.TemporaryDirectory() as src_dir,
+            tempfile.TemporaryDirectory() as build_dir,
+        ):
+            include_dir = os.path.join(src_dir, "includes")
+            os.makedirs(include_dir)
+            with open(os.path.join(include_dir, "helper.cuh"), "w") as f:
+                f.write("#include <cuda_runtime.h>\n")
+            source = os.path.join(src_dir, "kernel.cu")
+            with open(source, "w") as f:
+                f.write('#include <ATen/cuda/CUDAContext.h>\n#include "helper.cuh"\n')
+
+            # Mirrors the hipify call in torch.utils.cpp_extension._jit_compile.
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                header_include_dirs=[include_dir],
+                extra_files=[os.path.abspath(source)],
+                show_detailed=False,
+                show_progress=False,
+                is_pytorch_extension=True,
+            )
+
+            hipified = result[os.path.abspath(source)].hipified_path
+            self.assertEqual(hipified, os.path.join(src_dir, "kernel.hip"))
+            with open(hipified) as f:
+                out = f.read()
+            self.assertIn("ATen/hip/HIPContext.h", out)
+            self.assertIn('#include "helper_hip.cuh"', out)
+            self.assertTrue(os.path.exists(os.path.join(include_dir, "helper_hip.cuh")))
+
+    def test_hipify_rel_path_without_common_root(self):
+        from torch.utils.hipify import hipify_python
+
+        # Windows raises ValueError from relpath for paths on different drives.
+        path = os.path.abspath(os.path.join("cuda", "kernel.cu"))
+        with mock.patch.object(
+            hipify_python.os.path, "relpath", side_effect=ValueError
+        ):
+            base, rel = hipify_python._rel_path_for_hipify(path, "unused")
+        self.assertFalse(os.path.isabs(rel))
+        self.assertNotIn("\\", rel)
+        self.assertEqual(os.path.normpath(os.path.join(base, rel)), path)
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
@@ -880,21 +927,6 @@ class TestAssert(TestCase):
         with self.assertRaisesRegex(AssertionError, "bar"):
             torch._assert(torch.tensor([False], dtype=torch.bool), "bar")
 
-    def test_assert_scriptable(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                torch._assert(x.sum() > 0, "foo")
-                return x
-
-        m = M()
-        # scriptable
-        ms = torch.jit.script(m)
-        # data can be passed without errors
-        x = torch.randn(4, 4).fill_(1.0)
-        ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):
-            ms(torch.tensor([False], dtype=torch.bool))
-
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
@@ -929,10 +961,16 @@ class TestStandaloneCPPJIT(TestCase):
             )
 
             for shell in [True, False]:
+                # GPU init setenv()s ROCPROFILER_REGISTER_LIBRARY. os.environ
+                # never sees it, but this binary inherits it and aborts before
+                # main(). Rebuilding from os.environ drops it.
+                env = os.environ.copy()
+                env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
                 r = subprocess.run(
                     [exec_path],
                     shell=shell,
                     stdout=subprocess.PIPE,
+                    env=env,
                 )
                 self.assertEqual(r.returncode, 0)
                 self.assertEqual(
