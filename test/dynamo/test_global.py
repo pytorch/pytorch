@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import importlib.util
 import os
 import sys
@@ -98,6 +99,70 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         self.assertTrue(same(res1, x + x + 1))
+
+    def test_store_global_new_shadows_builtin(self):
+        def fn_input(x):
+            global input
+            input = x
+            return torch.conj(input)
+
+        def fn_list(x):
+            global list
+            list = x
+            return torch.conj(list)
+
+        def fn_type(x):
+            global type
+            type = x
+            return torch.conj(type)
+
+        try:
+            for name, fn in (
+                ("input", fn_input),
+                ("list", fn_list),
+                ("type", fn_type),
+            ):
+                with self.subTest(name=name):
+                    self.assertNotIn(name, globals())
+                    x = torch.randn(4, 4)
+                    cnts = torch._dynamo.testing.CompileCounter()
+                    opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+                    result = opt_fn(x)
+                    self.assertTrue(same(result, torch.conj(x)))
+                    self.assertIs(globals()[name], x)
+                    self.assertEqual(cnts.frame_count, 1)
+                    self.assertTrue(same(opt_fn(x), torch.conj(x)))
+                    self.assertEqual(cnts.frame_count, 2)
+        finally:
+            for name in ("input", "list", "type"):
+                globals().pop(name, None)
+
+    def test_load_builtin_without_global(self):
+        def fn_input():
+            return input
+
+        def fn_list(x):
+            return list(iter((x,)))
+
+        def fn_type(x):
+            return type(x)
+
+        for name in ("input", "list", "type"):
+            self.assertNotIn(name, globals())
+
+        self.assertIs(
+            torch.compile(fn_input, backend="eager", fullgraph=True)(),
+            builtins.input,
+        )
+        x = torch.randn(4, 4)
+        self.assertIs(
+            torch.compile(fn_list, backend="eager", fullgraph=True)(x)[0],
+            x,
+        )
+        self.assertIs(
+            torch.compile(fn_type, backend="eager", fullgraph=True)(x),
+            torch.Tensor,
+        )
 
     def test_store_global_list(self):
         def fn(x):
@@ -255,6 +320,86 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         self.assertTrue(mock_store_global_crossfile_inline.global_flag)
         fn(torch.ones(2, 2))
         self.assertFalse(mock_store_global_crossfile_inline.global_flag)
+
+    def test_store_global_builtin_shadow_crossfile_inline(self):
+        try:
+            from . import mock_store_global_crossfile_inline as mock_module
+        except ImportError:
+            import mock_store_global_crossfile_inline as mock_module
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return mock_module.shadow_list(x)
+
+        x = torch.randn(4, 4)
+        try:
+            self.assertTrue(same(fn(x), torch.conj(x)))
+            self.assertIs(mock_module.list, x)
+        finally:
+            mock_module.__dict__.pop("list", None)
+
+    def test_store_global_builtin_shadow_same_module_inline(self):
+        def helper(x):
+            global list
+            list = x
+
+        def fn(x):
+            helper(x)
+            return torch.conj(list)
+
+        x = torch.randn(4, 4)
+        try:
+            self.assertTrue(
+                same(
+                    torch.compile(fn, backend="eager", fullgraph=True)(x),
+                    torch.conj(x),
+                )
+            )
+            self.assertIs(globals()["list"], x)
+        finally:
+            globals().pop("list", None)
+
+    def test_builtin_only_crossfile_inline(self):
+        try:
+            from . import mock_store_global_crossfile_inline as mock_module
+        except ImportError:
+            import mock_store_global_crossfile_inline as mock_module
+
+        from torch._dynamo.guards import GuardBuilder
+
+        builtin_helper = mock_module.builtin_only
+        global_helper = mock_module.read_global_flag
+
+        def fn(x):
+            return builtin_helper(x)
+
+        def fn_with_global(x):
+            return global_helper(x)
+
+        x = torch.randn(4, 4)
+        explanation = torch._dynamo.explain(fn)(x)
+
+        self.assertEqual(explanation.graph_count, 1)
+        graph_output, = explanation.graphs[0](x)
+        self.assertTrue(same(graph_output, x + 4))
+
+        control = torch._dynamo.explain(fn_with_global)(x)
+        self.assertEqual(control.graph_count, 1)
+        control_output, = control.graphs[0](x)
+        self.assertTrue(same(control_output, x))
+        control_module_sources = [
+            guard.originating_source
+            for guard in control.out_guards
+            if guard.inner_create_fn() is GuardBuilder.MODULE_MATCH
+        ]
+        self.assertTrue(control_module_sources)
+        self.assertFalse(
+            any(
+                guard.inner_create_fn() is GuardBuilder.MODULE_MATCH
+                and guard.originating_source in control_module_sources
+                for guard in explanation.out_guards
+            )
+        )
 
     def test_unregistered_importlib_module_globals(self):
         module_name = "test_dynamo_unregistered_module_181243"
