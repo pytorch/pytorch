@@ -4114,10 +4114,10 @@ def capture(
     first calls. :func:`load` lists the CUDA graph settings that stay the
     loading process's.
 
-    The artifact records one CUDA graph config for all its graphs. A graph
-    that a :func:`torch._dynamo.override_cudagraphs` decided differently from
-    the capture's ``triton.cudagraphs`` is not supported: its artifact fails to
-    load, or serves that graph without CUDA graphs.
+    The artifact records one CUDA graph config for all its graphs, so a
+    capture is refused when a :func:`torch._dynamo.override_cudagraphs` decides
+    a graph differently from its ``triton.cudagraphs``: ``fwd`` differing from
+    it, or ``bwd=False`` for a CUDA-graphed forward that has a backward.
 
     ``CUDAGRAPH_CONFIG`` reaches Inductor as ``options`` do, so Dynamo traces
     the captured calls under ``torch._inductor.config``, as under
