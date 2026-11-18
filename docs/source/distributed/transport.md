@@ -80,6 +80,46 @@ stream; captured transfers hold their slot until `close`. Since consumers may
 already be enqueued, a failed transfer terminates the process. Backends with
 native stream support may override these methods.
 
+## Mooncake RDMA NIC selection
+
+The Mooncake backend (`protocol="rdma"`) restricts RDMA traffic to the NICs
+nearest the transport's accelerator, targeting one process
+per accelerator. The accelerator is the transport's `device` if it has an
+index, otherwise the current `torch.accelerator` device: call
+`torch.accelerator.set_device_index` (or `torch.cuda.set_device`) before
+creating the transport. If `device` is CPU or `None`, the current device is used
+only once the accelerator runtime is initialized, so processes that never
+initialize an accelerator are left unrestricted. Selection is also skipped
+when the current device is 0 while `LOCAL_RANK` (set by torchrun) is nonzero and
+more than one device is visible, since that usually means `set_device` was not
+called; other launchers get no such check. Pass an indexed accelerator `device`
+(which rejects CPU tensors), or list the NICs with `device_name`. When selection runs, an
+accelerator `device` may initialize its runtime. A process that transfers tensors
+on several accelerators still uses only one accelerator's NICs; list every NIC
+explicitly (see below) to use them all. Every registered buffer, including CPU memory
+on other NUMA nodes, uses only the selected NICs; with a single selected NIC, a
+local NIC failure fails the transfer instead of moving to another NIC.
+
+Only physical NICs with an active port 1 at the fastest link rate are
+considered, which excludes slower frontend NICs and SR-IOV virtual functions. The nearest NICs
+share the longest PCIe path with the accelerator, with ties broken by NUMA
+node. Accelerators with the same nearest NICs, including those hidden by
+`CUDA_VISIBLE_DEVICES`, form a group. In PCI address order, each member gets an
+equal, disjoint share of the group's NICs sorted by name (`mlx5_10` sorts
+before `mlx5_2`); members share NICs round-robin if they outnumber them. Groups
+containing closer accelerators claim NICs first. A group whose nearest NICs
+overlap a closer group's uses the unclaimed ones, including that group's
+remainder, or shares the claimed ones if none are left. A group never uses
+NICs outside its nearest set, even if idle. Where sysfs exposes no locality,
+such as in some VMs, all accelerators form one group.
+
+Selection reads Linux sysfs and the PCI address from `get_device_properties`,
+which CUDA and ROCm expose. If either is unavailable, the backend uses its
+default NIC discovery. To choose NICs explicitly, pass
+`device_name="mlx5_0,mlx5_1"`; list every NIC to use them all. Setting
+`MC_TE_FILTERS`, `MC_CUSTOM_TOPO_JSON` or `MC_RDMA_DATA_DIRECT_PAIRING`
+disables selection.
+
 ## NIXL backend
 
 The initial backend is NIXL, installed separately with `pip install nixl`.
