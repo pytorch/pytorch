@@ -384,6 +384,7 @@
 # /torch/csrc/Exceptions.cpp
 # /torch/csrc/Exceptions.h
 # /torch/csrc/Export.h
+# /torch/csrc/FakeFallbackKernel.cpp
 # /torch/csrc/FakeTensorMode.cpp
 # /torch/csrc/FakeTensorMode.h
 # /torch/csrc/Generator.cpp
@@ -959,14 +960,13 @@
 #
 # [infra_ci]
 # label: module: ci
-# owner: @atalman @georgehong @huydhn @jathu @malfet @zklaus
+# owner: @atalman @huydhn @malfet @zklaus
 /.ci/ @huydhn @atalman
-/.ci/pytorch/ @huydhn @georgehong @atalman @jathu
-/.ci/pytorch/build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/common-build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/macos-build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/win-arm64-build.ps1 @huydhn @georgehong @atalman @jathu @malfet @zklaus
-/.ci/pytorch/win-build.sh @huydhn @georgehong @atalman @jathu @malfet @zklaus
+/.ci/pytorch/build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/common-build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/macos-build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/win-arm64-build.ps1 @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/win-build.sh @huydhn @atalman @malfet @zklaus
 # label: module: ci, module: docker
 # owner: @atalman @huydhn @malfet
 /.ci/docker/ @atalman @huydhn @malfet
