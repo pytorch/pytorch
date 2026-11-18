@@ -33,20 +33,22 @@ function withFixture(callback) {
   });
 }
 
-test('only the allocated PR producer is active and the default PR0 remains denied', () => {
+test('only the allocated PR consumer is active and the default PR0 remains denied', () => {
   assert.equal(canary.EXPECTED_PR, 0);
   const {env, event, run, pr} = identities(205419);
   assert.throws(() => canary.validateIdentity(env, event, run, pr));
   assert.equal(canary.validateIdentity(env, event, run, pr, 205419).pr, 205419);
   assert.throws(() => canary.validateIdentity(env, event, run, pr, 205398));
   const activation = require('./activation.json');
-  assert.deepEqual(activation, {phase: 'producer', expected_pr: 205419, actor_ids: {ptdbot: 283013143, d4l3k: 909104}, rest_preflight: {run_id: 44210618534, attempt: 2, head: '4784376f2eeaa58f1927676d2c0be1f53133ef85', job_id: 134488060725, workflow_id: 422034765, pr: 205419, deleted_by: 'd4l3k', delete_status: 204, deleted_get_status: 404, remaining_artifacts: 0, artifacts: {preflight: {id: 14385473342, name: 'release-artifact-crossrun-44210618534-2-preflight', digest: 'b080dcdf4d6082c9d30fe62dcd93984b6b8745bce2f85f89cfd1bc5bd0fafa5f'}}}, producer: null});
+  const producer = {run_id: 44212393643, attempt: 2, head: 'aefe013f1e0164a2c6ef27f0bfda332d0209cf6b', job_id: 134493913211, workflow_id: 422034765, pr: 205419, artifacts: {ordinary: {id: 14386677146, name: 'release-artifact-crossrun-44212393643-2-ordinary', digest: '8d10a147f7e579879fbeb24bdff31081b5215394cbd5a7e7fda9e4138d421a88'}, leading: {id: 14385879061, name: 'release-artifact-crossrun-44212393643-2-leading', digest: 'b98208d61a2a4cefb65b89ea8dd78c29c041cbe3aec00c9ada0a69c05b72d59f'}, embedded: {id: 14386642177, name: 'flash-attn-3-wheel-cu126-x86_64', digest: 'fee10b54cdb9f95daa52ad5f7bd0dd6aefe63c6794e970411605ec942a2f2e5f'}}};
+  assert.deepEqual(activation, {phase: 'consumer', expected_pr: 205419, actor_ids: {ptdbot: 283013143, d4l3k: 909104}, rest_preflight: {run_id: 44210618534, attempt: 2, head: '4784376f2eeaa58f1927676d2c0be1f53133ef85', job_id: 134488060725, workflow_id: 422034765, pr: 205419, deleted_by: 'd4l3k', delete_status: 204, deleted_get_status: 404, remaining_artifacts: 0, artifacts: {preflight: {id: 14385473342, name: 'release-artifact-crossrun-44210618534-2-preflight', digest: 'b080dcdf4d6082c9d30fe62dcd93984b6b8745bce2f85f89cfd1bc5bd0fafa5f'}}}, producer});
   assert.deepEqual(require('./index.cjs').configuration(), activation);
   assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'disabled', expected_pr: 0}));
   assert.throws(() => require('./index.cjs').configuration({...activation, expected_pr: 0}));
   assert.throws(() => require('./index.cjs').configuration({...activation, rest_preflight: null}));
   assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'preflight'}));
-  assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'consumer'}));
+  assert.throws(() => require('./index.cjs').configuration({...activation, producer: null}));
+  assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'producer'}));
   const workflow = fs.readFileSync(path.resolve(__dirname, '../../workflows/security-artifact-crossrun.yml'), 'utf8');
   assert.equal(canary.WORKFLOW, '.github/workflows/security-artifact-crossrun.yml');
   assert.equal((workflow.match(/github\.event\.pull_request\.number == 205419\b/g) || []).length, 2);

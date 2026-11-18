@@ -1,5 +1,5 @@
 {
-  "phase": "producer",
+  "phase": "consumer",
   "expected_pr": 205419,
   "actor_ids": {"ptdbot": 283013143, "d4l3k": 909104},
   "rest_preflight": {
@@ -21,5 +21,29 @@
     "run_id": 44210618534,
     "workflow_id": 422034765
   },
-  "producer": null
+  "producer": {
+    "artifacts": {
+      "embedded": {
+        "digest": "fee10b54cdb9f95daa52ad5f7bd0dd6aefe63c6794e970411605ec942a2f2e5f",
+        "id": 14386642177,
+        "name": "flash-attn-3-wheel-cu126-x86_64"
+      },
+      "leading": {
+        "digest": "b98208d61a2a4cefb65b89ea8dd78c29c041cbe3aec00c9ada0a69c05b72d59f",
+        "id": 14385879061,
+        "name": "release-artifact-crossrun-44212393643-2-leading"
+      },
+      "ordinary": {
+        "digest": "8d10a147f7e579879fbeb24bdff31081b5215394cbd5a7e7fda9e4138d421a88",
+        "id": 14386677146,
+        "name": "release-artifact-crossrun-44212393643-2-ordinary"
+      }
+    },
+    "attempt": 2,
+    "head": "aefe013f1e0164a2c6ef27f0bfda332d0209cf6b",
+    "job_id": 134493913211,
+    "pr": 205419,
+    "run_id": 44212393643,
+    "workflow_id": 422034765
+  }
 }
