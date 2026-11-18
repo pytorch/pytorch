@@ -5004,14 +5004,10 @@ class TestPrecompileDynamoCapture(TestCase):
     def test_inductor_compiles_a_capture_under_the_cudagraph_config_it_records(self):
         compiled = self._inductor_compiles_under()
         partition = torch._inductor.config.graph_partition
-        # Read when capture() is called: the options over the ambient config.
+        # The options over the ambient config.
+        options = {"triton.cudagraph_trees": False}
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
-            session = self._capture(
-                self.mod.single, options={"triton.cudagraph_trees": False}
-            )
-        with session as cap:
-            # Whatever the ambient config says by the time of the call.
-            with torch._inductor.config.patch({"graph_partition": not partition}):
+            with self._capture(self.mod.single, options=options) as cap:
                 cap(self.model, self.x2)
         record = {
             "triton.cudagraphs": True,
@@ -5056,6 +5052,41 @@ class TestPrecompileDynamoCapture(TestCase):
         # The second value recompiles with scale as a dynamic input, which covers
         # the third; specialized, each value is its own variant.
         self.assertEqual(len(traced), 2 if partition else 3)
+
+    @parametrize(
+        "key",
+        [
+            "cpp_wrapper",
+            "graph_partition",
+            "triton.cudagraphs",
+            "triton.cudagraph_trees",
+        ],
+    )
+    def test_a_cudagraph_input_changed_after_capture_began_refuses(self, key):
+        options = {"triton.cudagraphs": True, "graph_partition": True}
+        with self._capture(self.mod.single, options=options) as cap:
+            # The check compares the ambient value, not the options over it.
+            flipped = {key: not operator.attrgetter(key)(torch._inductor.config)}
+            with torch._inductor.config.patch(flipped):
+                with self.assertRaisesRegex(PrecompileError, "changed since capture"):
+                    cap(self.model, self.x2)
+            cap(self.model, self.x2)
+
+    @parametrize("options", [None, {"triton.cudagraphs": False}])
+    def test_a_capture_without_cudagraphs_refuses_an_ambient_request(self, options):
+        with self._capture(self.mod.single, options=options) as cap:
+            with torch._inductor.config.patch({"triton.cudagraphs": True}):
+                if options is None:
+                    # It would be silently ignored.
+                    with self.assertRaisesRegex(PrecompileError, "changed since"):
+                        cap(self.model, self.x2)
+                else:
+                    # The options win over it, as under torch.compile.
+                    cap(self.model, self.x2)
+            cap(self.model, self.x2)
+        self.assertEqual(
+            self._recorded_cudagraph_config(), {"triton.cudagraphs": False}
+        )
 
     def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
         # cpp_wrapper compiles no CUDA graphs under graph_partition, and a graph
