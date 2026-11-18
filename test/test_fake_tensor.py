@@ -2572,7 +2572,6 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @parametrize("op", ["detach", "data", "shallow_copy_data"])
     @parametrize("active", [False, True])
     @parametrize("symbolic", [False, True])
