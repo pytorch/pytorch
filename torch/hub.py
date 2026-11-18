@@ -587,7 +587,7 @@ def load(
     r"""
     Load a model from a github repo or a local directory.
 
-    Note: Loading a model is the typical use case, but this can also be used to
+    Note: Loading a model is the typical use case, but this can also be used
     for loading other objects such as tokenizers, loss functions, etc.
 
     If ``source`` is 'github', ``repo_or_dir`` is expected to be

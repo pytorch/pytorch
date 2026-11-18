@@ -1,25 +1,26 @@
-#include <torch/csrc/dynamo/cache_entry.h>
-#include <torch/csrc/dynamo/guards.h>
+#include <string>
+#include <utility>
 
-#include <torch/csrc/dynamo/debug_macros.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/extra_state.h>
+#include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend{py::cast<py::object>(get_backend(backend))} {
-  this->guard_manager = guarded_code.attr("guard_manager");
-  this->code = guarded_code.attr("code");
-  this->compile_id = guarded_code.attr("compile_id");
-  py::object trace_annotation = guarded_code.attr("trace_annotation");
-  const char* trace_annotation_str = PyUnicode_AsUTF8(trace_annotation.ptr());
-  if (trace_annotation) {
-    this->trace_annotation = std::string(trace_annotation_str);
+    : guard_manager{guarded_code.attr("guard_manager")},
+      code{guarded_code.attr("code")},
+      compile_id{guarded_code.attr("compile_id")},
+      root_mgr{torch::dynamo::convert_to_root_guard_manager(
+          guard_manager.attr("root"))},
+      diff_guard_root_mgr{torch::dynamo::convert_to_root_guard_manager(
+          guard_manager.attr("diff_guard_root"))},
+      backend{py::cast<py::object>(get_backend(backend))} {
+  if (py::object trace_annotation_obj{guarded_code.attr("trace_annotation")}) {
+    trace_annotation = std::move(trace_annotation_obj).cast<std::string>();
   } else {
-    this->trace_annotation = "Unknown";
+    trace_annotation = "Unknown";
   }
-  this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
-      this->guard_manager.attr("root"));
-  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
-      this->guard_manager.attr("diff_guard_root"));
 }
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
@@ -27,6 +28,10 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 // NOLINTNEXTLINE(bugprone-exception-escape)
 CacheEntry::~CacheEntry() {
+  // Only an entry linked into an ExtraState set the back-references.
+  if (this->_owner == nullptr) {
+    return;
+  }
   // prevent guard_manager from use-after-free when invalidating
   this->guard_manager.attr("cache_entry") = py::none();
   this->guard_manager.attr("extra_state") = py::none();
@@ -47,16 +52,33 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
 }
 
 void CacheEntry::update_diff_guard_root_manager() {
+  TORCH_CHECK(
+      this->_owner != nullptr,
+      "cannot update the diff guard root of a copied cache entry");
   this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
       this->guard_manager.attr("diff_guard_root"));
 }
 
-PyCodeObject* CacheEntry_get_code(CacheEntry* e) {
-  return (PyCodeObject*)e->code.ptr();
+CacheEntry CacheEntry::copy_for_python() const {
+  CacheEntry copy(*this);
+  copy.root_mgr = nullptr;
+  copy.diff_guard_root_mgr = nullptr;
+  copy._owner = nullptr;
+  copy._source = identity();
+  copy._owner_loc = {};
+  return copy;
 }
 
-const char* CacheEntry_get_trace_annotation(CacheEntry* e) {
-  return e->trace_annotation.c_str();
+const CacheEntry* CacheEntry::identity() const {
+  return _source != nullptr ? _source : this;
+}
+
+bool CacheEntry::py_equal(const CacheEntry& other) const {
+  return identity() == other.identity() && compile_id.is(other.compile_id);
+}
+
+std::size_t CacheEntry::py_hash() const {
+  return std::hash<const void*>{}(identity());
 }
 
 PyObject* CacheEntry_to_obj(CacheEntry* e) {
@@ -66,10 +88,28 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
   return py::cast(e, py::return_value_policy::reference).release().ptr();
 }
 
+static PyObject* get_orig_backend_str() {
+  // NB: leak
+  constinit static py::gil_safe_call_once_and_store<py::str> storage;
+  return storage
+      .call_once_and_store_result([]() {
+        return py::reinterpret_steal<py::str>(
+            PyUnicode_InternFromString("_torchdynamo_orig_backend"));
+      })
+      .get_stored()
+      .ptr();
+}
+
 PyObject* get_backend(PyObject* callback) {
-  py::handle handle = py::handle(callback);
-  while (py::hasattr(handle, "_torchdynamo_orig_backend")) {
-    handle = handle.attr("_torchdynamo_orig_backend");
+  PyObject* orig_backend_str{get_orig_backend_str()};
+  PyObject* next{nullptr};
+
+  // PyObject_GetOptionalAttr is in the C-API compat file, and more efficient
+  // than calling hasattr/getattr.
+  while (PyObject_GetOptionalAttr(callback, orig_backend_str, &next) > 0) {
+    // Return borrowed; the previous hop's attribute keeps it alive.
+    Py_DECREF(next);
+    callback = next;
   }
-  return handle.ptr();
+  return callback;
 }

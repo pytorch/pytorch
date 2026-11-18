@@ -13,10 +13,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
-#include <ATen/ops/ones.h>
 #include <ATen/ops/slow_conv_transpose2d_native.h>
 #include <ATen/ops/sum.h>
-#include <ATen/ops/zeros.h>
 #endif
 
 #include <c10/core/TensorOptions.h>
@@ -370,7 +368,7 @@ void slow_conv_transpose2d_out_cpu_template(
             stride_width,
             dilation_height,
             dilation_width,
-            output_n.data_ptr<scalar_t>(),
+            output_n.mutable_data_ptr<scalar_t>(),
             use_channels_last);
       }
     });
@@ -525,7 +523,7 @@ void slow_conv_transpose2d_backward_out_cpu_template(
                   stride_width,
                   dilation_height,
                   dilation_width,
-                  grad_columns.data_ptr<scalar_t>(),
+                  grad_columns.mutable_data_ptr<scalar_t>(),
                   use_channels_last);
           }
 
@@ -723,7 +721,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                   stride_width,
                   dilation_height,
                   dilation_width,
-                  columns.data_ptr<scalar_t>(),
+                  columns.mutable_data_ptr<scalar_t>(),
                   use_channels_last);
             }
 

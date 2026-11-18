@@ -6,7 +6,8 @@ import importlib
 import inspect
 import sys
 import types
-from collections.abc import Callable, Iterator
+import weakref
+from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, ClassVar, Concatenate, final, Generic, TYPE_CHECKING
@@ -57,6 +58,68 @@ def dl_open_guard():
         yield
     finally:
         sys.setdlopenflags(old_flags)
+
+
+class _PyKernelDict(dict[DispatchKey, Callable[..., Any]]):
+    """Keep native PythonCIA membership in sync without changing dict reads."""
+
+    def __init__(self, op: "OpOverload", kernels):
+        super().__init__(kernels)
+        self._owner = weakref.ref(op)
+
+    def _sync_python_cia(self):
+        op = self._owner()
+        if op is None or op.py_kernels is not self:
+            return
+        has_python_cia = DispatchKey.CompositeImplicitAutograd in self
+        if has_python_cia == op._has_python_cia:
+            return
+        schema = op._schema
+        if has_python_cia:
+            torch._C._fake_dispatch_register_python_cia(
+                schema.name, schema.overload_name
+            )
+        else:
+            torch._C._fake_dispatch_deregister_python_cia(
+                schema.name, schema.overload_name
+            )
+        op._has_python_cia = has_python_cia
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self._sync_python_cia()
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self._sync_python_cia()
+
+    def clear(self):
+        super().clear()
+        self._sync_python_cia()
+
+    def pop(self, key, *args):
+        value = super().pop(key, *args)
+        self._sync_python_cia()
+        return value
+
+    def popitem(self):
+        item = super().popitem()
+        self._sync_python_cia()
+        return item
+
+    def setdefault(self, key, default: Any = None):
+        value = super().setdefault(key, default)
+        self._sync_python_cia()
+        return value
+
+    def update(self, *args, **kwargs):
+        # dict.update bypasses __setitem__. Track each entry, including when an
+        # iterable reenters dispatch or raises partway through the update.
+        MutableMapping.update(self, *args, **kwargs)
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
 
 
 class OperatorBase:
@@ -578,6 +641,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def __deepcopy__(self, memo=None):
         return self
 
+    def __copy__(self):
+        return self
+
 
 def _to_flat_tuple(args, kwargs):
     return pytree.arg_tree_leaves(*args, **kwargs)
@@ -835,6 +901,18 @@ class _PyObjectDispatcher(Generic[_P, _T]):
 # Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload(OperatorBase, Generic[_P, _T]):
+    def __setattr__(self, name, value):
+        if name == "py_kernels" and "_schema" in self.__dict__:
+            # Keep old kernels alive until native membership is updated.
+            previous = self.__dict__.get(name)
+            if value is previous:
+                return
+            value = _PyKernelDict(self, value)
+            super().__setattr__(name, value)
+            value._sync_python_cia()
+        else:
+            super().__setattr__(name, value)
+
     def __init__(
         self,
         overloadpacket: "OpOverloadPacket",
@@ -849,7 +927,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         # dispatcher handle separately for code that must bypass that fast path.
         self._cpp_dispatch_handle = op
         self._op_dk = op_dk
+        self._has_python_cia = False
         self._schema = schema
+        self.py_kernels = {}
         self._pyobj_dispatcher: _PyObjectDispatcher[_P, _T] | None = None
         self._overloadpacket = overloadpacket
         self._tags = tags
@@ -900,6 +980,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
+        return self
+
+    def __copy__(self):
         return self
 
     def __repr__(self):
@@ -1257,6 +1340,9 @@ class OpOverloadPacket(Generic[_P, _T]):
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
+        return self
+
+    def __copy__(self):
         return self
 
     def __repr__(self):

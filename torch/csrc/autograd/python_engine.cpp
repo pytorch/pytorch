@@ -1,10 +1,11 @@
 #include <torch/csrc/autograd/python_engine.h>
 
+#include <torch/csrc/Exceptions.h>
+
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
@@ -13,6 +14,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_node_creation_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -110,13 +112,19 @@ std::unique_ptr<SavedVariableHooks> PythonEngine::
   return PyDefaultSavedVariableHooks::get_hooks();
 }
 
+std::vector<std::unique_ptr<NodeCreationHook>> PythonEngine::
+    get_node_creation_hooks() {
+  return PyDefaultNodeCreationHooks::get_hooks();
+}
+
 variable_list PythonEngine::execute(
     const edge_list& roots,
     const variable_list& inputs,
     bool keep_graph,
     bool create_graph,
     bool accumulate_grad,
-    const edge_list& outputs) {
+    const edge_list& outputs,
+    bool disallow_implicit_grad_accumulation) {
   TORCH_CHECK(
       !PyGILState_Check(),
       "The autograd engine was called while holding the GIL. If you are using the C++ "
@@ -125,7 +133,13 @@ variable_list PythonEngine::execute(
       ". If you are not using the C++ API, please report a bug to the pytorch team.")
   try {
     return Engine::execute(
-        roots, inputs, keep_graph, create_graph, accumulate_grad, outputs);
+        roots,
+        inputs,
+        keep_graph,
+        create_graph,
+        accumulate_grad,
+        outputs,
+        disallow_implicit_grad_accumulation);
   } catch (python_error& e) {
     e.restore();
     throw;
@@ -182,6 +196,7 @@ static PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
+  unsigned char disallow_implicit_grad_accumulation = 0;
   constexpr const char* accepted_kwargs[] = {
       "tensors",
       "grad_tensors",
@@ -190,11 +205,12 @@ static PyObject* THPEngine_run_backward(
       "inputs",
       "allow_unreachable",
       "accumulate_grad",
+      "disallow_implicit_grad_accumulation",
       nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "OObb|Obb",
+          "OObb|Obbb",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast,-warnings-as-errors)
           const_cast<char**>(accepted_kwargs),
           &tensors,
@@ -203,7 +219,8 @@ static PyObject* THPEngine_run_backward(
           &create_graph,
           &inputs,
           &allow_unreachable,
-          &accumulate_grad))
+          &accumulate_grad,
+          &disallow_implicit_grad_accumulation))
     return nullptr;
   TORCH_CHECK(
       PyTuple_Check(tensors),
@@ -352,7 +369,13 @@ static PyObject* THPEngine_run_backward(
     pybind11::gil_scoped_release no_gil;
     auto& engine = python::PythonEngine::get_python_engine();
     outputs = engine.execute(
-        roots, grads, keep_graph, create_graph, accumulate_grad, output_edges);
+        roots,
+        grads,
+        keep_graph,
+        create_graph,
+        accumulate_grad,
+        output_edges,
+        disallow_implicit_grad_accumulation);
   }
 
   if (!backward_api_called && inputs != nullptr) {
@@ -389,23 +412,10 @@ static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) {
-      // Note [ Persisting PyErr state across autograd engine threads ]
-      //
-      // Since the autograd engine is multi-threaded, and Python error state is
-      // local to each thread, it must preserve the python error from the worker
-      // thread and rethrow it as-is in the calling thread. This is done via
-      // persisting the error in the two places that can encounter Python
-      // errors: (1) evaluate function and (2) queued callbacks.
-      //
-      // TODO: the engine is not actually responsible for persisting the error
-      // in the custom autograd Function case today! See the note above
-      // `raise_python_error()` function in python_function.cpp and
-      // python_hooks.cpp for more details. Persisting an extra time in the
-      // engine is fine because doing so is a no-op when the python_error has
-      // already been persisted.
-      python_error err;
-      err.persist();
-      throw std::move(err);
+      // See Note [ Persisting PyErr state across autograd engine threads ],
+      // above throw_python_error() in torch/csrc/Exceptions.h. Persisting an
+      // extra time here is a no-op if the error has already been persisted.
+      torch::throw_python_error();
     }
   });
   Py_RETURN_NONE;

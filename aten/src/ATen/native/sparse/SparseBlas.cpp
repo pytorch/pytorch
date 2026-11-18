@@ -16,8 +16,6 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/addmm.h>
-#include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/sparse_sampled_addmm_native.h>
 #include <ATen/ops/triangular_solve_native.h>
 #endif
@@ -121,6 +119,9 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
+    return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { sparse_sampled_addmm_out_sparse_csr_cpu(self, mat1, mat2, beta, alpha, r); });
+  }
   at::native::sparse::sparse_sampled_addmm_check_inputs(self, mat1, mat2, beta, alpha, result);
   // Allow only same types as for the CUDA path
   auto t = self.scalar_type();
