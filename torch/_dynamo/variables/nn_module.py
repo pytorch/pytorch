@@ -80,6 +80,7 @@ from ..utils import (
 )
 from .base import (
     Method,
+    NO_SUCH_SUBOBJ,
     typestr,
     ValueAndAttributeMutationExisting,
     ValueMutationNew,
@@ -88,7 +89,7 @@ from .base import (
 from .functions import invoke_and_store_as_constant
 from .hashable import HashableTracker
 from .lazy import LazyVariableTracker
-from .object_protocol import generic_is_true
+from .object_protocol import generic_getitem, generic_is_true, pysequence_contains
 from .user_defined import (
     can_guard_class_function_code,
     UserDefinedNNModuleHooksDictVariable,
@@ -540,20 +541,36 @@ class NNModuleVariable(VariableTracker):
         if name == "__dict__":
             return self.get_dict_vt(tx)
 
-        subobj = None
-        if name in base_dict:
-            subobj = base_dict[name]
-        elif (
-            "_modules" in base_dict
-            and name in base_dict["_modules"]
-            and name not in all_class_attribute_names
-        ):
-            subobj = base_dict["_modules"][name]
-        elif "_parameters" in base_dict and name in base_dict["_parameters"]:
-            subobj = base_dict["_parameters"][name]
-        elif "_buffers" in base_dict and name in base_dict["_buffers"]:
-            subobj = base_dict["_buffers"][name]
-        else:
+        subobj = base_dict.get(name, NO_SUCH_SUBOBJ)
+        if subobj is NO_SUCH_SUBOBJ and name not in all_class_attribute_names:
+            for field in ("_parameters", "_buffers", "_modules"):
+                if field not in base_dict:
+                    continue
+                registry = base_dict[field]
+                registry_source = AttrSource(self.source, field)
+                if (
+                    type(registry) is not dict
+                    and type(registry) is not collections.OrderedDict
+                ):
+                    mapping = VariableBuilder(tx, registry_source)(registry)
+                    key = VariableTracker.build(tx, name)
+                    if pysequence_contains(tx, mapping, key).as_python_constant():
+                        return generic_getitem(tx, mapping, key)
+                    continue
+                present = name in registry
+                guard = (
+                    GuardBuilder.DICT_CONTAINS
+                    if present
+                    else GuardBuilder.DICT_NOT_CONTAINS
+                )
+                install_guard(
+                    registry_source.make_guard(GuardBuilder.TYPE_MATCH),
+                    registry_source.make_guard(functools.partial(guard, key=name)),
+                )
+                if present:
+                    subobj = registry[name]
+                    break
+        if subobj is NO_SUCH_SUBOBJ:
             try:
                 subobj = inspect.getattr_static(base, name)
                 object_member = False
@@ -1631,7 +1648,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             result = dict_vt.maybe_getitem_const(name_vt)
             if result is None:
                 # Successful lookups guard the sourced value; misses need a presence guard.
-                dict_vt.install_dict_contains_guard(tx, HashableTracker(name_vt))
+                dict_vt.install_dict_contains_guard(
+                    tx, HashableTracker(name_vt), key_present=False
+                )
             return result
         return None
 

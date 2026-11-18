@@ -1200,6 +1200,7 @@ def temporary_tensor_subclass(torch_function=None):
     return TensorProxy
 
 
+@instantiate_parametrized_tests
 class NNModuleTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1871,7 +1872,26 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x), x)
         self.assertEqual(counter.frame_count, 2)
 
-    def test_registered_attribute_lookup_precedence(self):
+    def test_registered_attribute_lookup_custom_registry(self):
+        class HiddenValue(dict):
+            def __contains__(self, name):
+                return name != "value" and super().__contains__(name)
+
+        def fn(x, module):
+            return x + module.value
+
+        module = torch.nn.Module()
+        module.torchdynamo_force_dynamic = False
+        module.register_buffer("value", torch.tensor(2.0))
+        module._parameters["value"] = torch.nn.Parameter(torch.tensor(5.0))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for registry in (dict, HiddenValue, dict):
+            module._parameters = registry(module._parameters)
+            self.assertEqual(compiled(x, module), fn(x, module))
+
+    @parametrize("specialize", [False, True])
+    def test_registered_attribute_lookup_precedence(self, specialize):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1883,6 +1903,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 return value(x) + 7 if isinstance(value, torch.nn.Module) else x + value
 
         model = Model()
+        model.torchdynamo_force_dynamic = not specialize
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(model, backend=counter, fullgraph=True)
         x = torch.ones(1)

@@ -138,6 +138,7 @@ from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
+    _can_guard_lookup_hooks,
     _resolve_descriptor_get,
     generic_is_true,
     guard_mro_absent,
@@ -172,12 +173,7 @@ _SAFE_C_SLOTS: OrderedSet[object] | None = None
 def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
-    Covers tp_hash and tp_richcompare slots for C extension types, used by
-    UDOV's tp_hash_impl and tp_richcompare_impl MRO walks, and the
-    __getattribute__ wrappers of builtin types whose tp_getattro is
-    PyObject_GenericGetAttr, used by object_generic_getattr. A C type that
-    sets the slot explicitly gets its own wrapper, so identity with
-    object.__getattribute__ is not enough.
+    Covers tp_hash and tp_richcompare slots for C extension types used in UDOV's MRO walks.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -199,25 +195,6 @@ def _safe_c_slots() -> OrderedSet[object]:
             for dunder in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
                 if hasattr(tp, dunder):
                     _SAFE_C_SLOTS.add(getattr(tp, dunder))
-        for tp in (
-            object,
-            list,
-            tuple,
-            dict,
-            set,
-            frozenset,
-            collections.deque,
-            range,
-            str,
-            bytes,
-            bytearray,
-            int,
-            float,
-            complex,
-            slice,
-            torch.Size,
-        ):
-            _SAFE_C_SLOTS.add(tp.__getattribute__)
     return _SAFE_C_SLOTS
 
 
@@ -4066,22 +4043,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> None:
         cls = type(self.value)
-        if self.cls_source:
+        guard_mro = _can_guard_lookup_hooks(cls)
+        # A sourceless instance has no HASATTR fallback for custom metadata access.
+        if self.cls_source and (guard_mro or not self.source):
             mro_attr_source(tx, cls, self.cls_source, name)
-            if not config.assume_dunder_attributes_remain_unchanged:
-                mro_attr_source(tx, cls, self.cls_source, "__getattr__")
+            mro_attr_source(tx, cls, self.cls_source, "__getattr__")
         effects = tx.output.side_effects
-        if not self.source or any(
-            effects.has_pending_mutation_of_attr(self, attr)
-            for attr in (name, "__dict__")
+        if (
+            not self.source
+            or is_constant_source(self.source)
+            or any(
+                effects.has_pending_mutation_of_attr(self, attr)
+                for attr in (name, "__dict__")
+            )
         ):
             return
         # Guard storage rather than re-running a user getter while building/checking guards.
         offset = type.__dict__["__dictoffset__"].__get__(cls)
-        if offset and not isinstance(
-            self.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
+        if not guard_mro or (
+            offset
+            and not isinstance(
+                self.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
+            )
         ):
-            # Preserve the existing presence check when __dict__ is not a storage accessor.
+            # Preserve the presence guard when class metadata or storage access is customized.
             install_guard(
                 self.source.make_guard(
                     functools.partial(GuardBuilder.HASATTR, attr=name)
@@ -4559,13 +4544,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     self.cls_source
                 ):
                     mro_attr_source(tx, self.value_type, self.cls_source, name)
-                # Install before inlining so nested graph breaks preserve the guard.
-                # A traced deletion may leave the name present in the live dict.
+                # A traced deletion may leave the name present in the live dictionary.
                 if (
                     self.source
                     and not is_constant_source(self.source)
-                    and hasattr(self.value, "__dict__")
-                    and name not in self.value.__dict__
+                    and isinstance(
+                        self.lookup_class_mro_attr("__dict__"),
+                        types.GetSetDescriptorType,
+                    )
+                    and name not in object.__getattribute__(self.value, "__dict__")
                 ):
                     install_not_in_instance_dict_guard(self.source, name)
             if (
