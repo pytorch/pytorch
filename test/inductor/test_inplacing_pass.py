@@ -2,6 +2,7 @@
 
 import operator
 import unittest
+from unittest import mock
 
 import torch
 import torch._inductor.config as inductor_config
@@ -18,6 +19,7 @@ from torch._higher_order_ops.auto_functionalize import (
 from torch._inductor import inductor_prims
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.fx_passes.control_dependencies import preserve_node_ordering
+from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
 from torch._inductor.fx_passes.reinplace import (
     inplaceable_foreach_ops,
     reinplace_inplaceable_ops,
@@ -951,7 +953,244 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(gm(*inputs), f(*inputs))
 
     @parametrize("enable_v2", [False, True])
-    def test_auto_functionalized_without_decomposition(self, enable_v2):
+    @parametrize("keep_original", [False, True])
+    def test_auto_functionalized_mutated_output_rewiring(
+        self, enable_v2, keep_original
+    ):
+        hop = auto_functionalized_v2 if enable_v2 else auto_functionalized
+
+        def f(x):
+            first, second = torch.ones_like(x), torch.zeros_like(x)
+            kwargs = (
+                dict(
+                    _out_sin_base_index=0,
+                    _out_cos_base_index=1,
+                    _all_bases=[first, second],
+                )
+                if enable_v2
+                else dict(out_sin=first, out_cos=second)
+            )
+            _, updated_first, updated_second = hop(sin_cos._opoverload, x=x, **kwargs)
+            values = updated_first, updated_second
+            return (*values, first) if keep_original else values
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        first = next(n for n in gm.graph.nodes if n.target is aten.ones_like.default)
+        second = next(n for n in gm.graph.nodes if n.target is aten.zeros_like.default)
+        wrapper = next(n for n in gm.graph.nodes if n.target is hop)
+        with V.set_fake_mode(detect_fake_mode([first.meta["val"]])):
+            reinplace_inplaceable_ops(
+                FakeTensorUpdater(gm),
+                gm.graph,
+                rewire_auto_functionalized_outputs=True,
+            )
+            expected_clones = (
+                ([0] if enable_v2 else ["out_sin"]) if keep_original else []
+            )
+            self.assertEqual(wrapper.meta["only_clone_these_tensors"], expected_clones)
+            updated_first, updated_second, *_ = gm.graph.output_node().args[0]
+            if keep_original:
+                self.assertIs(updated_first.target, operator.getitem)
+            else:
+                self.assertIs(updated_first, first)
+            self.assertIs(updated_second, second)
+            decompose_auto_functionalized(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        values = x.sin(), x.cos()
+        expected = (*values, torch.ones_like(x)) if keep_original else values
+        self.assertEqual(gm(x), expected)
+
+    @parametrize("enable_v2", [False, True])
+    def test_auto_functionalized_optional_multiple_outputs(self, enable_v2):
+        @torch.library.custom_op(
+            "_reinplacing::auto_output_rewiring", mutates_args={"optional", "result"}
+        )
+        def op(
+            x: Tensor, optional: Tensor | None, result: Tensor
+        ) -> tuple[Tensor, Tensor]:
+            if optional is not None:
+                optional.zero_()
+            result.copy_(x.sin())
+            return x.cos(), x.neg()
+
+        @op.register_fake
+        def _(x, optional, result):
+            return torch.empty_like(x), torch.empty_like(x)
+
+        def f(x):
+            out = torch.empty_like(x)
+            if enable_v2:
+                first, second, updated = auto_functionalized_v2(
+                    op._opoverload,
+                    x=x,
+                    _optional_base_index=None,
+                    _result_base_index=0,
+                    _all_bases=[out],
+                )
+            else:
+                first, second, _, updated = auto_functionalized(
+                    op._opoverload, x=x, optional=None, result=out
+                )
+            return first, second, updated
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        out = next(n for n in gm.graph.nodes if n.target is aten.empty_like.default)
+        hop = auto_functionalized_v2 if enable_v2 else auto_functionalized
+        wrapper = next(n for n in gm.graph.nodes if n.target is hop)
+        with V.set_fake_mode(detect_fake_mode([out.meta["val"]])):
+            reinplace_inplaceable_ops(
+                FakeTensorUpdater(gm),
+                gm.graph,
+                rewire_auto_functionalized_outputs=True,
+            )
+            self.assertEqual(wrapper.meta["only_clone_these_tensors"], [])
+            first, second, updated = gm.graph.output_node().args[0]
+            self.assertIs(updated, out)
+            self.assertEqual((first.args[1], second.args[1]), (0, 1))
+            decompose_auto_functionalized(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(x), (x.cos(), x.neg(), x.sin()))
+
+    @parametrize("enable_v2", [False, True])
+    def test_auto_functionalized_aliased_original_output(self, enable_v2):
+        with torch.library._scoped_library("_reinplacing", "FRAGMENT") as lib:
+            lib.define(
+                "output_alias_(Tensor(a!) x) -> Tensor(a!)", tags=(torch.Tag.inplace,)
+            )
+            lib.impl("output_alias_", lambda x: x.sin_(), "CompositeExplicitAutograd")
+            op = torch.ops._reinplacing.output_alias_.default
+
+            def f(x):
+                out = x.clone()
+                if enable_v2:
+                    return auto_functionalized_v2(op, _x_base_index=0, _all_bases=[out])
+                return auto_functionalized(op, x=out)
+
+            x = torch.randn(3)
+            gm = make_fx(f, tracing_mode="fake")(x)
+            out = next(n for n in gm.graph.nodes if n.target is aten.clone.default)
+            with V.set_fake_mode(detect_fake_mode([out.meta["val"]])):
+                reinplace_inplaceable_ops(
+                    FakeTensorUpdater(gm),
+                    gm.graph,
+                    rewire_auto_functionalized_outputs=True,
+                )
+                first, second = gm.graph.output_node().args[0]
+                self.assertEqual(get_node_storage(first), get_node_storage(second))
+                decompose_auto_functionalized(gm.graph)
+            gm.graph.lint()
+            gm.recompile()
+            first, second = gm(x)
+            self.assertEqual((first, second), (x.sin(), x.sin()))
+            self.assertTrue(torch._C._is_alias_of(first, second))
+
+    def test_auto_functionalized_unextracted_list_keeps_clone_elimination(self):
+        @torch.library.custom_op(
+            "_reinplacing::list_output_rewiring", mutates_args={"results"}
+        )
+        def op(x: Tensor, results: list[Tensor]) -> None:
+            for result in results:
+                result.copy_(x.sin())
+
+        @op.register_fake
+        def _(x, results):
+            return None
+
+        def f(x):
+            results = [x.clone(), x.clone()]
+            return auto_functionalized(op._opoverload, x=x, results=results)[1]
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        wrapper = next(n for n in gm.graph.nodes if n.target is auto_functionalized)
+        result = next(
+            n for n in wrapper.users if n.target is operator.getitem and n.args[1] == 1
+        )
+        # Keep the list container instead of its traced tensor extractions.
+        gm.graph.output_node().args = (result,)
+        gm.graph.eliminate_dead_code()
+        with V.set_fake_mode(detect_fake_mode(result.meta["val"])):
+            reinplace_inplaceable_ops(
+                FakeTensorUpdater(gm),
+                gm.graph,
+                rewire_auto_functionalized_outputs=True,
+            )
+            self.assertEqual(wrapper.meta["only_clone_these_tensors"], [])
+            decompose_auto_functionalized(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(x), [x.sin(), x.sin()])
+
+    @parametrize("enable_v2", [False, True])
+    def test_auto_functionalized_output_rewiring_e2e(self, enable_v2):
+        def f(x):
+            first = torch.empty_like(x)
+            second = torch.empty_like(x)
+            sin_cos(x, first, second)
+            sin(first, first)
+            return first, second
+
+        x = torch.randn(3)
+        with inductor_config.patch({"enable_auto_functionalized_v2": enable_v2}):
+            compiled = torch.compile(f, fullgraph=True)
+            self.assertEqual(compiled(x), (x.sin().sin(), x.cos()))
+
+    @parametrize("disable_decomposition", [False, True])
+    def test_auto_functionalized_decomposition_disabled(self, disable_decomposition):
+        def f(x):
+            out = torch.ones_like(x)
+            sin(x, out)
+            return out.cos()
+
+        x = torch.tensor([0.1, 0.5, 1.0])
+        with inductor_config.patch(
+            enable_auto_functionalized_v2=False,
+            disabled_passes=(
+                "decompose_auto_functionalized" if disable_decomposition else ""
+            ),
+        ):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), x.sin().cos())
+
+    @parametrize("cutoff_after_gate", [1, 2, 3])
+    def test_auto_functionalized_decomposition_bisection(self, cutoff_after_gate):
+        calls = 0
+        cutoff = None
+        decomposition_checks = 0
+
+        def disable_subsystem(backend, subsystem, debug_info=None):
+            nonlocal calls, cutoff, decomposition_checks
+            if backend != "inductor" or subsystem != "post_grad_passes":
+                return False
+            calls += 1
+            if debug_info() == "decompose_auto_functionalized":
+                decomposition_checks += 1
+                if cutoff is None:
+                    cutoff = calls + cutoff_after_gate
+            return cutoff is not None and calls > cutoff
+
+        def f(x):
+            out = torch.ones_like(x)
+            sin(x, out)
+            return out.cos()
+
+        x = torch.tensor([0.1, 0.5, 1.0])
+        with (
+            inductor_config.patch(enable_auto_functionalized_v2=False),
+            mock.patch(
+                "torch._inductor.compiler_bisector.CompilerBisector.disable_subsystem",
+                side_effect=disable_subsystem,
+            ),
+        ):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), x.sin().cos())
+        self.assertEqual(decomposition_checks, 1)
+
+    @parametrize("post_grad", [False, True])
+    @parametrize("enable_v2", [False, True])
+    def test_auto_functionalized_without_decomposition(self, enable_v2, post_grad):
         def f(x):
             out = torch.ones_like(x)
             if enable_v2:
@@ -965,7 +1204,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x = torch.tensor([0.1, 0.5, 1.0])
         gm = make_fx(f, tracing_mode="fake")(x)
         out = next(n for n in gm.graph.nodes if n.target is aten.ones_like.default)
-        with V.set_fake_mode(detect_fake_mode([out.meta["val"]])):
+        with (
+            inductor_config.patch(use_post_grad_passes=post_grad),
+            V.set_fake_mode(detect_fake_mode([out.meta["val"]])),
+        ):
             reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
         gm.graph.lint()
         gm.recompile()
