@@ -181,9 +181,8 @@ operator*(const Float8_e5m2fnuz& a, const Float8_e5m2fnuz& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e5m2fnuz operator/(
-    const Float8_e5m2fnuz& a,
-    const Float8_e5m2fnuz& b) __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE Float8_e5m2fnuz
+operator/(const Float8_e5m2fnuz& a, const Float8_e5m2fnuz& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -230,8 +229,7 @@ inline C10_HOST_DEVICE float operator-(Float8_e5m2fnuz a, float b) {
 inline C10_HOST_DEVICE float operator*(Float8_e5m2fnuz a, float b) {
   return static_cast<float>(a) * b;
 }
-inline C10_HOST_DEVICE float operator/(Float8_e5m2fnuz a, float b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(Float8_e5m2fnuz a, float b) {
   return static_cast<float>(a) / b;
 }
 
@@ -244,8 +242,7 @@ inline C10_HOST_DEVICE float operator-(float a, Float8_e5m2fnuz b) {
 inline C10_HOST_DEVICE float operator*(float a, Float8_e5m2fnuz b) {
   return a * static_cast<float>(b);
 }
-inline C10_HOST_DEVICE float operator/(float a, Float8_e5m2fnuz b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE float operator/(float a, Float8_e5m2fnuz b) {
   return a / static_cast<float>(b);
 }
 
@@ -273,8 +270,7 @@ inline C10_HOST_DEVICE double operator-(Float8_e5m2fnuz a, double b) {
 inline C10_HOST_DEVICE double operator*(Float8_e5m2fnuz a, double b) {
   return static_cast<double>(a) * b;
 }
-inline C10_HOST_DEVICE double operator/(Float8_e5m2fnuz a, double b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(Float8_e5m2fnuz a, double b) {
   return static_cast<double>(a) / b;
 }
 
@@ -287,8 +283,7 @@ inline C10_HOST_DEVICE double operator-(double a, Float8_e5m2fnuz b) {
 inline C10_HOST_DEVICE double operator*(double a, Float8_e5m2fnuz b) {
   return a * static_cast<double>(b);
 }
-inline C10_HOST_DEVICE double operator/(double a, Float8_e5m2fnuz b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE double operator/(double a, Float8_e5m2fnuz b) {
   return a / static_cast<double>(b);
 }
 
