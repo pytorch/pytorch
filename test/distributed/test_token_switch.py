@@ -1528,9 +1528,51 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
 instantiate_device_type_tests(TokenSwitchRoutingDtypeTest, globals(), only_for="cuda")
 
 
-@requires_mori()
 @instantiate_parametrized_tests
+class _TokenSwitchMoRIOnlyTests:
+    """MoRI-only tests; the host class is TokenSwitchMoRITest."""
+
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_dispatch_short_out_raises(self, layout):
+        self._init()
+        ts = self.get_contract_token_switch()
+        topk_idx, w, x, _nd, _exp, _ = self._contract_inputs(seed=31)
+        routing = ts.create_routing(topk_idx, layout=layout)
+        need = ts.max_expert_major_slots_per_rank
+        if layout == "flat":
+            need = ts.max_recv_tokens_per_rank
+        out = ts._alloc_dispatch_outputs(routing, x, w, need, HIDDEN, CONTRACT_TOP_K)
+        with self.assertRaisesRegex(ValueError, f"require at least {need} rows"):
+            ts.dispatch(routing, x, w, out=(out[0][: need - 1], out[1], out[2]))
+
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_combine_backward_zeroes_unused_rows(self, layout):
+        # combine ignores rows past the received slots, so their gradient is zero.
+        self._init()
+        ts = self.get_contract_token_switch()
+        topk_idx, w, x, _nd, expected, _ = self._contract_inputs(seed=32)
+        epr = CONTRACT_EXPERTS_PER_RANK
+        counts = torch.zeros(epr, dtype=torch.int32, device=self.device)
+        routing = ts.create_routing(topk_idx, counts, layout=layout)
+        max_recv = ts.max_recv_tokens_per_rank
+        if layout == "flat":
+            # Fill the receive buffers of ranks 0 and 1 first, so their rows past
+            # this routing's receive count hold stale tokens.
+            ids = torch.arange(CONTRACT_TOP_K, device=self.device) * epr
+            fill = ts.create_routing(ids.repeat(NUM_TOKENS, 1), layout="flat")
+            ts.dispatch(fill, x, w, max_recv)
+        d, _, _ = ts.dispatch(routing, x, w, max_recv)
+        n = len(expected) if layout == "flat" else int(counts.sum())
+        d = d.detach().requires_grad_(True)
+        ts.combine(routing, d).float().sum().backward()
+        grad = d.grad.float()
+        self.assertEqual(grad[:n], torch.ones_like(grad[:n]))
+        self.assertEqual(grad[n:], torch.zeros_like(grad[n:]))
+
+
+@requires_mori()
 class TokenSwitchMoRITest(
+    _TokenSwitchMoRIOnlyTests,
     _TokenSwitchFlatTests,
     _TokenSwitchExpertMajorTests,
     _TokenSwitchContractTests,
@@ -1586,36 +1628,6 @@ class TokenSwitchMoRITest(
     def _init(self):
         torch.cuda.set_device(self.device)
         dist.barrier()
-
-    @parametrize("layout", ["flat", "expert_major"])
-    def test_dispatch_short_out_raises(self, layout):
-        self._init()
-        ts = self.get_contract_token_switch()
-        topk_idx, w, x, _nd, _exp, _ = self._contract_inputs(seed=31)
-        routing = ts.create_routing(topk_idx, layout=layout)
-        need = ts.max_expert_major_slots_per_rank
-        if layout == "flat":
-            need = ts.max_recv_tokens_per_rank
-        out = ts._alloc_dispatch_outputs(routing, x, w, need, HIDDEN, CONTRACT_TOP_K)
-        with self.assertRaisesRegex(ValueError, f"require at least {need} rows"):
-            ts.dispatch(routing, x, w, out=(out[0][: need - 1], out[1], out[2]))
-
-    @parametrize("layout", ["flat", "expert_major"])
-    def test_combine_backward_zeroes_unused_rows(self, layout):
-        # combine ignores rows past the received slots, so their gradient is zero.
-        self._init()
-        ts = self.get_contract_token_switch()
-        topk_idx, w, x, _nd, expected, _ = self._contract_inputs(seed=32)
-        epr = CONTRACT_EXPERTS_PER_RANK
-        counts = torch.zeros(epr, dtype=torch.int32, device=self.device)
-        routing = ts.create_routing(topk_idx, counts, layout=layout)
-        d, _, _ = ts.dispatch(routing, x, w, ts.max_recv_tokens_per_rank)
-        n = len(expected) if layout == "flat" else int(counts.sum())
-        d = d.detach().requires_grad_(True)
-        ts.combine(routing, d).float().sum().backward()
-        grad = d.grad.float()
-        self.assertEqual(grad[:n], torch.ones_like(grad[:n]))
-        self.assertEqual(grad[n:], torch.zeros_like(grad[n:]))
 
     def test_expert_major_slots_and_combine(self):
         # One slot per (token, local expert), grouped by local expert; a second
