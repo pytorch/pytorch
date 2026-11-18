@@ -4,6 +4,7 @@ import dis
 import importlib
 import sys
 import unittest
+import warnings
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -499,7 +500,7 @@ class TestDispatchCapture(TestCase):
 
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgFrontend(TestCase):
-    """The bytecode decoder of the Rust crate."""
+    """Bytecode -> SSA graph."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -534,6 +535,53 @@ class TestCfgFrontend(TestCase):
         self.assertTrue(
             any(arg > 255 for _, _, arg, _ in cfg_rs.decode(namespace["wide"].__code__))
         )
+
+    def test_whole_function_is_one_graph(self):
+        def f(x, n):
+            for _ in range(n):
+                if x.sum() > 0:
+                    x = x - 1
+                else:
+                    x = x + 2
+            return x
+
+        text = torch.cfg_compile(f, fallback=False).dump()
+        self.assertIn("phi", text)
+        self.assertIn("br_exhausted", text)
+        self.assertIn("binary - ", text)
+        self.assertIn("binary + ", text)
+
+    def test_unsupported(self):
+        def f(x):
+            try:
+                return x + 1
+            except RuntimeError:
+                return x
+
+        with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "try/except"):
+            torch.cfg_compile(f, fallback=False)
+        self.assertTrue(torch.cfg_compile.is_available())
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.assertIs(torch.cfg_compile(f), f)
+        self.assertIn(
+            "left f uncompiled", str(caught[0].message).replace(f.__qualname__, "f")
+        )
+
+    def test_methods_and_modules(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return x * self.w + 1
+
+        m = M()
+        x = torch.randn(3)
+        for compiled in (torch.cfg_compile(m), torch.cfg_compile(m.forward)):
+            for _ in range(3):
+                self.assertEqual(compiled(x), m(x))
 
 
 if __name__ == "__main__":
