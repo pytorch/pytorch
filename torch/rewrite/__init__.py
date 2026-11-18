@@ -78,7 +78,7 @@ from typing import Any
 import torch
 
 from . import _regions, _shortcuts
-from ._passes import fuse_checked, Mismatch, swap
+from ._passes import Builtin, fuse_checked, Mismatch, swap
 
 
 __all__ = [
@@ -181,7 +181,7 @@ def graphs(
     return Graphs(backend, min_ops, max_variants, freeze)
 
 
-Pass = str | Callable[[Any], bool] | Graphs
+Pass = str | Callable[[Any], bool] | Graphs | Builtin
 
 # The passes that rewrite the whole function once, before the others see it.
 _WHOLE = ("inline", "unroll", "shortcuts")
@@ -313,16 +313,22 @@ def is_available() -> bool:
 
 def _plan(
     passes: Iterable[Pass] | None,
-) -> tuple[dict[str, bool], list[Any], Graphs | None]:
+) -> tuple[dict[str, bool], dict[str, Any], list[Any], Graphs | None]:
     """Sorts a list of passes into what the engine is given.
 
-    Returns which of the passes over the whole function are asked for, the
-    passes over a block in their order, and which of those is the graph pass.
+    Returns which of the passes over the whole function are asked for, what
+    they were configured with, the passes over a block in their order, and
+    which of those is the graph pass.
     """
     whole = dict.fromkeys(_WHOLE, False)
+    settings: dict[str, Any] = {}
     block: list[Any] = []
     found: Graphs | None = None
     for one in canonical if passes is None else passes:
+        if isinstance(one, Builtin):
+            # What torch.vm makes: the name, and what goes with it.
+            settings.update(one.settings)
+            one = one.name
         if isinstance(one, Graphs):
             if found is not None:
                 raise ValueError(f"passes= has {found!r} and {one!r}: one of them")
@@ -351,7 +357,7 @@ def _plan(
             raise TypeError(
                 f"a pass is a name, a callable or torch.rewrite.graphs(...), not {type(one).__name__}"
             )
-    return whole, block, found
+    return whole, settings, block, found
 
 
 def rewrite(
@@ -375,7 +381,9 @@ def rewrite(
             Can be omitted to use ``rewrite`` as a decorator with options.
         passes: what is done to the function, in the order it is done.
             Defaults to :data:`canonical`. An entry is the name of a built-in
-            pass, ``torch.rewrite.graphs(...)``, or a callable
+            pass (or what ``torch.vm`` makes for one, such as
+            ``torch.vm.loop_unrolling_pass(8)``), ``torch.rewrite.graphs(...)``,
+            or a callable
             ``pass_(region) -> bool`` that looks at the instructions of one
             basic block and at what was observed of them, rewrites them, and
             returns whether it changed anything. With an empty list nothing
@@ -458,7 +466,7 @@ def rewrite(
         return types.MethodType(rewrite(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
         raise TypeError(f"torch.rewrite expects a function, not {type(fn).__name__}")
-    whole, block, found = _plan(passes)
+    whole, settings, block, found = _plan(passes)
     runtime = _load_runtime()
     regions = None
     if found is not None:
@@ -478,6 +486,7 @@ def rewrite(
             unboxed=unboxed,
             inline=whole["inline"],
             unroll=whole["unroll"],
+            max_trip_count=settings.get("max_trip_count", 8),
             callees=callees,
             shortcuts=whole["shortcuts"] and _shortcuts.register(runtime),
             demote=demote,
