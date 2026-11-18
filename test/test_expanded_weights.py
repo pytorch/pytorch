@@ -976,7 +976,7 @@ class ContextManagerTests(TestBase):
     def constructor_args(self):
         return self._get_arg("constructor_args", False)
 
-    def test_context_manager(self, test_case, device):
+    def run_context_manager(self, test_case, device):
         kwargs = {"device": device, "dtype": torch.double}
         module = self.constructor(*self.constructor_args).to(**kwargs)
         if "Embedding" in self.get_name():
@@ -992,7 +992,7 @@ class ContextManagerTests(TestBase):
             )
         test_case._do_test(module, input)
 
-    def test_context_manager_multiple_inputs(self, test_case, device):
+    def run_context_manager_multiple_inputs(self, test_case, device):
         module = self.constructor(*self.constructor_args).to(device)
         input = self._get_input().detach().clone()
         if len(input.shape) == 0 or input.shape[0] == 0:
@@ -1043,13 +1043,13 @@ for test_param in supported_tests:
         setattr(
             TestExpandedWeightModule,
             test_name,
-            decorator(lambda self, test=test: test.test_context_manager(self, "cpu")),
+            decorator(lambda self, test=test: test.run_context_manager(self, "cpu")),
         )
         setattr(
             TestExpandedWeightModule,
             test_name_multi_input,
             decorator(
-                lambda self, test=test: test.test_context_manager_multiple_inputs(
+                lambda self, test=test: test.run_context_manager_multiple_inputs(
                     self, "cpu"
                 )
             ),
@@ -1060,7 +1060,7 @@ for test_param in supported_tests:
             TestExpandedWeightModule,
             test_name + f"_{accelerator}_double",
             decorator(
-                lambda self, test=test, acc=accelerator: test.test_context_manager(
+                lambda self, test=test, acc=accelerator: test.run_context_manager(
                     self, acc
                 )
             ),
