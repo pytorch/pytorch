@@ -1,0 +1,14 @@
+name: Owned GitHub artifact canary
+description: Bounded, same-principal archive extraction and cleanup diagnostic.
+inputs:
+  expected-head:
+    description: Exact head approved for this draft pull request.
+    required: true
+  github-token:
+    description: Read-only identity and deletion-verification token.
+    required: true
+runs:
+  using: node20
+  main: index.cjs
+  post: index.cjs
+  post-if: always()

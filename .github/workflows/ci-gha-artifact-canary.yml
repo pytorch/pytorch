@@ -1,0 +1,44 @@
+# Owner(s): ["module: ci"]
+# AI-assisted temporary owned-artifact diagnostic. Never merge.
+name: CI owned artifact canary
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/actions/gha-artifact-canary/**
+      - .github/workflows/ci-gha-artifact-canary.yml
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: >-
+      github.repository == 'pytorch/pytorch' &&
+      github.actor == 'ptdbot' &&
+      github.triggering_actor == 'd4l3k' &&
+      github.event.pull_request.number == 205438 &&
+      github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == 'ptdbot/pytorch' &&
+      github.event.pull_request.head.ref == 'd4l3k/gha-infra-artifact-canary-20261117' &&
+      github.run_attempt == 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/actions/gha-artifact-canary
+      - name: Exercise and delete only the owned same-run artifact
+        uses: ./.github/actions/gha-artifact-canary
+        with:
+          expected-head: ${{ github.event.pull_request.head.sha }}
+          github-token: ${{ github.token }}
