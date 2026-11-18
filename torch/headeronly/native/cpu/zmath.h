@@ -5,6 +5,10 @@
 #include <torch/headeronly/util/NumericUtils.h>
 #include <torch/headeronly/util/complex.h>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly, native)
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
