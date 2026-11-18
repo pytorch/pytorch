@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 ACCOUNT = "308535385114"
 REGION = "us-east-1"
 ROLES = ("gha_workflow_hf-cache-write",)
-PR_NUMBER = "0"
+PR_NUMBER = "205434"
 HEAD_REF = "d4l3k/hf-cache-role-audit"
 TAG = f"refs/tags/ciflow/inductor-cu126/{PR_NUMBER}"
 OBJECT_NAME = "release-audit-hf-cache-20261117-c1e8e9b4"
