@@ -16,7 +16,7 @@ namespace {
 // Load vector from a smaller type (more elements) to a larger type (fewer elements),
 // reducing neighboring elements until it fits into the vector size.
 template <typename acc_t, typename scalar_t, typename F>
-Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
+[[maybe_unused]] Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
   using vec_t = Vectorized<scalar_t>;
   using vacc_t = Vectorized<acc_t>;
   static_assert(vacc_t::size() <= vec_t::size());

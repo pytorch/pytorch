@@ -304,7 +304,7 @@ inline void copy_value_with_pad(
 }
 
 template <typename scalar_t>
-inline void pad_remain_row_col_zero(
+[[maybe_unused]] inline void pad_remain_row_col_zero(
     scalar_t* value_ptr,
     int rows,
     int cols,
