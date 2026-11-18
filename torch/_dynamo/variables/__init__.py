@@ -80,6 +80,8 @@ from .dicts import (
     DunderDictVariable,
     FrozenDictVariable,
     MappingProxyVariable,
+    NNModuleGlobalHooksDictVariable,
+    NNModuleGlobalHooksOrderedDictVariable,
     NNModuleHookFlagsDictVariable,
     NNModuleHookFlagsOrderedDictVariable,
     NNModuleHooksDictVariable,
