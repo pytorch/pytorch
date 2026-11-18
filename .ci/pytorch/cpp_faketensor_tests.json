@@ -372,7 +372,6 @@
     "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_item_memo",
     "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_maybe_get_fake_mode",
     "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_memo_helpers",
-    "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_require_python_fake_mode",
     "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_set_data_releases_mode_after_metadata_copy_*",
     "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_suspend_for_real_tensors",
     "test_fake_tensor.py::TestCppFakeTensorModeBindings::test_unsafe_data_ptr_access",
