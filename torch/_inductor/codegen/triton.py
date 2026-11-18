@@ -5497,7 +5497,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             ep = ""
 
-        if (has_tmpmask or has_rindex) and indexing.has_mask():
+        if (
+            has_tmpmask or has_rindex or self._load_other is not None
+        ) and indexing.has_mask():
             if self._load_other:
                 other = f", other={constant_repr(self._load_other)}"
             elif uses_uint8_storage:
