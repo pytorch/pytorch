@@ -199,7 +199,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             1 if use_lazy_get else 0,
         )
 
-    @parametrize("consumer", ["nested", "computed"])
+    @parametrize("consumer", ["after_write", "store", "nested", "computed"])
     def test_lazy_dict_lookup_consumers(self, consumer):
         def fn(x, d):
             if consumer == "after_write":
