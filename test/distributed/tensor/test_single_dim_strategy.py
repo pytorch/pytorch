@@ -157,8 +157,8 @@ class TestExpandPlaceholder(TestCase):
                 # so there should be exactly 1 strategy (the input placement)
                 self.assertEqual(len(strategy.children[0].strategies), 1)
             elif linearity == 1:
-                # See test_expand_foreach_add_to_3d_mesh for derivation of 634.
-                self.assertEqual(len(strategy.children[0].strategies), 634)
+                # See test_expand_foreach_add_to_3d_mesh for derivation of 512.
+                self.assertEqual(len(strategy.children[0].strategies), 512)
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -275,19 +275,17 @@ class TestExpandPlaceholder(TestCase):
             return strategy
 
         # Sizes are multiples of mesh dims so every shard option is valid.
-        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 6 partial rules
-        # (1 Psum, 3 Pavg, 1 Pmax, 1 Pmin). Mixed-partial filter allows
-        # Psum+Pavg to coexist but rejects other mixes. By inclusion-exclusion
-        # on a 3D mesh (n=4 non-partial, partial rule counts by type):
+        # Per mesh dim: 4 non-partial (S0,S1,S2,R) + 4 partial rules
+        # (1 Psum, 3 Pavg). Mixed-partial filter allows Psum+Pavg to coexist.
+        # By inclusion-exclusion on a 3D mesh (n=4 non-partial, partial rule
+        # counts by type):
         #   no partials:    4^3                                    =  64
         #   Psum only:      (4+1)^3 - 4^3                         =  61
         #   Pavg only:      (4+3)^3 - 4^3                         = 279
-        #   Pmax only:      (4+1)^3 - 4^3                         =  61
-        #   Pmin only:      (4+1)^3 - 4^3                         =  61
         #   Psum+Pavg mix:  (4+1+3)^3 - (4+3)^3 - (4+1)^3 + 4^3  = 108
-        #   total: 634
-        # For scalars (no Shard), n=1 (R only): same formula gives 139.
-        expected_num_strategies = (634, 139)
+        #   total: 512
+        # For scalars (no Shard), n=1 (R only): same formula gives 125.
+        expected_num_strategies = (512, 125)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
@@ -2058,8 +2056,6 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
             (Partial("sum"), Partial("sum"), Partial("sum")),
             (Partial("avg"), Partial("avg"), Partial("avg")),
             (Partial("avg"), Partial("avg"), Replicate()),
-            (Partial("max"), Partial("max"), Replicate()),
-            (Partial("min"), Partial("min"), Replicate()),
             (Partial("avg"), Replicate(), Partial("avg")),
         ]
         self.assertEqual(rules, expected)

@@ -134,6 +134,16 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(dt_dim1.full_tensor(), tensor.nansum(dim=1))
         self.assertEqual(dt_dim1.placements, (Shard(0),))
 
+        # Pending Partial(sum) input is reduced first: nansum would drop a NaN
+        # held by one rank, but the reduced input is NaN there.
+        rows = torch.zeros(self.world_size, 2, device=self.device_type)
+        rows[0] = torch.tensor([float("nan"), 1.0])
+        rows[1] = torch.tensor([2.0, 3.0])
+        # Local value on rank r is rows[r]
+        partial = distribute_tensor(rows, device_mesh, [Shard(0)]).sum(0)
+        self.assertEqual(partial.placements, (Partial("sum"),))
+        self.assertEqual(partial.nansum().full_tensor(), partial.full_tensor().nansum())
+
     @with_comms
     def test_prims_amax_amin(self):
         device_mesh = self.build_device_mesh()
@@ -1569,7 +1579,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         )
 
     @with_comms
-    def test_matching_partial_reduction_ops(self):
+    def test_max_of_partial_max_reduces_input(self):
+        # max does not pass a pending Partial("max") through: NCCL's all_reduce
+        # MAX ignores NaN, so a NaN in one rank's local values would hide that
+        # rank's other values. The input is reduced first.
         mesh = self.build_device_mesh()
         rank = dist.get_rank()
 
@@ -1578,16 +1591,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("max")]
         )
-        out_without_redistribute = torch.max(dt)
+        out = torch.max(dt)
 
-        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
-        out_with_redistribute = torch.max(dt)
-
-        self.assertTrue(out_without_redistribute.placements[0].is_partial())
-        self.assertTrue(out_with_redistribute.placements[0].is_replicate())
-        self.assertEqual(
-            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
-        )
+        self.assertTrue(out.placements[0].is_replicate())
+        self.assertEqual(out.full_tensor(), torch.max(dt.full_tensor()))
 
     @skip_if_lt_x_gpu(4)
     @with_comms

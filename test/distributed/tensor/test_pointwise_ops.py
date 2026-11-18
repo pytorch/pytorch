@@ -651,9 +651,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     @parametrize("op,reduce_op", [(torch.maximum, "max"), (torch.minimum, "min")])
-    def test_partial_propagation(self, op, reduce_op):
-        # Test that torch.maximum/minimum preserves Partial("max"/"min") placements
-        # since max(max(a), max(b)) == max(a, b) and min(min(a), min(b)) == min(a, b)
+    def test_two_partial_inputs_reduce_one(self, op, reduce_op):
+        # torch.maximum/minimum of two Partial("max"/"min") inputs reduces one
+        # input first. Passing both through is not allowed: NCCL's all_reduce
+        # MAX/MIN ignores NaN, so a NaN in one input would hide that rank's value
+        # of the other input.
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -666,10 +668,38 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         with comm_mode:
             result = op(d_input1, d_input2)
 
-        # Should not require any communication
-        self.assertEqual(comm_mode.get_total_counts(), 0)
-        # Result should still be Partial with the same reduce_op
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        # P(max), R -> P(max) keeps the other input pending
         self.assertEqual(result.placements, (Partial(reduce_op),))
+        self.assertEqual(
+            result.full_tensor(), op(d_input1.full_tensor(), d_input2.full_tensor())
+        )
+
+    @with_comms
+    @parametrize("reduce_op", ["max", "min"])
+    def test_partial_max_min_with_nan(self, reduce_op):
+        # sign, sgn, nan_to_num, fmax and fmin map NaN to a number, so they must
+        # not pass a pending Partial("max"/"min") through: the reduced input is
+        # NaN, but applying the op first turns rank 0's NaN into a number that
+        # loses the reduction to the other ranks' values.
+        device_mesh = self.build_device_mesh()
+        rows = torch.tensor([[5.0, -3.0]], device=self.device_type).repeat(
+            self.world_size, 1
+        )
+        rows[0] = float("nan")
+        sharded = distribute_tensor(rows, device_mesh, [Shard(0)])
+        # Pending Partial(reduce_op) whose local value on rank r is rows[r]
+        d_input = sharded.amax(0) if reduce_op == "max" else sharded.amin(0)
+        self.assertEqual(d_input.placements, (Partial(reduce_op),))
+        full_input = d_input.full_tensor()
+        other = torch.full((2,), 2.0, device=self.device_type)
+        d_other = distribute_tensor(other, device_mesh, [Replicate()])
+
+        for op in (torch.sign, torch.sgn, torch.nan_to_num):
+            self.assertEqual(op(d_input).full_tensor(), op(full_input))
+        for op in (torch.fmax, torch.fmin):
+            self.assertEqual(op(d_input, d_other).full_tensor(), op(full_input, other))
+            self.assertEqual(op(d_other, d_input).full_tensor(), op(other, full_input))
 
     @with_comms
     def test_neg_partial(self):
@@ -750,8 +780,9 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     def test_add_partial_with_replicate_rules(self):
-        # P(x) + R -> P(x) for x in {avg, max, min}: adding a replicated constant
-        # preserves the partial reduce type (constant is the same on all ranks)
+        # P(avg) + R -> P(avg): adding a replicated constant preserves the
+        # average. P(max/min) + R reduces the input first: inf - inf would create
+        # a NaN on one rank only, which NCCL's all_reduce MAX/MIN ignores.
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -777,8 +808,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             with comm_mode:
                 result = d_input + d_other
 
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-            self.assertEqual(result.placements, (Partial(reduce_op),))
+            if reduce_op == "avg":
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                self.assertEqual(result.placements, (Partial(reduce_op),))
+            else:
+                self.assertEqual(comm_mode.get_total_counts(), 1)
             self.assertEqual(
                 result.full_tensor(),
                 torch.full((8, 8), expected_full[reduce_op], device=self.device_type),
@@ -1395,14 +1429,12 @@ class TestPointwiseRuleValidation(TestCase):
 
         representative_ops = [
             # (op_name, category, expected_true_positives)
-            ("add", "binary_additive", 81),
+            ("add", "binary_additive", 61),
             ("mul", "binary_mul", 49),
             ("div", "binary_div", 67),
             ("sigmoid", "non_decreasing_unary", 5),
             ("erfc", "non_increasing_unary", 5),
             ("neg", "neg", 6),
-            ("maximum", "monotonic_max_preserving", 57),
-            ("minimum", "monotonic_min_preserving", 57),
             ("logaddexp", "monotonic_binary", 49),
             ("abs", "pointwise_generic", 2),
         ]
