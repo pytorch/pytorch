@@ -125,7 +125,9 @@ class Adam(Optimizer):
             fused = group.setdefault("fused", None)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
-                if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
+                if len(p_state) == 0:
+                    continue
+                if not torch.is_tensor(p_state["step"]):
                     step_val = float(p_state["step"])
                     p_state["step"] = (
                         torch.tensor(
@@ -134,8 +136,15 @@ class Adam(Optimizer):
                             device=p.device,
                         )
                         if group["capturable"] or group["fused"]
-                        else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                        else torch.tensor(
+                            step_val, dtype=_get_scalar_dtype(), device="cpu"
+                        )
                     )
+                elif (
+                    not group["capturable"] and not fused and not p_state["step"].is_meta
+                ):
+                    # Match initialization to avoid a host sync on every step.
+                    p_state["step"] = p_state["step"].cpu()
 
     def _init_group(
         self,
