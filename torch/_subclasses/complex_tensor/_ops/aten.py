@@ -64,10 +64,12 @@ def register_binary_linear_inplace(
     op: OpType, out_of_place_impl: Callable[..., Any]
 ) -> Callable[..., Any]:
     def impl(
-        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
-    ) -> ComplexTensor:
+        lhs: ComplexTensor | torch.Tensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+    ) -> ComplexTensor | torch.Tensor:
         if not lhs.dtype.is_complex:
-            raise TypeError("result type can't be cast to the desired output type")
+            raise RuntimeError(
+                f"result type {torch.result_type(lhs, rhs)} can't be cast to the desired output type {lhs.dtype}"
+            )
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
