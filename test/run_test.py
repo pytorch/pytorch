@@ -353,7 +353,6 @@ XPU_BLOCKLIST = [
     "test_cuda_sanitizer",
     "test_functionalization_of_rng_ops",
     "test_jiterator",
-    "test_matmul_cuda",
     "test_sparse_semi_structured",
     "test_stateless_rng",
 ]

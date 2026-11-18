@@ -799,7 +799,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
             # We've established with the above check that the method is not overridden, so we guard that the method is the same
             # as the impl defined on tensor and retrieve it
-            if self.source:
+            if self.source and self.source.subguards_allowed():
                 source = AttrSource(AttrSource(self.source, "__class__"), name)
                 value = inspect.getattr_static(self.python_type(), name)
             else:
