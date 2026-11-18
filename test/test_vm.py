@@ -6970,6 +6970,126 @@ class TestVmRegions(TestCase):
                 ]
                 self.assertIn("asks for the type of a tensor", reasons)
 
+    def test_a_pass_over_the_graph_of_a_region(self):
+        seen = []
+
+        def sigmoid_for_tanh(gm, input_types):
+            seen.append(input_types)
+            for node in gm.graph.nodes:
+                if node.target is torch.ops.aten.tanh.default:
+                    node.target = torch.ops.aten.sigmoid.default
+                    seen.append(torch.vm.type_of(gm, input_types, node))
+            return gm
+
+        def f(x, w):
+            return torch.tanh(x @ w).sum() + (x * 2).mean()
+
+        compiled = torch.vm(f, passes=(*DEFAULT, sigmoid_for_tanh), fallback=False)
+        w = torch.randn(8, 8)
+        last = {}
+        for n in (4, 4, 4, 4, 4, 4, 6, 6, 6, 9, 9, 9):
+            x = torch.randn(n, 8)
+            last[n] = (compiled(x, w), torch.sigmoid(x @ w).sum() + (x * 2).mean())
+        # Once the region has its graph, the function computes what the pass
+        # made of the graph.
+        for got, expected in last.values():
+            self.assertEqual(got, expected)
+        self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
+        # The types of the inputs say what the graph is for.
+        x_type, w_type = seen[0][:2]
+        self.assertIsInstance(x_type, torch.vm.TensorType)
+        self.assertEqual((x_type.dtype, x_type.device), (torch.float32, x.device))
+        four, eight = torch.vm.Interval(4, 4), torch.vm.Interval(8, 8)
+        self.assertEqual((x_type.dim(0), x_type.dim(1)), (four, eight))
+        self.assertEqual((repr(w_type), w_type.nbytes()), ("float32[8, 8]", 256))
+        self.assertIn(torch.zeros(4, 8), x_type)
+        self.assertNotIn(torch.zeros(5, 8), x_type)
+        # An intermediate has one too.
+        self.assertEqual(repr(seen[1]), "float32[4, 8]")
+        # A size that differs from call to call is left open: an interval.
+        open_type = seen[-2][0]
+        self.assertGreater(open_type.dim(0).hi, open_type.dim(0).lo)
+        self.assertEqual(open_type.dim(1), eight)
+        self.assertFalse(torch.vm.is_exact((*DEFAULT, sigmoid_for_tanh)))
+
+    def test_a_pass_over_the_graph_brings_its_guards(self):
+        made = []
+
+        def only_small(gm, input_types):
+            x = next(node for node in gm.graph.nodes if node.op == "placeholder")
+            made.append(torch.vm.materialize(input_types[0], at="hi").shape)
+            torch.vm.guard(gm, x, torch.vm.Dim(0, range(1, 6)), torch.vm.Contiguous())
+            for node in gm.graph.nodes:
+                if node.target is torch.ops.aten.tanh.default:
+                    node.target = torch.ops.aten.sigmoid.default
+            return gm
+
+        def f(x, w):
+            return torch.tanh(x @ w).sum() + (x * 2).mean()
+
+        compiled = torch.vm(f, passes=(*DEFAULT, only_small), fallback=False)
+        w = torch.randn(8, 8)
+        for n in (4, 4, 4, 4, 4, 4, 8, 8, 8, 8, 4):
+            x = torch.randn(n, 8)
+            got = compiled(x, w)
+            if n == 8:
+                # A call that fails the guard runs what the function wrote.
+                self.assertEqual(got, f(x, w))
+        self.assertEqual(got, torch.sigmoid(x @ w).sum() + (x * 2).mean())
+        self.assertEqual(made[0], (4, 8))
+        gm = torch.fx.symbolic_trace(f)
+        x = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        with self.assertRaisesRegex(TypeError, "takes checks"):
+            torch.vm.guard(gm, x, 3)
+        with self.assertRaisesRegex(ValueError, "is computed in it"):
+            torch.vm.guard(gm, list(gm.graph.nodes)[-2], torch.vm.Contiguous())
+
+    def test_what_types_and_checks_say(self):
+        interval = torch.vm.Interval(16, 32)
+        self.assertEqual(interval.samples(3), [16, 24, 32])
+        self.assertEqual((20 in interval, 33 in interval), (True, False))
+        t = torch.vm.TensorType(torch.float32, torch.device("cpu"), False, (interval,))
+        self.assertEqual(
+            (repr(t), t.nbytes("lo"), t.nbytes()), ("float32[16..32]", 64, 128)
+        )
+        self.assertEqual(torch.vm.materialize(t, dim0=24).shape, (24,))
+        x = torch.zeros(4, 6)[:, ::2]
+        self.assertTrue(torch.vm.Dim(-1, {3}).holds(x))
+        self.assertTrue(torch.vm.Stride(-1, {2}).holds(x))
+        self.assertFalse(torch.vm.Contiguous().holds(x))
+        self.assertTrue(torch.vm.Dtype(torch.float32).holds(x))
+        self.assertTrue(torch.vm.Device("cpu").holds(x))
+
+    def test_a_pass_over_the_graph_that_raises_leaves_the_region_to_the_vm(self):
+        def broken(gm, input_types):
+            raise RuntimeError("not today")
+
+        def f(x, w):
+            return torch.tanh(x @ w).sum() + (x * 2).mean()
+
+        compiled = torch.vm(f, passes=(*DEFAULT, broken), fallback=False)
+        x, w = torch.randn(4, 8), torch.randn(8, 8)
+        for _ in range(4):
+            self.assertEqual(compiled(x, w), f(x, w), atol=0, rtol=0)
+        regions = torch.vm.regions(compiled)
+        reasons = [r["reason"] for r in regions if r["state"] == "vm"]
+        self.assertIn("the pass broken raised RuntimeError: not today", reasons)
+
+    def test_a_pass_over_the_graph_goes_in_front_of_the_graph_compiler(self):
+        def keep(gm, input_types):
+            return gm
+
+        def f(x, w):
+            return torch.tanh(x @ w).sum() + (x * 2).mean()
+
+        with self.assertRaisesRegex(ValueError, "they go in front of it"):
+            torch.vm(f, passes=(*DEFAULT, P.Graphs("aot_eager"), keep))
+        compiled = torch.vm(f, passes=(*DEFAULT, keep, P.Graphs("aot_eager")))
+        x, w = torch.randn(4, 8), torch.randn(8, 8)
+        for _ in range(4):
+            self.assertEqual(compiled(x, w), f(x, w))
+        self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.vm(region_infer, passes=with_graphs("nope"))
