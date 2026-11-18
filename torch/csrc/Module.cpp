@@ -2735,6 +2735,7 @@ PyObject* initModule() {
   });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
+  torch::initSymNodeCache(py_module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_is_pybind11_type", [](py::handle cls) {

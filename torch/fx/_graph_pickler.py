@@ -468,6 +468,7 @@ class _ShapeEnvPickleData:
         self.data = env.__dict__.copy()
         del self.data["tracked_fakes"]
         del self.data["fake_tensor_cache"]
+        del self.data["_native_symnode_cache"]
 
     def unpickle(self, unpickle_state: _UnpickleState) -> ShapeEnv:
         # Fill in the existing ShapeEnv rather than creating a new one
@@ -476,10 +477,16 @@ class _ShapeEnvPickleData:
         if not unpickle_state.fake_mode.shape_env:
             raise AssertionError("unpickle_state.fake_mode.shape_env is not set")
 
+        shape_env = unpickle_state.fake_mode.shape_env
+        # Live tensor adapters retain this cache and need future invalidations.
+        if shape_env._native_symnode_cache is not None:
+            shape_env._native_symnode_cache.clear()
         for k, v in self.data.items():
-            setattr(unpickle_state.fake_mode.shape_env, k, v)
+            # Older payloads may still contain a native cache.
+            if k != "_native_symnode_cache":
+                setattr(shape_env, k, v)
 
-        return unpickle_state.fake_mode.shape_env
+        return shape_env
 
 
 class _SymNodePickleData:
