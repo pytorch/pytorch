@@ -453,9 +453,10 @@ use_lamba_guard_for_object_aliasing = False
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
-# During module dispatch, skip empty local hook guards and builtin registry/key
-# type checks. Populated registries still guard callbacks and flag membership.
-# The no-hook shortcut can miss new global hooks regardless of this setting.
+# Skip emptiness checks on builtin local hook registries and type checks on
+# builtin global registries and keys used for flag membership during dispatch.
+# Calling forward directly on a module without hooks can miss later global hooks
+# with either setting.
 skip_nnmodule_hook_guards = True
 
 # Make dynamo skip no tensor aliasing guard on parameters
@@ -750,8 +751,7 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
-# Use C++ FakeTensor mode (DispatchKey::Fake) instead of Python FakeTensorMode
-# for fake tensor propagation during dynamo tracing.
+# Construct CppFakeTensorMode from FakeTensorMode when enabled.
 use_cpp_fake_tensor = os.environ.get("CPP_FAKETENSOR", "0") == "1"
 
 # Experimental feature for running automatic caching precompile.
