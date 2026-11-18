@@ -4186,6 +4186,37 @@ class TestCfgRegions(TestCase):
         self.assertEqual((region["variants"], region["compiles"]), (5, 1))
         self.assertEqual(len(graphs), 1)
 
+    def test_limit_is_on_graphs_not_on_variants(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return graph
+
+        torch.manual_seed(0)
+        model = RegionLayers().eval()
+        compiled = torch.cfg_compile(
+            region_infer, backend=backend, fallback=False, region_max_variants=2
+        )
+        with torch.no_grad():
+            for n in (3, 3, 3, 3, 3, 3, 3, 3, 4, 5, 6, 4, 9):
+                x = torch.randn(n, 6)
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        # Five layers, each with a variant for three rows and one that leaves
+        # the rows open: ten variants of two graphs, which is as many graphs
+        # as the region may have.
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["variants"], region["compiles"]), (10, 2))
+        self.assertEqual(len(region["open"]), 5)
+        self.assertEqual(len(graphs), 2)
+        # A third graph would be one too many: these inputs run the layers
+        # as they are.
+        model.double()
+        with torch.no_grad():
+            x = torch.randn(4, 6, dtype=torch.float64)
+            self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        self.assertEqual(len(graphs), 2)
+
     def test_same_tensor_twice_is_its_own_variant(self):
         graphs = []
 
