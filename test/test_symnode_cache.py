@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: jit"]
 import copy
 import gc
+import io
+import pickle
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -143,6 +145,43 @@ class TestSymNodeCache(TestCase):
         result = tensor.clone().numel()
         self.assertIsInstance(result, torch.SymInt)
         self.assertEqual(result.node.expr, size.node.expr * 3)
+
+    @parametrize("enabled", (False, True))
+    @parametrize("legacy", (False, True))
+    @parametrize("serializer", ("pickle", "torch"))
+    def test_pickle_restarts_cache(self, enabled, legacy, serializer):
+        env = ShapeEnv()
+        original_cache = env._native_symnode_cache
+        size = self.symbol(env, "size", 7)
+        for _ in range(3):
+            torch.empty((size, 3), device="meta").numel()
+        if legacy:
+            del env._native_symnode_cache
+
+        buffer = io.BytesIO()
+        if serializer == "pickle":
+            pickle.dump(size, buffer)
+        else:
+            torch.save(size, buffer)
+        buffer.seek(0)
+        torch._C._set_symnode_cache_enabled(enabled)
+        if serializer == "pickle":
+            restored = pickle.load(buffer)
+        else:
+            restored = torch.load(buffer, weights_only=False)
+
+        restored_env = restored.node.shape_env
+        cache = restored_env._native_symnode_cache
+        if enabled:
+            self.assertIsInstance(cache, torch._C._SymNodeCache)
+            self.assertIsNot(cache, original_cache)
+        else:
+            self.assertIsNone(cache)
+        self.assertTrue(restored > 3)
+        result = torch.empty((restored, 3), device="meta").numel()
+        self.assertEqual(result.node.expr, 3 * size.node._expr)
+        data = _ShapeEnvPickleData(restored_env).data
+        self.assertNotIn("_native_symnode_cache", data)
 
     def test_graph_pickler_invalidates_retained_tensor(self):
         env = ShapeEnv()

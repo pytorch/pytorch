@@ -4072,6 +4072,12 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
 
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._native_symnode_cache = (
+            torch._C._SymNodeCache() if torch._C._symnode_cache_enabled() else None
+        )
+
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
     #
