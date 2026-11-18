@@ -4,7 +4,6 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <vector>
 
 // WARNING: Be careful when adding new includes here. This header will be used
@@ -23,15 +22,6 @@ class ModelPool {
   struct ModelEntry;
 
  public:
-  struct StreamLock {
-    StreamLock() = default;
-    explicit StreamLock(const std::shared_ptr<std::mutex>& stream_mutex)
-        : stream_mutex_(stream_mutex), lock_(*stream_mutex_) {}
-
-    std::shared_ptr<std::mutex> stream_mutex_;
-    std::unique_lock<std::mutex> lock_;
-  };
-
   // Owns a checked-out model. A run that succeeds ends with mark_in_flight():
   // its device work may still be in flight, so the model is reused only once
   // that work has finished. Dropping the lease means the run threw: the model
@@ -138,7 +128,6 @@ class ModelPool {
     for (auto& entry : entries_) {
       entry.stream = nullptr;
     }
-    reclaim_unused_stream_mutexes();
   }
 
   bool use_stream_affinity() const {
@@ -163,28 +152,6 @@ class ModelPool {
 
   [[nodiscard]] ModelLease checkout(Stream stream) {
     return ModelLease(*this, get_available_entry(stream));
-  }
-
-  StreamLock acquire_stream_lock(Stream stream) {
-#if defined(USE_CUDA) || defined(USE_XPU)
-    std::shared_ptr<std::mutex> stream_mutex;
-    {
-      std::lock_guard lk(models_mutex_);
-      if (!use_stream_affinity_ || stream == nullptr) {
-        return {};
-      }
-      reclaim_unused_stream_mutexes();
-      auto [it, inserted] = stream_mutexes_.try_emplace(stream, nullptr);
-      if (inserted) {
-        it->second = std::make_shared<std::mutex>();
-      }
-      stream_mutex = it->second;
-    }
-    return StreamLock(stream_mutex);
-#else
-    (void)stream;
-    return {};
-#endif
   }
 
  private:
@@ -309,13 +276,24 @@ class ModelPool {
     return *entry;
   }
 
+  // Calls on one stream serialize through the model bound to it: a call waits
+  // while that model is held, then for its last run to finish. A stream's first
+  // call binds a model in the same critical section that picks it, before
+  // anything releases the lock, so a second call on the stream finds the
+  // binding and waits instead of binding another model.
   ModelEntry& get_stream_affine_entry(
       Stream stream,
       std::unique_lock<std::mutex>& lk) {
     while (true) {
       ModelEntry* entry = bound_entry(stream);
       if (entry == nullptr) {
-        break;
+        entry = entry_to_bind();
+        if (entry == nullptr) {
+          // Every model is held; wait for one to come back.
+          model_state_changed_.wait(lk);
+          continue;
+        }
+        entry->stream = stream;
       }
 
       if (entry->state == ModelState::kAvailable) {
@@ -335,37 +313,35 @@ class ModelPool {
         return *entry;
       }
 
-      // A null-stream checkout or pool reclamation can temporarily borrow a
-      // bound model. Same non-null stream calls serialize before this point.
+      // Held by an earlier call on this stream, by a checkout without a stream,
+      // or by a checkout waiting for its device work.
       model_state_changed_.wait(
           lk, [entry]() { return entry->state != ModelState::kHeld; });
     }
+  }
 
-    // Bind an unbound model on a stream's first use. If all model instances are
-    // already bound, reclaim and rebind one for an oversubscribed stream.
-    ModelEntry& entry = take_available_entry(lk, /*prefer_unbound=*/true);
-    ModelEntry* previous = bound_entry(stream);
-    if (previous != nullptr) {
-      previous->stream = nullptr;
+  // The model for a stream's first call: an available one, after reclaiming
+  // finished runs if none is, preferring one no other stream is bound to; else
+  // the oldest draining one, which the call claims and waits on. nullptr if
+  // every model is held. A model bound to another stream is rebound.
+  ModelEntry* entry_to_bind() {
+    if (oldest(ModelState::kAvailable) == nullptr) {
+      reclaim_finished_runs();
     }
-    entry.stream = stream;
+    ModelEntry* entry = newest(ModelState::kAvailable, /*unbound_only=*/true);
+    if (entry == nullptr) {
+      entry = newest(ModelState::kAvailable);
+    }
+    if (entry == nullptr) {
+      entry = oldest(ModelState::kDraining);
+    }
     return entry;
   }
 
-  void reclaim_unused_stream_mutexes() {
-    for (auto it = stream_mutexes_.begin(); it != stream_mutexes_.end();) {
-      if (bound_entry(it->first) == nullptr && it->second.use_count() == 1) {
-        it = stream_mutexes_.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-
-  void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
-    // Move every finished run back to available, oldest first, so the most
-    // recently launched one is reused first. This allocates nothing, and if
-    // is_finished() throws, every entry is still in exactly one state.
+  // Moves every finished run back to available, oldest first, so the most
+  // recently launched one is reused first. This allocates nothing, and if
+  // is_finished() throws, every entry is still in exactly one state.
+  bool reclaim_finished_runs() {
     bool reclaimed = false;
     uint64_t min_seq = 0;
     while (ModelEntry* entry = oldest(ModelState::kDraining, min_seq)) {
@@ -378,6 +354,12 @@ class ModelPool {
     }
     if (reclaimed) {
       model_state_changed_.notify_all();
+    }
+    return reclaimed;
+  }
+
+  void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
+    if (reclaim_finished_runs()) {
       return;
     }
 
@@ -413,13 +395,11 @@ class ModelPool {
   std::vector<ModelEntry> entries_;
   uint64_t next_seq_{0};
 
-  bool use_stream_affinity_{false};
   // Callers enabling affinity must keep bound streams alive to avoid a reused
-  // device handle inheriting an old binding. Unbound mutexes are reclaimed
-  // once no in-flight StreamLock shares ownership.
-  std::unordered_map<Stream, std::shared_ptr<std::mutex>> stream_mutexes_;
+  // device handle inheriting an old binding.
+  bool use_stream_affinity_{false};
 
-  // Protects the entries and the stream mutexes.
+  // Protects the entries. Never held across a call that blocks.
   std::mutex models_mutex_;
 
   std::condition_variable model_state_changed_;
