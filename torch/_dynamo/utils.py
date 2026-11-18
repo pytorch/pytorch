@@ -119,7 +119,7 @@ if typing.TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+    from torch._subclasses import FakeTensorMode
 
 
 try:
@@ -3699,7 +3699,7 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
 
 
 def deepcopy_to_fake_tensor(
-    obj: Any, fake_mode: FakeTensorMode | CppFakeTensorMode
+    obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
 ) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
@@ -4180,9 +4180,7 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_concrete_sizes_from_symints(
-    msg: str, fake_mode: FakeTensorMode | CppFakeTensorMode | None
-) -> str:
+def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
     """
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.
@@ -5792,7 +5790,7 @@ def has_torch_function(vt: VariableTracker) -> bool:
 
 # see note [Tensor Fakification and Symbol Caching]
 def to_fake_tensor(
-    t: torch.Tensor, fake_mode: FakeTensorMode | CppFakeTensorMode
+    t: torch.Tensor, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
 ) -> Any:
     symbolic_context = None
     source = None

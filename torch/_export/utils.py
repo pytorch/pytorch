@@ -17,6 +17,7 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import (
     CppFakeTensorMode,
+    FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
 )
@@ -1506,7 +1507,7 @@ def _compiling_state_context() -> AbstractContextManager[None]:
 
 
 def _fakify_params_buffers(
-    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    fake_mode: FakeTensorMode,
     mod: torch.nn.Module,
 ) -> dict[str, torch.Tensor | torch.nn.Parameter]:
     params_buffers = {
@@ -1515,7 +1516,7 @@ def _fakify_params_buffers(
     }
 
     faked_params_buffers = {}
-    memo: dict[int, torch.Tensor] = {}
+    memo: dict[int, FakeTensor] = {}
     for key, value in params_buffers.items():
         if id(value) in memo:
             fake_tensor = memo[id(value)]

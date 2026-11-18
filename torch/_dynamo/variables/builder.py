@@ -73,7 +73,6 @@ from torch._library.opaque_object import (
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
-    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake,
@@ -4273,9 +4272,7 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
     return TupleVariable(items)
 
 
-def _clone_input(
-    value: Any, fake_mode: FakeTensorMode | CppFakeTensorMode | None
-) -> Any:
+def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
