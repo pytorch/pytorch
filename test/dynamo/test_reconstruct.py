@@ -86,6 +86,31 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    @parametrize("target", ["scalar", "nested", "attribute"])
+    def test_storage_offset_reconstruction_after_data_swap(self, target):
+        class Box:
+            pass
+
+        def fn(x, y, box):
+            offset = x.storage_offset()
+            x.data = y
+            if target == "attribute":
+                box.key = (offset, "value")
+                return x + 1
+            return x + 1, ((offset,),) if target == "nested" else offset
+
+        def inputs(offset):
+            return torch.ones(4)[offset : offset + 3], torch.ones(2, 5)[:, 1:], Box()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for index, offset in enumerate((0, 0, 1)):
+            eager_inputs, compiled_inputs = inputs(offset), inputs(offset)
+            self.assertEqual(compiled(*compiled_inputs), fn(*eager_inputs))
+            if target == "attribute":
+                self.assertEqual(compiled_inputs[2].key, eager_inputs[2].key)
+            self.assertEqual(counter.frame_count, 1 if index < 2 else 2)
+
     @parametrize("leaf", ["int", "bool", "computed"])
     @parametrize("aggregate", ["tuple", "list", "slice_list", "slice_dict"])
     def test_nested_lazy_constant_aggregate_does_not_specialize_values(
@@ -260,7 +285,15 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(seen, [1])
 
-    @parametrize("container_type", [subtest(None, name="scalar"), list, dict, set])
+    @parametrize(
+        "container_type",
+        [
+            subtest(None, name="scalar"),
+            subtest(list, name="list"),
+            subtest(dict, name="dict"),
+            subtest(set, name="set"),
+        ],
+    )
     @parametrize("nested", [False, True])
     @parametrize("frozen", [False, True])
     def test_sourced_constant_in_aggregates(self, container_type, nested, frozen):
