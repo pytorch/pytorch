@@ -20,6 +20,16 @@ PyInterpreter* PythonDispatcherTLS::get_state() {
   return pythonDispatcherState;
 }
 
+PyInterpreter* PythonDispatcherTLS::get_state_for_pre_dispatch() {
+  if (tls_is_dispatch_key_included(DispatchKey::PreDispatch) &&
+      !tls_is_dispatch_key_excluded(DispatchKey::PreDispatch) &&
+      !tls_is_dispatch_key_excluded(DispatchKey::Python) &&
+      !tls_is_dispatch_key_excluded(DispatchKey::PythonDispatcher)) {
+    return pythonDispatcherState;
+  }
+  return nullptr;
+}
+
 void PythonDispatcherTLS::reset_state() {
   pythonDispatcherState = nullptr;
   c10::impl::tls_set_dispatch_key_included(
