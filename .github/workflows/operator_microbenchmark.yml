@@ -93,6 +93,7 @@ jobs:
           { config: "operator_microbenchmark_norm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "operator_microbenchmark_scaled_mm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "operator_microbenchmark_scaled_grouped_mm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_grouped_mm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
       python-version: "3.12"
       compiler: gcc11

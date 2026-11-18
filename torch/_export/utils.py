@@ -14,7 +14,7 @@ from inspect import ismethod, Parameter
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -1307,7 +1307,7 @@ def _detect_fake_mode_from_gm(
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_vals.append(fake_val)
 
-    return detect_fake_mode(fake_inps + fake_vals)
+    return require_python_fake_mode(detect_fake_mode(fake_inps + fake_vals))
 
 
 @contextmanager
