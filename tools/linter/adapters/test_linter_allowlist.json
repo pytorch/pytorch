@@ -7,7 +7,6 @@
   "test/backends/xeon/test_launch.py",
   "test/benchmark_utils/test_benchmark_utils.py",
   "test/cpp_extensions/libtorch_agn_2_10_extension/test_version_compatibility.py",
-  "test/cpp_extensions/python_agnostic_extension/test/test_python_agnostic.py",
   "test/cpp_extensions/test_libtorch_agnostic.py",
   "test/cpp_extensions/test_target_version_guard.py",
   "test/custom_backend/test_custom_backend.py",

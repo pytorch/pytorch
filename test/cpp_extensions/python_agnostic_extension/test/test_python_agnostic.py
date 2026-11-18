@@ -7,14 +7,12 @@ import sys
 import unittest
 from pathlib import Path
 
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
     run_tests,
     shell,
-    TEST_XPU,
     TestCase,
 )
 
@@ -36,10 +34,6 @@ class TestPythonAgnostic(TestCase):
         if return_code != 0:
             raise RuntimeError("python_agnostic bdist_wheel failed to build")
 
-    @unittest.skipIf(
-        not (TEST_CUDA or TEST_XPU),
-        "test requires CUDA or XPU",
-    )
     @unittest.skipIf(not IS_LINUX, "test requires linux tools ldd and nm")
     def test_extension_is_python_agnostic(self, device):
         # For this test, run_test.py will call `python -m build --wheel --no-isolation` in the
@@ -69,9 +63,11 @@ class TestPythonAgnostic(TestCase):
         self.assertFalse("Py" in missing_symbols)
 
 
-devices = ("cuda", "xpu")
 instantiate_device_type_tests(
-    TestPythonAgnostic, globals(), only_for=devices, allow_xpu=True
+    TestPythonAgnostic,
+    globals(),
+    except_for=("cpu", "privateuse1", "hpu"),
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
