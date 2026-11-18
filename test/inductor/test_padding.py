@@ -14,6 +14,8 @@ from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ceildiv, run_and_get_code
+from torch._prims_common import compute_required_storage_length
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -977,6 +979,90 @@ class PaddingTest(TestCaseBase):
             compiled = torch.compile(program, backend="inductor")(x.clone())
 
         self.assertEqual(eager, compiled)
+
+
+class NestedCatPaddingTest(TestCase):
+    """Regression tests for https://github.com/pytorch/pytorch/issues/204346.
+
+    Before pytorch#192575, a noncontiguous reshape of a nested cat could record
+    its index map before comprehensive padding changed the backing layout, so
+    returned views read past their storage and chunks read wrong values.
+    """
+
+    def _compile_with_padding(self, fn, *args):
+        metrics.reset()
+        # The bug depends on the traced output order, which the Dynamo test
+        # harness would otherwise canonicalize.
+        with (
+            torch._dynamo.config.patch(canonicalize_output_graph_node_order=False),
+            config.patch(
+                {
+                    "comprehensive_padding": True,
+                    "force_disable_caches": True,
+                    "triton.cudagraphs": False,
+                }
+            ),
+            torch.no_grad(),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+        self.assertGreater(metrics.num_comprehensive_padding, 0)
+        # Check bounds before reading any output: an out-of-bounds view reads
+        # unrelated memory.
+        for value in actual:
+            geometry = f"size={value.size()} stride={value.stride()} offset={value.storage_offset()}"
+            self.assertTrue(all(stride >= 0 for stride in value.stride()), msg=geometry)
+            required = compute_required_storage_length(
+                value.shape, value.stride(), value.storage_offset()
+            )
+            self.assertLessEqual(
+                required * value.element_size(),
+                value.untyped_storage().nbytes(),
+                msg=geometry,
+            )
+        return actual
+
+    def test_nested_cat_returned_expand(self, device):
+        def fn(x, scale):
+            values = torch.relu(x) * scale
+            values = values[:, :, 0, 0, :].transpose(1, 0).unsqueeze(0)
+            for _ in range(2):
+                values = torch.cat((values, values), dim=0)
+            first_copy = torch.relu(values[:1])
+            softmax = torch.softmax(first_copy.reshape(-1), dim=0)
+            view = first_copy.squeeze(0).expand(1, 48, 49, 27)
+            return softmax, view
+
+        torch.manual_seed(0)
+        x = torch.randn(49, 48, 1, 1, 1, device=device)
+        scale = torch.randn(1, 27, device=device)
+        actual = self._compile_with_padding(fn, x, scale)
+        self.assertEqual(fn(x, scale), actual)
+
+    def test_nested_cat_chunk_values(self, device):
+        def fn(x0, x4):
+            v3 = torch.softmax(x0.transpose(0, 2)[..., 0:1:60], dim=0)
+            v6 = x4.max(dim=2).values + v3
+            v9 = torch.relu(v6.max(dim=3).values.max(dim=0).values)
+            v10 = torch.cat((v9, v9), dim=0)
+            v20 = torch.cat((v6, v6), dim=0)
+            v25_0, v25_1 = torch.chunk(torch.cat((v20, v20), dim=0), 2, dim=0)
+            _, v26_1 = torch.chunk(v25_0, 2, dim=0)
+            v35_0, v35_1 = torch.chunk(torch.cat((v10, v10), dim=0), 2, dim=0)
+            v36_0, v36_1 = torch.chunk(v35_0, 2, dim=0)
+            v37 = v26_1.max(dim=3).values
+            return v25_1, v26_1, v35_1, v36_1, v37 * v36_0
+
+        torch.manual_seed(0)
+        x = torch.randn(1, 34, 4, 60, device=device)
+        other = torch.randn(60, 1, 136, device=device)
+        actual = self._compile_with_padding(fn, x, other)
+        self.assertEqual(fn(x, other), actual)
+
+
+if HAS_GPU:
+    instantiate_device_type_tests(
+        NestedCatPaddingTest, globals(), only_for=GPU_TYPE, allow_xpu=True
+    )
 
 
 if __name__ == "__main__":
