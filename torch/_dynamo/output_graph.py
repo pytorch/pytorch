@@ -2210,11 +2210,7 @@ class OutputGraph(OutputGraphCommon):
                 meta.stack_null_idxes.append(i)
             else:
                 stack_values.append(value)
-            # Guard contexts have an instance builder; preserve inactive aliases
-            # rather than recreating each alias from the context factory on resume.
-            if isinstance(value, ContextWrappingVariable) and not isinstance(
-                value, variables.GuardContextVariable
-            ):
+            if isinstance(value, ContextWrappingVariable):
                 target_values = (
                     () if value.target_values is None else tuple(value.target_values)
                 )
@@ -2275,9 +2271,7 @@ class OutputGraph(OutputGraphCommon):
                         "variable should never be NULL in Python < 3.12"
                     )
             meta.locals_names[k] = len(meta.locals_names)
-            if isinstance(v, ContextWrappingVariable) and not isinstance(
-                v, variables.GuardContextVariable
-            ):
+            if isinstance(v, ContextWrappingVariable):
                 target_values = (
                     () if v.target_values is None else tuple(v.target_values)
                 )
