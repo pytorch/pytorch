@@ -1730,7 +1730,11 @@ void THP_PyThreadState_PopFrame(
     _PyInterpreterFrame* frame);
 }
 
-void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
+void* framePush(
+    PyObject* func,
+    uint16_t*** instr,
+    uint16_t** code_start,
+    PyObject*** locals) {
   PyThreadState* tstate = PyThreadState_Get();
   // A compiled function is a Python call: it counts against the recursion
   // limit in the interpreter's own counter, as _Py_EnterRecursivePy does, so
@@ -1758,8 +1762,8 @@ void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
   }
   Py_INCREF(func);
   _PyFrame_Initialize(frame, function, nullptr, code, 0);
-  // What COPY_FREE_VARS does. The other locals stay empty: the VM keeps them
-  // in its registers.
+  // What COPY_FREE_VARS does. The other variables start out unbound: the VM
+  // fills them in as the function binds them.
   if (PyObject* closure = function->func_closure) {
     Py_ssize_t n = PyTuple_GET_SIZE(closure);
     Py_ssize_t first = code->co_nlocalsplus - n;
@@ -1774,6 +1778,7 @@ void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
   tstate->cframe->current_frame = frame;
   *instr = reinterpret_cast<uint16_t**>(&frame->prev_instr);
   *code_start = reinterpret_cast<uint16_t*>(_PyCode_CODE(code));
+  *locals = frame->localsplus;
   return frame;
 }
 
@@ -1783,19 +1788,9 @@ int32_t frameHeld(void* held) {
       Py_REFCNT(reinterpret_cast<PyObject*>(frame->frame_obj)) > 1;
 }
 
-void framePop(void* popped, PyObject* kept) {
+void framePop(void* popped) {
   auto* frame = static_cast<_PyInterpreterFrame*>(popped);
   PyThreadState* tstate = PyThreadState_Get();
-  if (kept != nullptr) {
-    // On the frame's own stack, which is empty: the frame object clears it
-    // with its locals, and f_locals does not show it.
-    PyCodeObject* code = frame->f_code;
-    if (frame->stacktop < code->co_nlocalsplus + code->co_stacksize) {
-      frame->localsplus[frame->stacktop++] = kept;
-    } else {
-      Py_DECREF(kept);
-    }
-  }
   // Unlinked before it is cleared, as in the interpreter: clearing can run
   // finalizers, which must not find a half-cleared frame on the stack.
   tstate->cframe->current_frame = frame->previous;

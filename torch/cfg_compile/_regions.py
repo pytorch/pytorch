@@ -444,6 +444,11 @@ def _is_pure(callee: Any) -> bool:
     return False
 
 
+# Instructions that take a value without looking at it: one that keeps it
+# alive, and one that binds a variable of the frame to it.
+_KEEPS = ("hold", "store_local")
+
+
 def _problem(
     inst: dict[str, Any], env: dict[int, Any], local: dict[int, Any], given: Any = ()
 ) -> str | None:
@@ -476,6 +481,11 @@ def _problem(
         if type(target) in _CONTAINERS and id(target) not in local:
             return f"changes a {type(target).__name__} from before the region"
     return None
+
+
+def _slot(inst: dict[str, Any]) -> int:
+    """Which variable of the frame a ``store_local`` binds."""
+    return int(inst["text"].split()[1])
 
 
 def _note_local(
@@ -2047,7 +2057,7 @@ class _Variant:
         # For a region that goes on into other blocks: where the VM goes on
         # (block, instruction), the values the recipes are of, and the ones
         # that are unset there; and what the path read that is no input.
-        self.leap: tuple[int, int, list[int], list[int]] | None = None
+        self.leap: tuple[int, int, list[int], list[int], list[Any]] | None = None
         self.guards: list[tuple[str, Any, str, Any]] = []
         # What the region does to the lists, dicts and objects it was given,
         # once its graph has run (see ``_effects``), and whether that leaves
@@ -2089,8 +2099,8 @@ class _Variant:
             _apply(effect, results, built, flat, held)
         if self.leap is None:
             return tuple(made)
-        block, index, values, unset = self.leap
-        return (block, index, dict(zip(values, made)), unset)
+        block, index, values, unset, bound = self.leap
+        return (block, index, dict(zip(values, made)), unset, bound)
 
     def affects(self, effects: list[Any], grows: bool) -> None:
         self.effects, self.grows = effects, grows
@@ -2343,7 +2353,7 @@ class _Region:
         for i in range(self.lo, self.hi):
             inst = plan.insts[i]
             reason = _problem(inst, env, local, given)
-            if reason is None and inst["op"] != "hold":
+            if reason is None and inst["op"] not in _KEEPS:
                 reason = next(
                     (refused[v] for v in inst["uses"] if refused.get(v)), None
                 )
@@ -2375,7 +2385,7 @@ class _Region:
                 i
                 for i in range(self.lo, self.hi)
                 if value in self.plan.insts[i]["uses"]
-                and self.plan.insts[i]["op"] != "hold"
+                and self.plan.insts[i]["op"] not in _KEEPS
             ]
             reason = "takes " + e.reason
             self.plan.split(
@@ -2761,6 +2771,9 @@ class _Walk:
         self.born: dict[int, int | None] = {}
         self.local: dict[int, Any] = {}
         self.guards: list[tuple[str, Any, str, Any]] = []
+        # The variables of the frame the path bound: to which value, and
+        # what that was (the walk itself for a value there is none of).
+        self.bound: dict[int, tuple[int, Any]] = {}
 
     def read(self, value: int) -> None:
         if value in self.given and value not in self.born:
@@ -2825,9 +2838,12 @@ class _Walk:
                     env.clear()
                     env.update(before)
                     return self.block, self.index
-                if inst["op"] != "hold":
+                if inst["op"] not in _KEEPS:
                     for value in inst["uses"]:
                         self.read(value)
+                elif inst["op"] == "store_local":
+                    value = inst["uses"][0]
+                    self.bound[_slot(inst)] = (value, env.get(value, self))
                 if inst["dst"] is not None:
                     self.born[inst["dst"]] = None if inside else self.entered
                 self.note(inst, receiver)
@@ -2843,7 +2859,7 @@ class _Walk:
             return True
         if self.steps >= _PATH_STEPS or (self.block, self.index) in self.plan.fails:
             return True
-        if op == "hold":
+        if op in _KEEPS:
             return False
         if any(value in self.refused or value not in env for value in uses):
             return True
@@ -2877,6 +2893,22 @@ class _Walk:
                 name = inst["text"].split("'")[1]
                 if name in self.plan.globals:
                     self.guards.append(("global", self.plan.globals, name, value))
+
+    def binds(self, live: list[int], made: list[int]) -> list[tuple[int, int]]:
+        """What the VM is to bind the variables to where the path ends: for
+        each, a value that has a register there with what the path bound it
+        to (a later block may know it by another number), or 0 for none."""
+        env, found = self.env, []
+        there = [v for v in live if v in made or v not in self.born]
+        for slot, (value, obj) in self.bound.items():
+            if obj is self or (value not in self.born and value in live):
+                # Unbound, or a value from before the path that is still
+                # where it was.
+                found.append((slot, value))
+                continue
+            same = (v for v in there if v in env and env[v] is obj)
+            found.append((slot, next(same, 0)))
+        return found
 
     def leave(self) -> bool:
         """Goes on into the block the values choose; False if they cannot."""
@@ -2946,7 +2978,10 @@ class _Path(_Region):
 
     def give(self, env: dict[int, Any]) -> Any:
         values = {value: env[value] for value in self.outputs if value in env}
-        return (self.plan.block, self.hi, values, [])
+        # The variables the instructions bind, which the VM did not run.
+        insts = self.plan.insts[self.lo : self.hi]
+        bound = {_slot(i): i["uses"][0] for i in insts if i["op"] == "store_local"}
+        return (self.plan.block, self.hi, values, [], list(bound.items()))
 
     def decline(self, args: tuple[Any, ...]) -> Any:
         return None
@@ -3147,7 +3182,9 @@ class _Path(_Region):
                     if born is None:
                         raise _Failed(self.definition(value), str(e)) from None
                     raise _Retry(limit=born - 1) from None
-            found["leap"] = (block, index, values, [v for v in live if v not in values])
+            unset = [v for v in live if v not in values]
+            every = plan.replay.live(block, index)
+            found["leap"] = (block, index, values, unset, walk.binds(every, values))
             found["effects"] = _effects_of(copies, recipes, stored)
             found["written"] = _written(flat, fake, versions, stored)
             found["modules"] = modules
