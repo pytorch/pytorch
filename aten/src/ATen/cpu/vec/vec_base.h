@@ -379,6 +379,20 @@ struct Vectorized {
     }
     return ret;
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<T> or_nan_if(const VecBool<T>& mask) const {
+    Vectorized<T> vector;
+    std::array<int_same_size_t<T>, size()> buffer{};
+    mask.store(buffer.data());
+    for (const auto i : c10::irange(size())) {
+      if (buffer[i] & 0x01) {
+        std::memset(&vector.values[i], 0xFF, sizeof(T));
+      } else {
+        vector[i] = values[i];
+      }
+    }
+    return vector;
+  }
   template <
       typename other_t_abs = T,
       typename std::enable_if_t<
@@ -828,8 +842,7 @@ Vectorized<T> inline operator*(const Vectorized<T>& a, const Vectorized<T>& b) {
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(*)
 
 template <class T>
-Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b)
-    __ubsan_ignore_float_divide_by_zero__ {
+Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] / b[i];
@@ -840,8 +853,7 @@ Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b)
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(/)
 
 template <class T, typename std::enable_if_t<!is_floating_point_v<T>, int> = 0>
-Vectorized<T> inline operator%(const Vectorized<T>& a, const Vectorized<T>& b)
-    __ubsan_ignore_float_divide_by_zero__ {
+Vectorized<T> inline operator%(const Vectorized<T>& a, const Vectorized<T>& b) {
   return a - a / b * b;
 }
 

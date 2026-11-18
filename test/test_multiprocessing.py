@@ -286,6 +286,9 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     else:
         is_ok &= type(var) is torch.Tensor
     var._grad = torch.ones(5, 5, device=device)
+    # The parent reads var after this message; wait for the writes above.
+    if device != "cpu":
+        torch.accelerator.synchronize()
 
     queue.put(is_ok)
 
@@ -499,6 +502,9 @@ class _MultiprocessingTestMixin:
         ready.wait()
         var.data[0, 0] = 1000
         var.grad.data[:] = torch.ones(5, 5, device=device) * 4
+        # The child reads var after this event; wait for the writes above.
+        if device != "cpu":
+            torch.accelerator.synchronize()
         master_modified.set()
 
         worker_ok = queue.get()
@@ -638,9 +644,10 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     def test_device_bad_call(self, device):
         # Initialize device
         t = torch.zeros(5, 5).to(device).cpu()
-        inq = mp.Queue()
-        outq = mp.Queue()
-        p = mp.Process(target=queue_get_exception, args=(device, inq, outq))
+        ctx = mp.get_context("fork")
+        inq = ctx.Queue()
+        outq = ctx.Queue()
+        p = ctx.Process(target=queue_get_exception, args=(device, inq, outq))
         p.start()
         inq.put(t)
         p.join()
@@ -652,16 +659,17 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             f"""\
 import torch
-from torch.multiprocessing import Process
+from torch.multiprocessing import get_context
 def run(rank):
     torch.get_device_module("{device}").set_device(rank)
 if __name__ == "__main__":
     size = 2
     processes = []
+    ctx = get_context("fork")
     for rank in range(size):
         # it would work fine without the line below
         x = torch.rand(20, 2).to("{device}")
-        p = Process(target=run, args=(rank,))
+        p = ctx.Process(target=run, args=(rank,))
         p.start()
         processes.append(p)
     for p in processes:
@@ -675,6 +683,30 @@ if __name__ == "__main__":
 
 
 instantiate_device_type_tests(TestMultiprocessingDevice, globals(), allow_xpu=True)
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+class TestMultiprocessingAutogradFork(TestCase):
+    # No hw_classification: fork after autograd fails only when an accelerator is
+    # present, and this checks both cases, so it isn't GENERIC. The test takes no
+    # device parameter and the class doesn't use instantiate_device_type_tests,
+    # so it isn't ACCELERATOR either. Unlabeled, it runs on every job.
+
+    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
+    def test_autograd_errors(self):
+        ctx = mp.get_context("fork")
+        simple_autograd_function()
+        # Autograd only uses thread when GPUs are involved
+        if torch.accelerator.is_available():
+            with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
+                with ctx.Pool(3) as pool:
+                    pool.map(simple_autograd_function, [1, 2, 3])
+        else:
+            with ctx.Pool(3) as pool:
+                pool.map(simple_autograd_function, [1, 2, 3])
 
 
 @unittest.skipIf(
@@ -799,19 +831,6 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         simple_autograd_function()
         with ctx.Pool(3) as pool:
             pool.map(simple_autograd_function, [1, 2, 3])
-
-    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
-    def test_autograd_errors(self):
-        ctx = mp.get_context("fork")
-        simple_autograd_function()
-        # Autograd only uses thread when GPUs are involved
-        if torch.accelerator.is_available():
-            with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
-                with ctx.Pool(3) as pool:
-                    pool.map(simple_autograd_function, [1, 2, 3])
-        else:
-            with ctx.Pool(3) as pool:
-                pool.map(simple_autograd_function, [1, 2, 3])
 
     def test_empty_tensor_sharing_meta(self):
         self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
