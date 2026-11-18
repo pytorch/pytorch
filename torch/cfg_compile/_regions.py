@@ -1171,7 +1171,10 @@ def _identities(
         for item in obj.values():
             _identities(item, modules, others, seen)
     elif type(obj) in (types.MethodType, types.BuiltinFunctionType):
-        others.append(obj)
+        # A method of a tensor is named by what the tensor is like, and to
+        # keep it would be to keep the batch a variant was made on.
+        if not isinstance(obj.__self__, torch.Tensor):
+            others.append(obj)
         _identities(obj.__self__, modules, others, seen)
     elif type(obj) is types.CellType:
         try:
