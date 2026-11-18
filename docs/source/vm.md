@@ -11,56 +11,87 @@
 ```
 
 ```{eval-rst}
-.. autodata:: torch.vm.DefaultCFGPasses
+.. autodata:: torch.vm.DEFAULT_PASSES
 ```
 
 ```{eval-rst}
-.. autodata:: torch.vm.DefaultBlockPasses
+.. autofunction:: torch.vm.swap
 ```
 
 ```{eval-rst}
-.. autodata:: torch.vm.FAST
+.. autofunction:: torch.vm.fuse_checked
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.inlining_pass
+.. autoexception:: torch.vm.Mismatch
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.loop_unrolling_pass
+.. autofunction:: torch.vm.load_passes
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.module_shortcuts_pass
+.. autofunction:: torch.vm.regions
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.graphs_pass
+.. autofunction:: torch.vm.memory
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.resolve_dispatch_pass
+.. autofunction:: torch.vm.is_available
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.tensor_accessors_pass
+.. autoexception:: torch.vm.Unsupported
+```
+
+## torch.vm.passes
+
+```{eval-rst}
+.. automodule:: torch.vm.passes
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.method_calls_pass
+.. autoclass:: torch.vm.passes.BuiltinPass
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.narrow_dims_pass
+.. autoclass:: torch.vm.passes.Inline
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.fold_pass
+.. autoclass:: torch.vm.passes.Unroll
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.dce_pass
+.. autoclass:: torch.vm.passes.ModuleShortcuts
 ```
 
-What a pass of one's own is made with (`swap`, `fuse_checked`, `Mismatch`, `load_passes`), what reports on a function (`regions`, `memory`),
-`is_available` and `Unsupported` are those of {mod}`torch.rewrite`, under the same names.
+```{eval-rst}
+.. autoclass:: torch.vm.passes.Graphs
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.ResolveDispatch
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.TensorAccessors
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.MethodCalls
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.NarrowDims
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.Fold
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.DCE
+```
