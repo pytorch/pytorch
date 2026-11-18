@@ -27,6 +27,11 @@ A preset is the keyword arguments of a configuration, to be unpacked::
 
     @torch.vm(**torch.vm.FAST)  # the default passes, and Inductor for the tensor work
     def forward(model, x): ...
+
+A pass that has a setting is made with it::
+
+    # loops of up to 16 iterations, where the default is 8
+    cfg_passes = (torch.vm.inlining_pass(), torch.vm.loop_unrolling_pass(16))
 """
 
 import sys
@@ -85,12 +90,22 @@ def inlining_pass() -> Builtin:
     return Builtin("inline", True, "inlining_pass")
 
 
-def loop_unrolling_pass() -> Builtin:
-    """``for i in range(k)`` with a constant ``k`` of at most 8 is replaced by
-    ``k`` copies of its body, under a guard on ``range``. A loop whose copies
-    would come to more than 600 instructions is left as it is. Over the
-    control-flow graph, after inlining."""
-    return Builtin("unroll", True, "loop_unrolling_pass")
+def loop_unrolling_pass(max_trip_count: int = 8) -> Builtin:
+    """``for i in range(k)`` with a constant ``k`` of at most
+    ``max_trip_count`` is replaced by ``k`` copies of its body, under a guard
+    on ``range``. A loop whose copies would come to more than 600
+    instructions is left as it is. Over the control-flow graph, after
+    inlining."""
+    if isinstance(max_trip_count, bool) or not isinstance(max_trip_count, int):
+        kind = type(max_trip_count).__name__
+        raise TypeError(f"loop_unrolling_pass takes a number of iterations, not {kind}")
+    if max_trip_count < 1:
+        raise ValueError(
+            f"loop_unrolling_pass({max_trip_count}): at least one iteration; "
+            "to unroll nothing, leave the pass out of cfg_passes"
+        )
+    settings = (("max_trip_count", max_trip_count),)
+    return Builtin("unroll", True, "loop_unrolling_pass", settings)
 
 
 def module_shortcuts_pass() -> Builtin:
@@ -164,8 +179,8 @@ DefaultCFGPasses: tuple[Builtin, ...] = (
     module_shortcuts_pass(),
 )
 """What ``@torch.vm`` does to the control-flow graph of a function:
-:func:`inlining_pass`, :func:`loop_unrolling_pass`,
-:func:`module_shortcuts_pass`."""
+:func:`inlining_pass`, :func:`loop_unrolling_pass` with its default of 8
+iterations, :func:`module_shortcuts_pass`."""
 
 DefaultBlockPasses: tuple[Builtin, ...] = (
     resolve_dispatch_pass(),

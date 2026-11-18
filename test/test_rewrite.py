@@ -7684,6 +7684,10 @@ def vm_twelve(x):
     return x
 
 
+def vm_thirteen(x):
+    return vm_twelve(x) + 1
+
+
 def vm_scaled(x, y):
     return unr_loop(x, y)[0] * 2
 
@@ -7727,6 +7731,30 @@ class TestVm(TestCase):
         self.assertEqual(plain.stats()["unrolled_loops"], 0)
         specialized = [b["specialized_executions"] for b in plain.stats()["blocks"]]
         self.assertEqual(sum(specialized), 0)
+
+    def test_loop_unrolling_pass_takes_the_number_of_iterations(self):
+        x = torch.zeros(2)
+        usual = torch.vm(vm_twelve, fallback=False)
+        self.assertEqual(usual(x), x + 12)
+        self.assertEqual(usual.stats()["unrolled_loops"], 0)
+        unrolling = torch.vm.loop_unrolling_pass
+        for most, unrolled in ((11, 0), (12, 1), (16, 1)):
+            cfg_passes = (torch.vm.inlining_pass(), unrolling(most))
+            fn = torch.vm(vm_twelve, cfg_passes=cfg_passes, fallback=False)
+            self.assertEqual(fn(x), x + 12)
+            self.assertEqual(fn.stats()["unrolled_loops"], unrolled)
+        # A loop that comes in with an inlined call is unrolled as well.
+        cfg_passes = (torch.vm.inlining_pass(), unrolling(12))
+        outer = torch.vm(vm_thirteen, cfg_passes=cfg_passes, fallback=False)
+        self.assertEqual(outer(x), x + 13)
+        self.assertEqual(len(outer.stats()["inlined"]), 1)
+        self.assertEqual(outer.stats()["unrolled_loops"], 1)
+        said = "torch.vm.loop_unrolling_pass(max_trip_count=16)"
+        self.assertEqual(repr(unrolling(16)), said)
+        with self.assertRaisesRegex(ValueError, "at least one iteration"):
+            unrolling(0)
+        with self.assertRaisesRegex(TypeError, "number of iterations"):
+            unrolling("8")
 
     def test_fast_is_the_defaults_behind_a_graph_compiler(self):
         vm = torch.vm
