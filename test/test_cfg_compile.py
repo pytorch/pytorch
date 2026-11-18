@@ -4783,6 +4783,38 @@ class TestCfgRegions(TestCase):
         where = [r["where"] for r in self.compiled_regions(compiled)]
         self.assertTrue(any(w.startswith("region_partway") for w in where), where)
 
+    def test_strides_select_a_variant(self):
+        compiled = torch.cfg_compile(region_chain, backend="aot_eager", fallback=False)
+        for _ in range(6):
+            x, y = torch.randn(4, 4), torch.randn(4, 4)
+            self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
+            # The same sizes, laid out the other way.
+            x = x.t()
+            self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 2)
+
+    def test_numbers_of_a_call(self):
+        runtime = importlib.import_module("torch._cfg_rs")
+        torch.cfg_compile(region_small)
+        a, b = torch.randn(4, 12, 8), torch.nn.Parameter(torch.randn(3))
+        view = a[:, 2:9]
+        kinds, numbers, offsets = runtime.tensor_key([a, view, b], [5, -2])
+        # The sizes and then the strides of each tensor, then the integers.
+        self.assertEqual(
+            memoryview(numbers).cast("q").tolist(),
+            [4, 12, 8, 96, 8, 1, 4, 7, 8, 96, 8, 1, 3, 1, 5, -2],
+        )
+        self.assertEqual(memoryview(offsets).cast("q").tolist(), [0, 16, 0])
+        # Other elements, or gradients, make another kind of tensor of the
+        # same numbers.
+        for other in (a.double(), a.clone().requires_grad_()):
+            key = runtime.tensor_key([other, view, b], [5, -2])
+            self.assertNotEqual(kinds, key[0])
+            self.assertEqual(numbers, key[1])
+        with self.assertRaises(TypeError):
+            runtime.tensor_key([a, 3], [])
+
     @slowTest
     def test_inductor(self):
         def train(compile_step):
