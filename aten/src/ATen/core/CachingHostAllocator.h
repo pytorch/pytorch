@@ -13,6 +13,7 @@
 #include <optional>
 
 #include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <exception>
 #include <vector>
@@ -185,6 +186,7 @@ using c10::CachingDeviceAllocator::HostSegmentInfo;
  * device): reclamation operations take blocks out of their pools with
  * detach_block() under the pool locks and return them in a PendingHostFrees,
  * which frees them once the locks are released.
+ * frees_mutex_ is independent: never held together with another lock.
  * external_registrations_mutex_ is independent: never nested with another
  * lock. Released before record_trace() so it does not nest the RingBuffer
  * lock either.
@@ -340,10 +342,12 @@ struct CachingHostAllocatorImpl {
 
     void add(B* block) {
       blocks_.push_back(block);
+      allocator_->frees_started_++;
     }
 
     void add(const std::deque<B*>& blocks) {
       blocks_.insert(blocks_.end(), blocks.begin(), blocks.end());
+      allocator_->frees_started_ += blocks.size();
     }
 
     // Frees every block, then rethrows the first error.
@@ -355,6 +359,9 @@ struct CachingHostAllocatorImpl {
 
    private:
     std::exception_ptr free_blocks() {
+      if (blocks_.empty()) {
+        return nullptr;
+      }
       std::exception_ptr error;
       for (auto* block : std::exchange(blocks_, {})) {
         // Separate tries: a failed trace must not skip the free.
@@ -380,7 +387,12 @@ struct CachingHostAllocatorImpl {
           }
         }
         delete block;
+        allocator_->frees_finished_++;
       }
+      // Under the mutex, so that an allocation between checking frees_finished_
+      // and waiting does not miss it.
+      std::lock_guard<std::mutex> g(allocator_->frees_mutex_);
+      allocator_->frees_finished_cv_.notify_all();
       return error;
     }
 
@@ -481,7 +493,24 @@ struct CachingHostAllocatorImpl {
     // Slow path: if we can't allocate from the cached free list, we need
     // to create a new block.
     void* ptr = nullptr;
-    allocate_host_memory(roundSize, &ptr);
+    auto frees_finished = frees_finished_.load();
+    try {
+      allocate_host_memory(roundSize, &ptr);
+    } catch (const c10::Error&) {
+      // Other threads free blocks with no allocator lock held, so the memory
+      // this needs may still be on its way back. Wait until as many frees have
+      // finished as had started, then retry once.
+      auto frees_started = frees_started_.load();
+      if (frees_started == frees_finished) {
+        throw;
+      }
+      {
+        std::unique_lock<std::mutex> g(frees_mutex_);
+        frees_finished_cv_.wait(
+            g, [&] { return frees_finished_.load() >= frees_started; });
+      }
+      allocate_host_memory(roundSize, &ptr);
+    }
 
     record_trace(
         TraceEntry::SEGMENT_ALLOC,
@@ -1456,6 +1485,13 @@ private:
 
   // corresponds to c10::MempoolId_t{0,0}
   BlockPool default_pool_;
+
+  // Blocks added to a PendingHostFrees, and blocks whose free was attempted,
+  // so that a failed allocation can wait for the frees in flight.
+  std::atomic<size_t> frees_started_{0};
+  std::atomic<size_t> frees_finished_{0};
+  std::mutex frees_mutex_;
+  std::condition_variable frees_finished_cv_;
 
   // Indicates whether the event-processing thread pool is active.
   // Set to false in the destructor to signal background threads to stop.

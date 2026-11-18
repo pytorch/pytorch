@@ -461,6 +461,31 @@ struct FailingAllocator : MockAllocator {
   }
 };
 
+// The next allocate_host_memory() fails when asked to, as cudaHostAlloc does
+// while the memory it needs is still being freed.
+struct FailOnceAllocator : BlockingFreeAllocator {
+  std::atomic<bool> fail_next{false};
+  std::promise<void> failed;
+  std::atomic<bool> freed{false};
+  // Whether the last successful allocate_host_memory() came after a
+  // free_block() returned.
+  std::atomic<bool> allocated_after_free{false};
+
+  void allocate_host_memory(size_t size, void** ptr) override {
+    if (fail_next.exchange(false)) {
+      failed.set_value();
+      TORCH_CHECK(false, "out of host memory");
+    }
+    allocated_after_free = freed.load();
+    BlockingFreeAllocator::allocate_host_memory(size, ptr);
+  }
+
+  void free_block(at::HostBlock<TestStream>* block) override {
+    BlockingFreeAllocator::free_block(block);
+    freed = true;
+  }
+};
+
 // Expects fn() to throw a c10::Error whose message contains msg.
 template <typename F>
 void expect_error(F fn, const std::string& msg) {
@@ -568,6 +593,45 @@ TEST(CachingHostAllocatorTest, empty_cache_frees_detached_blocks_on_query_error)
   expect_error([&] { allocator.empty_cache(); }, "query_event failed");
   // The failed query dropped the other block's event, so that block stays.
   EXPECT_EQ(allocator.live, 1);
+}
+
+// Frees run with no allocator lock held, so an allocation that fails while
+// another thread frees a block waits for that free, then retries once.
+TEST(CachingHostAllocatorTest, allocate_retries_after_frees_in_flight) {
+  constexpr auto kTimeout = std::chrono::seconds(10);
+  FailOnceAllocator allocator;
+  allocator.max_cached_size = 1024;
+  void* large = allocator.allocate(4096).second;
+  auto freeing_thread =
+      std::async(std::launch::async, [&] { allocator.free(large); });
+  bool freeing = allocator.wait_until_freeing(kTimeout);
+  auto failed = allocator.failed.get_future();
+  allocator.fail_next = true;
+  auto allocating_thread =
+      std::async(std::launch::async, [&] { return allocator.allocate(4096); });
+  // Unblock only after the allocation failed, so that the free was in flight.
+  bool failed_once = failed.wait_for(kTimeout) == std::future_status::ready;
+  allocator.unblock();
+  freeing_thread.get();
+  auto [ptr, ctx] = allocating_thread.get();
+  EXPECT_TRUE(freeing);
+  EXPECT_TRUE(failed_once);
+  EXPECT_TRUE(allocator.allocated_after_free)
+      << "retried before the free in flight finished";
+  EXPECT_NE(ptr, nullptr);
+  allocator.free(ctx);
+}
+
+// With no free in flight, the error is rethrown without a retry, which would
+// succeed here.
+TEST(CachingHostAllocatorTest, allocate_throws_with_no_frees_in_flight) {
+  FailOnceAllocator allocator;
+  allocator.unblock();
+  // A free that already finished does not count.
+  allocator.free(allocator.allocate(N).second);
+  allocator.empty_cache();
+  allocator.fail_next = true;
+  expect_error([&] { allocator.allocate(N); }, "out of host memory");
 }
 
 // empty_cache() holds instance_mutex_ exclusively while it processes the
