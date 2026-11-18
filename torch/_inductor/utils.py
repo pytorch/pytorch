@@ -1761,6 +1761,18 @@ def is_affine_indexing(index: sympy.Expr) -> bool:
         return False
 
 
+# The constructs InductorChoices.use_modular_indexing decides about.
+ModularIndexingUse = Literal[
+    "view",  # dim-merging view whose inlined loads need it
+    "reduction",  # flat split of a multi-dim reduction
+    "repeat",
+    "roll",
+    "slice_scatter",  # strided slice_scatter
+    "index",  # %, //, abs, clamp of an index tensor folded into the address
+    "reindex",  # loop reindexing and index inversion during fusion
+]
+
+
 def is_symbolic(a: object) -> TypeGuard[torch.SymInt | torch.Tensor]:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor) and a._has_symbolic_sizes_strides
