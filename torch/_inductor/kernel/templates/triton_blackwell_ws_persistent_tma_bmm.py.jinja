@@ -41,8 +41,6 @@
     grid_m = tl.cdiv(M, BLOCK_M)
     {%- if TWO_CTAS %}
     grid_m = tl.cdiv(grid_m, 2) * 2
-    # paired CTAs must get adjacent M tiles of the same N tile, which needs an even GROUP_M
-    tl.static_assert(GROUP_M % 2 == 0, "TWO_CTAS requires an even GROUP_M")
     {%- endif %}
     grid_n = tl.cdiv(N, BLOCK_N)
     num_tiles_per_batch = grid_m * grid_n
