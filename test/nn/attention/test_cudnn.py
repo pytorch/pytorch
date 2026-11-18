@@ -32,15 +32,11 @@ def _cudnn_python_available() -> bool:
     if not attention.is_cudnn_sdp_python_available():
         return False
     # Only a missing or too-old dependency means unavailable: any other failure
-    # to import an installed provider must fail the tests rather than skip them.
+    # to import an installed provider, or a provider without the dispatch
+    # counter these tests read, must fail the tests rather than skip them.
     try:
         _cudnn._check_frontend_version(_PROVIDER)
-    except (ImportError, RuntimeError):
-        return False
-    import cudnn.torch as provider
-
-    # The real-provider tests count dispatches with the provider's counter.
-    if not hasattr(provider, "calls"):
+    except _cudnn._FrontendVersionError:
         return False
     q = torch.empty(_SHAPE, device="cuda", dtype=torch.bfloat16)
     params = torch.backends.cuda.SDPAParams(q, q, q, None, 0.0, True, False)
@@ -143,8 +139,9 @@ def _use_provider(test, install, version=_cudnn._MIN_FRONTEND_VERSION):
 
 
 class TestCuDNNPythonSDPALifecycle(TestCase):
-    # Calls torch.nn.attention._cudnn directly; the public wrappers only
-    # forward to it and are covered by TestCuDNNPythonSDPA.
+    # Uses stand-in providers, so needs neither a GPU nor the frontend. Most
+    # tests call torch.nn.attention._cudnn directly: the public wrappers add
+    # only the bool check, tested here, and TestCuDNNPythonSDPA covers them.
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
@@ -154,6 +151,19 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
     def test_installed_provider_is_available(self):
         _use_provider(self, _fake_install(self.live, "cudnn"))
         self.assertTrue(_cudnn.is_available())
+
+    def test_provider_that_fails_to_load_is_unavailable(self):
+        broken = OSError("libcudnn.so.9: cannot open shared object file")
+        with mock.patch.object(importlib.util, "find_spec", side_effect=broken):
+            self.assertFalse(_cudnn.is_available())
+
+    def test_missing_package_names_the_pip_requirement(self):
+        _use_provider(self, None)
+        with mock.patch.dict(sys.modules, {"cudnn": None, _PROVIDER: None}):
+            required = f"nvidia-cudnn-frontend>={_cudnn._MIN_FRONTEND_VERSION}"
+            with self.assertRaisesRegex(ModuleNotFoundError, required):
+                _cudnn.enable()
+        self.assertFalse(_cudnn.is_enabled())
 
     def test_missing_provider_is_reported_and_not_enabled(self):
         # A None entry in sys.modules is how a missing package looks to import.
