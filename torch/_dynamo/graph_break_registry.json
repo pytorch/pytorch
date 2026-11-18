@@ -7062,5 +7062,15 @@
         "Please open an issue."
       ]
     }
+  ],
+  "GB9959": [
+    {
+      "Gb_type": "identity comparison that cannot be guarded",
+      "Context": "f\"{a.name} is {b.name}\"",
+      "Explanation": "Dynamo bakes the result of `is` between two inputs into the graph and guards it, but this relation cannot be guarded: {reason}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

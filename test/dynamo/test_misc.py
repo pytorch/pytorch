@@ -3386,6 +3386,27 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         relation_guards = {"NOT_ALIASING", "DUPLICATE_INPUT"}
         self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
 
+    def test_is_source_with_itself_adds_no_relation_guard(self):
+        # A source compared with itself is not a relation between two inputs:
+        # `a.append` builds a new bound method on every access, so the answer
+        # is always False and needs no guard (one would fail on its own frame).
+        cases = [
+            (lambda x, a: x + 1 if a.append is a.append else x - 1, [1]),
+            (lambda x, a: x + 1 if a.append is not a.append else x - 1, [1]),
+            (lambda x, a: x + 1 if a.__add__ is a.__add__ else x - 1, 1),
+            (lambda x, a: x + 1 if a.upper is a.upper else x - 1, "s"),
+        ]
+        relation_guards = {"NOT_ALIASING", "DUPLICATE_INPUT"}
+        x = torch.ones(2)
+        for fn, arg in cases:
+            torch._dynamo.reset()
+            guards = []
+            opt_fn = torch._dynamo.optimize("eager", guard_export_fn=guards.extend)(fn)
+            self.assertEqual(opt_fn(x, arg), fn(x, arg))
+            self.assertFalse(
+                [g for g in guards if g.create_fn_name() in relation_guards]
+            )
+
     def test_is_on_context_var_value_adds_no_relation_guard(self):
         # A ContextVar value depends on the context the code runs in, so a
         # relation guard on it can fail on the frame that created it (seen with
@@ -3485,17 +3506,24 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             opt_fn(torch.ones(2), v, v)
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.expectedFailure
-    def test_is_on_rebuilt_tuple_matches_eager(self):
-        # Known limitation, older than the relation guards: the fold compares
-        # the rebuilt tuples, not the frame's object.
+    @parametrize("kind", ["tuple", "partial", "slice"])
+    def test_is_on_rebuilt_values_matches_eager(self, kind):
+        # The fold compares rebuilt values, so it says `v is v` is False; the
+        # answer comes from the frame's objects instead, and is guarded.
+        make = {
+            "tuple": lambda: tuple(["a", "b"]),
+            "partial": lambda: functools.partial(str.split, sep=","),
+            "slice": lambda: slice("a", "b"),
+        }[kind]
+
         def fn(x, a, b):
             return x + 1 if a is b else x - 1
 
-        v = (1, 2)
+        v, w = make(), make()
         x = torch.ones(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, v, v), fn(x, v, v))
+        self.assertEqual(opt_fn(x, v, w), fn(x, v, w))
 
     def test_is_on_assume_constant_result_compiles(self):
         # The constant side has a ConstantSource, which takes no guard.

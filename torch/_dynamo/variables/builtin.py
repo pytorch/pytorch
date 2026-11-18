@@ -354,29 +354,6 @@ def _try_computed_lazy_constant(
     return ComputedLazyConstantVariable.create(fn, args)
 
 
-def _fold_disagrees_with_frame(
-    tx: "InstructionTranslatorBase", a: Source, b: Source, is_same: bool
-) -> bool:
-    # Some VTs (tuples, partials, slices, ...) rebuild their backed value, so
-    # the fold can disagree with the frame, and a guard on it would fail on the
-    # frame that created it (CheckFunctionManager raises on that). Only the guard
-    # is skipped; the fold itself is unchanged. A source that cannot be resolved
-    # here is guarded unverified, which is only a problem if the fold also
-    # disagrees with the frame.
-    resolve = tx.output.resolve_source_value
-    try:
-        frame_is_same = resolve(a) is resolve(b)
-    except Exception as e:
-        guards_log.debug("guarding `%s is %s` unverified: %r", a.name, b.name, e)
-        return False
-    if frame_is_same != is_same:
-        guards_log.debug(
-            "not guarding `%s is %s`: fold disagrees with the frame", a.name, b.name
-        )
-        return True
-    return False
-
-
 _IDENTITY_GUARDS = frozenset(
     ("ID_MATCH", "CLASS_MATCH", "MODULE_MATCH", "BUILTIN_MATCH", "FUNCTION_MATCH")
 )
@@ -399,12 +376,31 @@ def _reads_context_var(source: Source) -> bool:
     return False
 
 
-def _guard_identity_fold(
+def _unguardable_identity(a: Source, b: Source, reason: str) -> NoReturn:
+    unimplemented(
+        gb_type="identity comparison that cannot be guarded",
+        context=f"{a.name} is {b.name}",
+        explanation="Dynamo bakes the result of `is` between two inputs into the "
+        "graph and guards it, but this relation cannot be guarded: "
+        f"{reason}.",
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
+def _fold_identity(
     tx: "InstructionTranslatorBase",
     a: VariableTracker,
     b: VariableTracker,
     is_same: bool,
-) -> None:
+) -> bool:
+    """Return `a is b` for a folded identity comparison and guard it.
+
+    When both operands come from the frame, the frame's objects decide the
+    answer and the guard checks that same relation, so the two agree by
+    construction. Some VTs rebuild their backed value (tuples, partials,
+    slices), so their fold alone can disagree with the frame. A relation that
+    cannot be guarded graph breaks instead of baking in an unguarded answer.
+    """
     # Constants are already guarded by value, and an unbacked VT has no object.
     if (
         a is b
@@ -416,22 +412,37 @@ def _guard_identity_fold(
         or a.get_real_python_backed_value() is NO_SUCH_SUBOBJ
         or b.get_real_python_backed_value() is NO_SUCH_SUBOBJ
     ):
-        return
+        return is_same
     # Polyfills such as list.index, operator.countOf and dict.__eq__ compare
     # elements with `is`; like `in`, they add no relation guard.
     if tx.f_code.co_filename.startswith(_polyfills_dir()):
-        return
+        return is_same
     if _reads_context_var(a.source) or _reads_context_var(b.source):
-        return
-    if _fold_disagrees_with_frame(tx, a.source, b.source, is_same):
-        return
+        # A ContextVar value depends on the context the guard runs in, so it can
+        # differ from the trace. Every config read goes through one
+        # (`user_override.get() is not _UNSET_SENTINEL` in _config_module), so a
+        # graph break here would break on each config access; keep the fold.
+        return is_same
+    resolve = tx.output.resolve_source_value
+    try:
+        frame_is_same = resolve(a.source) is resolve(b.source)
+    except Exception as e:
+        if a.source == b.source:
+            return is_same
+        _unguardable_identity(
+            a.source, b.source, f"an operand cannot be read from the frame ({e!r})"
+        )
+    if a.source == b.source:
+        # Not a relation between two inputs: a stable object is always itself,
+        # and one rebuilt on every access (`a.append`) never is.
+        return frame_is_same
     by_source = tx.output.guards.source_to_guards
     if all(
         any(g.create_fn_name() in _IDENTITY_GUARDS for g in by_source.get(s, ()))
         for s in (a.source, b.source)
     ):
         # Both objects are already pinned, which settles the relation.
-        return
+        return frame_is_same
     if isinstance(a.source, TypeSource) or isinstance(b.source, TypeSource):
         # `type(x) is C`: ID_MATCH on a TypeSource is TYPE_MATCH on x, so
         # pinning both sides settles the relation in C++ without recompiles.
@@ -439,18 +450,18 @@ def _guard_identity_fold(
             a.source.make_guard(GuardBuilder.ID_MATCH),
             b.source.make_guard(GuardBuilder.ID_MATCH),
         )
-    elif is_same:
+    elif frame_is_same:
         # Not make_dupe_guard: it leaves out a local against a global, which
         # DUPLICATE_INPUT's C++ aliasing leaf relates too.
-        if a.source != b.source:
-            dupe = functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=b.source)
-            install_guard(a.source.make_guard(dupe))
+        dupe = functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=b.source)
+        install_guard(a.source.make_guard(dupe))
     else:
         install_guard(
             a.source.make_guard(
                 functools.partial(GuardBuilder.NOT_ALIASING, source_b=b.source)
             )
         )
+    return frame_is_same
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -1258,10 +1269,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                     result = vt_identity_compare(left, right)
                     if result is None:
                         return None
-                    is_same = result.as_python_constant()
-                    # The answer is baked into the graph, so guard the
-                    # relation behind it.
-                    _guard_identity_fold(tx, left.realize(), right.realize(), is_same)
+                    # The answer is baked into the graph, so it comes from
+                    # the frame and the relation behind it is guarded.
+                    is_same = _fold_identity(
+                        tx,
+                        left.realize(),
+                        right.realize(),
+                        result.as_python_constant(),
+                    )
                     return VariableTracker.build(
                         tx, is_same if op.__name__ == "is_" else not is_same
                     )
