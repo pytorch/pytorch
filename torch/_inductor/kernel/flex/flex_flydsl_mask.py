@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 from torch.fx import Node
+from torch.utils._ordered_set import OrderedSet
 
 from ...virtualized import V
 
@@ -63,6 +64,19 @@ _ALPHA_TARGETS = (
     torch.ops.aten.add.Scalar,
     torch.ops.aten.sub.Tensor,
     torch.ops.aten.sub.Scalar,
+)
+
+_INTEGER_DTYPES = OrderedSet(
+    [
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    ]
 )
 
 
@@ -136,6 +150,17 @@ def lower_flydsl_mask_graph(
         instructions.append(instruction)
         return value_id
 
+    def scalar_constant(value, dtype=None):
+        if dtype == torch.bool:
+            return bool(value)
+        if dtype in _INTEGER_DTYPES:
+            return int(value)
+        if dtype is not None:
+            raise NotImplementedError(
+                f"mask_mod scalar constant dtype {dtype} is unsupported"
+            )
+        return value
+
     def value_id(value) -> int:
         if isinstance(value, Node):
             if value not in value_ids:
@@ -149,6 +174,10 @@ def lower_flydsl_mask_graph(
                 constant_ids[key] = append(("const_bool", bool(value)))
             return constant_ids[key]
         if isinstance(value, int):
+            if not -(1 << 31) <= value < (1 << 31):
+                raise NotImplementedError(
+                    f"mask_mod int constant {value} does not fit int32"
+                )
             key = ("int", value)
             if key not in constant_ids:
                 constant_ids[key] = append(("const_i32", value))
@@ -171,7 +200,11 @@ def lower_flydsl_mask_graph(
                     raise NotImplementedError(
                         "mask_mod aten.full supports scalar bool/int constants only"
                     )
-                value_ids[node] = value_id(fill)
+                dtype = node.kwargs.get("dtype")
+                if dtype is None:
+                    meta_value = node.meta.get("val")
+                    dtype = getattr(meta_value, "dtype", None)
+                value_ids[node] = value_id(scalar_constant(fill, dtype))
                 continue
 
             if target == torch.ops.aten.index.Tensor:

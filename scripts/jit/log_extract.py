@@ -1,7 +1,8 @@
 import argparse
 import functools
 import traceback
-from typing import Callable, List, Tuple
+from collections.abc import Callable
+from typing import List, Tuple
 
 from torch.utils.jit.log_extract import (
     extract_ir,

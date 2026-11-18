@@ -166,12 +166,7 @@ Date:  February 1996
   T d[2] = {  T(3.543889200),  T(1.637067800) };
   T y_abs = std::abs(y);
   if(y_abs > 1.0) return std::numeric_limits<T>::quiet_NaN();
-#ifdef _WIN32
-  // error C2039: '_copysign': is not a member of 'std'
-  if(y_abs == 1.0) return copysign(std::numeric_limits<T>::infinity(), y);
-#else
   if(y_abs == 1.0) return std::copysign(std::numeric_limits<T>::infinity(), y);
-#endif
   if(y_abs <= static_cast<T>(CENTRAL_RANGE)) {
     z = y * y;
     num = (((a[3]*z + a[2])*z + a[1])*z + a[0]);
@@ -182,12 +177,13 @@ Date:  February 1996
     z = std::sqrt(-std::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
     num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
     dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
-#ifdef _WIN32
-    // error C2039: '_copysign': is not a member of 'std'
-    x = copysign(num, y) / dem;
-#else
-    x = std::copysign(num, y) / dem;
-#endif
+    x = num / dem;
+    // Two step of Newton-Raphson using erfc, to avoid cancellation in erf(x) - y.
+    x += (std::erfc(x) - (static_cast<T>(1.0) - y_abs)) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+    x += (std::erfc(x) - (static_cast<T>(1.0) - y_abs)) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+    if constexpr (std::is_same_v<T, double>)
+      x += (std::erfc(x) - (static_cast<T>(1.0) - y_abs)) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+    return std::copysign(x, y);
   }
   /* Two steps of Newton-Raphson correction */
   x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
@@ -234,7 +230,7 @@ Date:  February 1996
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 template <typename scalar_t, bool is_cuda=false>
-C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
+C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
   using acc_t = at::acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
@@ -333,7 +329,7 @@ C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
   return result;
 }
 
-inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
+inline double trigamma(double x) {
   double sign = +1;
   double result = 0;
   if (x < 0.5) {
@@ -351,7 +347,7 @@ inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   return sign * result;
 }
 
-inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
+inline float trigamma(float x) {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {

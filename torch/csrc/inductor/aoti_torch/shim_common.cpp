@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
 #include <c10/core/DispatchKey.h>
@@ -38,6 +39,7 @@
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_embedding_bag.h>
 #include <ATen/ops/_fft_c2c.h>
+#include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
@@ -100,6 +102,7 @@ AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
 AOTI_TORCH_DEVICE_TYPE_IMPL(meta, Meta)
 AOTI_TORCH_DEVICE_TYPE_IMPL(xpu, XPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(mps, MPS)
+AOTI_TORCH_DEVICE_TYPE_IMPL(mtia, MTIA)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
@@ -975,6 +978,30 @@ AOTITorchError aoti_torch_copy_(
   });
 }
 
+AOTITorchError aoti_torch__foreach_copy_(
+    const AtenTensorHandle* dst,
+    int64_t dst_len,
+    const AtenTensorHandle* src,
+    int64_t src_len,
+    int32_t non_blocking) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        dst_len == src_len && dst_len > 0,
+        "aoti_torch__foreach_copy_: expected non-empty lists of equal length, got ",
+        dst_len,
+        " dst and ",
+        src_len,
+        " src tensors");
+    TORCH_CHECK(
+        dst != nullptr && src != nullptr,
+        "aoti_torch__foreach_copy_: null tensor handle array");
+    at::_foreach_copy_(
+        pointer_to_list<at::Tensor>(dst, dst_len),
+        pointer_to_list<at::Tensor>(src, src_len),
+        non_blocking != 0);
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
@@ -1548,4 +1575,11 @@ AOTITorchError aoti_torch_get_current_stream(
 AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *ret_device_index = at::accelerator::getDeviceIndex(); });
+}
+
+AOTITorchError aoti_torch_synchronize_device(int32_t device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::accelerator::synchronizeDevice(
+        static_cast<c10::DeviceIndex>(device_index));
+  });
 }
