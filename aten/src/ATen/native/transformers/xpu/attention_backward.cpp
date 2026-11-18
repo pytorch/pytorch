@@ -2,6 +2,12 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/native/transformers/xpu/flash_attn/flash_api.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_flash_attention_backward.h>
+#endif
+
 namespace at {
 namespace native {
 
