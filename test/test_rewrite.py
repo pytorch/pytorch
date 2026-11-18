@@ -6222,6 +6222,60 @@ class TestCfgRegions(TestCase):
             for _ in range(8):
                 self.assertEqual(compiled([1, 2], x), fn([1, 2], x))
 
+    def fake_inputs(self, seen):
+        """A backend that notes whether it is given tensors of a trace that
+        has a ShapeEnv, and runs the graph as it is."""
+        from torch._guards import detect_fake_mode
+
+        def backend(graph, inputs):
+            mode = detect_fake_mode(inputs)
+            seen.append(mode is not None and mode.shape_env is not None)
+            return graph
+
+        return backend
+
+    def test_a_size_that_depends_on_data_stays_in_the_graph(self):
+        def positive(x, y):
+            kept = x[x > 0]
+            return (kept * 2).sum() + y.sum(), kept.shape[0]
+
+        def between(x, y):
+            kept = x[x > 0] * 2 + 1
+            first = kept.sum() + y.sum()
+            time.perf_counter()
+            more = y[y > 0] * 3 + 1
+            return first + more.sum()
+
+        torch.manual_seed(0)
+        for fn, regions in ((positive, 1), (between, 2)):
+            seen = []
+            passes = with_graphs(self.fake_inputs(seen), min_ops=1)
+            compiled = torch.rewrite(fn, passes=passes, fallback=False)
+            # How many elements are positive is another number on every
+            # call: one graph is for all of them.
+            for _ in range(8):
+                x, y = torch.randn(64), torch.randn(64)
+                self.assertEqual(compiled(x, y), fn(x, y))
+            self.assertEqual(len(self.compiled_regions(compiled)), regions)
+            # The size of what a mask picks is a symbol of the trace. The
+            # backend is handed the tensors of that trace, so that the
+            # symbol is one of a ShapeEnv it has too.
+            self.assertEqual(seen, [True] * regions)
+
+    @slowTest
+    def test_inductor_compiles_a_size_that_depends_on_data(self):
+        def positive(x, y):
+            kept = x[x > 0]
+            return (kept * 2).sum() + y.sum(), kept.shape[0]
+
+        torch.manual_seed(0)
+        compiled = torch.rewrite(positive, passes=with_graphs("inductor", min_ops=1))
+        for _ in range(8):
+            x, y = torch.randn(64), torch.randn(64)
+            self.assertEqual(compiled(x, y), positive(x, y))
+        self.assertEqual(self.left_to_vm(compiled, "positive"), [])
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.rewrite(region_infer, passes=with_graphs("nope"))
