@@ -1224,7 +1224,6 @@ class TritonTemplateKernel(TritonKernel):
             meta = self.meta
             if (
                 meta.get("TWO_CTAS")
-                or not meta.get("USE_META_WS")
                 or "smem_operand_ring_first"
                 not in inspect.signature(tl.range).parameters
             ):
