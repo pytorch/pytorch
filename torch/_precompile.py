@@ -4118,6 +4118,10 @@ def capture(
     capture is refused when a :func:`torch._dynamo.override_cudagraphs` decides
     a graph differently from its ``triton.cudagraphs``: ``fwd`` differing from
     it, or ``bwd=False`` for a CUDA-graphed forward that has a backward.
+    ``cudagraph_policy``, a Python object that wraps the graphs again at load,
+    is refused in ``options``, and a capture with CUDA graphs on refuses one
+    set in ``torch._inductor.config``: unset it while capturing and set it in
+    the loading process.
 
     ``CUDAGRAPH_CONFIG`` reaches Inductor as ``options`` do, so Dynamo traces
     the captured calls under ``torch._inductor.config``, as under
@@ -4171,6 +4175,16 @@ def capture(
             raise RuntimeError(
                 "Either mode or options can be specified, but both can't be "
                 "specified at the same time."
+            )
+        # Keys normalized as the wrapper does; it cannot take this one at all
+        # (its type check fails on the string annotation).
+        keys = {k.replace("-", "_") for k in options or ()}
+        if "cudagraph_policy" in keys:
+            raise PrecompileError(
+                "precompile cannot record options={'cudagraph_policy': ...}: the "
+                "policy wraps the graphs again at load, and an artifact holds no "
+                "Python objects. Set torch._inductor.config.cudagraph_policy in the "
+                "loading process instead."
             )
         if isinstance(tracer, MakeFxTracer):
             # Refused before the wrapper is built, which sets CUPTI environment
