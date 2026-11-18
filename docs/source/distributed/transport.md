@@ -80,7 +80,7 @@ stream; captured transfers hold their slot until `close`. Since consumers may
 already be enqueued, a failed transfer terminates the process. Backends with
 native stream support may override these methods.
 
-## RDMA NIC selection
+## Mooncake RDMA NIC selection
 
 The Mooncake backend (`protocol="rdma"`) restricts RDMA traffic to the NICs
 nearest the transport's accelerator, targeting one process
@@ -92,7 +92,7 @@ only once the accelerator runtime is initialized, so processes that never
 initialize an accelerator are left unrestricted. Selection is also skipped
 when the current device is 0 while `LOCAL_RANK` is nonzero and more than one
 device is visible, since that usually means `set_device` was not called; pass
-an indexed `device` to select device 0 anyway. When selection runs, an
+an indexed accelerator `device`, or list the NICs with `device_name`. When selection runs, an
 accelerator `device` may initialize its runtime. A process that transfers tensors
 on several accelerators still uses only one accelerator's NICs; list every NIC
 explicitly (see below) to use them all. Every registered buffer, including CPU memory

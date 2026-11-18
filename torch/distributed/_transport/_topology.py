@@ -58,7 +58,7 @@ def _accelerator(device: torch.device | None) -> torch.device | None:
         logger.warning(
             "transport has no device index and the current %s device is 0 with "
             "LOCAL_RANK=%s; using the backend's default RDMA NICs. Call "
-            "set_device or pass an indexed device to select the nearest NICs",
+            "set_device, pass an indexed device, or list the NICs explicitly",
             accelerator.type,
             os.environ["LOCAL_RANK"],
         )
@@ -192,11 +192,11 @@ def select_nics(device: torch.device | None) -> list[str] | None:
     by PCIe path, then NUMA node, split among accelerators as in :func:`_split`.
     """
     try:
-        accelerator = _accelerator(device)
-        if accelerator is None:
-            return None
         nics = _nics()
         if not nics:
+            return None
+        accelerator = _accelerator(device)
+        if accelerator is None:
             return None
         address = _pci_address(accelerator)
         if address is None:

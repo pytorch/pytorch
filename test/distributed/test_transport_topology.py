@@ -197,7 +197,10 @@ class TestSelectNics(TestCase):
 
     def test_fallbacks(self):
         self.add_gpu(root(0))
-        self.assertIsNone(self.select(0))
+        # No NICs: skip before touching the accelerator runtime.
+        with patch.object(_topology, "_accelerator") as accelerator:
+            self.assertIsNone(self.select(0))
+        accelerator.assert_not_called()
         self.add_nic("mlx5_0", root(1))
         self.assertEqual(self.select(0), ["mlx5_0"])
         with patch.object(_topology, "_pci_address", return_value=None):
@@ -207,6 +210,7 @@ class TestSelectNics(TestCase):
 
 
 class TestAccelerator(TestCase):
+    # The accelerator runtime is mocked; runs without an accelerator.
     hw_classification = HardwareClassification.GENERIC
 
     def accelerator(self, device, initialized, current=3, local_rank=None, count=8):

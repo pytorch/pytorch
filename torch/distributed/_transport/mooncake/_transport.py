@@ -84,7 +84,7 @@ class MooncakeTransport(Transport):
     With the default ``protocol="rdma"``, RDMA traffic is restricted to the NICs
     nearest the accelerator unless ``device_name``, ``MC_TE_FILTERS``,
     ``MC_CUSTOM_TOPO_JSON`` or ``MC_RDMA_DATA_DIRECT_PAIRING`` is set;
-    see "RDMA NIC selection" in the transport docs.
+    see "Mooncake RDMA NIC selection" in the transport docs.
 
     """
 
@@ -209,8 +209,9 @@ class MooncakeTransport(Transport):
         if registration := self._registrations.get(key):
             return MooncakeMemory(self, registration)
         device_id = max(tensor.get_device(), 0)
-        # "*" lets Mooncake (>= 0.3.14) pick NICs by the memory's NUMA node;
-        # "cpu:0" would use NUMA node 0's NICs for every host buffer.
+        # "*" lets Mooncake (>= 0.3.14) pick among the engine's NICs by the
+        # memory's NUMA node; "cpu:0" would use NUMA node 0's NICs for every
+        # host buffer.
         location = f"cuda:{device_id}" if tensor.is_cuda else "*"
         if engine.register_memory(tensor.data_ptr(), length, location) != 0:
             raise RuntimeError("Mooncake memory registration failed")
