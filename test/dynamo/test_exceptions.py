@@ -80,6 +80,26 @@ def comparable(value):
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_base_exception_keyword_arguments(self):
+        def fn():
+            empty = BaseException().args
+            positional = BaseException("hello", 42).args
+
+            try:
+                _ = BaseException(a=1)
+            except TypeError as error:
+                keyword_error = str(error)
+
+            try:
+                _ = BaseException("hello", a=1)
+            except TypeError as error:
+                mixed_error = str(error)
+
+            return empty, positional, keyword_error, mixed_error
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
     def test_exception(self):
         def fn(x):
             x = torch.cos(x)

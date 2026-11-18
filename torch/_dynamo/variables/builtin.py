@@ -1410,6 +1410,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
+                if fn is BaseException and kwargs:
+                    raise_type_error(tx, "BaseException() takes no keyword arguments")
                 return variables.ExceptionVariable.create(fn, args, kwargs)
 
             return create_exception_class_object
