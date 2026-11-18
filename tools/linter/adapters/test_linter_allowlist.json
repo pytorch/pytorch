@@ -13,7 +13,6 @@
   "test/custom_operator/test_inplace_tag.py",
   "test/custom_operator/test_out_variant.py",
   "test/distributed/_composable/fsdp/test_fully_shard_autograd.py",
-  "test/distributed/_composable/fsdp/test_fully_shard_clip_grad_norm_.py",
   "test/distributed/_composable/fsdp/test_fully_shard_comm.py",
   "test/distributed/_composable/fsdp/test_fully_shard_compile.py",
   "test/distributed/_composable/fsdp/test_fully_shard_dtensor.py",
