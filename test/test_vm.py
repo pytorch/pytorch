@@ -1107,6 +1107,29 @@ class TestVmPasses(TestCase):
             torch.vm(lambda x: x, passes=[P.Fold(), P.Fold()])
         self.assertEqual(repr(P.Fold()), "torch.vm.passes.Fold()")
 
+    def test_passes_are_applied_in_the_order_of_the_list(self):
+        def f(x):
+            return x * 2 + 1
+
+        def run(place):
+            seen = []
+
+            def look(region):
+                seen.append({i["op"] for i in region.instructions()})
+                return False
+
+            passes = [P.ResolveDispatch()]
+            passes.insert(place, look)
+            compiled = torch.vm(f, passes=passes, fallback=False)
+            for _ in range(3):
+                self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 3.0))
+            return seen[0]
+
+        # In front of resolve_dispatch a pass sees what the function wrote, and
+        # behind it the kernel calls that those became.
+        self.assertNotIn("dispatch", run(0))
+        self.assertIn("dispatch", run(1))
+
     def test_generic_tier_only(self):
         def f(x, n):
             for _ in range(n):
@@ -1179,6 +1202,61 @@ class TestVmPasses(TestCase):
             self.assertEqual(compiled(x), f(x))
         self.assertIn("guard ", compiled.dump())
         self.assertGreaterEqual(block_stats(compiled, "guard_failures")[0], 1)
+
+    def test_python_pass(self):
+        pinned = []
+
+        def pin_first_dim(region):
+            changed = False
+            for inst in region.instructions():
+                if inst["op"] == "tensor_size" and region.speculate:
+                    value = inst["uses"][0]
+                    n = region.observed(value)["last"][0]
+                    if region.guard_dim(value, 0, n, n):
+                        pinned.append(n)
+                        changed = True
+            return changed
+
+        def f(x):
+            return x.sum() * x.shape[0]
+
+        passes = list(DEFAULT)
+        passes.insert(passes.index(P.TensorAccessors()) + 1, pin_first_dim)
+        compiled = torch.vm(f, passes=passes, fallback=False)
+        for n in (3, 3, 5, 3, 5):
+            x = torch.ones(n, 2)
+            self.assertEqual(compiled(x), f(x))
+        self.assertEqual(pinned, [3, 5])
+        text = compiled.dump()
+        self.assertIn("3 <= size(%x.1, 0) <= 3", text)
+        self.assertIn("5 <= size(%x.1, 0) <= 5", text)
+        self.assertEqual(block_stats(compiled, "profile_runs"), [2])
+
+    def test_region_is_only_valid_during_the_pass(self):
+        kept = []
+
+        def keep(region):
+            kept.append(region)
+            return False
+
+        compiled = torch.vm(lambda x: x + 1, passes=[*CFG, keep], fallback=False)
+        compiled(torch.ones(1))
+        with self.assertRaisesRegex(RuntimeError, "only valid while its pass runs"):
+            kept[0].instructions()
+
+    def test_failing_pass_leaves_the_block_generic(self):
+        def broken(region):
+            raise KeyError("oops")
+
+        def f(x):
+            return x * 3
+
+        compiled = torch.vm(f, passes=[*DEFAULT, broken], fallback=False)
+        for _ in range(3):
+            self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 3.0))
+        stats = compiled.stats()
+        self.assertEqual(block_stats(compiled, "versions"), [0])
+        self.assertIn("pass failed", stats["blocks"][0]["rejected"])
 
 
 if __name__ == "__main__":
