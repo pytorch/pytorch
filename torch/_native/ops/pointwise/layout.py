@@ -3,7 +3,7 @@ r"""Host layout classification for pointwise kernels."""
 from __future__ import annotations
 
 from functools import cache
-from typing import TYPE_CHECKING
+from typing import NamedTuple, TYPE_CHECKING
 
 import torch
 from torch._tensor_iterator import TensorIterator
@@ -29,6 +29,30 @@ def output_strides(
         static_device=torch.device("meta"),
     )
     return iterator.output().stride()
+
+
+class IterationLayout(NamedTuple):
+    shape: Shape
+    strides: tuple[Shape, ...]
+
+
+def iteration_layout(
+    inputs: list[torch.Tensor], outputs: list[torch.Tensor], *, with_index: bool = False
+) -> IterationLayout:
+    iterator = TensorIterator(
+        outputs=[*outputs],
+        const_inputs=inputs,
+        resize_outputs=False,
+        check_all_same_dtype=False,
+        check_all_same_device=False,
+        check_mem_overlap=False,
+        allow_cpu_scalars=True,
+        enforce_linear_iteration=with_index,
+    )
+    return IterationLayout(
+        tuple(iterator.shape),
+        tuple(iterator.element_strides(i) for i in range(iterator.ntensors)),
+    )
 
 
 def row_gap_view(t: torch.Tensor) -> RowGap | None:

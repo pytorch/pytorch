@@ -16,6 +16,7 @@ from cutlass._mlir.dialects import arith
 
 from ...cutedsl import fpbits as _fpbits, math as _math, minmax as _mm
 from ...cutedsl.types import ComputeScalar, MathFn, StorageScalar
+from .signature import Functor
 
 
 _INV_SIX: float = 0.1666666716337204
@@ -31,6 +32,7 @@ def _opmath(x: StorageScalar) -> ComputeScalar:
 class _UnaryMath:
     def __init__(self, fn: MathFn) -> None:
         self.fn: MathFn = fn
+        self.__name__: str = fn.__name__
 
     @cute.jit
     def __call__(self, x: StorageScalar) -> ComputeScalar:
@@ -678,6 +680,6 @@ def _nan_to_num(
     return nan if x != x else (sat if is_inf else x)
 
 
-def get_fn(name: str) -> MathFn:
+def get_fn(name: str | Functor) -> MathFn:
     # Resolve table names lazily after importing the DSL runtime.
-    return globals()[name]
+    return globals()[name.name if isinstance(name, Functor) else name]
