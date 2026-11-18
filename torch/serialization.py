@@ -81,6 +81,41 @@ UNSAFE_MESSAGE = (
     "trusted source."
 )
 
+_WEIGHTS_ONLY_DOCS_MESSAGE = (
+    "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
+    "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
+)
+
+
+def _get_wo_message(message: str) -> str:
+    unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
+    has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
+    blocklist_pattern = r"whose module (\S+) is blocked"
+    has_blocklist = re.search(blocklist_pattern, message) is not None
+    import_pattern = r"(\S+) must be (\S+) to load"
+    has_import = re.search(import_pattern, message) is not None
+    if has_unsafe_global:
+        updated_message = (
+            "Weights only load failed. This file can still be loaded, to do so you have two options, "
+            "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
+            f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
+            "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
+            + message
+        )
+    else:
+        if has_import:
+            return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
+        else:
+            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+            if not has_blocklist:
+                updated_message += (
+                    "Please file an issue with the following so that we can make "
+                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                )
+        updated_message += "\n\n" + message
+    return updated_message + _WEIGHTS_ONLY_DOCS_MESSAGE
+
+
 if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
@@ -819,10 +854,17 @@ def _load_zip_region(
     overall_storage: torch.UntypedStorage,
     storage_base_offset: int,
 ) -> Any:
+    """Load one torch.save ZIP region whose tensor bytes live in ``overall_storage``.
+
+    Uses the same ``weights_only`` unpickler setup as :func:`torch.load`
+    (``encoding="utf-8"`` and :func:`_get_wo_message` on ``UnpicklingError``).
+    """
     original_position = zip_view.tell()
     try:
         region_length = zip_view.seek(0, os.SEEK_END)
         zip_view.seek(0)
+        # Structure-only check: DCP regions come from torch.save and never write
+        # compressed/encrypted data/ records, so skip per-record payload opens.
         try:
             with zipfile.ZipFile(zip_view) as archive:
                 records = [
@@ -832,25 +874,23 @@ def _load_zip_region(
                 ]
                 if not records:
                     raise _UnsupportedZipRegion("ZIP has no tensor storage")
-                for info in records:
-                    if info.flag_bits & 0x1 or info.compress_type != zipfile.ZIP_STORED:
-                        raise _UnsupportedZipRegion("compressed or encrypted storage")
-                    with archive.open(info):
-                        pass
         except zipfile.BadZipFile as e:
             raise RuntimeError("invalid bounded ZIP region") from e
         zip_view.seek(0)
-        with _open_zipfile_reader(zip_view) as zip_file:
-            return _load(
-                zip_file,
-                map_location="cpu",
-                pickle_module=_weights_only_unpickler,
-                overall_storage=overall_storage[
-                    storage_base_offset : storage_base_offset + region_length
-                ],
-                weights_only=True,
-                disallow_byteswap=True,
-            )
+        try:
+            with _open_zipfile_reader(zip_view) as zip_file:
+                return _load(
+                    zip_file,
+                    map_location="cpu",
+                    pickle_module=_weights_only_unpickler,
+                    overall_storage=overall_storage[
+                        storage_base_offset : storage_base_offset + region_length
+                    ],
+                    weights_only=True,
+                    encoding="utf-8",
+                )
+        except pickle.UnpicklingError as e:
+            raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
     finally:
         zip_view.seek(original_position)
 
@@ -1490,38 +1530,6 @@ def load(
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
-    DOCS_MESSAGE = (
-        "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
-        "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
-    )
-
-    def _get_wo_message(message: str) -> str:
-        unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
-        has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
-        blocklist_pattern = r"whose module (\S+) is blocked"
-        has_blocklist = re.search(blocklist_pattern, message) is not None
-        import_pattern = r"(\S+) must be (\S+) to load"
-        has_import = re.search(import_pattern, message) is not None
-        if has_unsafe_global:
-            updated_message = (
-                "Weights only load failed. This file can still be loaded, to do so you have two options, "
-                "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
-                f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
-                "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
-                + message
-            )
-        else:
-            if has_import:
-                return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
-            else:
-                updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
-                if not has_blocklist:
-                    updated_message += (
-                        "Please file an issue with the following so that we can make "
-                        "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
-                    )
-            updated_message += "\n\n" + message
-        return updated_message + DOCS_MESSAGE
 
     weights_only_not_set = weights_only is None
 
@@ -2038,7 +2046,6 @@ def _load(
     overall_storage=None,
     *,
     weights_only=False,
-    disallow_byteswap=False,
     **pickle_load_args,
 ):
     restore_location = _get_restore_location(map_location)
@@ -2070,11 +2077,6 @@ def _load(
         pass
     else:
         raise ValueError("Invalid load endianness type")
-
-    if disallow_byteswap and _is_torchscript_zip(zip_file):
-        raise _UnsupportedZipRegion("TorchScript archives are unsupported")
-    if disallow_byteswap and byteorderdata not in (None, sys.byteorder.encode()):
-        raise _UnsupportedZipRegion("mapped ZIP regions cannot be byteswapped")
 
     storage_alignment = 64
     if zip_file.has_record(".storage_alignment"):

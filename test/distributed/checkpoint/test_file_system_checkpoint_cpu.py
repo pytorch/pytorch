@@ -153,24 +153,37 @@ class TestDistributedStateDictSaveLoad(TestCase):
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
-    def test_read_write_only_tensor_mmap(self) -> None:
+    @parametrize("thread_count", _THREAD_COUNTS)
+    def test_read_write_only_tensor_mmap(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
             save_state_dict(
                 state_dict=state_dict_to_save,
-                storage_writer=FileSystemWriter(path=path, thread_count=1),
+                storage_writer=FileSystemWriter(path=path, thread_count=thread_count),
                 no_dist=True,
             )
 
             state_dict_to_load_to = MyTestModule().state_dict()
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
             load_zip_region = torch.serialization._load_zip_region
 
-            with mock.patch.object(
-                torch.serialization,
-                "_load_zip_region",
-                wraps=load_zip_region,
-            ) as mocked_load_zip_region:
+            def _fail_torch_load(*args, **kwargs):
+                raise AssertionError("mmap path should not fall back to torch.load")
+
+            with (
+                mock.patch.object(
+                    torch.serialization,
+                    "_load_zip_region",
+                    wraps=load_zip_region,
+                ) as mocked_load_zip_region,
+                mock.patch(
+                    "torch.distributed.checkpoint.filesystem.torch.load",
+                    side_effect=_fail_torch_load,
+                ),
+            ):
                 load_state_dict(
                     state_dict=state_dict_to_load_to,
                     storage_reader=FileSystemReader(path=path, mmap=True),

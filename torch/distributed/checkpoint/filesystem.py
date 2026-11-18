@@ -3,6 +3,7 @@ import collections
 import dataclasses
 import io
 import json
+import logging
 import operator
 import os
 import pickle
@@ -67,6 +68,7 @@ __all__ = [
 ]
 
 _metadata_fn: str = ".metadata"
+logger = logging.getLogger(__name__)
 
 CURRENT_DCP_VERSION: Final[str] = "1.0.0"
 
@@ -847,6 +849,29 @@ class _StorageReaderTransforms:
 
 
 class FileSystemReader(StorageReader):
+    """Storage reader for local filesystem checkpoints.
+
+    Args:
+        path: Directory that contains the checkpoint.
+        _extension_registry: Experimental registry used to decode stream
+            transform descriptors present in checkpoint metadata.
+        mmap: If ``True``, eligible local tensor regions are loaded from a
+            private whole-file mapping of each backing ``.distcp`` file.
+            Default is ``False``.
+
+            Notes:
+            - Checkpoint files must remain unchanged for the duration of the
+              load; truncating or rewriting a mapped file can raise ``SIGBUS``.
+            - The mmap path validates ZIP structure and storage bounds but does
+              not eagerly verify per-record CRCs of tensor payloads.
+            - Regions with stream transforms, or regions that raise
+              :class:`torch.serialization._UnsupportedZipRegion`, fall back to
+              the native ``torch.load`` path.
+            - Subclasses that replace ``self.fs`` (for example ``FsspecReader``
+              or ``HuggingFaceStorageReader``) ignore this option because the
+              mmap path requires ``type(self.fs) is FileSystem``.
+    """
+
     def __init__(
         self,
         path: str | os.PathLike,
@@ -940,8 +965,10 @@ class FileSystemReader(StorageReader):
                         planner.load_bytes(req, cast(io.BytesIO, item))
                     else:
                         tensor: Tensor | None = None
-                        if self.mmap and type(self.fs) is FileSystem and not (
-                            item_md.transform_descriptors or ()
+                        if (
+                            self.mmap
+                            and type(self.fs) is FileSystem
+                            and not (item_md.transform_descriptors or ())
                         ):
                             if file_size is None:
                                 file_size = os.fstat(stream.fileno()).st_size
@@ -951,8 +978,14 @@ class FileSystemReader(StorageReader):
                                     "DCP storage range is outside the backing file"
                                 )
                             if mapped_storage is None:
-                                mapped_storage = torch.UntypedStorage.from_file(
-                                    os.fspath(new_path), shared=False, nbytes=file_size
+                                # from_file stubs as TypedStorage | _StorageBase.
+                                mapped_storage = cast(
+                                    torch.UntypedStorage,
+                                    torch.UntypedStorage.from_file(
+                                        os.fspath(new_path),
+                                        shared=False,
+                                        nbytes=file_size,
+                                    ),
                                 )
                             try:
                                 tensor = torch.serialization._load_zip_region(
@@ -960,8 +993,12 @@ class FileSystemReader(StorageReader):
                                     overall_storage=mapped_storage,
                                     storage_base_offset=item_md.offset,
                                 )
-                            except torch.serialization._UnsupportedZipRegion:
-                                pass
+                            except torch.serialization._UnsupportedZipRegion as e:
+                                logger.debug(
+                                    "mmap load falling back to torch.load for %s: %s",
+                                    req.storage_index,
+                                    e,
+                                )
                         if tensor is None:
                             tensor = cast(Tensor, self._load_item(req, file_slice))
                         else:
