@@ -1431,6 +1431,7 @@
 # /test/test_cpython_diff_sync.py
 # /torch/_dynamo/
 # /torch/rewrite/
+# /torch/vm/
 # /torch/csrc/cfg/
 # /torch/csrc/dynamo/
 # label: module: dynamo, module: tvm

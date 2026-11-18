@@ -78,7 +78,7 @@ from typing import Any
 import torch
 
 from . import _regions, _shortcuts
-from ._passes import fuse_checked, Mismatch, swap
+from ._passes import Builtin, fuse_checked, Mismatch, swap
 
 
 __all__ = [
@@ -181,7 +181,7 @@ def graphs(
     return Graphs(backend, min_ops, max_variants, freeze)
 
 
-Pass = str | Callable[[Any], bool] | Graphs
+Pass = str | Callable[[Any], bool] | Graphs | Builtin
 
 # The passes that rewrite the whole function once, before the others see it.
 _WHOLE = ("inline", "unroll", "shortcuts")
@@ -323,6 +323,9 @@ def _plan(
     block: list[Any] = []
     found: Graphs | None = None
     for one in canonical if passes is None else passes:
+        if isinstance(one, Builtin):
+            # What torch.vm makes.
+            one = one.name
         if isinstance(one, Graphs):
             if found is not None:
                 raise ValueError(f"passes= has {found!r} and {one!r}: one of them")
@@ -375,7 +378,9 @@ def rewrite(
             Can be omitted to use ``rewrite`` as a decorator with options.
         passes: what is done to the function, in the order it is done.
             Defaults to :data:`canonical`. An entry is the name of a built-in
-            pass, ``torch.rewrite.graphs(...)``, or a callable
+            pass (or what ``torch.vm`` makes for one, such as
+            ``torch.vm.inlining_pass()``), ``torch.rewrite.graphs(...)``,
+            or a callable
             ``pass_(region) -> bool`` that looks at the instructions of one
             basic block and at what was observed of them, rewrites them, and
             returns whether it changed anything. With an empty list nothing

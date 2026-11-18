@@ -5,10 +5,26 @@ operations in the function, replaces it by one call of the kernel, and checks
 the kernel against the operations it replaced.
 """
 
+import dataclasses
 from collections.abc import Callable, Iterable
 from typing import Any
 
 import torch
+
+
+@dataclasses.dataclass(frozen=True)
+class Builtin:
+    """A pass the engine has: the name it goes by there, and whether it
+    rewrites the control-flow graph of the function (once) or one basic block
+    (after it was profiled). ``torch.vm`` makes these
+    (``torch.vm.inlining_pass()``)."""
+
+    name: str
+    cfg: bool
+    made_by: str
+
+    def __repr__(self) -> str:
+        return f"torch.vm.{self.made_by}()"
 
 
 class Mismatch(RuntimeError):
