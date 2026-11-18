@@ -4618,11 +4618,16 @@ class TestConvolutionNNCUDA(NNTestCase):
             else:
                 self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
-    @skipCUDAIfRocm
     @largeTensorTest("48GB", "cuda")
     @serialTest()
     @dtypes(*(torch.half, torch.bfloat16))
     def test_conv3d_cudnn_broken(self, device, dtype):
+        if TEST_WITH_ROCM:
+            props = torch.cuda.get_device_properties(device)
+            # Partitioned (DPX/CPX) gfx950 has no hipBLASLt kernels for this GEMM;
+            # a full gfx950 has 256 CUs.
+            if "gfx950" in props.gcnArchName and props.multi_processor_count < 256:
+                self.skipTest("no hipBLASLt kernels on partitioned gfx950 (#168696)")
         x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
         m = torch.nn.Conv3d(
             16,
