@@ -641,7 +641,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           // simplicity. For now, we collect producer and the immediate parent
           // loop of the consumer. We could collect all the consumer enclosing
           // loops, but then we will have to clean up the ones that are shared
-          // with the producer encloser loop. Currently, we only test on the
+          // with the producer enclosing loop. Currently, we only test on the
           // immediate parent loop.
           auto buffers = BufFinder::find(l.root_stmt());
           std::vector<std::pair<StmtPtr, ForPtr>> producer_consumer_pairs;
@@ -737,7 +737,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
   } catch (...) {
     std::cout << "EXCEPTION THROWN!\n";
     std::cout << "SEED: " << seed << '\n';
-    throw std::runtime_error("Random test failed");
+    TORCH_CHECK(false, "Random test failed");
   }
   message = "End of transformations;\n";
   randomization_helper::printHistory(n_transforms, message);

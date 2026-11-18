@@ -147,6 +147,8 @@ ALLOW_LIST = [
     # These ops are defined in torch/csrc/distributed/c10d/Ops.cpp
     # TODO: add back restriction when c10d ops can be exported
     ("c10d::.*", datetime.date(9999, 1, 1)),
+    # Private FSDP ops defined in torch/csrc/distributed/fsdp, with no BC guarantee
+    ("fsdp::.*", datetime.date(9999, 1, 1), None, True),
     # Previously MPS_only did not support backward
     ("aten::_fused_rms_norm", datetime.date(2025, 12, 30)),
     # Named tensor removal: all dimname/named overloads and ops permanently removed

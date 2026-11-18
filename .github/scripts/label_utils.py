@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 
 BOT_AUTHORS = ["github-actions", "pytorchmergebot", "pytorch-bot"]
 
+# Label that marks a PR as excluded from release notes.
+NOT_USER_FACING_LABEL = "topic: not user facing"
+
 LABEL_ERR_MSG_TITLE = "This PR needs a `release notes:` label"
 LABEL_ERR_MSG = f"""# {LABEL_ERR_MSG_TITLE}
 If your changes are user facing and intended to be a part of release notes, please use a label starting with `release notes:`.
@@ -112,7 +115,7 @@ def has_required_labels(pr: GitHubPR) -> bool:
     pr_labels = pr.get_labels()
     # Check if PR is not user facing
     is_not_user_facing_pr = any(
-        label.strip() == "topic: not user facing" for label in pr_labels
+        label.strip() == NOT_USER_FACING_LABEL for label in pr_labels
     )
     return is_not_user_facing_pr or any(
         label.strip() in get_release_notes_labels(pr.org, pr.project)

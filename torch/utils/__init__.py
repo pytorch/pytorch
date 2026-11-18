@@ -5,6 +5,7 @@ import os.path as _osp
 import weakref
 
 import torch
+from torch._utils_internal import get_file_path as _get_file_path
 from torch.utils import (
     backcompat as backcompat,
     collect_env as collect_env,
@@ -13,11 +14,11 @@ from torch.utils import (
     hooks as hooks,
 )
 from torch.utils.backend_registration import (
-    generate_methods_for_privateuse1_backend,
-    rename_privateuse1_backend,
+    generate_methods_for_privateuse1_backend as generate_methods_for_privateuse1_backend,
+    rename_privateuse1_backend as rename_privateuse1_backend,
 )
-from torch.utils.cpp_backtrace import get_cpp_backtrace
-from torch.utils.throughput_benchmark import ThroughputBenchmark
+from torch.utils.cpp_backtrace import get_cpp_backtrace as get_cpp_backtrace
+from torch.utils.throughput_benchmark import ThroughputBenchmark as ThroughputBenchmark
 
 
 def set_module(obj, mod):
@@ -29,7 +30,18 @@ def set_module(obj, mod):
     obj.__module__ = mod
 
 
-cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
+def _resolve_cmake_prefix_path() -> str:
+    try:
+        return _get_file_path("torch", "share", "cmake")
+    except Exception:
+        # Some build systems ship torch without the CMake package files, and
+        # their get_file_path raises for a resource that is not there; which
+        # exception is up to them. Keep the historical __file__-derived path so
+        # importing torch.utils still works.
+        return _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
+
+
+cmake_prefix_path = _resolve_cmake_prefix_path()
 
 
 def swap_tensors(t1, t2):
@@ -40,20 +52,10 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
-    # Ensure there are no weakrefs that could observe swapped tensor contents.
-    # Import lazily because torch.utils is imported while torch is still initializing.
-    from torch.utils.weak import _TensorWeakRef
-
-    def has_unsafe_weakrefs(t):
-        # TensorWeakRef owns _TensorWeakRef, the internal tensor-only weakref
-        # used by Dynamo and Inductor. It has no user callback and fixes the
-        # tensor weakref before returning it. Keep other weakref types,
-        # including WeakIdRef-backed caches, on the conservative path.
-        return any(not isinstance(wr, _TensorWeakRef) for wr in weakref.getweakrefs(t))
-
-    if has_unsafe_weakrefs(t1):
+    # Ensure there are no weakrefs
+    if weakref.getweakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
-    if has_unsafe_weakrefs(t2):
+    if weakref.getweakrefs(t2):
         raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
     t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
     t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]

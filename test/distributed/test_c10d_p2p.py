@@ -13,16 +13,18 @@ if not dist.is_available():
 from c10d_backend_common import (
     C10D_BACKENDS,
     C10dBackendTest,
+    C10dBackendTestContinuous,
     instantiate_backend_tests,
 )
 
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import run_tests
 
 
 COUNTS = (0, 4)
 
 
-class AbstractP2PTest(C10dBackendTest):
+class P2PTestMixin:
     def _peers(self):
         next_rank = (self.rank + 1) % self.world_size
         previous_rank = (self.rank - 1) % self.world_size
@@ -45,15 +47,15 @@ class AbstractP2PTest(C10dBackendTest):
             dist.send(send, next_rank)
         self.assertEqual(recv, self._tensor(count, dtype, previous_rank))
 
+
+class AbstractP2PTest(P2PTestMixin, C10dBackendTestContinuous):
     def test_send_recv(self):
-        self._init_pg()
         for count in COUNTS:
             for dtype in self.dtypes:
                 with self.subTest(count=count, dtype=dtype):
                     self._test_send_recv(count, dtype)
 
     def test_isend_irecv(self):
-        self._init_pg()
         next_rank, previous_rank = self._peers()
         for count in COUNTS:
             for dtype in self.dtypes:
@@ -92,7 +94,6 @@ class AbstractP2PTest(C10dBackendTest):
             self.assertEqual(recv, self._tensor(1, dtype, previous_rank + i * 100))
 
     def test_batch_isend_irecv(self):
-        self._init_pg()
         for dtype in self.dtypes:
             for recv_first in (False, True):
                 for num_ops in (1, 2):
@@ -102,6 +103,37 @@ class AbstractP2PTest(C10dBackendTest):
                         num_ops=num_ops,
                     ):
                         self._test_batch_isend_irecv(dtype, recv_first, num_ops)
+
+    def test_send_recv_event_ordering(self):
+        # Regression test for the single-op P2P group-wrap fix (TorchComms
+        # D109625550): the nccl2 sendImpl/recvImpl now wrap ncclSend/ncclRecv in
+        # ncclGroupStart/End so the kernel is enqueued before the end CUDA event
+        # is recorded. Without it a non-blocking comm could complete the event
+        # ahead of the transfer and wait() would return stale/partial data. Loop
+        # with distinct per-iteration values and read back immediately after
+        # wait(): an early completion surfaces as a value mismatch. Generic P2P
+        # ordering check, so it runs across every backend.
+        next_rank, previous_rank = self._peers()
+        numel = 1024 * 1024
+        for i in range(50):
+            send = self._tensor(numel, torch.float32, self.rank + i)
+            recv = torch.empty_like(send)
+            if self.rank % 2 == 0:
+                send_work = dist.isend(send, next_rank)
+                recv_work = dist.irecv(recv, previous_rank)
+            else:
+                recv_work = dist.irecv(recv, previous_rank)
+                send_work = dist.isend(send, next_rank)
+            send_work.wait()
+            recv_work.wait()
+            self.assertEqual(
+                recv, self._tensor(numel, torch.float32, previous_rank + i)
+            )
+
+
+class AbstractIsolatedP2PTest(P2PTestMixin, C10dBackendTest):
+    """Drops send work without waiting on it. A reused worker would carry that
+    work into the next test, so these keep fresh rank processes."""
 
     def test_async_work_lifetime(self):
         if not self.supports_dropped_p2p_work:
@@ -121,7 +153,12 @@ class AbstractP2PTest(C10dBackendTest):
         self.assertEqual(recv, self._tensor(4, torch.float32, previous_rank))
 
 
-instantiate_backend_tests(globals(), "P2P", AbstractP2PTest, C10D_BACKENDS)
+instantiate_backend_tests(
+    globals(), "P2P", AbstractP2PTest, C10D_BACKENDS, harness=MultiProcContinuousTest
+)
+instantiate_backend_tests(
+    globals(), "IsolatedP2P", AbstractIsolatedP2PTest, C10D_BACKENDS
+)
 
 
 if __name__ == "__main__":

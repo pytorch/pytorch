@@ -217,9 +217,9 @@ struct FromImpl<DeviceType> {
 template <>
 struct FromImpl<std::nullopt_t> {
   static StableIValue call(
-      std::nullopt_t val,
-      [[maybe_unused]] uint64_t extension_build_version,
-      [[maybe_unused]] bool is_internal) {
+      std::nullopt_t /*val*/,
+      uint64_t /*extension_build_version*/,
+      bool /*is_internal*/) {
     return torch::stable::detail::from(nullptr);
   }
 };
@@ -617,9 +617,9 @@ struct ToImpl<DeviceType> {
 template <>
 struct ToImpl<std::nullopt_t> {
   static std::nullopt_t call(
-      StableIValue val,
-      [[maybe_unused]] uint64_t extension_build_version,
-      [[maybe_unused]] bool is_internal) {
+      StableIValue /*val*/,
+      uint64_t /*extension_build_version*/,
+      bool /*is_internal*/) {
     // val should be equivalent to from(nullptr)
     return std::nullopt;
   }
@@ -804,7 +804,7 @@ struct ToImpl<torch::stable::Device> {
 };
 
 // Specialization for std::string
-// Returns a new std::string; the string in val is deleted.
+// Returns a std::string which owns its memory; the string in val is deleted.
 template <>
 struct ToImpl<std::string> {
   static std::string call(
@@ -816,11 +816,11 @@ struct ToImpl<std::string> {
     STABLE_TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
     const char* data;
     STABLE_TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
-    auto strptr = new std::string(data, length);
+    const auto str = std::string(data, length);
 
-    // delete the old string before returning new string
+    // delete the old string
     STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
-    return *strptr;
+    return str;
   }
 };
 

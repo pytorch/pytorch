@@ -16,9 +16,13 @@ from torch._higher_order_ops.flat_apply import (
     flat_apply,
     func_to_graphable,
     is_graphable,
+    is_graphable_type,
     to_graphable,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    skipIfTorchDynamo,
+)
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
 
@@ -86,6 +90,8 @@ class OutputInvalid:
 
 
 class FlatApplyTests(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         tensor = torch.tensor
 
@@ -132,6 +138,22 @@ class FlatApplyTests(PytreeRegisteringTestCase):
         result = flat_apply(func_spec, in_spec, *flat_args)
         self.assertEqual(result, f(*args, **kwargs))
 
+    def test_none_leaves(self):
+        def f(x, maybe_y, payload):
+            return x + 1, maybe_y, payload["bias"]
+
+        args = (torch.tensor(1), None, {"bias": None})
+        kwargs = {}
+
+        flat_args, in_spec = to_graphable((args, kwargs))
+        self.assertEqual(flat_args, [args[0], None, None])
+        self.assertTrue(is_graphable(None))
+        self.assertTrue(is_graphable_type(type(None)))
+
+        empty_list, func_spec = func_to_graphable(f)
+        self.assertEqual(empty_list, [])
+        self.assertEqual(flat_apply(func_spec, in_spec, *flat_args), f(*args, **kwargs))
+
     def test_nonstrict_trace_dynamo_graph(self):
         class Point:
             x: Tensor
@@ -168,9 +190,12 @@ class FlatApplyTests(PytreeRegisteringTestCase):
             return p.x * p.y
 
         @torch._dynamo.nonstrict_trace
-        def trace_point_tensor(pt):
+        def trace_point_tensor(pt, maybe_bias):
             torch._dynamo.graph_break()
-            return pt.t + trace_point(pt.p)
+            result = pt.t + trace_point(pt.p)
+            if maybe_bias is None:
+                return result
+            return result + maybe_bias
 
         backend = EagerAndRecordGraphs()
 
@@ -179,7 +204,7 @@ class FlatApplyTests(PytreeRegisteringTestCase):
             p = Point(x, y)
             t = x + y
             pt = PointTensor(p, t)
-            res = trace_point_tensor(pt)
+            res = trace_point_tensor(pt, None)
             return res
 
         fn(torch.randn(10), torch.randn(10))
@@ -195,7 +220,7 @@ class GraphModule(torch.nn.Module):
 
         trace_point_tensor_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.trace_point_tensor_callable
         trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
-        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, add);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = add = None
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, add, None);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = add = None
         getitem: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
         return (getitem,)
 """,
@@ -231,6 +256,8 @@ class <lambda>(torch.nn.Module):
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class TestInputOutput(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         a = 4
         b = torch.randn(4, 4)
