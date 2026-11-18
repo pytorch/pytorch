@@ -35,6 +35,7 @@ torch.distributed <distributed>
 torch.distributions <distributions>
 torch.compiler <torch.compiler_api>
 torch.rewrite <rewrite>
+torch.vm <vm>
 torch.fft <fft>
 torch.foreach <foreach>
 torch.func <func>

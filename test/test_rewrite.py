@@ -7678,5 +7678,98 @@ class TestCfgRegions(TestCase):
 instantiate_parametrized_tests(TestCfgRegions)
 
 
+def vm_twelve(x):
+    for _ in range(12):
+        x = x + 1
+    return x
+
+
+def vm_scaled(x, y):
+    return unr_loop(x, y)[0] * 2
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.rewrite runtime not built")
+class TestVm(TestCase):
+    """torch.vm: the engine of torch.rewrite, with its passes in two lists."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_the_decorator_with_and_without_arguments(self):
+        @torch.vm
+        def bare(x, y):
+            return unr_loop(x, y)[0] * 2
+
+        @torch.vm(
+            cfg_passes=torch.vm.DefaultCFGPasses,
+            block_passes=torch.vm.DefaultBlockPasses,
+        )
+        def spelled(x, y):
+            return unr_loop(x, y)[0] * 2
+
+        called = torch.vm(vm_scaled, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        for fn in (bare, spelled, called):
+            for _ in range(3):
+                self.assertEqual(fn(x, y), vm_scaled(x, y))
+            # The defaults: the call is inlined, and the inlined loop unrolled.
+            self.assertEqual(len(fn.stats()["inlined"]), 1)
+            self.assertEqual(fn.stats()["unrolled_loops"], 1)
+        # The same as the standard list of torch.rewrite.
+        old = torch.rewrite(vm_scaled, fallback=False)
+        old(x, y)
+        self.assertEqual(called.dump(), old.dump())
+
+    def test_empty_lists_change_nothing(self):
+        plain = torch.vm(vm_scaled, cfg_passes=(), block_passes=(), fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(plain(x, y), vm_scaled(x, y))
+        self.assertEqual(plain.stats()["inlined"], [])
+        self.assertEqual(plain.stats()["unrolled_loops"], 0)
+        specialized = [b["specialized_executions"] for b in plain.stats()["blocks"]]
+        self.assertEqual(sum(specialized), 0)
+
+    def test_fast_is_the_defaults_behind_a_graph_compiler(self):
+        vm = torch.vm
+        self.assertEqual(vm.FAST["cfg_passes"], vm.DefaultCFGPasses)
+        first, *rest = vm.FAST["block_passes"]
+        self.assertEqual(repr(first), "torch.vm.graphs_pass('inductor')")
+        self.assertEqual(tuple(rest), vm.DefaultBlockPasses)
+        with self.assertRaises(TypeError):
+            vm.FAST["block_passes"] = ()
+
+        # The same shape with a backend that compiles nothing: a region is made.
+        block_passes = (vm.graphs_pass("aot_eager"), *vm.DefaultBlockPasses)
+
+        @torch.vm(block_passes=block_passes, fallback=False)
+        def forward(model, x):
+            return model(x).relu().sum()
+
+        layers = (torch.nn.Linear(8, 8), torch.nn.Tanh(), torch.nn.Linear(8, 8))
+        model = torch.nn.Sequential(*layers)
+        x = torch.randn(4, 8)
+        with torch.no_grad():
+            expected = model(x).relu().sum()
+            for _ in range(6):
+                self.assertEqual(forward(model, x), expected)
+        states = [r["state"] for r in vm.regions(forward)]
+        self.assertIn("compiled", states)
+
+    def test_a_pass_in_the_wrong_list_is_told(self):
+        vm = torch.vm
+        fold, inlining = vm.fold_pass(), vm.inlining_pass()
+        with self.assertRaisesRegex(TypeError, "it goes in block_passes"):
+            vm(vm_twelve, cfg_passes=(fold,))
+        with self.assertRaisesRegex(TypeError, "it goes in cfg_passes"):
+            vm(vm_twelve, block_passes=(inlining,))
+        with self.assertRaisesRegex(TypeError, "block_passes has a str"):
+            vm(vm_twelve, block_passes=("fold",))
+        with self.assertRaisesRegex(ValueError, "fold_pass is given more than once"):
+            vm(vm_twelve, block_passes=(fold, vm.fold_pass()))
+        with self.assertRaisesRegex(ValueError, "the engine inlines first"):
+            vm(vm_twelve, cfg_passes=(vm.loop_unrolling_pass(), inlining))
+        with self.assertRaisesRegex(ValueError, "so it goes first"):
+            vm(vm_twelve, block_passes=(fold, vm.graphs_pass("aot_eager")))
+
+
 if __name__ == "__main__":
     run_tests()
