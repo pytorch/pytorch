@@ -1766,7 +1766,8 @@ void frameLink(
     _PyInterpreterFrame* frame,
     uint16_t*** instr,
     uint16_t** code_start,
-    PyObject*** locals) {
+    PyObject*** locals,
+    PyObject*** object) {
   auto* function = reinterpret_cast<PyFunctionObject*>(frame->f_funcobj);
   PyCodeObject* code = frame->f_code;
   // What COPY_FREE_VARS does. The other variables are what the caller bound
@@ -1787,13 +1788,15 @@ void frameLink(
   *instr = reinterpret_cast<uint16_t**>(&frame->prev_instr);
   *code_start = reinterpret_cast<uint16_t*>(_PyCode_CODE(code));
   *locals = frame->localsplus;
+  *object = reinterpret_cast<PyObject**>(&frame->frame_obj);
 }
 
 void* framePush(
     PyObject* func,
     uint16_t*** instr,
     uint16_t** code_start,
-    PyObject*** locals) {
+    PyObject*** locals,
+    PyObject*** object) {
   PyThreadState* tstate = PyThreadState_Get();
   if (!enterPythonCall(tstate)) {
     return nullptr;
@@ -1808,7 +1811,7 @@ void* framePush(
   }
   Py_INCREF(func);
   _PyFrame_Initialize(frame, function, nullptr, code, 0);
-  frameLink(tstate, frame, instr, code_start, locals);
+  frameLink(tstate, frame, instr, code_start, locals, object);
   return frame;
 }
 
@@ -1816,7 +1819,8 @@ int32_t frameAdopt(
     void* made,
     uint16_t*** instr,
     uint16_t** code_start,
-    PyObject*** locals) {
+    PyObject*** locals,
+    PyObject*** object) {
   auto* frame = static_cast<_PyInterpreterFrame*>(made);
   PyThreadState* tstate = PyThreadState_Get();
   if (!enterPythonCall(tstate)) {
@@ -1825,7 +1829,7 @@ int32_t frameAdopt(
     THP_PyThreadState_PopFrame(tstate, frame);
     return 0;
   }
-  frameLink(tstate, frame, instr, code_start, locals);
+  frameLink(tstate, frame, instr, code_start, locals, object);
   return 1;
 }
 
@@ -1856,6 +1860,25 @@ void* frameSwap(void* frame) {
 int32_t frameTraced() {
   PyThreadState* tstate = PyThreadState_Get();
   return tstate->c_tracefunc != nullptr;
+}
+
+int32_t frameReturns(void* returning, PyObject* result) {
+  auto* frame = static_cast<_PyInterpreterFrame*>(returning);
+  PyThreadState* tstate = PyThreadState_Get();
+  PyFrameObject* object = frame->frame_obj;
+  if (object == nullptr || object->f_trace == nullptr ||
+      tstate->c_tracefunc == nullptr || tstate->tracing != 0) {
+    return 0;
+  }
+  // What the interpreter does for a frame that has a trace function when it
+  // returns; the function is not itself traced.
+  Py_INCREF(object);
+  tstate->tracing++;
+  int failed =
+      tstate->c_tracefunc(tstate->c_traceobj, object, PyTrace_RETURN, result);
+  tstate->tracing--;
+  Py_DECREF(object);
+  return failed != 0 ? -1 : 0;
 }
 
 // The frame evaluation function of the interpreter (PEP 523) while a
@@ -1982,8 +2005,9 @@ const TcfgApi api_table = {
 #ifdef TCFG_HAS_FRAMES
     &framePush,       &framePop,          &frameHeld,         &frameSwap,
     &frameTraced,     &frameHook,         &frameWant,         &frameAdopt,
-    &frameInterpret,
+    &frameInterpret,  &frameReturns,
 #else
+    nullptr,
     nullptr,
     nullptr,
     nullptr,

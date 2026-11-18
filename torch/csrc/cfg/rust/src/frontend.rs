@@ -1227,6 +1227,14 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             }
         }
     }
+    // A debugger that is entered in a function stops in its frame and steps
+    // through its lines, and the lines of a frame are the interpreter's to
+    // report.
+    for name in ["set_trace", "breakpoint"] {
+        if names.iter().any(|n| n == name) {
+            return unsupported(format!("{}() stops a debugger in this frame, which the interpreter runs", name));
+        }
+    }
     let cell_locals: HashSet<u32> =
         instrs.iter().filter(|i| i.op == Bc::MakeCell).map(|i| i.arg).collect();
     let freevars: Vec<String> = code.getattr("co_freevars")?.extract()?;
