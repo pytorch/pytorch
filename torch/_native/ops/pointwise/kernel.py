@@ -19,10 +19,9 @@ from torch._prims_common import (
 from ... import cutedsl_utils as cu
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.config import (
-    POINTWISE_DENSE_MIN as _DENSE_MIN,
-    POINTWISE_EPT_SCHEDULE as _EPT_SCHEDULE,
+    POINTWISE_PADDED_TMA_MIN,
+    pointwise_presets,
     POINTWISE_REFERENCE_LANES as _B200_DEVICE_LANES,
-    POINTWISE_VEC256_MIN as _VEC256_MIN,
 )
 from ...cutedsl.dtypes import cute2torch, scalar_arg, torch2cute
 from ...cutedsl.plan_cache import cached_plan
@@ -31,7 +30,8 @@ from ...utils.device import check_current
 from ...utils.tensor import can_use_32bit_indexing, const_data_ptr
 from ._types import CacheKey, DTypes, Load, Path, RowGap, Shape
 from .layout import (
-    row_gap_view as _row_gap_view,
+    iteration_layout,
+    IterationLayout,
     tma_layout,
     TMA_SMEM_ALIGNMENT,
     TMA_STAGES,
@@ -66,25 +66,26 @@ def _choose_config(
     nin: int = 1,
     storage_bits: int | None = None,
     bool_output: bool = False,
+    *,
+    op: str = "",
+    dtype: str = "",
+    rowgap: bool = False,
 ) -> "_PointwiseConfig":
     fill = 1.0
     if hw is not None:
         fill = hw.sm_count * hw.max_threads_per_sm / _B200_DEVICE_LANES
-    if bool_output and compute_bits in (16, 32) and nin > 0:
-        if numel < _DENSE_MIN * fill:
-            return _PointwiseConfig()
-        return _PointwiseConfig(block=128, ept=compute_bits // 16)
-    if compute_bits == 32 and nin > 0:
-        if numel < _DENSE_MIN * fill:
-            return _PointwiseConfig()
-        narrow_unary = storage_bits is not None and storage_bits < 32 and nin == 1
-        return _PointwiseConfig(
-            ept=4 if narrow_unary else 2, vec_bits=256 if narrow_unary else 128
-        )
-    norm = numel // max(compute_bits // 16, 1)
-    ept = next(e for thresh, e in _EPT_SCHEDULE if norm >= thresh * fill)
-    wide = nin > 0 and compute_bits >= _VEC256_MIN[0] and numel >= _VEC256_MIN[1] * fill
-    return _PointwiseConfig(ept=ept, vec_bits=256 if wide else 128)
+    presets = pointwise_presets(
+        op,
+        compute_bits,
+        max(storage_bits or compute_bits, 32)
+        if bool_output
+        else storage_bits or compute_bits,
+        nin,
+        dtype=dtype,
+        rowgap=rowgap,
+    )
+    _, ept, bits = next(p for p in reversed(presets) if numel >= p[0] * fill)
+    return _PointwiseConfig(ept=ept, vec_bits=bits)
 
 
 def _vec_width(compute_bits: int, vec_bits: int = _VEC_BITS) -> int:
@@ -252,11 +253,16 @@ class _ElementwiseStrided(_PointwiseOp):
 
     @cute.jit
     def __call__(
-        self, mIns: Any, mOuts: list[cute.Tensor], consts: Any, stream: cuda.CUstream
+        self,
+        mIns: Any,
+        mOuts: list[cute.Tensor],
+        consts: Any,
+        rank: cutlass.Int32,
+        stream: cuda.CUstream,
     ) -> None:
         n = cute.size(mOuts[0])
         tile = const_expr(self.block * self.ept)
-        self.kernel(mIns, mOuts, consts, n).launch(
+        self.kernel(mIns, mOuts, consts, n, rank).launch(
             grid=[cute.ceil_div(n, tile), 1, 1],
             block=[self.block, 1, 1],
             stream=stream,
@@ -264,7 +270,12 @@ class _ElementwiseStrided(_PointwiseOp):
 
     @cute.kernel
     def kernel(
-        self, mIns: Any, mOuts: list[cute.Tensor], consts: Any, n: cutlass.Int32
+        self,
+        mIns: Any,
+        mOuts: list[cute.Tensor],
+        consts: Any,
+        n: cutlass.Int32,
+        rank: cutlass.Int32,
     ) -> None:
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
@@ -273,19 +284,41 @@ class _ElementwiseStrided(_PointwiseOp):
         for p in cutlass.range_constexpr(self.ept):
             i = base + p * block
             if i < n:
-                vals = tuple(
-                    self._convert(k, mIns[k] if self.host_scalars[k] else mIns[k][i])
-                    for k in range(const_expr(self.nin))
-                )
-                # Formulas receive Int64 indices; counts and offsets must fit Int32.
+                rest = i
+                offsets = [cutlass.Int64(0) for _ in range(self.nin + self.nout)]
+                for d in cutlass.range_constexpr(_ITERATION_DIMS):
+                    if d < rank:
+                        coord = rest
+                        if d + 1 < rank:
+                            coord = rest % mOuts[0].shape[d]
+                            rest = rest // mOuts[0].shape[d]
+                        for k in cutlass.range_constexpr(self.nin):
+                            if const_expr(not self.host_scalars[k]):
+                                offsets[k] += cutlass.Int64(coord) * mIns[k].stride[d]
+                        for k in cutlass.range_constexpr(self.nout):
+                            offsets[self.nin + k] += (
+                                cutlass.Int64(coord) * mOuts[k].stride[d]
+                            )
+                values = []
+                for k in cutlass.range_constexpr(self.nin):
+                    value = mIns[k]
+                    if const_expr(not self.host_scalars[k]):
+                        view = cute.make_tensor(
+                            value.iterator + offsets[k], cute.make_layout(1)
+                        )
+                        value = view[0]
+                    values.append(self._convert(k, value))
+                vals = tuple(values)
+                # Indexed formulas use the original linear order preserved by TI.
                 if const_expr(self.with_index):
                     vals = (cutlass.Int64(i), *vals)
                 outs = self._evaluate(vals, consts)
-                if const_expr(self.nout == 1):
-                    mOuts[0][i] = self._cast_result(0, outs)
-                else:
-                    for j in cutlass.range_constexpr(self.nout):
-                        mOuts[j][i] = self._cast_result(j, outs[j])
+                for j in cutlass.range_constexpr(self.nout):
+                    target = cute.make_tensor(
+                        mOuts[j].iterator + offsets[self.nin + j], cute.make_layout(1)
+                    )
+                    result = outs if const_expr(self.nout == 1) else outs[j]
+                    target[0] = self._cast_result(j, result)
 
 
 _VEC_OUT_DTYPES = (
@@ -303,6 +336,27 @@ _VEC_OUT_DTYPES = (
     torch.uint32,
     torch.uint64,
 )
+
+# The count limit permits at most 30 non-singleton dimensions after TI coalescing.
+_ITERATION_DIMS = 32
+
+
+def _fake_iteration(dtype: NumericType) -> cute.Tensor:
+    return cute.runtime.make_fake_tensor(
+        dtype,
+        tuple(cute.sym_int32() for _ in range(_ITERATION_DIMS)),
+        stride=tuple(cute.sym_int64() for _ in range(_ITERATION_DIMS)),
+        assumed_align=max(dtype.width // 8, 1),
+    )
+
+
+def _iteration_view(
+    tensor: torch.Tensor, layout: IterationLayout, index: int
+) -> torch.Tensor:
+    padding = _ITERATION_DIMS - len(layout.shape)
+    return tensor.as_strided(
+        layout.shape + (1,) * padding, layout.strides[index] + (0,) * padding
+    )
 
 
 def _vec_ok(
@@ -363,29 +417,12 @@ def _view_rowvec(
     return t.as_strided((run // V, rows, V), (V, row_step, 1))
 
 
-def _fake_rowvec(
-    t: torch.Tensor, rows: int, run: int, row_step: int, V: int
-) -> cute.Tensor:
+def _fake_rowvec(dtype: NumericType, V: int) -> cute.Tensor:
     return cute.runtime.make_fake_tensor(
-        torch2cute[t.dtype],
-        (run // V, rows, V),
-        stride=(V, row_step, 1),
+        dtype,
+        (_L.sym(), _L.sym(), V),
+        stride=(V, cute.sym_int64(divisibility=V), 1),
         assumed_align=16,
-    )
-
-
-def _strided_view(t: torch.Tensor, shape: Shape, with_index: bool) -> torch.Tensor:
-    value = t.expand(shape)
-    return value.permute(tuple(reversed(range(value.ndim)))) if with_index else value
-
-
-def _fake_strided(
-    t: torch.Tensor, shape: Shape, with_index: bool = False
-) -> cute.Tensor:
-    # The cache key includes these concrete shapes and strides.
-    v = _strided_view(t, shape, with_index)
-    return cute.runtime.make_fake_tensor(
-        torch2cute[t.dtype], tuple(v.shape), stride=v.stride()
     )
 
 
@@ -394,6 +431,7 @@ def _rowvec_ok(
     shape: Shape,
     out_dtypes: DTypes,
     V: int,
+    layout: IterationLayout,
 ) -> RowGap | None:
     if not inputs:
         return None
@@ -403,10 +441,17 @@ def _rowvec_ok(
         return None
     if not all(_is_16b_aligned(t) for t in inputs):
         return None
-    view = _row_gap_view(inputs[0])
-    if view is None or view[1] % V:
+    if len(layout.shape) != 2:
         return None
-    return view if all(_row_gap_view(t) == view for t in inputs[1:]) else None
+    run, rows = layout.shape
+    stride = layout.strides[len(out_dtypes)]
+    if run % V or stride[0] != 1 or stride[1] <= run or stride[1] % V:
+        return None
+    return (
+        (rows, run, stride[1])
+        if all(s == stride for s in layout.strides[len(out_dtypes) :])
+        else None
+    )
 
 
 class _Plan(NamedTuple):
@@ -417,6 +462,7 @@ class _Plan(NamedTuple):
     fn: "Function"
     rowgap: RowGap | None = None
     tma: TmaLayout | None = None
+    iteration: IterationLayout | None = None
 
 
 def tma_eligible(
@@ -479,7 +525,11 @@ def tma_eligible(
     if layout is None:
         return None
     # Small padded-only calls measured slower than ATen; keep them on the fallback.
-    if not force and not any(layout.transposed) and math.prod(shape) < 16 * 1024 * 1024:
+    if (
+        not force
+        and not any(layout.transposed)
+        and math.prod(shape) < POINTWISE_PADDED_TMA_MIN
+    ):
         return None
     if any(
         orientation is not None and const_data_ptr(t) % (128 if orientation else 16)
@@ -531,9 +581,12 @@ def _build_plan(
     # Device-scaled measured defaults apply unless the caller supplies tuning values.
     try_tma = load != "direct"
     force_tma = load == "tma"
-    row_ept = 1 if ept is None else ept
+    strided_block = 256 if block is None else block
+    strided_ept = 1 if ept is None else ept
+    requested_ept, requested_vec_bits = ept, vec_bits
     hw = _hw.caps(ref.device)
     storage_bits = max((t.element_size() * 8 for t in inputs), default=compute.width)
+    preset_name = getattr(fn, "__name__", "")
     cfg = _choose_config(
         math.prod(shape),
         compute.width,
@@ -541,6 +594,8 @@ def _build_plan(
         nin,
         storage_bits,
         any(d is torch.bool for d in out_dtypes),
+        op=preset_name,
+        dtype=str(ref.dtype).removeprefix("torch."),
     )
     block = cfg.block if block is None else block
     ept = cfg.ept if ept is None else ept
@@ -558,6 +613,8 @@ def _build_plan(
         o.view(torch.int8) if o.dtype is torch.bool else o for o in seed_outs
     ]
     rowgap = None
+    iteration = None
+    geometry = iteration_layout(list(inputs), seed_outs, with_index=with_index)
     in_dtypes = tuple(t.dtype for t in inputs)
     common = (
         ref.get_device(),
@@ -589,17 +646,38 @@ def _build_plan(
     input_types = tuple(torch2cute[d] for d in casts)
     scalar_inputs = tuple(t.numel() == 1 for t in inputs)
     host_scalars = tuple(t.device.type == "cpu" and t.dim() == 0 for t in inputs)
+    generic_key = common + (input_types, host_scalars)
     common += (input_types, scalar_inputs, host_scalars)
     # Index-aware formulas need the strided path for individual element indices.
     vec1 = not with_index and all(
         _vec_ok(inputs, shape, out_dtypes, V, o) for o in seed_outs
     )
     rg = (
-        _rowvec_ok(inputs, shape, out_dtypes, V)
+        _rowvec_ok(inputs, shape, out_dtypes, V, geometry)
         if not with_index
         and all(o.is_contiguous() and _is_16b_aligned(o) for o in seed_outs)
         else None
     )
+    if rg is not None:
+        row_cfg = _choose_config(
+            math.prod(shape),
+            compute.width,
+            hw,
+            nin,
+            storage_bits,
+            any(d is torch.bool for d in out_dtypes),
+            op=preset_name,
+            dtype=str(ref.dtype).removeprefix("torch."),
+            rowgap=True,
+        )
+        row_bits = (
+            row_cfg.vec_bits if requested_vec_bits is None else requested_vec_bits
+        )
+        row_v = _vec_width(compute.width, row_bits)
+        if rg[1] % row_v or rg[2] % row_v:
+            row_cfg, row_v = _PointwiseConfig(), V
+        V = row_v
+        ept = row_cfg.ept if requested_ept is None else requested_ept
     tma = (
         tma_eligible(inputs, shape, out_dtypes[0], seed_outs[0], force=force_tma)
         if try_tma
@@ -607,7 +685,11 @@ def _build_plan(
         and not with_index
         and (
             force_tma
-            or (not vec1 and any(not t.is_contiguous() for t in (*inputs, *seed_outs)))
+            or (
+                not vec1
+                and (rg is None or ept == 1)
+                and any(not t.is_contiguous() for t in (*inputs, *seed_outs))
+            )
         )
         else None
     )
@@ -626,9 +708,11 @@ def _build_plan(
             input_types,
             result_types=result_types,
         )
-        cin, cout = op.fake_args(tma, tuple(torch2cute[t.dtype] for t in inputs))
+        cin, cout = op.fake_args(
+            tma, tuple(torch2cute[t.dtype] for t in inputs), dynamic=True
+        )
         path = "tma"
-        kkey = common + (path, tma)
+        kkey = common + (path, tma.transposed, tma.rows_first)
     elif vec1 or rg is not None:
         if rg is None:
             cin = [
@@ -646,11 +730,9 @@ def _build_plan(
             ]
             cout = [_fake_vec(torch2cute[o.dtype], V) for o in storage_outs]
         else:
-            # Grouped views default to one vector per thread.
-            ept = row_ept
             rows, run, row_step = rg
-            cin = [_fake_rowvec(t, rows, run, row_step, V) for t in inputs]
-            cout = [_fake_rowvec(o, rows, run, run, V) for o in storage_outs]
+            cin = [_fake_rowvec(torch2cute[t.dtype], V) for t in inputs]
+            cout = [_fake_rowvec(torch2cute[o.dtype], V) for o in storage_outs]
             rowgap = rg
         op = _ElementwiseVec(
             fn,
@@ -668,8 +750,12 @@ def _build_plan(
             result_types=result_types,
         )
         path = "vec"
-        kkey = common + (path, rg, V, block, ept)
+        kkey = common + (path, "rowgap" if rg is not None else "dense", V, block, ept)
     else:
+        iteration = geometry
+        if len(iteration.shape) > _ITERATION_DIMS:
+            raise ValueError("pointwise iterator exceeds 32 coalesced dimensions")
+        block, ept = strided_block, strided_ept
         op = _ElementwiseStrided(
             fn,
             nin,
@@ -687,24 +773,25 @@ def _build_plan(
         cin = [
             input_types[k](1)
             if host_scalars[k]
-            else _fake_strided(t, shape, with_index)
+            else _fake_iteration(torch2cute[t.dtype])
             for k, t in enumerate(inputs)
         ]
-        cout = [_fake_strided(o, tuple(o.shape), with_index) for o in storage_outs]
+        cout = [_fake_iteration(torch2cute[o.dtype]) for o in storage_outs]
         path = "strided"
-        lays = tuple((tuple(t.shape), t.stride()) for t in inputs)
-        out_lays = tuple((tuple(o.shape), o.stride()) for o in seed_outs)
-        kkey = common + ("strided", shape, lays, out_lays, block, ept)
+        kkey = generic_key + ("strided", block, ept)
     seed_consts = [c.__class__(1) for c in consts]
     compile_ins = cin if cin else None
     compile_consts = seed_consts if seed_consts else None
+    args = (compile_ins, cout, compile_consts)
+    if iteration is not None:
+        args += (cutlass.Int32(1),)
     compiled = cached_plan(
         _KERNELS,
         kkey,
-        lambda: _L.compile_kernel(op, compile_ins, cout, compile_consts, _L.stream()),
+        lambda: _L.compile_kernel(op, *args, _L.stream()),
         op=op_name,
     )
-    return _Plan(path, shape, V, tuple(out_dtypes), compiled, rowgap, tma)
+    return _Plan(path, shape, V, tuple(out_dtypes), compiled, rowgap, tma, iteration)
 
 
 def run(
@@ -810,6 +897,24 @@ def run(
         else [torch.empty(plan.shape, device=dev, dtype=d) for d in plan.out_dtypes]
     )
     storage_outs = [o.view(torch.int8) if o.dtype is torch.bool else o for o in outs]
+    if plan.iteration is not None:
+        cin = [
+            scalar_arg(t.item(), input_casts[k] if input_casts else cute2torch[compute])
+            if t.device.type == "cpu" and t.dim() == 0
+            else _L.read_only(_iteration_view(t, plan.iteration, nout + k))
+            for k, t in enumerate(inputs)
+        ]
+        cout = [
+            _iteration_view(t, plan.iteration, k) for k, t in enumerate(storage_outs)
+        ]
+        plan.fn(
+            cin or None,
+            cout,
+            list(consts) or None,
+            cutlass.Int32(len(plan.iteration.shape)),
+            _L.stream(),
+        )
+        return tuple(outs)
     if plan.tma is not None:
         cin = [_L.read_only(t.as_strided(*v)) for t, v in zip(inputs, plan.tma.inputs)]
         cout = [storage_outs[0].as_strided(*plan.tma.output)]
@@ -820,23 +925,15 @@ def run(
         ]
         cout = [_view_rowvec(o, rows, run, run, plan.V) for o in storage_outs]
     else:
-        vector = plan.path == "vec"
         cin = [
             scalar_arg(t.item(), input_casts[k] if input_casts else cute2torch[compute])
             if t.device.type == "cpu" and t.dim() == 0
             else _L.read_only(
-                (t.as_strided((1,), (1,)) if t.numel() == 1 else _view_vec(t, plan.V))
-                if vector
-                else _strided_view(t, plan.shape, with_index)
+                t.as_strided((1,), (1,)) if t.numel() == 1 else _view_vec(t, plan.V)
             )
             for k, t in enumerate(inputs)
         ]
-        cout = [
-            _view_vec(o, plan.V)
-            if vector
-            else _strided_view(o, tuple(o.shape), with_index)
-            for o in storage_outs
-        ]
+        cout = [_view_vec(o, plan.V) for o in storage_outs]
     # Scalar values are runtime arguments; changing them does not recompile kernels.
     plan.fn(cin or None, cout, list(consts) or None, _L.stream())
     return tuple(outs)
