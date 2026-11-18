@@ -33,18 +33,20 @@ function withFixture(callback) {
   });
 }
 
-test('only the allocated PR preflight is active and the default PR0 remains denied', () => {
+test('only the allocated PR producer is active and the default PR0 remains denied', () => {
   assert.equal(canary.EXPECTED_PR, 0);
   const {env, event, run, pr} = identities(205419);
   assert.throws(() => canary.validateIdentity(env, event, run, pr));
   assert.equal(canary.validateIdentity(env, event, run, pr, 205419).pr, 205419);
   assert.throws(() => canary.validateIdentity(env, event, run, pr, 205398));
   const activation = require('./activation.json');
-  assert.deepEqual(activation, {phase: 'preflight', expected_pr: 205419, actor_ids: {ptdbot: 283013143, d4l3k: 909104}, rest_preflight: null, producer: null});
+  assert.deepEqual(activation, {phase: 'producer', expected_pr: 205419, actor_ids: {ptdbot: 283013143, d4l3k: 909104}, rest_preflight: {run_id: 44210618534, attempt: 2, head: '4784376f2eeaa58f1927676d2c0be1f53133ef85', job_id: 134488060725, workflow_id: 422034765, pr: 205419, deleted_by: 'd4l3k', delete_status: 204, deleted_get_status: 404, remaining_artifacts: 0, artifacts: {preflight: {id: 14385473342, name: 'release-artifact-crossrun-44210618534-2-preflight', digest: 'b080dcdf4d6082c9d30fe62dcd93984b6b8745bce2f85f89cfd1bc5bd0fafa5f'}}}, producer: null});
   assert.deepEqual(require('./index.cjs').configuration(), activation);
   assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'disabled', expected_pr: 0}));
   assert.throws(() => require('./index.cjs').configuration({...activation, expected_pr: 0}));
-  assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'producer'}));
+  assert.throws(() => require('./index.cjs').configuration({...activation, rest_preflight: null}));
+  assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'preflight'}));
+  assert.throws(() => require('./index.cjs').configuration({...activation, phase: 'consumer'}));
   const workflow = fs.readFileSync(path.resolve(__dirname, '../../workflows/security-artifact-crossrun.yml'), 'utf8');
   assert.equal(canary.WORKFLOW, '.github/workflows/security-artifact-crossrun.yml');
   assert.equal((workflow.match(/github\.event\.pull_request\.number == 205419\b/g) || []).length, 2);

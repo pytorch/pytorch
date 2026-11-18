@@ -1,7 +1,25 @@
 {
-  "phase": "preflight",
+  "phase": "producer",
   "expected_pr": 205419,
   "actor_ids": {"ptdbot": 283013143, "d4l3k": 909104},
-  "rest_preflight": null,
+  "rest_preflight": {
+    "artifacts": {
+      "preflight": {
+        "digest": "b080dcdf4d6082c9d30fe62dcd93984b6b8745bce2f85f89cfd1bc5bd0fafa5f",
+        "id": 14385473342,
+        "name": "release-artifact-crossrun-44210618534-2-preflight"
+      }
+    },
+    "attempt": 2,
+    "delete_status": 204,
+    "deleted_by": "d4l3k",
+    "deleted_get_status": 404,
+    "head": "4784376f2eeaa58f1927676d2c0be1f53133ef85",
+    "job_id": 134488060725,
+    "pr": 205419,
+    "remaining_artifacts": 0,
+    "run_id": 44210618534,
+    "workflow_id": 422034765
+  },
   "producer": null
 }
