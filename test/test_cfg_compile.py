@@ -4815,6 +4815,47 @@ class TestCfgRegions(TestCase):
         with self.assertRaises(TypeError):
             runtime.tensor_key([a, 3], [])
 
+    def test_condition_on_the_numbers_of_a_call(self):
+        runtime = importlib.import_module("torch._cfg_rs")
+        torch.cfg_compile(region_small)
+        a, b = torch.randn(4, 12, 8), torch.nn.Parameter(torch.randn(3))
+        view = a[:, 2:9]
+        _, numbers, offsets = runtime.tensor_key([a, view, b], [5, -2])
+        # Open where the first tensor has 12, and what follows from it: 12
+        # may be anything from 2 to 100 that is even.
+        size = ("slot", 1)
+        conditions = [
+            ("and", [("le", ("const", 2), size), ("le", size, ("const", 100))]),
+            ("eq", ("mod", size, ("const", 2)), ("const", 0)),
+            ("eq", ("slot", 3), ("mul", ("const", 8), size)),
+        ]
+        guard = runtime.ShapeGuard(numbers, offsets, [1, 3], conditions)
+        self.assertEqual(guard.open, 2)
+
+        def holds(rows, tensors=None):
+            c = torch.randn(4, rows, 8)
+            key = runtime.tensor_key(tensors or [c, view, b], [5, -2])
+            return guard.holds(key[1], key[2])
+
+        self.assertTrue(holds(12))
+        self.assertTrue(holds(30))
+        self.assertFalse(holds(31))
+        self.assertFalse(holds(102))
+        self.assertFalse(holds(1))
+        # A number that is not open is another one.
+        self.assertFalse(holds(30, [torch.randn(5, 30, 8), view, b]))
+        # Where a tensor starts in its storage is no part of the numbers,
+        # but a condition may speak of it: it comes after them.
+        self.assertTrue(holds(30, [torch.randn(4, 30, 8), a[:, 1:8], b]))
+        conditions.append(("le", ("const", 2), ("slot", 16 + 1)))
+        guard = runtime.ShapeGuard(numbers, offsets, [1, 3], conditions)
+        self.assertTrue(holds(30))
+        self.assertFalse(holds(30, [torch.randn(4, 30, 8), a[:, 0:7], b]))
+        with self.assertRaises(ValueError):
+            runtime.ShapeGuard(numbers, offsets, [], [("slot", 99)])
+        with self.assertRaises(ValueError):
+            runtime.ShapeGuard(numbers, offsets, [], [("power", size, size)])
+
     @slowTest
     def test_inductor(self):
         def train(compile_step):
