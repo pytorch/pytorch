@@ -1,0 +1,7 @@
+{
+  "phase": "disabled",
+  "expected_pr": 0,
+  "actor_ids": {"ptdbot": 0, "d4l3k": 0},
+  "rest_preflight": null,
+  "producer": null
+}
