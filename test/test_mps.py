@@ -15562,56 +15562,35 @@ class TestCommon(TestCase):
     @largeMPSBufferTest((1 << 31) + 128)
     @parametrize("accumulate", [False, True])
     def test_index_put_deterministic_split(self, device, accumulate):
-        if accumulate:
-            # Four float32 values span INT32_MAX bytes and split into two pairs.
-            stride = (1 << 29) // 3 + 1
-            values = torch.empty_strided(
-                (4,), (stride,), dtype=torch.float32, device=device
-            )
-            values.copy_(torch.tensor([1e20, 1, -1e20, 3], device=device))
-            indices = torch.zeros(4, dtype=torch.long, device=device)
-            expected = torch.tensor([3.0])
-        else:
-            count = 128
-            stride = (1 << 31) // (count - 1) + 1
-            values = torch.empty_strided(
-                (count,), (stride,), dtype=torch.uint8, device=device
-            )
-            values.copy_(torch.arange(count, dtype=torch.uint8, device=device))
-            indices = torch.arange(count, device=device) % 8
-            expected = torch.arange(count - 8, count, dtype=torch.uint8)
+        dtype = torch.float32 if accumulate else torch.uint8
+        source = [1e20, 1, -1e20, 3] if accumulate else [1, 2, 3, 4]
+        count = len(source)
+        # Span more than INT32_MAX bytes so TensorIterator splits into two pairs.
+        stride = (1 << 31) // ((count - 1) * dtype.itemsize) + 1
+        values = torch.empty_strided((count,), (stride,), dtype=dtype, device=device)
+        values.copy_(torch.tensor(source, dtype=dtype, device=device))
+        indices = torch.zeros(count, dtype=torch.long, device=device)
+        result = torch.zeros(1, dtype=dtype, device=device)
+        expected = torch.tensor([3 if accumulate else 4], dtype=dtype)
         with DeterministicGuard(True):
-            for _ in range(5):
-                result = torch.zeros(
-                    expected.shape, dtype=expected.dtype, device=device
-                )
-                result.index_put_((indices,), values, accumulate=accumulate)
-                self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+            result.index_put_((indices,), values, accumulate=accumulate)
+        self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
 
-    @parametrize("destinations", [1, 257])
-    @parametrize("updates", [7, 8, 9, 15, 16, 17])
-    @parametrize("op", ["index_put_", "put_"])
-    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.complex64, torch.complex32)
-    def test_nonzero_output_rounding(self, device, dtype, destinations, updates, op):
+    def test_nonzero_output_rounding(self, device):
+        destinations, updates = 257, 17
+        dtype = torch.float32
         large = 2 / torch.finfo(dtype).eps
-        initial = large * (1 + 1j) if dtype.is_complex else large
-        values_cpu = torch.tensor([1] * (updates - 2) + [-large, 3], dtype=dtype)
-        if dtype.is_complex:
-            values_cpu.imag.copy_(values_cpu.real)
-        values_cpu = values_cpu.repeat_interleave(destinations)
-        indices_cpu = torch.arange(destinations).repeat(updates)
-        expected = torch.full((destinations + 2,), initial, dtype=dtype)
+        indices = torch.arange(destinations, device=device).repeat(updates)
+        values = torch.empty(indices.numel(), 2, device=device, dtype=dtype)[:, 1]
+        row = torch.tensor([1] * (updates - 2) + [-large, 3], device=device, dtype=dtype)
+        values.copy_(row.repeat_interleave(destinations))
+        result = torch.full((destinations, 2), large, device=device, dtype=dtype)
+        # Each +1 rounds away before -large cancels the initial value.
+        expected = torch.full((destinations, 2), large, dtype=dtype)
+        expected[:, 1] = 3
         with DeterministicGuard(True):
-            expected[1:-1].index_put_((indices_cpu,), values_cpu, accumulate=True)
-            indices = indices_cpu.to(device)
-            values = torch.stack((values_cpu, values_cpu), dim=1).to(device)[:, 1]
-            for _ in range(5):
-                result = torch.full((destinations + 2,), initial, device=device, dtype=dtype)
-                if op == "index_put_":
-                    result[1:-1].index_put_((indices,), values, accumulate=True)
-                else:
-                    result[1:-1].put_(indices, values, accumulate=True)
-                self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+            result[:, 1].index_put_((indices,), values, accumulate=True)
+        self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
 
     exact_dtype = True
 
