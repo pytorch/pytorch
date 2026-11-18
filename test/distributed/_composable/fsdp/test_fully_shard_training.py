@@ -47,10 +47,7 @@ from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_nat
 from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import with_tf32_off
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-    skip_if_rocm_arch_multiprocess,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
@@ -68,7 +65,6 @@ from torch.testing._internal.common_utils import (
     device_sleep,
     get_cycles_per_ms,
     instantiate_parametrized_tests,
-    MI200_ARCH,
     parametrize,
     run_tests,
     skipIfRocm,
@@ -2878,7 +2874,6 @@ class TestFullyShardNDTraining(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(4, allow_cpu=True)
-    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     def test_2d_mlp_with_nd_mesh(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
