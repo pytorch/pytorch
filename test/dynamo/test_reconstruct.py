@@ -151,25 +151,11 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         ],
     )
     def test_sourced_singleton_aggregate_uses_load_const(self, value):
-        constants = []
-
-        def hook(instructions):
-            constants.extend(
-                i.argval
-                for i in instructions
-                if i.opname == "LOAD_CONST" and type(i.argval) is tuple
-            )
-
         def fn(x, value):
             comptime.force_static(value)
             return x + 1, (value, None), id(value)
 
-        x = torch.ones(1)
-        with self.register_bytecode_hook(hook):
-            result = torch.compile(fn, backend="eager", fullgraph=True)(x, value)
-        self.assertEqual(result, fn(x, value))
-        self.assertIs(result[1][0], value)
-        self.assertIn((value, None), constants)
+        self._assert_tuple_loaded_as_constant(fn, value)
 
     @parametrize("kind", ["class", "enum"])
     def test_identity_specialized_aggregate_uses_load_const(self, kind):
@@ -179,22 +165,28 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         class Holder:
             pass
 
+        def fn(x, value):
+            return x + 1, (value, None)
+
         value = Choice.member if kind == "enum" else Holder
+        self._assert_tuple_loaded_as_constant(fn, value)
+
+    def _assert_tuple_loaded_as_constant(self, fn, value):
         constants = []
 
         def hook(instructions):
-            constants.extend(i.argval for i in instructions if i.opname == "LOAD_CONST")
-
-        def fn(x, value):
-            return x + 1, (value, None)
+            constants.extend(
+                i.argval
+                for i in instructions
+                if i.opname == "LOAD_CONST" and type(i.argval) is tuple
+            )
 
         x = torch.ones(1)
         with self.register_bytecode_hook(hook):
             result = torch.compile(fn, backend="eager", fullgraph=True)(x, value)
+        self.assertEqual(result, fn(x, value))
         self.assertIs(result[1][0], value)
-        self.assertTrue(
-            any(type(item) is tuple and item == (value, None) for item in constants)
-        )
+        self.assertIn((value, None), constants)
 
     @parametrize(
         "factory",

@@ -1600,16 +1600,14 @@ class VariableBuilder:
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            global_hooks = istype(value, (dict, collections.OrderedDict)) and any(
-                value is getattr(torch.nn.modules.module, name)
-                for name in (
-                    "_global_forward_hooks_with_kwargs",
-                    "_global_forward_hooks_always_called",
-                    "_global_forward_pre_hooks",
-                    "_global_forward_hooks",
-                    "_global_backward_pre_hooks",
-                    "_global_backward_hooks",
-                )
+            hook_api = torch.nn.modules.module
+            global_hooks = istype(value, (dict, collections.OrderedDict)) and (
+                value is hook_api._global_forward_hooks_with_kwargs
+                or value is hook_api._global_forward_hooks_always_called
+                or value is hook_api._global_forward_pre_hooks
+                or value is hook_api._global_forward_hooks
+                or value is hook_api._global_backward_pre_hooks
+                or value is hook_api._global_backward_hooks
             )
             if not (global_hooks and config.skip_nnmodule_hook_guards):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
