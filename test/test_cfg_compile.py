@@ -2233,5 +2233,113 @@ class TestCfgFrames(TestCase):
         )
 
 
+def e2e_halve(x):
+    return x * 0.5
+
+
+def e2e_program(x, y, log):
+    if x.shape[0] > 1:
+        x = x.mean(0, keepdim=True)
+    total = e2e_halve(x)
+    for i in range(3):
+        total = total * 2 + y + i
+    while total.sum() < 10:
+        total = total + 1
+    log.append(float(total.sum()))
+    return total
+
+
+class E2ENet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(4, 8)
+        self.scale = torch.nn.Parameter(torch.ones(8))
+        self.fc2 = torch.nn.Linear(8, 1)
+        self.register_buffer("calls", torch.zeros(()))
+
+    def forward(self, x):
+        self.calls += 1
+        return self.fc2(torch.relu(self.fc1(x)) * self.scale)
+
+
+def e2e_step(net, opt, x, y):
+    opt.zero_grad()
+    loss = torch.nn.functional.mse_loss(net(x), y)
+    loss.backward()
+    opt.step()
+    return loss
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgEndToEnd(TestCase):
+    """Whole programs, compared bit for bit with the interpreter."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_tensor_program(self):
+        # An inlined call, an unrolled loop, a branch on a shape that is
+        # narrowed under a guard, a loop on tensor data and a Python side
+        # effect, in one graph.
+        narrowing = torch.cfg_compile.Pipeline.narrowing()
+        compiled = torch.cfg_compile(e2e_program, pipeline=narrowing, fallback=False)
+        log, expected_log = [], []
+        for batch in (4, 1, 4, 8, 1):
+            x, y = torch.randn(batch, 3), torch.randn(3)
+            result, expected = compiled(x, y, log), e2e_program(x, y, expected_log)
+            self.assertEqual(result, expected, atol=0, rtol=0)
+        self.assertEqual(log, expected_log)
+        stats = compiled.stats()
+        self.assertEqual(stats["inlined"], ["e2e_halve"])
+        self.assertEqual(stats["unrolled_loops"], 1)
+        self.assertGreater(stats["sites"], 0)
+        self.assertEqual(stats["site_misses"], 0)
+        # The batch of one failed the guard that batches of four had put on
+        # the first block: that block, and no other, was compiled again.
+        entry, rest = stats["blocks"][0], stats["blocks"][1:]
+        failures = entry["guard_failures"] + entry["entry_guard_misses"]
+        self.assertEqual((entry["versions"], failures), (2, 1))
+        self.assertLessEqual(max(block["versions"] for block in rest), 1)
+
+    @parametrize("optimizer", ("sgd", "adam"))
+    def test_training_step(self, optimizer):
+        def train(compile_step):
+            torch.manual_seed(0)
+            net = E2ENet()
+            if optimizer == "sgd":
+                opt = torch.optim.SGD(net.parameters(), lr=0.1, momentum=0.9)
+            else:
+                opt = torch.optim.Adam(net.parameters(), lr=0.01)
+            step = (
+                torch.cfg_compile(e2e_step, fallback=False)
+                if compile_step
+                else e2e_step
+            )
+            data = [(torch.randn(16, 4), torch.randn(16, 1)) for _ in range(10)]
+            losses = [step(net, opt, x, y).item() for x, y in data]
+            return net.state_dict(), losses, step
+
+        expected_state, expected_losses, _ = train(False)
+        state, losses, step = train(True)
+        self.assertEqual(losses, expected_losses)
+        self.assertEqual(sorted(state), sorted(expected_state))
+        for name, value in state.items():
+            self.assertTrue(torch.equal(value, expected_state[name]), name)
+        self.assertEqual(state["calls"].item(), 10)
+        # The module, its submodules and the optimizer ran compiled.
+        callees = step.stats()["compiled_callees"]
+        optimizer_step = "SGD.step" if optimizer == "sgd" else "Adam.step"
+        for name in (
+            "E2ENet.forward",
+            "Linear.forward",
+            "Module._call_impl",
+            "Optimizer.zero_grad",
+            optimizer_step,
+        ):
+            self.assertIn(name, callees)
+
+
+instantiate_parametrized_tests(TestCfgEndToEnd)
+
+
 if __name__ == "__main__":
     run_tests()
