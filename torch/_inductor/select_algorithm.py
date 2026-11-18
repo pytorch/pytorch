@@ -54,7 +54,6 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
     use_pipelined_autotuning,
 )
-from .autows_utils import has_smem_operand_ring_first
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
@@ -1220,11 +1219,14 @@ class TritonTemplateKernel(TritonKernel):
         """autoWS loop-header kwarg for large epilogue staging slots."""
 
         def hook() -> str:
+            import triton.language as tl
+
             meta = self.meta
             if (
                 meta.get("TWO_CTAS")
                 or not meta.get("USE_META_WS")
-                or not has_smem_operand_ring_first()
+                or "smem_operand_ring_first"
+                not in inspect.signature(tl.range).parameters
             ):
                 return ""
             buffers = {**self.args.output_buffers, **self.args.inplace_buffers}
