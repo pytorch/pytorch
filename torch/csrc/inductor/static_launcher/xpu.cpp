@@ -23,14 +23,13 @@
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
-#include <c10/xpu/XPUFunctions.h>
 #include <c10/util/env.h>
+#include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 
 #include <level_zero/ze_api.h>
@@ -381,38 +380,14 @@ inline LoadedKernel _createKernel(
   return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
 
-// Whether to submit kernels on `device` without a sycl::event, gated as in
-// Intel triton's launcher (_use_eventless_submit in backend/driver.py) on two
-// counts:
-// 1. The driver version, because older drivers harvest the device-side assert
-//    and printf buffers only when the host waits on the kernel's event.
-// 2. The device architecture, because on the Level Zero v1 adapter eventless
-//    submit is no faster and makes PTI lose kernel times or hang. UR exposes
-//    no query for which adapter it loaded, so mirror the condition it picks
-//    v2 by (shouldUseV1Adapter in its Level Zero adapter: an Intel GPU of
-//    Battlemage or newer, unless UR_LOADER_USE_LEVEL_ZERO_V2 says otherwise).
-// TORCHINDUCTOR_XPU_EVENTLESS_SUBMIT=0 turns this off entirely.
 bool useEventlessSubmit(const sycl::device& device) {
-#if SYCL_COMPILER_VERSION >= 20260000 // oneAPI 2026.0
   const auto env = c10::utils::check_env("TORCHINDUCTOR_XPU_EVENTLESS_SUBMIT");
-  if (env == false) {
-    return false;
-  }
-  // A driver version that does not parse counts as too old.
-  const auto ver = device.get_info<sycl::info::device::driver_version>();
-  std::array<unsigned, 4> v{}; // major, minor, patch, build
-  // NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion)
-  int n = std::sscanf(ver.c_str(), "%u.%u.%u+%u", &v[0], &v[1], &v[2], &v[3]);
-  if (n < 3 || v < std::array<unsigned, 4>{1, 6, 35096, 9}) {
-    return false;
+  if (env) {
+    return *env;
   }
   namespace syclex = sycl::ext::oneapi::experimental;
-  return env == true ||
-      device.get_info<syclex::info::device::architecture>() >=
+  return device.get_info<syclex::info::device::architecture>() >=
       syclex::architecture::intel_gpu_bmg_g21;
-#else
-  return false;
-#endif
 }
 
 std::unique_ptr<LoadedKernel> loadKernel(
@@ -536,12 +511,10 @@ void submitKernel(
       cgh.parallel_for(parallelWorkSize, loadedKernel->kernel);
     }
   };
-#if SYCL_COMPILER_VERSION >= 20260000 // oneAPI 2026.0
   if (loadedKernel->eventlessSubmit) {
     sycl::ext::oneapi::experimental::submit(*queuePtr, cgf);
     return;
   }
-#endif
   queuePtr->submit(cgf);
 }
 
