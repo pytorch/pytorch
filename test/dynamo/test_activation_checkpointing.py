@@ -4247,6 +4247,8 @@ instantiate_device_type_tests(
 
 
 class ActivationCheckpointingGraphBreakFallbackTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class _Attention(nn.Module):
         def __init__(self):
             super().__init__()
