@@ -154,6 +154,29 @@ class TestPointwiseTma(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    def test_kernel_reuses_runtime_geometry(self, device: str) -> None:
+        from torch._native.ops.pointwise import kernel
+
+        count = None
+        with torch.backends.python_native.cutedsl.disabled():
+            for batch, rows, cols, pitch in (
+                (1, 64, 96, 80),
+                (2, 96, 128, 128),
+                (3, 32, 64, 64),
+                (1, 64, 96, 80),
+            ):
+                x = torch.randn(batch, cols, pitch, device=device)[
+                    ..., :rows
+                ].transpose(1, 2)
+                y = torch.randn(batch, rows, cols + 16, device=device)[..., :cols]
+                actual = self._run([x, y])
+                self.assertEqual(actual, x + y)
+                if count is None:
+                    count = len(kernel._KERNELS)
+                self.assertEqual(len(kernel._KERNELS), count)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     def test_integer_scalar_float_promotion(self, device: str) -> None:
         x = torch.ones(96, 64, device=device, dtype=torch.int32).t()
         y = torch.tensor(2**32 + 1, device=device, dtype=torch.int64)
