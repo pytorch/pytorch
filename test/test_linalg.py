@@ -12341,7 +12341,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             self.skipTest("Reaches no new panel width")
         self._check_ldl_factor_random(n, device, dtype)
 
-    @onlyCUDA
     @skipCUDAIfNotRocm
     @serialTest()
     def test_eigh_workspace_growth_with_full_caching_allocator(self, device):
@@ -12382,7 +12381,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
     # Audit other batched cuSOLVER APIs for the batch-boundary failures seen
     # with XsyevBatched (see #166004 and #203815). Keep these small enough
     # for regular CUDA CI rather than relying on largeTensorTest.
-    @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfNoCusolver
     @dtypes(torch.float32)
@@ -12398,7 +12396,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         self.assertEqual(singular[:, 1], scales)
         self.assertEqual(u @ torch.diag_embed(singular) @ vh, a, atol=1e-5, rtol=1e-5)
 
-    @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfNoCusolver
     @dtypes(torch.float32)
@@ -12417,7 +12414,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         self.assertEqual(factor @ factor.mH, a, atol=1e-5, rtol=1e-5)
 
 
-    @onlyCUDA
     @skipIfRocm
     @skipCUDAIf(not torch.cuda.has_magma, "requires MAGMA")
     @setLinalgBackendsToDefaultFinally
@@ -12431,7 +12427,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
                 self._assert_svd_driver_error(A, driver, msg)
             self._assert_svd_driver_error(A, "invalid", "torch.linalg.svd: unknown svd driver")
 
-    @onlyCUDA
     @skipCUDAIfNoCusolver
     @skipCUDAIfNotRocm
     @dtypes(torch.float32, torch.complex64)
