@@ -3960,6 +3960,34 @@ class TestCfgFrames(TestCase):
         ours = [name for name in names if name in ("fmt", "scale")]
         self.assertEqual(sorted(ours), ["fmt", "scale", "scale"])
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "counts page faults")
+    @unittest.skipIf(sys.version_info < (3, 11), "frames are not kept in chunks")
+    def test_calls_at_the_end_of_a_chunk_of_frames_map_no_memory(self):
+        import resource
+
+        def callee(a=0, b=0, c=0, d=0, e=0, f=0, g=0, h=0):
+            return a
+
+        def caller(n):
+            for _ in range(n):
+                callee()
+
+        def deeper(depth, n):
+            return caller(n) if depth == 0 else deeper(depth - 1, n)
+
+        def faults():
+            return resource.getrusage(resource.RUSAGE_SELF).ru_minflt
+
+        self.assertEqual(torch.rewrite(lambda: 1, fallback=False)(), 1)
+        # A chunk is 16 KB and a frame of `deeper` some 130 bytes: at one of
+        # these depths the frame of `callee` is the first that does not fit.
+        seen = []
+        for depth in range(160):
+            before = faults()
+            deeper(depth, 2000)
+            seen.append(faults() - before)
+        self.assertLess(max(seen), 500)
+
 
 def frame_traced_callee(a):
     b = a + 1
