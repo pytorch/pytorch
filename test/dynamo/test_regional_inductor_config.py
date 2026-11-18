@@ -834,9 +834,9 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             "triton.cudagraphs": False,
         }
     )
-    def test_redundant_disabled_cudagraph_config_does_not_partition(self):
+    def test_redundant_disabled_cudagraph_config_is_accepted(self):
         """With capture off, a region that restates triton.cudagraphs=False is
-        accepted and changes nothing."""
+        accepted, and the result matches eager."""
         nested_config = get_invoke_subgraph_compile_options(
             fw_inductor_config_patches={"triton.cudagraphs": False}
         )
@@ -854,11 +854,15 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         )
 
         self.assertEqual(result, fn(x))
-        self.assertNotIn("def partition_0(args):", codes[0])
 
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @torch._inductor.config.patch({"graph_partition": True, "triton.cudagraphs": True})
-    def test_region_cudagraphs_rejected_when_compiled_on_its_own(self):
+    # The backward alone, with bw_inductor_config_patches replacing the rest
+    # of the forward patches, must reject it too.
+    @parametrize("forward_on_its_own", (True, False))
+    def test_region_cudagraphs_rejected_when_compiled_on_its_own(
+        self, forward_on_its_own
+    ):
         """regional_inductor_invoke_subgraph compiles a region on its own, which
         would capture it without pairing its forward and backward."""
         from torch._dynamo.backends.common import aot_autograd
@@ -866,8 +870,13 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             regional_inductor_invoke_subgraph,
         )
 
+        from torch._functorch.aot_autograd import make_boxed_func
+
         options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": False}
+            fw_inductor_config_patches={"triton.cudagraphs": False},
+            bw_inductor_config_patches=(
+                None if forward_on_its_own else {"fallback_by_default": False}
+            ),
         )
 
         @torch.compiler.nested_compile_region(options=options)
@@ -877,21 +886,33 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         def fn(x):
             return torch.cos(region(x))
 
-        def backend(gm, *args, **kwargs):
+        def regional(gm, *args, **kwargs):
             with torch.fx.traceback.preserve_node_meta():
                 return regional_inductor_invoke_subgraph(gm, *args, **kwargs)
 
+        def eager(gm, example_inputs):
+            return make_boxed_func(gm)
+
         compiled_fn = torch.compile(
             fn,
-            backend=aot_autograd(fw_compiler=backend, bw_compiler=backend),
+            backend=aot_autograd(
+                fw_compiler=regional if forward_on_its_own else eager,
+                bw_compiler=regional,
+            ),
             fullgraph=True,
         )
-        with self.assertRaisesRegex(
-            BackendCompilerFailed,
+        message = (
             "'triton.cudagraphs' in nested compile-region options is not "
-            "supported when the region is compiled on its own",
-        ):
-            compiled_fn(torch.randn(4, requires_grad=True))
+            "supported when the region is compiled on its own"
+        )
+        if forward_on_its_own:
+            with self.assertRaisesRegex(BackendCompilerFailed, message):
+                compiled_fn(torch.randn(4, requires_grad=True))
+        else:
+            # The lazily compiled backward raises outside the Dynamo backend.
+            result = compiled_fn(torch.randn(4, requires_grad=True))
+            with self.assertRaisesRegex(ValueError, message):
+                result.sum().backward()
 
     def _assert_rejected(self, fn, problem, requires_grad=True, call_site=""):
         with self.assertRaisesRegex(

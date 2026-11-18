@@ -743,7 +743,8 @@ def _validate_region_cudagraphs(
                 node,
                 "opting in to CUDA Graphs while triton.cudagraphs is off is not "
                 "supported; turn on torch._inductor.config.triton.cudagraphs and "
-                "set triton.cudagraphs=False on the regions to leave out instead",
+                "graph_partition, and set triton.cudagraphs=False on the regions "
+                "to leave out instead",
             )
         if not setting and config.triton.cudagraphs and not config.graph_partition:
             reject(

@@ -218,6 +218,18 @@ def _extract_nested_region_config(fn):
     return None
 
 
+def _backward_inductor_config_patches(
+    fw_patches: dict[str, Any] | None, bw_patches: dict[str, Any]
+) -> dict[str, Any]:
+    """bw_patches, plus the forward's triton.cudagraphs, which covers both
+    directions."""
+    if fw_patches and "triton.cudagraphs" in fw_patches:
+        return immutable_dict(
+            {**bw_patches, "triton.cudagraphs": fw_patches["triton.cudagraphs"]}
+        )
+    return bw_patches
+
+
 def get_backward_nested_region_config(
     fw_config: NestedCompileRegionOptions | None,
 ) -> NestedCompileRegionOptions | None:
@@ -233,16 +245,12 @@ def get_backward_nested_region_config(
         isinstance(fw_config, NestedCompileRegionOptions)
         and fw_config.bw_inductor_config_patches is not None
     ):
-        bw_patches = fw_config.bw_inductor_config_patches
-        fw_patches = fw_config.inductor_config_patches or {}
-        if "triton.cudagraphs" in fw_patches:
-            bw_patches = {
-                **bw_patches,
-                "triton.cudagraphs": fw_patches["triton.cudagraphs"],
-            }
         return replace(
             fw_config,
-            inductor_config_patches=bw_patches,
+            inductor_config_patches=_backward_inductor_config_patches(
+                fw_config.inductor_config_patches,
+                fw_config.bw_inductor_config_patches,
+            ),
             bw_inductor_config_patches=None,
         )
     return fw_config
@@ -1558,8 +1566,13 @@ def get_invoke_subgraph_compile_options(
     )
 
     # The backward uses bw_inductor_config_patches when set (independently of the
-    # forward), otherwise it reuses the forward config.
-    effective_bw_patches = bw_patches if bw_patches is not None else fw_patches
+    # forward, except for triton.cudagraphs), otherwise it reuses the forward
+    # config.
+    effective_bw_patches = (
+        _backward_inductor_config_patches(fw_patches, bw_patches)
+        if bw_patches is not None
+        else fw_patches
+    )
 
     fw_compiler = functools.partial(
         invoke_subgraph_inductor_compile,
