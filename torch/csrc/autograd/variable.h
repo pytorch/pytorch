@@ -9,10 +9,8 @@
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/node.h>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/VariableHooksInterface.h>
-#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/Exception.h>
 
 #include <cstdint>
@@ -928,33 +926,9 @@ inline Variable make_variable(
       }
       return Variable(std::move(data_impl));
     } else {
-      c10::intrusive_ptr<c10::TensorImpl> data_impl_copy;
-      if (C10_UNLIKELY(
-              data.is_fake() &&
-              c10::impl::tls_is_dispatch_key_included(
-                  c10::DispatchKey::PreDispatch) &&
-              !c10::impl::tls_is_dispatch_key_excluded(
-                  c10::DispatchKey::PreDispatch) &&
-              !c10::impl::tls_is_dispatch_key_excluded(
-                  c10::DispatchKey::Python) &&
-              !c10::impl::tls_is_dispatch_key_excluded(
-                  c10::DispatchKey::PythonDispatcher) &&
-              c10::impl::PythonDispatcherTLS::get_state() != nullptr)) {
-        // A native shallow copy bypasses pre-dispatch tracing and loses the
-        // factory result's proxy. Dispatch the copy before initializing
-        // metadata.
-        at::AutoDispatchBelowADInplaceOrView guard;
-        data_impl_copy = data.detach().getIntrusivePtr();
-        if (!data_impl_copy->is_inference()) {
-          data_impl_copy->set_version_counter(0);
-        }
-        data_impl_copy->set_allow_tensor_metadata_change(
-            allow_tensor_metadata_change);
-      } else {
-        data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-            /*version_counter=*/0,
-            /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      }
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+          /*version_counter=*/0,
+          /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       if (requires_grad) {
         data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
             data_impl_copy.get(), requires_grad));
