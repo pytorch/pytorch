@@ -2234,10 +2234,8 @@ class PrecompileSession(Generic[_P, _R]):
                 "Keep mutable MRO bases and classes returned by assume_constant_result "
                 "importable under stable qualified names, with module-level metaclasses."
                 if any(
-                    kind == "CLASS_MATCH"
-                    or ".__mro__[" in name
-                    or name.endswith(".__mro__")
-                    for kind, name in summary.risky_dropped_guards
+                    ".__mro__[" in name or name.endswith(".__mro__")
+                    for _, name in summary.risky_dropped_guards
                 )
                 else ""
             )
