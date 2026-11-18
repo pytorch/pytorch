@@ -5402,6 +5402,150 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
+    def test_deepcopy_ordered_dict(self):
+        def minimal(x):
+            copy.deepcopy(collections.OrderedDict(a=1))
+            return x + 1
+
+        x = torch.randn(4)
+        self.assertEqual(
+            torch.compile(minimal, fullgraph=True, backend="eager")(x), minimal(x)
+        )
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_input_order(self, copier):
+        def fn(x, od):
+            return x + (next(iter(copier(od))) == "first key")
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+        original = collections.OrderedDict.fromkeys(["".join(["first", " key"]), "b"])
+        equal_key = "".join(["first", " key"])
+        self.assertIsNot(next(iter(original)), equal_key)
+        self.assertEqual(compiled(x, original), fn(x, original))
+        original.clear()
+        original.update([(equal_key, None), ("b", None)])
+        self.assertEqual(compiled(x, original), fn(x, original))
+        self.assertEqual(counter.frame_count, 1)
+        reversed_input = collections.OrderedDict(reversed(list(original.items())))
+        self.assertEqual(compiled(x, reversed_input), fn(x, reversed_input))
+        original.move_to_end(equal_key)
+        self.assertEqual(compiled(x, original), fn(x, original))
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_instance_attributes(self, copier):
+        def fn(x, od):
+            return x + 1, copier(od)
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.tensor(10)
+        od = collections.OrderedDict(a=1)
+        self.assertEqual(vars(compiled(x, od)[1]), {})
+        od.tag = [42]
+        copied = compiled(x, od)[1]
+        self.assertEqual(vars(copied), vars(od))
+        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_after_instance_dict_write(self, copier):
+        def fn(x, od):
+            od.__dict__["tag"] = [42]
+            return x + 1, od, copier(od)
+
+        x = torch.tensor(10)
+        inp = collections.OrderedDict(a=1)
+        result, od, copied = torch.compile(fn, backend="eager")(x, inp)
+        self.assertEqual(result, x + 1)
+        self.assertEqual(copied.tag, [42])
+        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_after_possible_instance_dict_alias_write(self, copier):
+        def fn(x, od, attrs):
+            attrs["tag"] = [1]
+            return x + 1, copier(od)
+
+        compiled = torch.compile(fn, backend="eager")
+        for aliases in (False, True):
+            od = collections.OrderedDict(a=1)
+            attrs = od.__dict__ if aliases else {}
+            _, copied = compiled(torch.tensor(10), od, attrs)
+            self.assertEqual(vars(copied), {"tag": [1]} if aliases else {})
+            if aliases:
+                self.assertEqual(copied.tag is attrs["tag"], copier is copy.copy)
+
+    def test_deepcopy_ordered_dict_nested(self):
+        def fn(x):
+            original = collections.OrderedDict(a=[1], b=[2])
+            copied = copy.deepcopy(original)
+            copied["a"][0] = 3
+            return x + original["a"][0] + copied["a"][0] + copied["b"][0]
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+    def test_copy_ordered_dict_nested(self):
+        def fn(x):
+            original = collections.OrderedDict(a=[1], b=[2])
+            copied = copy.copy(original)
+            copied["a"][0] = 3
+            return x + original["a"][0] + copied["b"][0]
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+    def test_deepcopy_ordered_dict_shared_value(self):
+        def fn(x):
+            shared = [1]
+            original = collections.OrderedDict(a=shared, b=shared)
+            copied = copy.deepcopy(original)
+            copied["a"][0] = 7
+            return x + 10 * copied["b"][0] + original["a"][0]
+
+        x = torch.randn(4)
+        self.assertEqual(
+            torch.compile(fn, fullgraph=True, backend="aot_eager")(x), fn(x)
+        )
+
+    def test_ordered_dict_reduce_iterator_type(self):
+        iterator_type = type(iter(collections.OrderedDict()))
+
+        def fn(x):
+            reduced = collections.OrderedDict(a=1).__reduce_ex__(4)
+            return x + (type(reduced[4]) is iterator_type)
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+    def test_ordered_dict_reduce_iterator_mutation(self):
+        def fn(x):
+            original = collections.OrderedDict(a=1, b=2)
+            items = original.__reduce_ex__(4)[4]
+            first = next(items)
+            original["b"] = 9
+            second = next(items)
+            return x + first[1] + second[1]
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, fullgraph=True, backend="eager")(x), fn(x))
+
+        def mutate_keys(x):
+            original = collections.OrderedDict(a=1, b=2)
+            items = original.__reduce_ex__(4)[4]
+            next(items)
+            original["c"] = 3
+            try:
+                next(items)
+            except RuntimeError:
+                return x + 1
+            return x + 2
+
+        self.assertEqual(
+            torch.compile(mutate_keys, fullgraph=True, backend="eager")(x),
+            mutate_keys(x),
+        )
+
     def test_deepcopy_dict(self):
         MY_DICT = {"a": 1, "b": 2.0, "c": None}
 
@@ -9065,6 +9209,57 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @parametrize("from_input", [True, False])
+    @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
+    def test_nn_parameter_ctor_type(self, from_input):
+        # nn.Parameter() is built before the graph runs, into a synthetic local
+        # that guards can't read, so type() and __class__ must not guard on it.
+        # (The config patch only matters for nn.Parameter(torch.ones(3)).)
+        def fn(x):
+            p = torch.nn.Parameter(x if from_input else torch.ones(3))
+            if type(p) is torch.nn.Parameter and p.__class__ is torch.nn.Parameter:
+                return x + 1
+            return x - 1
+
+        x = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_nn_parameter_ctor_hasattr(self):
+        def fn(x):
+            p = torch.nn.Parameter(x)
+            return x + 1 if hasattr(p, "foo") else x - 1
+
+        x = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_nn_parameter_ctor_method_in_torch_function_mode(self):
+        def fn(x):
+            p = torch.nn.Parameter(x)
+            return p.add(1)
+
+        x = torch.zeros(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # torch.device is a TorchFunctionMode, so p.add() dispatches through it.
+        with torch.device("cpu"):
+            self.assertEqual(opt_fn(x), fn(x))
+
+    # With dynamic shapes, the shape guards of a Parameter built from a tensor
+    # subclass still refer to the synthetic local, so any use of it fails.
+    @expectedFailureDynamic
+    def test_nn_parameter_ctor_subclass_method(self):
+        class MySubclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            p = torch.nn.Parameter(x)
+            return p.add(1)
+
+        x = torch.zeros(3).as_subclass(MySubclass)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def _optimize_then_check_exp(
         self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
@@ -17618,10 +17813,6 @@ A.last
         compile_id = entry.compile_id
         trace_annotation = entry.trace_annotation
         entry_hash = hash(entry)
-        with self.assertRaises(RuntimeError):
-            entry.update_diff_guard_root_manager()
-        with self.assertRaises(RuntimeError):
-            entry.guard_manager.extra_state.invalidate(entry, entry.guard_manager)
 
         torch._dynamo.reset()
         self.assertEqual(_debug_get_cache_entry_list(fn), [])
@@ -17638,8 +17829,13 @@ A.last
         self.assertEqual(entry.trace_annotation, trace_annotation)
         self.assertEqual(entry.isolate_recompiles_id, region_id)
         self.assertEqual(hash(entry), entry_hash)
-        self.assertIsNone(entry.guard_manager.cache_entry)
-        self.assertIsNone(entry.guard_manager.extra_state)
+        # The guard manager outlives its entry, and finds nothing to update.
+        eval_frame = torch._C._dynamo.eval_frame
+        eval_frame._update_diff_guard_root_manager(entry.guard_manager)
+        deleted = torch._dynamo.guards.DeletedGuardManagerWrapper("test")
+        self.assertFalse(
+            eval_frame._invalidate_cache_entry(entry.guard_manager, deleted)
+        )
 
     def test_inspect_signature_bind(self):
         import inspect
@@ -21505,11 +21701,15 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
     def test_interpolate_propagate_real_tensors(self, device):
         real_tensor_refs = []
-        from_tensor = torch._subclasses.FakeTensorMode.from_tensor
-        from torch._subclasses.fake_tensor import maybe_get_real_tensor
+        from torch._subclasses.fake_tensor import (
+            FakeTensorConverter,
+            maybe_get_real_tensor,
+        )
 
-        def record_real_tensor(mode, tensor, **kwargs):
-            fake = from_tensor(mode, tensor, **kwargs)
+        from_real_tensor = FakeTensorConverter.from_real_tensor
+
+        def record_real_tensor(converter, mode, tensor, *args, **kwargs):
+            fake = from_real_tensor(converter, mode, tensor, *args, **kwargs)
             real_tensor = maybe_get_real_tensor(fake)
             if mode.propagate_real_tensors and real_tensor is not None:
                 real_tensor_refs.append(weakref.ref(real_tensor))
@@ -21525,7 +21725,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             )
 
         with mock.patch.object(
-            torch._subclasses.FakeTensorMode, "from_tensor", record_real_tensor
+            FakeTensorConverter, "from_real_tensor", record_real_tensor
         ):
             f(
                 torch.tensor([30, 30], device=device),
