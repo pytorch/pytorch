@@ -5,6 +5,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
@@ -412,8 +413,9 @@ gemm_transa_(
 
 // lay out a column-major (rows x k, leading dimension ld) operand so that gemm_transa_ can read
 template <typename scalar_t>
-std::unique_ptr<scalar_t[]> pack_k_contiguous(int64_t rows, int64_t k, const scalar_t* src, int64_t ld) {
-  std::unique_ptr<scalar_t[]> dst(new scalar_t[rows * k]);
+at::DataPtr pack_k_contiguous(int64_t rows, int64_t k, const scalar_t* src, int64_t ld) {
+  at::DataPtr buf = c10::GetCPUAllocator()->allocate(rows * k * sizeof(scalar_t));
+  auto* dst = static_cast<scalar_t*>(buf.get());
   constexpr int64_t kBlock = 32;
   const int64_t grain = std::max<int64_t>(kBlock, at::internal::GRAIN_SIZE / std::max<int64_t>(1, k));
   parallel_for(0, rows, grain, [&](int64_t begin, int64_t end) {
@@ -426,7 +428,7 @@ std::unique_ptr<scalar_t[]> pack_k_contiguous(int64_t rows, int64_t k, const sca
       }
     }
   });
-  return dst;
+  return buf;
 }
 #endif // !defined(C10_MOBILE)
 
@@ -452,15 +454,15 @@ void gemm_core_(
     // gemm_transa_ is the vectorized, parallel kernel for these types. Repack the operands
     // it cannot read directly and use it for every layout. Leave tiny problems to naive loop.
     if (m * n * k > 16 * 16 * 16) {
-      std::unique_ptr<scalar_t[]> a_packed, b_packed;
+      at::DataPtr a_packed, b_packed;
       if (transa == TransposeType::NoTranspose) {
         a_packed = pack_k_contiguous(m, k, a, lda);
-        a = a_packed.get();
+        a = static_cast<const scalar_t*>(a_packed.get());
         lda = k;
       }
       if (transb != TransposeType::NoTranspose) {
         b_packed = pack_k_contiguous(n, k, b, ldb);
-        b = b_packed.get();
+        b = static_cast<const scalar_t*>(b_packed.get());
         ldb = k;
       }
       return gemm_transa_(TransposeType::Transpose, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
