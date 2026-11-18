@@ -213,7 +213,6 @@
   "test/distributed/test_collective_config.py",
   "test/distributed/test_composability.py",
   "test/distributed/test_compute_comm_reordering.py",
-  "test/distributed/test_data_parallel.py",
   "test/distributed/test_debug.py",
   "test/distributed/test_device_mesh.py",
   "test/distributed/test_dynamo_distributed.py",
