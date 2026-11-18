@@ -86,7 +86,6 @@ def _nics() -> dict[str, Path]:
     except OSError:
         return {}
     for entry in entries:
-        # NIXL uses port 1 of each listed device.
         port = entry / "ports" / "1"
         if "ACTIVE" not in _read(port / "state"):
             continue
@@ -194,11 +193,13 @@ def select_nics(device: torch.device | None) -> list[str] | None:
     """
     try:
         accelerator = _accelerator(device)
-        address = None if accelerator is None else _pci_address(accelerator)
-        if address is None:
+        if accelerator is None:
             return None
         nics = _nics()
         if not nics:
+            return None
+        address = _pci_address(accelerator)
+        if address is None:
             return None
         path = (_PCI_ROOT / address).resolve(strict=True)
         selected = _split(path, nics)

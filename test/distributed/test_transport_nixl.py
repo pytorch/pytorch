@@ -3,7 +3,6 @@
 import asyncio
 import gc
 import json
-import os
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -168,9 +167,6 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         super().setUp()
         _Agent.agents.clear()
         _Agent.transfer_state = "DONE"
-        nics = patch.object(_nixl, "select_nics", return_value=None)
-        self.select_nics = nics.start()
-        self.addCleanup(nics.stop)
 
     @staticmethod
     def backend():
@@ -802,26 +798,6 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
                 self.assertEqual(
                     transport._agent.backends["UCX"], {"NET_DEVICES": "all"}
                 )
-
-    def test_selected_nics_restrict_ucx(self):
-        self.select_nics.return_value = ["mlx5_0", "mlx5_1"]
-        with (
-            patch.object(_nixl, "_load_backend", return_value=self.backend()),
-            patch.dict(os.environ),
-        ):
-            os.environ.pop("UCX_NET_DEVICES", None)
-            with _nixl.NIXLTransport("cpu", num_threads=2) as transport:
-                self.assertEqual(
-                    transport._agent.backends["UCX"],
-                    {"num_threads": "2", "device_list": "mlx5_0, mlx5_1"},
-                )
-            self.select_nics.assert_called_once_with(torch.device("cpu"))
-            options = {"device_list": "mlx5_3"}
-            with _nixl.NIXLTransport(backend_options=options) as transport:
-                self.assertEqual(transport._agent.backends["UCX"], options)
-            os.environ["UCX_NET_DEVICES"] = "mlx5_2:1"
-            with _nixl.NIXLTransport() as transport:
-                self.assertIsNone(transport._agent.backends["UCX"])
 
     def test_empty_view_and_replaced_storage(self):
         tensor = torch.ones(8)

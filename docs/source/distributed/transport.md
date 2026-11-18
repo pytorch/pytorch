@@ -82,8 +82,8 @@ native stream support may override these methods.
 
 ## RDMA NIC selection
 
-The NIXL (UCX plugin) and Mooncake (`protocol="rdma"`) backends restrict RDMA
-traffic to the NICs nearest the transport's accelerator, targeting one process
+The Mooncake backend (`protocol="rdma"`) restricts RDMA traffic to the NICs
+nearest the transport's accelerator, targeting one process
 per accelerator. The accelerator is the transport's `device` if it has an
 index, otherwise the current `torch.accelerator` device: call
 `torch.accelerator.set_device_index` (or `torch.cuda.set_device`) before
@@ -93,9 +93,11 @@ initialize an accelerator are left unrestricted. Selection is also skipped
 when the current device is 0 while `LOCAL_RANK` is nonzero and more than one
 device is visible, since that usually means `set_device` was not called; pass
 an indexed `device` to select device 0 anyway. When selection runs, an
-accelerator `device` initializes its runtime. A process that transfers tensors
+accelerator `device` may initialize its runtime. A process that transfers tensors
 on several accelerators still uses only one accelerator's NICs; list every NIC
-explicitly (see below) to use them all.
+explicitly (see below) to use them all. Every registered buffer, including CPU memory
+on other NUMA nodes, uses only the selected NICs; with a single selected NIC, a
+local NIC failure fails the transfer instead of moving to another NIC.
 
 Only active physical NICs at the fastest link rate are considered, which
 excludes slower frontend NICs and SR-IOV virtual functions. The nearest NICs
@@ -113,12 +115,9 @@ such as in some VMs, all accelerators form one group.
 Selection reads Linux sysfs and the PCI address from `get_device_properties`,
 which CUDA and ROCm expose. If either is unavailable, the backend uses its
 default NIC discovery. To choose NICs explicitly, pass
-`backend_options={"device_list": "mlx5_0, mlx5_1"}` to NIXL (names separated
-by `", "`) or `device_name="mlx5_0,mlx5_1"` to Mooncake (separated by `","`);
-list every NIC to use them all. Setting `UCX_NET_DEVICES` disables selection
-for NIXL (for example `UCX_NET_DEVICES=all`, also needed for UCX TCP
-transports), and `MC_TE_FILTERS`, `MC_CUSTOM_TOPO_JSON` or
-`MC_RDMA_DATA_DIRECT_PAIRING` disables it for Mooncake.
+`device_name="mlx5_0,mlx5_1"`; list every NIC to use them all. Setting
+`MC_TE_FILTERS`, `MC_CUSTOM_TOPO_JSON` or `MC_RDMA_DATA_DIRECT_PAIRING`
+disables selection.
 
 ## NIXL backend
 
