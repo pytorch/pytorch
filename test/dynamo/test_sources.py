@@ -159,6 +159,8 @@ class SourceTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, read_mro), x + 3)
             cls.__bases__ = (Intermediate,)
             self.assertEqual(compiled(x, read_mro), x + 4)
+            cls.__bases__ = (Parent,)
+            self.assertEqual(compiled(x, read_mro), x + 3)
             self.assertEqual(counter.frame_count, 2)
 
     def test_property_setter_guards_replacement(self):

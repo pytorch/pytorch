@@ -942,6 +942,7 @@ class DictViewIterator(IteratorVariable):
 
     _nonvar_fields = {
         "view_type",
+        "_initial_size",
         *IteratorVariable._nonvar_fields,
     }
 
@@ -953,10 +954,13 @@ class DictViewIterator(IteratorVariable):
         items: dict[HashableTracker, VariableTracker],
         *,
         view_type: str,
+        owner: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.view_type = view_type
+        self.owner = owner
+        self._initial_size = len(items)
         if not self.linked_order and isinstance(items, dict):
             self._iter = iter(getattr(dict, self.view_type)(items))
         elif self.view_type == "keys":
@@ -972,15 +976,54 @@ class DictViewIterator(IteratorVariable):
 
     @classmethod
     def create(
-        cls, items: dict[HashableTracker, VariableTracker], *, ordered: bool = False
+        cls,
+        items: dict[HashableTracker, VariableTracker],
+        *,
+        ordered: bool = False,
+        owner: VariableTracker | None = None,
     ) -> "DictViewIterator":
         iterator_cls = OrderedDictIterator if ordered else cls
-        return iterator_cls(items, view_type=cls.view_type)
+        return iterator_cls(items, view_type=cls.view_type, owner=owner)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        from .dicts import ConstDictVariable, DictKeysVariable, DictViewVariable
+        from .sets import BaseSetVariable
+
+        owner = self.owner
+        if owner is None:
+            return super().reconstruct(codegen)
+        container = owner.dv_dict if isinstance(owner, DictViewVariable) else owner
+        if not isinstance(container, (ConstDictVariable, BaseSetVariable)):
+            return super().reconstruct(codegen)
+        if len(container.items) != self._initial_size:
+            return super().reconstruct(codegen)
+        if self.linked_order:
+            try:
+                # A move can invalidate an OrderedDict iterator without changing its size.
+                self._iter.__reduce__()
+            except RuntimeError:
+                return super().reconstruct(codegen)
+        if isinstance(owner, ConstDictVariable):
+            owner = DictKeysVariable.create(owner, is_ordered=self.linked_order)
+        if isinstance(owner, (variables.SetVariable, variables.FrozensetVariable)):
+            base = "set" if isinstance(owner, variables.SetVariable) else "frozenset"
+
+            def load_iter() -> None:
+                codegen.load_import_from("builtins", base)
+                codegen.append_output(codegen.create_load_attr("__iter__"))
+
+            codegen.add_push_null(load_iter)
+        else:
+            codegen.add_push_null(lambda: codegen.load_import_from("builtins", "iter"))
+        codegen(owner)
+        codegen.extend_output(create_call_function(1, False))
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # dictiter_iternextitem: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5538-L5578
         # dictiter_iternextkey: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5125-L5144
         # dictiter_iternextvalue: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5248-L5267
+        # Reconstruct only fresh iterators, whose cursor is still at the beginning.
+        self.owner = None
         try:
             item = next(self._iter)
 
