@@ -25,10 +25,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
-    parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -38,7 +36,6 @@ from torch.testing._internal.common_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
-@instantiate_parametrized_tests
 class TestUtils(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -62,36 +59,36 @@ class TestUtils(TestCase):
         self.assertEqual(restored_state, device_state)
         self.assertEqual(device, 3)
 
-    @parametrize("mutations_locked", [False, True])
-    def test_ordered_snapshot_runtime_safety(self, mutations_locked):
+    @mock.patch.object(utils, "_ORDERED_DICT_MUTATIONS_LOCKED", True)
+    def test_ordered_snapshot_runtime_safety_locked(self):
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        self.assertEqual(
+            list(utils.enumerate_items_with_dict_position(mapping)),
+            [(1, "b", 2), (0, "a", 1)],
+        )
+
+    @mock.patch.object(utils, "_ORDERED_DICT_MUTATIONS_LOCKED", False)
+    def test_ordered_snapshot_runtime_safety_unlocked(self):
         mapping = OrderedDict(a=1, b=2)
         mapping.move_to_end("a")
         with mock.patch.object(
-            utils, "_ORDERED_DICT_MUTATIONS_LOCKED", mutations_locked
-        ):
-            if not mutations_locked:
-                with mock.patch.object(
-                    torch._C._dynamo.guards,
-                    "ordered_dict_keys",
-                    wraps=torch._C._dynamo.guards.ordered_dict_keys,
-                ) as native:
-                    with self.assertRaisesRegex(
-                        utils.UnsupportedOrderedDictRuntime, r"require Python 3\.14\.1"
-                    ):
-                        list(utils.enumerate_items_with_dict_position(mapping))
-                    self.assertIsNone(torch._dynamo.guards._ordered_dict_order(mapping))
-                    with self.assertRaisesRegex(
-                        torch._dynamo.exc.Unsupported, r"require Python 3\.14\.1"
-                    ):
-                        _dict_input_snapshot(mapping)
-                    self.assertTrue(native.call_args_list)
-                    for call in native.call_args_list:
-                        self.assertEqual(call.kwargs, {"empty_only": True})
-            else:
-                self.assertEqual(
-                    list(utils.enumerate_items_with_dict_position(mapping)),
-                    [(1, "b", 2), (0, "a", 1)],
-                )
+            torch._C._dynamo.guards,
+            "ordered_dict_keys",
+            wraps=torch._C._dynamo.guards.ordered_dict_keys,
+        ) as native:
+            with self.assertRaisesRegex(
+                utils.UnsupportedOrderedDictRuntime, r"require Python 3\.14\.1"
+            ):
+                list(utils.enumerate_items_with_dict_position(mapping))
+            self.assertIsNone(torch._dynamo.guards._ordered_dict_order(mapping))
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, r"require Python 3\.14\.1"
+            ):
+                _dict_input_snapshot(mapping)
+            self.assertTrue(native.called)
+            for call in native.call_args_list:
+                self.assertEqual(call.kwargs, {"empty_only": True})
 
     def test_corrupted_empty_ordered_snapshot_older_free_threaded(self):
         mapping = OrderedDict(a=1)
