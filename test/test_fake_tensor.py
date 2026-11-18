@@ -220,6 +220,36 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertTrue(is_fake_tensor(z))
             self.assertIs(maybe_get_fake_mode(z), mode)
 
+    @parametrize("op", ["data", "detach"])
+    @parametrize("inference", [False, True])
+    @parametrize("active", [False, True])
+    def test_metadata_copy_version(self, op, inference, active):
+        with torch.inference_mode(inference):
+            real = torch.randn(3, requires_grad=True)
+            mode = FakeTensorMode()
+            source = mode.from_tensor(real)
+            with mode, torch.no_grad():
+                source.add_(1)
+            source_version = None if inference else source._version
+            with mode if active else contextlib.nullcontext():
+                result = source.data if op == "data" else source.detach()
+            self.assertFalse(result.requires_grad)
+            self.assertIsNone(result.grad_fn)
+            self.assertEqual(result.is_inference(), inference)
+            self.assertTrue(torch._C._is_alias_of(result, source))
+            self.assertIs(maybe_get_fake_mode(result), mode)
+            if source_version is not None:
+                self.assertEqual(source._version, source_version)
+                self.assertEqual(result._version, 0 if op == "data" else source_version)
+                result_version = result._version
+                with mode:
+                    result.add_(1)
+                self.assertEqual(result._version, result_version + 1)
+                self.assertEqual(source._version, source_version + (op == "detach"))
+            with mode, torch.no_grad():
+                source.unsqueeze_(0)
+            self.assertEqual(result.shape, (3,))
+
     def test_sparse_compressed_tensor_creation(self):
         def csr():
             crow = torch.tensor([0, 2, 4])
@@ -6144,6 +6174,71 @@ class TestFakeTensorViewCopy(TestCase):
 
 @instantiate_parametrized_tests
 class TestCppFakeTensorModeBindings(TestCase):
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=True)
+    @parametrize("op", ["data", "detach"])
+    @parametrize("requires_grad", [False, True])
+    def test_pre_dispatch_metadata_copy(self, op, requires_grad):
+        def f(x):
+            y = x.sin()
+            with torch.no_grad():
+                y.add_(1)
+            version = y._version
+            result = y.data if op == "data" else y.detach()
+            self.assertFalse(result.requires_grad)
+            self.assertIsNone(result.grad_fn)
+            self.assertTrue(torch._C._is_alias_of(result, y))
+            self.assertEqual(y._version, version)
+            self.assertEqual(result._version, 0 if op == "data" else version)
+            return result
+
+        x = torch.randn(3, requires_grad=requires_grad)
+        gm = make_fx(f, tracing_mode="fake", pre_dispatch=True)(x)
+        self.assertFalse(any(n.op == "get_attr" for n in gm.graph.nodes))
+        self.assertEqual(
+            sum(n.target == aten.detach.default for n in gm.graph.nodes), 1
+        )
+        other = torch.randn_like(x)
+        self.assertEqual(gm(other), f(other))
+        self.assertFalse(gm(x).requires_grad)
+
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=True)
+    @parametrize(
+        "excluded",
+        [None, "Python", "PreDispatch", "PythonDispatcher", "no_python_dispatcher"],
+    )
+    def test_pre_dispatch_data_respects_dispatch_exclusion(self, excluded):
+        from torch._dispatch.python import no_python_dispatcher
+        from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+
+        seen = []
+        dispatch = ProxyTorchDispatchMode.__torch_dispatch__
+
+        def observe(mode, func, types, args=(), kwargs=None):
+            seen.append(func)
+            return dispatch(mode, func, types, args, kwargs)
+
+        def f(x):
+            if excluded is None:
+                guard = contextlib.nullcontext()
+            elif excluded == "no_python_dispatcher":
+                guard = no_python_dispatcher()
+            else:
+                guard = torch._C._ExcludeDispatchKeyGuard(
+                    torch._C.DispatchKeySet(getattr(torch._C.DispatchKey, excluded))
+                )
+            seen.clear()
+            with guard:
+                result = x.data
+            self.assertIs(maybe_get_fake_mode(result), maybe_get_fake_mode(x))
+            self.assertEqual(seen.count(aten.detach.default), int(excluded is None))
+            seen.clear()
+            result = x.data
+            self.assertEqual(seen.count(aten.detach.default), 1)
+            return x
+
+        with patch.object(ProxyTorchDispatchMode, "__torch_dispatch__", observe):
+            make_fx(f, tracing_mode="fake", pre_dispatch=True)(torch.randn(3))
+
     def _installed(self):
         return (
             torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
