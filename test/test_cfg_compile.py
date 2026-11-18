@@ -4052,6 +4052,13 @@ class RegionRandom(torch.nn.Module):
         return self.inner(x) * random.random()
 
 
+def temporaries(x, steps):
+    # Every step frees what the step before it made.
+    for _ in range(steps):
+        x = torch.tanh(x * 1.5 + 0.25)
+    return x
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgWorkspace(TestCase):
     """The memory a compiled function keeps from one call to the next."""
@@ -4070,6 +4077,91 @@ class TestCfgWorkspace(TestCase):
         del before, after
         nothing = dict.fromkeys(("calls", "hits", "misses", "kept", "live", "peak"), 0)
         self.assertEqual(torch._C._cfg_workspace_stats(workspace), nothing)
+
+    def test_memory_of_a_call_serves_the_next(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        for _ in range(4):
+            self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        before = torch.cfg_compile.memory(compiled)
+        self.assertEqual(before["live"], 0)
+        self.assertGreaterEqual(before["kept"], x.numel() * 4)
+        compiled(x, 6)
+        after = torch.cfg_compile.memory(compiled)
+        # Every tensor of the call found its memory in the workspace.
+        self.assertEqual(after["misses"], before["misses"])
+        self.assertGreaterEqual(after["hits"] - before["hits"], 6)
+        self.assertEqual(after["calls"], before["calls"] + 1)
+
+    def test_result_holds_its_memory(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        expected = temporaries(x, 3)
+        kept = [compiled(x, 3) for _ in range(3)]
+        self.assertEqual(torch.cfg_compile.memory(compiled)["live"], 3 * x.numel() * 4)
+        # The function goes first: its results still own their memory.
+        del compiled
+        gc.collect()
+        for result in kept:
+            self.assertEqual(result, expected, atol=0, rtol=0)
+
+    def test_result_freed_on_another_thread(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        kept = [compiled(x, 2)]
+        thread = threading.Thread(target=kept.clear)
+        thread.start()
+        thread.join()
+        memory = torch.cfg_compile.memory(compiled)
+        self.assertEqual(memory["live"], 0)
+        self.assertGreaterEqual(memory["kept"], x.numel() * 4)
+
+    def test_small_tensors_are_left_to_malloc(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        x = torch.randn(16)
+        for _ in range(3):
+            self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        memory = torch.cfg_compile.memory(compiled)
+        self.assertEqual((memory["hits"], memory["misses"]), (0, 0))
+
+    def test_memory_not_asked_for_is_given_back(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False)
+        large, small = torch.randn(256, 1024), torch.randn(16)
+        for _ in range(3):
+            compiled(large, 6)
+        self.assertGreaterEqual(
+            torch.cfg_compile.memory(compiled)["kept"], large.numel() * 4
+        )
+        for _ in range(6):
+            compiled(small, 6)
+        self.assertEqual(torch.cfg_compile.memory(compiled)["kept"], 0)
+
+    def test_without_a_workspace(self):
+        compiled = torch.cfg_compile(temporaries, fallback=False, keep_memory=False)
+        x = torch.randn(64, 1024)
+        self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        self.assertIsNone(torch.cfg_compile.memory(compiled))
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCH_CFG_COMPILE_KEEP_MEMORY": "0"}
+        ):
+            compiled = torch.cfg_compile(temporaries, fallback=False)
+        self.assertIsNone(torch.cfg_compile.memory(compiled))
+
+    def test_compiled_function_called_by_another(self):
+        inner = torch.cfg_compile(temporaries, fallback=False)
+
+        def outer(x):
+            return inner(x, 3) + 1
+
+        compiled = torch.cfg_compile(outer, fallback=False, callees=False)
+        x = torch.randn(64, 1024)
+        for _ in range(4):
+            self.assertEqual(compiled(x), temporaries(x, 3) + 1, atol=0, rtol=0)
+        # Back in the outer function, its own workspace is the one in use.
+        self.assertGreater(torch.cfg_compile.memory(inner)["hits"], 0)
+        self.assertGreater(torch.cfg_compile.memory(compiled)["hits"], 0)
+        self.assertEqual(torch.cfg_compile.memory(compiled)["live"], 0)
+        self.assertEqual(torch.cfg_compile.memory(inner)["live"], 0)
 
 
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
