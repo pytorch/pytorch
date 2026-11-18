@@ -321,23 +321,21 @@ void register_host_memory(void* ptr, size_t size) {
 #if SYCL_COMPILER_VERSION >= 20260200
   TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
   TORCH_CHECK_VALUE(size > 0, "size must be greater than 0.");
-  static size_t page_size = []() -> size_t {
-    TORCH_CHECK(
-        get_device_context().get_platform().has(
-            sycl::aspect::ext_oneapi_register_host_memory),
-        "Requires the ext_oneapi_register_host_memory extension, "
-        "which is not supported on this device. ",
-        "Please upgrade to a newer driver.");
+  TORCH_CHECK(
+      get_device_context().get_platform().has(
+          sycl::aspect::ext_oneapi_register_host_memory),
+      "Requires the ext_oneapi_register_host_memory extension, "
+      "which is not supported on this device. ",
+      "Please upgrade to a newer driver.");
 #ifdef _WIN32
-    SYSTEM_INFO si;
-    GetSystemInfo(&si);
-    return static_cast<size_t>(si.dwPageSize);
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  const size_t page_size = si.dwPageSize;
 #else
-    auto ret = sysconf(_SC_PAGESIZE);
-    TORCH_CHECK_VALUE(ret > 0, "Failed to query the system page size.");
-    return static_cast<size_t>(ret);
+  const auto ret = sysconf(_SC_PAGESIZE);
+  TORCH_CHECK(ret > 0, "Failed to query the system page size.");
+  const auto page_size = static_cast<size_t>(ret);
 #endif
-  }();
   TORCH_CHECK_VALUE(
       (reinterpret_cast<uintptr_t>(ptr) % page_size) == 0,
       "ptr must be aligned to the system page size.");
