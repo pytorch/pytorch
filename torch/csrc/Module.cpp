@@ -3144,8 +3144,8 @@ Call this whenever a new thread is created in order to propagate values from
           // dispatcher too.
           torch::DisableTorchDispatch no_dispatch;
           c10::impl::DisablePythonDispatcher no_python_dispatcher;
-          out_impl = impl->shallow_copy_and_detach(
-              impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+          out_impl = meta.detach().getIntrusivePtr();
+          out_impl->set_allow_tensor_metadata_change(true);
         }
         // Before marking the shared storage, as this can throw
         out_impl->set_requires_grad(meta.requires_grad());
