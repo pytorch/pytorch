@@ -237,6 +237,7 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
+    case StreamIdType::LOW:
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
