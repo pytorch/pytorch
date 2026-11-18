@@ -374,5 +374,27 @@ pub fn unroll_loops(func: &mut Function) -> usize {
         unroll(func, &lp);
         unrolled += 1;
     }
+    if unrolled > 0 {
+        prune_holds(func);
+    }
     unrolled
+}
+
+/// In the copies the loop variable is a constant, and before the first copy
+/// it is unbound: neither is anything to hold.
+fn prune_holds(func: &mut Function) {
+    let mut consts: HashSet<V> = HashSet::new();
+    for inst in func.blocks.iter().flat_map(|block| &block.insts) {
+        if matches!(inst.op, Op::Const(_)) {
+            consts.insert(inst.dst);
+        }
+    }
+    for block in func.blocks.iter_mut() {
+        for inst in block.insts.iter_mut() {
+            if let Op::Hold(held) = &mut inst.op {
+                held.retain(|v| *v != UNDEF && !consts.contains(v));
+            }
+        }
+        block.insts.retain(|inst| !matches!(&inst.op, Op::Hold(held) if held.is_empty()));
+    }
 }

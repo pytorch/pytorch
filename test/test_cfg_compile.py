@@ -2233,6 +2233,110 @@ class TestCfgFrames(TestCase):
         )
 
 
+class LifetimeProbe:
+    """Appends its name to a log when it is destroyed."""
+
+    def __init__(self, name, log):
+        self.name = name
+        self.log = log
+
+    def __del__(self):
+        self.log.append(self.name)
+
+
+def lifetime_unused_local(log):
+    probe = LifetimeProbe("probe", log)  # noqa: F841
+    log.append("body")
+    return 1
+
+
+def lifetime_rebound(log):
+    probe = LifetimeProbe("first", log)
+    log.append("between")
+    probe = LifetimeProbe("second", log)  # noqa: F841
+    log.append("after")
+    return 2
+
+
+def lifetime_raises(log):
+    probe = LifetimeProbe("probe", log)  # noqa: F841
+    log.append("body")
+    raise ValueError("raised")
+
+
+def lifetime_loop(log):
+    for i in range(3):
+        probe = LifetimeProbe(f"probe {i}", log)  # noqa: F841
+        log.append(f"iteration {i}")
+    log.append("after")
+    return 3
+
+
+def lifetime_argument(log, make=LifetimeProbe):
+    def callee(probe):
+        log.append("callee")
+        return 4
+
+    result = callee(make("argument", log))
+    log.append("after the call")
+    return result
+
+
+def lifetime_buffer_export(log):
+    data = bytearray(range(10))
+    view = memoryview(data)  # noqa: F841
+    try:
+        data[1:-1] = range(11, 20)
+    except BufferError:
+        return "the export is still there"
+    return "resized"
+
+
+LIFETIME_FUNCTIONS = (
+    lifetime_unused_local,
+    lifetime_rebound,
+    lifetime_raises,
+    lifetime_loop,
+    lifetime_argument,
+    lifetime_buffer_export,
+)
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgLifetimes(TestCase):
+    """A local variable keeps its object until it is rebound or the function is left."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("fn", LIFETIME_FUNCTIONS, name_fn=lambda fn: fn.__name__)
+    @parametrize("unroll", (True, False))
+    def test_objects_die_where_the_interpreter_lets_go_of_them(self, fn, unroll):
+        def run(f):
+            log = []
+            try:
+                result = f(log)
+            except ValueError as e:
+                result = str(e)
+            return result, log
+
+        compiled = torch.cfg_compile(fn, fallback=False, unroll=unroll)
+        expected = run(fn)
+        self.assertEqual(run(compiled), expected)
+        self.assertEqual(run(compiled), expected)
+
+    def test_hold_in_the_graph(self):
+        compiled = torch.cfg_compile(lifetime_rebound, fallback=False)
+        dump = compiled.dump(versions=False)
+        # One for the rebinding, one for the return.
+        self.assertEqual(
+            [line.strip() for line in dump.splitlines() if "hold" in line],
+            ["hold %probe.4", "hold %log.1, %probe.10"],
+        )
+
+
+instantiate_parametrized_tests(TestCfgLifetimes)
+
+
 def e2e_halve(x):
     return x * 0.5
 
