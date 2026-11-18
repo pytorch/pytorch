@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      skipIfNoLapack,
-     MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
+     MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision, DeterministicGuard)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
@@ -3531,8 +3531,8 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             Q.sum().abs().backward()
 
     # I don't know how much memory this test uses but on complex64 it needs at least 4GB
-    @largeTensorTest("4GB", device="cuda")
-    @serialTest(TEST_CUDA)
+    @largeTensorTest("4GB")
+    @serialTest()
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
