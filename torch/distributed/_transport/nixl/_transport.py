@@ -224,6 +224,13 @@ class NIXLTransport(Transport):
         return self._call(send, timeout)
 
     def wait_notifications(self, *, timeout: float | None = None) -> list[Notification]:
+        """See ``Transport.wait_notifications``.
+
+        This first takes the transport lock, which serializes NIXL calls, and
+        waits up to the transport's default timeout for it whatever ``timeout``
+        is, even ``timeout=0``, raising ``TimeoutError`` if it stays busy.
+        Returning early instead would let transfers starve asyncio waiters.
+        """
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
