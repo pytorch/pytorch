@@ -77,6 +77,26 @@ DescriptorTypes: TypeAlias = (
 )
 
 
+def _descriptor_result_source(
+    descriptor: types.MemberDescriptorType | types.GetSetDescriptorType,
+    source: Source | None,
+    obj_value: object,
+) -> Source | None:
+    if source is None:
+        return None
+    name = descriptor.__name__
+    if descriptor.__objclass__ is type:
+        # type.__mro__ is a member descriptor before CPython 3.12 and a getset
+        # afterwards. An explicit descriptor call reads the slot in both cases.
+        if name == "__mro__":
+            return TypeMROSource(guardable_mro_source(source))
+        if name in ("__annotations__", "__dict__") and (
+            inspect.getattr_static(type(obj_value), name, None) is not descriptor
+        ):
+            return None
+    return AttrSource(source, name)
+
+
 def _is_c_struct_member(descriptor: types.MemberDescriptorType) -> bool:
     """A member of a C type: may be T_OBJECT (del, then reads give None) or a
     numeric field (del raises). __slots__ members live on heap types and are
@@ -1306,7 +1326,9 @@ class MemberDescriptorVariable(DescriptorVariable):
                     f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
                 ],
             )
-        result_source = obj.source and AttrSource(obj.source, attr_name)
+        result_source = _descriptor_result_source(
+            self.descriptor, obj.source, obj_value
+        )
         return VariableTracker.build(tx, resolved, result_source)
 
     def tp_descr_set_impl(
@@ -1483,20 +1505,9 @@ class GetSetDescriptorVariable(DescriptorVariable):
                     f"'{type(obj_value).__name__}' object has no attribute '{attr_name}'"
                 ],
             )
-        result_source = obj.source and AttrSource(obj.source, attr_name)
-        if (
-            obj.source
-            and self.descriptor.__objclass__ is type
-            and attr_name in ("__annotations__", "__dict__", "__mro__")
-        ):
-            # Direct descriptor calls still resolve the standard type slot even
-            # when a metaclass shadows the same attribute. Only attach the
-            # normal attribute source when runtime attribute lookup agrees.
-            static_desc = inspect.getattr_static(type(obj_value), attr_name, None)
-            if static_desc is not self.descriptor:
-                result_source = None
-            elif attr_name == "__mro__":
-                result_source = TypeMROSource(guardable_mro_source(obj.source))
+        result_source = _descriptor_result_source(
+            self.descriptor, obj.source, obj_value
+        )
         return VariableTracker.build(tx, resolved, result_source)
 
 
