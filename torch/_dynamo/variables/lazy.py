@@ -472,7 +472,7 @@ class LazyConstantVariable(LazyVariableTracker):
         if isinstance(result, ConstantVariable):
             if self._type_guard_ref is not None:
                 tracing_context = TracingContext.get()
-                tracing_context.guards_context.dynamo_guards.inner.discard(
+                tracing_context.guards_context.dynamo_guards.remove(
                     self._type_guard_ref
                 )
                 self._type_guard_ref = None

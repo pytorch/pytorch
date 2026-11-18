@@ -112,6 +112,7 @@ from torch._guards import (
     Guard,
     GuardBuilderBase,
     GuardEnvExpr,
+    GuardKey,
     GuardSource,
     Source,
     StorageOverlap,
@@ -5921,10 +5922,15 @@ def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
     )
 
 
-def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
+def make_guard_filter_entry(
+    guard: Guard,
+    builder: GuardBuilder | None = None,
+    *,
+    labels: frozenset[str] = frozenset(),
+) -> GuardFilterEntry:
     MISSING = object()
     name = strip_local_scope(guard.name)
-    if name == "":
+    if builder is None or name == "":
         has_value = False
         value = MISSING
     else:
@@ -5944,11 +5950,60 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         has_value=has_value,
         value=value,
         guard_type=guard.create_fn_name(),
-        derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
+        derived_guard_types=(
+            tuple(guard.guard_types)
+            if builder is not None and guard.guard_types
+            else ()
+        ),
         is_global=is_global,
         orig_guard=guard,
-        code_parts=tuple(guard.code_list or ()),
+        code_parts=tuple(guard.code_list or ()) if builder is not None else (),
+        labels=labels,
     )
+
+
+def _filter_labeled_guards(
+    sorted_guards: list[Guard], guards: torch._guards.GuardsSet
+) -> list[Guard]:
+    if not guards.guard_labels:
+        return sorted_guards
+
+    # Snapshot registrations at finalization, rather than at context entry or
+    # tracing time. Each callback sees only its own region's entries.
+    with torch.compiler._guard_filter_registry_lock:
+        registry = torch.compiler._guard_filter_registry.copy()
+    if not registry:
+        return sorted_guards
+    batches: dict[str, list[tuple[int, GuardFilterEntry]]] = {}
+    for index, guard in enumerate(sorted_guards):
+        labels = frozenset(guards.guard_labels.get(GuardKey.from_guard(guard), ()))
+        matching_labels = labels.intersection(registry)
+        if matching_labels:
+            entry = make_guard_filter_entry(guard, labels=labels)
+            for label in sorted(matching_labels):
+                batches.setdefault(label, []).append((index, entry))
+
+    if not batches:
+        return sorted_guards
+
+    # None means no matching registration, which defaults to keep.
+    decisions: list[bool | None] = [None] * len(sorted_guards)
+    for label, batch in batches.items():
+        results = registry[label]([entry for _, entry in batch])
+        if len(results) != len(batch):
+            raise AssertionError(
+                f"Guard filter {label!r} returned {len(results)} results "
+                f"for {len(batch)} entries"
+            )
+        if not all(type(result) is bool for result in results):
+            raise AssertionError(f"Guard filter {label!r} results must all be bool")
+        for (index, _), keep in zip(batch, results):
+            decisions[index] = bool(decisions[index]) or keep
+    return [
+        guard
+        for index, guard in enumerate(sorted_guards)
+        if decisions[index] is not False
+    ]
 
 
 # _pickles_as_its_own_global predicts GuardsStatePickler's reduction with this
@@ -6119,6 +6174,20 @@ class CheckFunctionManager:
         # before the guard sanity check so GlobalStateGuard.check() sees
         # the true runtime state.
         with torch._C.DisableTorchFunction():
+            if guards is not None:
+                sorted_guards = _filter_labeled_guards(sorted_guards, guards)
+                package = getattr(output_graph, "package", None)
+                if (
+                    len(sorted_guards) != len(guards)
+                    and package is not None
+                    and not package.supports_regional_guard_filter_drops
+                ):
+                    # Precompile's safety report cannot account for drops that
+                    # precede its post-build global filter inspection.
+                    raise RuntimeError(
+                        "Regional guard filter drops are not supported by "
+                        "torch.compiler.precompile.capture with DynamoTracer"
+                    )
             builder: GuardBuilder | None = None
             if guard_filter_fn:
                 # If we're filtering guards, we need to build it an extra time first
@@ -6132,7 +6201,18 @@ class CheckFunctionManager:
                 )
 
                 filter_results = guard_filter_fn(
-                    [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
+                    [
+                        make_guard_filter_entry(
+                            guard,
+                            builder,
+                            labels=frozenset(
+                                guards.guard_labels.get(GuardKey.from_guard(guard), ())
+                            )
+                            if guards is not None
+                            else frozenset(),
+                        )
+                        for guard in sorted_guards
+                    ]
                 )
                 if len(filter_results) != len(sorted_guards):
                     raise AssertionError(
@@ -6424,6 +6504,7 @@ class CheckFunctionManager:
                         obj_weakref=None,
                         guarded_class_weakref=None,
                         create_fn=portable_create_fn(guard.create_fn),
+                        creation_label=None,
                     )
                     for guard in sorted_guards
                 )
@@ -7441,7 +7522,10 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
             raise AssertionError(f"Expected Guard, got {type(guard)}")
         if is_from_skip_guard_source(guard.originating_source):
             continue
-        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
+        label = guard.creation_label
+        if label is None:
+            label = guards_context.current_guard_label
+        add(guard, label=label, collect_debug_stack=collect_debug_stack, skip=skip + 1)
 
 
 # ---------------------------------------------------------------------------

@@ -3187,6 +3187,11 @@ def compile(
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
 
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
+          This compile-wide policy runs on the survivors of regional filters registered
+          with `torch.compiler.register_guard_filter` and selected by `torch.compiler.guard_ctx`.
+          Regional filters run before C++ guard construction; `guard_filter_fn` retains
+          its existing built-entry metadata, including source values when available,
+          derived guard types, and guard code.
           This is an unsafe feature and there is no backward compatibility guarantee provided
           for dynamo guards as data types.
           For stable helper functions to use, see the documentation in `torch.compiler`, for example:

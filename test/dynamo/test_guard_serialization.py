@@ -3236,6 +3236,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    def test_creation_labels_are_transient(self):
+        label = "transient_guard_creation_label_8d337d"
+        inspected = []
+
+        def inspect_saved_state(state, builder):
+            live_guards = (
+                torch._guards.TracingContext.get().guards_context.dynamo_guards
+            )
+            self.assertTrue(any(guard.creation_label == label for guard in live_guards))
+            self.assertTrue(live_guards.guard_labels)
+            saved_guards = state.output_graph.guards
+            self.assertTrue(saved_guards)
+            self.assertTrue(all(guard.creation_label is None for guard in saved_guards))
+            self.assertEqual(saved_guards.guard_labels, {})
+            inspected.append(True)
+            return pickle_guards_state(state, builder)
+
+        def fn(x, value):
+            return x + len(value)
+
+        x = torch.ones(2)
+        with (
+            torch.compiler.guard_ctx(label),
+            mock.patch("torch._dynamo.guards.pickle_guards_state", inspect_saved_state),
+        ):
+            ref, loaded = self._test_serialization(
+                ("TENSOR_MATCH", "CONSTANT_MATCH"), fn, x, "first"
+            )
+        self.assertEqual(inspected, [True])
+        self.assertNotIn(label.encode(), self._cached_guards_state)
+        restored = load_guards_state(self._cached_guards_state).output_graph.guards
+        self.assertTrue(all(guard.creation_label is None for guard in restored))
+        self.assertEqual(restored.guard_labels, {})
+        self._test_check_fn(ref, loaded, {"x": x, "value": "first"}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "value": "second"}, False)
+
     @parametrize("reordered", [False, True])
     def test_native_ordered_dict_order(self, reordered):
         def install_order_guard(ctx):
