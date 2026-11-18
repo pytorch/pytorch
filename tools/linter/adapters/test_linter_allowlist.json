@@ -514,7 +514,6 @@
   "test/profiler/test_memory_profiler.py",
   "test/profiler/test_profiler_tree.py",
   "test/profiler/test_python_tracer.py",
-  "test/profiler/test_record_function.py",
   "test/profiler/test_torch_tidy.py",
   "test/profiler/test_xpu_scope_profiler.py",
   "test/python_native/test_aot_manifest.py",
