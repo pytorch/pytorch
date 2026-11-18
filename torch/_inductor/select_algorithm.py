@@ -2649,8 +2649,15 @@ class TritonTemplateKernel(TritonKernel):
         (slot, last), val_shape = self.batch_loops[subgraph_idx]
         tile = self.output_tiles[subgraph_idx][1]
         partials = batch_reduction_partials(tile, self.output_node)
-        if partials is None or self.meta.get("NUM_SMS") != get_num_sms():
-            raise AssertionError("the template's batch loop can't host batch sums")
+        if partials is None:
+            raise AssertionError(
+                f"batch sums have no partials layout for template tile {tile}"
+            )
+        if self.meta.get("NUM_SMS") != get_num_sms():
+            raise AssertionError(
+                f"batch sums need the template's NUM_SMS ({self.meta.get('NUM_SMS')}) "
+                f"to match the device's SM count ({get_num_sms()})"
+            )
         _, m, n = map(int, self.output_node.get_size())
         batch, row, col = self.output_index_symbols[subgraph_idx]
         stored: list[str] = []
