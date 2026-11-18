@@ -1569,6 +1569,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         )
         from .tensor import CurrentDeviceVariable
 
+        constant_args = check_constant_args(args, kwargs)
+
         if isinstance(self.value, type) and type_disallows_instantiation(self.value):
             raise_type_error(tx, f"cannot create '{self.value.__name__}' instances")
 
