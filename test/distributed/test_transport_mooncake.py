@@ -177,14 +177,20 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.assertIsInstance(ctx.exception.__cause__, ValueError)
 
     def test_initialization_failure_raises(self):
-        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
-            with patch.object(_Engine, "initialize", return_value=-1):
-                with self.assertRaises(RuntimeError) as ctx:
-                    new_transport("mooncake")
-                self.assertNotIn("NICs", str(ctx.exception.__cause__))
-                self.select_nics.return_value = ["mlx5_0"]
-                with self.assertRaises(RuntimeError) as ctx:
-                    new_transport("mooncake")
+        with (
+            patch.object(_mooncake, "_load_backend", return_value=_backend()),
+            patch.object(_Engine, "initialize", return_value=-1),
+            patch.dict(os.environ),
+        ):
+            for name in _mooncake._USER_NIC_ENVS:
+                os.environ.pop(name, None)
+            with self.assertRaises(RuntimeError) as ctx:
+                new_transport("mooncake")
+            msg = "Mooncake transport initialization failed"
+            self.assertEqual(str(ctx.exception.__cause__), msg)
+            self.select_nics.return_value = ["mlx5_0"]
+            with self.assertRaises(RuntimeError) as ctx:
+                new_transport("mooncake")
         self.assertIn("NICs mlx5_0; set device_name", str(ctx.exception.__cause__))
 
     def test_descriptor_roundtrip_excludes_metadata_blob(self):

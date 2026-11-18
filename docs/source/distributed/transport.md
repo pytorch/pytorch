@@ -90,9 +90,10 @@ index, otherwise the current `torch.accelerator` device: call
 creating the transport. If `device` is CPU or `None`, the current device is used
 only once the accelerator runtime is initialized, so processes that never
 initialize an accelerator are left unrestricted. Selection is also skipped
-when the current device is 0 while `LOCAL_RANK` is nonzero and more than one
-device is visible, since that usually means `set_device` was not called; pass
-an indexed accelerator `device`, or list the NICs with `device_name`. When selection runs, an
+when the current device is 0 while `LOCAL_RANK` (set by torchrun) is nonzero and
+more than one device is visible, since that usually means `set_device` was not
+called; other launchers get no such check. Pass an indexed accelerator `device`
+(which rejects CPU tensors), or list the NICs with `device_name`. When selection runs, an
 accelerator `device` may initialize its runtime. A process that transfers tensors
 on several accelerators still uses only one accelerator's NICs; list every NIC
 explicitly (see below) to use them all. Every registered buffer, including CPU memory
