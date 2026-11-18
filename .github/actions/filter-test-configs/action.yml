@@ -6,6 +6,10 @@ description: |
   test configs matrix is returned untouched.
 
 inputs:
+  cpp-faketensor:
+    description: Add C++ FakeTensor test jobs before filtering.
+    required: false
+    default: "false"
   github-token:
     description: GITHUB_TOKEN
     required: true
@@ -147,6 +151,7 @@ runs:
         SCHEDULE: ${{ github.event.schedule }}
         HEAD_BRANCH: ${{ steps.parse-ref.outputs.branch }}
         LF_RUNNERS: ${{ inputs.lf-runners }}
+        TESTS_TO_INCLUDE: ${{ github.event.inputs.tests-to-include }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
@@ -158,6 +163,8 @@ runs:
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
+          ${{ inputs.cpp-faketensor == 'true' && '--cpp-faketensor' || '' }} \
+          --tests-to-include "${TESTS_TO_INCLUDE}" \
           --selected-test-configs "${{ inputs.selected-test-configs }}" \
           ${{ inputs.ignore-test-config-labels == 'true' && '--ignore-test-config-labels' || '' }} \
           --pr-number "${PR_NUMBER}" \
