@@ -301,6 +301,16 @@ class _MRORight(_MROBase):
     pass
 
 
+class _MROTupleTypes:
+    class Base(typing.NamedTuple):
+        field: int
+        scale = 1
+
+
+class _MROTupleInput(_MROTupleTypes.Base):
+    pass
+
+
 class _DynamicMROInput(type("_DynamicMROBase", (), {"scale": 1})):
     pass
 
@@ -378,18 +388,66 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(loaded(x, initial), fn(x, initial))
         self.assertFalse(loaded.guard_check(x, replacement))
 
-    def test_mro_guard_survives_serialization(self):
+    def test_constant_mro_length_changed_before_reload(self):
+        x = torch.ones(1)
+        compiled = _aot_compile(_constant_mro_length, x)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        try:
+            _MROLeft.__bases__ = (_MRORight,)
+            loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+            self.assertFalse(loaded.guard_check(x))
+        finally:
+            _MROLeft.__bases__ = (_MROBase,)
+        self.assertTrue(loaded.guard_check(x))
+
+    def test_inherited_constant_changed_before_reload(self):
         x, left, right = torch.ones(1), _MROLeft(), _MRORight()
         compiled = _aot_compile(_mro_sum, x, left, right)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
-        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
-        self.assertTrue(loaded.guard_check(x, left, right))
-        self.assertEqual(loaded(x, left, right), x + 2)
-        try:
-            _MRORight.__bases__ = (_MROOther,)
+        with mock.patch.object(_MROBase, "scale", 7):
+            loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
             self.assertFalse(loaded.guard_check(x, left, right))
+        self.assertTrue(loaded.guard_check(x, left, right))
+
+    def test_mro_guard_survives_serialization(self):
+        x, left, right = torch.ones(1), _MROLeft(), _MRORight()
+        try:
+            for base in (_MROBase, _MROLeft):
+                with self.subTest(base=base):
+                    _MRORight.__bases__ = (base,)
+                    compiled = _aot_compile(_mro_sum, x, left, right)
+                    data = AOTCompiledFunction.serialize(compiled).serialized_data
+                    loaded = AOTCompiledFunction.deserialize(
+                        data, guard_globals=globals()
+                    )
+                    self.assertTrue(loaded.guard_check(x, left, right))
+                    self.assertEqual(loaded(x, left, right), x + 2)
+                    _MRORight.__bases__ = (_MROOther,)
+                    self.assertFalse(loaded.guard_check(x, left, right))
+                    reloaded = AOTCompiledFunction.deserialize(
+                        data, guard_globals=globals()
+                    )
+                    self.assertFalse(reloaded.guard_check(x, left, right))
+                    _MRORight.__bases__ = (base,)
+                    self.assertTrue(reloaded.guard_check(x, left, right))
         finally:
             _MRORight.__bases__ = (_MROBase,)
+
+    def test_importable_nested_named_tuple_base(self):
+        x, obj = torch.ones(1), _MROTupleInput(0)
+        seen = []
+        compiled = _aot_compile(_mro_sum, x, obj, obj, seen=seen)
+        base_guards = [
+            keep
+            for entry, keep in seen
+            if entry.guard_type == "CLASS_MATCH" and entry.value is _MROTupleTypes.Base
+        ]
+        self.assertIn(True, base_guards)
+        self.assertNotIn(False, base_guards)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x, obj, obj))
+        self.assertEqual(loaded(x, obj, obj), x + 2)
 
     def test_mro_guard_refuses_nonreferenceable_base(self):
         x, obj = torch.ones(1), _DynamicMROInput()
@@ -430,7 +488,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             cache = os.path.join(directory, "mro.cache")
             with self.assertRaisesRegex(
                 PrecompileError,
-                "dropped guard.*__mro__.*MRO bases and their metaclasses.*nested namedtuple",
+                "dropped guard.*__mro__.*MRO bases.*module-level metaclasses",
             ):
                 with capture(
                     _mro_sum,
@@ -475,13 +533,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(loaded.guard_check(x, module))
         self.assertEqual(loaded(x, module), fn(x, module))
         state, _ = _kept_types(compiled)
-        self.assertTrue(
-            any(
-                guard.create_fn_name() == "TENSOR_MATCH"
-                and guard.name.startswith("L['module']")
-                for guard in state.output_graph.guards
-            )
+        guards = (
+            g for g in state.output_graph.guards if g.name.startswith("L['module']")
         )
+        self.assertIn("TENSOR_MATCH", (g.create_fn_name() for g in guards))
         self.assertFalse(loaded.guard_check(x, torch.nn.Linear(3, 4)))
 
     @parametrize("caching_precompile", (False, True))
@@ -729,11 +784,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_counts = collections.Counter(
             g.create_fn_name() for g in control_state.output_graph.guards
         )
-        # Class matches protect the tensor type, TreeSpec and typing.Any. The
-        # identity matches include TreeSpec's MRO base and two torch imports.
-        # Before Python 3.11, typing.Any is a _SpecialForm guarded by identity.
+        # Class matches protect the tensor type, TreeSpec, its MRO base and typing.Any.
+        # The two torch imports are guarded by identity. Before Python 3.11,
+        # typing.Any is also guarded by identity because it is a _SpecialForm.
         any_is_class = isinstance(pytree.Any, type)
-        class_matches, id_matches = (3, 3) if any_is_class else (2, 4)
+        class_matches, id_matches = (4, 2) if any_is_class else (3, 3)
         self.assertEqual(
             counts - control_counts,
             {
@@ -2925,7 +2980,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         with self.assertRaisesRegex(PackageError, "can affect dispatch") as error:
             session.snapshot_artifact()
-        self.assertNotIn("nested namedtuple", str(error.exception))
+        self.assertNotIn("module-level metaclasses", str(error.exception))
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config

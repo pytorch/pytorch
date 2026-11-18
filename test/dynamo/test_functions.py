@@ -266,9 +266,7 @@ _RANDOM_KEYS = (random.Random().random, random.Random().random)
 class FunctionTests(torch._dynamo.test_case.TestCase):
     @parametrize("capture", ["ordinary", "aot", "cache"])
     def test_prebound_slot_wrapper_metadata(self, capture):
-        def fn(x, method):
-            return x + 1, method.__qualname__, method
-
+        fn = lambda x, method: (x + 1, method.__qualname__, method)
         receiver = collections.OrderedDict()
         descriptors = (dict.__setitem__, type(receiver).__setitem__, dict.__delitem__)
         methods = [owner.__get__(receiver) for owner in descriptors]
@@ -316,9 +314,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         method = list.__add__.__get__(Override([1]))
 
-        def fn(x, method):
-            return x + 1, method([2])
-
+        fn = lambda x, method: (x + 1, method([2]))
         self._check_key_fallback(fn, (method,), "Unsupported function call")
 
     def test_prebound_wrapper_key_aliases(self):
@@ -339,9 +335,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 2)
 
     def test_prebound_wrapper_mutable_hash_escape(self):
-        def fn(x, method):
-            return x + 1, hash(method)
-
+        fn = lambda x, method: (x + 1, hash(method))
         self._check_key_fallback(fn, (dict.__setitem__.__get__({}),), "FakeIdVariable")
 
     @parametrize("operation", ["hash", "compare"])
@@ -474,8 +468,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             if isinstance(guard.originating_source, TypeMROSource):
                 self.assertNotIn("TYPE_MATCH", guard.guard_types or ())
         source = mro_sources.pop()
-        self.assertIn(("ID_MATCH", GetItemSource(source, 1)), guards)
-        self.assertIn(("ID_MATCH", GetItemSource(source, 2)), guards)
+        self.assertIn(("CLASS_MATCH", GetItemSource(source, 1)), guards)
+        self.assertIn(("CLASS_MATCH", GetItemSource(source, 2)), guards)
 
     @parametrize("initial_builtin", [False, True])
     def test_shared_mro_owner_non_object_tail(self, initial_builtin):
@@ -7618,17 +7612,29 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, a, a), (True, x + 1))
 
+    @parametrize("skip", [False, True])
+    @parametrize("mapping", [False, True])
     @parametrize("receiver_type", [list, tuple, range])
-    def test_bound_builtin_method_comparison_alias_changes(self, receiver_type):
+    def test_bound_builtin_method_comparison_alias_changes(
+        self, receiver_type, skip, mapping
+    ):
+        def skip_source(ctx):
+            value = ctx.get_local("left")
+            value = value._i_will_not_complain_if_bc_breaks_VariableTracker().realize()
+            value.source = SkipGuardSource(value.source)
+
         def fn(x, pair):
             left, right = pair
+            if skip:
+                comptime(skip_source)
             descriptor = receiver_type.__dict__["count"]
-            return x + (descriptor.__get__(left) == descriptor.__get__(right))
+            first, second = descriptor.__get__(left), descriptor.__get__(right)
+            return x + (len({first: 1, second: 2}) if mapping else first == second)
 
         value = 2 if receiver_type is range else [1, 2]
         left, right = receiver_type(value), receiver_type(value)
         pairs = ((left, right), (left, left), (right, right), (right, left))
-        self._check_key_reuse(fn, pairs)
+        self._check_key_reuse(fn, pairs[:2] if skip else pairs)
 
     @parametrize(
         "capture", ["ordinary", "ordinary_instance", "aot", "cache", "session"]
@@ -7859,9 +7865,7 @@ class GraphModule(torch.nn.Module):
         self._check_key_reuse(fn, values, frames=1 if hash_first else 2, dynamic=True)
 
     def test_prebound_method_key_ignores_receiver_contents(self):
-        def fn(x, method):
-            return x + len({method}), method.__name__
-
+        fn = lambda x, method: (x + len({method}), method.__name__)
         payload = MyCls()
         receiver = {"payload": payload}
         refs = [weakref.ref(payload)]
