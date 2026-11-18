@@ -12835,7 +12835,7 @@ class Scheduler:
             try:
                 return (
                     self._codegen_partitions()
-                    if V.graph.partition_plan.split_into_partitions
+                    if V.graph.partition_plan.uses_graph_partition
                     else self._codegen(self.nodes)
                 )
             finally:
