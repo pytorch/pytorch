@@ -3081,6 +3081,22 @@ def demote_caller(n, x):
     return demote_python(n), x + 1
 
 
+def demote_chain_1(n):
+    return demote_python(n)
+
+
+def demote_chain_2(n):
+    return demote_chain_1(n)
+
+
+def demote_chain_3(n):
+    return demote_chain_2(n)
+
+
+def demote_chain_4(n):
+    return demote_chain_3(n)
+
+
 @unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
 class TestCfgDemotion(TestCase):
     """What the interpreter runs faster is left to it."""
@@ -3107,6 +3123,43 @@ class TestCfgDemotion(TestCase):
         for _ in range(200):
             self.assertEqual(compiled(300), demote_python(300))
         self.assertTrue(compiled.stats()["demoted"])
+
+    def test_measurement_is_reported(self):
+        compiled = torch.cfg_compile(demote_python, fallback=False, demote=True)
+        self.assertTrue(compiled.stats()["measuring"])
+        for _ in range(200):
+            compiled(300)
+        stats = compiled.stats()
+        self.assertEqual((stats["measuring"], stats["demoted"]), (False, True))
+        unmeasured = torch.cfg_compile(demote_python, fallback=False, demote=False)
+        self.assertFalse(unmeasured.stats()["measuring"])
+
+    def test_chain_of_calls_is_measured_at_once(self):
+        # Five functions deep. Were each measured from scratch once the one
+        # it calls is settled, the outermost would still be at it.
+        compiled = torch.cfg_compile(
+            demote_chain_4, fallback=False, demote=True, inline=False
+        )
+        for _ in range(150):
+            self.assertEqual(compiled(300), demote_python(300))
+        stats = compiled.stats()
+        self.assertFalse(stats["measuring"])
+        # The loop is with the interpreter: on its own, or along with
+        # callers of it, which cost the same either way once it is.
+        self.assertTrue(stats["demoted"] or stats["demoted_callees"])
+
+    def test_measurement_starts_over_when_compiled_code_changes(self):
+        compiled = torch.cfg_compile(demote_python, fallback=False, demote=True)
+        for _ in range(200):
+            # What a pass says when it has replaced part of a block.
+            cfg_rs.plan_changed()
+            compiled(300)
+        stats = compiled.stats()
+        self.assertEqual((stats["measuring"], stats["demoted"]), (True, False))
+        for _ in range(200):
+            compiled(300)
+        stats = compiled.stats()
+        self.assertEqual((stats["measuring"], stats["demoted"]), (False, True))
 
     def test_nothing_is_demoted_when_turned_off(self):
         compiled = torch.cfg_compile(
