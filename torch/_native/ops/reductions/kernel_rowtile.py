@@ -102,11 +102,16 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
+# 0.92-1.41x the rolled fold and requires per-N compilation. Column layouts take the
+# general axis's decoded-gather tree ahead of coltile: x.sum(0) of fp32 (65536, 256) took
+# 68.4us against 17.2us (B200 CUDA graphs, L2-cold). Its independent env var avoids
 # affecting upstream kernels, which register first. `1` prefers the order and warns once when
 # a call cannot use it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 _INNER_TREE_STRICT = "strict"
+# Reasons a dispatcher cannot serve an inner-tree request.
+_INNER_TREE_WIDE = "inner-tree reduction requires 32-bit logical extents"
+_INNER_TREE_GEOMETRY = "inner-tree reduction cannot serve this geometry"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
@@ -197,9 +202,20 @@ _ITREE_BLOCK_THREADS = 256
 _ITREE_STAGE_E = 32
 
 
+def _inner_tree_env() -> str:
+    """The validated gate value; "" when unset."""
+    value = os.environ.get(_INNER_TREE_ENV, "")
+    if value not in ("", "0", "1", _INNER_TREE_STRICT):
+        raise ValueError(
+            f"{_INNER_TREE_ENV} must be unset, '0', '1' or '{_INNER_TREE_STRICT}', "
+            f"got {value!r}"
+        )
+    return value
+
+
 def inner_tree_order_enabled() -> bool:
     """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
-    return os.environ.get(_INNER_TREE_ENV, "") not in ("", "0")
+    return _inner_tree_env() not in ("", "0")
 
 
 def reduction_order(
@@ -215,9 +231,12 @@ def reduction_order(
 _warned_inner_tree_reasons: set[str] = set()
 
 
-def inner_tree_fallback(reason: str) -> None:
-    """Fall back from the env gate: raise if strict, else warn once per reason."""
-    if os.environ.get(_INNER_TREE_ENV, "") == _INNER_TREE_STRICT:
+def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
+    """Fall back from an unservable inner-tree request: raise for an explicit order= or
+    the strict env gate, else warn once per reason."""
+    if explicit:
+        raise ValueError(reason)
+    if _inner_tree_env() == _INNER_TREE_STRICT:
         raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
     if reason not in _warned_inner_tree_reasons:
         _warned_inner_tree_reasons.add(reason)
