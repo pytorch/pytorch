@@ -280,6 +280,135 @@ class TestFlopsFx(TestCase):
         self.assertEqual(shape_env.replacements, replacements)
 
 
+@instantiate_parametrized_tests
+class TestCUDAGraphUtils(TestCase):
+    def test_initial_mempool_allocation_uses_backend_device(self):
+        from torch._inductor import cudagraph_trees, graph_tree_backend as backend
+
+        prime_gb = 1 / 1024
+        graph_interface = mock.Mock()
+        graph_interface.capture.return_value = mock.MagicMock()
+        with (
+            inductor_config.patch(
+                "triton.cudagraph_initial_mempool_allocation_gb", prime_gb
+            ),
+            mock.patch.object(
+                backend, "get_graph_interface", return_value=graph_interface
+            ),
+            mock.patch.object(backend, "get_device_type", return_value="xpu"),
+            mock.patch.object(
+                torch.accelerator, "device_index", return_value=mock.MagicMock()
+            ),
+            mock.patch.object(torch.accelerator, "synchronize"),
+            mock.patch.object(torch.accelerator, "current_stream"),
+            mock.patch.object(torch._C, "_set_cached_tensors_enabled"),
+            mock.patch.object(torch, "empty") as empty,
+        ):
+            cudagraph_trees.CUDAGraphTreeManager(2)
+
+        empty.assert_called_once_with(
+            1 << 20, dtype=torch.uint8, device=torch.device("xpu", 2)
+        )
+
+    @parametrize("strict", (False, True))
+    def test_graph_partition_runtime_cudagraph_fallback(self, strict):
+        from torch._dynamo.utils import counters
+        from torch._inductor.output_code import (
+            cudagraph_partition_post_compile as partition_post_compile,
+        )
+        from torch._inductor.utils import BoxedBool
+
+        compiled_graph = mock.Mock()
+        compiled_graph.cudagraph_info.cudagraph_fail_reasons = []
+        compiled_graph.fx_kwargs = {"is_backward": False}
+        original_callable = compiled_graph.current_callable
+        cudagraphs = BoxedBool(True)
+        counters.clear()
+
+        with (
+            inductor_config.patch(
+                {
+                    "graph_partition": True,
+                    "triton.cudagraph_or_error": strict,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.output_code._get_runtime_cudagraph_fail_reason",
+                return_value="no Graph Trees backend registered",
+            ),
+        ):
+            if strict:
+                with self.assertRaisesRegex(
+                    RuntimeError, "no Graph Trees backend registered"
+                ):
+                    partition_post_compile([], compiled_graph, cudagraphs, {}, None)
+            else:
+                partition_post_compile([], compiled_graph, cudagraphs, {}, None)
+
+        self.assertFalse(cudagraphs.value)
+        self.assertIs(compiled_graph.current_callable, original_callable)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+    def test_accelerator_mismatch_fallback(self):
+        from torch._inductor.cudagraph_utils import (
+            check_current_accelerator_for_cudagraphs,
+        )
+
+        with mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=torch.device("xpu"),
+        ):
+            reason = check_current_accelerator_for_cudagraphs("cuda")
+
+        self.assertIsNotNone(reason)
+        self.assertIn("does not match graph device", reason)
+
+    def test_missing_rng_fallback(self):
+        from torch._inductor.cudagraph_utils import check_rng_state_for_cudagraphs
+
+        device_module = mock.Mock(spec=["get_rng_state"])
+        with mock.patch.object(torch, "get_device_module", return_value=device_module):
+            reason = check_rng_state_for_cudagraphs("privateuseone")
+
+        self.assertIsNotNone(reason)
+        self.assertIn("missing set_rng_state", reason)
+
+    def test_multiple_accelerators_runtime_fallback(self):
+        from torch._inductor.output_code import _get_runtime_cudagraph_fail_reason
+
+        compiled_graph = mock.Mock(device_types={"cuda", "xpu"})
+        reason = _get_runtime_cudagraph_fail_reason(compiled_graph)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("expected one accelerator device", reason)
+
+    def test_non_tree_mps_runtime_cudagraph_fallback(self):
+        from torch._inductor.output_code import (
+            _get_runtime_cudagraph_fail_reason,
+            cudagraph_post_compile,
+        )
+        from torch._inductor.utils import BoxedBool
+
+        compiled_graph = mock.Mock(device_types={"mps"})
+        compiled_graph.cudagraph_info.cudagraph_fail_reasons = []
+        compiled_graph.fx_kwargs = {"is_inference": True, "is_backward": False}
+        compiled_graph.disabled_cudagraphs_reason = None
+        original_callable = compiled_graph.current_callable
+        cudagraphs = BoxedBool(True)
+
+        with inductor_config.patch(
+            {"triton.cudagraph_trees": False, "cudagraph_policy": None}
+        ):
+            reason = _get_runtime_cudagraph_fail_reason(compiled_graph)
+            cudagraph_post_compile([], compiled_graph, cudagraphs, {}, None)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("non-Tree cudagraph capture requires CUDA", reason)
+        self.assertFalse(cudagraphs.value)
+        self.assertIs(compiled_graph.current_callable, original_callable)
+
+
 class TestUtils(TestCase):
     @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
     def test_is_big_gpu_min_sms_config(self):
@@ -2834,12 +2963,27 @@ class TestScaleSwizzleInference(TestCase):
     `to_blocked` hands back the 32x8 buffer flattened.
     """
 
-    def _infer(self, mat_size, scale_size, mat_dtype, prefers_32_8):
+    def _infer(
+        self,
+        mat_size,
+        scale_size,
+        mat_dtype,
+        prefers_32_8,
+        gfx1250=(False, False),
+        scale_dtype=None,
+    ):
+        if scale_dtype is None:
+            scale_dtype = torch.float8_e8m0fnu
         with (
             mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch("torch.xpu._is_compiled", return_value=False),
             mock.patch(
                 "torch._inductor.utils._prefers_swizzle_32_8",
                 return_value=prefers_32_8,
+            ),
+            mock.patch(
+                "torch._inductor.utils._gfx1250_scale_swizzle",
+                return_value=gfx1250,
             ),
         ):
             return _infer_scale_swizzle_impl(
@@ -2847,7 +2991,7 @@ class TestScaleSwizzleInference(TestCase):
                 scale_size=scale_size,
                 scale_numel=math.prod(scale_size),
                 mat_dtype=mat_dtype,
-                scale_dtype=torch.float8_e8m0fnu,
+                scale_dtype=scale_dtype,
                 eq_fn=lambda a, b: a == b,
             )
 
@@ -2878,6 +3022,32 @@ class TestScaleSwizzleInference(TestCase):
         self.assertEqual(
             self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=True),
             (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8),
+        )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_gfx1250_mx_wins_the_unswizzled_tie(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # M=128, K=128: gfx1250 holds 512 scales, the same as NO_SWIZZLE.
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(
+                mat_size, (512,), mat_dtype, prefers_32_8=False, gfx1250=(True, False)
+            ),
+            (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_128),
+        )
+
+    def test_gfx1250_nvfp4_is_swizzle_128(self):
+        # M=128, unpacked K=128: rows * round_up(K/16, 8) = 1024 scales.
+        self.assertEqual(
+            self._infer(
+                (128, 64),
+                (1024,),
+                torch.float4_e2m1fn_x2,
+                prefers_32_8=False,
+                gfx1250=(True, True),
+                scale_dtype=torch.float8_e4m3fn,
+            ),
+            (ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_128),
         )
 
     @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
