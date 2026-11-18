@@ -1378,15 +1378,13 @@ def view_dtype_impl(
     self: ComplexTensor,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    if not dtype.is_complex:
-        raise RuntimeError("Cannot take a view of non-interleaved tensor.")
+    if dtype != self.dtype:
+        raise RuntimeError(
+            "Cannot view a non-interleaved complex tensor as a different dtype; use view_copy instead."
+        )
 
-    real_dtype = COMPLEX_TO_REAL.get(dtype, dtype)
     re, im = split_complex_arg(self)
-    return ComplexTensor(
-        re.view(real_dtype),
-        im.view(real_dtype),
-    )
+    return ComplexTensor(re.view(dtype=re.dtype), im.view(dtype=im.dtype))
 
 
 @register_complex(aten.view.default)
@@ -1399,3 +1397,20 @@ def view_default_impl(
         re.view(shape),
         im.view(shape),
     )
+
+
+@register_complex(aten.view_copy.default)
+def view_copy_default_impl(self: ComplexTensor, size: tuple[int, ...]) -> ComplexTensor:
+    re, im = split_complex_arg(self)
+    return ComplexTensor(aten.view_copy(re, size), aten.view_copy(im, size))
+
+
+@register_complex(aten.view_copy.dtype)
+def view_copy_dtype_impl(self: ComplexTensor, dtype: torch.dtype) -> torch.Tensor:
+    # Reinterpret the interleaved layout, which can mix real and imaginary parts.
+    interleaved = view_as_real_impl(self).flatten(-2)
+    if not dtype.is_complex:
+        return interleaved.view(dtype)
+
+    real_view = interleaved.view(COMPLEX_TO_REAL[dtype])
+    return view_as_complex_impl(real_view.unflatten(-1, (-1, 2)))
