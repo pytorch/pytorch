@@ -180,10 +180,13 @@ class TestAOTICodegenPrivateUse1(TestCase):
     def test_include_path_hooks(self):
         # Subclass overrides of these hooks see the real device name; the
         # privateuse1 mapping happens in the defaults.
-        aot = "#include <torch/csrc/inductor/aoti_include/%s.h>"
-        include_path = CppWrapperCpu.get_device_include_path_aot
-        self.assertEqual(include_path("openreg"), aot % "privateuse1")
-        self.assertEqual(include_path("cuda"), aot % "cuda")
+        for folder, include_path in (
+            ("aoti_include", CppWrapperCpu.get_device_include_path_aot),
+            ("cpp_wrapper", CppWrapperCpu.get_device_include_path_jit),
+        ):
+            include = f"#include <torch/csrc/inductor/{folder}/%s.h>"
+            self.assertEqual(include_path("openreg"), include % "privateuse1")
+            self.assertEqual(include_path("cuda"), include % "cuda")
 
 
 class SmallModel(torch.nn.Module):
