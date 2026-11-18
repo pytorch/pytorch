@@ -1,4 +1,4 @@
-//! The compiler behind `torch.cfg_compile`.
+//! The compiler behind `torch.vm`.
 //!
 //! A Python function is turned into a control-flow graph in SSA form
 //! (`frontend`), in an IR whose instructions have the semantics of the

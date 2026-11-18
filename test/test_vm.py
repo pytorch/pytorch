@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
 # dynamo test configurations interpose on exactly that.
 UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
 
-# The Rust runtime is only in builds made with USE_CFG_COMPILE=1, and only
+# The Rust runtime is only in builds made with USE_TORCH_VM=1, and only
 # understands CPython 3.12 bytecode.
 try:
     cfg_rs = importlib.import_module("torch._cfg_rs")
@@ -390,7 +390,7 @@ class TestCallSite(TestCase):
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
 class TestDispatchCapture(TestCase):
-    """The dispatcher hook that cfg_compile records kernels with."""
+    """The dispatcher hook that torch.vm records kernels with."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -498,8 +498,8 @@ class TestDispatchCapture(TestCase):
         self.assertEqual([r[0] for r in records if r[2] == 0], ["aten::mul.Tensor"])
 
 
-@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
-class TestCfgFrontend(TestCase):
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmFrontend(TestCase):
     """Bytecode -> SSA graph."""
 
     hw_classification = HardwareClassification.GENERIC
@@ -545,7 +545,7 @@ class TestCfgFrontend(TestCase):
                     x = x + 2
             return x
 
-        text = torch.cfg_compile(f, fallback=False).dump()
+        text = torch.vm(f, fallback=False).dump()
         self.assertIn("phi", text)
         self.assertIn("br_exhausted", text)
         self.assertIn("binary - ", text)
@@ -558,14 +558,14 @@ class TestCfgFrontend(TestCase):
             except RuntimeError:
                 return x
 
-        with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "try/except"):
-            torch.cfg_compile(f, fallback=False)
-        self.assertTrue(torch.cfg_compile.is_available())
+        with self.assertRaisesRegex(torch.vm.Unsupported, "try/except"):
+            torch.vm(f, fallback=False)
+        self.assertTrue(torch.vm.is_available())
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            self.assertIs(torch.cfg_compile(f), f)
+            self.assertIs(torch.vm(f), f)
         self.assertIn(
-            "left f uncompiled", str(caught[0].message).replace(f.__qualname__, "f")
+            "left f as it is", str(caught[0].message).replace(f.__qualname__, "f")
         )
 
     def test_methods_and_modules(self):
@@ -579,7 +579,7 @@ class TestCfgFrontend(TestCase):
 
         m = M()
         x = torch.randn(3)
-        for compiled in (torch.cfg_compile(m), torch.cfg_compile(m.forward)):
+        for compiled in (torch.vm(m), torch.vm(m.forward)):
             for _ in range(3):
                 self.assertEqual(compiled(x), m(x))
 
