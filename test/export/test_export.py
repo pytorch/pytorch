@@ -18379,10 +18379,10 @@ def forward(self, x):
             _maybe_run_with_interpreter,
             autograd_not_implemented,
             reenter_make_fx,
+            register_fake,
             unique_graph_id,
         )
         from torch._ops import HigherOrderOperator
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.proxy_tensor import (
             ProxyTorchDispatchMode,
             track_tensor_tree,
@@ -18431,10 +18431,6 @@ def forward(self, x):
             )
             return fn(x)
 
-        def fake_hop(mode, fn, x, schema):
-            with mode:
-                return dense_hop(fn, x, schema)
-
         def func_hop(ctx, fn, x, schema):
             unwrapped_x = ctx.unwrap_tensors(x)
             functional_fn = ctx.functionalize(_maybe_run_with_interpreter(fn))
@@ -18443,7 +18439,7 @@ def forward(self, x):
         test_hop = TestFunctionSchemaHop()
         test_hop.py_impl(ProxyTorchDispatchMode)(trace_hop)
         test_hop.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)(dense_hop)
-        test_hop.py_impl(FakeTensorMode)(fake_hop)
+        register_fake(test_hop, dense_hop, skip_cache=True)
         test_hop.py_autograd_impl(
             autograd_not_implemented(test_hop, deferred_error=True)
         )
