@@ -1244,6 +1244,27 @@ class TestBlackwellAutoWSConstraints(TestCase):
                 )
             )
 
+    def test_fp32_output_prunes_large_staging(self):
+        fp32_out_ok = (
+            CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_fp32_out_ok
+        )
+
+        def ok(block_m, block_n, subtile, dp, two_ctas):
+            kwargs = {
+                "BLOCK_M": block_m,
+                "BLOCK_N": block_n,
+                "EPILOGUE_SUBTILE": subtile,
+                "DATA_PARTITION_FACTOR": dp,
+                "TWO_CTAS": two_ctas,
+            }
+            return fp32_out_ok(kwargs)
+
+        self.assertFalse(ok(256, 256, 8, 2, False))
+        self.assertTrue(ok(256, 256, 4, 2, True))
+        self.assertFalse(ok(256, 256, 2, 2, True))
+        self.assertFalse(ok(128, 256, 1, 1, True))
+        self.assertTrue(ok(128, 256, 4, 1, True))
+
     def test_two_ctas_requires_tma_store_for_metaws_template(self):
         kwargs = {
             "BLOCK_M": 128,

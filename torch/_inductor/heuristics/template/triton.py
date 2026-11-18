@@ -3552,6 +3552,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs, element_size=element_size
             ):
                 continue
+            if (
+                use_meta_ws
+                and kernel_inputs.out_dtype() == torch.float32
+                and not self._autows_fp32_out_ok(template_kwargs)
+            ):
+                continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
@@ -3611,6 +3617,20 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             if template_kwargs.get("GROUP_M", 8) % 2 != 0:
                 return False
         return True
+
+    @staticmethod
+    def _autows_fp32_out_ok(template_kwargs: dict[str, Any]) -> bool:
+        """fp32 epilogue staging takes shared memory from the operand ring: above
+        32 KB per staging subtile the ring drops to 1-2 stages, and the 1-CTA
+        256x256 DP2 tile is never competitive."""
+        block_m = template_kwargs["BLOCK_M"]
+        block_n = template_kwargs["BLOCK_N"]
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
+        subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        two_ctas = template_kwargs.get("TWO_CTAS", False)
+        if not two_ctas and block_m == 256 and block_n == 256 and dp == 2:
+            return False
+        return (block_m // dp) * (block_n // subtile) * 4 <= 32 * 1024
 
     def _get_config_generator(self) -> partial[Generator[TritonConfig, None, None]]:
         if _use_template_autows():
