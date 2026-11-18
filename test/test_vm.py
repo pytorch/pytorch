@@ -7749,6 +7749,17 @@ class TestVmApi(TestCase):
             states = [r["state"] for r in torch.vm.regions(forward)]
             self.assertIn("compiled", states)
 
+    def test_a_module_is_called_with_its_hooks(self):
+        model = torch.nn.Linear(3, 3)
+        seen = []
+        model.register_forward_pre_hook(lambda module, args: seen.append("before"))
+        model.register_forward_hook(lambda module, args, output: output * 2)
+        compiled = torch.vm(model, fallback=False)
+        x = torch.randn(2, 3)
+        for _ in range(4):
+            self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        self.assertEqual(seen.count("before"), 8)
+
 
 if __name__ == "__main__":
     run_tests()
