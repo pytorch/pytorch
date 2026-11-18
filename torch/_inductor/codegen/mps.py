@@ -422,7 +422,7 @@ class MetalOverrides(OpOverrides):
         # temporary, for example from where, maximum or minimum, so this is
         # needed for neg and abs as well. uint16 (ushort) is promoted the same
         # way and is not wrapped yet, because eager MPS has no uint16 add or
-        # mul to test it against.
+        # mul to test it against, see #205432.
         dtypes = [a.dtype for a in args if isinstance(a, CSEVariable)]
         if not dtypes or None in dtypes:
             return expr

@@ -21935,12 +21935,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (small_int_edge_input(dtype, self.device),), check_lowp=False)
 
+    # Small int gaps on other backends: https://github.com/pytorch/pytorch/issues/205432
     # hl.abs returns an unsigned type, so abs(-128) is 128
     @skip_if_halide
     @parametrize("dtype", [torch.int8, torch.int16])
     def test_small_int_abs_wraps(self, dtype):
         if self.device == "cpu":
-            raise unittest.SkipTest("CPU abs of the minimum does not wrap")
+            raise unittest.SkipTest("CPU abs of the minimum does not wrap, see #205432")
 
         def fn(x):
             return torch.where(x > 0, x, x.flip(0)).abs().float()
