@@ -29,6 +29,7 @@
 //
 
 #include <array>
+#include <bit>
 #include <tuple>
 #include <type_traits>
 
@@ -78,6 +79,14 @@ constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
     }
 }
 
+template <typename args_t, size_t... Is>
+constexpr size_t max_of_sizes(args_t, std::index_sequence<Is...>) {
+  size_t max_size = 0;
+  ((max_size = std::max(max_size, sizeof(std::tuple_element_t<Is, args_t>))),
+   ...);
+  return max_size;
+}
+
 #ifdef USE_ROCM
 template <int io_sizes>
 constexpr auto elems_per_thread(){
@@ -98,6 +107,23 @@ constexpr auto elems_per_thread(){
     return 8;
   }
 }
+
+// Rubin (SM 10.7) supports 1024 resident threads per SM. Target 128 bytes of
+// input per thread to keep roughly 128 KiB in flight per SM.
+template <size_t input_size>
+constexpr auto elems_per_thread_128b(size_t output_size) {
+  if constexpr (input_size == 0) {
+    // note: without inputs, we simply double the number of elements per thread
+    // for SM 10.7 as there are half the number of threads per SM compared
+    // to previous generations.
+    return output_size == 1 ? 32 : 16;
+  } else if constexpr (input_size >= 128) {
+    return 1;
+  } else {
+    constexpr auto rounded_input_size = std::bit_ceil(input_size);
+    return static_cast<int>(128 / rounded_input_size);
+  }
+}
 #endif
 
 
@@ -106,11 +132,6 @@ constexpr auto elems_per_thread(){
 constexpr int elementwise_thread_work_size() {return 4;}
 constexpr int elementwise_block_work_size() {
   return elementwise_thread_work_size() * num_threads();
-}
-
-template <int io_sizes>
-constexpr auto io_block_work_size() {
-  return num_threads() * elems_per_thread<io_sizes>();
 }
 
 #ifdef USE_ROCM
@@ -160,72 +181,117 @@ constexpr auto calc_io_size(){
 
 #ifndef USE_ROCM
 // To save on binary size of libtorch_cuda.so, we split the vectorized_elementwise_kernel
-// into two: one for vec_size=8 and one for vec_size=[2, 4], since vec8 is going to be
-// used on sm_90 and sm_10x exclusively.
-template <int vec_size, typename func_t, typename array_t>
+// into three: one targeting 128 bytes per thread (and only vec_size=8), one for
+// vec_size=8, and one for vec_size=[2, 4]. vec_size=8 is only used on sm_90
+// and sm_10x, and the 128-byte-per-thread configuration is only used on sm_10x.
+template <int vec_size, int tws, typename func_t, typename array_t>
+__forceinline__ __device__ void vectorized_elementwise_kernel_impl(
+    int N,
+    func_t f,
+    array_t data) {
+  using traits = function_traits<func_t>;
+  static_assert(tws > 0, "Thread work size must be positive");
+  constexpr int bws = tws * num_threads();
+  int remaining = N - bws * blockIdx.x;
+
+  // The compiler generally preserves source order, so keep the hot path first
+  // to improve instruction cache use.
+  if (remaining >= bws) {
+    elementwise_kernel_helper(
+        f, memory::policies::vectorized<vec_size, array_t, tws>(data));
+  } else {
+    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto output_calc = TrivialOffsetCalculator<1>();
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    auto policy = memory::policies::unroll<
+        array_t,
+        decltype(input_calc),
+        decltype(output_calc),
+        memory::LoadWithoutCast,
+        memory::StoreWithoutCast,
+        tws>(data, remaining, input_calc, output_calc, loader, storer);
+    elementwise_kernel_helper(f, policy);
+  }
+}
+
+template <
+    int vec_size,
+    typename func_t,
+    typename array_t,
+    bool use_128b_tws = false>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
-  if constexpr (vec_size == 8) {
-#if __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
-    using traits = function_traits<func_t>;
-    constexpr auto io_size = calc_io_size<func_t>();
-    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
-
-    // note: unless the compiler has a good reason to move code, it won't.
-    // Thus, the if-condition typically comes first in SASS, so the "hot" path
-    // should go first, improving instruction cache use.
-    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
-      // vectorized memory access
-      elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
-    } else { // if this block handles the reminder,
-      // just do a naive unrolled loop
-      auto input_calc = TrivialOffsetCalculator<traits::arity>();
-      auto output_calc = TrivialOffsetCalculator<1>();
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      auto policy = memory::policies::unroll<
-      array_t,
-      decltype(input_calc),
-      decltype(output_calc),
-      memory::LoadWithoutCast,
-      memory::StoreWithoutCast,
-      elems_per_thread<io_size>()>(
-      data, remaining, input_calc, output_calc, loader, storer);
-      elementwise_kernel_helper(f, policy);
-    }
+  if constexpr (vec_size == 8 && use_128b_tws) {
+#if __CUDA_ARCH__ / 100 == 10
+    using output_t = typename function_traits<func_t>::result_type;
+    constexpr auto input_size = calc_io_size<func_t>() - sizeof(output_t);
+    constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(output_t));
+    vectorized_elementwise_kernel_impl<vec_size, tws_128b>(N, f, data);
 #else
-    CUDA_KERNEL_ASSERT(false && "Fatal! vectorized_elementwise_kernel<8,...> supports only sm_90 and sm_10x. Please report an issue on GitHub.");
+    CUDA_KERNEL_ASSERT(
+        false &&
+        "Fatal! vectorized_elementwise_kernel<8,...> with 128-byte-per-thread "
+        "work size supports only sm_10x. Please report an issue on GitHub.");
+#endif
+  } else if constexpr (vec_size == 8) {
+#if __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
+    constexpr auto io_size = calc_io_size<func_t>();
+    constexpr auto tws = elems_per_thread<io_size>();
+    vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
+#else
+    CUDA_KERNEL_ASSERT(
+      false && "Fatal! vectorized_elementwise_kernel<8,...> supports only "
+      "sm_90 and sm_10x. Please report an issue on GitHub.");
 #endif // __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
   } else {
-    using traits = function_traits<func_t>;
     constexpr auto io_size = calc_io_size<func_t>();
-    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
-
-    if (remaining >= io_block_work_size<io_size>()) { // if this block has a full `block_work_size` data to handle, use
-      // vectorized memory access
-      elementwise_kernel_helper(
-        f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
-    } else { // if this block handles the reminder,
-      // just do a naive unrolled loop
-      auto input_calc = TrivialOffsetCalculator<traits::arity>();
-      auto output_calc = TrivialOffsetCalculator<1>();
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      auto policy = memory::policies::unroll<
-      array_t,
-      decltype(input_calc),
-      decltype(output_calc),
-      memory::LoadWithoutCast,
-      memory::StoreWithoutCast,
-      elems_per_thread<io_size>()>(
-      data, remaining, input_calc, output_calc, loader, storer);
-      elementwise_kernel_helper(f, policy);
-    }
+    constexpr auto tws = elems_per_thread<io_size>();
+    vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
   }
 }
 
 #else // USE_ROCM
+// Trivial offsets plus a constant shift, so the remainder block of a wide
+// block_work_size can be processed with a narrower unroll policy.
+template <int NARGS>
+struct ShiftedTrivialOffsetCalculator {
+  using offset_type = std::array<uint32_t, std::max<int>(NARGS, 1)>;
+  uint32_t shift;
+
+  C10_HOST_DEVICE offset_type get(uint32_t linear_idx) const {
+    offset_type offsets;
+#pragma unroll
+    for (int arg = 0; arg < NARGS; arg++) {
+      offsets[arg] = linear_idx + shift;
+    }
+    return offsets;
+  }
+};
+
+template <
+    int tws,
+    int nt = num_threads(),
+    bool reverted_idx = false,
+    typename loader_t = memory::LoadWithoutCast,
+    typename storer_t = memory::StoreWithoutCast,
+    typename func_t,
+    typename array_t>
+__device__ inline void unrolled_remainder(func_t f, array_t data, int remaining, uint32_t shift) {
+  using traits = function_traits<func_t>;
+  auto input_calc = ShiftedTrivialOffsetCalculator<traits::arity>{shift};
+  auto output_calc = ShiftedTrivialOffsetCalculator<1>{shift};
+  auto policy = memory::policies::unroll_base<
+      nt,
+      array_t,
+      decltype(input_calc),
+      decltype(output_calc),
+      loader_t,
+      storer_t,
+      tws>(data, remaining, input_calc, output_calc, loader_t(), storer_t());
+  elementwise_kernel_helper<reverted_idx>(f, policy);
+}
+
 template <int vec_size, int tws, typename func_t, typename array_t>
 __forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
@@ -233,7 +299,15 @@ __forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t
   constexpr int bws = tws * num_threads();
   int remaining = N - bws * blockIdx.x;
 
-  if (remaining < bws) { // if this block handles the reminder,
+  // The unroll policy guards every element, so with a large tws a short
+  // remainder pays for many empty steps. Use a narrower unroll when it fits.
+  // Not narrower than 4: with a single functor call per thread the compiler
+  // emits different floating-point code for some ops (atan2, complex pow), and
+  // results would depend on n.
+  constexpr int nt = num_threads();
+  if (tws > 4 && remaining <= 4 * nt) {
+    unrolled_remainder<4>(f, data, remaining, (bws - 4 * nt) * blockIdx.x);
+  } else if (remaining < bws) { // if this block handles the reminder,
                                        // just do a naive unrolled loop
     auto input_calc = TrivialOffsetCalculator<traits::arity>();
     auto output_calc = TrivialOffsetCalculator<1>();
@@ -313,11 +387,24 @@ static inline void launch_vectorized_kernel(
   using cpp_type = typename function_traits<func_t>::result_type;
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
+  cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
+  // Empirical benchmarking set this threshold; retain the existing path for
+  // smaller workloads to avoid performance regressions
+  // (the larger thread work size decreases thread level parallelism,
+  // which is important for small footprints).
+  constexpr int64_t min_sm107_io_size = 16 * 1024 * 1024;
+  const bool use_sm107_optimizations =
+      p->major == 10 && p->minor == 7 && N * io_size >= min_sm107_io_size;
+  if (use_sm107_optimizations) {
+    using args_t = typename function_traits<func_t>::ArgsTuple;
+    constexpr auto max_input_size = at::native::max_of_sizes(
+        args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{});
+    vec_size = 32 / static_cast<uint16_t>(std::max(sizeof(cpp_type), max_input_size));
+  }
   vec_size = std::min<uint16_t>(vec_size, max_vec_size);
   // due to excessive binary size the `vectorized_elementwise_kernel` of
   // the size 8 is compiled for sm_90 and sm_10x only.
   // TODO: Lift this limitation when CUDA 12.x support is fully dropped
-  cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
   if (p->major != 9 && p->major != 10) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
@@ -327,6 +414,11 @@ static inline void launch_vectorized_kernel(
   }
 #endif
   int tws = elems_per_thread<io_size>();
+  constexpr auto input_size = io_size - sizeof(cpp_type);
+  constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(cpp_type));
+  if (tws_128b >= 8 && use_sm107_optimizations && vec_size == 8) {
+    tws = tws_128b;
+  }
 #endif
   int bws = tws * num_threads();
   int64_t grid = (N + bws - 1) / bws;
@@ -339,8 +431,18 @@ static inline void launch_vectorized_kernel(
       break;
 #endif
     case 8:
+#ifdef USE_ROCM
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
+#else
+      if (use_sm107_optimizations) {
+        vectorized_elementwise_kernel<8, func_t, array_t, tws_128b >= 8>
+            <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      } else {
+        vectorized_elementwise_kernel<8, func_t, array_t>
+            <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      }
+#endif
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 4:
@@ -375,47 +477,39 @@ template <
     int vec_size,
     typename func_t,
     typename array_t,
-    typename inp_calc_t,
-    typename out_calc_t,
-    typename loader_t,
-    typename storer_t,
     typename OutputType,
     typename... InputTypes>
 C10_LAUNCH_BOUNDS_1(vectorized_templated_config::num_threads())
 __global__ void vectorized_templated_elementwise_kernel(
     int N,
     func_t f,
-    array_t data,
-    inp_calc_t inp_calc,
-    out_calc_t out_calc,
-    loader_t loader,
-    storer_t storer) {
-  int remaining = N -
-      vectorized_templated_config::block_work_size() *
-          (gridDim.x - blockIdx.x - 1);
+    array_t data) {
+  constexpr int nt = vectorized_templated_config::num_threads();
+  constexpr int tws = vectorized_templated_config::elems_per_thread();
+  constexpr int bws = vectorized_templated_config::block_work_size();
   constexpr bool reverted_idx = true;
+  using loader_t = memory::LoadWithStaticCast<InputTypes...>;
+  using storer_t = memory::StoreWithStaticCast<OutputType>;
+  // Blocks run in reverse, so block 0 handles the remainder.
+  const int idx = gridDim.x - blockIdx.x - 1;
+  int remaining = N - bws * idx;
 
-  if (remaining <
-      vectorized_templated_config::block_work_size()) { // if this block handles
-                                                        // the reminder,
-    // just do a naive unrolled loop
-    auto policy = memory::policies::unroll_base<
-        vectorized_templated_config::num_threads(),
-        array_t,
-        inp_calc_t,
-        out_calc_t,
-        loader_t,
-        storer_t,
-        vectorized_templated_config::elems_per_thread()>(
-        data, remaining, inp_calc, out_calc, loader, storer);
-    elementwise_kernel_helper<reverted_idx>(f, policy);
+  // The remainder loads and stores the dtypes known at compile time. As in
+  // vectorized_elementwise_kernel_impl, use a narrower unroll (not narrower
+  // than 4) when it fits.
+  if (remaining <= 4 * nt) {
+    unrolled_remainder<4, nt, reverted_idx, loader_t, storer_t>(
+        f, data, remaining, (bws - 4 * nt) * idx);
+  } else if (remaining < bws) {
+    unrolled_remainder<tws, nt, reverted_idx, loader_t, storer_t>(
+        f, data, remaining, 0);
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
     auto policy = memory::policies::vectorized_templated<
         vec_size,
         array_t,
-        vectorized_templated_config::elems_per_thread(),
-        vectorized_templated_config::num_threads(),
+        tws,
+        nt,
         OutputType,
         InputTypes...>(data);
     elementwise_kernel_helper<reverted_idx>(f, policy);
@@ -432,20 +526,12 @@ __global__ void vectorized_templated_elementwise_kernel(
 template <
     typename func_t,
     typename array_t,
-    typename inp_calc_t,
-    typename out_calc_t,
-    typename loader_t,
-    typename storer_t,
     typename OutputType,
     typename... InputTypes>
 static inline void launch_vectorized_templated_kernel(
     int64_t N,
     const func_t& f,
-    array_t data,
-    inp_calc_t ic,
-    out_calc_t oc,
-    loader_t l,
-    storer_t s) {
+    array_t data) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + vectorized_templated_config::block_work_size() - 1) /
       vectorized_templated_config::block_work_size();
@@ -457,14 +543,10 @@ static inline void launch_vectorized_templated_kernel(
           8,
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           OutputType,
           InputTypes...>
           <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
-              N, f, data, ic, oc, l, s);
+              N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 4:
@@ -472,14 +554,10 @@ static inline void launch_vectorized_templated_kernel(
           4,
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           OutputType,
           InputTypes...>
           <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
-              N, f, data, ic, oc, l, s);
+              N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 2:
@@ -487,14 +565,10 @@ static inline void launch_vectorized_templated_kernel(
           2,
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           OutputType,
           InputTypes...>
           <<<grid, vectorized_templated_config::num_threads(), 0, stream>>>(
-              N, f, data, ic, oc, l, s);
+              N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     default:
@@ -848,24 +922,14 @@ bool check_binary_rt_types_for_specialization(TensorIteratorBase& iter) {
 
 template <int arg_index>
 struct type_specialized_kernel_launcher {
-  template <
-      typename func_t,
-      typename array_t,
-      typename inp_calc_t,
-      typename out_calc_t,
-      typename loader_t,
-      typename storer_t>
+  template <typename func_t, typename array_t>
   static void apply(
       ScalarType ret_t,
       ScalarType arg0_t,
       ScalarType arg1_t,
       int64_t numel,
       func_t f,
-      array_t data,
-      inp_calc_t input_offset_calculator,
-      out_calc_t output_offset_calculator,
-      loader_t loader,
-      storer_t storer) {
+      array_t data) {
     constexpr ScalarType sret_t = rt_binary_specializations[arg_index][0];
     constexpr ScalarType sarg0_t = rt_binary_specializations[arg_index][1];
     constexpr ScalarType sarg1_t = rt_binary_specializations[arg_index][2];
@@ -876,20 +940,9 @@ struct type_specialized_kernel_launcher {
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
-          inp_calc_t,
-          out_calc_t,
-          loader_t,
-          storer_t,
           cret_t,
           carg0_t,
-          carg1_t>(
-          numel,
-          f,
-          data,
-          input_offset_calculator,
-          output_offset_calculator,
-          loader,
-          storer);
+          carg1_t>(numel, f, data);
     }
   }
 };
@@ -1003,12 +1056,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
         // If we got here, we know we are in one of the specialized cases. We
         // need to translate the runtime type to a statically known type. This
         // is effectively hoisting to the host the switch over runtime type in
-        // the kernel in fetch_and_cast. Loader, storer, offset calculators are
-        // only needed for the reminder loop.
-        auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
-        auto output_offset_calculator = TrivialOffsetCalculator<1>();
-        auto loader = memory::LoadWithCast<traits::arity>(iter);
-        auto storer = memory::StoreWithCast<1>(iter);
+        // the kernel in fetch_and_cast.
         memory::detail::static_unroll<
             type_specialized_kernel_launcher,
             rt_binary_specializations.size()>::
@@ -1018,11 +1066,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
                 iter.input_dtype(1),
                 numel,
                 f,
-                data,
-                input_offset_calculator,
-                output_offset_calculator,
-                loader,
-                storer);
+                data);
         return;
       }
     }

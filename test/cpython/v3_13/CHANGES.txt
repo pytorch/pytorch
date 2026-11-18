@@ -1,5 +1,8 @@
-This subdirectory contains a selection of tests from the CPython repository (branch: v3.13.0):\
-https://github.com/python/cpython/releases/tag/v3.13.0
+This subdirectory contains a selection of tests from the CPython repository.
+Every adapted file pins the same upstream tag in its Dynamo patch header
+(currently v3.13.5; the suite may move together to a newer tag later):
+
+  https://raw.githubusercontent.com/python/cpython/refs/tags/<tag>/Lib/test/<name>.py
 
 Modifications were made to ensure compatibility with the Dynamo infrastructure:
 + Monkey-patched `unittest.TestCase` to `torch._dynamo.test_case.CPythonTestCase`.
@@ -7,3 +10,16 @@ Modifications were made to ensure compatibility with the Dynamo infrastructure:
 + Assigned test "owners."
 + Annotated CPU-intensive tests with the `@slowTest` decorator.
 + Adjusted imports to use `import module` instead of `from test import module`.
+
+Each adapted `*.py` has a matching `*.diff` recording the delta from the
+pristine upstream file. Diffs are generated with `git diff --full-index` so the
+`index <before>..<after>` line carries git blob hashes for offline sync checks
+(see `tools/cpython_diff_sync.py` and
+`tools/linter/adapters/cpython_diff_sync_linter.py`). After editing an adapted
+test, regenerate offline with:
+
+  python tools/regenerate_cpython_diffs.py
+  # or: python tools/regenerate_cpython_diffs.py --only test_foo.py
+
+If reverse-apply cannot reconstruct pristine bytes, download the upstream
+file locally (curl/wget) and pass --pristine; the regen tool never fetches.

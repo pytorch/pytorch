@@ -1,6 +1,5 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/alignment.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUCachingAllocator.h>
@@ -21,9 +20,9 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
     void* data = nullptr;
     try {
       data = c10::alloc_cpu(nbytes);
-    } catch (c10::Error& e) {
+    } catch (c10::Error&) {
       profiledCPUMemoryReporter().OutOfMemory(nbytes);
-      throw e;
+      throw;
     }
     profiledCPUMemoryReporter().New(data, nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
@@ -76,7 +75,7 @@ template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
   static void deleter(void* const pointer) {
-    if (C10_UNLIKELY(!pointer)) {
+    if (!pointer) [[unlikely]] {
       return;
     }
     // TODO: enable with better TLS support on mobile
@@ -101,7 +100,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
   }
 
   DataPtr allocate(const size_t nbytes) override {
-    if (C10_UNLIKELY(0u == nbytes)) {
+    if (0u == nbytes) [[unlikely]] {
       return {
           nullptr,
           nullptr,
@@ -121,9 +120,9 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     } else {
       try {
         data = c10::alloc_cpu(alloc_size);
-      } catch (c10::Error& e) {
+      } catch (c10::Error&) {
         profiledCPUMemoryReporter().OutOfMemory(alloc_size);
-        throw e;
+        throw;
       }
       auto allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
