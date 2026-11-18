@@ -1,15 +1,23 @@
 # Owner(s): ["module: dynamo"]
 
+import dataclasses
 import functools
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Event
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
-from torch._dynamo.guards import GuardBuilder
-from torch._dynamo.source import AttrSource, LocalSource
+from torch._dynamo.guards import GuardBuilder, install_guard
+from torch._dynamo.source import (
+    AttrSource,
+    ConstantSource,
+    EphemeralSource,
+    LocalSource,
+    SkipGuardSource,
+)
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.variables.ctx_manager import GradModeVariable
 from torch._dynamo.variables.lazy import LazyConstantVariable
 from torch._guards import (
     Guard,
@@ -29,6 +37,56 @@ from torch.utils._ordered_set import OrderedSet
 
 class GuardsSetTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_add_labels_before_duplicate_return(self):
+        guard = Guard(LocalSource("x"), GuardBuilder.TYPE_MATCH)
+        guards = GuardsSet()
+        guards.add(guard, label="one", collect_debug_stack=False)
+        guards.add(guard, label="two", collect_debug_stack=False)
+        # Existing per-build fields still distinguish objects in the set.
+        variant = dataclasses.replace(guard, code_list=["different debug info"])
+        guards.add(variant, label="three", collect_debug_stack=False)
+        self.assertEqual(len(guards), 2)
+        key = torch._guards.GuardKey.from_guard(guard)
+        self.assertEqual(list(guards._get_guard_labels(key)), ["one", "two", "three"])
+        guards.remove(guard)
+        self.assertEqual(list(guards._get_guard_labels(key)), ["one", "two", "three"])
+        guards.remove(variant)
+        self.assertEqual(guards.guard_labels, {})
+
+    def test_creation_label_preserves_guard_and_source_semantics(self):
+        source = AttrSource(LocalSource("x"), "value")
+        context = TracingContext(None)
+        with tracing(context):
+            with context.guards_context.guard_label("one"):
+                guard = source.make_guard(GuardBuilder.TYPE_MATCH)
+            with context.guards_context.guard_label("two"):
+                duplicate = source.make_guard(GuardBuilder.TYPE_MATCH)
+        self.assertEqual(guard.creation_label, "one")
+        self.assertEqual(duplicate.creation_label, "two")
+        self.assertEqual(guard, duplicate)
+        self.assertEqual(hash(guard), hash(duplicate))
+        self.assertEqual(str(guard), str(duplicate))
+        self.assertEqual(repr(guard), repr(duplicate))
+        self.assertEqual(source, AttrSource(LocalSource("x"), "value"))
+        self.assertEqual(hash(source), hash(AttrSource(LocalSource("x"), "value")))
+        value = object()
+        obj = type("Input", (), {"value": value})()
+        self.assertIs(source.get_value({}, {"L": {"x": obj}}, {}), value)
+        with self.assertRaises(AttributeError):
+            source.get_value({}, {"L": {"x": object()}}, {})
+        first_codegen, second_codegen = Mock(), Mock()
+        first_codegen.create_load_attrs.return_value = ("LOAD_ATTR", "value")
+        second_codegen.create_load_attrs.return_value = ("LOAD_ATTR", "value")
+        with tracing(context):
+            with context.guards_context.guard_label("one"):
+                source.reconstruct(first_codegen)
+            with context.guards_context.guard_label("two"):
+                source.reconstruct(second_codegen)
+        self.assertEqual(first_codegen.mock_calls, second_codegen.mock_calls)
+        for unguardable in (ConstantSource("constant"), EphemeralSource()):
+            with self.assertRaises(NotImplementedError):
+                unguardable.make_guard(GuardBuilder.TYPE_MATCH)
 
     def test_empty_guard_labels(self):
         guard = Guard(LocalSource("x"), GuardBuilder.TYPE_MATCH)
@@ -285,6 +343,170 @@ class GuardsSetTests(torch._dynamo.test_case.TestCase):
 class GuardContextTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_skipped_install_does_not_attach_labels(self):
+        context = TracingContext(None)
+        guards_context = context.guards_context
+        with tracing(context), guards_context.guard_label("one"):
+            skipped = SkipGuardSource(LocalSource("x")).make_guard(
+                GuardBuilder.TYPE_MATCH
+            )
+            self.assertEqual(skipped.creation_label, "one")
+            install_guard(skipped)
+            with guards_context.skip_guard_install():
+                install_guard(LocalSource("x").make_guard(GuardBuilder.TYPE_MATCH))
+        self.assertFalse(guards_context.dynamo_guards)
+        self.assertEqual(guards_context.dynamo_guards.guard_labels, {})
+
+    def test_creation_label_and_install_fallback(self):
+        context = TracingContext(None)
+        guards_context = context.guards_context
+        source = LocalSource("x")
+        direct = Guard(source, GuardBuilder.GRAD_MODE)
+        singleton = GradModeVariable._guards_singleton
+        unlabeled = source.make_guard(GuardBuilder.TYPE_MATCH)
+        with torch.compiler.guard_ctx("pending"):
+            # Only the active trace is authoritative, even when it masks pending.
+            with tracing(context):
+                self.assertIsNone(guards_context.current_guard_label)
+                self.assertIsNone(
+                    source.make_guard(GuardBuilder.TYPE_MATCH).creation_label
+                )
+                install_guard(unlabeled)
+                self.assertEqual(guards_context.dynamo_guards.guard_labels, {})
+                with guards_context.guard_label("one"):
+                    first = source.make_guard(GuardBuilder.CONSTANT_MATCH)
+                    with guards_context.guard_label("inner"):
+                        inner = source.make_guard(GuardBuilder.ID_MATCH)
+                with guards_context.guard_label("two"):
+                    install_guard(first, inner, direct, unlabeled, singleton)
+                with guards_context.guard_label("three"):
+                    install_guard(direct, singleton)
+                    second = source.make_guard(GuardBuilder.CONSTANT_MATCH)
+                    install_guard(second)
+                nested = TracingContext(None)
+                with tracing(nested):
+                    nested_guard = source.make_guard(GuardBuilder.TYPE_MATCH)
+                    install_guard(nested_guard)
+                    self.assertIsNone(nested_guard.creation_label)
+                    self.assertEqual(
+                        nested.guards_context.dynamo_guards.guard_labels, {}
+                    )
+        guards = guards_context.dynamo_guards
+        for guard, labels in (
+            (first, ["one", "three"]),
+            (inner, ["inner"]),
+            (direct, ["two", "three"]),
+            (singleton, ["two", "three"]),
+            (unlabeled, ["two"]),
+        ):
+            self.assertEqual(
+                list(
+                    guards._get_guard_labels(torch._guards.GuardKey.from_guard(guard))
+                ),
+                labels,
+            )
+        self.assertEqual(first.creation_label, "one")
+        self.assertIsNone(direct.creation_label)
+        self.assertIsNone(unlabeled.creation_label)
+
+    def test_installed_labels_survive_set_operations_and_checkpoint(self):
+        context = TracingContext(None)
+        guards_context = context.guards_context
+        source = LocalSource("x")
+        with tracing(context), guards_context.guard_label("one"):
+            first = source.make_guard(GuardBuilder.TYPE_MATCH)
+            second = AttrSource(source, "value").make_guard(GuardBuilder.ID_MATCH)
+            install_guard(first, second)
+            checkpoint = guards_context.copy_graphstate()
+        key = torch._guards.GuardKey.from_guard(first)
+        copied = guards_context.dynamo_guards.copy()
+        difference = copied - GuardsSet(OrderedSet([second]))
+        self.assertEqual(difference.guard_labels, {key: OrderedSet(["one"])})
+        updated = GuardsSet()
+        updated.update(difference)
+        self.assertEqual(updated.guard_labels, difference.guard_labels)
+        updated.remove(first)
+        self.assertEqual(updated.guard_labels, {})
+        copied.remove_guards_with_source(source)
+        self.assertEqual(copied.guard_labels, {})
+        guards_context.dynamo_guards.clear()
+        guards_context.restore_graphstate(checkpoint)
+        self.assertEqual(guards_context.current_guard_label, "one")
+        self.assertEqual(
+            guards_context.dynamo_guards.guard_labels, checkpoint.guard_labels
+        )
+        self.assertEqual(
+            list(guards_context.dynamo_guards._get_guard_labels(key)), ["one"]
+        )
+
+    @parametrize("graph_break", [False, True])
+    @parametrize("nested_graph_breaks", [False, True])
+    def test_region_guard_creation_across_break(self, graph_break, nested_graph_breaks):
+        labels = {}
+        expected = {}
+        graphs = []
+
+        def record_source(ctx, name, label):
+            value = ctx.get_local(
+                name
+            )._i_will_not_complain_if_bc_breaks_VariableTracker()
+            expected[value.source.name] = {label}
+
+        def record_first(ctx):
+            record_source(ctx, "first", "inner")
+
+        def record_second(ctx):
+            record_source(ctx, "second", "inner")
+
+        def record_outer(ctx):
+            record_source(ctx, "last", "outer")
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            guards = TracingContext.get().guards_context.dynamo_guards
+            for guard in guards:
+                if guard.create_fn is GuardBuilder.CONSTANT_MATCH:
+                    key = torch._guards.GuardKey.from_guard(guard)
+                    labels.setdefault(guard.name, set()).update(
+                        guards._get_guard_labels(key)
+                    )
+            return graph.forward
+
+        def inner(x, values):
+            with torch.compiler.guard_ctx("inner"):
+                first = values[0]
+                x = x + len(first)
+                comptime(record_first)
+                if graph_break:
+                    torch._dynamo.graph_break()
+                second = values[1]
+                x = x + len(second)
+                comptime(record_second)
+                return x
+
+        def fn(x, values):
+            with torch.compiler.guard_ctx("outer"):
+                x = inner(x, values)
+                last = values[2]
+                x = x + len(last)
+                comptime(record_outer)
+                return x
+
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.ones(2)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            for values in (["a", "bb", "ccc"], ["longer", "bb", "changed"]):
+                self.assertEqual(compiled(x, values), x + sum(map(len, values)))
+                snapshot = {name: set(value) for name, value in labels.items()}
+                frames = len(graphs)
+                self.assertEqual(compiled(x, values), x + sum(map(len, values)))
+                self.assertEqual(labels, snapshot)
+                self.assertEqual(len(graphs), frames)
+        self.assertGreaterEqual(len(expected), 3)
+        for name, expected_labels in expected.items():
+            self.assertEqual(labels[name], expected_labels)
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
+
     @parametrize("fullgraph", [False, True])
     @parametrize("prebuilt", [False, True])
     def test_context_inside_compiled_function(self, fullgraph, prebuilt):
@@ -295,7 +517,15 @@ class GuardContextTests(torch._dynamo.test_case.TestCase):
         def check_label(ctx):
             context = TracingContext.get().guards_context
             labels.append(context.current_guard_label)
-            self.assertEqual(context.dynamo_guards.guard_labels, {})
+            callback = next(
+                g for g in context.dynamo_guards if g.name == "L['check_label']"
+            )
+            self.assertEqual(
+                context.dynamo_guards._get_guard_labels(
+                    torch._guards.GuardKey.from_guard(callback)
+                ),
+                OrderedSet(["ambient"]),
+            )
             nested = TracingContext(None)
             self.assertIsNone(nested.guards_context.current_guard_label)
 
@@ -1049,7 +1279,25 @@ class GuardContextTests(torch._dynamo.test_case.TestCase):
         def check_label(ctx):
             context = TracingContext.get().guards_context
             labels.append(context.current_guard_label)
-            self.assertEqual(context.dynamo_guards.guard_labels, {})
+            callback = next(
+                g for g in context.dynamo_guards if g.name == "L['check_label']"
+            )
+            self.assertEqual(
+                context.dynamo_guards._get_guard_labels(
+                    torch._guards.GuardKey.from_guard(callback)
+                ),
+                OrderedSet(["compiled"]),
+            )
+            ambient = [guard for guard in context.dynamo_guards if not guard.name]
+            self.assertTrue(ambient)
+            for guard in ambient:
+                self.assertIsNone(guard.creation_label)
+                self.assertEqual(
+                    context.dynamo_guards._get_guard_labels(
+                        torch._guards.GuardKey.from_guard(guard)
+                    ),
+                    OrderedSet(),
+                )
 
         def backend(graph, inputs):
             backend_labels.append(
@@ -1210,8 +1458,85 @@ class GuardContextTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
 
 
+@instantiate_parametrized_tests
 class LazyGuardRemovalTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("graph_break", [False, True])
+    @parametrize("nested_graph_breaks", [False, True])
+    def test_lazy_creation_and_delayed_guard_install(
+        self, graph_break, nested_graph_breaks
+    ):
+        held = []
+        observed = []
+
+        def create_guard(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["value"]
+            self.assertIs(type(value), LazyConstantVariable)
+            self.assertFalse(value.is_realized())
+            guard = value.source.make_guard(GuardBuilder.CONSTANT_MATCH)
+            self.assertEqual(guard.creation_label, "one")
+            self.assertFalse(value.is_realized())
+            held.append(guard)
+
+        def install_delayed(ctx):
+            guard = held[-1]
+            self.assertEqual(
+                TracingContext.get().guards_context.current_guard_label, "two"
+            )
+            install_guard(guard)
+            guards = TracingContext.get().guards_context.dynamo_guards
+            labels = guards._get_guard_labels(torch._guards.GuardKey.from_guard(guard))
+            self.assertIn("one", labels)
+            observed.append(True)
+
+        def check_realization(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["value"]
+            value.realize()
+            guards = tx.output.guards
+            matching = [
+                guard
+                for guard in guards.get_guards_for_source(value.source)
+                if guard.create_fn is GuardBuilder.CONSTANT_MATCH
+            ]
+            self.assertTrue(matching)
+            # Without a break, realization creates a NEW guard in region two.
+            # A break may already realize the value while reconstructing region one.
+            if not graph_break:
+                self.assertIn(
+                    "two",
+                    guards._get_guard_labels(
+                        torch._guards.GuardKey.from_guard(matching[0])
+                    ),
+                )
+
+        def fn(x, values):
+            with torch.compiler.guard_ctx("one"):
+                value = values[0]
+                comptime(create_guard)
+                x = x.sin()
+                if graph_break:
+                    torch._dynamo.graph_break()
+            with torch.compiler.guard_ctx("two"):
+                comptime(install_delayed)
+                comptime(check_realization)
+                return x + len(value) + len(values)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        x = torch.ones(2)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            for value in ("first", "longer value"):
+                self.assertEqual(compiled(x, [value]), x.sin() + len(value) + 1)
+                frames = counter.frame_count
+                callbacks = len(observed)
+                self.assertEqual(compiled(x, [value]), x.sin() + len(value) + 1)
+                self.assertEqual(counter.frame_count, frames)
+                self.assertEqual(len(observed), callbacks)
+        self.assertTrue(observed)
+        self.assertIsNone(TracingContext(None).guards_context.current_guard_label)
 
     def test_realization_removes_type_guard_metadata(self):
         def check_realization(ctx):
