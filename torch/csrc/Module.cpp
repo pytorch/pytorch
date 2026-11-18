@@ -3175,6 +3175,12 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
       "_set_storage_data_ptr_access_error_msg",
       [](size_t storage_impl_ptr, std::string s) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -3187,6 +3193,19 @@ Call this whenever a new thread is created in order to propagate values from
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->clear_data_ptr_access_error_msg_();
+      });
+
+  py_module.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }
+        }
+        return true;
       });
 
   ASSERT_TRUE(
@@ -3553,11 +3572,15 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_8",
           at::blas::SwizzleType::SWIZZLE_32_8,
-          "gfx950-style 32x8 swizzle (hipBLASLt BLK32_UE8M0_32_8)")
+          "gfx950 32x8 tile")
       .value(
           "SWIZZLE_MN_K4",
           at::blas::SwizzleType::SWIZZLE_MN_K4,
-          "MN-major scales with four values packed along K");
+          "MN-major scales with four values packed along K")
+      .value(
+          "SWIZZLE_128",
+          at::blas::SwizzleType::SWIZZLE_128,
+          "gfx1250 scales grouped by 128 along K");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
