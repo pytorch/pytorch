@@ -1156,6 +1156,39 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         ):
             self.assertEqual(torch.compile(f, fullgraph=True)(x), x.sin().cos())
 
+    @parametrize("cutoff_after_gate", [1, 2, 3])
+    def test_auto_functionalized_decomposition_bisection(self, cutoff_after_gate):
+        calls = 0
+        cutoff = None
+        decomposition_checks = 0
+
+        def disable_subsystem(backend, subsystem, debug_info=None):
+            nonlocal calls, cutoff, decomposition_checks
+            if backend != "inductor" or subsystem != "post_grad_passes":
+                return False
+            calls += 1
+            if debug_info() == "decompose_auto_functionalized":
+                decomposition_checks += 1
+                if cutoff is None:
+                    cutoff = calls + cutoff_after_gate
+            return cutoff is not None and calls > cutoff
+
+        def f(x):
+            out = torch.ones_like(x)
+            sin(x, out)
+            return out.cos()
+
+        x = torch.tensor([0.1, 0.5, 1.0])
+        with (
+            inductor_config.patch(enable_auto_functionalized_v2=False),
+            mock.patch(
+                "torch._inductor.compiler_bisector.CompilerBisector.disable_subsystem",
+                side_effect=disable_subsystem,
+            ),
+        ):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), x.sin().cos())
+        self.assertEqual(decomposition_checks, 1)
+
     @parametrize("post_grad", [False, True])
     @parametrize("enable_v2", [False, True])
     def test_auto_functionalized_without_decomposition(self, enable_v2, post_grad):
