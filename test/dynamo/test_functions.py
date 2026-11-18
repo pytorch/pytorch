@@ -275,8 +275,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             if isinstance(guard.originating_source, TypeMROSource):
                 self.assertNotIn("TYPE_MATCH", guard.guard_types or ())
         source = mro_sources.pop()
-        self.assertIn(("ID_MATCH", GetItemSource(source, 1)), guards)
-        self.assertIn(("ID_MATCH", GetItemSource(source, 2)), guards)
+        self.assertIn(("CLASS_MATCH", GetItemSource(source, 1)), guards)
+        self.assertIn(("CLASS_MATCH", GetItemSource(source, 2)), guards)
 
     @parametrize("initial_builtin", [False, True])
     def test_shared_mro_owner_non_object_tail(self, initial_builtin):
