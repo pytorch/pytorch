@@ -2181,6 +2181,59 @@ class TestVmMoreBytecodes(TestCase):
         self.assertIn("Optimizer.zero_grad", compiled.stats()["compiled_callees"])
 
 
+class FrameChild(BytecodeBase):
+    def scale(self, x):
+        parent = super()
+        return parent.scale(x) + 1
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmFrames(TestCase):
+    """A compiled function has no Python frame, so what reads its own frame is not compiled."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_function_that_reads_its_frame_is_not_compiled(self):
+        def uses_locals(a, b):
+            return sorted(locals())
+
+        def uses_eval(a):
+            return eval("a + 1")
+
+        def uses_frame(a):
+            return sys._getframe().f_locals["a"]
+
+        for f, args, name in (
+            (uses_locals, (1, 2), "locals"),
+            (uses_eval, (1,), "eval"),
+            (uses_frame, (1,), "_getframe"),
+        ):
+            with self.assertRaisesRegex(
+                torch.vm.Unsupported,
+                name + r"\(\) needs a Python frame of its own",
+            ):
+                torch.vm(f, fallback=False)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.assertEqual(torch.vm(f)(*args), f(*args))
+
+    def test_callee_that_reads_its_frame_runs_in_the_interpreter(self):
+        def fmt(name, value):
+            return "{name}={value}".format(**locals())
+
+        def f(obj, x):
+            return fmt("x", x), obj.scale(x)
+
+        compiled = torch.vm(f, fallback=False)
+        self.assertEqual(compiled(FrameChild(), 3), ("x=3", 7))
+        # What an interpreted function calls is not compiled either.
+        self.assertEqual(compiled.stats()["compiled_callees"], [])
+        interpreted = compiled.stats()["interpreted_callees"]
+        self.assertEqual(
+            [name.rsplit(".", 1)[-1] for name in interpreted], ["scale", "fmt"]
+        )
+
+
 def vm_scaled(x, y):
     return unr_loop(x, y)[0] * 2
 
