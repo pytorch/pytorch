@@ -354,10 +354,11 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     One dict per region, with ``where`` (function, block and instructions),
     ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
     tried yet), ``variants``, ``compiles`` (how many of the variants went to
-    the backend: the others had the graph of an earlier one), ``ops`` and
-    ``seconds`` spent tracing and compiling; and one per instruction or run of
-    instructions that was left to the VM, with ``state`` ``"vm"`` and the
-    ``reason``.
+    the backend: the others had the graph of an earlier one), ``open`` (per
+    variant that leaves sizes open, the conditions it holds under), ``ops``
+    and ``seconds`` spent tracing and compiling; and one per instruction or
+    run of instructions that was left to the VM, with ``state`` ``"vm"`` and
+    the ``reason``.
     """
     fn = getattr(fn, "__func__", fn)
     found = _region_passes.get(fn)
