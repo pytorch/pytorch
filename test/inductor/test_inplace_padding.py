@@ -41,10 +41,10 @@ if os.environ.get("TORCHINDUCTOR_INPLACE_PADDING") is not None:
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
-@inductor_config.patch(inplace_padding=enable_inplace_padding)
 class InplacePaddingTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     def test_skip_pad_due_to_fusion(self, device):
         """
         If the padding can be fused with downstream op, there would
@@ -61,6 +61,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     def test_skip_pad_input(self, device):
         """
         Don't apply the padding to graph input since Inductor does not
@@ -79,6 +80,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     def test_pad_non_zero(self, device):
         def f(x):
             x = x + 1
@@ -110,6 +112,7 @@ class InplacePaddingTest(TestCase):
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
         self.assertEqual(num_inplace_padding(), 1)
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     @inductor_config.patch(cpp_wrapper=True)
     @inductor_config.patch("triton.autotune_at_compile_time", True)
     def test_pad_non_zero_cpp_wrapper(self, device):
@@ -165,6 +168,7 @@ class InplacePaddingTest(TestCase):
         self.assertEqual(num_inplace_padding(), 1)
         self.assertTrue(compile_time_autotune_called)
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     def test_pad_too_large(self, device):
         def f(x, y):
             x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
@@ -177,6 +181,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     @inductor_config.patch(can_inplace_pad_graph_input=True)
     def test_mutating_padding_input(self, device):
         """
@@ -198,6 +203,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 1)
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     def test_mutating_padding_output(self, device):
         """
         Inplace padding does not take effect since the `aten.add_` op
@@ -218,6 +224,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     def test_negative_padding(self, device):
         """
         Negative padding (shrinking the tensor) should not trigger inplace padding
@@ -235,10 +242,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @requires_gpu_with_enough_memory(2e10)
-    @inductor_config.patch(force_shape_pad=True)
-    @serialTest()
-    def test_linear_and_cel(self, device):
+    def _linear_and_cel(self, device):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)
         torch.utils.deterministic.fill_uninitialized_empty = True
@@ -278,13 +282,22 @@ class InplacePaddingTest(TestCase):
             ms = do_bench(lambda: opt_f(x, y))
             print(f"{inductor_config.inplace_padding=} {ms=:.3f}")
 
+    @requires_gpu_with_enough_memory(2e10)
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
+    @inductor_config.patch(force_shape_pad=True)
+    @serialTest()
+    def test_linear_and_cel(self, device):
+        self._linear_and_cel(device)
+
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
     @requires_gpu_with_enough_memory(2e10)
+    @inductor_config.patch(inplace_padding=enable_inplace_padding)
     @inductor_config.patch(max_autotune=True)
+    @inductor_config.patch(force_shape_pad=True)
     @serialTest()
     def test_linear_and_cel_max_autotune(self, device):
-        self.test_linear_and_cel(device)
+        self._linear_and_cel(device)
 
 
 instantiate_device_type_tests(
