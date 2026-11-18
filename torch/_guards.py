@@ -20,6 +20,7 @@ from typing_extensions import dataclass_transform
 
 import torch
 from torch.utils import _pytree as pytree
+from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
@@ -31,8 +32,8 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import dis
-    from collections.abc import Callable, Generator, Iterator
-    from types import CodeType
+    from collections.abc import Callable, Generator, Iterable, Iterator
+    from types import CodeType, TracebackType
 
     import sympy
 
@@ -438,6 +439,17 @@ class Guard:
         self.obj_weakref = obj_weakref
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class GuardKey:
+    name: str
+    source: GuardSource
+    create_fn_id: int
+
+    @classmethod
+    def from_guard(cls, guard: Guard) -> GuardKey:
+        return cls(guard.name, guard.source, id(guard.create_fn))
+
+
 T = TypeVar("T")
 
 """
@@ -531,9 +543,20 @@ class GuardsCheckpointState:
     """
 
     dynamo_guards: OrderedSet[Guard]
+    guard_labels: dict[GuardKey, OrderedSet[str]]
+    current_guard_label: str | None
 
-    def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
+    def __init__(
+        self,
+        dynamo_guards: OrderedSet[Guard],
+        guard_labels: dict[GuardKey, OrderedSet[str]] | None = None,
+        current_guard_label: str | None = None,
+    ) -> None:
         self.dynamo_guards = dynamo_guards
+        self.guard_labels = {
+            key: OrderedSet(labels) for key, labels in (guard_labels or {}).items()
+        }
+        self.current_guard_label = current_guard_label
 
     def diff(self, other: GuardsCheckpointState) -> OrderedSet[Guard] | None:
         """
@@ -658,16 +681,36 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: OrderedSet[Guard] | None = None) -> None:
-        if inner is None:
-            self.inner: OrderedSet[Guard] = OrderedSet()
-        else:
-            self.inner = inner
+    def __init__(
+        self,
+        inner: OrderedSet[Guard] | None = None,
+        *,
+        guard_labels: dict[GuardKey, OrderedSet[str]] | None = None,
+    ) -> None:
+        self.inner: OrderedSet[Guard] = OrderedSet(inner)
+        self.guard_labels: dict[GuardKey, OrderedSet[str]] = {}
         # Map from source to list of guards with that source. Incrementally
         # built in `add` method.
         self.source_to_guards: defaultdict[Source, list[Guard]] = defaultdict(list)
         for guard in self.inner:
             self.track_guard_by_source(guard)
+            if guard_labels:
+                key = GuardKey.from_guard(guard)
+                self._add_guard_labels(key, guard_labels.get(key, ()))
+
+    def _add_guard_labels(self, key: GuardKey, labels: Iterable[str]) -> None:
+        labels = OrderedSet(labels)
+        if labels:
+            self.guard_labels.setdefault(key, OrderedSet()).update(labels)
+
+    def _get_guard_labels(self, key: GuardKey) -> OrderedSet[str]:
+        return OrderedSet(self.guard_labels.get(key, ()))
+
+    def _remove_guard_labels(self, key: GuardKey) -> None:
+        self.guard_labels.pop(key, None)
+
+    def _clear_guard_labels(self) -> None:
+        self.guard_labels.clear()
 
     def track_guard_by_source(self, guard: Guard) -> None:
         source = guard.originating_source
@@ -682,7 +725,10 @@ class GuardsSet:
     # Subtraction along with bool is typically used to determine the delta of
     # added guards between checkpoints for higher order ops
     def __sub__(self, other: GuardsSet) -> GuardsSet:
-        return GuardsSet(self.inner - other.inner)
+        return GuardsSet(self.inner - other.inner, guard_labels=self.guard_labels)
+
+    def copy(self) -> GuardsSet:
+        return GuardsSet(self.inner, guard_labels=self.guard_labels)
 
     def __bool__(self) -> bool:
         return bool(self.inner)
@@ -690,6 +736,7 @@ class GuardsSet:
     def clear(self) -> None:
         self.inner = OrderedSet()
         self.source_to_guards = defaultdict(list)
+        self._clear_guard_labels()
 
     def add(
         self, guard: Guard, *, collect_debug_stack: bool = True, skip: int = 0
@@ -704,14 +751,35 @@ class GuardsSet:
         self.inner.add(guard)
         self.track_guard_by_source(guard)
 
-    def update(self, *others: set[Guard]) -> None:
+    def remove(self, guard: Guard) -> None:
+        """Discard a guard and any metadata no longer used by remaining guards."""
+        if guard not in self.inner:
+            return
+        self.inner.discard(guard)
+        source = guard.originating_source
+        source_guards = self.source_to_guards[source]
+        source_guards.remove(guard)
+        if not source_guards:
+            del self.source_to_guards[source]
+        if self.guard_labels:
+            key = GuardKey.from_guard(guard)
+            # Unequal guards can share a key because debug fields affect equality.
+            if key in self.guard_labels and not any(
+                GuardKey.from_guard(remaining) == key for remaining in self.inner
+            ):
+                self._remove_guard_labels(key)
+
+    def update(self, *others: Iterable[Guard]) -> None:
         for o in others:
             for g in o:
                 self.add(g, skip=1)
+                if isinstance(o, GuardsSet) and o.guard_labels:
+                    key = GuardKey.from_guard(g)
+                    self._add_guard_labels(key, o._get_guard_labels(key))
 
     def get_guards_for_source(self, source: Source) -> list[Guard]:
         """Return all guards with the given originating_source."""
-        return list(self.source_to_guards[source])
+        return list(self.source_to_guards.get(source, ()))
 
     def remove_guards_with_source(self, source: Source) -> None:
         """Delete all guards that contain a given source"""
@@ -725,6 +793,11 @@ class GuardsSet:
         self.source_to_guards = defaultdict(list)
         for guard in self.inner:
             self.track_guard_by_source(guard)
+        if self.guard_labels:
+            retained_keys = {GuardKey.from_guard(guard) for guard in self.inner}
+            for key in list(self.guard_labels):
+                if key not in retained_keys:
+                    self._remove_guard_labels(key)
 
 
 """
@@ -740,6 +813,16 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: list[GuardEnvExpr] = []
         self.skip_install: bool = False
+        self.current_guard_label: str | None = None
+
+    @contextlib.contextmanager
+    def guard_label(self, label: str | None) -> Generator[None, None, None]:
+        old = self.current_guard_label
+        self.current_guard_label = label
+        try:
+            yield
+        finally:
+            self.current_guard_label = old
 
     @contextlib.contextmanager
     def skip_guard_install(self) -> Generator[None, None, None]:
@@ -751,13 +834,19 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
             self.skip_install = old
 
     def copy_graphstate(self) -> GuardsCheckpointState:
-        return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))
+        return GuardsCheckpointState(
+            OrderedSet(self.dynamo_guards),
+            self.dynamo_guards.guard_labels,
+            self.current_guard_label,
+        )
 
     def restore_graphstate(self, state: GuardsCheckpointState) -> None:
-        # NB: "steals" the passed in state
         if not isinstance(state, GuardsCheckpointState):
             raise AssertionError(f"expected GuardsCheckpointState, got {type(state)}")
-        self.dynamo_guards = GuardsSet(state.dynamo_guards)
+        self.dynamo_guards = GuardsSet(
+            state.dynamo_guards, guard_labels=state.guard_labels
+        )
+        self.current_guard_label = state.current_guard_label
 
 
 class HopSubgraphCache:
@@ -1030,6 +1119,7 @@ class _TLSStorage(threading.local):
     def __init__(self) -> None:
         self.tracing_context: TracingContext | None = None
         self.compile_context: CompileContext | None = None
+        self.pending_guard_label: str | None = None
 
 
 _TLS = _TLSStorage()
@@ -1122,6 +1212,8 @@ class TracingContext:
 
     def __init__(self, fake_mode: FakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
+        if TracingContext.try_get() is None:
+            self.guards_context.current_guard_label = _TLS.pending_guard_label
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
@@ -1349,6 +1441,11 @@ def tracing(
     will return None.
     """
     old_context = getattr(_TLS, "tracing_context", None)
+    old_pending_guard_label = _TLS.pending_guard_label
+    masking_context = context is None and old_context is not None
+    if masking_context:
+        # Internal nested traces must not inherit the outer call's pending label.
+        _TLS.pending_guard_label = None
     _TLS.tracing_context = context
     try:
         yield context
@@ -1364,6 +1461,48 @@ def tracing(
         ):
             context.fake_mode.shape_env.cleanup()
         _TLS.tracing_context = old_context
+        if masking_context:
+            _TLS.pending_guard_label = old_pending_guard_label
+
+
+class _GuardContext(_DecoratorContextManager):
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self._local = threading.local()
+
+    def clone(self) -> _GuardContext:
+        return self.__class__(self.label)
+
+    @contextmanager
+    def _guard_label(self) -> Generator[None, None, None]:
+        context = TracingContext.try_get()
+        if context is not None:
+            with context.guards_context.guard_label(self.label):
+                yield
+        else:
+            old = _TLS.pending_guard_label
+            _TLS.pending_guard_label = self.label
+            try:
+                yield
+            finally:
+                _TLS.pending_guard_label = old
+
+    def __enter__(self) -> None:
+        # Keep entries per thread so a reusable context or decorator can nest.
+        stack = getattr(self._local, "stack", None)
+        if stack is None:
+            stack = self._local.stack = []
+        manager = self._guard_label()
+        manager.__enter__()
+        stack.append(manager)
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._local.stack.pop().__exit__(exc_type, exc_value, traceback)
 
 
 @overload
