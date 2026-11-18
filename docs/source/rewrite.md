@@ -11,8 +11,23 @@
 ```
 
 ```{eval-rst}
-.. autoclass:: torch.rewrite.Pipeline
-    :members:
+.. autodata:: torch.rewrite.canonical
+```
+
+```{eval-rst}
+.. autofunction:: torch.rewrite.graphs
+```
+
+```{eval-rst}
+.. autodata:: torch.rewrite.inductor
+```
+
+```{eval-rst}
+.. autofunction:: torch.rewrite.regions
+```
+
+```{eval-rst}
+.. autofunction:: torch.rewrite.memory
 ```
 
 ```{eval-rst}
