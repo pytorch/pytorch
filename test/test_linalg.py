@@ -4777,41 +4777,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         self.assertEqual(H, H.mH, atol=atol, rtol=0)
         self.assertGreaterEqual(torch.linalg.eigvalsh(H).min().item(), -atol)
 
-    @skipCUDAIfNoCusolver
-    @skipIfNoNvmath
-    @dtypes(torch.float, torch.double)
-    @decorateIf(
-        unittest.skip('cuSOLVER Xpolar path is CUDA-only'),
-        lambda p: torch.device(p['device']).type != 'cuda',
-    )
-    def test_polar_matches_svd(self, device, dtype):
-        # On CUDA with nvmath present, the cuSOLVER Xpolar path and the SVD-based
-        # aten kernel should agree on the polar factors. Invoke the Xpolar kernel
-        # directly so the comparison exercises it specifically, and check the
-        # reported residual is small. A full-rank input makes the polar
-        # decomposition unique, so the two algorithms must match exactly.
-        if torch.device(device).type != "cuda":
-            self.skipTest("cuSOLVER Xpolar path is CUDA-only")
-        from torch._native.ops.polar import nvmath_impl as nv
-        from torch._native.ops.polar.impl import _check_nvmath
-
-        # The test invokes the Xpolar kernel directly, bypassing the override's
-        # runtime gate/fallback, so skip when the loaded cuSOLVER does not expose
-        # Xpolar (e.g. a CUDA runtime older than the version that added it).
-        if not _check_nvmath():
-            self.skipTest("cuSOLVER runtime does not expose Xpolar")
-
-        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        A = make_fullrank(32, 16, device=device, dtype=dtype)
-        U, H, residual = nv.polar_xpolar(A, return_residual=True)
-        self.assertLess(residual.item(), 1e-6)
-        # SVD-based reference (the aten kernel that backs the CPU/fallback path).
-        Up, S, Vh = torch.linalg.svd(A, full_matrices=False)
-        U_ref = Up @ Vh
-        H_ref = Vh.mH @ (S.unsqueeze(-1) * Vh)
-        H_ref = 0.5 * (H_ref + H_ref.mH)
-        self.assertEqual(U, U_ref)
-        self.assertEqual(H, H_ref)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
@@ -12443,6 +12408,42 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
                         with self.assertWarnsOnceRegex(UserWarning, ".*driver.*ignored on ROCm"):
                             actual = call()
                         self.assertEqual(actual, result)
+
+    @skipCUDAIfNoCusolver
+    @skipIfNoNvmath
+    @dtypes(torch.float, torch.double)
+    @decorateIf(
+        unittest.skip('cuSOLVER Xpolar path is CUDA-only'),
+        lambda p: torch.device(p['device']).type != 'cuda',
+    )
+    def test_polar_matches_svd(self, device, dtype):
+        # On CUDA with nvmath present, the cuSOLVER Xpolar path and the SVD-based
+        # aten kernel should agree on the polar factors. Invoke the Xpolar kernel
+        # directly so the comparison exercises it specifically, and check the
+        # reported residual is small. A full-rank input makes the polar
+        # decomposition unique, so the two algorithms must match exactly.
+        if torch.device(device).type != "cuda":
+            self.skipTest("cuSOLVER Xpolar path is CUDA-only")
+        from torch._native.ops.polar import nvmath_impl as nv
+        from torch._native.ops.polar.impl import _check_nvmath
+
+        # The test invokes the Xpolar kernel directly, bypassing the override's
+        # runtime gate/fallback, so skip when the loaded cuSOLVER does not expose
+        # Xpolar (e.g. a CUDA runtime older than the version that added it).
+        if not _check_nvmath():
+            self.skipTest("cuSOLVER runtime does not expose Xpolar")
+
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        A = make_fullrank(32, 16, device=device, dtype=dtype)
+        U, H, residual = nv.polar_xpolar(A, return_residual=True)
+        self.assertLess(residual.item(), 1e-6)
+        # SVD-based reference (the aten kernel that backs the CPU/fallback path).
+        Up, S, Vh = torch.linalg.svd(A, full_matrices=False)
+        U_ref = Up @ Vh
+        H_ref = Vh.mH @ (S.unsqueeze(-1) * Vh)
+        H_ref = 0.5 * (H_ref + H_ref.mH)
+        self.assertEqual(U, U_ref)
+        self.assertEqual(H, H_ref)
 
 
 class TestLinalgCpuOnly(_TestLinalgMixin, TestCase):
