@@ -23,6 +23,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      disable
      set_default_backend
      get_default_backend
+     guard_ctx
      set_stance
      set_enable_guard_collectives
      cudagraph_mark_step_begin
