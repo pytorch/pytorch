@@ -99,12 +99,11 @@ class BaseSetVariable(VariableTracker):
     one implementation.
     """
 
-    _nonvar_fields = {"_checking_python_constant", *VariableTracker._nonvar_fields}
-
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
 
     _nonvar_fields = {
+        "_checking_python_constant",
         # Same reason as ConstDictVariable.original_items: a construction-time
         # snapshot read only for still-live keys, so traversing it would make
         # removed elements look reachable.  Here the mismatch is even wider --

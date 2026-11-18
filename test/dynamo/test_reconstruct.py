@@ -13,8 +13,8 @@ from unittest import mock
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import Unsupported
 import torch.utils.checkpoint
+from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
