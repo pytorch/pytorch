@@ -20,9 +20,6 @@ set CUDA_VERSION_STR=%CUDA_VER_MAJOR%.%CUDA_VER_MINOR%
 set CUDNN_FOLDER=cuda
 set CUDNN_LIB_FOLDER=lib\x64
 
-:: If CUDA is already installed, skip CUDA installation but still verify cuDNN
-if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto check_cudnn
-
 if %CUDA_VER% EQU 132 goto cuda132
 if %CUDA_VER% EQU 134 goto cuda134
 if %CUDA_VER% EQU 135 goto cuda135
@@ -55,6 +52,9 @@ goto cuda_download
 
 :: Common download logic for CUDA toolkit and cuDNN
 :cuda_download
+:: If CUDA is already installed, skip CUDA installation but still verify cuDNN
+if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto check_cudnn
+
 set CUDNN_LIB_FOLDER=lib
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
