@@ -37,7 +37,7 @@ class ProcessedNodeInputs {
   }
 
   uint16_t& operator[](uint16_t idx) {
-    if (C10_LIKELY(repr_.is_inline())) {
+    if (repr_.is_inline()) [[likely]] {
       TORCH_DCHECK_LT(idx, repr_.inline_repr_.size);
       return repr_.inline_repr_.inputs[idx];
     } else {
@@ -46,7 +46,7 @@ class ProcessedNodeInputs {
   }
 
   [[nodiscard]] uint16_t size() const {
-    if (C10_LIKELY(repr_.is_inline())) {
+    if (repr_.is_inline()) [[likely]] {
       return repr_.inline_repr_.size;
     } else {
       return repr_.outline_repr_.size();
