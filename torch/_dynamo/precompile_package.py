@@ -158,6 +158,18 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
         )
 
 
+def _ambient_cudagraph_inputs() -> dict[str, bool]:
+    # The ambient settings a capture's CUDA graph config is read from.
+    import torch._inductor.config as inductor_config
+
+    return {
+        "triton.cudagraphs": inductor_config.triton.cudagraphs,
+        "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
+        "graph_partition": inductor_config.graph_partition,
+        "cpp_wrapper": inductor_config.cpp_wrapper,
+    }
+
+
 def _capture_cudagraph_config(
     backend: str | torch._TorchCompileInductorWrapper,
 ) -> dict[str, bool]:
@@ -169,18 +181,12 @@ def _capture_cudagraph_config(
     of it because post-compile picks the wrapper by it, while the graph was
     partitioned, or not, when it compiled.
     """
-    import torch._inductor.config as inductor_config
     from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
 
-    config = {
-        "triton.cudagraphs": inductor_config.triton.cudagraphs,
-        "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
-        "graph_partition": inductor_config.graph_partition,
-    }
-    cpp_wrapper = inductor_config.cpp_wrapper
+    config = _ambient_cudagraph_inputs()
     if not isinstance(backend, str):
         config.update((k, v) for k, v in backend.config.items() if k in config)
-        cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
+    cpp_wrapper = config.pop("cpp_wrapper")
     # Without CUDA graphs the other two decide nothing at load, so the calls
     # compile them as configured.
     if not config["triton.cudagraphs"]:
@@ -2010,6 +2016,8 @@ class PrecompileSession(Generic[_P, _R]):
         # What the artifact records as CUDAGRAPH_CONFIG. Inductor compiles every
         # captured graph under it: __enter__ merges it into the backend's options.
         self._cudagraph_config: dict[str, bool] = {}
+        # The ambient settings it was read from, which every call is held to.
+        self._cudagraph_inputs: dict[str, bool] = {}
         # Dynamo reads triton.cudagraphs as well: under it a Python float argument
         # is specialized rather than passed as a CPU scalar tensor, which keeps an
         # unpartitioned graph out of CUDA graphs. Only such a capture's calls are
@@ -2018,6 +2026,7 @@ class PrecompileSession(Generic[_P, _R]):
         self._traced_under: dict[str, bool] = {}
         if self._backend_name == "inductor":
             config = self._cudagraph_config = _capture_cudagraph_config(backend)
+            self._cudagraph_inputs = _ambient_cudagraph_inputs()
             if config["triton.cudagraphs"] and not config["graph_partition"]:
                 self._traced_under = config
         _check_cudagraph_policy(self._cudagraph_config)
@@ -2144,6 +2153,8 @@ class PrecompileSession(Generic[_P, _R]):
         limit = max(
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
+        if self._cudagraph_inputs:
+            self._check_cudagraph_inputs()
         # Each compile reads the policy again, so one set since capture() is
         # refused before this call compiles under it.
         _check_cudagraph_policy(self._cudagraph_config)
@@ -2182,6 +2193,36 @@ class PrecompileSession(Generic[_P, _R]):
                 artifact = PrecompileContext.take_artifact(backend_id)
                 if artifact is not None:
                     self._backend_artifacts[backend_id] = artifact
+
+    def _check_cudagraph_inputs(self) -> None:
+        """Refuse a call made after the ambient config that ``CUDAGRAPH_CONFIG``
+        was read from changed.
+
+        Inductor compiles the call's graphs under the recorded config all the
+        same, so the change would be silently ignored. cpp_wrapper is not in the
+        record but decides it: turned on later, it would compile a graph without
+        the CUDA graphs the record has on.
+        """
+        backend = self._backend
+        options: Mapping[str, object] = (
+            {} if isinstance(backend, str) else backend.config
+        )
+        snapshot, ambient = self._cudagraph_inputs, _ambient_cudagraph_inputs()
+        changed: list[str]
+        if options.get("triton.cudagraphs", snapshot["triton.cudagraphs"]):
+            changed = [k for k, v in snapshot.items() if ambient[k] != v]
+        else:
+            # A capture without CUDA graphs reads only that flag, and not at all
+            # when its options decide it, as under torch.compile.
+            on = ambient["triton.cudagraphs"] and "triton.cudagraphs" not in options
+            changed = ["triton.cudagraphs"] if on else []
+        if changed:
+            raise PackageError(
+                f"{', '.join(changed)} changed since capture() began: the artifact "
+                "records one CUDA graph config, read when capture() is called, "
+                "for every captured call. Restore it for the captured calls; to "
+                "capture under another value, set it before capture()."
+            )
 
     def _check_cudagraph_overrides(
         self, backends: Mapping[str, BackendCacheArtifact[Any]]

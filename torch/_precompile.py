@@ -4122,6 +4122,13 @@ def capture(
     is refused in ``options``, and a capture with CUDA graphs on refuses one
     set in ``torch._inductor.config``: unset it while capturing and set it in
     the loading process.
+    ``triton.cudagraphs``, ``triton.cudagraph_trees``, ``graph_partition`` and
+    ``cpp_wrapper`` are read when ``capture()`` is called: a capture with CUDA
+    graphs on raises on a call made after one of them changed in
+    ``torch._inductor.config``, and one without raises on a call made with
+    ``triton.cudagraphs`` turned on there, which it would ignore, unless its
+    ``mode`` or ``options`` set ``triton.cudagraphs`` (they win, as under
+    :func:`torch.compile`).
 
     ``CUDAGRAPH_CONFIG`` reaches Inductor as ``options`` do, so Dynamo traces
     the captured calls under ``torch._inductor.config``, as under
