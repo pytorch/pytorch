@@ -98,6 +98,7 @@ from .static_triton_launcher import (
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
+from .tiling import block_to_prefix, get_max_block
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -572,8 +573,10 @@ def disable_caching_autotuner_plugins() -> Generator[None, None, None]:
 class CachingAutotunerPlugin:
     """Base class for ``CachingAutotuner`` plugins.
 
-    Each hook returns ``DEFER`` to fall through to the next plugin / default
-    behavior, or any other value to short-circuit ``run()`` with that value.
+    Each ``pre_*`` hook returns ``DEFER`` to fall through to the next plugin /
+    default behavior, or any other value to short-circuit ``run()`` with that
+    value. ``holds_candidates`` and ``tunes_prebuilt_launchers`` are questions
+    ``torch.compiler.precompile`` asks every plugin; they return ``bool``.
     """
 
     def pre_compile(self, autotuner: CachingAutotuner) -> object:
@@ -631,6 +634,34 @@ class CachingAutotunerPlugin:
         instead.
         """
         return DEFER
+
+    def holds_candidates(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin emptied ``autotuner.launchers`` and is still choosing
+        among its ``compile_results`` on real launches.
+
+        ``torch.compiler.precompile`` freezes every candidate of such a kernel,
+        which it would otherwise refuse for having no single launcher, with
+        coordinate descent and combo tuning off. It asks only when every compile
+        result is static, with and without the kernel's lock held, so the answer
+        must be cheap and free of side effects. Serving finishes the tuning under
+        a plugin whose ``tunes_prebuilt_launchers`` is True, and keeps the first
+        candidate without one.
+        """
+        return False
+
+    def tunes_prebuilt_launchers(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin chooses among the launchers ``autotuner`` already
+        built, on real launches and without compiling.
+
+        A kernel ``torch.compiler.precompile`` froze with several candidates
+        keeps them all when it loads under such a plugin, and only the first
+        otherwise; ``holds_candidates`` is what made the capture freeze them.
+        A plugin that returns True must then resolve ``autotuner.launchers``
+        itself, in ``pre_dispatch`` or ``pre_autotune``: deferring leaves
+        ``run()`` to ``autotune_to_one_config``, which ``no_compilation()``
+        refuses.
+        """
+        return False
 
 
 def get_caching_autotuner_plugins(
@@ -2977,42 +3008,39 @@ class CachingAutotuner(KernelInterface):
             log.warning("Unexpected error building fast launcher", exc_info=True)
             return None
 
+    def _launcher_arg_names(self, cfg: Config) -> list[str]:
+        """Names of the signature args the launcher is called with, in order."""
+        if not triton_version_uses_attrs_dict():
+            return list(self.triton_meta["signature"].keys())
+
+        # constexprs are not passed in as args
+        new_signature: list[str] = []
+        from triton.runtime.interpreter import InterpretedFunction
+
+        for i, x in enumerate(self.triton_meta["signature"].keys()):
+            if isinstance(self.fn, InterpretedFunction):
+                # These are torch compiled triton kernels that definitely
+                # have block size configs. Dynamo does not currently
+                # trace user defined triton kernels when TRITON_INTERPRET=1
+                if x not in cfg.kwargs:
+                    new_signature.append(x)
+            elif i not in get_constexprs(self.fn):
+                # use constexprs rather than just configs since user
+                # defined triton kernels may not have any configs
+                new_signature.append(x)
+
+        return new_signature
+
     def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config
     ) -> tuple[tuple[Any, ...], tuple[int, int, int]]:
-        if triton_version_uses_attrs_dict():
-
-            def filtered_signature() -> list[str]:
-                # constexprs are not passed in as args
-                new_signature: list[str] = []
-                from triton.runtime.interpreter import InterpretedFunction
-
-                for i, x in enumerate(self.triton_meta["signature"].keys()):
-                    if isinstance(self.fn, InterpretedFunction):
-                        # These are torch compiled triton kernels that definitely
-                        # have block size configs. Dynamo does not currently
-                        # trace user defined triton kernels when TRITON_INTERPRET=1
-                        if x not in cfg.kwargs:
-                            new_signature.append(x)
-                    elif i not in get_constexprs(self.fn):
-                        # use constexprs rather than just configs since user
-                        # defined triton kernels may not have any configs
-                        new_signature.append(x)
-
-                return new_signature
-
-        else:
-
-            def filtered_signature() -> list[str]:
-                return list(self.triton_meta["signature"].keys())
-
         grid = GridExpr.from_meta(
             self.inductor_meta, cfg, mode=self.grid_mode
         ).eval_slow(
             dict(
                 zip(
                     [
-                        *filtered_signature(),
+                        *self._launcher_arg_names(cfg),
                         *self.inductor_meta.get("extra_launcher_args", ()),
                     ],
                     args,
@@ -4152,7 +4180,7 @@ def check_config(cfg, *, xnumel=None, ynumel=None, z0_numel=None):
                     f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
                     f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
                 )
-        max_block = TRITON_MAX_BLOCK[label]
+        max_block = get_max_block(label, TRITON_MAX_BLOCK)
         max_block_str = f'config.triton.max_block["{label}"]'
         if max_block % block != 0:
             raise AssertionError(
@@ -4168,8 +4196,8 @@ def check_max_block(cfg: dict[str, int]):
     for var, val in cfg.items():
         block_suffix = "BLOCK"
         if block_suffix in var:
-            prefix = var.removesuffix(block_suffix)
-            max_block = TRITON_MAX_BLOCK[prefix]
+            prefix = block_to_prefix(var)
+            max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
             if val > max_block:
                 raise AssertionError(
                     f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
@@ -4265,13 +4293,13 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if (
-            frozenset(("YBLOCK", "Z0_BLOCK", "R1_BLOCK", "R2_BLOCK"))
-            & cfg.kwargs.keys()
+        if any(
+            key.endswith("BLOCK") and key not in ("XBLOCK", "R0_BLOCK")
+            for key in cfg.kwargs
         ):
             raise AssertionError(
-                "min_xblock/min_rblock do not support YBLOCK, Z0_BLOCK, "
-                f"R1_BLOCK, or R2_BLOCK configs: {cfg}"
+                "min_xblock/min_rblock do not support YBLOCK, Z blocks, "
+                f"or reduction blocks other than R0_BLOCK: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
@@ -4503,7 +4531,7 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
     rnumels = {}
     for idx in range(num_reduction_dims - 1, -1, -1):
         prefix = f"r{idx}_"
-        max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
+        max_size = min(size_hints[prefix], get_max_block(prefix, TRITON_MAX_BLOCK))
         dim = min(max_size, remaining)
         if remaining % dim != 0:
             raise AssertionError(
@@ -4705,9 +4733,10 @@ def _combo_coordesc_meta(
                 continue
             field_order.append(key)
             block_key = key.rsplit("_", 1)[0]
-            prefix = block_key.removesuffix("BLOCK").lower()
-            if (max_block := TRITON_MAX_BLOCK.get(prefix.upper())) is not None:
-                field_limits[key] = min(max_block, size_hints_i.get(prefix, max_block))
+            prefix = block_to_prefix(block_key)
+            if prefix in size_hints_i:
+                max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
+                field_limits[key] = min(max_block, size_hints_i[prefix])
             if block_key in min_block_sizes:
                 field_minimums[key] = min_block_sizes[block_key]
     return field_order, field_limits, field_minimums
@@ -4862,10 +4891,10 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 continue
             combined_key = f"{key}_{i}"
             group_coordesc_fields.add(combined_key)
-            prefix = key.removesuffix("BLOCK").lower()
+            prefix = block_to_prefix(key)
             if prefix in size_hints_i:
                 combo_coordesc_field_limits[combined_key] = min(
-                    TRITON_MAX_BLOCK[prefix.upper()],
+                    get_max_block(prefix, TRITON_MAX_BLOCK),
                     size_hints_i[prefix],
                 )
             if key in min_block_sizes_i:

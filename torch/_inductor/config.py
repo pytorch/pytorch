@@ -496,6 +496,8 @@ reorder_prefetch_limit: int | None = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = lite_mode_default(False, True)
 reorder_for_peak_memory_debug = False
+# reject a reorder_for_peak_memory candidate that changes the input order of collectives and waits
+reorder_for_peak_memory_preserve_collective_order = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
 # it is beneficial to switch the scheduling strategy. So instead of using
@@ -2700,6 +2702,18 @@ class triton:
     )
 
     dynamic_disable_pipelining = True
+
+    # Experimental. Applies only on compute capability 10.0 (B200, GB200), not
+    # on sm103 or sm110. It changes the config of non-persistent OUTER
+    # reductions that have an x size hint of 65536 or more, one dynamic
+    # dimension, and 3 or more loads: XBLOCK=64, R0_BLOCK=8, num_warps=2
+    # instead of R0_BLOCK=1. Without max-autotune this is the only config for
+    # these kernels, so the autotuner cannot fall back to the old one. It stays
+    # off until benchmarks on more models show no regressions; then it becomes
+    # the default or is removed.
+    sm100_outer_reduction_r0_block_8: bool = (
+        os.environ.get("TORCHINDUCTOR_SM100_OUTER_REDUCTION_R0_BLOCK_8", "0") == "1"
+    )
 
 
 class aot_inductor:
