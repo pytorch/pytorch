@@ -283,27 +283,20 @@ class ModelPool {
   }
 
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
-#ifdef __aarch64__
-    // push finished model instances to the end of in_flight_models_
-    auto it = std::partition(
-        in_flight_models_.begin(), in_flight_models_.end(), [](Model* m) {
-          return !m->is_finished();
-        });
-#else
-    // push finished model instances to the end of in_flight_models_
-    auto it = std::stable_partition(
-        in_flight_models_.begin(), in_flight_models_.end(), [](Model* m) {
-          return !m->is_finished();
-        });
-#endif
-
-    if (it != in_flight_models_.end()) {
-      // We have finished model instances that can be pushed into
-      // available_models_ so that we don't have to block waiting on
-      // model_state_changed_.
-      available_models_.insert(
-          available_models_.end(), it, in_flight_models_.end());
-      in_flight_models_.erase(it, in_flight_models_.end());
+    // Move every finished run to available_models_, oldest first, so the most
+    // recently launched one is reused first. std::stable_partition keeps that
+    // order too, but its temporary buffer caused OOMs on aarch64 hosts running
+    // multi-threaded predictors.
+    auto still_in_flight = in_flight_models_.begin();
+    for (auto* model : in_flight_models_) {
+      if (model->is_finished()) {
+        available_models_.push_back(model);
+      } else {
+        *still_in_flight++ = model;
+      }
+    }
+    if (still_in_flight != in_flight_models_.end()) {
+      in_flight_models_.erase(still_in_flight, in_flight_models_.end());
       model_state_changed_.notify_all();
       return;
     }
