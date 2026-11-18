@@ -73,6 +73,8 @@ struct Builder<'a> {
     removed_phis: HashSet<V>,
     value_names: Vec<Option<String>>,
     bool_values: HashSet<V>,
+    /// Values that are constants of the code: nothing to keep alive.
+    const_values: HashSet<V>,
 
     out_insts: Vec<Vec<Inst>>,
     out_terms: Vec<Option<Term>>,
@@ -281,6 +283,25 @@ impl<'a> Builder<'a> {
                 insts.push(Inst { dst: NONE, op: $op, bc: $off, kills: Vec::new() })
             };
         }
+        // What the locals are bound to stays alive until the function is
+        // left.
+        macro_rules! hold_locals {
+            ($off:expr) => {{
+                let mut held: Vec<V> = Vec::new();
+                for local in 0..self.nlocals as u32 {
+                    if self.slots.contains_key(&local) {
+                        continue;
+                    }
+                    let v = self.read_var(local, b);
+                    if v != UNDEF && !self.const_values.contains(&v) && !held.contains(&v) {
+                        held.push(v);
+                    }
+                }
+                if !held.is_empty() {
+                    effect!($off, Op::Hold(held));
+                }
+            }};
+        }
         macro_rules! pop_n {
             ($n:expr) => {{
                 let n: usize = $n;
@@ -323,6 +344,7 @@ impl<'a> Builder<'a> {
                 }
                 Bc::LoadConst => {
                     let v = emit!(off, Op::Const(arg));
+                    self.const_values.insert(v);
                     stack.push(v);
                 }
                 // A local that lives in a frame slot is read and written there.
@@ -367,6 +389,12 @@ impl<'a> Builder<'a> {
                     }
                     if v != UNDEF && self.value_names[v as usize].is_none() {
                         self.value_names[v as usize] = self.varnames.get(arg as usize).cloned();
+                    }
+                    // The frame lets go of what the variable was bound to
+                    // here, not earlier.
+                    let old = self.read_var(arg, b);
+                    if old != UNDEF && old != v && !self.const_values.contains(&old) {
+                        effect!(off, Op::Hold(vec![old]));
                     }
                     self.write_var(arg, b, v);
                 }
@@ -720,9 +748,11 @@ impl<'a> Builder<'a> {
                 }
                 Bc::ReturnValue => {
                     let v = pop_value!();
+                    hold_locals!(off);
                     term = Some(Term::Return(v));
                 }
                 Bc::ReturnConst => {
+                    hold_locals!(off);
                     let v = emit!(off, Op::Const(arg));
                     term = Some(Term::Return(v));
                 }
@@ -735,6 +765,7 @@ impl<'a> Builder<'a> {
                         }
                         _ => (NONE, NONE),
                     };
+                    hold_locals!(off);
                     term = Some(Term::Raise { exc, cause });
                 }
                 Bc::PushExcInfo => {
@@ -756,6 +787,7 @@ impl<'a> Builder<'a> {
                 }
                 Bc::Reraise => {
                     let exc = pop_value!();
+                    hold_locals!(off);
                     term = Some(Term::Reraise(exc));
                 }
                 Bc::WithExceptStart => {
@@ -1129,6 +1161,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             entry_depth: vec![None; nblocks],
             entry_stacks: vec![Vec::new(); nblocks],
             null_slots: null_slots.clone(),
+            const_values: HashSet::new(),
             forward: Vec::new(),
             phi_block: HashMap::new(),
             phi_ops: HashMap::new(),
@@ -1416,6 +1449,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::BuildList(vs)
         | Op::BuildSet(vs)
         | Op::BuildMap(vs)
+        | Op::Hold(vs)
         | Op::BuildString(vs) => {
             for v in vs.iter_mut() {
                 r!(v);
