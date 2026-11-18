@@ -89,7 +89,6 @@ def is_pinned_impl(self: ComplexTensor, device: torch.device | None = None) -> b
 SIMPLE_OPS_LIST = [
     aten.slice,
     aten.flatten,
-    aten.view,
     aten.diagonal,
     aten.expand,
     aten.unsqueeze,
@@ -1209,3 +1208,18 @@ def _to_copy_out(
     )
     out.copy_(temp)
     return out
+
+@register_complex(aten.view.dtype)
+def view_dtype_impl(
+    self: ComplexTensor,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    if not dtype.is_complex:
+        raise RuntimeError("Cannot take a view of non-interleaved tensor.")
+
+    real_dtype = COMPLEX_TO_REAL.get(dtype, dtype)
+    re, im = split_complex_arg(self)
+    return ComplexTensor(
+        re.view(real_dtype),
+        im.view(real_dtype),
+    )
