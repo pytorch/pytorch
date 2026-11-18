@@ -2532,6 +2532,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         y = f(x)
         self.assertEqual(y.shape, x.shape)
 
+    def test_check_constant_true_ignores_message_closure(self):
+        def f(x):
+            torch._check(x.ndim == 2, lambda: f"Expected matrix, got {x.shape}")
+            return x.sin() + 1
+
+        x = torch.randn(2, 3)
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), f(x))
+
     def test_check_compiles_when_predicate_true_and_message_string(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):
