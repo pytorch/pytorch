@@ -138,6 +138,7 @@ __all__ = [
     "no_grad",
     "rand",
     "randn",
+    "rewrite",
     "save",
     "seed",
     "set_default_device",
@@ -161,6 +162,7 @@ __all__ = [
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
+    "vm",
     "vmap",
 ]
 
@@ -3386,7 +3388,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import compiler as compiler, fx as fx
+from torch import compiler as compiler, fx as fx, rewrite as rewrite, vm as vm
 
 
 class _TritonLibrary:
