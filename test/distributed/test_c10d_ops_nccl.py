@@ -286,7 +286,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
             ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
         ):
-            with self.assertRaisesRegex(ValueError, f"Cannot use {err} with X?CCL"):
+            with self.assertRaisesRegex(ValueError, f"Cannot use {err} with [NX]CCL"):
                 allreduce(tensors, op)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/157879")
@@ -480,7 +480,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                 (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
                 ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
             ):
-                with self.assertRaisesRegex(ValueError, f"Cannot use {err} with X?CCL"):
+                with self.assertRaisesRegex(ValueError, f"Cannot use {err} with [NX]CCL"):
                     reduce(tensors, self.rank, rt, op)
 
             # Premul sum (XCCL reduce lacks it: https://github.com/intel/torch-xpu-ops/issues/5777)
