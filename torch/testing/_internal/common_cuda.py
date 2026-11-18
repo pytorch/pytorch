@@ -238,8 +238,9 @@ def gfx_arch_supports_opportunistic_fastatomics():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        # gfx1250-strict ships in the AOTriton gfx1250 image. The arch match is
-        # exact, so list strict itself; "gfx1250" does not cover it.
+        # gfx1250-strict uses the AOTriton gfx1250 image.
+        # The arch match is exact, so list strict itself; "gfx1250" does
+        # not cover it.
         # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
@@ -274,8 +275,9 @@ def evaluate_platform_sdpa_supports_hdim512():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        # gfx1250-strict ships in the AOTriton gfx1250 image. The arch match is
-        # exact, so list strict itself; "gfx1250" does not cover it.
+        # gfx1250-strict uses the AOTriton gfx1250 image.
+        # The arch match is exact, so list strict itself; "gfx1250" does
+        # not cover it.
         # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
