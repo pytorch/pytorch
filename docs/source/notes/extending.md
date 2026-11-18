@@ -1211,9 +1211,13 @@ semantics.
 
 - ``__tensor_flatten__(self)`` returns ``(names, metadata)``. ``names`` is a
   sequence of stable attribute names, not the inner tensors themselves. For a
-  wrapper storing a tensor in ``self.elem``, return ``["elem"]``. Include the
-  inner values that participate in tracing; put additional information needed
-  to reconstruct the wrapper in ``metadata``.
+  wrapper storing a tensor in ``self.elem``, return ``["elem"]``. Each name must
+  refer to a tensor (which can itself be a traceable wrapper subclass) or a
+  registered reference-type opaque object. Put other information needed to
+  reconstruct the wrapper in ``metadata``. For Dynamo's default metadata
+  guard, use values that can be deep-copied and compared by value with ``==``,
+  such as strings or tuples of integers. Keep the metadata equal across calls
+  that should reuse the same compiled graph.
 - ``__tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride)``
   is a static method or class method that returns a new instance of the wrapper.
   ``inner_tensors`` maps the names returned by ``__tensor_flatten__`` to their
@@ -1228,6 +1232,7 @@ constructor accepts ``outer_size`` and ``outer_stride`` and uses them when
 creating the wrapper, and that it already implements ``__torch_dispatch__``:
 
 ```{code-block} python
+:dedent: 4
 
     def __tensor_flatten__(self):
         return ["elem"], self.label
@@ -1247,6 +1252,7 @@ should produce an equivalent wrapper with the same size, stride, inner values,
 and metadata:
 
 ```{code-block} python
+:dedent: 4
 
     names, metadata = x.__tensor_flatten__()
     rebuilt = type(x).__tensor_unflatten__(
