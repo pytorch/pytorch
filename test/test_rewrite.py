@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -5937,6 +5938,56 @@ class TestCfgRegions(TestCase):
         # The optimizer is compiled by the VM, but nothing in it is a region.
         plumbing = ("Adam", "Optimizer", "_single_tensor", "_multi_tensor", "adam")
         self.assertEqual([w for w in where if w.startswith(plumbing)], [])
+
+    def test_a_graph_is_made_for_the_default_device_it_runs_under(self):
+        def made(x):
+            return ((x * 2 + 1) * x - 3) / 2
+
+        graphs = []
+        passes = with_graphs(self.counting(graphs))
+        compiled = torch.rewrite(made, passes=passes, fallback=False)
+        x = torch.arange(3.0)
+        for _ in range(8):
+            self.assertEqual(compiled(x), made(x))
+        self.assertEqual(len(graphs), 1)
+        # What a default device does is built into a graph: there is one
+        # graph for running under it and one for running without.
+        with torch.device("cpu"):
+            for _ in range(4):
+                self.assertEqual(compiled(x), made(x))
+        self.assertEqual(len(graphs), 2)
+        for _ in range(3):
+            self.assertEqual(compiled(x), made(x))
+        self.assertEqual(len(graphs), 2)
+
+    def test_a_graph_is_called_below_a_default_device(self):
+        seen = []
+        handle = DeviceContext.__torch_function__
+
+        def counting(self, func, types, args=(), kwargs=None):
+            seen.append(func)
+            return handle(self, func, types, args, kwargs)
+
+        def run(gm, example_inputs):
+            # A backend whose code calls torch functions, as Inductor's does.
+            return lambda *args: [torch.add(out, 0) for out in gm(*args)]
+
+        model = RegionNet().eval()
+        compiled = torch.rewrite(region_infer, passes=with_graphs(run), fallback=False)
+        x = torch.randn(2, 3, 6, 6)
+        with torch.no_grad(), torch.device("cpu"):
+            for _ in range(8):
+                self.assertEqual(compiled(model, x), region_infer(model, x))
+            self.assertEqual(len(self.compiled_regions(compiled)), 1)
+            with unittest.mock.patch.object(
+                DeviceContext, "__torch_function__", counting
+            ):
+                out = compiled(model, x)
+            self.assertEqual(out, region_infer(model, x))
+            stack = torch.overrides._get_current_function_mode_stack()
+            self.assertEqual([type(mode) for mode in stack], [DeviceContext])
+        # The mode is not called for what the backend's code does.
+        self.assertEqual(seen, [])
 
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
