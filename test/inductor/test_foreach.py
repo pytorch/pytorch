@@ -1135,21 +1135,26 @@ class ForeachTests(TestCase):
         def test_foreach_add(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add_([a0, a1, a2], [b0, b1, b2])
 
-        input = torch.ones(10, 10, device=GPU_TYPE)
-        input2 = torch.ones(10, 10, device=GPU_TYPE)
-        inps = [
-            input,
-            input.view(10, 10),
-            input.view(10, 10),
-            input2,
-            input2.view(10, 10),
-            input2.view(10, 10),
-        ]
+        def inputs():
+            a = torch.ones(10, 10, device=GPU_TYPE)
+            b = torch.ones(10, 10, device=GPU_TYPE)
+            return [
+                a,
+                a.view(10, 10),
+                a.view(10, 10),
+                b,
+                b.view(10, 10),
+                b.view(10, 10),
+            ]
 
-        out_eager = test_foreach_add(*inps)
-        out_compiled = torch.compile(test_foreach_add)(*inps)
+        eager_inputs, compiled_inputs = inputs(), inputs()
+        out_eager = test_foreach_add(*eager_inputs)
+        out_compiled = torch.compile(test_foreach_add)(*compiled_inputs)
 
         self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(eager_inputs, compiled_inputs)
+        for output, original in zip(out_compiled, compiled_inputs[:3], strict=True):
+            self.assertTrue(torch._C._is_alias_of(output, original))
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
     @requires_gpu

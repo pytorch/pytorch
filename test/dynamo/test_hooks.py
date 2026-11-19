@@ -13,6 +13,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.utils._pytree as pytree
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._dynamo.comptime import comptime
@@ -37,7 +38,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.utils import _pytree
 from torch.utils.hooks import RemovableHandle
 
 
@@ -607,7 +607,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             copied = flags.copy()
             if isinstance(copied, defaultdict):
                 return x + 1, copied.default_factory is int, repr(flags)
-            return x + 1, copied, _pytree.tree_map(operator.not_, flags), repr(flags)
+            return x + 1, copied, pytree.tree_map(operator.not_, flags), repr(flags)
 
         flags = defaultdict(int) if mapping_type is defaultdict else mapping_type()
         if populated:
@@ -646,11 +646,11 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             subtest(lambda d: 1 in {1: True}.keys() & d, name="view_intersection"),
             subtest(lambda d: 1 in d | {0: True}.keys(), name="reverse_view_union"),
             subtest(
-                lambda d: 1 in _pytree.tree_map(lambda value: True, d),
+                lambda d: 1 in pytree.tree_map(lambda value: True, d),
                 name="tree_map",
             ),
             subtest(
-                lambda d: 1 in _pytree.tree_map_with_path(lambda path, value: True, d),
+                lambda d: 1 in pytree.tree_map_with_path(lambda path, value: True, d),
                 name="tree_map_with_path",
             ),
         ],
@@ -761,7 +761,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 self.assertIs(actual._forward_hooks[key], hook)
         self.assertEqual(counter.frame_count, 2 if populated else 1)
 
-    @parametrize("global_flags", [False, True])
+    @parametrize("registry", ["forward", "backward", "global"])
     @parametrize(
         "operation, populated",
         [
@@ -777,18 +777,19 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             subtest((lambda d: d.copy(), False), name="copy"),
             subtest((lambda d: {} | d, False), name="reflected_union"),
             subtest((lambda d: isinstance(d, OrderedDict), False), name="instance"),
+            subtest((lambda d: d.__dict__ is not None, False), name="instance_dict"),
             subtest((lambda d: hasattr(d, "move_to_end"), False), name="hasattr"),
             subtest((lambda d: d.popitem(last=False), False), name="popitem"),
             subtest((lambda d: d.move_to_end(1), False), name="move_to_end"),
             subtest((lambda d: d.move_to_end is not None, False), name="read_method"),
         ],
     )
-    def test_hook_dict_observable_type(self, operation, populated, global_flags):
+    def test_hook_dict_observable_type(self, operation, populated, registry):
         hook_api = torch.nn.modules.module
 
         def fn(x, module):
-            hooks = module._forward_hooks
-            if global_flags:
+            hooks = getattr(module, f"_{registry}_hooks", None)
+            if registry == "global":
                 hooks = hook_api._global_forward_hooks_with_kwargs
             try:
                 return x + 1, operation(hooks)
@@ -800,13 +801,15 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         for kind in (dict, OrderedDict, dict, OrderedDict):
             module = torch.nn.Identity()
             hooks = kind({1: identity_forward_hook} if populated else {})
-            module._forward_hooks = hooks
+            if registry != "global":
+                setattr(module, f"_{registry}_hooks", hooks)
             flags = kind(hooks)
             with patch.object(hook_api, "_global_forward_hooks_with_kwargs", flags):
                 expected = fn(x, module)
                 actual = compiled(x, module)
                 self.assertEqual(actual, expected)
-                self.assertIs(type(actual[1]), type(expected[1]))
+                if isinstance(expected[1], dict):
+                    self.assertIs(type(actual[1]), type(expected[1]))
         self.assertEqual(counter.frame_count, 2)
 
     @torch._dynamo.config.patch(skip_nnmodule_hook_guards=True)

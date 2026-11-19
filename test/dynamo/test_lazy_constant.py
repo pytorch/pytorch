@@ -237,9 +237,7 @@ class LazyConstantVariableTests(TestCase):
 
     def test_lazy_hashability_uses_actual_type(self):
         class Key:
-            @property
-            def __class__(self):
-                return types.BuiltinFunctionType
+            __class__ = types.BuiltinFunctionType
 
         lazy = LazyVariableTracker.create(Key(), LocalSource("key"))
         self.assertFalse(lazy.is_hashable_lazy())
@@ -249,10 +247,8 @@ class LazyConstantVariableTests(TestCase):
             return x + mapping["used"]
 
         x, mapping = torch.ones(1), {"used": 2, (Key(),): 3}
-        self.assertEqual(
-            torch.compile(read, backend="eager", fullgraph=True)(x, mapping),
-            read(x, mapping),
-        )
+        compiled = torch.compile(read, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, mapping), read(x, mapping))
 
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
