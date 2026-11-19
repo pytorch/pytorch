@@ -77,9 +77,6 @@ target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 # WARNING: DO NOT LINK torch!!!
 # The purpose is to check if the used aten/c10 headers are written in a header-only way
 target_link_libraries(test_aoti_abi_check PRIVATE gtest_main sleef)
-if(TARGET cpuinfo)
-  target_link_libraries(test_aoti_abi_check PRIVATE cpuinfo)
-endif()
 if(USE_CUDA)
   target_link_libraries(test_aoti_abi_check PRIVATE torch::cudart)
 endif()
