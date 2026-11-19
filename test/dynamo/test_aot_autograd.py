@@ -1884,6 +1884,76 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(mod.buffer, ref_mod.buffer)
         self.assertEqual(compiler.frame_count, 2)
 
+    def test_input_mutation_storage_overlap_guards_assume_constant_result_tensor(self):
+        # get_const()'s result reaches AOTAutograd as an input with a ConstantSource.
+        @torch._dynamo.assume_constant_result
+        def get_const():
+            return torch.ones(4)
+
+        def f(x, y, index, src):
+            x.index_copy_(0, index, src)
+            return x + y + get_const()
+
+        class Compiler:
+            def __init__(self):
+                self.counter = CompileCounterWithBackend("aot_eager")
+                self.guards = []
+
+            def __call__(self, *args, **kwargs):
+                self.guards = TracingContext.get().guards_context.aotautograd_guards
+                return self.counter(*args, **kwargs)
+
+        compiler = Compiler()
+        opt_f = torch.compile(f, backend=compiler, fullgraph=True)
+        index, src = torch.tensor([0, 2]), torch.ones(2)
+
+        x, x_ref, y = torch.zeros(4), torch.zeros(4), torch.ones(4)
+        self.assertEqual(opt_f(x, y, index, src), f(x_ref, y, index, src))
+        self.assertEqual(x, x_ref)
+
+        partition_guards = [
+            guard
+            for guard in compiler.guards
+            if isinstance(guard, StorageOverlapPartition)
+        ]
+        self.assertEqual(len(partition_guards), 1)
+        names = {source.name for source in partition_guards[0].input_sources}
+        const_names = {name for name in names if name.startswith("G['get_const_")}
+        self.assertEqual(len(const_names), 1)
+        self.assertEqual(
+            names - const_names, {"L['x']", "L['y']", "L['index']", "L['src']"}
+        )
+
+        base, base_ref = torch.zeros(8), torch.zeros(8)
+        self.assertEqual(
+            opt_f(base[:4], base[2:6], index, src),
+            f(base_ref[:4], base_ref[2:6], index, src),
+        )
+        self.assertEqual(base, base_ref)
+        self.assertEqual(compiler.counter.frame_count, 2)
+
+    def test_input_mutation_storage_overlap_guards_assume_constant_result_alias(self):
+        const = torch.zeros(4)
+
+        @torch._dynamo.assume_constant_result
+        def get_const():
+            return const
+
+        def f(x, y):
+            x.add_(1)
+            return y + get_const()
+
+        counter = CompileCounterWithBackend("aot_eager")
+        opt_f = torch.compile(f, backend=counter, fullgraph=True)
+        opt_f(torch.zeros(4), torch.zeros(4))
+
+        out = opt_f(const, torch.zeros(4))
+        const_after = const.clone()
+        const.zero_()
+        self.assertEqual(out, f(const, torch.zeros(4)))
+        self.assertEqual(const_after, const)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.
         #
