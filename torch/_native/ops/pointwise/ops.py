@@ -221,22 +221,25 @@ def _hardsigmoid(x: StorageScalar) -> ComputeScalar:
 
 @cute.jit
 def _threshold(
-    x: StorageScalar, threshold: ComputeScalar, value: ComputeScalar
+    x: StorageScalar, threshold: StorageScalar, value: StorageScalar
 ) -> ComputeScalar:
     x = _opmath(x)
+    threshold, value = _opmath(threshold), _opmath(value)
     return value if x <= threshold else x
 
 
 @cute.jit
-def _hardshrink(x: StorageScalar, lambd: ComputeScalar) -> ComputeScalar:
+def _hardshrink(x: StorageScalar, lambd: StorageScalar) -> ComputeScalar:
     x = _opmath(x)
+    lambd = _opmath(lambd)
     z = x.__class__(0.0)
     return z if ((x >= -lambd) and (x <= lambd)) else x
 
 
 @cute.jit
-def _softshrink(x: StorageScalar, lambd: ComputeScalar) -> ComputeScalar:
+def _softshrink(x: StorageScalar, lambd: StorageScalar) -> ComputeScalar:
     x = _opmath(x)
+    lambd = _opmath(lambd)
     z = x.__class__(0.0)
     result = (x - lambd) if x > lambd else ((x + lambd) if x < -lambd else z)
     return x if x != x else result
@@ -400,19 +403,30 @@ def _copysign(x: StorageScalar, y: StorageScalar) -> ComputeScalar:
 
 @cute.jit
 def _fmod_int(x: StorageScalar, y: StorageScalar) -> StorageScalar:
-    return x.__class__(arith.remsi(x.ir_value(), y.ir_value()))
+    if const_expr(x.__class__.signed):
+        return x.__class__(arith.remsi(x.ir_value(), y.ir_value()))
+    return x.__class__(arith.remui(x.ir_value(), y.ir_value()))
 
 
 @cute.jit
 def _remainder_int(x: StorageScalar, y: StorageScalar) -> StorageScalar:
-    r = _fmod_int(x, y)
     z = x.__class__(0)
+    if const_expr(not x.__class__.signed):
+        r = _fmod_int(x, y if y != z else x.__class__(1))
+        return r if y != z else x.__class__((1 << x.__class__.width) - 1)
+    r = _fmod_int(x, y)
     return r + y if (r != z) and ((r < z) != (y < z)) else r
 
 
 @cute.jit
 def _floor_divide_int(x: StorageScalar, y: StorageScalar) -> StorageScalar:
-    return x // y
+    z = x.__class__(0)
+    valid = y != z
+    if const_expr(x.__class__.signed):
+        minimum = x.__class__(-(1 << (x.__class__.width - 1)))
+        valid = valid and not (x == minimum and y == x.__class__(-1))
+    q = x // (y if valid else x.__class__(1))
+    return q if y != z else z
 
 
 @cute.jit
@@ -505,7 +519,11 @@ def _bitwise_left_shift(x: StorageScalar, y: StorageScalar) -> StorageScalar:
 
 @cute.jit
 def _bitwise_right_shift(x: StorageScalar, y: StorageScalar) -> StorageScalar:
-    result = x >> (x.__class__.width - 1)
+    result = (
+        x >> (x.__class__.width - 1)
+        if const_expr(x.__class__.signed)
+        else x.__class__(0)
+    )
     if y >= 0 and y < x.__class__.width:
         result = x >> y
     return result
