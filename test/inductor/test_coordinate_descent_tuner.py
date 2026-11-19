@@ -59,6 +59,68 @@ def mock_compare_config_prefer_larger_XBLOCK(
 
 @instantiate_parametrized_tests
 class TestCoordinateDescentTuner(TestCase):
+    @parametrize(
+        "max_tiles,expected",
+        [
+            (1, ["XBLOCK", "R0_BLOCK"]),
+            (2, ["XBLOCK", "YBLOCK", "R0_BLOCK", "R1_BLOCK"]),
+            (3, ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]),
+            (
+                None,
+                ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"],
+            ),
+            (
+                4,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                ],
+            ),
+            (
+                5,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "Z2_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                    "R4_BLOCK",
+                ],
+            ),
+        ],
+    )
+    def test_tunable_fields_follow_max_tiles(self, max_tiles, expected):
+        with config.patch({"triton.max_tiles": max_tiles}):
+            self.assertEqual(
+                CoordescTuner().tunable_fields,
+                expected + ["BLOCK_M", "BLOCK_N", "BLOCK_K", "num_warps"],
+            )
+
+    @config.patch("triton.max_tiles", 1)
+    def test_tunable_fields_use_size_hints(self):
+        self.assertEqual(
+            CoordescTuner(size_hints={"z10_": 32, "x": 64, "r10_": 128}).tunable_fields,
+            [
+                "XBLOCK",
+                "Z10_BLOCK",
+                "R10_BLOCK",
+                "BLOCK_M",
+                "BLOCK_N",
+                "BLOCK_K",
+                "num_warps",
+            ],
+        )
+
     def test_abs_function(self):
         """
         The benchmark result is simply abs(XBLOCK - 15)
@@ -71,6 +133,19 @@ class TestCoordinateDescentTuner(TestCase):
 
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
+
+    def test_reduction_blocks(self):
+        tuner = CoordescTuner()
+        for reduction_dim in range(3):
+            block = f"R{reduction_dim}_BLOCK"
+            with self.subTest(block=block):
+                baseline_config = triton.Config({block: 1}, num_warps=8, num_stages=1)
+
+                def func(config, block=block):
+                    return abs(config.kwargs[block] - 15)
+
+                best_config = tuner.autotune(func, baseline_config)
+                self.assertEqual(best_config.kwargs[block], 16)
 
     def test_no_neighbors(self):
         """
@@ -121,8 +196,11 @@ class TestCoordinateDescentTuner(TestCase):
         max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
-        self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
-        self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
+        for prefix in ("R0_", "R1_", "R2_"):
+            with self.subTest(prefix=prefix):
+                block = f"{prefix}BLOCK"
+                self.assertFalse(tuner.value_too_large(block, max_block[prefix]))
+                self.assertTrue(tuner.value_too_large(block, max_block[prefix] * 2))
 
     def test_native_matmul_block_numel_limit(self):
         tuner = CoordescTuner(is_native_matmul=True)

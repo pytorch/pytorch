@@ -15,12 +15,14 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
+from .codegen.triton_utils import use_block_ptr_enabled
 from .heuristics.template import get_template_heuristic
 from .heuristics.template.triton import (
     _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    FlexAttentionConfigContext,
     IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
@@ -32,16 +34,17 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _use_autotune_backend
+from .utils import _use_autotune_backend, get_current_backend
 from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Sequence
     from functools import partial
 
     from triton import Config as TritonConfig
 
+    from . import ir
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
@@ -73,6 +76,21 @@ class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
     def __lt__(self, other: typing.Self) -> bool: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiTemplateFusionDecision:
+    """A backend's decision for fusing a MultiTemplateBuffer with a candidate.
+
+    ``fuse=False`` declines the fusion. ``fuse=True`` accepts it with ``choice``,
+    one of the buffer's Triton template choices, which the buffer is finalized to
+    when the scheduler commits the fusion. ``choice`` may be omitted only if the
+    buffer is already finalized to a Triton template. The scheduler declines an
+    accepted fusion that has no valid template or fails a legality check.
+    """
+
+    fuse: bool
+    choice: ChoiceCaller | None = None
 
 
 @dataclasses.dataclass
@@ -170,15 +188,45 @@ class InductorChoices:
         seq_len: sympy.Expr,
         dtype: torch.dtype,
         device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(
+            head_dim, seq_len, dtype, v_head_dim
+        )
+
+    def refine_flex_attention_fwd_configs(
+        self, configs: list[Any], context: FlexAttentionConfigContext
+    ) -> list[Any]:
+        """Return the forward configs to autotune, given the full attention context.
+
+        The result may replace ``configs`` rather than subset it and must be
+        non-empty unless ``configs`` is; a single config takes the lowering's
+        one-config path.
+        ``append_flex_attention_choices`` still receives the unrefined pool.
+        Only the stock pool is refined: when the active handler overrides
+        ``get_flex_attention_fwd_configs``, this base implementation returns the
+        pool unchanged, including when an override of this method delegates here.
+        """
+        # The pool comes from the active handler. With composed choices that is
+        # not necessarily the contributor this hook is bound to.
+        handler = V.choices
+        lookup = getattr(handler.get_flex_attention_fwd_configs, "__func__", None)
+        if lookup is not _STOCK_FLEX_ATTENTION_FWD_CONFIGS:
+            return configs
+        flex_heuristics = handler.get_config_heuristics(context.device.type)
+        refine = getattr(flex_heuristics, "refine_flex_attn_fwd_configs", None)
+        return configs if refine is None else refine(configs, context)
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self,
+        head_dim: int,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype, v_head_dim)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
@@ -200,7 +248,8 @@ class InductorChoices:
         """Append backend-specific forward flex-attention template choices.
 
         Default is a no-op. Subclasses may override to inject additional
-        autotuning candidates (e.g. TLX templates in fbcode).
+        autotuning candidates (e.g. TLX templates in fbcode). ``configs`` is the
+        unrefined pool; the Triton ``choices`` were built from the refined one.
         """
         return choices
 
@@ -325,9 +374,9 @@ class InductorChoices:
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
         # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
-        # origami only contributes Triton GEMM configs under autotuning, so with it
-        # off there is nothing that needs fixed strides and flexible layouts should
-        # be preserved (matches non-origami behavior).
+        # origami only contributes configs under autotuning, so with it off there is
+        # nothing that needs fixed strides and flexible layouts should be preserved
+        # (matches non-origami behavior).
         if (
             _origami_enabled()
             and IS_ROCM
@@ -434,6 +483,51 @@ class InductorChoices:
 
         return callers
 
+    def use_native_matmul(self, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
+        """Lower mat1 @ mat2 to Inductor's ops.dot, which generates a fused matmul
+        natively, instead of an extern kernel or a template. For relu(a @ b) on the
+        Triton backend:
+
+            False: extern_kernels.mm(arg0_1, arg1_1, out=buf0)
+                   triton_poi_fused_relu_0.run(buf1, ...)
+            True:  triton_red_fused_mm_relu_0.run(buf1, arg0_1, arg1_1, ...)
+
+        use_native_matmul() in kernel/mm_common.py asks this while lowering mm,
+        bmm, addmm, baddbmm and mm_plus_mm, after the checks that hold for any
+        backend (BF16x9, unbacked sizes). A dot cannot go back to the extern
+        kernel: the device's scheduling emits it. This default holds the checks
+        of Triton's native matmul codegen. An override replaces them: it returns
+        True only for matmuls its backend's scheduling emits (another
+        config.cuda_backend's), and calls super() for the rest.
+        """
+        if not config.triton.native_matmul:
+            return False
+        # If tma matmul is on, don't do native matmul
+        if (
+            config.triton.enable_persistent_tma_matmul
+            and torch.utils._triton.has_triton_tma_device()
+        ):
+            raise AssertionError("native matmul doesn't support tma codegen yet")
+        # Currently only enable native matmul for default indexing.
+        # TODO: support block ptr
+        if use_block_ptr_enabled():
+            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
+        device_type = mat1.get_device_or_error().type
+        # Currently, tl.dot only supports following dtypes
+        dtypes = (torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+        # (..., M, K) @ (..., K, N)
+        m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
+        sizevars = V.graph.sizevars
+        return (
+            device_type in ("cuda", "xpu")
+            and get_current_backend(device_type) == "triton"
+            and mat1.get_dtype() in dtypes
+            and mat2.get_dtype() in dtypes
+            # Consider the shape (m,k,n) > 1
+            # TODO : support when size = 1
+            and not any(sizevars.statically_known_leq(s, 1) for s in (m, k, n))
+        )
+
     def triton_kernel_kwargs(
         self,
         kernel_cls: type[TritonKernel],
@@ -451,6 +545,26 @@ class InductorChoices:
     ) -> ChoiceCaller:
         """Hook to override the autotuning best choice after benchmarking."""
         return best_choice
+
+    def multi_template_fusion_decision(
+        self,
+        scheduler: Scheduler,
+        multi_node: ir.MultiTemplateBuffer,
+        other_nodes: Sequence[BaseSchedulerNode],
+        epilogue: bool,
+    ) -> MultiTemplateFusionDecision | None:
+        """Hook to decide a MultiTemplateBuffer fusion instead of benchmarking it.
+
+        Called from ``Scheduler.speedup_by_fusion`` for a pair where one side's
+        template node is a MultiTemplateBuffer; ``other_nodes`` are the nodes of
+        the other side, an epilogue if ``epilogue`` else a prologue. Returning
+        None keeps the default benchmark-based decision. Decisions are immediate
+        (they do not compete as pending template fusions); an accepted one is
+        committed right away if it passes the scheduler's legality checks. Not
+        consulted when ``config.multi_kernel_hints`` is set. The hook should not
+        mutate state.
+        """
+        return None
 
     def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
         """Hook to transform fused kernel names during codegen"""
@@ -563,7 +677,8 @@ class InductorChoices:
         # Chosen GB200 thresholds: 32768 for xnumel < num_sm, otherwise 40960.
         # Reducing these thresholds further did not improve scenario (2), but
         # hurts scenario (1).
-        if props.major is not None and props.major >= 10:
+        # On ROCm major is the gfx major, not an NVIDIA SM version.
+        if props.type == "cuda" and props.major is not None and props.major >= 10:
             if xnumel < num_sm:
                 return 32768
             return 40960
@@ -826,6 +941,8 @@ class InductorChoices:
             proximity_score,
         )
 
+
+_STOCK_FLEX_ATTENTION_FWD_CONFIGS = InductorChoices.get_flex_attention_fwd_configs
 
 InductorChoicesFactory: typing.TypeAlias = typing.Callable[[], InductorChoices]
 InductorChoicesFactoryConfig: typing.TypeAlias = InductorChoicesFactory | None
