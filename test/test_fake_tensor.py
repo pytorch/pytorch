@@ -2855,7 +2855,11 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 )
 
         # Only CPU recognizes this unsqueezed view as channels-last.
-        expected_format = torch.channels_last if torch.device(device).type == "cpu" else torch.contiguous_format
+        expected_format = (
+            torch.channels_last
+            if torch.device(device).type == "cpu"
+            else torch.contiguous_format
+        )
         self.assertTrue(out[1].is_contiguous(memory_format=expected_format))
         self.checkMetaProps(out[0], out[1])
 
