@@ -75,6 +75,7 @@ fn shift_consts(op: &mut Op, offset: u32) {
             shift(func);
             shift(code)
         }
+        Op::Locals(_, entries) => entries.iter_mut().for_each(|(name, _, _)| shift(name)),
         _ => {}
     }
 }
