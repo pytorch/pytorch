@@ -2847,23 +2847,77 @@ def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
     return allow_tf32
 
 
+_MN_MAJOR_TF32_PROBE_LOCK = Lock()
+
+
+@cache
+def triton_supports_mn_major_tf32_mma() -> bool:
+    """Whether Triton can stage an MN-major TF32 operand for tcgen05.mma.
+
+    tcgen05.mma reads a transposed FP32 operand only with 128-byte swizzling
+    and 32-byte swizzle atomicity. Triton versions that support it accept the
+    `swizzleAtom32B` NVMMA shared layout key.
+    """
+    try:
+        import tempfile
+
+        from triton._C.libtriton import ir
+    except ImportError:
+        return False
+    src = (
+        "#s = #ttg.nvmma_shared<{swizzlingByteWidth = 128, transposed = false, "
+        "elementBitWidth = 32, swizzleAtom32B = true}>\n"
+        "module {\n"
+        "  tt.func @f(%a: !ttg.memdesc<32x128xf32, #s, #ttg.shared_memory>) {\n"
+        "    tt.return\n"
+        "  }\n"
+        "}\n"
+    )
+    # An older Triton prints a parse error to stderr; keep it out of the logs.
+    with _MN_MAJOR_TF32_PROBE_LOCK:
+        try:
+            saved_stderr = os.dup(2)
+        except OSError:
+            saved_stderr = None
+        try:
+            if saved_stderr is not None:
+                with open(os.devnull, "w") as devnull:
+                    os.dup2(devnull.fileno(), 2)
+            context = ir.context()
+            ir.load_dialects(context)
+            with tempfile.NamedTemporaryFile("w", suffix=".ttgir") as f:
+                f.write(src)
+                f.flush()
+                ir.parse_mlir_module(f.name, context)
+        except Exception:
+            return False
+        finally:
+            if saved_stderr is not None:
+                os.dup2(saved_stderr, 2)
+                os.close(saved_stderr)
+    return True
+
+
 def blackwell_tma_mma_layout_supported(
     dtype: torch.dtype,
     allow_tf32: bool,
     a_row_major: bool,
     block_m: int,
+    host_side_tma: bool = False,
 ) -> bool:
     """Whether the Blackwell TMA GEMM templates can lower this A operand layout.
 
-    tcgen05.mma does not support transposed FP32 operands in shared memory.
-    With the layouts emitted by the Blackwell persistent-TMA mm template and
-    the decompose-K partial-BMM template, the unsupported case is a transposed
-    (column-major) A operand with TF32 enabled and BLOCK_M > 32. BLOCK_M=32
-    and either orientation of B use supported MMA layouts.
+    Without Triton support for MN-major TF32 operands (see
+    triton_supports_mn_major_tf32_mma), the unsupported case with the layouts
+    emitted by the Blackwell persistent-TMA mm template and the decompose-K
+    partial-BMM template is a transposed (column-major) A operand with TF32
+    enabled and BLOCK_M > 32. BLOCK_M=32 and either orientation of B use
+    supported MMA layouts. Host-built descriptors keep the plain 128B swizzle
+    in Triton, so the MN-major operand would be staged through registers.
     """
-    return not (
-        dtype == torch.float32 and allow_tf32 and not a_row_major and block_m > 32
-    )
+    if not (dtype == torch.float32 and allow_tf32 and not a_row_major and block_m > 32):
+        return True
+    return not host_side_tma and triton_supports_mn_major_tf32_mma()
 
 
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
@@ -3518,6 +3572,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             allow_tf32,
             template_kwargs["A_ROW_MAJOR"],
             template_kwargs["BLOCK_M"],
+            host_side_tma=config.triton.enable_host_side_tma,
         )
 
     def _get_template_configs_impl(
