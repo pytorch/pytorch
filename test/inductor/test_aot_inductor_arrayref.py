@@ -343,12 +343,13 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
     # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
-    # Existing while_loop ArrayRefTensor/handle conversion gaps also prevent
-    # these variants from compiling. Keep them running as expected failures.
+    # Native lowering has existing while_loop ArrayRefTensor/handle conversion
+    # gaps. ATen fallback (lite) mode supports these cases and must not xfail.
     **{
         f"test_while_loop_captured_view_handle_lifetime_view_kind_{view_kind}_iterations_{iterations}": fail_stack_allocation()
         for view_kind in ("repeat", "dtype", "slice")
         for iterations in (0, 1, 3)
+        if not LITE_MODE
     },
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
