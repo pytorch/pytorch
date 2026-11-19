@@ -5423,6 +5423,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(fn(torch.tensor(1), collections.OrderedDict(a=1)), 2)
 
+    def test_deepcopy_ordered_dict_nested_region_memo(self):
+        @torch.compiler.nested_compile_region
+        def region(x, mapping):
+            return x + len(copy.deepcopy(mapping))
+
+        fn = torch.compile(lambda x, m: region(x, m), backend="eager", fullgraph=True)
+        mapping = collections.OrderedDict(a={1}, b=([],), c=1)
+        self.assertEqual(fn(torch.tensor(1), mapping), 4)
+
     @parametrize(
         "copier", [copy.copy, copy.deepcopy, lambda od: copy.deepcopy([od], {17: 3})[0]]
     )
@@ -5435,10 +5444,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.tensor(10)
         value = [1]
-        original = collections.OrderedDict(
-            [("b", value), (b"first key".decode(), None)]
-        )
-        equal_key = b"first key".decode()
+        original = collections.OrderedDict(b=value)
+        original[b"first key".decode()] = None
+        equal_key = "".join(["first", " key"])
         self.assertIsNot(next(reversed(original)), equal_key)
         self.assertEqual(compiled(x, original), fn(x, original))
         original.clear()

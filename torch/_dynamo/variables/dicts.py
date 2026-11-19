@@ -1642,9 +1642,19 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     ) -> VariableTracker | None:
         from .iter import OrderedDictIterator
 
-        if type(self) is not OrderedDictVariable or not self.is_python_constant():
+        if type(self) is not OrderedDictVariable:
             return None
 
+        self._guard_empty_copy_state(tx)
+        self.install_dict_order_guard(tx)
+        # Only the live iterator needs the entries, which can include symbolic values.
+        reduced = collections.OrderedDict().__reduce_ex__(args[0].as_python_constant())
+        return variables.TupleVariable(
+            [VariableTracker.build(tx, item) for item in reduced[:-1]]
+            + [OrderedDictIterator.create(self.items)]
+        )
+
+    def _guard_empty_copy_state(self, tx: "InstructionTranslatorBase") -> None:
         if self.source and not is_constant_source(self.source):
             instance_dict = AttrSource(self.source, "__dict__")
             effects = tx.output.side_effects
@@ -1664,13 +1674,19 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
                     hints=["Copy the OrderedDict outside the compiled region."],
                 )
             install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-            self.install_dict_order_guard(tx)
 
-        reduced = self.as_python_constant().__reduce_ex__(args[0].as_python_constant())
-        return variables.TupleVariable(
-            [VariableTracker.build(tx, item) for item in reduced[:-1]]
-            + [OrderedDictIterator.create(self.items)]
-        )
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        if type(self) is OrderedDictVariable and name == "__deepcopy__":
+            self._guard_empty_copy_state(tx)
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'collections.OrderedDict' object has no attribute '{name}'"],
+                kwargs={"name": ConstantVariable.create(name), "obj": self},
+            )
+        return super().call_getattr_fallback(tx, name)
 
     def move_to_end(
         self: "OrderedDictVariable",

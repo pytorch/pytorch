@@ -452,6 +452,10 @@ class SuperVariable(VariableTracker):
             and self.objvar._base_methods is not None
             and inner_fn in self.objvar._base_methods
         ):
+            if inner_fn is dict.__init__ and isinstance(
+                self.objvar, variables.ConstDictVariable
+            ):
+                self.objvar.check_base_dict_mutation(tx, name)
             return self.objvar.call_base_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]

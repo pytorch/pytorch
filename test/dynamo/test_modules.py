@@ -1872,6 +1872,36 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x), x)
         self.assertEqual(counter.frame_count, 2)
 
+    @parametrize("custom_getitem", [False, True])
+    def test_export_registered_attribute_custom_registry(self, custom_getitem):
+        class Registry(dict):
+            pass
+
+        class ScaledRegistry(dict):
+            def __getitem__(self, name):
+                return super().__getitem__(name) * 2
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + self.weight + self.offset
+
+        model = Model()
+        model.torchdynamo_force_dynamic = False
+        weight = model.weight = torch.nn.Parameter(torch.tensor(5.0))
+        offset = torch.tensor(3.0)
+        model.register_buffer("offset", offset)
+        registry = ScaledRegistry if custom_getitem else Registry
+        model._parameters = registry(model._parameters)
+        model._buffers = registry(model._buffers)
+        x = torch.ones(1)
+        exported = torch._dynamo.export(model)(x).graph_module
+        self.assertEqual(len(exported.graph.find_nodes(op="placeholder")), 1)
+        self.assertEqual(exported(x), model(x))
+        with torch.no_grad():
+            weight.add_(1)
+            offset.add_(3)
+        self.assertEqual(exported(x), model(x))
+
     def test_registered_attribute_lookup_custom_registry(self):
         class HiddenValue(dict):
             def __contains__(self, name):
