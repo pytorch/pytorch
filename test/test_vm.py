@@ -4107,6 +4107,26 @@ class RegionRandom(torch.nn.Module):
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmWorkspace(TestCase):
+    """The memory a compiled function keeps from one call to the next."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_tensors_outside_a_call_are_left_to_malloc(self):
+        before = torch.randn(1 << 16)
+        workspace = torch._C._cfg_workspace()
+        if workspace is None:
+            self.skipTest("the process has a CPU allocator of its own")
+        after = torch.randn(1 << 16)
+        self.assertEqual(before.sum() + after.sum(), after.sum() + before.sum())
+        # Made before and after PyTorch's allocator was replaced: both are
+        # freed by the one that made them.
+        del before, after
+        nothing = dict.fromkeys(("calls", "hits", "misses", "kept", "live", "peak"), 0)
+        self.assertEqual(torch._C._cfg_workspace_stats(workspace), nothing)
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmRegions(TestCase):
     """Runs of a block compiled as one graph by a ``graphs`` pass."""
 
