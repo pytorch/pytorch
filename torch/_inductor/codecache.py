@@ -107,6 +107,7 @@ from torch._inductor.utils import (
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
     fp32_matmul_precision_key,
+    get_cpp_wrapper_header_device,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -4009,7 +4010,7 @@ def _get_cpp_prefix_header(device: str) -> str | None:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":", maxsplit=1)[0]
+    base_device = get_cpp_wrapper_header_device(device.split(":", maxsplit=1)[0])
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
