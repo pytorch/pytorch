@@ -1029,7 +1029,7 @@ static int dict_version_watch_callback(
   dict_version_state.withLock([&](DictVersionState& state) {
     if (event == PyDict_EVENT_DEALLOCATED) {
       state.map.erase(dict);
-    } else if (event != PyDict_EVENT_CLONED) {
+    } else {
       state.map[dict] = state.next_id++;
     }
   });
@@ -3659,7 +3659,10 @@ void stop_recording_dict_pointers(
 bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
-void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer);
+void record_tensor_state(
+    RootGuardManager* root,
+    GuardManager* manager,
+    PyObject* tensor_pointer);
 using RecordedDictTagGuard = std::pair<std::shared_ptr<LeafGuard>, PyObject*>;
 void record_dict_tag_guard(
     RootGuardManager* root,
@@ -3675,7 +3678,6 @@ void add_relational_guard_resetter_to_cloned_root(
     std::shared_ptr<RelationalGuard> guard);
 std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
     RootGuardManager* _root);
-const LocalState& get_local_state(RootGuardManager* root);
 // std::string get_compile_id(RootGuardManager* root);
 
 struct WeakEntry {
@@ -3683,61 +3685,16 @@ struct WeakEntry {
   PyObject* cap; // capsule whose m_self is used by the callback
 };
 
-// Convert concrete sizes/strides to the optional<SymInt> vectors that
-// TensorCheck expects.  All dimensions are treated as static (no nullopt).
-inline std::vector<std::optional<c10::SymInt>> to_opt_symint(
-    c10::IntArrayRef vals) {
-  std::vector<std::optional<c10::SymInt>> out;
-  out.reserve(vals.size());
-  for (auto v : vals) {
-    out.emplace_back(c10::SymInt(v));
-  }
-  return out;
-}
-
-// Build a TensorCheck that validates all concrete metadata (dispatch key,
-// dtype, device, requires_grad, sizes, strides) for the dict-tag fast path.
-inline TensorCheck make_tensor_check(
-    const LocalState& state,
-    const at::Tensor& tensor,
-    bool device_index_is_current) {
-  auto layout = tensor.layout();
-  bool sparse = layout == c10::kSparseCsr || layout == c10::kSparseCsc ||
-      layout == c10::kSparseBsc || layout == c10::kSparseBsr;
-  // Sparse layouts don't support strides; use nullopt per dim so
-  // TensorCheck skips stride comparison for each dimension.
-  auto strides = sparse
-      ? std::vector<std::optional<c10::SymInt>>(tensor.dim(), std::nullopt)
-      : to_opt_symint(tensor.strides());
-  return TensorCheck(
-      state,
-      /*pt=*/nullptr,
-      tensor,
-      tensor.key_set(),
-      to_opt_symint(tensor.sizes()),
-      std::move(strides),
-      device_index_is_current);
-}
-
-// Mirrors _guard_device_index_is_current in torch/_dynamo/guards.py: under
-// compile_on_one_rank an accelerator tensor's index is the compiling rank's and
-// carries no information, so the snapshot has to compare against the runtime
-// current device the way the TENSOR_MATCH leaf does. Pinning it here instead
-// would let the unchanged-dict-tag fast path accept a tensor left behind on
-// another device, which the leaf itself rejects.
-inline bool coor_device_index_is_current(
-    bool compile_on_one_rank,
-    const at::Tensor& tensor) {
-  if (!compile_on_one_rank) {
-    return false;
-  }
-  auto acc = at::accelerator::getAccelerator(false);
-  return acc.has_value() && tensor.device().type() == acc.value();
-}
-
-struct RecordedTensorMetadata {
+struct RecordedTensorState {
   py::weakref tensor_weakref;
-  TensorCheck check;
+  // Owned by the same guard tree as the GuardManager storing this state.
+  GuardManager* manager;
+};
+
+struct RecordedDictState {
+  PyObject* dict;
+  uint64_t version;
+  py::object staging_ref;
 };
 
 /**
@@ -3996,8 +3953,8 @@ class GuardManager {
   // tag safe optimizations
   void stash_dict_pointers(
       PyObject* value,
-      std::vector<std::pair<PyObject*, uint64_t>> dict_pointers) {
-    _dict_pointers[value] = dict_pointers;
+      std::vector<RecordedDictState> dict_pointers) {
+    _dict_pointers[value] = std::move(dict_pointers);
   }
 
   void stash_tensor_pointers(
@@ -4006,10 +3963,10 @@ class GuardManager {
     _tensor_pointers[value] = std::move(tensor_pointers);
   }
 
-  void stash_tensor_metadata(
+  void stash_tensor_states(
       PyObject* value,
-      std::vector<RecordedTensorMetadata>&& tensor_metadata) {
-    _tensor_metadata_pointers[value] = std::move(tensor_metadata);
+      std::vector<RecordedTensorState>&& tensor_states) {
+    _tensor_states[value] = std::move(tensor_states);
   }
 
   void stash_dict_tag_guards(
@@ -4018,16 +3975,20 @@ class GuardManager {
     _dict_tag_guards[value] = std::move(guards);
   }
 
-  void disable_recursive_dict_tag_optimization() {
+  void disable_recursive_dict_tag_optimization(
+      bool dict_pointers_may_be_dead = false) {
     dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
-      disable_recursive_dict_tag_optimization(map);
+      disable_recursive_dict_tag_optimization(map, dict_pointers_may_be_dead);
     });
   }
 
   // Caller must hold dict_to_guard_managers lock.
-  void disable_recursive_dict_tag_optimization(DictToGuardManagersMap& map) {
-    unwatch_all_saved_dict_pointers(map);
+  void disable_recursive_dict_tag_optimization(
+      DictToGuardManagersMap& map, bool dict_pointers_may_be_dead = false) {
+    dict_pointers_may_be_dead |= _disable_dict_tag_matching;
     _disable_dict_tag_matching = true;
+    _active_dict_tag_values.clear();
+    unwatch_all_saved_dict_pointers(map, dict_pointers_may_be_dead);
   }
 
  public:
@@ -4146,24 +4107,43 @@ class GuardManager {
   }
 
   bool check_dict_pointer_tags(PyObject* value) {
-    if (_dict_callback_installed) {
-      // This means that for 3.12+, there are callbacks watching dict pointers.
-      return true;
-    }
-    for (auto& kv : _dict_pointers[value]) {
-      PyObject* dict_pointer = kv.first;
-      uint64_t old_tag = kv.second;
-      uint64_t new_tag = get_dict_version_unchecked(dict_pointer);
-      if (old_tag != new_tag) {
+    for (auto& state : _dict_pointers[value]) {
+      uint64_t new_tag = get_dict_version_unchecked(state.dict);
+      if (state.version != new_tag) {
         return false;
       }
     }
     return true;
   }
 
-  bool check_tensor_metadata_fast(PyObject* value) {
-    auto it = _tensor_metadata_pointers.find(value);
-    if (it == _tensor_metadata_pointers.end()) {
+  bool check_dict_pointer_tags_fast(PyObject* value) {
+#if IS_PYTHON_3_12_PLUS
+    if (!_active_dict_tag_values.contains(value)) {
+      return false;
+    }
+    // 3.12+: a successful PyDict_Watch installs callbacks that flip
+    // _disable_dict_tag_matching on any change to a recorded dict, and the
+    // caller only reaches here while !_disable_dict_tag_matching. An installed
+    // watcher therefore proves no recorded dict changed, without dereferencing
+    // a recorded pointer. If the watcher failed to install, bail instead of
+    // falling through to the raw-pointer read below.
+    return true;
+#else
+    // Pre-3.12 has no PyDict_Watch. This raw-pointer path is why recursive dict
+    // tags remain opt-in there.
+    return check_dict_pointer_tags(value);
+#endif
+  }
+
+  void release_staging_references(PyObject* value) {
+    for (auto& state : _dict_pointers[value]) {
+      state.staging_ref = py::object();
+    }
+  }
+
+  bool check_tensor_guards_fast(PyObject* value) {
+    auto it = _tensor_states.find(value);
+    if (it == _tensor_states.end()) {
       return true;
     }
     for (auto& recorded_tensor : it->second) {
@@ -4173,10 +4153,9 @@ class GuardManager {
         _disable_dict_tag_matching = true;
         return false;
       }
-      bool ok = THPVariable_Check(tensor_ptr) &&
-          recorded_tensor.check.check(
-              get_local_state(_root), THPVariable_Unpack(tensor_ptr));
-      Py_DECREF(tensor_ptr);
+      py::object tensor = py::reinterpret_steal<py::object>(tensor_ptr);
+      bool ok = recorded_tensor.manager
+                    ->check_non_relational_leaf_guards_nopybind(tensor.ptr());
       if (!ok) {
         return false;
       }
@@ -4202,8 +4181,8 @@ class GuardManager {
         _disable_dict_tag_matching = true;
         return false;
       }
-      bool ok = no_tensor_aliasing_guard->check_nopybind(tensor_ptr);
-      Py_DECREF(tensor_ptr);
+      py::object tensor = py::reinterpret_steal<py::object>(tensor_ptr);
+      bool ok = no_tensor_aliasing_guard->check_nopybind(tensor.ptr());
       if (!ok) {
         return false;
       }
@@ -4239,15 +4218,15 @@ class GuardManager {
     // guard is inspecting, serves as a proxy for the entire nested dictionary
     // structure beneath that node.  If this `value` pointer is one we have
     // already recorded, then verifying each dictionary’s tag plus the cached
-    // tensor metadata is sufficient to prove that nothing inside the subtree
-    // has changed.
+    // mutable tensor leaf guards is sufficient to prove that nothing inside
+    // the subtree has changed.
     //
     // Runtime flow
     // -------------
     // 1) Previously‑seen `value` pointer
     //    • Look up the current `value` pointer in our cache.
     //    • If found, perform a recursive tag comparison on the cached subtree
-    //      and revalidate recorded tensor metadata.
+    //      and revalidate recorded tensor leaf guards.
     //      All checks passing means guard passes with no further traversal.
     //
     // 2) First‑time `value` pointer
@@ -4289,9 +4268,8 @@ class GuardManager {
         // Check if the `value` object was recorded earlier
         if (_dict_pointers.contains(value)) {
           // Check for fast path
-          // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
-          if (check_dict_pointer_tags(value) &&
-              check_tensor_metadata_fast(value)) {
+          if (check_dict_pointer_tags_fast(value) &&
+              check_tensor_guards_fast(value)) {
             std::optional<bool> no_tensor_aliasing_result =
                 check_no_tensor_aliasing_guards_fast(value);
             if (no_tensor_aliasing_result.has_value()) {
@@ -4299,20 +4277,20 @@ class GuardManager {
                   check_dict_tag_guards_fast(value)) {
                 return true;
               }
-              _disable_dict_tag_matching = true;
+              disable_recursive_dict_tag_optimization();
               return false;
             }
           }
           // Something changed, very likely the dict tag checking will fail in
           // future. So disable the recursive tag matching.
-          _disable_dict_tag_matching = true;
+          disable_recursive_dict_tag_optimization();
         } else if (
             _dict_pointers.size() ==
             _max_saved_pointers_for_recursive_dict_tags_check) {
           // Bound the cache size. If there are too many new `value` pointers to
           // be recorded, it is a sign that dict tag matching will never
           // succeed.
-          _disable_dict_tag_matching = true;
+          disable_recursive_dict_tag_optimization();
         } else {
           // Start the recording
           start_recording_dict_pointers(_root, this);
@@ -4330,9 +4308,9 @@ class GuardManager {
         for (const auto& guard : _dict_tag_replay_guards) {
           record_dict_tag_guard(_root, guard, value);
         }
-        // Tensor metadata can mutate in-place without changing dict tags.
+        // Tensor state can mutate in-place without changing dict tags.
         if (_is_immutable && THPVariable_Check(value)) {
-          record_tensor_metadata(_root, value);
+          record_tensor_state(_root, this, value);
         }
       }
     }
@@ -4342,19 +4320,45 @@ class GuardManager {
     if (is_recording) {
       stop_recording_dict_pointers(_root, value, result);
       if (result) {
-        // something bad happened, disable the dict tag optimization
-        TORCH_CHECK(
-            register_weakref_callback(value),
-            "Could not register a callback for recursive dict tag optimization");
 #if IS_PYTHON_3_12_PLUS
-        // Ideally we don't need to even register a weakref callback for value.
-        // But it does not hurt to be more cautious
-        _dict_callback_installed = watch_dict_pointers(value);
+        // Install dict watchers before allocating weakref callbacks. Those
+        // allocations can run finalizers that mutate recorded state.
+        if (!watch_dict_pointers(value)) {
+          disable_recursive_dict_tag_optimization();
+          release_staging_references(value);
+          return false;
+        }
 #endif
+        bool callback_registered = register_weakref_callback(value);
+        if (!callback_registered) {
+          disable_recursive_dict_tag_optimization();
+          release_staging_references(value);
+        }
+        TORCH_CHECK(
+            callback_registered,
+            "Could not register a callback for recursive dict tag optimization");
+        if (_disable_dict_tag_matching) {
+          release_staging_references(value);
+          return false;
+        }
+        if (_disable_dict_tag_matching ||
+            !check_dict_pointer_tags(value) ||
+            !check_tensor_guards_fast(value)) {
+          disable_recursive_dict_tag_optimization();
+          release_staging_references(value);
+          return false;
+        }
+#if IS_PYTHON_3_12_PLUS
+        _active_dict_tag_values.insert(value);
+#endif
+        release_staging_references(value);
+        if (_disable_dict_tag_matching) {
+          return false;
+        }
       }
     }
     if (!result) {
-      _disable_dict_tag_matching = true;
+      disable_recursive_dict_tag_optimization();
     }
     return result;
   }
@@ -4368,7 +4372,8 @@ class GuardManager {
     GuardManager* guard_manager = static_cast<GuardManager*>(
         PyCapsule_GetPointer(self_capsule, "GuardManager*"));
     if (guard_manager) {
-      guard_manager->disable_recursive_dict_tag_optimization();
+      guard_manager->disable_recursive_dict_tag_optimization(
+          /*dict_pointers_may_be_dead=*/true);
     }
     Py_RETURN_NONE;
   }
@@ -4440,15 +4445,19 @@ class GuardManager {
     // that none of the dicts has mutated; if one **does** mutate, the callback
     // simply flips `_disable_dict_tag_matching = true`, causing the next guard
     // evaluation to skip the recursive-dict-tag optimisation entirely.
-    for (auto& kv : _dict_pointers[value]) {
-      PyObject* dict_pointer = kv.first;
+    for (auto& state : _dict_pointers[value]) {
+      PyObject* dict_pointer = state.dict;
       int rc = PyDict_Watch(dict_recursive_tag_watcher_id, dict_pointer);
       if (rc != 0) {
         PyErr_Clear();
         return false;
       }
       dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
-        map[dict_pointer].push_back(this);
+        auto& managers = map[dict_pointer];
+        if (std::find(managers.begin(), managers.end(), this) ==
+            managers.end()) {
+          managers.push_back(this);
+        }
       });
     }
 #endif
@@ -4466,22 +4475,21 @@ class GuardManager {
   //    manager (heap-use-after-free at the `_disable_dict_tag_matching`
   //    read in this function).
   //
-  // 2) PyDict_Unwatch + erase of the dict-keyed map entry: only safe
-  //    when the dict pointer is still alive. The watch callback sets
-  //    `_disable_dict_tag_matching = true` on every event, including
-  //    `PyDict_EVENT_DEALLOCATED`. Once the flag is set, dict pointers
-  //    in our map may have been freed, so PyDict_Unwatch on them would
-  //    crash. When the flag is true, the dict's eventual deallocation
-  //    will tear down the watch automatically; skipping PyDict_Unwatch
-  //    here only loses an early-cleanup optimisation.
-  void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
+  // 2) PyDict_Unwatch is only safe when the dict pointer is still alive. Map
+  //    entries can always be erased once their manager list is empty.
+  void unwatch_all_saved_dict_pointers(
+      DictToGuardManagersMap& map, bool dict_pointers_may_be_dead) {
 #if IS_PYTHON_3_12_PLUS
     for (auto& value_stashed_pointers : _dict_pointers) {
       auto stashed_pointers = value_stashed_pointers.second;
 
       for (auto& stashed_pointer : stashed_pointers) {
-        PyObject* dict_pointer = stashed_pointer.first;
-        auto& managers = map[dict_pointer];
+        PyObject* dict_pointer = stashed_pointer.dict;
+        auto map_it = map.find(dict_pointer);
+        if (map_it == map.end()) {
+          continue;
+        }
+        auto& managers = map_it->second;
 
         // (1) Always: remove this manager from the per-dict list.
         auto it = std::find(managers.begin(), managers.end(), this);
@@ -4489,12 +4497,13 @@ class GuardManager {
           managers.erase(it);
         }
 
-        // (2) Only when the dict is still guaranteed alive: unwatch and
-        // erase the now-empty map entry. The map.erase below invalidates
-        // the `managers` reference, so it must be the last use.
-        if (!_disable_dict_tag_matching && managers.empty()) {
-          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-          map.erase(dict_pointer);
+        // (2) The map.erase below invalidates the `managers` reference, so it
+        // must be the last use.
+        if (managers.empty()) {
+          if (!dict_pointers_may_be_dead) {
+            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          }
+          map.erase(map_it);
         }
       }
     }
@@ -4516,6 +4525,19 @@ class GuardManager {
       }
     }
 
+    return true;
+  }
+
+  bool check_non_relational_leaf_guards_nopybind(PyObject* value) {
+    for (const auto& guard : _leaf_guards) {
+      if (std::dynamic_pointer_cast<RelationalGuard>(guard) != nullptr) {
+        continue;
+      }
+      if (!guard->check_nopybind(value)) {
+        _fail_count += 1;
+        return false;
+      }
+    }
     return true;
   }
 
@@ -4778,20 +4800,18 @@ class GuardManager {
   bool _is_tag_safe = false;
   bool _is_tag_safe_root = false;
   bool _disable_dict_tag_matching = false;
-  std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, uint64_t>>>
+  std::unordered_map<PyObject*, std::vector<RecordedDictState>>
       _dict_pointers;
+  std::unordered_set<PyObject*> _active_dict_tag_values;
   std::unordered_map<PyObject*, std::vector<py::weakref>> _tensor_pointers;
-  std::unordered_map<PyObject*, std::vector<RecordedTensorMetadata>>
-      _tensor_metadata_pointers;
+  std::unordered_map<PyObject*, std::vector<RecordedTensorState>>
+      _tensor_states;
   std::vector<WeakEntry> _tag_safe_entries;
   std::vector<std::shared_ptr<LeafGuard>> _dict_tag_replay_guards;
   // Ownership paths and watched dictionary tags protect these borrowed
   // pointers.
   std::unordered_map<PyObject*, std::vector<RecordedDictTagGuard>>
       _dict_tag_guards;
-
-  // 3.12+ related helper
-  bool _dict_callback_installed = false;
 
  protected:
   // weakref to the type of guarded value
@@ -5080,7 +5100,7 @@ class RootGuardManager : public GuardManager {
     _current_tag_safe_root = nullptr;
     _recorded_dict_pointers.clear();
     _recorded_tensor_pointers.clear();
-    _recorded_tensor_metadata.clear();
+    _recorded_tensor_states.clear();
     _recorded_dict_tag_guards.clear();
   }
 
@@ -5088,11 +5108,11 @@ class RootGuardManager : public GuardManager {
     if (result) {
       // Stash the pointers only if the guard eval passed
       _current_tag_safe_root->stash_dict_pointers(
-          value, _recorded_dict_pointers);
+          value, std::move(_recorded_dict_pointers));
       _current_tag_safe_root->stash_tensor_pointers(
           value, _recorded_tensor_pointers);
-      _current_tag_safe_root->stash_tensor_metadata(
-          value, std::move(_recorded_tensor_metadata));
+      _current_tag_safe_root->stash_tensor_states(
+          value, std::move(_recorded_tensor_states));
       _current_tag_safe_root->stash_dict_tag_guards(
           value, std::move(_recorded_dict_tag_guards));
     }
@@ -5104,8 +5124,10 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_dict_pointer(PyObject* dict_pointer) {
-    _recorded_dict_pointers.emplace_back(
-        dict_pointer, get_dict_version_unchecked(dict_pointer));
+    _recorded_dict_pointers.push_back({
+        dict_pointer,
+        get_dict_version_unchecked(dict_pointer),
+        py::reinterpret_borrow<py::object>(dict_pointer)});
   }
 
   void record_tensor_pointer(PyObject* tensor_pointer) {
@@ -5113,14 +5135,10 @@ class RootGuardManager : public GuardManager {
         py::weakref(py::handle(tensor_pointer)));
   }
 
-  void record_tensor_metadata(PyObject* tensor_pointer) {
-    const at::Tensor& tensor = THPVariable_Unpack(tensor_pointer);
-    _recorded_tensor_metadata.push_back(RecordedTensorMetadata{
-        py::reinterpret_borrow<py::object>(tensor_pointer),
-        make_tensor_check(
-            _local_state,
-            tensor,
-            coor_device_index_is_current(_compile_on_one_rank, tensor)),
+  void record_tensor_state(
+      GuardManager* manager, PyObject* tensor_pointer) {
+    _recorded_tensor_states.push_back(RecordedTensorState{
+        py::weakref(py::handle(tensor_pointer)), manager,
     });
   }
 
@@ -5130,8 +5148,7 @@ class RootGuardManager : public GuardManager {
     _recorded_dict_tag_guards.emplace_back(guard, dictionary);
   }
 
-  // Whether this graph was traced with compile_on_one_rank. Set from Python
-  // alongside guard construction; see record_tensor_metadata.
+  // Whether this graph was traced with compile_on_one_rank, set from Python.
   void set_compile_on_one_rank(bool value) {
     _compile_on_one_rank = value;
   }
@@ -5193,10 +5210,10 @@ class RootGuardManager : public GuardManager {
   // tag safe optimization related members
   bool _is_recording_dict_pointers{false};
   GuardManager* _current_tag_safe_root{nullptr};
-  std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
+  std::vector<RecordedDictState> _recorded_dict_pointers;
   std::vector<py::weakref> _recorded_tensor_pointers;
   std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
-  std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
+  std::vector<RecordedTensorState> _recorded_tensor_states;
 };
 
 /*
@@ -5551,20 +5568,19 @@ static int dict_recursive_tag_watch_callback(
     PyObject* dict,
     PyObject* key,
     PyObject* new_value) noexcept {
-  if (event != PyDict_EVENT_CLONED) {
-    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
-      auto it = map.find(dict);
-      if (it != map.end()) {
-        // Copy the list — unwatch_all_saved_dict_pointers may mutate it.
-        auto guard_managers = it->second;
-        for (auto& guard_manager : guard_managers) {
-          if (guard_manager) {
-            guard_manager->disable_recursive_dict_tag_optimization(map);
-          }
+  dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+    auto it = map.find(dict);
+    if (it != map.end()) {
+      // Copy the list - unwatch_all_saved_dict_pointers may mutate it.
+      auto guard_managers = it->second;
+      for (auto& guard_manager : guard_managers) {
+        if (guard_manager) {
+          guard_manager->disable_recursive_dict_tag_optimization(
+              map, event == PyDict_EVENT_DEALLOCATED);
         }
       }
-    });
-  }
+    }
+  });
   return 0; // keep watching
 }
 #endif
@@ -5647,17 +5663,16 @@ void record_dict_tag_guard(
   root->record_dict_tag_guard(guard, dictionary);
 }
 
-void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer) {
-  root->record_tensor_metadata(tensor_pointer);
+void record_tensor_state(
+    RootGuardManager* root,
+    GuardManager* manager,
+    PyObject* tensor_pointer) {
+  root->record_tensor_state(manager, tensor_pointer);
 }
 
 std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
     RootGuardManager* _root) {
   return _root->get_no_tensor_aliasing_guard();
-}
-
-const LocalState& get_local_state(RootGuardManager* root) {
-  return root->_local_state;
 }
 
 // std::string get_compile_id(RootGuardManager* root) {
