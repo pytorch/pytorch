@@ -595,6 +595,20 @@ class ROCmFlexBwDConfig(FlexBwDConfig):
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
     kpack: int = 1
+    # True only on the stock configs, which are marked after construction;
+    # their kpack follows the query device's default at lookup. Not an init
+    # argument, so a copy (dataclasses.replace) or a new config starts False and
+    # keeps its kpack, and any later assignment to kpack clears it, so a value
+    # a subclass sets on an inherited config is kept too. Not part of equality
+    # or repr.
+    inherits_kpack: bool = dataclasses.field(
+        default=False, init=False, compare=False, repr=False
+    )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
+        if name == "kpack":
+            super().__setattr__("inherits_kpack", False)
 
 
 @dataclasses.dataclass
@@ -2102,6 +2116,29 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ),
         }
 
+        # Backward defaults measured on gfx1250-strict, where the backward
+        # selects TDM descriptors by default. Keyed by (dtype, QK head_dim,
+        # V head_dim), so they apply only to the measured width pairs; other
+        # pairs and head dims keep the shared values. The shared defaults
+        # exhaust the VGPRs here and spill: at head_dim 64 the 64/64/64/64
+        # tiles made the descriptor path slower than pointer loads on long
+        # non-causal sequences, and at head_dim 128 the 64/128/128/64 tiles
+        # spill heavily, most of all with GQA and unaligned lengths, which also
+        # lengthened the backend compile. The smaller BLOCK_M tiles below do
+        # not spill. For equal widths they were faster than the shared
+        # defaults on both load paths in the measured cases (MHA and GQA,
+        # causal, sliding window and unmasked), including layouts the
+        # descriptor gate rejects. With QK width 64 and V width 128,
+        # 32/64/64/32 slowed causal pointer loads, while 32/128/128/32 was
+        # faster than the shared default on both paths. kpack is resolved for
+        # the query device at lookup (see get_flex_attn_bwd_configs), not taken
+        # from the GPU that constructed this singleton.
+        self.gfx1250_default_flex_bwd_config: dict[Any, FlexBwDConfig] = {
+            (dtype, qk, v): ROCmFlexBwDConfig(32, n, n, 32, 1, 4)
+            for dtype in (torch.bfloat16, torch.float16)
+            for qk, v, n in ((64, 64, 64), (128, 128, 128), (64, 128, 128))
+        }
+
         # RDNA3 (gfx11xx) optimal configs profiled on gfx1151 (head_dim=256).
         # Three seq_len tiers to match CU occupancy on 16-CU RDNA3:
         #   short  (seq < 128): BLOCK_M=16, tiny tiles keep all CUs busy
@@ -2133,8 +2170,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             "gfx942": self.gfx942_default_flex_config,
             "gfx950": self.gfx950_default_flex_config,
         }
-        self.flex_bwd_config_by_arch = {
+        self.flex_bwd_config_by_arch: dict[str, Mapping[Any, FlexBwDConfig]] = {
             "gfx950": self.gfx950_default_flex_bwd_config,
+            "gfx1250": self.gfx1250_default_flex_bwd_config,
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -2155,6 +2193,18 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for mfma in [0, 16]
             if BLOCK2 % BLOCK1 == 0
         ]
+        # The stock backward configs above take the kpack default of the GPU
+        # that constructs this singleton (the gfx1250 entries take none). Mark
+        # them as inheriting the default, so a lookup resolves their kpack for
+        # the query device. A config a subclass supplies, or a kpack it assigns
+        # to one of these, is kept (see ROCmFlexBwDConfig.inherits_kpack).
+        for c in (
+            *self.flex_attn_bwd_autotune_configs,
+            *self.gfx950_default_flex_bwd_config.values(),
+            *self.gfx1250_default_flex_bwd_config.values(),
+        ):
+            if isinstance(c, ROCmFlexBwDConfig):
+                c.inherits_kpack = True
 
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
             ROCmFlexDecodeConfig(32, 1, 4, kpack=default_kpack),
@@ -2628,16 +2678,45 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
+        default_kpack = get_default_kpack()
+
+        def for_current_device(
+            candidates: list[FlexBwDConfig],
+        ) -> list[FlexBwDConfig]:
+            # The stock default autotune pool and arch tables are built once,
+            # with the kpack default of the GPU current when this singleton was
+            # constructed. Give the configs that inherit it the current (query)
+            # device's default instead, so the candidates and the arch default
+            # agree on kpack and deduplicate, and the compile options do not
+            # depend on initialization order. An explicit kpack (a config a
+            # subclass supplies, or a value it assigns) is kept. The exhaustive
+            # pool enumerates kpack values and is left as is.
+            return [
+                dataclasses.replace(c, kpack=default_kpack)
+                if isinstance(c, ROCmFlexBwDConfig)
+                and c.inherits_kpack
+                and c.kpack != default_kpack
+                else c
+                for c in candidates
+            ]
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
-            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            flex_attn_bwd_configs += for_current_device(
+                self.flex_attn_bwd_autotune_configs
+            )
 
-        default_kpack = get_default_kpack()
-        arch_bwd_config = self.flex_bwd_config_by_arch.get(rocm_gfx_arch(), {}).get(
-            (dtype, head_dim)
+        # Entries are keyed by (dtype, head_dim) or, to apply to one width
+        # pair only, by (dtype, head_dim, v_head_dim).
+        arch_bwd_table = self.flex_bwd_config_by_arch.get(rocm_gfx_arch(), {})
+        arch_bwd_config = arch_bwd_table.get(
+            (dtype, head_dim, head_dim if v_head_dim is None else v_head_dim)
         )
+        if arch_bwd_config is None:
+            arch_bwd_config = arch_bwd_table.get((dtype, head_dim))
+        if arch_bwd_config is not None:
+            (arch_bwd_config,) = for_current_device([arch_bwd_config])
         if dtype == torch.float32:
             default_config = ROCmFlexBwDConfig(
                 16, 16, 16, 16, 1, 4, kpack=default_kpack

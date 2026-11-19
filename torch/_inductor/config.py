@@ -2557,8 +2557,8 @@ class triton:
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
-    # Whether FlexAttention forward/decode may select AMD TDM descriptors on
-    # gfx1250. Defaults on: selection is capability-driven, so this is a kill
+    # Whether FlexAttention forward/decode/backward may select AMD TDM
+    # descriptors on gfx1250. Defaults on: selection is capability-driven, so this is a kill
     # switch for callers that do not own the flex_attention() call site and
     # therefore cannot pass USE_TMA. It does not affect NVIDIA, XPU, dense GEMM
     # or generic descriptor codegen.
