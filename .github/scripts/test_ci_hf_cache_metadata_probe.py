@@ -631,9 +631,24 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
         self.assertEqual(response.read.call_args.args, (probe.LIMIT + 1,))
 
     def test_exact_owned_routes(self):
-        self.assertEqual(probe.PR_NUMBER, "0")
-        self.assertEqual(probe.TAG, "refs/tags/ciflow/inductor-cu126/0")
-        self.assertFalse(probe.scope_valid(environment()))
+        self.assertEqual(probe.PR_NUMBER, "205603")
+        self.assertEqual(probe.HEAD_REF, "gh/d4l3k/351/head")
+        self.assertEqual(probe.BASE_REF, "gh/d4l3k/351/base")
+        self.assertEqual(probe.TAG, "refs/tags/ciflow/inductor-cu126/205603")
+        self.assertTrue(probe.scope_valid(environment()))
+        self.assertTrue(probe.source_matches(source(), "a" * 40))
+        for number in ("0", "123", "205602", "205604"):
+            self.assertFalse(
+                probe.scope_valid(
+                    environment()
+                    | {"GITHUB_REF": f"refs/tags/ciflow/inductor-cu126/{number}"}
+                )
+            )
+            self.assertFalse(
+                probe.source_matches(source() | {"number": int(number)}, "a" * 40)
+            )
+        with mock.patch.object(probe, "PR_NUMBER", "0"):
+            self.assertFalse(probe.scope_valid(environment()))
         with activated_scope():
             env = environment()
             self.assertTrue(probe.scope_valid(env))
@@ -765,7 +780,10 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "source credentials"):
                         probe.validate_source(env | {"CANARY_GITHUB_TOKEN": invalid})
                     factory.assert_not_called()
-        with mock.patch.object(probe.http.client, "HTTPSConnection") as factory:
+        with (
+            mock.patch.object(probe, "PR_NUMBER", "0"),
+            mock.patch.object(probe.http.client, "HTTPSConnection") as factory,
+        ):
             with self.assertRaisesRegex(ValueError, "workflow scope"):
                 probe.validate_source(environment())
             factory.assert_not_called()
@@ -786,7 +804,7 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
     def test_workflow_and_session_policy(self):
         path = Path(__file__).parents[2] / probe.WORKFLOW
         text = path.read_text()
-        self.assertIn("tags: [ciflow/inductor-cu126/0]", text)
+        self.assertIn("tags: [ciflow/inductor-cu126/205603]", text)
         for clause in (
             "github.repository == 'pytorch/pytorch'",
             "github.repository_id == '65600975'",
@@ -797,7 +815,7 @@ class TestHfCacheMetadataProbe(unittest.TestCase):
             "github.triggering_actor == 'pytorch-bot[bot]'",
             "github.event.sender.id == 54816060",
             "github.run_attempt == 1",
-            "0 != 0",
+            "205603 != 0",
         ):
             self.assertEqual(text.count(clause), 2)
         self.assertIn("uses: ./.github/workflows/_check-ci.yml", text)

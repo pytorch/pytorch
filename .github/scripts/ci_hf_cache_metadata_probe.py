@@ -19,9 +19,9 @@ import xml.etree.ElementTree as ET
 ACCOUNT = "308535385114"
 REGION = "us-east-1"
 ROLE = "gha_workflow_hf-cache-write"
-PR_NUMBER = "0"  # Inert until the separately reviewed ghstack allocation.
-HEAD_REF = "gh/d4l3k/0/head"
-BASE_REF = "gh/d4l3k/0/base"
+PR_NUMBER = "205603"
+HEAD_REF = "gh/d4l3k/351/head"
+BASE_REF = "gh/d4l3k/351/base"
 TAG = f"refs/tags/ciflow/inductor-cu126/{PR_NUMBER}"
 WORKFLOW = (
     ".github/workflows/ci-security-hf-cache-writer-metadata-repair-read-canary.yml"

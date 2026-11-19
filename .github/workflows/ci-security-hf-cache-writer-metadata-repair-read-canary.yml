@@ -3,7 +3,7 @@
 name: CI security HF-cache writer metadata repair read canary
 on:
   push:
-    tags: [ciflow/inductor-cu126/0]
+    tags: [ciflow/inductor-cu126/205603]
 permissions:
   contents: read
 concurrency:
@@ -11,11 +11,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check-ci:
-    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/0' && github.actor == 'pytorch-bot[bot]' && github.actor_id == '54816060' && github.triggering_actor == 'pytorch-bot[bot]' && github.event.sender.id == 54816060 && github.run_attempt == 1 && 0 != 0
+    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205603' && github.actor == 'pytorch-bot[bot]' && github.actor_id == '54816060' && github.triggering_actor == 'pytorch-bot[bot]' && github.event.sender.id == 54816060 && github.run_attempt == 1 && 205603 != 0
     uses: ./.github/workflows/_check-ci.yml
   exact-read:
     needs: check-ci
-    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/0' && github.actor == 'pytorch-bot[bot]' && github.actor_id == '54816060' && github.triggering_actor == 'pytorch-bot[bot]' && github.event.sender.id == 54816060 && github.run_attempt == 1 && 0 != 0
+    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205603' && github.actor == 'pytorch-bot[bot]' && github.actor_id == '54816060' && github.triggering_actor == 'pytorch-bot[bot]' && github.event.sender.id == 54816060 && github.run_attempt == 1 && 205603 != 0
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
