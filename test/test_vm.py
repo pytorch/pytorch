@@ -6215,6 +6215,35 @@ class TestVmRegions(TestCase):
         plumbing = ("Adam", "Optimizer", "_single_tensor", "_multi_tensor", "adam")
         self.assertEqual([w for w in where if w.startswith(plumbing)], [])
 
+    def test_other_numbers_on_each_of_the_first_calls_get_no_graph(self):
+        def scaled(model, x, rate):
+            return model(x) * rate + rate
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        graphs = []
+        passes = with_graphs(self.counting(graphs))
+        compiled = torch.vm(scaled, passes=passes, fallback=False)
+        with torch.no_grad():
+            for i in range(10):
+                rate = 0.5 / (i + 1)
+                self.assertEqual(compiled(model, x, rate), scaled(model, x, rate))
+        # A rate that is another on every call (one on a schedule) is in no
+        # graph: the one there is, is the model's.
+        self.assertEqual(len(graphs), 1)
+        left = [r for r in torch.vm.regions(compiled) if r["state"] == "vm"]
+        reasons = {r["reason"] for r in left if "scaled" in r["where"]}
+        self.assertIn("its inputs take ever new values", reasons)
+        # Two rates that come again are two graphs.
+        graphs.clear()
+        compiled = torch.vm(scaled, passes=passes, fallback=False)
+        with torch.no_grad():
+            for i in range(10):
+                rate = (0.5, 0.25)[i % 2]
+                self.assertEqual(compiled(model, x, rate), scaled(model, x, rate))
+        self.assertEqual(len(graphs), 2)
+
     def test_a_graph_is_made_for_the_default_device_it_runs_under(self):
         def made(x):
             return ((x * 2 + 1) * x - 3) / 2
