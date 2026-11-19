@@ -31,9 +31,8 @@ class TestNativeScalarCoercion(TestCase):
 
         expected_dtype = torch.float64 if dtype is torch.float64 else torch.float32
         op = torch.ops.aten.add_.Tensor if inplace else torch.ops.aten.add.Tensor
-        shape = (3,) if dtype is torch.float64 else ()
         args, result_dtype = _scalar_arg_coercer(op)(
-            (torch.ones(shape, dtype=dtype), value)
+            (torch.ones(3, dtype=dtype), value)
         )
         self.assertEqual(args[1].dtype, expected_dtype)
         self.assertEqual(
@@ -63,7 +62,15 @@ class TestNativeScalarCoercion(TestCase):
 
         dtype = torch.int64 if isinstance(value, int) else torch.float64
         expected = torch.tensor(value, dtype=dtype).float().item()
-        self.assertEqual(f32(value), expected)
+        self.assertEqual(f32(value), expected, atol=0, rtol=0)
+
+    def test_integer_scalar_accepts_fraction_below_overflow(self) -> None:
+        from torch._native.utils.scalar import check_scalar
+
+        check_scalar(255.5, torch.uint8)
+        self.assertEqual(torch.empty((), dtype=torch.uint8).fill_(255.5).item(), 255)
+        with self.assertRaises(OverflowError):
+            check_scalar(256.0, torch.uint8)
 
 
 instantiate_parametrized_tests(TestNativeScalarCoercion)
