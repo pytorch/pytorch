@@ -2491,7 +2491,7 @@ class TestFP8Lowering(TestCase):
             raise unittest.SkipTest(
                 "MX FP8 block swizzle requires gfx950 or gfx1250 and ROCm 7.14"
             )
-        if use_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+        if use_32_8 and evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
             swizzle = SwizzleType.SWIZZLE_128
         elif use_32_8:
             swizzle = SwizzleType.SWIZZLE_32_8
@@ -2511,7 +2511,7 @@ class TestFP8Lowering(TestCase):
         reference = (A.double() * A_scale.double().repeat_interleave(BLOCK_SIZE, 1)) @ (
             B.double() * B_scale.double().repeat_interleave(BLOCK_SIZE, 1)
         ).t()
-        if use_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+        if use_32_8 and evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
             A_scale = to_mx_swizzled_gfx1250(A_scale)
             B_scale = to_mx_swizzled_gfx1250(B_scale)
         else:
@@ -2560,7 +2560,7 @@ class TestFP8Lowering(TestCase):
         # using a smaller K would size the MX 1x32 scales for fewer K-blocks
         # than the data has (XPU rejects this; CUDA only masks it via the
         # to_blocked() zero-padding below).
-        if torch.version.hip and evaluate_gfx_arch_within(["gfx1250"]):
+        if torch.version.hip and evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
             raise unittest.SkipTest(
                 "gfx1250 MX scaling requires SWIZZLE_128, which v1 _scaled_mm cannot express"
             )

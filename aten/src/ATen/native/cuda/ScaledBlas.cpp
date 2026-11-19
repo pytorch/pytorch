@@ -196,7 +196,7 @@ bool prefers_swizzle_32_8([[maybe_unused]] const at::Tensor& t) {
 
 bool is_gfx1250_mx_swizzle() {
 #if ROCM_VERSION >= 71400
-  return at::detail::getCUDAHooks().isGPUArch({"gfx1250"});
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1250", "gfx1250-strict"});
 #else
   return false;
 #endif
@@ -204,7 +204,7 @@ bool is_gfx1250_mx_swizzle() {
 
 bool is_gfx1250_nvfp4() {
 #if ROCM_VERSION >= 100000
-  return at::detail::getCUDAHooks().isGPUArch({"gfx1250"});
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1250", "gfx1250-strict"});
 #else
   return false;
 #endif

@@ -6108,8 +6108,7 @@ def _gfx1250_scale_swizzle_cached(rocm_version: str) -> tuple[bool, bool]:
         version = tuple(int(x) for x in rocm_version.split("-")[0].split("."))
     except ValueError:
         return False, False
-    arch = _rocm_native_device_arch_name("cuda").split(":", 1)[0]
-    if not arch.startswith("gfx1250"):
+    if not is_gfx1250_arch(_rocm_native_device_arch_name("cuda")):
         return False, False
     return version >= (7, 14), version >= (10, 0)
 

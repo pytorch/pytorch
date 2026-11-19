@@ -719,7 +719,7 @@ def rocm_mx_swizzle(mat_dtype):
     if evaluate_gfx_arch_within(["gfx950"]):
         min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
         return version >= min_version
-    if evaluate_gfx_arch_within(["gfx1250"]):
+    if evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
         return version >= (7, 14)
     return False
 
@@ -735,7 +735,7 @@ def mx_scale_swizzle(scale, mat_dtype, block_size=32):
     if torch.version.hip:
         if not rocm_mx_swizzle(mat_dtype):
             return scale
-        if evaluate_gfx_arch_within(["gfx1250"]):
+        if evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
             return to_mx_swizzled_gfx1250(scale, block_size)
         return to_blocked(scale, swizzle_32_8=True)
     if scale.device.type == "xpu":

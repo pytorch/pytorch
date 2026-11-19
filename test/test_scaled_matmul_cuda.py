@@ -239,10 +239,14 @@ def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+def is_gfx1250_family() -> bool:
+    return evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"])
+
+
 def rocm_nvfp4_supported() -> bool:
     if not torch.version.hip:
         return False
-    return evaluate_gfx_arch_within(["gfx1250"]) and _get_torch_rocm_version() >= (10, 0)
+    return is_gfx1250_family() and _get_torch_rocm_version() >= (10, 0)
 
 
 def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
@@ -254,7 +258,7 @@ def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
     """
     if not torch.version.hip and "xpu" not in device:
         return SwizzleType.SWIZZLE_32_4_4
-    if torch.version.hip and evaluate_gfx_arch_within(["gfx1250"]) and rocm_mx_swizzle(mat_dtype):
+    if torch.version.hip and is_gfx1250_family() and rocm_mx_swizzle(mat_dtype):
         return SwizzleType.SWIZZLE_128
     return SwizzleType.SWIZZLE_32_8 if rocm_mx_swizzle(mat_dtype) else SwizzleType.NO_SWIZZLE
 
@@ -2798,7 +2802,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             # NO_SWIZZLE requires M and N multiples of 16 and K a multiple of 128.
             if not rocm_mx_swizzle(mat_dtype) and not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
                 raise unittest.SkipTest("M and N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE on ROCm, skipping")
-            if recipe == "mxfp4" and evaluate_gfx_arch_within(["gfx1250"]) and (M % 2 != 0 or N % 2 != 0 or K % 32 != 0):
+            if recipe == "mxfp4" and is_gfx1250_family() and (M % 2 != 0 or N % 2 != 0 or K % 32 != 0):
                 raise unittest.SkipTest("gfx1250 MX FP4 requires even M and N and K a multiple of 32, skipping")
 
         if torch.version.hip and recipe == "nvfp4" and rocm_nvfp4_supported() and (M % 2 != 0 or N % 2 != 0 or K % 16 != 0):
@@ -3064,7 +3068,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         )
         if not torch.version.hip:
             swizzle = SwizzleType.SWIZZLE_32_4_4
-        elif evaluate_gfx_arch_within(["gfx1250"]) and rocm_mx_swizzle(x_lowp.dtype):
+        elif is_gfx1250_family() and rocm_mx_swizzle(x_lowp.dtype):
             swizzle = SwizzleType.SWIZZLE_128
         elif rocm_mx_swizzle(x_lowp.dtype):
             swizzle = SwizzleType.SWIZZLE_32_8
@@ -3445,7 +3449,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 out_dtype=torch.bfloat16, use_fast_accum=False,
             )
 
-        if evaluate_gfx_arch_within(["gfx1250"]):
+        if is_gfx1250_family():
             # Rejected in check_mx_swizzle, before the K alignment check.
             with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
                 with self.assertRaisesRegex(
@@ -3463,7 +3467,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         if not rocm_mx_swizzle(mat_dtype):
             return
-        swizzle = SwizzleType.SWIZZLE_128 if evaluate_gfx_arch_within(["gfx1250"]) else SwizzleType.SWIZZLE_32_8
+        swizzle = SwizzleType.SWIZZLE_128 if is_gfx1250_family() else SwizzleType.SWIZZLE_32_8
         swizzle_name = "SWIZZLE_128" if swizzle == SwizzleType.SWIZZLE_128 else "SWIZZLE_32_8"
         with self.subTest(swizzle=swizzle_name, mkn=(32, 16, 32)):
             with self.assertRaisesRegex(ValueError, f"K must be a multiple of 32 for (gfx1250 MX FP4 )?{swizzle_name}"):
@@ -3473,7 +3477,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             # regardless of swizzle. M is not.
             got = ones_mm(8, 32, 16, swizzle)
             self.assertEqual(got, torch.full((8, 16), 32, device=device, dtype=torch.bfloat16))
-        if evaluate_gfx_arch_within(["gfx1250"]) and fp4:
+        if is_gfx1250_family() and fp4:
             with self.subTest(swizzle="SWIZZLE_128", mkn=(3, 32, 16)):
                 with self.assertRaisesRegex(ValueError, "gfx1250 MX FP4 SWIZZLE_128"):
                     ones_mm(3, 32, 16, SwizzleType.SWIZZLE_128)
@@ -3566,7 +3570,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
-        if evaluate_gfx_arch_within(["gfx1250"]):
+        if is_gfx1250_family():
             # At K=128 the gfx1250 order is the identity, so a linear buffer
             # has the right count. A 32x8-padded buffer is the wrong size.
             expected = M * round_up(ceil_div(K, BLOCK_SIZE), 4)
@@ -3631,7 +3635,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         C_ref = A_ref @ B_ref.t()
         sqnr_target = 15.0 if recipe == "mxfp4" else 15.8
 
-        if evaluate_gfx_arch_within(["gfx1250"]):
+        if is_gfx1250_family():
             # v1 hard-wires NO_SWIZZLE. gfx1250 cannot read that order.
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -5149,7 +5153,7 @@ print("tunableop_keys_ok")
         # already a valid SWIZZLE_128 buffer. gfx1250 rejects NO_SWIZZLE.
         # gfx950 still accepts it.
         gfx1250_swizzle = {}
-        if evaluate_gfx_arch_within(["gfx1250"]):
+        if is_gfx1250_family():
             gfx1250_swizzle = {
                 "swizzle_a": SwizzleType.SWIZZLE_128,
                 "swizzle_b": SwizzleType.SWIZZLE_128,
