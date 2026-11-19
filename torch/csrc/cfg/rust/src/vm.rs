@@ -256,6 +256,30 @@ pub fn plan_changed() {
     PLAN_EPOCH.fetch_add(1, Ordering::Relaxed);
 }
 
+/// The builtins `locals`, `vars` and `dir`, which look for the variables of
+/// the frame that calls them (see `Op::Locals`). Kept for good.
+unsafe fn frame_readers() -> (Obj, Obj, Obj) {
+    static FOUND: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+    let found = FOUND.get_or_init(|| {
+        let builtins = ffi::PyImport_ImportModule(c"builtins".as_ptr());
+        let get = |name: &std::ffi::CStr| {
+            let found = if builtins.is_null() {
+                null_mut()
+            } else {
+                ffi::PyObject_GetAttrString(builtins, name.as_ptr())
+            };
+            if found.is_null() {
+                ffi::PyErr_Clear();
+            }
+            found as usize
+        };
+        let all = (get(c"locals"), get(c"vars"), get(c"dir"));
+        xdecref(builtins);
+        all
+    });
+    (found.0 as Obj, found.1 as Obj, found.2 as Obj)
+}
+
 static TRIAL_DRAW: AtomicU64 = AtomicU64::new(0x9E37_79B9_7F4A_7C15);
 
 unsafe impl Send for SettledBlocks {}
@@ -2210,6 +2234,49 @@ impl Compiled {
                 }
                 xdecref(package);
                 checked(found)
+            }
+            Op::Locals(callee, entries) => {
+                let callee = self.obj(regs, *callee);
+                let (locals, vars, dir) = frame_readers();
+                if callee != locals && callee != vars && callee != dir {
+                    return checked(ffi::PyObject_CallNoArgs(callee));
+                }
+                let dict = ffi::PyDict_New();
+                if dict.is_null() {
+                    return Err(());
+                }
+                for (name, v, is_cell) in entries {
+                    if reg(regs, *v).is_null() {
+                        continue;
+                    }
+                    let held = self.obj(regs, *v);
+                    let value = if *is_cell && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(pyffi::PyCell_Type) {
+                        pyffi::PyCell_Get(held)
+                    } else {
+                        new_ref(held)
+                    };
+                    if value.is_null() {
+                        // A cell without a value: a variable that has none.
+                        ffi::PyErr_Clear();
+                        continue;
+                    }
+                    let failed = ffi::PyDict_SetItem(dict, f.consts[*name as usize].as_ptr(), value) < 0;
+                    ffi::Py_DECREF(value);
+                    if failed {
+                        ffi::Py_DECREF(dict);
+                        return Err(());
+                    }
+                }
+                if callee != dir {
+                    return Ok(dict);
+                }
+                let names = ffi::PyDict_Keys(dict);
+                ffi::Py_DECREF(dict);
+                if names.is_null() || ffi::PyList_Sort(names) < 0 {
+                    xdecref(names);
+                    return Err(());
+                }
+                Ok(names)
             }
             // The block loop runs these two; it has the frames.
             Op::Hold(_) | Op::FrameEnter(_) | Op::FrameLeave => Ok(null_mut()),

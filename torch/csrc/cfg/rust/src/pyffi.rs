@@ -13,6 +13,7 @@ extern "C" {
     // Borrowed references to the two halves of a bound method.
     pub fn PyMethod_Function(method: Obj) -> Obj;
     pub fn PyMethod_Self(method: Obj) -> Obj;
+    pub static mut PyCell_Type: ffi::PyTypeObject;
     // New reference, or null (without an error) for an empty cell.
     pub fn PyCell_Get(cell: Obj) -> Obj;
     // value may be null, for an empty cell.
