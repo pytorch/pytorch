@@ -6453,6 +6453,83 @@ class TestVmRegions(TestCase):
         model.bias = torch.nn.Parameter(torch.zeros(2))
         self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (0, 2))
 
+    def test_usual_tells_a_call_that_is_like_another(self):
+        torch.vm._load_runtime()
+        types = (torch.Tensor, torch.nn.Parameter)
+        a, b = torch.ones(2, 3), torch.zeros(4)
+        hooks = {}
+        spec = [
+            ("tensor", 0),
+            ("int",),
+            ("value", "sum"),
+            ("tuple", [("tensor", 1), ("tensor", 0)]),
+            ("list", [("int",)]),
+            ("dict", ("k",), [("value", None)]),
+            ("object", len),
+        ]
+        with torch.no_grad():
+            usual = cfg_rs.Usual(
+                list(range(7)),
+                spec,
+                ("parts",),
+                ("modes",),
+                [],
+                types,
+                1 << 62,
+                (hooks,),
+            )
+            args = (a, 7, "sum", (b, a), [3], {"k": None}, len)
+            key, flat, held, ints, offsets, known, unwritten = usual.look(args)
+            # What describing the call the long way gives.
+            kinds, numbers, expected = cfg_rs.tensor_key([a, b], [7, 3])
+            self.assertEqual(key, (("parts",), kinds, numbers, ("modes",)))
+            self.assertTrue(flat[0] is a and flat[1] is b and len(flat) == 2)
+            self.assertTrue(
+                held[0] is args[4] and held[1] is args[5] and len(held) == 2
+            )
+            self.assertEqual(
+                (ints, offsets, known, unwritten), ([7, 3], expected, [], True)
+            )
+            # Other numbers, and tensors of another kind, are like it: they
+            # are what the key is made of.
+            again = (b, 8, "sum", (a.double(), b), [3], {"k": None}, len)
+            kinds, numbers, _ = cfg_rs.tensor_key([b, again[3][0]], [8, 3])
+            self.assertEqual(
+                usual.look(again)[0], (("parts",), kinds, numbers, ("modes",))
+            )
+            unlike = [
+                (a, 7.0, "sum", (b, a), [3], {"k": None}, len),
+                (a, True, "sum", (b, a), [3], {"k": None}, len),
+                (a, 7, "max", (b, a), [3], {"k": None}, len),
+                (a, 7, "sum", (b, b), [3], {"k": None}, len),
+                (a, 7, "sum", (a, a), [3], {"k": None}, len),
+                (a, 7, "sum", (b, a, a), [3], {"k": None}, len),
+                (a, 7, "sum", [b, a], [3], {"k": None}, len),
+                (a, 7, "sum", (b, a), [3, 4], {"k": None}, len),
+                (a, 7, "sum", (b, a), [3], {"j": None}, len),
+                (a, 7, "sum", (b, a), [3], {"k": 0}, len),
+                (a, 7, "sum", (b, a), [3], {"k": None}, max),
+                (a, 1 << 62, "sum", (b, a), [3], {"k": None}, len),
+                (a, 7, "sum", (b, a), [3], {"k": None}),
+            ]
+            for other in unlike:
+                self.assertIsNone(usual.look(other))
+            # Nor is one that comes with a hook for every module,
+            hooks[0] = len
+            self.assertIsNone(usual.look(args))
+            del hooks[0]
+            self.assertIsNotNone(usual.look(args))
+        # in other modes of the thread,
+        self.assertIsNone(usual.look(args))
+        # or after a dict of a module has changed.
+        model = torch.nn.Linear(3, 2)
+        cfg_rs.module_look(model, types, True)
+        with torch.no_grad():
+            usual = cfg_rs.Usual([0], [("int",)], (int,), (), [], types, 1 << 62, ())
+            self.assertIsNotNone(usual.look((1,)))
+            model.note = 1
+            self.assertIsNone(usual.look((1,)))
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.vm(region_infer, passes=with_graphs("nope"))
