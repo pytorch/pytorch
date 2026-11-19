@@ -483,7 +483,6 @@ impl Op {
                 | Op::DictUpdate(..)
                 | Op::DictMerge(..)
                 | Op::MapAdd(..)
-                | Op::SetItem { .. }
                 | Op::IsFunction { .. }
                 | Op::FrameEnter(_)
                 | Op::FrameLeave
@@ -497,7 +496,7 @@ impl Op {
         self.is_replayable()
             || matches!(
                 self,
-                Op::GetIter(_) | Op::IterNext(_) | Op::MakeCell(_) | Op::CheckBound(..)
+                Op::GetIter(_) | Op::IterNext(_) | Op::MakeCell(_) | Op::CheckBound(..) | Op::SetItem { .. }
             )
     }
 
