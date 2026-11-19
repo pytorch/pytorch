@@ -68,11 +68,11 @@ traced and compiled as another variant. What the trace read from anywhere
 else, such as an attribute of a module that is not a tensor or a global that
 is rebound later, is not checked.
 
-Sizes are the exception to "a new combination is another variant". When a
-region is called with tensors that differ from earlier ones in their sizes
-only, the next variant leaves those sizes open: its graph computes with them,
-and it holds for every call that satisfies what its trace needed to know
-about them (see "Sizes" below).
+Sizes and integers are the exception to "a new combination is another
+variant". When a region is called with inputs that differ from earlier ones
+in such numbers only, the next variant leaves those numbers open: its graph
+computes with them, and it holds for every call that satisfies what its trace
+needed to know about them (see "Sizes" below).
 """
 
 import ast
@@ -182,6 +182,9 @@ _TENSORS = frozenset({torch.Tensor, nn.Parameter})
 _TENSOR_TYPES = tuple(_TENSORS)
 # What a size is in a trace that leaves it open, and what is computed from it.
 _SYMS = frozenset({torch.SymInt, torch.SymFloat, torch.SymBool})
+# An integer the region is handed is one of the numbers of the call (see
+# ``_Inputs``) if it fits a machine word with room to compute.
+_WIDE = 1 << 62
 # How many variants of a region may leave sizes open, for inputs that are
 # otherwise alike: one per path that the sizes choose.
 _MOST_OPEN = 4
@@ -704,7 +707,7 @@ def _module_state(module: nn.Module) -> _ModuleState:
 class _Inputs:
     """What one call hands a region, as ``_describe`` finds it."""
 
-    __slots__ = ("flat", "held", "offsets", "seen")
+    __slots__ = ("flat", "held", "ints", "offsets", "seen")
 
     def __init__(self) -> None:
         # The tensors, each object once.
@@ -712,6 +715,9 @@ class _Inputs:
         # The objects whose state a region may change: lists, dicts, sets,
         # cells, plain instances.
         self.held: list[Any] = []
+        # The integers. With the sizes and strides of the tensors they are
+        # the numbers of the call: what a variant may leave open.
+        self.ints: list[int] = []
         # The storage offsets of the tensors (see ``_key``).
         self.offsets = b""
         # Where a tensor is in ``flat``, or, counted down from -1, an object
@@ -734,8 +740,8 @@ def _hold(obj: Any, inputs: _Inputs) -> int | None:
 
 def _describe(obj: Any, inputs: _Inputs) -> Any:
     """What a compiled region depends on in ``obj``, as something hashable,
-    but for its tensors: those go to ``inputs`` in the order they are found,
-    and are compared by what they are like (``_key``)."""
+    but for its tensors and integers: those go to ``inputs`` in the order
+    they are found, and are compared by what they are like (``_key``)."""
     cls = type(obj)
     if cls in _TENSORS:
         position = inputs.seen.get(id(obj))
@@ -743,6 +749,9 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
             position = inputs.seen[id(obj)] = len(inputs.flat)
             inputs.flat.append(obj)
         return position
+    if cls is int and -_WIDE < obj < _WIDE:
+        inputs.ints.append(obj)
+        return int
     if cls in _VALUES:
         return (cls, obj)
     if cls in _PLAIN:
@@ -858,12 +867,12 @@ def _acceptable(obj: Any) -> str | None:
 
 def _key(parts: list[Any], inputs: _Inputs) -> Any:
     """The key of the variant for a call: what its inputs are apart from
-    tensors, what kinds of tensors they hold, the numbers of the call (the
-    sizes and strides of the tensors), and the modes it runs in. A variant
-    with open sizes is for many keys that differ in their numbers only
-    (``_Sizes``)."""
+    tensors and integers, what kinds of tensors they hold, the numbers of
+    the call (the sizes and strides of the tensors, then the integers), and
+    the modes it runs in. A variant with open sizes is for many keys that
+    differ in their numbers only (``_Sizes``)."""
     try:
-        kinds, numbers, inputs.offsets = _runtime.tensor_key(inputs.flat, [])
+        kinds, numbers, inputs.offsets = _runtime.tensor_key(inputs.flat, inputs.ints)
     except TypeError:
         raise _Opaque(0, "a tensor without sizes of its own") from None
     return (tuple(parts), kinds, numbers, _modes())
@@ -878,13 +887,31 @@ class _Copies:
     (``_Variant.effects``).
     """
 
-    def __init__(self, fakes: dict[int, torch.Tensor]) -> None:
+    def __init__(
+        self,
+        fakes: dict[int, torch.Tensor],
+        ints: list[int],
+        open_ints: dict[int, Any] | None = None,
+    ) -> None:
         self.fakes = fakes
+        # The integers of the call in the order they were found, and what
+        # the trace runs on in place of the ones it leaves open.
+        self.ints = ints
+        self.open_ints = open_ints or {}
+        self.taken = 0
         # By the id of what they are copies of.
         self.of: dict[int, Any] = {}
         # Pytree nodes, with their children: these must stay as they are.
         self.nodes: list[tuple[Any, list[Any]]] = []
         self.tracked: list[tuple[Any, Any]] = []
+
+    def number(self, value: int) -> Any:
+        """The next integer of the call, as the trace is to see it."""
+        k = self.taken
+        self.taken += 1
+        if k >= len(self.ints) or self.ints[k] != value:
+            raise _Failed(None, "its integers are not where the call had them")
+        return self.open_ints.get(k, value)
 
     def track(self, held: list[Any]) -> None:
         """Remembers what the copies of ``held`` hold before the trace."""
@@ -916,6 +943,10 @@ def _rebuild(obj: Any, copies: _Copies) -> Any:
     cls = type(obj)
     if cls in _TENSORS:
         return copies.fakes[id(obj)]
+    if cls is int:
+        return copies.number(obj) if -_WIDE < obj < _WIDE else obj
+    if cls in _VALUES:
+        return obj
     if cls is tuple:
         return tuple([_rebuild(item, copies) for item in obj])
     copy = copies.of.get(id(obj))
@@ -1038,6 +1069,8 @@ def _checked(
 ) -> "_Recipes":
     """After the instructions of a trace ran: what a region must not have
     done, and the recipes for what it gives back."""
+    if copies.taken != len(copies.ints):
+        raise _Failed(None, "its integers are not where the call had them")
     for copy, children in copies.nodes:
         if not _unchanged(copy, children):
             raise _Failed(None, f"changes a {type(copy).__name__} it was given")
@@ -1147,11 +1180,11 @@ def _modes() -> tuple[Any, ...]:
 # ----------------------------------------------------------------------
 #
 # A size is a value of the program like any other: the VM has it in a
-# register once the code reads it, and a region is handed it inside a
-# tensor. So a region does not get shapes of a special kind. One call's
-# worth of what a graph can depend on in them is a row of numbers
-# (``_key``): the sizes and strides of the tensors. The first variant for
-# some kind of inputs is for exactly its row. When a call
+# register once the code reads it, and a region is handed it inside a tensor
+# or as an integer. So a region does not get shapes of a special kind. One
+# call's worth of what a graph can depend on in them is a row of numbers
+# (``_key``): the sizes and strides of the tensors, then the integers. The
+# first variant for some kind of inputs is for exactly its row. When a call
 # comes with other numbers in some places, those are the places the next
 # variant leaves open: its trace runs on symbols there, its graph computes
 # with them, and what the trace needed to know about them (a branch it took,
@@ -1163,20 +1196,23 @@ def _modes() -> tuple[Any, ...]:
 class _Sizes:
     """What a region knows about the numbers of inputs of one kind."""
 
-    __slots__ = ("fixed", "last", "open", "static", "varies")
+    __slots__ = ("fixed", "last", "open", "static", "stuck", "varies")
 
     def __init__(self, numbers: bytes) -> None:
         # The numbers of the call a variant was last made for.
         self.last = numbers
         # The places that have not held the same number every time, and of
-        # those the ones a trace needed to be the number they were (it
-        # looped over one, say): those are not left open again.
+        # those the ones a trace needed to be the number they were (it used
+        # one as an index, say): those are not left open again.
         self.varies: set[int] = set()
         self.fixed: set[int] = set()
         # The variants that leave numbers open, newest last.
         self.open: list[_Variant] = []
         # No trace with open numbers worked: every variant is for its row.
         self.static = False
+        # How many variants were made because an integer that cannot be
+        # left open was another one.
+        self.stuck = 0
 
 
 def _kind(key: Any) -> Any:
@@ -1184,9 +1220,9 @@ def _kind(key: Any) -> Any:
     return (key[0], key[1], key[3])
 
 
-def _slots(kinds: bytes) -> list[tuple[str, int, int]]:
+def _slots(kinds: bytes, ints: int) -> list[tuple[str, int, int]]:
     """What each number of a call is: ("size" or "stride", tensor,
-    dimension)."""
+    dimension), or ("int", which, 0)."""
     slots: list[tuple[str, int, int]] = []
     fields = memoryview(kinds).cast("i")
     for tensor in range(len(fields) // 6):
@@ -1194,6 +1230,7 @@ def _slots(kinds: bytes) -> list[tuple[str, int, int]]:
         slots.extend(("size", tensor, dim) for dim in range(rank))
         if strided:
             slots.extend(("stride", tensor, dim) for dim in range(rank))
+    slots.extend(("int", k, 0) for k in range(ints))
     return slots
 
 
@@ -1249,8 +1286,9 @@ def _named(node: ast.AST) -> str | None:
 
 def _number_of(node: ast.AST) -> tuple[str, int, int] | None:
     """Which number of a call an expression of a condition stands for."""
-    if _named(node) is not None:
-        return None
+    name = _named(node)
+    if name is not None:
+        return ("int", int(name[1:]), 0) if name[0] == "i" else None
     call = node.value if isinstance(node, ast.Subscript) else node
     if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
         return None
@@ -1397,10 +1435,10 @@ def _trap_sizes(on: bool) -> None:
 class _Open:
     """The inputs of a trace that leaves numbers of a call open.
 
-    The tensors of the trace have symbols where sizes are open, all of one
-    ``ShapeEnv``. It does the algebra while the trace and the backend run;
-    what it knows in the end is turned into the condition of the variant
-    (``guard``).
+    The tensors of the trace have symbols where sizes are open, and the
+    integers that are open are symbols too, all of one ``ShapeEnv``. It
+    does the algebra while the trace and the backend run; what it knows in
+    the end is turned into the condition of the variant (``guard``).
     """
 
     def __init__(self, key: Any, inputs: _Inputs, opened: set[int]) -> None:
@@ -1412,7 +1450,7 @@ class _Open:
             StatelessSymbolicContext,
         )
 
-        self.slots = _slots(key[1])
+        self.slots = _slots(key[1], len(inputs.ints))
         self.opened = opened
         self.env = ShapeEnv(duck_shape=False)
         # Places a trace found it cannot leave open after all.
@@ -1420,9 +1458,15 @@ class _Open:
         self.lost = False
         mode = FakeTensorMode(shape_env=self.env)
         dims: dict[int, set[int]] = {}
+        # The open integers, as positions in ``_Inputs.ints``: the graph
+        # takes them after the tensors.
+        self.numbers: list[int] = []
         for slot in sorted(opened):
-            _, which, dim = self.slots[slot]
-            dims.setdefault(which, set()).add(dim)
+            kind, which, dim = self.slots[slot]
+            if kind == "size":
+                dims.setdefault(which, set()).add(dim)
+            else:
+                self.numbers.append(which)
         static, dynamic = DimDynamic.STATIC, DimDynamic.DYNAMIC
         self.fakes: list[torch.Tensor] = []
         self.sources: list[Any] = []
@@ -1451,9 +1495,20 @@ class _Open:
                     self.symbols[size.node.expr] = index[("size", t, d)]
             self.fakes.append(fake)
             self.sources.append(source)
+        self.syms: list[Any] = []
+        for k in self.numbers:
+            source = LocalSource(f"i{k}")
+            symbol = self.env.create_unspecified_symbol(
+                inputs.ints[k], source, dynamic_dim=dynamic
+            )
+            self.symbols[symbol] = index[("int", k, 0)]
+            self.syms.append(
+                self.env.create_symintnode(symbol, hint=inputs.ints[k], source=source)
+            )
+            self.sources.append(source)
 
     def example(self) -> list[Any]:
-        return list(self.fakes)
+        return [*self.fakes, *self.syms]
 
     def close(self, value: Any) -> None:
         """Notes that the places ``value`` was computed from cannot be open."""
@@ -1492,6 +1547,9 @@ class _Open:
                 for d, stride in enumerate(fake.stride()):
                     if _is_open(stride):
                         left.add(index[("stride", t, d)])
+        for k, sym in zip(self.numbers, self.syms):
+            if _is_open(sym):
+                left.add(index[("int", k, 0)])
         return left
 
     def conditions(self) -> list[str]:
@@ -1902,6 +1960,7 @@ class _Variant:
         "guards",
         "keep",
         "leap",
+        "numbers",
         "ops",
         "proven",
         "recipes",
@@ -1931,13 +1990,19 @@ class _Variant:
         self.effects: list[Any] = []
         self.grows = False
         # For a variant that leaves sizes open: which calls it holds for
-        # (a ``ShapeGuard``), and the same as text.
+        # (a ``ShapeGuard``), the same as text, and which of the integers of
+        # a call its graph takes after the tensors.
         self.shape: Any = None
         self.conditions: list[str] = []
+        self.numbers: list[int] = []
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
-        results = self.compiled(*flat)
+        if self.numbers:
+            ints = inputs.ints
+            results = self.compiled(*flat, *[ints[k] for k in self.numbers])
+        else:
+            results = self.compiled(*flat)
         if self.direct:
             return tuple(results)
         built: dict[int, Any] = {}
@@ -2165,11 +2230,20 @@ class _Region:
         self, key: Any, args: tuple[Any, ...], inputs: _Inputs
     ) -> _Variant | None:
         """Another variant of a region that has one, for inputs not seen yet."""
-        if len(self.variants) >= 3 and all(
+        known = self.sizes.get(_kind(key))
+        ints: set[int] = set()
+        if known is not None:
+            # The integers that are not what they were last time.
+            first = len(memoryview(key[2]).cast("q")) - len(inputs.ints)
+            ints = {i for i in _differing(known.last, key[2]) if i >= first}
+        ever_new = len(self.variants) >= 3 and all(
             _same_but_values(key, k) for k in self.variants
-        ):
-            # A loop counter, say: there is no end to these, and every one
-            # would be a graph of its own.
+        )
+        if known is not None and known.stuck >= 2:
+            ever_new = ever_new or any(known.static or i in known.fixed for i in ints)
+        if ever_new:
+            # A loop counter that picks a layer, say: there is no end to
+            # these, and every one would be a graph of its own.
             self.hot = False
             self.plan.split(self, None, "its inputs take ever new values")
             return None
@@ -2191,6 +2265,8 @@ class _Region:
             self.hot = False
             self.plan.split(self, None, "changes what it is given on every call")
             return None
+        if known is not None and any(known.static or i in known.fixed for i in ints):
+            known.stuck += 1
         self.variants[key] = variant
         return variant
 
@@ -2210,14 +2286,14 @@ class _Region:
         if _monitor is None or _monitor < 0:
             # Nothing would tell a trace that code asks what type a size is.
             return set()
-        slots = _slots(key[1])
+        slots = _slots(key[1], len(inputs.ints))
         now = memoryview(key[2]).cast("q")
         # A size of 0 or 1 is not like the others (it broadcasts): a tensor
         # that has one gets a variant of its own.
         return {
             i
             for i in known.varies - known.fixed
-            if slots[i][0] == "size" and now[i] > 1
+            if slots[i][0] == "int" or (slots[i][0] == "size" and now[i] > 1)
         }
 
     def open_for(self, key: Any, inputs: _Inputs) -> _Open | None:
@@ -2262,10 +2338,14 @@ class _Region:
         for module in modules.values():
             reachable |= _module_state(module).ids
         found: dict[str, Any] = {}
+        numbers = opening.numbers if opening is not None else []
 
-        def region(*fake: torch.Tensor) -> tuple[Any, ...]:
+        def region(*example: Any) -> tuple[Any, ...]:
+            fake = example[: len(flat)]
             fakes = {id(real): f for real, f in zip(flat, fake)}
-            copies = _Copies(fakes)
+            copies = _Copies(
+                fakes, inputs.ints, dict(zip(numbers, example[len(flat) :]))
+            )
             env = dict(zip(self.inputs, [_rebuild(arg, copies) for arg in args]))
             copies.track(held)
             given = copies.given()
@@ -2314,6 +2394,7 @@ class _Region:
         was traced on in its open numbers, as far as the trace allows."""
         shape, kept, left = opening.guard(key[2], inputs.offsets, texts)
         variant.shape, variant.conditions = shape, kept
+        variant.numbers = opening.numbers
         known = self.sizes.get(_kind(key))
         if known is None:
             known = self.sizes[_kind(key)] = _Sizes(key[2])
@@ -2345,8 +2426,10 @@ class _Region:
         # tensor of its own is not looked up, the code does not say which.
         same = None
         if not any(node.op == "get_attr" for node in graph.graph.nodes):
+            # The integers of the call are in the code, or are open.
+            tensors = key[2][: len(key[2]) - 8 * len(inputs.ints)]
             opened = tuple(sorted(opening.opened)) if opening is not None else None
-            same = (graph.code, key[1], key[2], key[3], opened)
+            same = (graph.code, key[1], tensors, key[3], opened)
         # What this trace needed of the sizes, before the backend adds to it.
         own = opening.conditions() if opening is not None else None
         made = options.compiled.get(same)
@@ -2696,10 +2779,12 @@ class _Path(_Region):
             if wanted != positions:
                 fewer = _Inputs()
                 self.key(args, fewer, wanted)
-                # The recipes and effects count the tensors and the objects
-                # the region was given: they must be the same ones.
-                same = _same_items(fewer.flat, inputs.flat) and _same_items(
-                    fewer.held, inputs.held
+                # The recipes and effects count the tensors, the objects and
+                # the integers the region was given: they must be the same.
+                same = (
+                    _same_items(fewer.flat, inputs.flat)
+                    and _same_items(fewer.held, inputs.held)
+                    and fewer.ints == inputs.ints
                 )
                 positions = wanted
                 if not same:
@@ -2749,10 +2834,14 @@ class _Path(_Region):
             reachable |= _module_state(module).ids
         found: dict[str, Any] = {}
         keyed = set(positions)
+        numbers = opening.numbers if opening is not None else []
 
-        def path(*fake: torch.Tensor) -> tuple[Any, ...]:
+        def path(*example: Any) -> tuple[Any, ...]:
+            fake = example[: len(flat)]
             fakes = {id(real): f for real, f in zip(flat, fake)}
-            copies = _Copies(fakes)
+            copies = _Copies(
+                fakes, inputs.ints, dict(zip(numbers, example[len(flat) :]))
+            )
             env: dict[int, Any] = {}
             for position, (value, arg) in enumerate(zip(self.inputs, args)):
                 if position in keyed:
