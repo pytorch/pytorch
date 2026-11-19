@@ -5,6 +5,7 @@ from . import (
     norm,
     pointwise,
     polar,
+    quantize_tensor,
     reductions,
     rng,
     scatter_add,
