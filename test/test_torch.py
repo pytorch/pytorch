@@ -7141,22 +7141,17 @@ class TestTorchDeviceType(TestCase):
     def test_bmm_matmul_mixed_dtype_error(self, device):
         a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
         b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
-        msg = (
-            "expected scalar type .* but found"  # CUDA
-            "|batch1 and batch2 to have the same dtype"  # XPU
-            "|Expected arguments of same type"  # MPS bmm/matmul
-        )
 
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.bmm(a, b)
 
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
 
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.matmul(a, b)
 
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
     @onlyAccelerator
@@ -7165,8 +7160,7 @@ class TestTorchDeviceType(TestCase):
         a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
         b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
         msg = (
-            "expected scalar type .* but found"  # CUDA
-            "|batch1 and batch2 to have the same dtype"  # XPU
+            "expected scalar type .* but found"  # CUDA, XPU
             "|same dtype"  # MPS baddbmm
         )
 
