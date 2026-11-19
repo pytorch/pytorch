@@ -645,8 +645,11 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
 MPSScalar getMPSScalar(const TensorBase& cpu_scalar) {
   TORCH_CHECK(cpu_scalar.dim() == 0, "Passed CPU tensor to MPS op");
   const auto type = cpu_scalar.scalar_type();
-  if (type == kDouble || type == kComplexDouble) [[unlikely]] {
-    return getMPSScalar(Tensor(cpu_scalar).item(), type);
+  if (type == kDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<double>(), type);
+  }
+  if (type == kComplexDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<c10::complex<double>>(), type);
   }
   MPSScalar s{.size = static_cast<size_t>(cpu_scalar.element_size()), .type = type};
   TORCH_CHECK(s.size <= sizeof(s.value), "Unsupported CPU scalar type ", type);
