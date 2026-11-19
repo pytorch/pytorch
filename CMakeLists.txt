@@ -173,6 +173,7 @@ set(CMAKE_C_STANDARD
 
 # ---[ Utils
 include(cmake/public/utils.cmake)
+include(cmake/ExplicitRequests.cmake)
 
 # --- [ Check that minimal gcc version is 11.3+
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
@@ -381,11 +382,9 @@ cmake_dependent_option(
 # instead of the value. the toolkit-not-found case is
 # cmake/public/LoadHIP.cmake's business
 pytorch_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
-if(_USE_ROCM_EXPLICITLY_SET AND NOT (LINUX OR WIN32))
-  message(FATAL_ERROR
-    "PyTorch: ROCm was explicitly requested (USE_ROCM=1) but is only "
-    "supported on Linux and Windows. "
-    "If you want to build without ROCm, please set USE_ROCM=0.")
+if(NOT (LINUX OR WIN32))
+  pytorch_refuse_explicit_request(USE_ROCM ROCm
+    "is only supported on Linux and Windows")
 endif()
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
@@ -419,33 +418,20 @@ option(USE_DISTRIBUTED "Use distributed" ON)
 # cmake/Dependencies.cmake
 pytorch_dependent_option(USE_NCCL "Use NCCL" ON
                          "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-if(_USE_NCCL_EXPLICITLY_SET)
-  if(NOT (USE_DISTRIBUTED AND UNIX AND NOT APPLE))
-    message(FATAL_ERROR
-      "PyTorch: NCCL was explicitly requested (USE_NCCL=1) but requires "
-      "USE_DISTRIBUTED on a non-Apple UNIX platform. "
-      "If you want to build without NCCL, please set USE_NCCL=0.")
-  elseif(NOT (USE_CUDA OR USE_ROCM))
-    message(FATAL_ERROR
-      "PyTorch: NCCL was explicitly requested (USE_NCCL=1) but requires a "
-      "CUDA or ROCm build. "
-      "If you want to build without NCCL, please set USE_NCCL=0.")
-  endif()
+if(NOT (USE_DISTRIBUTED AND UNIX AND NOT APPLE))
+  pytorch_refuse_explicit_request(USE_NCCL NCCL
+    "requires USE_DISTRIBUTED on a non-Apple UNIX platform")
+elseif(NOT (USE_CUDA OR USE_ROCM))
+  pytorch_refuse_explicit_request(USE_NCCL NCCL
+    "requires a CUDA or ROCm build")
 endif()
 pytorch_dependent_option(USE_XCCL "Use XCCL" ON
                           "USE_XPU;UNIX;NOT APPLE" OFF)
-if(_USE_XCCL_EXPLICITLY_SET)
-  if(NOT (UNIX AND NOT APPLE))
-    message(FATAL_ERROR
-      "PyTorch: XCCL was explicitly requested (USE_XCCL=1) but requires a "
-      "non-Apple UNIX platform. "
-      "If you want to build without XCCL, please set USE_XCCL=0.")
-  elseif(NOT USE_XPU)
-    message(FATAL_ERROR
-      "PyTorch: XCCL was explicitly requested (USE_XCCL=1) but requires an "
-      "XPU build. "
-      "If you want to build without XCCL, please set USE_XCCL=0.")
-  endif()
+if(NOT (UNIX AND NOT APPLE))
+  pytorch_refuse_explicit_request(USE_XCCL XCCL
+    "requires a non-Apple UNIX platform")
+elseif(NOT USE_XPU)
+  pytorch_refuse_explicit_request(USE_XCCL XCCL "requires an XPU build")
 endif()
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)

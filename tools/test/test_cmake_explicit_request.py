@@ -52,6 +52,7 @@ set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 find_package(Python COMPONENTS Interpreter REQUIRED)
 include(CMakeDependentOption)
 include("{repo}/cmake/public/utils.cmake")
+include("{repo}/cmake/ExplicitRequests.cmake")
 include("{repo}/cmake/EnvVarForwarding.cmake")
 {options}
 if(USE_CUDA)
