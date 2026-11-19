@@ -1351,6 +1351,13 @@ class LazyTraceHandler(logging.StreamHandler):
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
+                elif (
+                    "TORCHELASTIC_RUN_ID" in os.environ
+                    and (env_rank := os.environ.get("RANK", "")).isdecimal()
+                ):
+                    # The first trace often precedes init_process_group; torchelastic
+                    # exports the global rank before starting workers.
+                    ranksuffix = f"rank_{env_rank}_"
                 fd, path = tempfile.mkstemp(
                     suffix=".log",
                     prefix=LOG_PREFIX + ranksuffix,
