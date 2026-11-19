@@ -4169,9 +4169,17 @@ class CppCodeCache:
             restore_cpp_kernel,
         )
 
+        # With optimized code, the main source is only compiled, so its command
+        # line lacks the flags that reach only the link.
+        link_flags = (
+            " " + " ".join(config.cpp.extra_ldflags) if config.cpp.extra_ldflags else ""
+        )
+
         # Both keys come from here; only the command line passed in differs.
         def kernel_key(cmd_line: str) -> str:
-            return get_hash(main_code.strip(), f"{optimized_code} {cmd_line}")
+            return get_hash(
+                main_code.strip(), f"{optimized_code} {cmd_line}{link_flags}"
+            )
 
         key, main_path = write(main_code, "main.cpp", key=kernel_key(main_cmd_line))
 

@@ -1279,6 +1279,12 @@ def get_cpp_options(
         ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
+    # Linux only. One argument per list: the builder drops repeated arguments,
+    # which would separate a repeated flag such as -mllvm from its value.
+    if _IS_LINUX and config.cpp.extra_cflags:
+        passthrough_args.append(" ".join(config.cpp.extra_cflags))
+    if _IS_LINUX and do_link and config.cpp.extra_ldflags:
+        passthrough_args.append(" ".join(config.cpp.extra_ldflags))
 
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])

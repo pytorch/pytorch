@@ -429,6 +429,33 @@ class TestCppBuilder(TestCase):
         self.assertIsInstance(env, dict)
         self.assertEqual(env["PATH"], "/mock/bin")
 
+    def test_extra_cflags_and_ldflags(self) -> None:
+        def command(compile_only: bool) -> str:
+            options = cpp_builder.CppOptions(compile_only=compile_only)
+            return cpp_builder.CppBuilder(
+                "model", "model.cpp", options
+            ).get_command_line()
+
+        with cpp_builder.config.patch(
+            {
+                "cpp.extra_cflags": ["-mllvm", "-a=1", "-mllvm", "-b=2"],
+                "cpp.extra_ldflags": ["-Wl,-mllvm,-c=3"],
+            }
+        ):
+            with mock.patch.object(cpp_builder, "_IS_LINUX", True):
+                compile_command = command(compile_only=True)
+                link_command = command(compile_only=False)
+            with mock.patch.object(cpp_builder, "_IS_LINUX", False):
+                other_platform_command = command(compile_only=False)
+        # A repeated flag such as -mllvm stays next to its value.
+        self.assertIn(" -mllvm -a=1 -mllvm -b=2 ", compile_command)
+        self.assertIn(" -mllvm -a=1 -mllvm -b=2 ", link_command)
+        self.assertNotIn("-c=3", compile_command)
+        self.assertIn(" -Wl,-mllvm,-c=3 ", link_command)
+        # Linux only.
+        self.assertNotIn("-a=1", other_platform_command)
+        self.assertNotIn("-c=3", other_platform_command)
+
 
 if __name__ == "__main__":
     run_tests()

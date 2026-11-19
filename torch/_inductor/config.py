@@ -2092,6 +2092,17 @@ class cpp:
     # uses the platform default. Set to "" to suppress the architecture flag.
     march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
 
+    # Linux only, ignored on other platforms: extra flags passed verbatim to
+    # every C++ compiler command, e.g. ["-mllvm", "-enable-misched=false"].
+    extra_cflags: list[str] = []
+
+    # Linux only, ignored on other platforms: extra flags passed verbatim to the
+    # C++ compiler commands that link. These go to the compiler, which runs the
+    # linker, so linker options need the -Wl, prefix. With
+    # aot_inductor.enable_lto, machine code is generated at link time, so code
+    # generation flags go here, e.g. ["-Wl,-mllvm,-enable-misched=false"].
+    extra_ldflags: list[str] = []
+
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"

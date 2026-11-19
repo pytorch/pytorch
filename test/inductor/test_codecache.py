@@ -5929,6 +5929,31 @@ class TestCppCodeCacheKey(TestCase):
                     keys.append(self._key())
             self.assertNotEqual(keys[0], keys[1])
 
+    def test_key_tracks_link_flags_of_a_split_build(self):
+        # With optimized code, cpp.extra_ldflags reach only the separate link.
+        from torch.compiler import _runtime_cache
+
+        for scope in (nullcontext, _runtime_cache.capture_scope):
+            keys = set()
+            for flags in ([], ["-Wl,--defsym,a=1"], ["-Wl,--defsym,a=2"]):
+                with (
+                    fresh_cache(),
+                    scope(),
+                    config.patch({"cpp.extra_ldflags": flags}),
+                ):
+                    CppCodeCache.load_async(
+                        self.CODE,
+                        optimized_code="// optimized\n",
+                        needs_vec_isa=False,
+                        kernel_needs_vec_isa=False,
+                    )
+                    if scope is nullcontext:
+                        (key,) = CppCodeCache.cache
+                    else:
+                        (key,) = _runtime_cache._capture.cpp_kernels
+                    keys.add(key)
+            self.assertEqual(len(keys), 3)
+
     def test_frozen_key_tracks_torch_build(self):
         from torch.compiler._runtime_cache import capture_scope
 
