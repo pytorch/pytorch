@@ -16,9 +16,9 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 
-from ... import cutedsl_utils as cu
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.config import (
+    POINTWISE_ARCH_MAJORS,
     POINTWISE_PADDED_TMA_MIN,
     pointwise_presets,
     POINTWISE_REFERENCE_LANES as _B200_DEVICE_LANES,
@@ -503,7 +503,7 @@ def tma_eligible(
     if not ref.is_cuda:
         return None
     hw = _hw.caps(ref.device)
-    if hw.cc[0] not in cu.POINTWISE_ARCH_MAJORS:
+    if hw.cc[0] not in POINTWISE_ARCH_MAJORS:
         return None
     if target is not None and (
         tuple(target.shape) != shape

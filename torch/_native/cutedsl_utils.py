@@ -12,7 +12,6 @@ from .common_utils import (
     check_native_jit_disabled,
     check_native_version_skip,
 )
-from .cutedsl import config as _cutedsl_config
 from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
     _OpCondFn,
@@ -26,7 +25,6 @@ log = logging.getLogger(__name__)
 
 
 _CUTEDSL_DSL_NAME = "cutedsl"
-POINTWISE_ARCH_MAJORS = _cutedsl_config.POINTWISE_ARCH_MAJORS
 
 # Reductions require FastDivmodDivisorV2 from 4.6.2; Version.from_part needs packaging >26.
 _CUTEDSL_REQUIRED_VERSIONS: set[Version] = {
