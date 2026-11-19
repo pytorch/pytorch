@@ -303,6 +303,16 @@
       "Hints": []
     }
   ],
+  "GB3253": [
+    {
+      "Gb_type": "Unbound method descriptor call with unmodeled owner",
+      "Context": "{self.descriptor.__qualname__}({obj}, ...)",
+      "Explanation": "Dynamo has no model of {objclass.__qualname__}.{name} for a {obj.python_type().__qualname__} receiver.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0017": [
     {
       "Gb_type": "Attempted to wrap torch._higher_order_ops.invoke_subgraph",
@@ -6072,6 +6082,17 @@
       "Explanation": "combine_fn needs to produce one pytree for the output but combine_fn produces the pytree {_combine_treespec.as_python_constant()}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9423": [
+    {
+      "Gb_type": "Identity-based __hash__ escapes to user code",
+      "Context": "{self}.__hash__()",
+      "Explanation": "Dynamo cannot guard an identity-based hash, so its value could go stale.",
+      "Hints": [
+        "Use hash(x) if calling x's own hash implementation is intended.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

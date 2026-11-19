@@ -2537,8 +2537,7 @@ def object_generic_getattr(
         # graph nodes, suppression) that MRO-based resolution via
         # UserMethodVariable would bypass.
         if _is_method_type(type_attr) and (
-            obj._lookup_tp_table(name, "tp_methods") is not None
-            or _has_custom_call_method(obj)
+            obj.lookup_tp_method(name) is not None or _has_custom_call_method(obj)
         ):
             return variables.CallMethodVariable(obj, name, source=source)
 
