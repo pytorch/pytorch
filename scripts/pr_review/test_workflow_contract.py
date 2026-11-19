@@ -88,7 +88,8 @@ PR_REVIEW_SKILL = REPO / ".agents" / "skills" / "pr-review" / "SKILL.md"
 # to edit; the install step, the Read grants, the prompt hash and those links
 # are each checked against it.
 INSTALLED_SKILLS = ("pr-review", "cuda-streams")
-# The two claude-code-action steps: stage A reviews, stage B maps its review.
+# The two model steps (claude-code-action's base-action): stage A reviews,
+# stage B maps its review.
 MODEL_STEP_IDS = ("a", "claude")
 
 
@@ -1479,19 +1480,6 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 strip_comments(STAGE2.read_text()),
                 f"`{flag}` is set; it bypasses the sanitizer and publishes raw "
                 "model output to a log.",
-            )
-
-    def test_only_named_bots_may_trigger_the_review(self):
-        """pytorch-bot applies the label on a maintainer's behalf, and
-        meta-codesync pushes a co-dev PR's re-exports; a wildcard would let any
-        bot that can label or push to a pull request start the review.
-        """
-        review = strip_comments(job_block(STAGE2.read_text(), "review"))
-        for step_id in MODEL_STEP_IDS:
-            inputs = "\n".join(with_block(model_step(review, step_id)))
-            bots = re.findall(r"(?m)^\s*allowed_bots:\s*(.*)$", inputs)
-            self.assertEqual(
-                bots, ['"pytorch-bot[bot],meta-codesync[bot]"'], f"step {step_id}"
             )
 
     def test_stage2_declares_exactly_the_jobs_that_were_reviewed(self):
@@ -2952,13 +2940,15 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
     # its only reader, and uses it rather than a second copy that could drift.
     STAGE2_ENV_KEYS = frozenset(
         (
-            "APPEND_SYSTEM_PROMPT",
+            # Whoever triggered Stage 1, read by prepare's bot allowlist.
+            "ACTOR",
+            "ACTOR_TYPE",
             "AWS_REGION",
             "BASE_SHA",
             "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
             "CLAUDE_CODE_SUBAGENT_MODEL",
             "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
-            # Pinned to "0" by test_the_action_gets_the_read_only_job_token.
+            # Pinned to "0" by test_the_model_steps_run_base_action.
             "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
             "CLAUDE_OUTCOME",
             "CONVERSATION_FETCHED_AT",
@@ -2973,10 +2963,14 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "HARNESS_VERSION",
             "HEAD_SHA",
             "HEAD_TREE_SHA",
+            # Stage A's appended system prompt, read by base-action.
+            "INPUT_APPEND_SYSTEM_PROMPT",
             "IS_FORK",
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
             "MERGE_BASE_SHA",
+            # Pinned to "24" by test_the_model_steps_run_base_action.
+            "NODE_VERSION",
             "PREVIOUS_MERGE_BASE_SHA",
             "PREVIOUS_REVIEW_SHA",
             "OPT_OUT_LABEL",
@@ -3063,12 +3057,12 @@ class TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot(unittest.TestCase):
 
     Two separate controls depend on the workspace root staying empty. Project
     and local setting discovery resolve against the action's cwd, which is
-    $GITHUB_WORKSPACE; and claude-code-action's agent mode runs
-    `configureGitAuth` unconditionally, which would write a token into a
-    .git/config at that root — the file `persist-credentials: false` exists to
-    prevent. Today both throw or find nothing because the root is not a
-    checkout. Losing either `path:` is a one-token edit that changes nothing
-    observable in a passing run.
+    $GITHUB_WORKSPACE; and base-action starts its entry point with
+    `bun run` from that cwd without `--no-env-file`, so Bun would load a
+    `.env` or `bunfig.toml` (whose `preload` runs code) found at that root.
+    Today both find nothing because the root is not a checkout. Losing either
+    `path:` is a one-token edit that changes nothing observable in a passing
+    run.
     """
 
     def test_every_checkout_in_the_review_job_declares_a_path(self):
@@ -3433,14 +3427,9 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
         # session — it assumes REVIEW_ROLE deliberately, and that role's narrow
         # scope is what TestReviewRoleSeparationIsPinned exists for.
         #
-        # ONE EXCEPTION, by exact text: each of the two model steps hands the
-        # action this job's own token, scoped by the job's `contents: read`. Without it the
-        # action mints a Claude App token instead, so the job held a GitHub
-        # credential either way; this one has permissions this file pins.
-        # Pinned by test_the_action_gets_the_read_only_job_token below.
+        # No exception: the model steps run base-action, which takes no GitHub
+        # token (test_the_model_steps_run_base_action below).
         code = self.code
-        if code.count(self.ACTION_TOKEN_LINE) == len(MODEL_STEP_IDS):
-            code = code.replace(self.ACTION_TOKEN_LINE, "")
         pattern = r"\bsecrets\b|github\s*\[|github\s*\.\s*token|\btoJSON\b"
         offenders = [
             ln.strip() for ln in code.splitlines() if re.search(pattern, ln, re.I)
@@ -3459,63 +3448,56 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
             f"({folded.group(0) if folded else ''!r})",
         )
 
-    ACTION_TOKEN_LINE = "          github_token: ${{ github.token }}"
+    BASE_ACTION = (
+        "anthropics/claude-code-action/base-action@"
+        "9ca9355b36297178e28d37c799d1c9c8a28e6507"
+    )
 
-    def test_the_action_gets_the_read_only_job_token(self):
-        """Contributors without write access get re-reviewed only while both
-        inputs hold: the action ignores `allowed_non_write_users` unless
-        `github_token` is set, and without `github_token` it falls back to the
-        OIDC exchange that refuses those contributors. The token must be this
-        job's own, whose scope is the `contents: read` pinned with the job's
-        permissions, never a secret or another job's token.
+    def test_the_model_steps_run_base_action(self):
+        """The full claude-code-action looks up the triggering actor with the
+        shared Actions token before Claude starts, so a token out of rate-limit
+        budget fails stage B after stage A is paid for. base-action makes no
+        GitHub API call and takes no GitHub token, so Claude Code, which reads
+        PR content, is handed none.
         """
         # The steps are found by what they RUN, not by a marker another step
-        # could carry: exactly the two stages use the pinned action.
+        # could carry: exactly the two stages use an anthropics action.
         steps = [
             s
             for s in self.code.split("- name:")
-            if re.search(r"(?m)^\s*uses:\s*anthropics/claude-code-action@", s)
+            if re.search(r"(?m)^\s*uses:\s*anthropics/", s)
         ]
         self.assertEqual(
             [re.search(r"(?m)^\s*id:\s*(\S+)\s*$", s).group(1) for s in steps],
             list(MODEL_STEP_IDS),
-            "expected exactly the two stages' claude-code-action steps",
+            "expected exactly the two stages' model steps",
         )
         for step in steps:
             with self.subTest(step=step.split("\n", 1)[0].strip()):
-                self._check_token_inputs(step)
+                self._check_base_action_step(step)
 
-    def _check_token_inputs(self, step: str) -> None:
-        # allowed_non_write_users turns on a scrub that refuses to install
-        # Claude Code without bubblewrap, which this sudo-less job cannot add.
-        # In the step's `env:`, not `with:`, where it would be an unknown input.
+    def _check_base_action_step(self, step: str) -> None:
+        uses = re.findall(r"(?m)^\s*uses:\s*(\S+)", step)
+        self.assertEqual(uses, [self.BASE_ACTION])
+        # Only base-action's own inputs: the full action's token, bot and
+        # write-access inputs would be unknown inputs here, silently ignored.
+        keys = [
+            m.group(1)
+            for ln in with_block(step)
+            if (m := re.match(r"^ {10}([A-Za-z_][\w-]*)\s*:", ln))
+        ]
+        self.assertEqual(sorted(keys), ["claude_args", "prompt", "use_bedrock"])
+        # In the step's `env:`, not `with:`, where each would be an unknown input.
         env = re.search(r"(?ms)^ {8}env:\s*\n(.*?)(?=^ {8}\S)", step)
-        self.assertIsNotNone(env, "the claude step declares no env:")
+        self.assertIsNotNone(env, "the model step declares no env:")
+        # Claude Code's subprocess scrub needs bubblewrap, which this sudo-less
+        # job cannot add.
         self.assertRegex(
             env.group(1), r'(?m)^ {10}CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"$'
         )
-        inputs = with_block(step)
-        self.assertEqual(
-            [ln.strip() for ln in inputs if re.match(r"\s*github_token\s*:", ln)],
-            [self.ACTION_TOKEN_LINE.strip()],
-        )
-        # Adjacent and whole: a more-indented line under either would continue
-        # its scalar and change the value YAML reads.
-        i = inputs.index(self.ACTION_TOKEN_LINE)
-        indent = len(self.ACTION_TOKEN_LINE) - len(self.ACTION_TOKEN_LINE.lstrip())
-        self.assertEqual(inputs[i + 1], " " * indent + 'allowed_non_write_users: "*"')
-        nxt = next((ln for ln in inputs[i + 2 :] if ln.strip()), None)
-        if nxt is not None:
-            self.assertEqual(
-                len(nxt) - len(nxt.lstrip()),
-                indent,
-                "a continuation line follows allowed_non_write_users",
-            )
-        self.assertEqual(
-            self.code.count(self.ACTION_TOKEN_LINE),
-            len(MODEL_STEP_IDS),
-            "the job token is handed to exactly the two model steps",
-        )
+        # base-action's setup-node defaults to 18.x, which the runner image
+        # does not cache; resolving it calls api.github.com on the job token.
+        self.assertRegex(env.group(1), r'(?m)^ {10}NODE_VERSION: "24"$')
 
     def test_review_job_caches_nothing(self):
         """Cache writes land in the default-branch scope — poisonable from a fork."""
@@ -6894,7 +6876,15 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
         "trigger_label": "in progress",
     }
 
-    def _run_coords(self, td: str, *, artifact=None, event_head_sha=STUB_API_HEAD):
+    def _run_coords(
+        self,
+        td: str,
+        *,
+        artifact=None,
+        event_head_sha=STUB_API_HEAD,
+        actor="a-maintainer",
+        actor_type="User",
+    ):
         """Execute `prepare`'s artifact validation step on a real JSON file."""
         req = Path(td) / "request"
         req.mkdir(exist_ok=True)
@@ -6907,11 +6897,69 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
             td,
             {
                 "EVENT_HEAD_SHA": event_head_sha,
+                "ACTOR": actor,
+                "ACTOR_TYPE": actor_type,
                 "REVIEW_LABEL": "in progress",
                 "OPT_OUT_LABEL": "no automated review",
             },
             {},
         )
+
+    def test_only_named_bots_may_trigger_the_review(self):
+        """pytorch-bot applies the label on a maintainer's behalf, and
+        meta-codesync pushes a co-dev PR's re-exports; a wildcard would let any
+        bot that can label or push to a pull request start the review. The
+        review's base-action checks no actor, so this step is the only gate.
+        """
+        for actor, actor_type, ok in (
+            ("a-maintainer", "User", True),
+            ("pytorch-bot[bot]", "Bot", True),
+            ("meta-codesync[bot]", "Bot", True),
+            ("dependabot[bot]", "Bot", False),
+            # A bot's login with the suffix dropped is not the bot.
+            ("pytorch-bot", "Bot", False),
+            ("pytorch-bot[bot]", "Organization", True),
+            ("some-org", "Organization", False),
+            ("pytorch-bot[bot]x", "Bot", False),
+        ):
+            with self.subTest(actor=actor, actor_type=actor_type):
+                with tempfile.TemporaryDirectory() as td:
+                    proc, out = self._run_coords(td, actor=actor, actor_type=actor_type)
+                    written = out.read_text()
+                if ok:
+                    self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                    self.assertIn("pr_number=7", written)
+                else:
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertIn("unlisted bot", proc.stdout + proc.stderr)
+                    self.assertNotIn("pr_number=", written)
+
+    def test_the_bot_gate_reads_the_stage_1_actor(self):
+        """The executed cases above inject ACTOR and ACTOR_TYPE, so they hold
+        even if the step were fed `ACTOR_TYPE: User`. Pin what it is fed: the
+        actor of the Stage 1 run, from the event GitHub populated.
+        """
+        text = strip_comments(STAGE2.read_text())
+        for name, expected in (
+            ("ACTOR", "${{ github.event.workflow_run.actor.login }}"),
+            ("ACTOR_TYPE", "${{ github.event.workflow_run.actor.type }}"),
+        ):
+            with self.subTest(variable=name):
+                self.assertEqual(env_values(text, name), [expected])
+
+    def test_any_actor_may_withdraw(self):
+        """The opt-out label starts no review, only a withdrawal, so the bot
+        gate does not apply."""
+        with tempfile.TemporaryDirectory() as td:
+            proc, out = self._run_coords(
+                td,
+                artifact={"trigger_label": "no automated review"},
+                actor="dependabot[bot]",
+                actor_type="Bot",
+            )
+            written = out.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("trigger_label=no automated review", written)
 
     def test_a_matching_artifact_is_accepted_and_its_coordinates_exported(self):
         """The positive control for the head_sha guard."""
@@ -7227,13 +7275,13 @@ class TestTheReadersPremisesStillHold(unittest.TestCase):
 
 
 def stage_a_system_prompt() -> str:
-    """Stage A's APPEND_SYSTEM_PROMPT: one double-quoted line whose only escapes
-    are \\n, which JSON decodes the same way YAML does."""
+    """Stage A's INPUT_APPEND_SYSTEM_PROMPT: one double-quoted line whose only
+    escapes are \\n, which JSON decodes the same way YAML does."""
     values = re.findall(
-        r'(?m)^\s*APPEND_SYSTEM_PROMPT:\s*(".*")\s*$',
+        r'(?m)^\s*INPUT_APPEND_SYSTEM_PROMPT:\s*(".*")\s*$',
         model_step(STAGE2.read_text(), "a"),
     )
-    assert len(values) == 1, "premise changed: APPEND_SYSTEM_PROMPT"
+    assert len(values) == 1, "premise changed: INPUT_APPEND_SYSTEM_PROMPT"
     return json.loads(values[0])
 
 
