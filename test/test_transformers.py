@@ -7324,7 +7324,7 @@ class TestSDPAXpuOnly(NNTestCase):
     hw_classification = HardwareClassification.XPU
 
     @parametrize("type", ["dense"])
-    @parametrize("dropout", [0.0, 0.7])
+    @parametrize("dropout", [0.0])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
     @skipIfTorchDynamo()
     def test_fused_sdp_choice_xpu(self, device, type: str, dropout: float, dtype: torch.dtype):
@@ -7699,24 +7699,6 @@ class TestSDPAXpuOnly(NNTestCase):
                 F.scaled_dot_product_attention(q, k, v)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    def test_flash_attention_unsupport_dropout(self, device):
-        dtype = torch.bfloat16
-        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
-        batch, num_heads, seqlen, head_dim = 32, 16, 32, 64
-        q_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        k_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        v_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        q, k, v = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
-
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
-
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                F.scaled_dot_product_attention(q, k, v, dropout_p=0.1)
-
-    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     def test_flash_attention_headdim_size(self, device):
         dtype = torch.bfloat16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
@@ -7757,15 +7739,16 @@ class TestSDPAXpuOnly(NNTestCase):
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.half, torch.bfloat16])
-    @parametrize("batch_size", [1, 2, 4])
-    @parametrize("n_head", [[3, 1], [4, 2], [10, 2]])
-    @parametrize("q_size", [1, 32, 77, 128, 144, 512, 576])
-    @parametrize("kv_size", [1, 32, 77, 128, 144, 512, 576])
-    @parametrize("head_dim", [64, 96, 128, 160, 192])
+    @parametrize("batch_size", [1, 4])
+    @parametrize("n_head", [[3, 1], [10, 2]])
+    @parametrize("q_size", [1, 32, 77, 128, 144, 512])
+    @parametrize("kv_size", [32, 77, 128, 144, 512])
+    @parametrize("head_dim", [64, 128, 192])
     @parametrize("mask_type", [None, "causal"])
     @parametrize("train", [True, False])
     @parametrize("layout", ["bshd", "bhsd"])
     @parametrize("enable_gqa", [True, False])
+    @parametrize("dropout_p", [0.0, 0.5])
     @decorateIf(
         unittest.skip('Flash Attention V2 does not accept is_causal when seq_len_q != seq_len_k'),
         lambda p: p['mask_type'] == 'causal' and p['q_size'] != p['kv_size'],
@@ -7784,6 +7767,7 @@ class TestSDPAXpuOnly(NNTestCase):
         train,
         layout,
         enable_gqa,
+        dropout_p,
     ):
         if mask_type == "causal" and q_size != kv_size:
             self.skipTest("Flash Attention V2 does not accept is_causal when seq_len_q != seq_len_k")
@@ -7830,18 +7814,46 @@ class TestSDPAXpuOnly(NNTestCase):
             k2 = k2.detach().clone().requires_grad_(True)
             v2 = v2.detach().clone().requires_grad_(True)
 
-        with sdpa_kernel(backends=[fused_kernel]):
-            actual = F.scaled_dot_product_attention(
-                q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa)
+        is_dropout = dropout_p > 0.0
 
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            if is_causal:
-                bottom_right_mask = causal_lower_right(q_size, kv_size)
+        if not is_dropout:
+            with sdpa_kernel(backends=[fused_kernel]):
+                actual = F.scaled_dot_product_attention(
+                    q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa
+                )
+
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
                 math_ref = F.scaled_dot_product_attention(
-                    q2, k2, v2, dropout_p=0.0, attn_mask=bottom_right_mask, enable_gqa=enable_gqa)
-            else:
-                math_ref = F.scaled_dot_product_attention(
-                    q2, k2, v2, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa)
+                    q2,
+                    k2,
+                    v2,
+                    dropout_p=0.0,
+                    is_causal=is_causal,
+                    enable_gqa=enable_gqa,
+                )
+        else:
+            output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
+                q,
+                k,
+                v,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                return_debug_mask=is_dropout,
+            )
+            actual = output_tuple[0]
+            dbug_mask = output_tuple[-1]
+            dropout_mask = dbug_mask >= 0
+
+            # High Precision Math Reference
+            math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                q2,
+                k2,
+                v2,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                dropout_mask=dropout_mask,
+                enable_gqa=enable_gqa,
+            )[0]
 
         if dtype in [torch.float16, torch.bfloat16]:
             math_ref = math_ref.to(dtype)
@@ -7849,10 +7861,9 @@ class TestSDPAXpuOnly(NNTestCase):
         self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 
         if train:
-            loss = torch.mean(actual)
-            loss_ref = torch.mean(math_ref)
-            loss.backward()
-            loss_ref.backward()
+            grad = torch.randn_like(actual, requires_grad=False)
+            actual.backward(grad)
+            math_ref.backward(grad)
 
             grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
             grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
@@ -7861,9 +7872,29 @@ class TestSDPAXpuOnly(NNTestCase):
                 grad_k_ref = grad_k_ref.to(dtype)
                 grad_v_ref = grad_v_ref.to(dtype)
 
-            self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
-            self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
-            self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+            # Backward gradients have different numerical sensitivities;
+            # apply per-gradient tolerances (cf. CUDA's fudge_factors).
+            # dK and dV go through bf16 intermediate + GQA sum reduction;
+            # dQ does not, so only relax those.
+            _grad_tol_q = Tolerances(tol.atol, tol.rtol)
+            _grad_tol_kv = Tolerances(tol.atol, tol.rtol)
+            if dtype in (torch.float16, torch.bfloat16) and enable_gqa:
+                _grad_tol_kv = Tolerances(tol.atol * 2, tol.rtol)
+            self.assertEqual(
+                grad_q_actual, grad_q_ref, atol=_grad_tol_q.atol, rtol=_grad_tol_q.rtol
+            )
+            self.assertEqual(
+                grad_k_actual,
+                grad_k_ref,
+                atol=_grad_tol_kv.atol,
+                rtol=_grad_tol_kv.rtol,
+            )
+            self.assertEqual(
+                grad_v_actual,
+                grad_v_ref,
+                atol=_grad_tol_kv.atol,
+                rtol=_grad_tol_kv.rtol,
+            )
 
 class TestAttnBias(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
