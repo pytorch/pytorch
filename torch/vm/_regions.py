@@ -122,6 +122,10 @@ _runtime: Any = None
 
 # Instructions that can do tensor work. A region must contain one.
 _WORK = frozenset({"call", "call_ex", "binary", "unary", "compare", "get_item"})
+# Instructions that read something and do nothing else.
+_READS = frozenset(
+    {"load_attr", "load_global", "load_deref", "load_closure", "load_slot", "cell_get"}
+)
 # Instructions that change their first operand.
 _MUTATORS = frozenset(
     {"list_append", "list_extend", "dict_update", "dict_merge", "map_add"}
@@ -1467,19 +1471,29 @@ class _Walk:
                     if inside:
                         raise
                     outside = True
+                    began = inst["op"] not in _READS
+                else:
+                    began = outside and inst["op"] not in _READS
                 watch = _state.watch
                 if watch is not None and watch.changed():
                     if inside:
                         raise _Failed(
                             self.index, "changes a module the region was given"
                         )
-                    watch.restore()
-                    outside = True
+                    outside = began = True
                 if outside:
                     if inside:
                         raise _Failed(
                             self.index, "gives a tensor from outside the region"
                         )
+                    if began:
+                        # It ran, in part at least, and what it did up to
+                        # there is in the trace (an append to a list the
+                        # region was given, a tensor changed in place), while
+                        # the VM is to run all of it. The path is traced
+                        # again, and ends in front of it.
+                        self.plan.fails.add((self.block, self.index))
+                        raise _Retry
                     # The VM runs this one: the path ends before it.
                     env.clear()
                     env.update(before)
@@ -1500,7 +1514,7 @@ class _Walk:
         op, uses, env = inst["op"], inst["uses"], self.env
         if not inst["steppable"] or op in ("frame_enter", "frame_leave"):
             return True
-        if self.steps >= _PATH_STEPS:
+        if self.steps >= _PATH_STEPS or (self.block, self.index) in self.plan.fails:
             return True
         if op == "hold":
             return False
@@ -1811,6 +1825,9 @@ class _Plan:
         self.ends: dict[int, Any] = {}
         # Instructions that stay with the VM, and why.
         self.bad: dict[int, str] = {}
+        # Instructions of the function, by block, that a path ends in front
+        # of: one tried to go through them and could not.
+        self.fails: set[tuple[int, int]] = set()
         # Runs that are not worth a region, and why.
         self.skipped: dict[tuple[int, int], str] = {}
         self.regions: list[_Region] = []
