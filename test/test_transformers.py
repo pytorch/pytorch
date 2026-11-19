@@ -3908,7 +3908,7 @@ class TestSDPAAccelerator(NNTestCase):
         S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
         return S_converted[:, :, :seqlen_q, :seqlen_k]
 
-    @onlyCUDA
+    @onlyAccelerator
     @parametrize("lengths", [(4, 4), (143, 127), (143, 579), (256, 256), (2048, 2048)])
     @parametrize("causal", [False, True])
     @parametrize("window_size", [(-1, -1), (2, 1)])
@@ -4525,7 +4525,7 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=1e-5, rtol=1e-5)
 
-    @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_backward'")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5809")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
@@ -6627,7 +6627,8 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertFalse(torch.isinf(out).any().item())
         _check_equal(golden, lp_ref, out, 4.0, "out")
 
-    @onlyCUDA
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6322")
     @parametrize("gold_dtype", [torch.float32, torch.float64])
     @parametrize("masked", [False, True])
     def test_check_out_and_grad_batched_dispatch(self, device, gold_dtype, masked):
@@ -6830,9 +6831,8 @@ class TestSDPAAccelerator(NNTestCase):
             fudge_factors=fudge_factors,
         )
 
-    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not (PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_XPU),
         "Does not support SDPA or pre-SM80 hardware",
     )
     @parametrize("batch_size", [1, 8])
@@ -7007,7 +7007,7 @@ class TestSDPAAccelerator(NNTestCase):
                 fudge_factors=fudge_factors
             )
 
-    @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_backward'")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5809")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
     def test_mem_eff_backward_outside_capture_after_graph_replay(self, device):
         # A forward captured in a CUDA graph returns its dropout seed/offset on
