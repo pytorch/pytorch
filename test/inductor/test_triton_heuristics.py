@@ -1229,7 +1229,7 @@ class TestTritonHeuristics(TestCase):
         unregistered = "gfx000"
         # RDNA3 is deliberately absent: it has its own branch, keyed by sequence
         # length rather than by target, so it is not part of this dispatch.
-        targets = ("gfx942", "gfx950", "gfx1250", "gfx1250-strict", unregistered)
+        targets = ("gfx942", "gfx950", "gfx1250", unregistered)
 
         def configs_for(arch, get_configs):
             with (
@@ -1271,6 +1271,13 @@ class TestTritonHeuristics(TestCase):
                     else:
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
+                # gfx1250-strict is absent from both registries too, so listing
+                # it in targets only repeats the fallback. The peer claim is
+                # that it returns the same configs as gfx1250.
+                self.assertEqual(
+                    configs_for("gfx1250-strict", get_configs),
+                    configs_for("gfx1250", get_configs),
+                )
 
     @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")

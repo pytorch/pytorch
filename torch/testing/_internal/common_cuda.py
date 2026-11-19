@@ -198,7 +198,9 @@ def blas_library_context(backend):
 # gcnArchName. The match stops when the next character is '-'. A ':'
 # feature suffix still belongs to the matched target, so "gfx1250"
 # matches "gfx1250:xnack-" and not "gfx1250-strict". Family prefixes
-# such as "gfx94" still match. evaluate_gfx_arch_within stays exact.
+# such as "gfx94" still match. evaluate_gfx_arch_within matches the
+# offload target exactly after splitting on ':', so "gfx94" does not
+# match "gfx942" there.
 def gcn_arch_matches(gcn_name, arch):
     start = 0
     while True:
@@ -217,8 +219,9 @@ def evaluate_gfx_arch_within(arch_list):
     gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
     effective_arch = os.environ.get('PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE', gcn_arch_name)
     # gcnArchName is "<offload-target>:<features>", for example
-    # gfx90a:sramecc+:xnack-. Match the target exactly. A substring check
-    # treats gfx1250-strict as gfx1250, and those are different targets.
+    # gfx90a:sramecc+:xnack-. Match the offload target exactly.
+    # "gfx1250" does not match gfx1250-strict, and a family prefix such
+    # as "gfx94" does not match gfx942.
     target = effective_arch.split(":", 1)[0]
     return target in arch_list
 
@@ -407,9 +410,8 @@ def evaluate_platform_supports_fp8_grouped_gemm():
             # gfx1250/gfx1250-strict omitted: MSLK only builds gfx942/gfx950
             # kernels (see aten/src/ATen/CMakeLists.txt). Add them once MSLK does.
             archs = ['gfx942', 'gfx950']
-            for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                    return True
+            gcn_name = torch.cuda.get_device_properties(0).gcnArchName
+            return any(gcn_arch_matches(gcn_name, arch) for arch in archs)
         else:
             return SM90OrLater and not SM100OrLater
     if torch.xpu.is_available():
@@ -421,10 +423,12 @@ def evaluate_platform_supports_mx_gemm():
         if torch.version.hip:
             if ROCM_VERSION >= (7, 0):
                 gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-                if 'gfx950' in gcn_name:
+                if gcn_arch_matches(gcn_name, 'gfx950'):
                     return True
-                # Also matches gfx1250-strict, which has the same floor.
-                return 'gfx1250' in gcn_name and ROCM_VERSION >= (7, 14)
+                # gcn_arch_matches("gfx1250") stops at '-', so name strict too.
+                return ROCM_VERSION >= (7, 14) and any(
+                    gcn_arch_matches(gcn_name, arch) for arch in _CDNA5_ARCHS
+                )
         else:
             return SM100OrLater
     if torch.xpu.is_available():
