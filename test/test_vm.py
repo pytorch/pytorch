@@ -1655,6 +1655,106 @@ class TestVmPasses(TestCase):
         self.assertIn("pass failed", stats["blocks"][0]["rejected"])
 
 
+SWAP_RMS = ["pow", "mean", "add", "rsqrt", "mul"]
+
+
+def swap_rms(x, w):
+    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + 1e-6) * w
+
+
+def swap_twice(x, w):
+    return swap_rms(x, w) + swap_rms(x + 1, w)
+
+
+class SwapKernel:
+    """Root-mean-square normalization, written another way."""
+
+    def __init__(self, shift=0.0):
+        self.calls = 0
+        self.shift = shift
+        self.took = None
+
+    def __call__(self, *args):
+        self.calls += 1
+        self.took = [type(arg) for arg in args]
+        (x,) = args
+        return x / x.square().mean(-1, keepdim=True).add(1e-6).sqrt() + self.shift
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmUserPasses(TestCase):
+    """Passes of the user's: a kernel in place of operations."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def run_swapped(self, fn, passes, calls=12):
+        compiled = torch.vm(fn, passes=[*passes, *DEFAULT], fallback=False)
+        x, w = torch.randn(4, 8), torch.randn(8)
+        for _ in range(calls):
+            self.assertEqual(compiled(x, w), fn(x, w))
+        return compiled, x, w
+
+    def test_instructions_name_the_kernel_they_call(self):
+        seen = []
+
+        def look(region):
+            seen.append([i["kernel"] for i in region.instructions() if i["kernel"]])
+            return False
+
+        compiled = torch.vm(swap_rms, passes=[look, *DEFAULT], fallback=False)
+        for _ in range(4):
+            compiled(torch.randn(4, 8), torch.randn(8))
+        self.assertEqual(
+            max(seen, key=len),
+            [
+                "aten::pow.Tensor_Scalar",
+                "aten::mean.dim",
+                "aten::add.Tensor",
+                "aten::rsqrt",
+                "aten::mul.Tensor",
+                "aten::mul.Tensor",
+            ],
+        )
+
+    def test_swap_puts_a_kernel_in_place_of_a_run_of_operations(self):
+        kernel = SwapKernel()
+        swap = torch.vm.swap(SWAP_RMS, kernel, check=2)
+        compiled, x, w = self.run_swapped(swap_rms, [swap])
+        self.assertGreater(kernel.calls, 2)
+        # It is handed what the run takes from the function: the tensor, and
+        # neither torch.rsqrt nor the constants.
+        self.assertEqual(kernel.took, [torch.Tensor])
+        # What it gives is what the function goes on with, once it is no
+        # longer checked.
+        kernel.shift = 1.0
+        self.assertEqual(compiled(x, w), swap_rms(x, w) + w)
+
+    def test_swap_finds_every_place(self):
+        kernel = SwapKernel()
+        swap = torch.vm.swap(SWAP_RMS, kernel)
+        compiled, x, w = self.run_swapped(swap_twice, [swap])
+        before = kernel.calls
+        compiled(x, w)
+        self.assertEqual(kernel.calls - before, 2)
+
+    def test_swap_checks_the_kernel_against_the_operations(self):
+        swap = torch.vm.swap(SWAP_RMS, SwapKernel(shift=1e-2))
+        with self.assertRaisesRegex(torch.vm.Mismatch, "differs by up to 0.01"):
+            self.run_swapped(swap_rms, [swap])
+        unchecked = torch.vm.swap(SWAP_RMS, SwapKernel(shift=1e-2), check=False)
+        compiled = torch.vm(swap_rms, passes=[unchecked, *DEFAULT])
+        x, w = torch.randn(4, 8), torch.randn(8)
+        for _ in range(6):
+            out = compiled(x, w)
+        self.assertEqual(out, swap_rms(x, w) + 1e-2 * w)
+
+    def test_swap_leaves_other_operations_alone(self):
+        kernel = SwapKernel()
+        swap = torch.vm.swap(["pow", "mean", "sub"], kernel)
+        self.run_swapped(swap_rms, [swap])
+        self.assertEqual(kernel.calls, 0)
+
+
 def inl_scale(x, k):
     return x * k
 
