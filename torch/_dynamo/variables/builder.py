@@ -73,12 +73,14 @@ from torch._library.opaque_object import (
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
     maybe_get_item_memo,
+    unset_fake_temporarily,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch.fx.experimental._backward_state import BackwardState
@@ -4291,7 +4293,9 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
     return TupleVariable(items)
 
 
-def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
+def _clone_input(
+    value: Any, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
@@ -4304,7 +4308,8 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             or value.is_nested
         ):
             # NB: ensure strides are preserved
-            value = clone_input(value)
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 
