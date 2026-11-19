@@ -153,6 +153,18 @@ def run_one(args):
         torch.manual_seed(1337)
         bench = load_model_by_name(name)(test=test, device=args.device)
         model, inputs = bench.get_module()
+        # A model that was built without giving its weights values
+        # (cm3leon_generate) has them in memory that was never written. To
+        # the kernel that is one page of zeros, however large the weights
+        # are, and the model computes faster than one with weights can. So
+        # every tensor is written once, with what it holds.
+        with torch.no_grad():
+            for tensor in [*model.parameters(), *model.buffers()]:
+                try:
+                    tensor.copy_(tensor.clone())
+                except RuntimeError:
+                    # One whose elements share memory: it was written.
+                    pass
         out["batch_size"] = getattr(bench, "batch_size", None)
         training = test == "train"
         model.train(training)
