@@ -100,19 +100,33 @@ void CuspyBuffers::on_request(
   {
     std::lock_guard<std::mutex> guard(mutex_);
     bytes = buffer_size_;
-    if (!free_.empty()) {
-      buf = free_.back();
+    // CUPTI fills a buffer up to the size reported below, so only reuse one
+    // allocated at that size. Buffers from before a configure() with a
+    // different size are freed instead.
+    while (buf == nullptr && !free_.empty()) {
+      uint8_t* candidate = free_.back();
       free_.pop_back();
+      auto it = sizes_.find(candidate);
+      if (it != sizes_.end() && it->second == bytes) {
+        buf = candidate;
+      } else {
+        if (it != sizes_.end()) {
+          sizes_.erase(it);
+        }
+        --allocated_;
+        // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+        std::free(candidate);
+      }
     }
   }
   if (buf == nullptr) {
     // malloc gives alignment suitable for any type (>= CUPTI's 8-byte
     // requirement) and returns nullptr (not throwing) on OOM, which is the
-    // right behavior inside a C callback. Tracked in all_ so reset() can free.
+    // right behavior inside a C callback. Tracked in sizes_ for reset().
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     buf = static_cast<uint8_t*>(std::malloc(bytes));
     std::lock_guard<std::mutex> guard(mutex_);
-    all_.push_back(buf);
+    sizes_.emplace(buf, bytes);
     ++allocated_;
   }
   *buffer = buf;
@@ -188,11 +202,11 @@ void CuspyBuffers::reset() {
   std::lock_guard<std::mutex> guard(mutex_);
   completed_.clear();
   free_.clear();
-  for (uint8_t* p : all_) {
+  for (const auto& entry : sizes_) {
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-    std::free(p);
+    std::free(entry.first);
   }
-  all_.clear();
+  sizes_.clear();
   allocated_ = 0;
   shutdown_ = false;
 }
