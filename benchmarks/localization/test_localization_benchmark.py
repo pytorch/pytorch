@@ -108,26 +108,20 @@ class TestLocalizationBenchmarks:
         then benchmark a single forward + sync."""
         torch._dynamo.reset()
         counters.clear()
-        # Ensure no stray custom pre-pass leaked in from another test.
-        with inductor_config.patch(
-            {
-                "post_grad_custom_pre_pass": None,
-            }
-        ):
-            with torch.inference_mode():
-                opt_model = torch.compile(model, fullgraph=True, mode="reduce-overhead")
-                opt_model(*args)
+        with torch.inference_mode():
+            opt_model = torch.compile(model, fullgraph=True, mode="reduce-overhead")
+            opt_model(*args)
+            opt_model(*args)
+            torch.cuda.synchronize()
+            # Benchmarking a skipped capture measures the wrong thing.
+            if counters["inductor"]["cudagraph_skips"] != 0:
+                raise AssertionError("expected CUDA Graph capture without skips")
+
+            def _run():
                 opt_model(*args)
                 torch.cuda.synchronize()
-                # Benchmarking a skipped capture measures the wrong thing.
-                if counters["inductor"]["cudagraph_skips"] != 0:
-                    raise AssertionError("expected CUDA Graph capture without skips")
 
-                def _run():
-                    opt_model(*args)
-                    torch.cuda.synchronize()
-
-                benchmark(_run)
+            benchmark(_run)
 
     @staticmethod
     def _compile_localized_capture(model, args, *, force_triton):
@@ -144,7 +138,7 @@ class TestLocalizationBenchmarks:
         def save(code: str) -> None:
             captured.append(code)
 
-        patch = {"post_grad_custom_pre_pass": None}
+        patch = {}
         if force_triton:
             patch["max_autotune_gemm"] = True
             patch["max_autotune_gemm_backends"] = "TRITON"
@@ -182,17 +176,9 @@ class TestLocalizationBenchmarks:
         of the locality-domain allocator's page granularity (2 MiB on
         Blackwell): per-branch output = ``m * (n / 2) * 2 = m * n`` bf16 bytes,
         and ``m=32, n=65536`` gives exactly one 2 MiB granularity unit per
-        branch -- the alignment the future zero-copy contiguous-split path
-        needs.  Compiles in reduce-overhead mode (matching the other
-        benchmarks), captures the generated wrapper, asserts numerics vs eager
-        and that both branches allocate into their locality-domain pool, then
-        benchmarks the steady-state replay.  Returns the generated code so the
-        caller can assert backend-specific IR.
-
-        Note: under reduce-overhead the zero-copy static-alloc path is gated
-        off (cudagraph_trees rejects out-of-pool storage), so the cat still
-        does a pointwise copy; that lifts once cudagraph_trees grows multi-pool
-        support.
+        branch.  Asserts numerics vs eager and that both branches allocate into
+        their locality-domain pool, then benchmarks the steady-state replay.
+        Returns the generated code so the caller can assert backend-specific IR.
         """
         m, k, n = 32, 1024, 65536  # m*n = 2 MiB exactly per branch
         eager_model = torch.nn.Linear(k, n, bias=False).cuda().to(torch.bfloat16).eval()
@@ -240,12 +226,7 @@ class TestLocalizationBenchmarks:
 
     def test_simple_matmul_localized_page_aligned_triton_benchmark(self, benchmark):
         """Page-aligned localized nn.Linear forcing Triton-template GEMMs
-        (``max_autotune_gemm_backends="TRITON"``) instead of nvjet.
-
-        Forcing Triton keeps the matmul's pointer args visible to cupti
-        (nvjet hides them), so the per-branch mm can be verified to bind its
-        locality-domain pool -- which the default/nvjet variant cannot
-        demonstrate."""
+        (``max_autotune_gemm_backends="TRITON"``) instead of nvjet."""
         code = self._page_aligned_localized(benchmark, force_triton=True)
         if "extern_kernels.mm" in code:
             raise AssertionError(

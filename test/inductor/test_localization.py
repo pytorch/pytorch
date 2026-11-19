@@ -114,9 +114,10 @@ def _requires_cublas_tensorop_on_green_streams(test_func):
     context is currently pushed.  The fp32 codepath (non-TensorOp)
     works fine on the same stream.
 
-    More recent cuBLAS versions work fine.
+    Fixed in cuBLAS 13.6.
     """
 
+    @functools.wraps(test_func)
     def wrapper(*args, **kwargs):
         v = _cublas_version_int()
         if v is not None and v < 130600:
@@ -125,7 +126,6 @@ def _requires_cublas_tensorop_on_green_streams(test_func):
             )
         return test_func(*args, **kwargs)
 
-    wrapper.__name__ = test_func.__name__
     return wrapper
 
 
@@ -335,6 +335,20 @@ class _LinearHeadEscapes(nn.Module):
         return y, self.fc3(z)
 
 
+class _LinearHeadEscapes2(nn.Module):
+    """Two stacked linears; the head's output is returned alongside the tail."""
+
+    def __init__(self, k, n, p):
+        super().__init__()
+        self.fc1 = nn.Linear(k, n, bias=False)
+        self.fc2 = nn.Linear(n, p, bias=False)
+
+    def forward(self, x):
+        head = self.fc1(x)
+        tail = self.fc2(head)
+        return head, tail
+
+
 class _MultiConsumerHead(nn.Module):
     """One linear's output feeds two downstream linears that get summed."""
 
@@ -362,16 +376,20 @@ class _SharedLinearTwoCalls(nn.Module):
         return self.fc(x1) + self.fc(x2)
 
 
+class _LinearMergeInnerSplit(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(3, 8, bias=False)
+
+    def forward(self, x):
+        y = self.fc(x)  # [6, 8]
+        y = y.view(6, 2, 4)  # 1-to-many
+        return y.view(12, 4)  # merge with split inside
+
+
 # ---------------------------------------------------------------------------
 # Drive helpers.
 # ---------------------------------------------------------------------------
-
-
-def _get_node_stream(node):
-    """Return the green-stream index annotation that the localized
-    dispatch attaches to per-branch FX nodes, or ``None`` if absent."""
-    custom = node.meta.get("custom") or {}
-    return custom.get("stream")
 
 
 def _capture_localized_aot(module, *forward_args):
@@ -403,13 +421,14 @@ def _capture_localized_aot(module, *forward_args):
     with torch.inference_mode():
         compiled(*forward_args)
         torch.cuda.synchronize()
-    assert captured, "post-AOT graph was not captured"  # noqa: S101
-    gm = captured[0]
-    return gm
+    if not captured:
+        raise AssertionError("post-AOT graph was not captured")
+    return captured[0]
 
 
 def _eager_and_localized(module_cls, ctor_args, forward_args, dtype=torch.float32):
-    """Build two copies of the module, localize one, and return (eager_out, loc_out).
+    """Build two copies of the module, localize one, and return
+    (eager_out, loc_out, localized_module).
 
     ``forward_args`` is a list of inputs (CUDA tensors / non-tensor scalars)
     passed positionally to forward().  Both module copies start from the
@@ -442,7 +461,6 @@ class TestLocalizeContract(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_localize_replaces_linear_weight_with_subclass(self):
         """nn.Linear.weight should become a _LocalizedTensor after localize."""
@@ -456,7 +474,6 @@ class TestLocalizeContract(TestCase):
         self.assertEqual(tuple(m.fc.weight.shape), (128, 64))
         self.assertEqual(tuple(m.fc.bias.shape), (128,))
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_localize_idempotent(self):
         """Re-localizing should be a no-op."""
@@ -468,7 +485,6 @@ class TestLocalizeContract(TestCase):
             torch.cuda.localize(m)
         self.assertEqual(id(m.fc.weight), w_id)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_localize_returns_module_for_chaining(self):
         m = _OneLinear(64, 128).cuda()
@@ -493,17 +509,15 @@ class TestLocalizeContract(TestCase):
             ):
                 torch.cuda.localize(gm)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_rejects_odd_output_dim(self):
         """Splitting an odd output dim must error rather than silently
         miscompute."""
         m = _OneLinear(16, 17).cuda()
-        with self.assertRaises((ValueError, AssertionError)):
+        with self.assertRaisesRegex(ValueError, "divisible"):
             with torch.inference_mode():
                 torch.cuda.localize(m)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_mark_static_halves_default_marks_halves(self):
         """By default, ``torch.cuda.localize`` marks each per-domain
@@ -541,13 +555,9 @@ class TestLocalizeContract(TestCase):
             "unguarded",
         )
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_mark_static_halves_false_leaves_halves_unmarked(self):
-        """``mark_static_halves=False`` must leave the halves clean, so
-        A/B benches that need to attribute the cudagraph win to this
-        knob actually have an unmarked baseline.
-        """
+        """``mark_static_halves=False`` must leave the halves unmarked."""
         m = _OneLinear(64, 128, bias=True).cuda()
         with torch.inference_mode():
             torch.cuda.localize(m, mark_static_halves=False)
@@ -615,7 +625,6 @@ class TestLocalizableOpRegistry(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_is_registered_not_special_cased(self):
         """F.linear is an ordinary registry entry, carrying the arg names
@@ -634,7 +643,6 @@ class TestLocalizableOpRegistry(TestCase):
         aten_meta = _LOCALIZABLE_OPS[torch.ops.aten.linear.default]
         self.assertEqual(aten_meta.arg_names, ("input", "weight", "bias"))
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_localized_args_may_be_passed_by_keyword(self):
         """A localized position is resolved whether the caller passed it
@@ -657,7 +665,6 @@ class TestLocalizableOpRegistry(TestCase):
         torch.testing.assert_close(F.linear(x, w), F.linear(x, w, None), atol=0, rtol=0)
         self.assertFalse(torch.equal(F.linear(x, w), positional))
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_keyword_localized_arg_matches_unlocalized(self):
         """Numerics, not just self-consistency: a keyword-passed localized
@@ -728,13 +735,11 @@ class TestLocalizableOpRegistryCustomOp(TestCase):
         # into every later test's module walk.
         self.addCleanup(self._registry.pop, self._op, None)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_arg_names_derived_from_schema(self):
         meta = self._registry[self._op]
         self.assertEqual(meta.arg_names, ("input", "weight", "bias", "scale"))
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_custom_op_forks_with_keyword_args(self):
         """The op's bias arrives by keyword and its non-localized ``scale``
@@ -749,7 +754,6 @@ class TestLocalizableOpRegistryCustomOp(TestCase):
         self.assertTrue(_is_localized_tensor(m.bias))
         torch.testing.assert_close(m(x), expected, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_module_walk_is_registry_driven(self):
         """localize() rewrites a registered module type it has never heard
@@ -770,7 +774,6 @@ class TestLocalizableOpRegistryCustomOp(TestCase):
         self.assertTrue(_is_localized_tensor(m[0].weight))
         self.assertFalse(_is_localized_tensor(m[1].weight))
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_subclass_overriding_forward_is_skipped(self):
         """The stock-forward guard is keyed on the registered module type,
@@ -858,7 +861,6 @@ class TestLocalizableOpSlicedArgs(TestCase):
                 module_type=_ChannelScaledLinear,
             )
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_tensor_sliced_arg_matches_unlocalized(self):
         """A per-channel scale must be split to line up with the weight rows
@@ -875,7 +877,6 @@ class TestLocalizableOpSlicedArgs(TestCase):
         self.assertFalse(_is_localized_tensor(m.scale))
         torch.testing.assert_close(m(x), expected, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_sliced_arg_may_be_none(self):
         """An explicit None in a sliced position is replicated to every
@@ -889,7 +890,6 @@ class TestLocalizableOpSlicedArgs(TestCase):
         got = self._op(x, m.weight, m.bias, None)
         torch.testing.assert_close(got, expected, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_sliced_arg_list_of_tensors(self):
         """A list in a sliced position is sliced element-wise and transposed
@@ -904,7 +904,6 @@ class TestLocalizableOpSlicedArgs(TestCase):
         got = self._op(x, m.weight, m.bias, m.scale, extra)
         torch.testing.assert_close(got, expected, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_sliced_arg_empty_list(self):
         """An empty list has nothing to slice, so each branch gets an empty
@@ -918,7 +917,6 @@ class TestLocalizableOpSlicedArgs(TestCase):
         got = self._op(x, m.weight, m.bias, m.scale, [])
         torch.testing.assert_close(got, expected, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_unsliceable_sliced_arg_raises(self):
         """Registering a position that cannot be split must report which arg
@@ -939,11 +937,8 @@ class TestLocalizableOpSlicedArgs(TestCase):
 
 
 class TestLocalizationRuntimeNumerics(TestCase):
-    """The localized forward must match the eager forward, op-for-op,
-    across the patterns we care about.  Old free-function fn(x, w, ...)
-    style is replaced by nn.Module wrappers so the weight slots are
-    nn.Linear instances that ``torch.cuda.localize`` knows how to
-    rewrite."""
+    """The localized forward must match the eager forward across common
+    model patterns."""
 
     hw_classification = HardwareClassification.CUDA
 
@@ -951,49 +946,42 @@ class TestLocalizationRuntimeNumerics(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_basic_linear(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_OneLinear, (64, 128), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_with_pointwise_relu(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_LinearReLU, (64, 128), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_with_leaky_relu(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_LinearLeakyReLU, (64, 128), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_two_sequential_linears(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_TwoSequentialLinears, (64, 128, 64), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_two_independent_linears(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_TwoIndependentLinears, (64, 128), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_bias_sin(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_LinearBiasSin, (64, 128), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_attention_qkv(self):
         batch, seq_len, hidden, num_heads, head_dim = 2, 8, 64, 4, 16
@@ -1005,7 +993,6 @@ class TestLocalizationRuntimeNumerics(TestCase):
         )
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_ffn_residual_layernorm(self):
         batch, seq_len, hidden, ffn_dim = 2, 8, 64, 128
@@ -1013,7 +1000,6 @@ class TestLocalizationRuntimeNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(_FFNResidualLN, (hidden, ffn_dim), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_fused_qkv_split(self):
         batch, seq_len, hidden, num_heads, head_dim = 2, 8, 64, 4, 16
@@ -1027,10 +1013,8 @@ class TestLocalizationRuntimeNumerics(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Tests: chain numerics (multiple sequential linears).
-#
-# Even without chaining-aware fusion, the per-layer numerics must still
-# be correct because each layer's localize fork-join is self-contained.
+# Tests: chain numerics (multiple sequential linears).  Each layer's
+# fork-join is self-contained, so chains must match eager layer by layer.
 # ---------------------------------------------------------------------------
 
 
@@ -1041,21 +1025,18 @@ class TestLocalizationChainNumerics(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_chain_2(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_NSequentialLinears, ([64, 48, 32],), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_chain_mm_gelu_mm(self):
         x = torch.randn(32, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_LinearGELULinear, (64, 64, 32), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_chain_3(self):
         x = torch.randn(16, 64, device="cuda")
@@ -1064,7 +1045,6 @@ class TestLocalizationChainNumerics(TestCase):
         )
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_chain_4(self):
         x = torch.randn(8, 64, device="cuda")
@@ -1073,7 +1053,6 @@ class TestLocalizationChainNumerics(TestCase):
         )
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_chain_head_escapes(self):
         x = torch.randn(16, 64, device="cuda")
@@ -1083,21 +1062,32 @@ class TestLocalizationChainNumerics(TestCase):
         for ye, yl in zip(y_e_pair, y_l_pair):
             torch.testing.assert_close(yl, ye, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
+    @_requires_green_contexts
+    def test_chain_head_escapes_two_layer(self):
+        torch.manual_seed(0)
+        x = torch.randn(32, 64, device="cuda")
+        y_e_pair, y_l_pair, _ = _eager_and_localized(
+            _LinearHeadEscapes2, (64, 128, 96), (x,)
+        )
+        for ye, yl in zip(y_e_pair, y_l_pair):
+            torch.testing.assert_close(yl, ye, atol=1e-3, rtol=1e-3)
+
     @_requires_green_contexts
     def test_chain_multiple_consumers(self):
         x = torch.randn(16, 64, device="cuda")
         y_e, y_l, _ = _eager_and_localized(_MultiConsumerHead, (64, 64, 32, 32), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
+    @_requires_green_contexts
+    def test_view_merge_inner_split(self):
+        x = torch.randn(6, 3, device="cuda")
+        y_e, y_l, _ = _eager_and_localized(_LinearMergeInnerSplit, (), (x,))
+        torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
+
 
 # ---------------------------------------------------------------------------
-# Tests: packing-shaped patterns (numerics only).
-#
-# Each of these used to verify that pointwise ops were absorbed into the
-# green streams.  In the subclass path the pointwise tail runs unchanged
-# on the main stream after the cat -- correctness is the same, perf is
-# left on the table.  Numerics must still match.
+# Tests: pointwise / view tails after a localized linear.  The tail runs on
+# the main stream after the cat.
 # ---------------------------------------------------------------------------
 
 
@@ -1108,7 +1098,6 @@ class TestLocalizationPackingNumerics(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_with_bias(self):
         """linear(x) + b: bias is now part of nn.Linear, no separate add."""
@@ -1116,7 +1105,6 @@ class TestLocalizationPackingNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(_OneLinear, (64, 128, True), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_bias_relu(self):
         class M(nn.Module):
@@ -1131,14 +1119,6 @@ class TestLocalizationPackingNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(M, (), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_packing_cross_site(self):
-        x = torch.randn(32, 64, device="cuda")
-        y_e, y_l, _ = _eager_and_localized(_TwoIndependentLinears, (64, 128), (x,))
-        torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
-
-    @_requires_cuda
     @_requires_green_contexts
     def test_packing_stops_at_reduction(self):
         class M(nn.Module):
@@ -1153,7 +1133,6 @@ class TestLocalizationPackingNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(M, (), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-3, rtol=1e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_packing_through_unsqueeze(self):
         class M(nn.Module):
@@ -1168,7 +1147,6 @@ class TestLocalizationPackingNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(M, (), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_packing_through_transpose(self):
         class M(nn.Module):
@@ -1183,7 +1161,6 @@ class TestLocalizationPackingNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(M, (), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_packing_through_contiguous(self):
         class M(nn.Module):
@@ -1198,7 +1175,6 @@ class TestLocalizationPackingNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(M, (), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_bias_gelu(self):
         class M(nn.Module):
@@ -1213,7 +1189,6 @@ class TestLocalizationPackingNumerics(TestCase):
         y_e, y_l, _ = _eager_and_localized(M, (), (x,))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_view_after_linear(self):
         class M(nn.Module):
@@ -1241,7 +1216,6 @@ class TestLocalizationSharedWeight(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_linear_called_twice(self):
         """One nn.Linear, two inputs.  The same _LocalizedTensor weight is
@@ -1252,7 +1226,6 @@ class TestLocalizationSharedWeight(TestCase):
         y_e, y_l, _ = _eager_and_localized(_SharedLinearTwoCalls, (64, 128), (x1, x2))
         torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_tied_embedding_lm_head(self):
         """head.weight = embed.weight: the tie must survive localize so
@@ -1294,24 +1267,6 @@ class TestLocalizationDtypes(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_dtype_float32(self):
-        x = torch.randn(32, 64, device="cuda", dtype=torch.float32)
-        y_e, y_l, _ = _eager_and_localized(
-            _OneLinear, (64, 128), (x,), dtype=torch.float32
-        )
-        torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
-
-    # fp16 / bf16 route through cuBLAS's TensorOp GEMM codepath
-    # (``cublasGemmEx`` with ``CUBLAS_GEMM_DEFAULT_TENSOR_OP``).
-    # cuBLAS 13.4.x and earlier return ``CUBLAS_STATUS_EXECUTION_FAILED``
-    # on that codepath when the stream is bound to a green context;
-    # fp32 uses the non-TensorOp path and works fine on the same
-    # stream.  Fixed in cuBLAS 13.6+ -- the per-test
-    # ``_requires_cublas_tensorop_on_green_streams`` decorator skips
-    # below that version.
-    @_requires_cuda
     @_requires_green_contexts
     @_requires_cublas_tensorop_on_green_streams
     def test_dtype_float16(self):
@@ -1321,7 +1276,6 @@ class TestLocalizationDtypes(TestCase):
         )
         torch.testing.assert_close(y_l, y_e, atol=5e-3, rtol=5e-3)
 
-    @_requires_cuda
     @_requires_green_contexts
     @_requires_cublas_tensorop_on_green_streams
     def test_dtype_bfloat16(self):
@@ -1330,25 +1284,6 @@ class TestLocalizationDtypes(TestCase):
             _OneLinear, (64, 128), (x,), dtype=torch.bfloat16
         )
         torch.testing.assert_close(y_l, y_e, atol=5e-3, rtol=5e-3)
-
-
-class _LinearHeadEscapes2(nn.Module):
-    """Two stacked linears where the head's output ALSO escapes (is
-    returned alongside the tail).  The original test asserted that the
-    chain pass would not apply when the head escapes; in the subclass
-    path that constraint doesn't exist (each linear forks
-    independently), but the shape contract for both outputs still
-    holds."""
-
-    def __init__(self, k, n, p):
-        super().__init__()
-        self.fc1 = nn.Linear(k, n, bias=False)
-        self.fc2 = nn.Linear(n, p, bias=False)
-
-    def forward(self, x):
-        head = self.fc1(x)
-        tail = self.fc2(head)
-        return head, tail
 
 
 class TestConcatMemPool(TestCase):
@@ -1526,8 +1461,7 @@ class TestLocalizationAllocatorMeta(TestCase):
     * the inductor wrapper consumes that meta and emits
       ``with torch.cuda.use_mem_pool(...)`` around the matching
       scheduler node's allocations;
-    * non-localized compiles still produce single-pool allocations
-      (the new path is purely additive on localized graphs).
+    * non-localized compiles still produce single-pool allocations.
 
     Performance measurements live in
     ``benchmarks/localization/test_localization_benchmark.py``.
@@ -1539,7 +1473,6 @@ class TestLocalizationAllocatorMeta(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_per_branch_nodes_carry_paired_stream_and_mempool_meta(self):
         """Each per-branch matmul node carries both ``stream`` and
@@ -1591,7 +1524,6 @@ class TestLocalizationAllocatorMeta(TestCase):
             f"per-branch mempool indices must be distinct, got {allocs}",
         )
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_cat_join_carries_no_mempool_meta(self):
         """The trailing ``aten.cat`` produced by the dispatch join is
@@ -1614,50 +1546,23 @@ class TestLocalizationAllocatorMeta(TestCase):
             self.assertNotIn("stream", c, f"cat {n} should not carry stream meta")
             self.assertNotIn("mempool", c, f"cat {n} should not carry mempool meta")
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_output_code_wraps_per_branch_allocations(self):
         """The inductor wrapper emits ``with torch.cuda.use_mem_pool(...)``
         around the per-branch ``empty_strided_cuda`` calls."""
-        from torch._inductor.graph import GraphLowering
+        from torch._inductor.utils import run_and_get_code
 
-        captured: list = []
-
-        def save(code: str) -> None:
-            captured.append(code)
-
-        prev = GraphLowering.save_output_code
-        GraphLowering.save_output_code = save
-        try:
-            model = _LinearReLU(4096, 4096, bias=False).cuda().eval()
-            model = model.to(torch.bfloat16)
-            with torch.inference_mode():
-                torch.cuda.localize(model)
-            opt = torch.compile(model, fullgraph=True)
+        model = _LinearReLU(4096, 4096, bias=False).cuda().eval().to(torch.bfloat16)
+        with torch.inference_mode():
+            torch.cuda.localize(model)
             x = torch.randn(16, 4096, dtype=torch.bfloat16, device="cuda")
-            with torch.inference_mode():
-                _ = opt(x)
-            torch.cuda.synchronize()
-        finally:
-            GraphLowering.save_output_code = prev
+            _, codes = run_and_get_code(torch.compile(model, fullgraph=True), x)
 
-        self.assertTrue(captured, "no codegen captured from compile")
-        code = "\n\n".join(captured)
-        self.assertIn(
-            "torch.cuda.use_mem_pool",
-            code,
-            "expected the wrapper to emit use_mem_pool around per-branch "
-            "allocations, but the generated code does not mention it",
-        )
-        # The wrap pattern is jansel's per-scheduler-node mempool context:
-        # "with torch.cuda.use_mem_pool(get_external_object_by_index(N), device=M):"
-        # at least one such line must precede an empty_strided_cuda allocation
-        # at the next level of indentation.
-        # Between the wrap and the allocation the wrapper may open the
-        # stream context and emit alignment copies (`with streamN:` /
-        # copy_if_misaligned) -- the codegen nests pool and stream
-        # contexts differently across inductor versions -- so only
-        # require that an allocation appears within the wrapped block.
+        self.assertTrue(codes, "no codegen captured from compile")
+        code = "\n\n".join(codes)
+        # The stream context and alignment copies may sit between the pool
+        # wrap and the allocation, so only require the allocation somewhere
+        # inside the wrapped block.
         self.assertRegex(
             code,
             r"with torch\.cuda\.use_mem_pool\(\s*get_external_object_by_index\(\d+\),"
@@ -1667,44 +1572,21 @@ class TestLocalizationAllocatorMeta(TestCase):
             "indented `empty_strided_cuda(...)` call within the block",
         )
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_non_localized_compile_has_no_use_mem_pool_wrap(self):
         """A baseline (non-localized) compile of the same kind of model
         must NOT contain any ``use_mem_pool`` wrap.  This is the
         non-localized-user-code invariant the mempool path commits to."""
-        from torch._inductor.graph import GraphLowering
+        from torch._inductor.utils import run_and_get_code
 
-        captured: list = []
+        model = _LinearReLU(4096, 4096, bias=False).cuda().eval().to(torch.bfloat16)
+        x = torch.randn(16, 4096, dtype=torch.bfloat16, device="cuda")
+        with torch.inference_mode():
+            _, codes = run_and_get_code(torch.compile(model, fullgraph=True), x)
 
-        def save(code: str) -> None:
-            captured.append(code)
+        self.assertTrue(codes, "no codegen captured from compile")
+        self.assertNotIn("use_mem_pool", "\n\n".join(codes))
 
-        prev = GraphLowering.save_output_code
-        GraphLowering.save_output_code = save
-        try:
-            model = _LinearReLU(4096, 4096, bias=False).cuda().eval()
-            model = model.to(torch.bfloat16)
-            # Deliberately NOT calling torch.cuda.localize(model).
-            opt = torch.compile(model, fullgraph=True)
-            x = torch.randn(16, 4096, dtype=torch.bfloat16, device="cuda")
-            with torch.inference_mode():
-                _ = opt(x)
-            torch.cuda.synchronize()
-        finally:
-            GraphLowering.save_output_code = prev
-
-        self.assertTrue(captured, "no codegen captured from compile")
-        code = "\n\n".join(captured)
-        self.assertNotIn(
-            "use_mem_pool",
-            code,
-            "non-localized compile must not emit use_mem_pool; the "
-            "mempool-meta path leaked into user-code that didn't ask "
-            "for localization",
-        )
-
-    @_requires_cuda
     @_requires_green_contexts
     def test_runtime_numerics_match_eager(self):
         """Compiled localized forward matches eager forward to within
@@ -1728,7 +1610,6 @@ class TestLocalizationAllocatorMeta(TestCase):
             torch.cuda.synchronize()
         torch.testing.assert_close(out, ref, rtol=1e-2, atol=1e-2)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_compiled_numerics_match_eager_triton_fused(self):
         """Companion to test_runtime_numerics_match_eager: compile with
@@ -1759,16 +1640,10 @@ class TestLocalizationAllocatorMeta(TestCase):
                 torch.cuda.synchronize()
         torch.testing.assert_close(out, ref, rtol=1e-2, atol=1e-2)
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_fused_qkv_split_compiled(self):
-        """Compiled (reduce-overhead) companion to the eager
-        test_fused_qkv_split: the localized fused-QKV forward, CUDA-graph
-        captured, must match the eager forward.  Unlike the eager subclass
-        path -- which serializes the two per-branch GEMMs behind per-branch
-        Python dispatch, so they never overlap -- the captured graph replays
-        both branches back-to-back, letting them execute concurrently on
-        their green-context SM partitions."""
+        """Compiled (reduce-overhead) companion to test_fused_qkv_split: the
+        CUDA-graph-captured localized forward must match eager."""
         torch.manual_seed(0)
         hidden, num_heads, head_dim, batch, seq_len = 64, 4, 16, 2, 8
         eager_model = _FusedQKV(hidden, num_heads, head_dim).cuda().eval()
@@ -1791,157 +1666,6 @@ class TestLocalizationAllocatorMeta(TestCase):
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
 
-class TestLocalizationChainIR(TestCase):
-    """Chained linears: each localized linear forks per-branch
-    independently regardless of how many other linears feed it or
-    consume it.  These tests pin the numerics across a few common
-    chain shapes."""
-
-    hw_classification = HardwareClassification.CUDA
-
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.reset()
-
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_chain_no_chain_single_site(self):
-        """A single mm should not trigger any chaining behavior; the
-        subclass path produces 2 per-branch matmuls and otherwise
-        matches eager numerically."""
-        torch.manual_seed(0)
-        x = torch.randn(32, 64, device="cuda")
-        y_e, y_l, _ = _eager_and_localized(_OneLinear, (64, 128), (x,))
-        torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
-
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_chain_head_escapes(self):
-        """The head of a 2-linear chain is also returned: both outputs
-        must match eager."""
-        torch.manual_seed(0)
-        x = torch.randn(32, 64, device="cuda")
-        y_e_pair, y_l_pair, _ = _eager_and_localized(
-            _LinearHeadEscapes2, (64, 128, 96), (x,)
-        )
-        for ye, yl in zip(y_e_pair, y_l_pair):
-            torch.testing.assert_close(yl, ye, atol=1e-3, rtol=1e-3)
-
-
-class _LinearReshape(nn.Module):
-    """``mm(x, W).view(M, a, b)`` — tests the boundary contract for
-    a non-pointwise op downstream of a localized linear."""
-
-    def __init__(self, in_f, out_f, view_shape):
-        super().__init__()
-        self.fc = nn.Linear(in_f, out_f, bias=False)
-        self.view_shape = view_shape
-
-    def forward(self, x):
-        return self.fc(x).view(*self.view_shape)
-
-
-class _LinearReshapePermuteClone(nn.Module):
-    def __init__(self, in_f, out_f, view_shape, perm):
-        super().__init__()
-        self.fc = nn.Linear(in_f, out_f, bias=False)
-        self.view_shape = view_shape
-        self.perm = perm
-
-    def forward(self, x):
-        y = self.fc(x).view(*self.view_shape)
-        y = y.permute(*self.perm)
-        return y.clone()
-
-
-class _LinearReshapePermuteCloneReshape(nn.Module):
-    def __init__(self, in_f, out_f, view1, perm, view2):
-        super().__init__()
-        self.fc = nn.Linear(in_f, out_f, bias=False)
-        self.view1 = view1
-        self.perm = perm
-        self.view2 = view2
-
-    def forward(self, x):
-        y = self.fc(x).view(*self.view1)
-        y = y.permute(*self.perm)
-        y = y.clone()
-        return y.reshape(*self.view2)
-
-
-class _LinearMergeInnerSplit(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc = nn.Linear(3, 8, bias=False)
-
-    def forward(self, x):
-        y = self.fc(x)  # [6, 8]
-        y = y.view(6, 2, 4)  # 1-to-many
-        return y.view(12, 4)  # merge with split inside
-
-
-class _LinearBiasOnly(nn.Module):
-    """``F.linear(x, W) + b`` -- bias as a separate add (not via
-    nn.Linear's bias).  The add packs onto the green streams as a
-    pointwise tail."""
-
-    def __init__(self, in_f, out_f):
-        super().__init__()
-        self.fc = nn.Linear(in_f, out_f, bias=False)
-        self.bias = nn.Parameter(torch.zeros(out_f))
-
-    def forward(self, x):
-        return self.fc(x) + self.bias
-
-
-class TestLocalizationPackingIR(TestCase):
-    """IR-level tests for the subclass path's packing/boundary
-    behavior.
-
-    Pointwise tails (relu, bias-add, gelu) pack into the per-branch
-    streams via __torch_dispatch__'s pointwise fast path -- those
-    nodes appear per-branch with stream annotations in the post-AOT
-    graph.
-
-    Non-pointwise / shape-changing ops (reshape, view, permute, clone)
-    are NOT packed: when one of them consumes a localized tensor, the
-    slow path reifies via ``cat`` and the downstream op runs once on
-    the reified tensor, on the main stream.  These tests pin that
-    boundary contract.
-    """
-
-    hw_classification = HardwareClassification.CUDA
-
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.reset()
-
-    def _matmul_count(self, gm):
-        aten = torch.ops.aten
-        return sum(
-            1
-            for n in gm.graph.nodes
-            if n.op == "call_function"
-            and n.target in (aten.mm.default, aten.addmm.default)
-        )
-
-    def _nodes_with_target(self, gm, target):
-        return [
-            n for n in gm.graph.nodes if n.op == "call_function" and n.target is target
-        ]
-
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_packing_merge_inner_split_rejected(self):
-        """``mm -> view(1-to-many) -> view(merge with inner split)``.
-        Both reshapes are non-pointwise -> both run on the main
-        stream after a single reify.  Numerics must match eager."""
-        torch.manual_seed(0)
-        x = torch.randn(6, 3, device="cuda")
-        y_e, y_l, gm = _eager_and_localized(_LinearMergeInnerSplit, (), (x,))
-        torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
-
-
 class TestLocalizationRequiresInferenceMode(TestCase):
     """``localize`` refuses to run outside inference mode.
 
@@ -1957,7 +1681,6 @@ class TestLocalizationRequiresInferenceMode(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    @_requires_cuda
     @_requires_green_contexts
     def test_module_path_raises_outside_inference_mode(self):
         m = _OneLinear(64, 128).cuda()
@@ -1966,16 +1689,6 @@ class TestLocalizationRequiresInferenceMode(TestCase):
         # The module is left untouched, so a caller can retry correctly.
         self.assertFalse(_is_localized_tensor(m.fc.weight))
 
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_succeeds_inside_inference_mode(self):
-        m = _OneLinear(64, 128, bias=True).cuda()
-        with torch.inference_mode():
-            torch.cuda.localize(m)
-        self.assertTrue(_is_localized_tensor(m.fc.weight))
-        self.assertTrue(_is_localized_tensor(m.fc.bias))
-
-    @_requires_cuda
     @_requires_green_contexts
     def test_no_grad_is_not_sufficient(self):
         """``no_grad`` is the easy thing to reach for and is not enough --
@@ -1984,282 +1697,6 @@ class TestLocalizationRequiresInferenceMode(TestCase):
         with torch.no_grad():
             with self.assertRaisesRegex(RuntimeError, "requires inference mode"):
                 torch.cuda.localize(m)
-
-
-class _LinearBiasGelu(nn.Module):
-    def __init__(self, in_f, out_f):
-        super().__init__()
-        self.fc = nn.Linear(in_f, out_f, bias=True)
-
-    def forward(self, x):
-        return F.gelu(self.fc(x))
-
-
-class _TwoIndependentLinearsBias(nn.Module):
-    """Two independent Linear(...,bias=True) sites whose outputs are
-    summed.  Used by the addmm-split IR test.  Independent weights
-    means each site gets its own _LocalizedTensor and its own stream
-    pair."""
-
-    def __init__(self, in_f, out_f):
-        super().__init__()
-        self.fc1 = nn.Linear(in_f, out_f, bias=True)
-        self.fc2 = nn.Linear(in_f, out_f, bias=True)
-
-    def forward(self, x):
-        return self.fc1(x) + self.fc2(x)
-
-
-class TestLocalizationAddmmNumerics(TestCase):
-    """nn.Linear with bias is the userspace shape of addmm; the
-    numerics test ports cleanly."""
-
-    hw_classification = HardwareClassification.CUDA
-
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.reset()
-
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_linear_with_bias_numerics(self):
-        x = torch.randn(32, 64, device="cuda")
-        y_e, y_l, _ = _eager_and_localized(_OneLinear, (64, 128, True), (x,))
-        torch.testing.assert_close(y_l, y_e, atol=1e-4, rtol=1e-4)
-
-
-def _install_bf16_gelu_decomp():
-    """Replace the global aten.gelu decomp with one that has no
-    elementwise_type_promotion_wrapper.  Lets the entire gelu chain stay in
-    bf16 in the FX graph (the upstream decomp inserts bf16->fp32 converts
-    that the packing pass then splits out as a separate per-branch upcast
-    kernel).
-
-    Patches both the global decomposition tables (consumed by AOT autograd)
-    AND ``torch._inductor.decomposition.decompositions``.  The latter is a
-    snapshot taken at inductor module import time; without patching it,
-    inductor's lowering will still use the upstream gelu decomp even after
-    we override the global table."""
-    import torch._inductor.decomposition as inductor_decomp
-    from torch._decomp import decomposition_table, global_decomposition_table
-
-    aten = torch.ops.aten
-
-    def gelu_bf16(a, approximate="none"):
-        return a * 0.5 * (1 + torch.erf(a * 0.7071067811865476))
-
-    tables = (
-        decomposition_table,
-        global_decomposition_table.get("post_autograd", {}),
-        global_decomposition_table.get("pre_autograd", {}),
-        inductor_decomp.decompositions,
-    )
-    saved = [
-        {op: table[op] for op in (aten.gelu.default, aten.gelu.out) if op in table}
-        for table in tables
-    ]
-    for table in tables:
-        table[aten.gelu.default] = gelu_bf16
-        table.pop(aten.gelu.out, None)
-
-    def _restore():
-        for table, entries in zip(tables, saved):
-            table.pop(aten.gelu.default, None)
-            table.pop(aten.gelu.out, None)
-            table.update(entries)
-
-    return _restore
-
-
-class TestLocalizationTritonEpilogue(TestCase):
-    """Verify the codegen produced by ``torch.compile`` for a localized
-    ``Linear -> GeLU`` under Triton-only GEMM autotune.
-
-    The contract we want to confirm:
-      1. ``max_autotune_gemm_backends="TRITON"`` actually produces Triton MM
-         kernels (no silent fallback to ``extern_kernels.mm``).
-      2. The ``PackPointwiseAfterCat`` pass duplicates the GeLU chain
-         per-green-stream and inductor honours those stream annotations in
-         codegen: the GeLU kernel is invoked twice, once on each green
-         stream.
-      3. The ``cat`` (or its scheduler-replacement) happens *after* both
-         per-stream GeLU invocations.
-
-    (1) currently passes when the inductor cache is cleared; (2) and (3)
-    fail because inductor's scheduler re-collapses the duplicated GeLU
-    into a single post-join kernel.  The failing assertion documents the
-    epilogue-fusion gap we want to close next."""
-
-    hw_classification = HardwareClassification.CUDA
-
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.reset()
-        self._restore_decomp = _install_bf16_gelu_decomp()
-
-    def tearDown(self):
-        self._restore_decomp()
-        super().tearDown()
-
-    @_requires_cuda
-    @_requires_green_contexts
-    def test_gelu_duplicated_per_stream_under_triton_autotune(self):
-        """Capture the generated wrapper code via ``GraphLowering.save_output_code``,
-        then string-match for the expected structure."""
-        from torch._inductor.graph import GraphLowering
-
-        captured: list[str] = []
-
-        def save(code: str) -> None:
-            captured.append(code)
-
-        prev = GraphLowering.save_output_code
-        GraphLowering.save_output_code = save
-        try:
-            model = (
-                nn.Linear(
-                    8192,
-                    8192,
-                    bias=False,
-                    dtype=torch.bfloat16,
-                )
-                .cuda()
-                .eval()
-            )
-            # Localize wraps weight into a _LocalizedTensor; F.gelu sits on top.
-            full_model = nn.Sequential(model, nn.GELU())
-            with torch.inference_mode():
-                torch.cuda.localize(full_model)
-
-            with inductor_config.patch(
-                {
-                    "force_disable_caches": True,
-                    "max_autotune_gemm": True,
-                    "max_autotune_gemm_backends": "TRITON",
-                }
-            ):
-                opt = torch.compile(
-                    full_model,
-                    fullgraph=True,
-                    mode="reduce-overhead",
-                )
-                x = torch.randn(
-                    32,
-                    8192,
-                    dtype=torch.bfloat16,
-                    device="cuda",
-                )
-                with torch.inference_mode():
-                    _ = opt(x)
-                torch.cuda.synchronize()
-        finally:
-            GraphLowering.save_output_code = prev
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
-
-        self.assertTrue(captured, "no codegen captured from compile")
-        code = "\n\n".join(captured)
-
-        # (1) Triton MM template was actually selected.
-        self.assertIn(
-            "triton_tem_fused_mm",
-            code,
-            "Triton MM kernel not generated despite "
-            "max_autotune_gemm_backends='TRITON' "
-            "(silent fallback to extern_kernels.mm probably triggered)",
-        )
-        self.assertNotIn(
-            "extern_kernels.mm",
-            code,
-            "found extern_kernels.mm in codegen, meaning inductor silently "
-            "fell back to cuBLAS despite Triton-only autotune config",
-        )
-
-        # (2) At least one pointwise kernel must be invoked inside each
-        # green-stream block.  The per-stream wrappers in localize codegen
-        # guard each green stream with ``with torch.cuda.stream(stream{1,2}):``
-        # blocks; with the multi-user pack pass active, the gelu-decomposed
-        # ``mul``/``mul_1`` pair is fused into one ``triton_poi_fused_*``
-        # kernel that runs on each green stream.  The inductor scheduler
-        # may interleave per-branch work into more than one ``with
-        # torch.cuda.stream(stream1):`` block (mm in the first, the
-        # hoisted pointwise tail in a later one), so we concatenate every
-        # block bound to a given stream before checking.
-        def _stream_blocks(stream_name: str) -> str:
-            # The wrapper enters stream contexts as ``with streamN:`` on
-            # newer inductor and ``with torch.cuda.stream(streamN):`` on
-            # older; collect lines from either form of this stream's
-            # blocks until a different stream context (or return) starts.
-            needles = (
-                f"with {stream_name}:",
-                f"with torch.cuda.stream({stream_name}):",
-            )
-            collected: list[str] = []
-            in_block = False
-            for ln in code.splitlines():
-                stripped = ln.strip()
-                if stripped in needles:
-                    in_block = True
-                    continue
-                if in_block and (
-                    (
-                        stripped.startswith(("with stream", "with torch.cuda.stream("))
-                        and stripped not in needles
-                    )
-                    or stripped.startswith(("with default_stream", "return "))
-                ):
-                    in_block = False
-                    continue
-                if in_block:
-                    collected.append(ln)
-            return "\n".join(collected)
-
-        block1 = _stream_blocks("stream1")
-        block2 = _stream_blocks("stream2")
-        self.assertTrue(
-            block1 and block2, "could not find both green-stream blocks in codegen"
-        )
-        # The pack pass fires at FX time and per-branch pointwise
-        # kernels show up either INSIDE each green stream block (the
-        # original packing target) or fused into the cat-copy kernel
-        # the scheduler emits on the default stream when per-branch
-        # mm outputs are no longer aliased into the cat output (which
-        # is the case once the localized-mempool opt-out in
-        # ``ConcatKernel.realize_into`` fires).  The locality property
-        # we actually care about is preserved either way: the mm
-        # output lives in its branch's locality-domain pool (the
-        # ``use_mem_pool`` wrap around the per-branch ``empty_strided_cuda``
-        # is what gives us that) and the mm kernel runs inside the
-        # ``with torch.cuda.stream(stream{1,2}):`` block, so we just
-        # check for the per-branch pool wrap there instead of the
-        # specific gelu-packed kernel placement.
-        for label, block in (("stream1", block1), ("stream2", block2)):
-            has_pointwise = re.search(r"triton_poi_fused\w*\.run\(", block)
-            has_use_mem_pool = "torch.cuda.use_mem_pool" in block
-            self.assertTrue(
-                has_pointwise or has_use_mem_pool,
-                f"green {label} block has neither a per-branch pointwise "
-                f"kernel nor a use_mem_pool wrap; one of these must be "
-                f"present for the localization to be doing meaningful "
-                f"work (block content:\n{block})",
-            )
-
-        # (3) The gelu math ends up SOMEWHERE in the codegen (either
-        # packed onto a green stream by PackPointwiseAfterCat or fused
-        # into the cat copy by the scheduler when the per-branch mm
-        # outputs are no longer aliased into the cat).  We don't pin
-        # the placement; we just check that gelu math is present.
-        has_gelu_math = re.search(
-            r"triton_poi_fused\w*\.run\(",
-            code,
-        )
-        self.assertIsNotNone(
-            has_gelu_math,
-            "no per-branch pointwise kernel found anywhere in codegen "
-            "-- the pack pass didn't fire and the cat copy wasn't "
-            "fused with the gelu either, so the gelu chain is silently "
-            "missing or running on the default stream as a separate "
-            "kernel that the test would have flagged previously.",
-        )
 
 
 if __name__ == "__main__":

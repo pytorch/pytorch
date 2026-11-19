@@ -4725,7 +4725,7 @@ class CudagraphNcclMemPoolTest(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-        # Allowing multiple ranks on a single GPU requires on opt-in.
+        # Allowing multiple ranks on a single GPU requires an opt-in.
         self.env_patcher = mock.patch.dict(
             os.environ, {"NCCL_MULTI_RANK_GPU_ENABLE": "1"}
         )
@@ -4794,8 +4794,8 @@ class CudagraphNcclMemPoolTest(MultiProcessTestCase):
                 for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     x = torch.full((1024,), float(self.rank + 1), device=device)
-                    # y lives in the NCCL-registered pool and is produced by the
-                    # cudagraph; the collective uses it directly (userbuffer).
+                    # out lives in the NCCL-registered pool and is produced by
+                    # the cudagraph; the collective uses it directly (userbuffer).
                     out = step_opt(pool, x)
                     dist.all_reduce(out)
                     torch.cuda.synchronize(device)
