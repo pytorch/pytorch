@@ -1029,7 +1029,7 @@ static int dict_version_watch_callback(
   dict_version_state.withLock([&](DictVersionState& state) {
     if (event == PyDict_EVENT_DEALLOCATED) {
       state.map.erase(dict);
-    } else if (event != PyDict_EVENT_CLONED) {
+    } else {
       state.map[dict] = state.next_id++;
     }
   });
@@ -5551,20 +5551,18 @@ static int dict_recursive_tag_watch_callback(
     PyObject* dict,
     PyObject* key,
     PyObject* new_value) noexcept {
-  if (event != PyDict_EVENT_CLONED) {
-    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
-      auto it = map.find(dict);
-      if (it != map.end()) {
-        // Copy the list — unwatch_all_saved_dict_pointers may mutate it.
-        auto guard_managers = it->second;
-        for (auto& guard_manager : guard_managers) {
-          if (guard_manager) {
-            guard_manager->disable_recursive_dict_tag_optimization(map);
-          }
+  dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+    auto it = map.find(dict);
+    if (it != map.end()) {
+      // Copy the list - unwatch_all_saved_dict_pointers may mutate it.
+      auto guard_managers = it->second;
+      for (auto& guard_manager : guard_managers) {
+        if (guard_manager) {
+          guard_manager->disable_recursive_dict_tag_optimization(map);
         }
       }
-    });
-  }
+    }
+  });
   return 0; // keep watching
 }
 #endif
