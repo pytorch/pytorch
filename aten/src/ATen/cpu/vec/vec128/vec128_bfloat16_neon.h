@@ -387,14 +387,6 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
   Vectorized<c10::BFloat16> neg() const {
     return vreinterpretq_bf16_s16(vreinterpretq_s16_bf16(values) ^ (-32768));
   }
-  // Fast reciprocal is fine because we are truncating results
-  Vectorized<c10::BFloat16> reciprocal() const {
-    auto x = vcvtq_low_f32_bf16(values);
-    auto y = vcvtq_high_f32_bf16(values);
-    x = vrecpeq_f32(x);
-    y = vrecpeq_f32(y);
-    return vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(x), y);
-  }
   // Clearing the sign bit
   Vectorized<c10::BFloat16> abs() const {
     return vreinterpretq_bf16_u16(vreinterpretq_u16_bf16(values) & 0x7FFF);
@@ -402,8 +394,8 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
 #else
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal)
 #endif
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal)
 
 // These functions are optimized on clang-21+
 #if BF16_ARITHMETIC_SUPPORTED() && (__clang_major__ >= 21)
