@@ -5,9 +5,7 @@ import cuda.bindings.driver as cuda
 import cutlass
 import cutlass.cute as cute
 import cutlass.utils.blackwell_helpers as sm100_utils
-from cutlass.block import block_copy
 from cutlass.cute.nvgpu import cpasync
-from cutlass.memory import SmemAllocator
 from cutlass.tensor_utils import LayoutEnum
 
 from ...cutedsl import launch as _L
@@ -17,6 +15,13 @@ from ._transpose import matrix_view
 
 if TYPE_CHECKING:
     from tvm_ffi import Function  # pyrefly: ignore[missing-import]
+
+
+try:
+    from cutlass.block import block_copy
+    from cutlass.memory import SmemAllocator
+except ImportError:
+    from cutlass.utils import block_copy, SmemAllocator
 
 
 class _TmaTranspose:
@@ -82,7 +87,8 @@ class _TmaTranspose:
             cute.make_layout((self.threads // fast, fast), stride=(fast, 1)),
             cute.make_layout((1, vector)),
         )
-        self.kernel(load, tma_src, store, tma_dst, layout, copy).launch(
+        middle_div = cute.FastDivmodDivisorV2(cutlass.Int32(src.shape[3]))
+        self.kernel(load, tma_src, store, tma_dst, layout, copy, middle_div).launch(
             grid=(
                 cute.ceil_div(src.shape[0], self.tile),
                 cute.ceil_div(src.shape[1], self.tile),
@@ -101,10 +107,11 @@ class _TmaTranspose:
         dst: cute.Tensor,
         layout: cute.ComposedLayout,
         copy: cute.TiledCopy,
+        middle_div: Any,
     ) -> None:
         tid, _, _ = cute.arch.thread_idx()
         n, m, batch = cute.arch.block_idx()
-        outer, middle = batch // src.shape[3], batch % src.shape[3]
+        outer, middle = divmod(batch, middle_div)
         warp = cute.arch.make_warp_uniform(cute.arch.warp_idx())
         storage = SmemAllocator().allocate(self.storage_type)
         s_src = storage.src.get_tensor(layout.outer, swizzle=layout.inner)
@@ -151,10 +158,16 @@ class _TmaTranspose:
                 cute.arch.cp_async_bulk_wait_group(0)
 
 
-def compile_tma(word_size: int, outer: int, middle: int, a: int, b: int) -> "Function":
+def compile_tma(word_size: int) -> "Function":
     from .transpose_copy import tiled_kernel
 
-    op, (src, dst) = tiled_kernel(
-        word_size, 1, False, True, tma=True, shape=(outer, b, middle, a, 1)
+    vector = 16 // word_size
+    shape = (
+        cute.sym_int64(),
+        cute.sym_int64(divisibility=vector),
+        cute.sym_int64(),
+        cute.sym_int64(divisibility=vector),
+        1,
     )
+    op, (src, dst) = tiled_kernel(word_size, 1, False, True, tma=True, shape=shape)
     return _L.compile_kernel(op, src, dst, _L.stream())

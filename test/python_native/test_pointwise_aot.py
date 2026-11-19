@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
 
 
 def _probe(case: str, device: str) -> None:
-    from test.python_native.test_pointwise_cutedsl import (
+    from python_native.test_pointwise_cutedsl import (
         _packed_transpose_reference,
         _quantized_storage_bytes,
         _storage_bytes,
@@ -158,7 +158,7 @@ def _default_aot_probe(case: str, device: str) -> None:
 
 
 def _invalid_rng(case: str, device: str) -> None:
-    from test.python_native.test_rng_dsl import TestCuTeDSLRngCUDA
+    from python_native.test_rng_dsl import TestCuTeDSLRngCUDA
 
     check = TestCuTeDSLRngCUDA()
     index = torch._utils._get_device_index(device, optional=True)
@@ -169,7 +169,7 @@ def _invalid_rng(case: str, device: str) -> None:
 
 
 def _rng_state(distribution: str, capture: bool, device: str) -> None:
-    from test.python_native.test_rng_dsl import _DrawCase, TestCuTeDSLRngCUDA
+    from python_native.test_rng_dsl import _DrawCase, TestCuTeDSLRngCUDA
 
     check = TestCuTeDSLRngCUDA()
     check.gen = torch.cuda.default_generators[
@@ -198,15 +198,18 @@ class TestPointwiseAot(TestCase):
             self.skipTest("AOT artifacts do not cover this CUDA device")
 
     def _run_probe(self, name: str, *args: object, jit_enabled: bool = False) -> None:
-        source = (
-            f"from test.python_native.test_pointwise_aot import {name}; {name}{args!r}"
-        )
+        source = f"from python_native.test_pointwise_aot import {name}; {name}{args!r}"
         env = dict(
             os.environ,
             TORCH_DISABLE_NATIVE_JIT="0" if jit_enabled else "1",
             TORCH_DISABLE_NATIVE_AOT="0",
         )
-        code = shell([sys.executable, "-c", source], env=env, timeout=300)
+        code = shell(
+            [sys.executable, "-c", source],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            env=env,
+            timeout=300,
+        )
         self.assertEqual(code, 0)
 
     @parametrize(

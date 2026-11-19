@@ -4,7 +4,7 @@ import cutlass
 import cutlass.cute as cute
 
 from ...cutedsl.types import Index
-from ._transpose import source_offset
+from ._transpose import source_offset, source_row_fast
 
 
 FLAT_THREADS: int = 256
@@ -19,11 +19,12 @@ def flat_copy(
     bits: cutlass.Constexpr,
     pack: cutlass.Constexpr,
     normalize: cutlass.Constexpr,
+    divisors: Any = None,
 ) -> None:
     tid, _, _ = cute.arch.thread_idx()
     bid, _, _ = cute.arch.block_idx()
-    base = bid * (FLAT_THREADS * FLAT_ELEMENTS_PER_THREAD) + tid
-    transpose_flat(src, dst, base, geometry, bits, pack, normalize)
+    base = cutlass.Int64(bid) * (FLAT_THREADS * FLAT_ELEMENTS_PER_THREAD) + tid
+    transpose_flat(src, dst, base, geometry, bits, pack, normalize, divisors)
 
 
 @cute.jit
@@ -60,15 +61,21 @@ def packed_byte(
     numel: Any,
     bits: cutlass.Constexpr,
     pack: cutlass.Constexpr,
+    divisors: Any = None,
 ) -> cutlass.Uint8:
     result = cutlass.Int32(0)
     for lane in cutlass.range_constexpr(pack):
         index = byte_idx * pack + lane
         if index < numel:
-            source = source_offset(index // inner, index % inner, b, middle, a, inner)
-            value = (cutlass.Int32(src[source // pack]) >> ((source % pack) * bits)) & (
-                (1 << bits) - 1
-            )
+            if cutlass.const_expr(divisors is not None):
+                row, q = divmod(cutlass.Int32(index), divisors[3])
+                source = cutlass.Int64(source_row_fast(row, divisors[:3])) * inner + q
+            else:
+                source = source_offset(
+                    index // inner, index % inner, b, middle, a, inner
+                )
+            shift = cutlass.Int32((source % pack) * bits)
+            value = (cutlass.Int32(src[source // pack]) >> shift) & ((1 << bits) - 1)
             result |= value << (lane * bits)
     if numel % pack != 0:
         if byte_idx == numel // pack:
@@ -86,13 +93,16 @@ def transpose_flat(
     bits: cutlass.Constexpr,
     pack: cutlass.Constexpr,
     normalize: cutlass.Constexpr,
+    divisors: Any = None,
 ) -> None:
     b, middle, a, inner, _ = geometry
     for k in cutlass.range_constexpr(FLAT_ELEMENTS_PER_THREAD):
         index = base + k * FLAT_THREADS
         if index < cute.size(dst):
             if cutlass.const_expr(pack > 1):
-                dst[index] = packed_byte(src, dst, index, *geometry, bits, pack)
+                dst[index] = packed_byte(
+                    src, dst, index, *geometry, bits, pack, divisors
+                )
             else:
                 at = source_offset(index // inner, index % inner, b, middle, a, inner)
                 value = src[at]

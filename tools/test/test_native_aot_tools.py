@@ -1690,7 +1690,7 @@ class TestFunctionalIntrospection(unittest.TestCase):
 
     def test_functional_hook_rejects_aliases_and_mutation(self) -> None:
         from torchgen.gen import get_grouped_native_functions, parse_native_yaml
-        from torchgen.model import DispatchKey
+        from torchgen.model import DispatchKey, Location, NativeFunction
         from torchgen.native_aot import NativeAotManifest, validate_native_aot_manifests
 
         native = os.path.join(REPO, "aten", "src", "ATen", "native")
@@ -1698,15 +1698,34 @@ class TestFunctionalIntrospection(unittest.TestCase):
             os.path.join(native, "native_functions.yaml"),
             os.path.join(native, "tags.yaml"),
         )
-        grouped = get_grouped_native_functions(parsed.native_functions)
-        for op in ("view", "add.out", "missing_native_aot_op"):
+        grouped = list(get_grouped_native_functions(parsed.native_functions))
+        manual, _ = NativeFunction.from_yaml(
+            {
+                "func": "native_aot_manual(Tensor self) -> Tensor",
+                "manual_kernel_registration": True,
+            },
+            Location(__file__, 1),
+            valid_tags=set(),
+            ignore_keys=set(),
+        )
+        grouped.append(manual)
+        for op, error in (
+            ("view", "fresh Tensor returns"),
+            ("add.out", "fresh Tensor returns"),
+            ("missing_native_aot_op", "fresh Tensor returns"),
+            ("isfinite", "generated CUDA or CompositeExplicitAutograd"),
+            ("_add_relu.Tensor", "generated CUDA or CompositeExplicitAutograd"),
+            ("native_aot_manual", "manual kernel registration"),
+        ):
             with self.subTest(op=op):
                 manifest = NativeAotManifest(
                     op=op, dispatch_key=DispatchKey.CUDA, structured=False
                 )
-                with self.assertRaisesRegex(RuntimeError, "fresh Tensor returns"):
+                with self.assertRaisesRegex(RuntimeError, error):
                     validate_native_aot_manifests(
-                        {(DispatchKey.CUDA, op): manifest}, grouped
+                        {(DispatchKey.CUDA, op): manifest},
+                        grouped,
+                        backend_indices=parsed.backend_indices,
                     )
 
     def test_functional_hook_selects_required_tensor(self) -> None:
@@ -1728,13 +1747,16 @@ class TestFunctionalIntrospection(unittest.TestCase):
         for op, tensor in (
             ("remainder.Scalar_Tensor", "other"),
             ("convolution", "input"),
+            ("uniform_", "self"),
         ):
             with self.subTest(op=op):
                 manifest = NativeAotManifest(
                     op=op, dispatch_key=DispatchKey.CUDA, structured=False
                 )
                 validate_native_aot_manifests(
-                    {(DispatchKey.CUDA, op): manifest}, grouped
+                    {(DispatchKey.CUDA, op): manifest},
+                    grouped,
+                    backend_indices=parsed.backend_indices,
                 )
                 self.assertEqual(first_tensor_arg(functions[op]), tensor)
         manifest = NativeAotManifest(
@@ -1744,8 +1766,44 @@ class TestFunctionalIntrospection(unittest.TestCase):
             RuntimeError, "require a non-optional Tensor argument"
         ):
             validate_native_aot_manifests(
-                {(DispatchKey.CUDA, manifest.op): manifest}, grouped
+                {(DispatchKey.CUDA, manifest.op): manifest},
+                grouped,
+                backend_indices=parsed.backend_indices,
             )
+
+
+@unittest.skipIf(importlib.util.find_spec("cutlass") is None, "CuTeDSL required")
+class TestCuteExportArgs(unittest.TestCase):
+    def test_postponed_and_missing_scalar_annotations(self) -> None:
+        import cutlass
+        import cutlass.cute as cute
+
+        helper = native_aot_decl.load_by_path(
+            "native_aot_export_args",
+            os.path.join(REPO, "torch", "_native", "cutedsl", "aot.py"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "kernel.py")
+            with open(path, "w") as f:
+                f.write("""from __future__ import annotations
+import cutlass
+import cutlass.cute as cute
+
+def kernel(x: cute.Tensor, n: cutlass.Int32, stream: object) -> None:
+    pass
+
+def missing(x: cute.Tensor, n, stream: object) -> None:
+    pass
+""")
+            module = native_aot_decl.load_by_path("native_aot_annotation_kernel", path)
+        tensor = cute.runtime.make_fake_tensor(
+            cutlass.Float32, (cute.sym_int32(),), stride=(1,), assumed_align=16
+        )
+        result = helper.export_args(module.kernel, tensor, prefix="annotations")
+        self.assertEqual(result["scalar_args"], [{"name": "n", "ctype": "int32_t"}])
+        self.assertIsInstance(result["fake_args"][1], cutlass.Int32)
+        with self.assertRaisesRegex(TypeError, "'n' requires a type annotation"):
+            helper.export_args(module.missing, tensor, prefix="missing")
 
 
 class TestAtomicWrites(unittest.TestCase):
