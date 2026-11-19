@@ -402,6 +402,51 @@ class TestFlyDSLTemplate(TestCase):
             result = mm.get_flydsl_mm_template_kwargs(layout, mat1, mat2, True, True)
             self.assertEqual(result, [])
 
+    def test_grouped_mm_kwargs_pass_xcc_count(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+        from torch._inductor.kernel import mm_grouped
+        from torch._inductor.kernel.vendored_templates.flydsl import (
+            kernels as flydsl_kernels,
+        )
+
+        def node(size):
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_dtype=lambda: torch.bfloat16,
+                get_device_or_error=lambda: torch.device("cuda", 0),
+            )
+
+        gemm_config = {"TILE_M": 128}
+        with (
+            mock.patch.object(mm_grouped, "flydsl_xcc_count", return_value=4),
+            mock.patch.dict(
+                flydsl_kernels.__dict__, {"GEMM_DTYPE_BF16": 2, "GEMM_DTYPE_FP16": 3}
+            ),
+            mock.patch.object(
+                flydsl_heuristics,
+                "get_grouped_gemm_configs",
+                return_value=[gemm_config],
+            ),
+            mock.patch.object(
+                flydsl_heuristics,
+                "is_grouped_gemm_config_valid_for_shape",
+                return_value=True,
+            ),
+        ):
+            mat_a, mat_b = node([512, 128]), node([4, 128, 256])
+            result = mm_grouped.get_flydsl_grouped_mm_template_kwargs(mat_a, mat_b)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["NUM_XCCS"], 4)
+
+    @parametrize("xcc_count,expected", ((None, 4), (1, 1), (2, 2)))
+    def test_flydsl_xcc_count(self, xcc_count, expected):
+        from torch._inductor.utils import flydsl_xcc_count
+
+        # Without a reported XCC count, 128 CUs at 32 CUs per XCC gives 4.
+        props = SimpleNamespace(multi_processor_count=128, xcc_count=xcc_count)
+        with mock.patch("torch.cuda.get_device_properties", return_value=props):
+            self.assertEqual(flydsl_xcc_count(torch.device("cuda", 0)), expected)
+
     @parametrize(
         "a_is_transposed,b_is_transposed",
         ((False, False), (False, True), (True, False), (True, True)),
@@ -438,6 +483,7 @@ class TestFlyDSLTemplate(TestCase):
             V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
             mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
             mock.patch.object(mm, "is_unaligned", return_value=False),
+            mock.patch.object(mm, "flydsl_xcc_count", return_value=4),
             mock.patch.object(
                 flydsl_heuristics, "get_gemm_configs", return_value=[gemm_config]
             ) as get_configs,
@@ -469,6 +515,7 @@ class TestFlyDSLTemplate(TestCase):
             self.assertEqual(len(result), 1)
             self.assertEqual(result[0]["A_IS_TRANSPOSED"], a_is_transposed)
             self.assertEqual(result[0]["B_IS_TRANSPOSED"], b_is_transposed)
+            self.assertEqual(result[0]["NUM_XCCS"], 4)
             get_configs.assert_called_once_with(m, n, k, None)
             validate.assert_called_once_with(
                 m,

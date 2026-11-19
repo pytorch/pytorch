@@ -3257,6 +3257,15 @@ def use_flydsl_gemm_template(layout: Layout) -> bool:
     return True
 
 
+def flydsl_xcc_count(device: torch.device) -> int:
+    """XCCs the FlyDSL gfx950 kernels swizzle tiles across. HIP reports the
+    count for the current compute partition from ROCm 7.0; before that, assume
+    gfx950's 32 CUs per XCC."""
+    # An index-less device resolves to 0, as in use_flydsl_gemm_template.
+    props = torch.cuda.get_device_properties(device.index or 0)
+    return props.xcc_count or max(1, props.multi_processor_count // 32)
+
+
 def use_blackwell_cutedsl_grouped_mm(
     mat_a: Any,
     mat_b: Any,

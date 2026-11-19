@@ -27,7 +27,7 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
     if const_expr(param.group_m <= 0):
         return bid_m, bid_n
 
-    num_xcds = 8
+    num_xcds = param.num_xccs
     # BlockSwizzle maps pid % NUM_XCDS to hardware XCD assignment. In the
     # persistent grouped loop local_tile = blockIdx.x + j * grid - tiles_before,
     # so local_tile % NUM_XCDS tracks blockIdx.x only when both grid and
@@ -54,7 +54,7 @@ def make_grouped_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
         f"t{param.block_m}x{param.block_n}x{param.block_k}x{param.stages}"
     )
     name += f"_w{param.m_waves}x{param.n_waves}"
-    name += f"_gm{param.group_m}"
+    name += f"_gm{param.group_m}_xcc{param.num_xccs}"
     name += f"_ktail{int(param.has_k_tail)}"
     name += "_hti" if param.use_half_tile_interleaved else "_ft"
     return name
