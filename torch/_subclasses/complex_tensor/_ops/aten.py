@@ -64,8 +64,12 @@ def register_binary_linear_inplace(
     op: OpType, out_of_place_impl: Callable[..., Any]
 ) -> Callable[..., Any]:
     def impl(
-        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
-    ) -> ComplexTensor:
+        lhs: ComplexTensor | torch.Tensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+    ) -> ComplexTensor | torch.Tensor:
+        if not lhs.dtype.is_complex:
+            raise RuntimeError(
+                f"result type {torch.result_type(lhs, rhs)} can't be cast to the desired output type {lhs.dtype}"
+            )
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
@@ -258,6 +262,7 @@ INDUCTOR_OPS = [
     aten.linalg_qr,
     aten.linalg_solve_triangular,
     aten.linalg_vector_norm,
+    aten.lu_unpack,
 ]
 
 for inductor_op in INDUCTOR_OPS:
@@ -340,6 +345,16 @@ def div_impl(
         (num_r / den).to(out_dt),
         (num_i / den).to(out_dt),
     )
+
+
+div__impl = register_binary_linear_inplace(aten.div_, div_impl)
+
+
+@register_complex(aten.tril_)
+def tril__impl(self: ComplexTensor, diagonal: int = 0) -> ComplexTensor:
+    self.re.tril_(diagonal)
+    self.im.tril_(diagonal)
+    return self
 
 
 @register_complex(aten.reciprocal)
