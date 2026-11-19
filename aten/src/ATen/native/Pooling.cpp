@@ -41,8 +41,13 @@ static void check1d(
 }
 
 Tensor adaptive_avg_pool1d(const Tensor & self, IntArrayRef output_size) {
-  checkDimRange("adaptive_avg_pool1d", TensorArg(self, "self", 1), 2, 4 /* exclusive */);
-  check1d("adaptive_avg_pool1d", "output_size", output_size);
+  TORCH_CHECK_VALUE(
+      self.dim() == 2 || self.dim() == 3,
+      "adaptive_avg_pool1d(): Expected 2D or 3D tensor, but got ", self.sizes());
+  TORCH_CHECK_VALUE(
+      output_size.size() == 1,
+      "adaptive_avg_pool1d() argument 'output_size' should contain one int (got ",
+      output_size.size(), ")");
 
   auto output = at::adaptive_avg_pool2d(
       self.unsqueeze(-2),
