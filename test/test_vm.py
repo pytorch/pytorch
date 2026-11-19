@@ -4584,6 +4584,22 @@ class TestVmDemotion(TestCase):
         # Measured again once that was over: the loop is slower in the VM.
         self.assertEqual(compiled.stats()["demoted_callees"], ["demote_loud"])
 
+    def test_a_measurement_that_runs_out_goes_by_what_was_measured(self):
+        # Every call of the callee says that it is not what it will be, so
+        # no call of it counts against it; when that has gone on for as long
+        # as a measurement lasts, the times there are decide.
+        compiled = torch.vm(
+            demote_unsettled_caller,
+            fallback=False,
+            demote=True,
+            passes=without(P.Inline),
+        )
+        x = torch.ones(2)
+        for _ in range(450):
+            total, _ = compiled(300, x)
+            self.assertEqual(total, demote_python(300))
+        self.assertEqual(compiled.stats()["demoted_callees"], ["demote_unsettled"])
+
     def test_a_region_that_is_deciding_keeps_measurements_open(self):
         calls = []
         model = RegionNet().eval()
