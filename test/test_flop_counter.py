@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     subtest,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -922,6 +923,7 @@ class TestFlopCounterDevice(TestCase):
         self.assertEqual(gqa_flops, mha_flops)
         self.assertTrue(gqa_flops > 0)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @requires_capabilities(
         Capability.attention.flash_attention,
         Capability.attention.mem_efficient_attention,

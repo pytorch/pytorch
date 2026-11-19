@@ -490,23 +490,61 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(), fn())
 
-    def test_custom_op_fallback(self):
+    @parametrize("container", ["tensor", "list", "nested_list", "dict", "any"])
+    @parametrize("kernel", ["none", "meta", "fake"])
+    @parametrize("allow_non_fake_inputs", [False, True])
+    def test_custom_op_fallback(self, container, kernel, allow_non_fake_inputs):
         from torch.library import _scoped_library, impl
 
         with _scoped_library("my_test_op", "DEF") as test_lib:
-            test_lib.define("foo(Tensor self) -> Tensor")
+            schema_type = {
+                "tensor": "Tensor",
+                "list": "Tensor[]",
+                "nested_list": "Tensor[][]",
+                "dict": "Dict(str, Tensor)",
+                "any": "Any",
+            }[container]
+            test_lib.define(
+                f"foo({schema_type} self, Tensor? anchor=None) -> {schema_type}"
+            )
 
             @impl(test_lib, "foo", "CPU")
-            def foo_impl(self):
-                return self.cos()
+            def foo_impl(self, anchor=None):
+                return pytree.tree_map_only(torch.Tensor, torch.cos, self)
+
+            if kernel == "meta":
+                test_lib.impl("foo", foo_impl, "Meta")
+            elif kernel == "fake":
+                torch.library.register_fake("my_test_op::foo", foo_impl, lib=test_lib)
 
             x = torch.empty(2, 2, device="cpu")
-            with self.assertRaisesRegex(
-                UnsupportedOperatorException, "my_test_op.foo.default"
-            ):
-                with FakeTensorMode(allow_fallback_kernels=True) as mode:
+            with FakeTensorMode(
+                allow_fallback_kernels=True, allow_non_fake_inputs=allow_non_fake_inputs
+            ) as mode:
+                if not allow_non_fake_inputs:
                     x = mode.from_tensor(x)
-                    torch.ops.my_test_op.foo(x)
+                value = {
+                    "tensor": x,
+                    "list": [x],
+                    "nested_list": [[x]],
+                    "dict": {"x": x},
+                    "any": ({"x": [x]}, 7),
+                }[container]
+                # Native backend selection only sees direct tensor arguments.
+                kwargs = {"anchor": x} if mode.propagate_real_tensors else {}
+                if kernel == "none":
+                    with self.assertRaisesRegex(
+                        UnsupportedOperatorException, "my_test_op.foo.default"
+                    ):
+                        torch.ops.my_test_op.foo(value, **kwargs)
+                else:
+                    out = torch.ops.my_test_op.foo(value, **kwargs)
+                    self.assertEqual(
+                        pytree.tree_structure(out), pytree.tree_structure(value)
+                    )
+                self.assertIs(
+                    maybe_get_fake_mode(x), None if allow_non_fake_inputs else mode
+                )
 
     def test_custom_op_fake_impl_with_parameter_subclass(self):
         class ParameterSubclass(torch.nn.Parameter):
