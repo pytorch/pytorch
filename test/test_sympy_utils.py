@@ -1143,6 +1143,21 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
+    @parametrize(
+        "number, expected_floor, expected_ceil",
+        [
+            (sympy.Integer(2**54 + 1), 2**54 + 1, 2**54 + 1),
+            (sympy.Integer(-2**54 - 1), -2**54 - 1, -2**54 - 1),
+            (sympy.Rational(2**55 + 3, 2), 2**54 + 1, 2**54 + 2),
+            (sympy.Rational(-2**55 - 3, 2), -2**54 - 2, -2**54 - 1),
+        ],
+    )
+    def test_floor_ceil_to_int_large_numbers(self, number, expected_floor, expected_ceil):
+        from torch.utils._sympy.functions import CeilToInt, FloorToInt
+
+        self.assertEqual(FloorToInt(number), expected_floor)
+        self.assertEqual(CeilToInt(number), expected_ceil)
+
     def test_shift_edges(self):
         x = sympy.Symbol("x", integer=True)
         self.assertEqual(LShift(x, 0), x)
@@ -1383,6 +1398,7 @@ instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
 instantiate_device_type_tests(TestSympyInterpDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSympySolve)
+instantiate_parametrized_tests(TestSympyFunctions)
 
 
 if __name__ == "__main__":
