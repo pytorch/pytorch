@@ -2403,8 +2403,7 @@ class triton:
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
     #   - max_tiles=2
-    #   - max_tiles=3 is experimental and may have bugs
-    # higher values are unsupported
+    #   - max_tiles > 3 is experimental and may have bugs
 
     #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
     #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
