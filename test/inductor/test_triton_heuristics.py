@@ -290,27 +290,75 @@ class TestTritonHeuristics(TestCase):
     def test_3d_tiled_reduction_rounded_size_hint(self, axis):
         hints = {"x": 8, "y": 8, "z0_": 8, "r0_": 32, axis: 1 << 26}
         cfg = triton_config_tiled_reduction(hints, 8, 8, 32, z=8)
-        expected_blocks = {"XBLOCK": 8, "YBLOCK": 8, "Z0_BLOCK": 8, "R0_BLOCK": 32}
+        expected_blocks = {"XBLOCK": 8, "YBLOCK": 1, "Z0_BLOCK": 1, "R0_BLOCK": 32}
         expected_blocks[f"{axis.upper()}BLOCK"] = 1024
         self.assertEqual(cfg.kwargs, expected_blocks)
+        self.assertLessEqual(math.prod(cfg.kwargs.values()), TRITON_MAX_TENSOR_NUMEL)
         grid = Grid3D(inductor_meta={})
         grid.generate(cfg.kwargs)
         numels = {"x": 8, "y": 8, "z0_": 8, axis: 40_000_000}
         launch = grid.eval_slow({f"{p}numel": n for p, n in numels.items()})
-        self.assertEqual(launch, (1, 39063, 1) if axis == "y" else (1, 1, 39063))
+        self.assertEqual(launch, (1, 39063, 8) if axis == "y" else (1, 8, 39063))
 
     @parametrize("axis", ["y", "z0_"])
     def test_nd_grid_adjustment_preserves_xblock(self, axis):
         hints = {"x": 128, "y": 32, "z0_": 32, "z1_": 8, axis: 1 << 20}
         blocks = {"x": 64, "y": 8, "z0_": 8, "z1_": 8}
         _check_max_grid_yz(hints, blocks)
-        self.assertEqual(blocks["x"], 64)
-        self.assertGreater(blocks[axis], 8)
+        expected = (
+            {"x": 64, "y": 32, "z0_": 8, "z1_": 2}
+            if axis == "y"
+            else {"x": 64, "y": 2, "z0_": 32, "z1_": 8}
+        )
+        self.assertEqual(blocks, expected)
         grid = GridND(inductor_meta={"rank": 4})
         grid.generate({f"{p.upper()}BLOCK": n for p, n in blocks.items()})
         launch = grid.eval_slow({f"{p}numel": n for p, n in hints.items()})
         self.assertLessEqual(launch[1], 65535)
         self.assertLessEqual(launch[2], 65535)
+
+    def test_nd_pointwise_tensor_limit(self):
+        hints = {"x": 4096, "y": 1 << 25, "z0_": 8, "z1_": 8}
+        cfg = triton_config(hints, 4096, 1, 1)
+        self.assertLessEqual(math.prod(cfg.kwargs.values()), TRITON_MAX_TENSOR_NUMEL)
+        self.assertEqual(cfg.kwargs["XBLOCK"], 1024)
+
+    def test_nd_pointwise_tensor_and_x_grid_limits_conflict(self):
+        hints = {"x": 1 << 42, "y": 1 << 25, "z0_": 8, "z1_": 8}
+        with self.assertRaisesRegex(RuntimeError, "Triton's tensor limit.*min_xblock"):
+            triton_config(hints, 4096, 1, 1)
+
+    @parametrize("packed", [False, True])
+    def test_nd_tiled_reduction_tensor_limit(self, packed):
+        hints = {"x": 64, "y": 1 << 25, "z0_": 8, "r0_": 64}
+        if packed:
+            hints["z1_"] = 8
+        cfg = triton_config_tiled_reduction(hints, 64, 1, 64, z=1)
+        self.assertLessEqual(math.prod(cfg.kwargs.values()), TRITON_MAX_TENSOR_NUMEL)
+        self.assertEqual(cfg.kwargs["XBLOCK"], 16)
+        grid = GridND(inductor_meta={"rank": len(hints) - 1})
+        grid.generate(cfg.kwargs)
+        numels = {**hints, "y": (1 << 25) if packed else 20_000_000}
+        launch = grid.eval_slow({f"{p}numel": n for p, n in numels.items()})
+        self.assertLessEqual(launch[1], 65535)
+        self.assertLessEqual(launch[2], 65535)
+
+    def test_3d_tiled_reduction_oversized_initial_budget(self):
+        hints = {"x": 64, "y": 1024, "z0_": 8, "r0_": 64}
+        cfg = triton_config_tiled_reduction(hints, 64, 1024, 64, z=8)
+        self.assertEqual(cfg.kwargs["XBLOCK"], 64)
+        self.assertLessEqual(math.prod(cfg.kwargs.values()), TRITON_MAX_TENSOR_NUMEL)
+
+    def test_nd_tiled_reduction_impossible_tensor_limit(self):
+        hints = {"x": 1, "y": 1 << 25, "z0_": 1 << 25, "r0_": 32}
+        with self.assertRaisesRegex(RuntimeError, "Triton's tensor limit"):
+            triton_config_tiled_reduction(hints, 1, 1, 32, z=1)
+
+    @parametrize("axis", ["y", "z0_"])
+    def test_3d_tiled_reduction_impossible_grid(self, axis):
+        hints = {"x": 1, "y": 1, "z0_": 1, "r0_": 32, axis: 1 << 27}
+        with self.assertRaisesRegex(RuntimeError, "launch-grid limit"):
+            triton_config_tiled_reduction(hints, 1, 1, 32, z=1)
 
     @parametrize("rank", [4, 5])
     def test_nd_pointwise_autotune_hint(self, rank):

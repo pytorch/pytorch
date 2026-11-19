@@ -140,15 +140,18 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertTrue(tuner.is_valid_config(invalid))
 
     @parametrize("axis", ["y", "z0_"])
-    def test_3d_rounded_size_hint_neighbors(self, axis):
-        hints = {"x": 8, "y": 8, "z0_": 8, axis: 1 << 26}
+    @parametrize("hint, expected_neighbors", [(1 << 25, [512]), (1 << 26, [])])
+    def test_3d_rounded_size_hint_neighbors(self, axis, hint, expected_neighbors):
+        hints = {"x": 8, "y": 8, "z0_": 8, axis: hint}
         blocks = {"XBLOCK": 8, "YBLOCK": 8, "Z0_BLOCK": 8}
         blocks[f"{axis.upper()}BLOCK"] = 1024
         tuner = CoordescTuner(size_hints=hints)
         baseline = triton.Config(blocks)
         self.assertTrue(tuner.is_valid_config(baseline))
         neighbors = tuner.get_neighbour_configs(baseline, f"{axis.upper()}BLOCK")
-        self.assertEqual([c.kwargs[f"{axis.upper()}BLOCK"] for c in neighbors], [512])
+        self.assertEqual(
+            [c.kwargs[f"{axis.upper()}BLOCK"] for c in neighbors], expected_neighbors
+        )
 
     def test_y_grid_overflow_without_z(self):
         tuner = CoordescTuner(size_hints={"x": 16, "y": 65536})

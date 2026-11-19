@@ -24,7 +24,7 @@ from .tiling import (
     get_pointwise_prefixes,
     get_reduction_prefixes,
     get_yz_grid_extents,
-    get_z_prefixes,
+    has_packed_z_grid,
     pointwise_prefixes,
     reduction_prefixes,
 )
@@ -280,16 +280,15 @@ class CoordescTuner:
         return test is not None and test < baseline * (1 - threshold)
 
     def is_valid_config(self, config) -> bool:
-        if (
-            not self.is_mm
-            and not self.is_native_matmul
-            and self.size_hints
-            and len(get_z_prefixes(self.size_hints)) > 1
-        ):
+        if not self.is_mm and not self.is_native_matmul and self.size_hints:
             block_sizes = {block_to_prefix(k): v for k, v in config.kwargs.items()}
             if any(
                 extent > get_max_y_grid()
-                for extent in get_yz_grid_extents(self.size_hints, block_sizes).values()
+                for extent in get_yz_grid_extents(
+                    self.size_hints,
+                    block_sizes,
+                    lower_bound=not has_packed_z_grid(self.size_hints),
+                ).values()
             ):
                 return False
         if self.is_mix_order_reduction:
