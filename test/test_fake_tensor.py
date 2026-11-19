@@ -581,7 +581,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         op_name = (
             "_torch_testing::fake_tensor_dispatch_parameter_subclass"
-            f"_{type(self).__name__}"
+            f"_{type(self).__name__}_{self._testMethodName}"
         )
 
         @torch.library.custom_op(
@@ -716,7 +716,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         finally:
             torch._dynamo.reset()
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
         with FakeTensorMode():
@@ -739,7 +738,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertNotIn("fake_device", reconstructed.__dict__)
         self.assertEqual(reconstructed.to("meta").fake_device, torch.device("meta"))
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_rejects_device_conflict(self):
         with FakeTensorMode() as mode:
@@ -752,7 +750,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     fake_device=torch.device("cuda:0"),
                 )
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_accepts_normalized_device_aliases(self):
         with FakeTensorMode() as mode:
@@ -766,7 +763,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
         self.assertEqual(fake.fake_device, torch.device("cuda:0"))
 
-    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     @parametrize("device_kwarg_name", ["fake_device", "device"])
     def test_parameter_state_reconstruction_device_names(self, device_kwarg_name):
@@ -3515,10 +3511,15 @@ class TestFakeTensorConstHandling(TestCase):
         else:
             self.assertNotConst(x)
 
-    def test_inplace_add(self):
-        with FakeTensorMode():
+    @parametrize("detach", [False, True])
+    @parametrize("inference_mode", [False, True])
+    def test_inplace_add(self, detach, inference_mode):
+        with torch.inference_mode(inference_mode), FakeTensorMode():
             x = torch.tensor(4.0)
-            y = x.add_(1)
+            if detach:
+                x = x.detach()
+            y = aten.add_.Tensor(x, 1)
+            self.assertIs(y, x)
             self.assertEqual(x.item(), 5.0)
             self.assertEqual(y.item(), 5.0)
             self.assertConst(x, y)
@@ -7041,7 +7042,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(src.requires_grad)
         self.assertFalse(torch._C._in_kernel_invocation())
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @skipIfTorchDynamo("Dynamo cannot execute the plain Tensor subclass cases")
     @parametrize(
         "kind", ["tensor", "parameter", "parameter_subclass", "tensor_subclass"]
     )
