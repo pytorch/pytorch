@@ -1410,6 +1410,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
+                from ..trace_rules import is_builtin_callable
+
+                # Preserve keyword-aware initializers and exception-group __new__ validation.
+                if is_builtin_callable(fn) and not issubclass(
+                    fn, (ImportError, AttributeError, NameError, BaseExceptionGroup)
+                ):
+                    no_keywords(tx, fn.__name__, kwargs)
                 return variables.ExceptionVariable.create(fn, args, kwargs)
 
             return create_exception_class_object
