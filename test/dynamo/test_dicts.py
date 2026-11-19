@@ -374,14 +374,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
                     result.update((("a", 1), 0 if case == "pair" else Pair()))
             except TypeError as error:
                 context = None if error.__context__ is None else str(error.__context__)
-                return (
-                    x + 1,
-                    type(error),
-                    str(error),
-                    getattr(error, "__notes__", None),
-                    context,
-                    result,
-                )
+                details = (type(error), str(error), getattr(error, "__notes__", None))
+                return x + 1, details, context, result
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
@@ -762,15 +756,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
         self.assertEqual(counter.frame_count, 2 if observe_order else 1)
 
-    @parametrize(
-        "mapping_type, operation",
-        [
-            *itertools.product(
-                (dict, OrderedDict), ("iter", "extend", "copy", "update", "union")
-            ),
-            (OrderedDict, "popitem"),
-        ],
-    )
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("operation", ["iter", "extend", "copy", "update", "union", "popitem"])
     def test_sourced_mapping_order_consumers(self, mapping_type, operation):
         def fn(x, mapping):
             if operation == "iter":
@@ -778,7 +765,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 iterables = (mapping, *views, dict.items(mapping))
                 return x + 1, tuple((type(it), next(it)) for it in map(iter, iterables))
             if operation == "popitem":
-                key, value = mapping.popitem(last=False)
+                args = (False,) if mapping_type is OrderedDict else ()
+                key, value = mapping.popitem(*args)
                 return x + value, key
             if operation == "copy":
                 result = mapping.copy()
@@ -805,22 +793,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(tuple(mapping), tuple(expected))
             self.assertEqual(tuple(dict.keys(mapping)), tuple(dict.keys(expected)))
         self.assertEqual(counter.frame_count, 2)
-
-    @parametrize("mapping_type", [dict, OrderedDict])
-    @parametrize("name", ["__eq__", "__ne__"])
-    def test_dictionary_comparison_descriptor_order(self, mapping_type, name):
-        counter = torch._dynamo.testing.CompileCounter()
-
-        def fn(x, left, right):
-            return x + 1, getattr(mapping_type, name)(left, right)
-
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x, left = torch.ones(1), OrderedDict(a=1, b=2)
-        right = left.copy()
-        for _ in range(2):
-            self.assertEqual(compiled(x, left, right), fn(x, left, right))
-            right.move_to_end(next(iter(right)))
-        self.assertEqual(counter.frame_count, 2 if mapping_type is OrderedDict else 1)
 
     @parametrize("base", [dict, OrderedDict])
     def test_dict_storage_order_descriptor_custom_new(self, base):
@@ -1131,12 +1103,22 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, obj), (x, ("b",)))
         self.assertEqual(counter.frame_count, 2)
 
-    @parametrize("update", [dict.clear, dict.get])
-    def test_dict_constructor_bypasses_update_descriptor(self, update):
-        class Mapping(dict):
-            pass
+    def test_super_raw_dict_init_on_ordered_dict(self):
+        class Raw(OrderedDict):
+            def __init__(self):
+                super(OrderedDict, self).__init__(a=1)
 
-        Mapping.update = update
+        def fn(x):
+            obj = Raw()
+            return x + 1, list(obj), list(dict.keys(obj))
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("override", [dict.clear, dict.get])
+    def test_dict_constructor_bypasses_update_descriptor(self, override):
+        class Mapping(dict):
+            update = override
 
         def fn(x):
             mapping = Mapping({"a": 1}, b=2)
@@ -1331,7 +1313,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         "method, binding",
         [
             ("keys", "input"),
-            ("__iter__", "unbound"),
+            *itertools.product(("__iter__", "__eq__", "__ne__"), ("unbound",)),
             *itertools.product(
                 ("keys", "values", "items", "__reversed__"), ("bound", "unbound")
             ),
@@ -1341,9 +1323,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self, owner, mapping_type, method, reordered, binding
     ):
         keys_type = type(OrderedDict().keys())
+        reference = OrderedDict(a=1, b=2)
 
         def fn(x, obj):
             descriptor = getattr(owner, method)
+            if method in ("__eq__", "__ne__"):
+                return x + 1, descriptor(reference, obj)
             view = obj
             if binding == "bound":
                 view = descriptor.__get__(obj)()
@@ -1386,14 +1371,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         method = view if wrapped else getattr(view_owner, view_name)
         Mapping = type("Mapping", (OrderedDict,), {view_name: method})
         view_type = type(getattr(view_owner(), view_name)())
-        names = (
-            "mapping",
-            "__len__",
-            "isdisjoint",
-            "__contains__",
-            "__or__",
-            "missing",
-        )
+        names = ("mapping", "__len__", "isdisjoint", "__contains__", "__or__")
 
         def fn(x, mapping):
             view = getattr(mapping, view_name)()
@@ -1403,6 +1381,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 view.missing
             except AttributeError as error:
                 absent = error.name == "missing" and error.obj is view
+            absent = absent and not hasattr(view, "missing")
             absent = absent and getattr(view, "missing", None) is None
             return x + 1, view, isinstance(view, view_type), attributes, absent
 

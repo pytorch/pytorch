@@ -986,7 +986,12 @@ class DictViewIterator(IteratorVariable):
         return iterator_cls(items, view_type=cls.view_type, owner=owner)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        from .dicts import ConstDictVariable, DictKeysVariable, DictViewVariable
+        from .dicts import (
+            ConstDictVariable,
+            DictKeysVariable,
+            DictViewVariable,
+            DunderDictVariable,
+        )
         from .sets import BaseSetVariable
 
         owner = self.owner
@@ -996,7 +1001,12 @@ class DictViewIterator(IteratorVariable):
         if not isinstance(container, (ConstDictVariable, BaseSetVariable)):
             return super().reconstruct(codegen)
         # Stack reconstruction precedes replay of mutations to a live input.
-        if container.source and codegen.tx.output.side_effects.is_modified(container):
+        side_effects = codegen.tx.output.side_effects
+        if container.source and (
+            side_effects.is_modified(container)
+            or isinstance(container, DunderDictVariable)
+            and side_effects.has_pending_mutation(container.items.item)
+        ):
             return super().reconstruct(codegen)
         if len(container.items) != self._initial_size:
             return super().reconstruct(codegen)
