@@ -376,6 +376,59 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
 
 
+class TestFullyShardAllGatherCopyInStream(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _build_model(self) -> nn.Module:
+        torch.manual_seed(42)
+        model = nn.Sequential(MLP(8, device_type), MLP(8, device_type))
+        for mlp in model:
+            fully_shard(mlp)
+        fully_shard(model)
+        return model
+
+    def _record_copy_in_streams(self, model: nn.Module) -> list[torch.Stream]:
+        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+
+        streams: list[torch.Stream] = []
+        orig = _fsdp_collectives._get_param_all_gather_inputs
+
+        def recording(*args, **kwargs):
+            streams.append(torch.get_device_module(device_type).current_stream())
+            return orig(*args, **kwargs)
+
+        with mock.patch.object(
+            _fsdp_collectives, "_get_param_all_gather_inputs", recording
+        ):
+            model(torch.randn((2, 8), device=device_type.type)).sum().backward()
+        self.assertGreater(len(streams), 0)
+        return streams
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_all_gather_copy_in_stream(self):
+        model = self._build_model()
+        for module in (model, model[0]):
+            with self.assertRaisesRegex(RuntimeError, "lazy initialization"):
+                module.get_all_gather_copy_in_stream()
+
+        copy_in_streams = self._record_copy_in_streams(model)
+        stream = model.get_all_gather_copy_in_stream()
+        # Shared by every FSDP module under the root
+        self.assertEqual(model[0].get_all_gather_copy_in_stream(), stream)
+        self.assertEqual(model[1].get_all_gather_copy_in_stream(), stream)
+        self.assertTrue(all(s == stream for s in copy_in_streams))
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_all_gather_copy_in_stream_unshard_in_current_stream(self):
+        model = self._build_model()
+        model.set_unshard_in_current_stream(True)
+        copy_in_streams = self._record_copy_in_streams(model)
+        stream = model.get_all_gather_copy_in_stream()
+        self.assertTrue(all(s != stream for s in copy_in_streams))
+
+
 class TestFullyShardCastAfterInit(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
