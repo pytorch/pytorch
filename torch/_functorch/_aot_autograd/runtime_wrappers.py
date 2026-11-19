@@ -2116,11 +2116,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                         f"args[{i}]" for i in group if i in self.data_mutation_indices
                     )
                     if mutated_args:
-                        buf.add_global(
-                            "_increment_version_",
-                            torch.autograd.graph.increment_version,
-                        )
-                        buf.writeline(f"_increment_version_(({mutated_args},))")
+                        buf.writeline(f"torch._C._increment_version(({mutated_args},))")
 
             other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
             buf.writeline(f"_new_args = _bases + [{other_items}]")
