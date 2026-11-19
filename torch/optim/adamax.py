@@ -408,7 +408,8 @@ def _multi_tensor_adamax(
         bias_corrections: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             steps = [
-                _promote_step(s, grouped_params[0].dtype) for s in grouped_state_steps
+                _promote_step(s, p.dtype)
+                for s, p in zip(grouped_state_steps, grouped_params, strict=True)
             ]
             bias_corrections = torch._foreach_pow(beta1, steps)
             # foreach_sub doesn't allow a scalar as the first arg

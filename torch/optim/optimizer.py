@@ -104,8 +104,7 @@ def _get_value(x: torch.Tensor | float) -> torch.Tensor | float:
 
 
 def _promote_step(step: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    # step is float32 unless the default dtype is float64: don't round constants derived from
-    # it to float32 for float64 params
+    # keep constants derived from step (beta**step, ...) from being rounded below the param dtype
     return step.to(torch.promote_types(step.dtype, dtype))
 
 

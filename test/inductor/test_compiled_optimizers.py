@@ -942,15 +942,35 @@ class CompiledOptimizerTests(TestCase):
             torch._dynamo.reset()
             param = torch.nn.Parameter(torch.ones(2, dtype=torch.float64))
             opt = optim_cls([param], lr=0.1, foreach=foreach)
-            step = (
-                torch.compile(opt.step, backend="aot_eager") if compiled else opt.step
-            )
-            for grad in (0.5, -1.0, 0.125):
-                param.grad = torch.full_like(param, grad)
-                step()
+            step = compile_opt(opt) if compiled else opt.step
+            for i in range(10):
+                param.grad = torch.full_like(param, 0.3 * (-1) ** i + 0.01 * i)
+                with torch.no_grad():
+                    step()
             return param.detach()
 
-        self.assertEqual(run(True), run(False), atol=0, rtol=0)
+        self.assertEqual(run(True), run(False), atol=0, rtol=1e-12)
+
+    @parametrize(
+        "optim_cls", [Adam, AdamW, Adamax, RAdam], name_fn=lambda c: c.__name__
+    )
+    def test_mixed_dtype_params_match_single_dtype(self, optim_cls):
+        def run(dtypes):
+            torch._dynamo.reset()
+            params = [torch.nn.Parameter(torch.ones(2, dtype=d)) for d in dtypes]
+            opt = optim_cls(params, lr=0.1, foreach=True)
+            step = compile_opt(opt)
+            for i in range(10):
+                for param in params:
+                    param.grad = torch.full_like(param, 0.3 * (-1) ** i + 0.01 * i)
+                with torch.no_grad():
+                    step()
+            return [param.detach() for param in params]
+
+        expected = {d: run([d])[0] for d in (torch.float32, torch.float64)}
+        for dtypes in ([torch.float32, torch.float64], [torch.float64, torch.float32]):
+            for result, dtype in zip(run(dtypes), dtypes, strict=True):
+                self.assertEqual(result, expected[dtype], atol=0, rtol=0)
 
     # compile a large foreach op and verify
     # that the time taken is within an expected range

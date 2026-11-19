@@ -494,7 +494,8 @@ def _multi_tensor_nadam(
         mu_nexts: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             steps = [
-                _promote_step(s, grouped_params[0].dtype) for s in grouped_state_steps
+                _promote_step(s, p.dtype)
+                for s, p in zip(grouped_state_steps, grouped_params, strict=True)
             ]
             # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
             exponent = torch._foreach_mul(steps, momentum_decay)

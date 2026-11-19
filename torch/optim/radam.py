@@ -444,12 +444,12 @@ def _multi_tensor_radam(
         bias_correction1: tuple[Tensor, ...] | list[Tensor]
         bias_correction2: tuple[Tensor, ...] | list[Tensor]
         rho_t_list: tuple[Tensor, ...] | list[Tensor]
-        steps = (
-            [_promote_step(s, grouped_params[0].dtype) for s in grouped_state_steps]
-            if capturable
-            else grouped_state_steps
-        )
+        steps = grouped_state_steps
         if capturable:
+            steps = [
+                _promote_step(s, p.dtype)
+                for s, p in zip(grouped_state_steps, grouped_params, strict=True)
+            ]
             bias_correction1 = torch._foreach_pow(beta2, steps)
             torch._foreach_neg_(bias_correction1)
             torch._foreach_add_(bias_correction1, 1)

@@ -734,7 +734,8 @@ def _multi_tensor_adam(
 
         if capturable:
             steps = [
-                _promote_step(s, device_params[0].dtype) for s in device_state_steps
+                _promote_step(s, p.dtype)
+                for s, p in zip(device_state_steps, device_params, strict=True)
             ]
             bias_correction1 = torch._foreach_pow(beta1, steps)  # type: ignore[arg-type]
             bias_correction2 = torch._foreach_pow(beta2, steps)  # type: ignore[arg-type]
