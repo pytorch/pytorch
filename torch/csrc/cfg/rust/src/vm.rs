@@ -663,6 +663,44 @@ struct Unbound {
 unsafe impl Send for Unbound {}
 unsafe impl Sync for Unbound {}
 
+/// What the interpreter says of an object that `with` cannot use, for lack
+/// of the method `name`.
+#[cfg(not(Py_3_14))]
+unsafe fn not_a_context_manager(o: Obj, name: &str) -> String {
+    let missed = if name == "__exit__" { " (missed __exit__ method)" } else { "" };
+    format!("'{}' object does not support the context manager protocol{}", pyffi::type_name(o), missed)
+}
+
+/// What the interpreter says of an object that `with` cannot use, for lack
+/// of the method `name`. From 3.14 on it names the type in full and either
+/// method, and points an asynchronous context manager to `async with`.
+#[cfg(Py_3_14)]
+unsafe fn not_a_context_manager(o: Obj, name: &str) -> String {
+    let ty = ffi::Py_TYPE(o);
+    let full = ffi::PyType_GetFullyQualifiedName(ty);
+    let type_name = if full.is_null() {
+        ffi::PyErr_Clear();
+        pyffi::type_name(o)
+    } else {
+        let text = pyffi::str_to_string(full);
+        ffi::Py_DECREF(full);
+        text
+    };
+    let asynchronous = [c"__aenter__", c"__aexit__"].iter().all(|method| {
+        let method = ffi::PyUnicode_InternFromString(method.as_ptr());
+        let found = if method.is_null() { null_mut() } else { pyffi::_PyType_Lookup(ty, method) };
+        xdecref(method);
+        !found.is_null() && (*ffi::Py_TYPE(found)).tp_descr_get.is_some()
+    });
+    ffi::PyErr_Clear();
+    let hint = if asynchronous {
+        " but it supports the asynchronous context manager protocol. Did you mean to use 'async with'?"
+    } else {
+        ""
+    };
+    format!("'{}' object does not support the context manager protocol (missed {} method){}", type_name, name, hint)
+}
+
 /// `match_keys` of ceval.c: the values `map` has for `keys`, as a tuple; None
 /// if it lacks one of them; null with an error set if looking raised.
 unsafe fn match_keys(map: Obj, keys: Obj) -> Obj {
@@ -2744,16 +2782,7 @@ impl Compiled {
                 let attr = pyffi::_PyType_Lookup(ty, f.consts[*name as usize].as_ptr());
                 if attr.is_null() {
                     let name = pyffi::str_to_string(f.consts[*name as usize].as_ptr());
-                    let missed =
-                        if name == "__exit__" { " (missed __exit__ method)" } else { "" };
-                    set_error(
-                        ffi::PyExc_TypeError,
-                        format!(
-                            "'{}' object does not support the context manager protocol{}",
-                            pyffi::type_name(o),
-                            missed
-                        ),
-                    );
+                    set_error(ffi::PyExc_TypeError, not_a_context_manager(o, &name));
                     return Err(());
                 }
                 match (*ffi::Py_TYPE(attr)).tp_descr_get {
@@ -2811,7 +2840,7 @@ impl Compiled {
                 }
                 Ok(null_mut())
             }
-            Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
+            Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
                 let func = ffi::PyFunction_New(self.obj(regs, *code), f.globals.as_ptr());
                 if func.is_null() {
                     return Err(());
@@ -2843,6 +2872,24 @@ impl Compiled {
                     }
                     ok = ok && ffi::PyFunction_SetAnnotations(func, dict) == 0;
                     xdecref(dict);
+                }
+                if *annotate != NONE {
+                    // As SET_FUNCTION_ATTRIBUTE does it, down to the name
+                    // the function that computes them goes by.
+                    let annotate = self.obj(regs, *annotate);
+                    ok = ok && ffi::PyObject_SetAttrString(func, c"__annotate__".as_ptr(), annotate) == 0;
+                    if ok && ffi::PyFunction_Check(annotate) != 0 {
+                        let of = ffi::PyObject_GetAttrString(func, c"__qualname__".as_ptr());
+                        let name = if of.is_null() {
+                            null_mut()
+                        } else {
+                            ffi::PyUnicode_FromFormat(c"%U.__annotate__".as_ptr(), of)
+                        };
+                        ok = !name.is_null()
+                            && ffi::PyObject_SetAttrString(annotate, c"__qualname__".as_ptr(), name) == 0;
+                        xdecref(of);
+                        xdecref(name);
+                    }
                 }
                 if !ok {
                     ffi::Py_DECREF(func);
@@ -3022,7 +3069,7 @@ impl Compiled {
             }
             Op::Format { val, conv, spec } => {
                 let val = self.obj(regs, *val);
-                let converted = match conv {
+                let converted = match conv & 3 {
                     1 => ffi::PyObject_Str(val),
                     2 => ffi::PyObject_Repr(val),
                     3 => ffi::PyObject_ASCII(val),
@@ -3031,7 +3078,7 @@ impl Compiled {
                 if converted.is_null() {
                     return Err(());
                 }
-                if *spec == NONE && ffi::PyUnicode_CheckExact(converted) != 0 {
+                if conv & CONVERT_ONLY != 0 || (*spec == NONE && ffi::PyUnicode_CheckExact(converted) != 0) {
                     return Ok(converted);
                 }
                 let spec = if *spec == NONE { null_mut() } else { self.obj(regs, *spec) };
@@ -3241,9 +3288,17 @@ impl Compiled {
                 let size = ffi::PyTuple_GET_SIZE(t);
                 if size != n {
                     ffi::Py_DECREF(t);
+                    // From 3.14 on the interpreter says how many there are
+                    // of what it knows the length of.
+                    let sized = cfg!(Py_3_14)
+                        && (ffi::PyList_CheckExact(seq) != 0
+                            || ffi::PyTuple_CheckExact(seq) != 0
+                            || ffi::PyDict_CheckExact(seq) != 0);
                     set_error(
                         ffi::PyExc_ValueError,
-                        if size > n {
+                        if size > n && sized {
+                            format!("too many values to unpack (expected {}, got {})", n, size)
+                        } else if size > n {
                             format!("too many values to unpack (expected {})", n)
                         } else {
                             format!("not enough values to unpack (expected {}, got {})", n, size)
