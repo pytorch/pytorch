@@ -3,6 +3,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/InnerProduct.h>
+#include <ATen/native/mkldnn/detail/Lstm.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <torch/library.h>
@@ -278,7 +280,7 @@ static Tensor mkldnn_reorder_linear_weight(
   if (batch_size_opt.has_value()) {
     input_size = {batch_size_opt.value(), in_features};
   }
-  auto packed_desc = ideep::inner_product_forward::expected_weights_desc(
+  auto packed_desc = mkldnn::inner_product_forward_expected_weights_desc(
       {out_features, in_features},
       input_size,
       /* weight dtype */ dtype,
@@ -442,7 +444,7 @@ static std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
         dnnl::memory::format_tag::ldgoi});
 
   auto [packed_desc_ih, packed_desc_hh] =
-      ideep::lstm_forward_inference::expected_weights_desc(
+      mkldnn::lstm_forward_inference_expected_weights_desc(
           output_sizes,
           src_layer,
           src_iter,
