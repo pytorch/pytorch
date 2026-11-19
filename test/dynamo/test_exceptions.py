@@ -131,6 +131,49 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), x + 1)
         self.assertEqual(compiled(x), x + 1)
 
+    def test_custom_exception_keywords_from_exit(self):
+        class MyError(Exception):
+            def __init__(self, message, code=0):
+                super().__init__(message)
+                self.code = code
+
+        class Context:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, typ, value, traceback):
+                raise typ("wrapped", code=1)
+
+        def fn(x):
+            try:
+                with Context():
+                    raise MyError("original")
+            except MyError as error:
+                return x + error.code
+            except TypeError:
+                return x + 2
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), x + 1)
+
+    @parametrize(
+        "exc_type",
+        [ImportError, ModuleNotFoundError, UnboundLocalError],
+        name_fn=lambda exc_type: exc_type.__name__,
+    )
+    def test_exception_keyword_fallback(self, exc_type):
+        def fn(x):
+            try:
+                error = exc_type("missing", name="target")
+                return x + 1, error.name
+            except TypeError:
+                return x + 2, None
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), (x + 1, "target"))
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
     def test_exception_supported_keyword_arguments(self):
         def fn(x):
             attribute_error = AttributeError("missing", name="field", obj=x)
