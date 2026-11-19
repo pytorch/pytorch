@@ -676,7 +676,18 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        if use_decompose_k_choice(m, n, k):
+        from ..heuristics.template.triton import mm_allow_tf32
+
+        # Measured on Blackwell only.
+        device = mat1.get_device()
+        tf32 = (
+            mat1.get_dtype() == torch.float32
+            and device.type == "cuda"
+            and torch.version.hip is None
+            and torch.cuda.get_device_capability(device) >= (10, 0)
+            and mm_allow_tf32(m, n, k, device.type)
+        )
+        if use_decompose_k_choice(m, n, k, tf32=tf32):
             templates_to_use.append(decompose_k_subgraph_template)
         # CUDA drops Triton mm from the default search once decompose_k applies
         # at twice the usual threshold. The exhaustive search still includes it.
