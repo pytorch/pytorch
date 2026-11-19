@@ -20,7 +20,7 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from torchgen.model import DispatchKey
+from torchgen.model import BaseTy, BaseType, DispatchKey
 from torchgen.native_aot_decl import decl_id_for_op as _decl_id, discover_declarations
 
 
@@ -42,6 +42,7 @@ class NativeAotManifest:
     # switch (see gen_stub_consultation).
     unconditional: bool = False
     structured: bool = True
+    exact: bool = False
 
     @property
     def decl_id(self) -> str:
@@ -54,12 +55,10 @@ class NativeAotManifest:
         return f"{self.decl_id}_aot_fn"
 
     def matches_group(self, g: NativeFunctionsGroup) -> bool:
-        """Does this structured manifest target group g? A qualified op matches the exact
-        functional overload name; a base name matches the group's base, whose
-        uniqueness validate_native_aot_manifests checks."""
+        r"""Match an exact functional overload or a validated unique structured base."""
         if not self.structured or not g.structured:
             return False
-        if "." in self.op:
+        if "." in self.op or self.exact:
             return self.op == str(g.functional.func.name)
         return self.op == g.functional.func.name.name.base
 
@@ -98,11 +97,15 @@ def parse_native_aot_manifests(
         structured = getattr(d, "STRUCTURED", True)
         if not isinstance(structured, bool):
             raise RuntimeError(f"{op}: STRUCTURED must be a bool")
+        exact = getattr(d, "EXACT", False)
+        if not isinstance(exact, bool):
+            raise RuntimeError(f"{op}: EXACT must be a bool")
         manifests[(key, op)] = NativeAotManifest(
             op=op,
             dispatch_key=key,
             unconditional=is_unconditional(d),
             structured=structured,
+            exact=exact,
         )
     return manifests
 
@@ -122,7 +125,8 @@ def functional_stub_params(f: NativeFunction) -> str:
     with native_function_manager(f):
         sig = DispatcherSignature.from_schema(f.func)
         params = [b.decl() for b in sig.arguments()]
-        params.append(f"{sig.returns_type().cpp_type()}& aot_result")
+        result_type = sig.returns_type().cpp_type(strip_ref=True)
+        params.append(f"{result_type}& aot_result")
     return ", ".join(params)
 
 
@@ -149,19 +153,17 @@ REGISTER_NO_CPU_DISPATCH({m.stub_name()})
 
 
 def gen_stub_consultation(
-    m: NativeAotManifest, impl_exprs: str, *, returns_type: str | None = None
+    m: NativeAotManifest,
+    impl_exprs: str,
+    *,
+    returns_type: str | None = None,
+    return_arg: str | None = None,
+    tensor_arg: str | None = None,
+    device_guarded: bool = False,
 ) -> str:
-    """The wrapper call site. A Context switch gates the stub, which either fills
-    structured outputs or assigns the functional result and skips the backend.
-
-    Which switch depends on the declaration: an ordinary op reads allowNativeAot(),
-    the user-facing off switch, while an UNCONDITIONAL op reads
-    maskUnconditionalNativeAot(), since its kernels are the implementation and the
-    user-facing switch must not reach them. A gate still has to exist for the private
-    hatch that obtains stock aten values.
-
-    The emitted comment states that the last conjunct LAUNCHES the kernel, which the
-    call site alone does not show."""
+    r"""Emit a gated AOT launch before the backend fallback.
+    Unconditional declarations use the private mask instead of allowNativeAot().
+    """
     device_type = f"c10::DeviceType::{m.dispatch_key}"
     stub = f"at::native::{m.stub_name()}"
     gate = (
@@ -172,45 +174,50 @@ def gen_stub_consultation(
     if not m.structured:
         if returns_type is None:
             raise AssertionError("functional native-AOT hooks require a return type")
-        args = ", ".join(filter(None, (impl_exprs, "aot_result")))
+        result = return_arg or "aot_result"
+        args = ", ".join(filter(None, (impl_exprs, result)))
+        initialize = "" if return_arg else f"{returns_type} aot_result;"
+        device = (
+            f"{tensor_arg}.device().type() == {device_type} && " if tensor_arg else ""
+        )
+        guard = (
+            f"const c10::OptionalDeviceGuard aot_guard({tensor_arg}.device());"
+            if tensor_arg and not device_guarded
+            else ""
+        )
         return f"""
-  if ({gate} && {stub}.is_device_supported({device_type})) {{
-    {returns_type} aot_result;
+  if ({device}{gate} && {stub}.is_device_supported({device_type})) {{
+    {guard}
+    {initialize}
     if ({stub}({device_type}, {args})) {{
-      return aot_result;
+      return {result};
     }}
   }}
 """
-    if m.unconditional:
-        # The user-facing switch does NOT reach this op, so the shared comment's
-        # "switched off" case would describe a route that does not exist here.
-        gate_comment = (
-            "// declared UNCONDITIONAL: these kernels are the implementation, so\n"
-            "// torch._native.set_aot_enabled(False) does NOT mask them -- only the\n"
-            "// private reference-computation hatch does. op.impl runs when that hatch\n"
-            "// is set, when the device is unsupported, or when the kernels decline\n"
-            "// this shape.\n"
-        )
-        cases = (
-            "// the stub is never called when the device is unsupported. op.impl\n"
-            "// below is the ordinary aten kernel.\n"
-        )
-    else:
-        gate_comment = ""
-        cases = (
-            "// the stub is never called when AOT is switched off or the device is\n"
-            "// unsupported. op.impl below is the ordinary aten kernel, and it runs in\n"
-            "// exactly those three cases: switched off, unsupported device, or declined.\n"
-        )
+    comment = (
+        "// native-AOT: the last conjunct is the LAUNCH into meta outputs; false calls op.impl.\n"
+        "// declared UNCONDITIONAL: private mask only; && short-circuits unsupported devices.\n"
+        if m.unconditional
+        else "// native-AOT: the last conjunct is the LAUNCH into meta outputs; false calls op.impl.\n"
+        "// && short-circuits disabled AOT and unsupported devices.\n"
+    )
     return (
-        f"// native-AOT: the last conjunct is the LAUNCH, not a query -- it runs the\n"
-        f"// AOT kernel into the meta()-allocated outputs and returns true if it\n"
-        f"// handled the call, false if it declined this shape. && short-circuits, so\n"
-        f"{cases}"
-        f"{gate_comment}"
+        f"{comment}"
         f"if (!({gate} && "
         f"{stub}.is_device_supported({device_type}) && "
         f"{stub}({device_type}, {impl_exprs}))) {{ op.impl({impl_exprs}); }}"
+    )
+
+
+def first_tensor_arg(f: NativeFunction) -> str | None:
+    """Choose a required Tensor for unstructured device checks and guards."""
+    return next(
+        (
+            a.name
+            for a in f.func.arguments.flat_non_out
+            if a.type == BaseType(BaseTy.Tensor)
+        ),
+        None,
     )
 
 
@@ -218,10 +225,8 @@ def validate_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest],
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
 ) -> None:
-    """Resolve structured groups or explicitly declared unstructured functions.
-
-    Functional hooks require fresh Tensor returns so the result parameter cannot
-    introduce mutation or aliasing. Structured base names must be unambiguous.
+    r"""Validate unique or EXACT structured names and exact unstructured names.
+    Unstructured hooks require fresh Tensor returns or an inplace self alias.
     """
     from collections import defaultdict
 
@@ -235,28 +240,41 @@ def validate_native_aot_manifests(
                 str(g.functional.func.name)
             )
         else:
-            f = g.functional if isinstance(g, NativeFunctionsGroup) else g
-            functional_by_name[str(f.func.name)] = f
+            for f in g.functions() if isinstance(g, NativeFunctionsGroup) else [g]:
+                functional_by_name[str(f.func.name)] = f
     for (key, op), manifest in manifests.items():
         if not manifest.structured:
             f = functional_by_name.get(op)
-            if (
-                f is None
-                or f.func.kind() != SchemaKind.functional
-                or not f.func.returns
-                or any(
-                    r.type != BaseType(BaseTy.Tensor) or r.annotation is not None
+            fresh = (
+                f is not None
+                and f.func.kind() == SchemaKind.functional
+                and bool(f.func.returns)
+                and all(
+                    r.type == BaseType(BaseTy.Tensor) and r.annotation is None
                     for r in f.func.returns
                 )
-            ):
+            )
+            # FunctionSchema validates inplace self mutation and return aliasing.
+            mutable = (
+                f is not None
+                and f.func.kind() == SchemaKind.inplace
+                and bool(f.func.returns)
+                and f.func.returns[0].type == BaseType(BaseTy.Tensor)
+            )
+            if not fresh and not mutable:
                 raise RuntimeError(
                     f"native-aot declaration for {op}@{key}: STRUCTURED=False "
-                    "requires an exact functional overload returning fresh tensors"
+                    "requires fresh Tensor returns or an inplace return aliasing self"
+                )
+            if f is None or first_tensor_arg(f) is None:
+                raise RuntimeError(
+                    f"native-aot declaration for {op}@{key}: unstructured hooks "
+                    "require a non-optional Tensor argument for the device guard"
                 )
             continue
         base = op.split(".")[0]
         names = structured_by_base.get(base, [])
-        if "." in op:
+        if "." in op or manifest.exact:
             if op not in names:
                 raise RuntimeError(
                     f"native-aot declaration for {op}@{key}: no structured "
