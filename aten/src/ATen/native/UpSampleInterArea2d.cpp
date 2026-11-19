@@ -8,6 +8,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_upsample_inter_area2d.h>
+#include <ATen/ops/_upsample_inter_area2d_backward.h>
+#include <ATen/ops/_upsample_inter_area2d_backward_native.h>
 #include <ATen/ops/_upsample_inter_area2d_native.h>
 #endif
 
@@ -26,6 +28,30 @@ TORCH_META_FUNC(_upsample_inter_area2d) (
   set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
 }
 
+TORCH_META_FUNC(_upsample_inter_area2d_backward) (
+  const Tensor& grad_output,
+  IntArrayRef output_size,
+  IntArrayRef input_size,
+  std::optional<double> scales_h,
+  std::optional<double> scales_w
+) {
+  auto full_output_size = native::upsample_2d_common_check(input_size, output_size);
+
+  TORCH_CHECK(
+      grad_output.dim() == 4,
+      "Expected grad_output to be a tensor of dimension 4 but got: dimension ", grad_output.dim());
+
+  for (const auto i : c10::irange(4)) {
+    TORCH_CHECK(
+        grad_output.size(i) == full_output_size[i],
+        "Expected grad_output to have the same shape as output;",
+        " output.size(", i, ") = ", full_output_size[i],
+        " but got grad_output.size(", i, ") = ", grad_output.size(i));
+  }
+
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
+}
+
 } // namespace at::meta
 namespace at::native {
 
@@ -37,6 +63,18 @@ TORCH_IMPL_FUNC(_upsample_inter_area2d_out_cpu) (
     const Tensor& output
 ) {
   _upsample_inter_area2d_kernel(kCPU, output, input, scales_h, scales_w);
+}
+
+TORCH_IMPL_FUNC(_upsample_inter_area2d_backward_out_cpu) (
+    const Tensor& grad_output,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
+    const Tensor& grad_input
+) {
+  grad_input.zero_();
+  _upsample_inter_area2d_backward_kernel(kCPU, grad_input, grad_output, scales_h, scales_w);
 }
 
 // vec variant
@@ -55,5 +93,6 @@ Tensor _upsample_inter_area2d(
 }
 
 DEFINE_DISPATCH(_upsample_inter_area2d_kernel);
+DEFINE_DISPATCH(_upsample_inter_area2d_backward_kernel);
 
 } // namespace at::native
