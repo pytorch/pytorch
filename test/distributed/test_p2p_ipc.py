@@ -167,6 +167,9 @@ class P2PIpcTest(MultiProcContinuousTest):
                 # copy out of the imported mapping, which has no host access
                 # for fabric imports on ROCm.
                 self.assertTrue(tensor.cpu().eq(1).all())
+                # Device-to-device copies of 16 MiB or more take a different
+                # runtime path than small ones.
+                self.assertTrue(tensor.clone().eq(1).all())
             # Drop the comparison tensor so it doesn't pin the segment that the
             # producer is about to free below.
             del expected
@@ -221,9 +224,11 @@ class P2PIpcTest(MultiProcContinuousTest):
         with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
             torch.cuda.memory._set_allocator_settings("expandable_segments:True")
             torch.cuda.empty_cache()
-            # 8MB > the 2MB default segment size, forcing an expandable segment.
+            # 32 MiB: larger than the 2 MiB default segment size, forcing an
+            # expandable segment, and large enough for the consumer's
+            # device-to-device copy to take the large-copy path.
             self._test_p2p_ipc_impl(
-                tensor_size=2 * 1024 * 1024,
+                tensor_size=8 * 1024 * 1024,
                 consumer_prealloc=False,
                 free_producer_segment=True,
                 expected_handle_type=_FABRIC_HANDLE,
@@ -240,7 +245,7 @@ class P2PIpcTest(MultiProcContinuousTest):
             torch.cuda.memory._set_allocator_settings("expandable_segments:True")
             torch.cuda.empty_cache()
             self._test_p2p_ipc_impl(
-                tensor_size=2 * 1024 * 1024,
+                tensor_size=8 * 1024 * 1024,
                 consumer_prealloc=False,
                 free_producer_segment=True,
                 expected_handle_type=_POSIX_FD_HANDLE,

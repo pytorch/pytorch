@@ -775,7 +775,9 @@ struct ExpandableSegment {
         "Unsupported expandable_segments IPC handle type ",
         static_cast<int>(header.handle_type),
         " on device ",
-        static_cast<int>(device));
+        static_cast<int>(device),
+        ". Set expandable_segments:False in the exporting process to share "
+        "without expandable segment handles.");
     TORCH_CHECK(
         header.num_handles > 0,
         "IPC share header describes an empty expandable segment");
@@ -786,6 +788,11 @@ struct ExpandableSegment {
         std::move(peers),
         header.num_handles,
         /*requested_addr=*/std::nullopt,
+        // Device-only access is safe for imported segments: the only host read
+        // of device memory is the direct scalar read in
+        // _local_scalar_dense_cuda_impl, which requires this allocator's
+        // raw_deleter, and IPC-rebuilt storages install their own deleter
+        // (_new_shared_cuda).
         /*host_access=*/header.handle_type !=
             Expandable_Segments_Handle_Type::FABRIC_HANDLE);
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
