@@ -663,15 +663,11 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(_expected_kernel(k, n, dtype), "radix")
         x = _tied_input((_test_m(k, dtype), n), dtype)
 
-        prior = torch.are_deterministic_algorithms_enabled()
-        try:
-            torch.use_deterministic_algorithms(True)
+        with DeterministicGuard(True):
             with pn.flydsl.disabled():
                 ref_v, ref_i = torch.topk(x, k, dim=-1, largest=largest)
             v1, i1 = torch.topk(x, k, dim=-1, largest=largest)
             v2, i2 = torch.topk(x, k, dim=-1, largest=largest)
-        finally:
-            torch.use_deterministic_algorithms(prior)
 
         self.assertEqual(topk_cache_info("radix").misses, 1)
         self.assertEqual(v1, v2, atol=0, rtol=0)
@@ -693,13 +689,9 @@ class TestFlyDSLTopK(TestCase):
         x = _tied_input((_test_m(k, dtype), n), dtype)
         expected_i = torch.argsort(x, dim=-1, descending=largest, stable=True)[:, :k]
 
-        prior = torch.are_deterministic_algorithms_enabled()
-        try:
-            torch.use_deterministic_algorithms(True)
+        with DeterministicGuard(True):
             v1, i1 = torch.topk(x, k, dim=-1, largest=largest)
             v2, i2 = torch.topk(x, k, dim=-1, largest=largest)
-        finally:
-            torch.use_deterministic_algorithms(prior)
 
         self.assertEqual(i1, i2)
         self.assertEqual(v1, v2, atol=0, rtol=0)
