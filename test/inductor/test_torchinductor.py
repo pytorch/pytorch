@@ -20774,6 +20774,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(inp, index, source)
 
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.ops.aten.index_reduce.default(
+                inp.to("meta"),
+                0,
+                index.to("meta"),
+                source.to("meta"),
+                "mean",
+                include_self=True,
+            )
+
         torch._dynamo.reset()
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn, fullgraph=True)(inp, index, source)

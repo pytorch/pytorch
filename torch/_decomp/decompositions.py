@@ -3480,6 +3480,22 @@ def _index_add(
         tensor_size == index_size,
         lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
+    # Match index_func_meta_impl. A scalar self is valid only when source is
+    # scalar too. index_put would otherwise broadcast and return a value that
+    # eager rejects, including the index_reduce mean lowering (#202938).
+    self_sizes = list(x.shape)
+    source_sizes = list(tensor.shape)
+    if tensor.ndim != 0 and x.ndim != 0:
+        self_sizes.pop(dim)
+        source_sizes.pop(dim)
+    torch._check(
+        utils.is_same_shape(self_sizes, source_sizes),
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the "
+            "specified dimension. "
+            f"Got self.shape = {tuple(x.shape)} source.shape = {tuple(tensor.shape)}"
+        ),
+    )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(

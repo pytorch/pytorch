@@ -1026,6 +1026,79 @@ def meta__cslt_sparse_mm(
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
 
+def _check_index_reduce_meta(self, dim, index, source, reduce):
+    # Python meta shadows the C++ index_func_meta_impl checks. Without these,
+    # fake tracing accepts a scalar self that eager rejects (#202938).
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
+    torch._check(
+        reduce in ("prod", "mean", "amax", "amin"),
+        lambda: (
+            "index_reduce(): Expected reduce to be one of prod, mean, amax or amin "
+            f"but got {reduce}."
+        ),
+    )
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    torch._check(
+        index.ndim <= 1,
+        lambda: (
+            "index_reduce_(): Index is supposed to be a vector, "
+            f"but got dim: {index.ndim} with type: {index.dtype} "
+            f"and size: {tuple(index.shape)}"
+        ),
+    )
+    torch._check(
+        index.dtype in (torch.int32, torch.int64),
+        lambda: (
+            "index_reduce_(): Expected dtype int32/int64 for index "
+            f"but got: {index.dtype}"
+        ),
+    )
+    torch._check(
+        self.dtype == source.dtype,
+        lambda: (
+            f"index_reduce_(): self ({self.dtype}) and source ({source.dtype}) "
+            "must have the same scalar type"
+        ),
+    )
+    torch._check(
+        dim == 0 or dim < source.dim(),
+        lambda: (
+            f"index_reduce_(): Indexing dim {dim} is out of bounds of the source "
+            f"tensor with dim {source.dim()}"
+        ),
+    )
+    source_count = 1 if source.dim() == 0 else source.size(dim)
+    torch._check(
+        sym_eq(index.numel(), source_count),
+        lambda: (
+            f"index_reduce_(): Number of indices ({index.numel()}) should be equal "
+            f"to source.size(dim): ({source_count}), for dim: {dim}"
+        ),
+    )
+    self_sizes = list(self.shape)
+    source_sizes = list(source.shape)
+    if source.dim() != 0 and self.dim() != 0:
+        self_sizes.pop(dim)
+        source_sizes.pop(dim)
+    torch._check(
+        utils.is_same_shape(self_sizes, source_sizes),
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the "
+            "specified dimension. "
+            f"Got self.shape = {list(self.shape)} source.shape = {list(source.shape)}"
+        ),
+    )
+    torch._check(
+        self.device == source.device and self.device == index.device,
+        lambda: (
+            "index_reduce_(): self, index and source expected to be in the "
+            f"same device, but got (self) {self.device}, (index) {index.device}, "
+            f"and (source) {source.device}"
+        ),
+    )
+
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,
@@ -1036,6 +1109,7 @@ def meta_index_reduce(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    _check_index_reduce_meta(self, dim, index, source, reduce)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
@@ -1049,6 +1123,7 @@ def meta_index_reduce_(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    _check_index_reduce_meta(self, dim, index, source, reduce)
     return self
 
 
