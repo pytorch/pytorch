@@ -10413,6 +10413,13 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out[0].permute(1, 2, 0).cpu(), expected, **tol, msg=f"({in_h}, {in_w}) -> ({out_h}, {out_w})")
 
     @onlyCPU
+    def test_upsamplingInterArea2d_gradcheck(self, device):
+        for input_size, output_size in [((5, 7), (3, 4)), ((6, 6), (3, 2)), ((3, 7), (5, 4)), ((2, 3), (5, 4))]:
+            x = torch.rand(2, 3, *input_size, dtype=torch.double, device=device, requires_grad=True)
+            gradcheck(lambda x: F.interpolate(x, size=output_size, mode="inter-area"), [x])
+            gradgradcheck(lambda x: F.interpolate(x, size=output_size, mode="inter-area"), [x])
+
+    @onlyCPU
     def test_upsamplingInterArea2d_errors(self, device):
         x = torch.rand(1, 3, 8, 8, device=device)
         with self.assertRaisesRegex(ValueError, "align_corners option can only be set"):
@@ -10421,8 +10428,6 @@ class TestNNDeviceType(NNTestCase):
             F.interpolate(x, size=(4, 4), mode="inter-area", antialias=True)
         with self.assertRaisesRegex(NotImplementedError, "inter-area"):
             F.interpolate(x[0], size=4, mode="inter-area")
-        with self.assertRaisesRegex(RuntimeError, "derivative for '_upsample_inter_area2d' is not implemented"):
-            F.interpolate(x.requires_grad_(), size=(4, 4), mode="inter-area").sum().backward()
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])

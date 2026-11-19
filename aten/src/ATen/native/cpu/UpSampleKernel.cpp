@@ -2406,6 +2406,86 @@ void upsample_lanczos2d_aa_backward_kernel_impl(
       });
 }
 
+// Backward of the separable inter-area resize: grad_input[c, y, x] accumulates
+// grad_output[c, oy, ox] * wy[oy][y] * wx[ox][x] over the output pixels whose weights cover (y, x).
+template <typename scalar_t, class F>
+void upsample_inter_area2d_backward(
+    const Tensor& grad_input_,
+    const Tensor& grad_output_,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  auto grad_output = grad_output_.contiguous();
+  auto grad_input = grad_input_.contiguous();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
+
+  const int64_t channels = grad_input.size(0) * grad_input.size(1);
+  const int64_t input_height = grad_input.size(2), input_width = grad_input.size(3);
+  const int64_t output_height = grad_output.size(2), output_width = grad_output.size(3);
+  const int64_t output_slice_size = output_height * output_width;
+
+  // Weights of all output indices of one axis, max_size per output index.
+  struct AxisWeights {
+    std::vector<int64_t> xmin, xsize;
+    std::vector<scalar_t> weights;
+    int64_t max_size;
+  };
+  auto compute_axis_weights = [](int64_t input_size, int64_t output_size, const std::optional<double>& opt_scale) {
+    const auto [scale, inv_scale] = F::scales(input_size, output_size, opt_scale);
+    AxisWeights w;
+    w.max_size = F::max_interp_size(scale);
+    w.xmin.resize(output_size);
+    w.xsize.resize(output_size);
+    w.weights.resize(output_size * w.max_size);
+    for (const auto i : c10::irange(output_size)) {
+      F::template compute_weights<scalar_t>(
+          i, input_size, scale, inv_scale, w.weights.data() + i * w.max_size, w.max_size, w.xmin[i], w.xsize[i]);
+    }
+    return w;
+  };
+  const AxisWeights wy = compute_axis_weights(input_height, output_height, scales_h);
+  const AxisWeights wx = compute_axis_weights(input_width, output_width, scales_w);
+
+  at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 4, [&](int64_t begin, int64_t end) {
+    for (const auto c : c10::irange(begin, end)) {
+      const scalar_t* grad_output_c = grad_output_data + c * output_slice_size;
+      scalar_t* grad_input_c = grad_input_data + c * input_height * input_width;
+      for (const auto oh : c10::irange(output_height)) {
+        for (const auto ow : c10::irange(output_width)) {
+          const scalar_t grad_output_value = grad_output_c[oh * output_width + ow];
+          for (const auto y : c10::irange(wy.xsize[oh])) {
+            const scalar_t gy = grad_output_value * wy.weights[oh * wy.max_size + y];
+            scalar_t* row = grad_input_c + (wy.xmin[oh] + y) * input_width + wx.xmin[ow];
+            for (const auto x : c10::irange(wx.xsize[ow])) {
+              row[x] += gy * wx.weights[ow * wx.max_size + x];
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!grad_input_.is_contiguous()) {
+    grad_input_.copy_(grad_input);
+  }
+}
+
+void upsample_inter_area2d_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  const bool linear = inter_area_uses_linear_weights(grad_input, grad_output, scales_h, scales_w);
+  AT_DISPATCH_FLOATING_TYPES(
+      grad_output.scalar_type(), "upsample_inter_area2d_backward_cpu", [&] {
+        if (linear) {
+          upsample_inter_area2d_backward<scalar_t, HelperInterpInterArea<true>>(grad_input, grad_output, scales_h, scales_w);
+        } else {
+          upsample_inter_area2d_backward<scalar_t, HelperInterpInterArea<false>>(grad_input, grad_output, scales_h, scales_w);
+        }
+      });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(upsample_nearest1d_kernel, &upsample_nearest1d_kernel_impl)
@@ -2429,4 +2509,5 @@ REGISTER_DISPATCH(_upsample_lanczos2d_aa_kernel, &upsample_lanczos2d_aa_kernel_i
 REGISTER_DISPATCH(_upsample_lanczos2d_aa_backward_kernel, &upsample_lanczos2d_aa_backward_kernel_impl)
 
 REGISTER_DISPATCH(_upsample_inter_area2d_kernel, &upsample_inter_area2d_kernel_impl)
+REGISTER_DISPATCH(_upsample_inter_area2d_backward_kernel, &upsample_inter_area2d_backward_kernel_impl)
 } // namespace at::native

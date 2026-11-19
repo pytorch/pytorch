@@ -5157,7 +5157,7 @@ def interpolate(  # noqa: F811
         2-tap linear coefficients on both dimensions instead. As in OpenCV, a ``scale_factor`` is used
         as the scale of the interpolation (unless ``recompute_scale_factor=True``); otherwise the scale
         is the ratio of the output and input sizes. It only supports 4-D input (i.e. 2D spatial) and
-        CPU, and ``align_corners`` and ``antialias`` must not be set. Backward is not supported. For ``uint8`` inputs, outputs can
+        CPU, and ``align_corners`` and ``antialias`` must not be set. For ``uint8`` inputs, outputs can
         differ from OpenCV's by 1, as intermediate results are rounded to ``uint8`` between the two
         spatial dimensions.
 
