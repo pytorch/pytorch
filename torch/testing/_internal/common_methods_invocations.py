@@ -5630,10 +5630,52 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(get_tensor_input(()), 1, -1, True, True)
 
 
-def _make_dsl_topk_arg(shape, *, device, dtype):
-    # Generic tests compare indices exactly; tie behavior has dedicated tests.
+def _make_cutedsl_topk_arg(shape, *, device, dtype):
+    # CuTeDSL's default radix gather does not define an index order for ties.
+    # Its fp32 sample sizes stay below 2**24, so these integers remain unique
+    # after conversion and generic tests may compare indices exactly.
     values = torch.randperm(math.prod(shape), dtype=torch.int64, device=device)
     return values.reshape(shape).to(dtype)
+
+
+def _make_flydsl_topk_arg(shape, *, k, largest=True, device, dtype):
+    # Unique values are impossible for narrow dtypes at the large N required
+    # by these kernels. Make exactly K entries better than the background so
+    # no tie crosses the selection boundary. Scatter those entries across each
+    # row with a row-dependent shift so wrong-row and leading-tile-only reads
+    # fail the gather check.
+    n = shape[-1]
+    rows = math.prod(shape[:-1])
+    if dtype.is_floating_point:
+        background = -64 if largest else 64
+        selected = torch.arange(k, dtype=torch.int64, device=device).remainder(127) - 63
+    else:
+        info = torch.iinfo(dtype)
+        background = info.min if largest else info.max
+        levels = (
+            (info.min + 1, -1, 0, 1, info.max)
+            if largest
+            else (info.min, -1, 0, 1, info.max - 1)
+        )
+        level_tensor = torch.tensor(levels, dtype=torch.int64, device=device)
+        selected = level_tensor[
+            torch.arange(k, dtype=torch.int64, device=device).remainder(len(levels))
+        ]
+
+    stride = max(1, n // max(k, 1))
+    while math.gcd(stride, n) != 1:
+        stride += 1
+    selected_cols = torch.arange(k, dtype=torch.int64, device=device) * stride
+    row_shifts = torch.arange(rows, dtype=torch.int64, device=device) * 131
+    selected_cols = (selected_cols + row_shifts[:, None]).remainder(n)
+
+    result = torch.full((rows, n), background, dtype=dtype, device=device)
+    result.scatter_(
+        1,
+        selected_cols,
+        selected.to(dtype).expand(rows, -1),
+    )
+    return result.reshape(shape)
 
 
 def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
@@ -5650,7 +5692,7 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
         _REGISTER_N_RANGE,
     )
 
-    make_arg = partial(_make_dsl_topk_arg, device=device, dtype=dtype)
+    make_arg = partial(_make_cutedsl_topk_arg, device=device, dtype=dtype)
 
     # M=256 is >= typical GPU SM count so the cond's SM-wave gate passes.
     for K in (64, 128, 256, 512, 1024):
@@ -5666,23 +5708,44 @@ def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_flydsl_topk(op_info, device, dtype, requires_grad, **kwargs):
-    from torch._native.ops.topk.flydsl_impl import _radix_n_range, _REGISTER_N_BOUNDS
+    from torch._native.ops.topk.flydsl_impl import (
+        _min_rows_for_full_wave,
+        _radix_n_range,
+        _RADIX_MIN_CU_WAVES,
+        _REGISTER_MIN_CU_WAVES,
+        _REGISTER_N_BOUNDS,
+    )
 
-    make_arg = partial(_make_dsl_topk_arg, device=device, dtype=dtype)
+    make_arg = partial(_make_flydsl_topk_arg, device=device, dtype=dtype)
+    device_index = torch.device(device).index
+    if device_index is None:
+        device_index = torch.cuda.current_device()
+    min_rows = _min_rows_for_full_wave(device_index)
+    radix_rows = min_rows * _RADIX_MIN_CU_WAVES
 
-    # M=256 covers the gfx950 occupancy gate.
-    for K in (64, 256, 257, 383, 384, 831, 832, 1024):
-        n_range = _radix_n_range(K)
+    for K in (64, 257, 513):
+        n_range = _radix_n_range(K, dtype)
         if n_range is None:
-            raise AssertionError(f"missing radix gate for K={K}")
+            raise AssertionError(f"missing radix gate for K={K} dtype={dtype}")
         N = n_range[0]
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
-        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((radix_rows, N), k=K).contiguous(), args=(K,))
+        yield SampleInput(
+            make_arg((radix_rows, N), k=K, largest=False).contiguous(),
+            args=(K,),
+            kwargs={"largest": False},
+        )
 
-    for K, N in ((2, _REGISTER_N_BOUNDS[0]), (16, _REGISTER_N_BOUNDS[1])):
-        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
-        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+    n_range = _REGISTER_N_BOUNDS.get(dtype)
+    min_cu_waves = _REGISTER_MIN_CU_WAVES.get(dtype)
+    if n_range is not None and min_cu_waves is not None:
+        register_rows = min_rows * min_cu_waves
+        K, N = 16, n_range[1]
+        yield SampleInput(make_arg((register_rows, N), k=K).contiguous(), args=(K,))
+        yield SampleInput(
+            make_arg((register_rows, N), k=K, largest=False).contiguous(),
+            args=(K,),
+            kwargs={"largest": False},
+        )
 
 
 def _topk_deterministic(*args, **kwargs):
@@ -17683,7 +17746,10 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
                                             torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
-                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cuda', 'xpu')),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=2e-05, rtol=9e-06),
+                                            torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='xpu'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
@@ -18427,10 +18493,10 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits'),
                        DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                                     "TestUnaryUfuncs", "test_reference_numerics_extremal",
-                                    device_type="cuda"),
+                                    device_type=("cuda", "xpu")),
                        DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                                     "TestUnaryUfuncs", "test_reference_numerics_normal",
-                                    device_type="cuda"),
+                                    device_type=("cuda", "xpu")),
                    ),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -18835,7 +18901,7 @@ op_db: list[OpInfo] = [
                    decorators=(DecorateInfo(
                                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
                                'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                               device_type='cuda'),),
+                               device_type=('cuda', 'xpu')),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -18886,7 +18952,7 @@ op_db: list[OpInfo] = [
                                DecorateInfo(
                                    toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
                                    'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                   device_type='cuda'),),
+                                   device_type=('cuda', 'xpu')),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -23246,18 +23312,17 @@ if "flydsl" in dsl_ops_by_dsl:
 
     from torch._native.ops.topk.flydsl_impl import (
         _SUPPORTED_ARCHES as _flydsl_topk_supported_arches,
+        _SUPPORTED_DTYPES as _flydsl_topk_supported_dtypes,
     )
 
     # These are deterministic OpInfo assertion failures, not crashes.
-    # Keep them as xfails so an XPASS signals that coverage can be restored.
     _flydsl_topk_skips = _topk_dsl_skips(skipIfNoFlyDSL) + (
-        DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes"),
         DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
         DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
     )
     _flydsl_topk_kwargs = dict(
-        dtypes=_dispatch_dtypes((torch.float32,)),
-        dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
+        dtypes=_dispatch_dtypes(_flydsl_topk_supported_dtypes),
+        dtypesIfCUDA=_dispatch_dtypes(_flydsl_topk_supported_dtypes),
         sample_inputs_func=sample_inputs_flydsl_topk,
         ref=reference_topk,
         supports_autograd=False,
@@ -23285,11 +23350,7 @@ if "flydsl" in dsl_ops_by_dsl:
         OpInfo(
             "topk", op=torch.topk,
             variant_test_name="flydsl_optimized",
-            skips=_flydsl_topk_skips + (
-                DecorateInfo(unittest.skip("nondeterministic on tied indices by design"),
-                             "TestCommon", "test_variant_consistency_eager"),
-            ),
-            **{k: v for k, v in _flydsl_topk_kwargs.items() if k != "skips"},
+            **_flydsl_topk_kwargs,
         ),
         OpInfo(
             "topk", op=_topk_deterministic,
@@ -24592,7 +24653,7 @@ python_ref_db = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cuda', 'xpu')),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -24619,7 +24680,7 @@ python_ref_db = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cuda', 'xpu')),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -25011,6 +25072,12 @@ python_ref_db = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02),
                                    torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='xpu'),
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=2e-05, rtol=9e-06)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_normal', device_type='xpu'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
