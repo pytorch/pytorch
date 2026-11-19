@@ -550,7 +550,9 @@ class NNModuleVariable(VariableTracker):
                 registry = base_dict[field]
                 registry_source = AttrSource(self.source, field)
                 if not istype(registry, (dict, collections.OrderedDict)):
-                    mapping = VariableBuilder(tx, registry_source)(registry)
+                    # Keep stored tensors on the module while tracing the registry's lookup.
+                    specialized_source = NNModuleSource(registry_source)
+                    mapping = VariableBuilder(tx, specialized_source)(registry)
                     key = VariableTracker.build(tx, name)
                     if pysequence_contains(tx, mapping, key).as_python_constant():
                         out = generic_getitem(tx, mapping, key)
