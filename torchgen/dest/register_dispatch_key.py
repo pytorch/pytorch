@@ -578,7 +578,10 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 aot_consultation = ""
                 aot_manifest = self.native_aot_manifests.get(str(f.func.name))
                 if aot_manifest is not None and not aot_manifest.structured:
-                    from torchgen.native_aot import gen_stub_consultation
+                    from torchgen.native_aot import (
+                        first_tensor_arg,
+                        gen_stub_consultation,
+                    )
 
                     aot_consultation = gen_stub_consultation(
                         aot_manifest,
@@ -590,11 +593,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                             and f.func.arguments.self_arg
                             else None
                         ),
-                        tensor_arg=(
-                            f.func.arguments.self_arg.argument.name
-                            if f.func.arguments.self_arg
-                            else None
-                        ),
+                        tensor_arg=first_tensor_arg(f),
                         device_guarded=device_guarded,
                     )
                 return f"""\
