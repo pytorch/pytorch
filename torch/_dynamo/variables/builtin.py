@@ -477,7 +477,11 @@ class TypeVariable(VariableTracker):
     ) -> VariableTracker:
         check_positional(tx, "__subclasscheck__", len(args), 1, 1)
         cls = args[0].as_python_constant()
-        return VariableTracker.build(tx, issubclass(cls, self.as_python_constant()))
+        try:
+            result = issubclass(cls, self.as_python_constant())
+        except TypeError as exc:
+            raise_observed_exception(TypeError, tx, args=list(exc.args))
+        return VariableTracker.build(tx, result)
 
     tp_methods = {
         "__instancecheck__": Method(_type_instancecheck),
