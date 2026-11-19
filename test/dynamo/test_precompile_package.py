@@ -795,10 +795,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_counts = collections.Counter(
             g.create_fn_name() for g in control_state.output_graph.guards
         )
-        # Class matches protect the tensor type, TreeSpec, its MRO base and typing.Any.
-        # The two torch imports are guarded by identity. Before Python 3.11,
-        # typing.Any is also guarded by identity because it is a _SpecialForm.
+        # pytree's classes are TreeSpec and typing.Any, which is a class only
+        # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
+        # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
+        # The tensor type and TreeSpec's MRO base also need class identity guards.
         class_matches, id_matches = (4, 2) if any_is_class else (3, 3)
         self.assertEqual(
             counts - control_counts,
