@@ -18,6 +18,7 @@
 #include <ATen/native/xpu/grouped_mm/grouped_mm_api.h>
 #include <ATen/xpu/XPUContext.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/env.h>
 
 #include <algorithm>
 #include <array>
@@ -331,13 +332,17 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_xpu_v2_out)
 
 namespace {
 
-// The SYCL-TLA grouped GEMM from torch-xpu-ops is opt-in, like ROCm's CK
-// grouped GEMM: set XPU_ALLOW_GROUP_GEMM_SYCLTLA=1 to enable it. It serves
-// bf16/fp16 calls with offs, no bias and the input dtype as output dtype, on
-// the architectures its kernels are built for, when
-// sycltla::can_use_grouped_mm accepts the layouts and alignment. Like the
-// CUDA and ROCm selection, the checks never look at the routed row counts, so
-// every rank of an expert-parallel job selects the same kernel.
+// XPU_GROUP_GEMM_BACKEND = fallback (default) | onednn | sycltla, read on
+// every call, selects the grouped GEMM kernel:
+//   fallback  the per-group mm (_grouped_mm_fallback)
+//   onednn    the oneDNN grouped matmul: 2D mat_a, same dtypes, no bias
+//   sycltla   the SYCL-TLA grouped GEMM from torch-xpu-ops: bf16/fp16, offs,
+//             no bias, the input dtype as output dtype, on the architectures
+//             its kernels are built for, when sycltla::can_use_grouped_mm
+//             accepts the layouts and alignment
+// A call the selected kernel cannot serve takes the per-group fallback. Like
+// the CUDA and ROCm selection, the checks never look at the routed row counts,
+// so every rank of an expert-parallel job selects the same kernel.
 bool sycltla_grouped_mm_arch_supported() {
   constexpr auto supported_architectures =
       std::to_array<sycl::ext::oneapi::experimental::architecture>({
@@ -371,6 +376,24 @@ bool sycltla_grouped_mm_supported(
 
 enum class GroupedMMKernel { Fallback, OneDnn, SyclTla };
 
+GroupedMMKernel requested_grouped_mm_kernel() {
+  const auto v = c10::utils::get_env("XPU_GROUP_GEMM_BACKEND");
+  if (!v.has_value() || v->empty() || *v == "fallback") {
+    return GroupedMMKernel::Fallback;
+  }
+  if (*v == "onednn") {
+    return GroupedMMKernel::OneDnn;
+  }
+  if (*v == "sycltla") {
+    return GroupedMMKernel::SyclTla;
+  }
+  TORCH_WARN_ONCE(
+      "Ignoring unknown XPU_GROUP_GEMM_BACKEND='",
+      *v,
+      "'; expected fallback, onednn or sycltla. Using fallback.");
+  return GroupedMMKernel::Fallback;
+}
+
 GroupedMMKernel select_grouped_mm_kernel(
     const Tensor& mat_a,
     const Tensor& mat_b,
@@ -378,16 +401,25 @@ GroupedMMKernel select_grouped_mm_kernel(
     const std::optional<at::Tensor>& bias,
     std::optional<c10::ScalarType> out_dtype,
     const Tensor& out) {
-  if (at::globalContext().xpuAllowGroupGemmSyclTla() &&
-      sycltla_grouped_mm_supported(
-          mat_a, mat_b, offs, bias, out.scalar_type(), out)) {
-    return GroupedMMKernel::SyclTla;
-  }
-  const bool a_b_and_out_are_same_type = (mat_a.dtype() == mat_b.dtype()) &&
-      (!out_dtype.has_value() || mat_a.dtype() == *out_dtype);
-  // OneDNN only supports 2dx3d and 2dx2d for grouped matmul.
-  if (a_b_and_out_are_same_type && mat_a.dim() == 2 && !bias.has_value()) {
-    return GroupedMMKernel::OneDnn;
+  switch (requested_grouped_mm_kernel()) {
+    case GroupedMMKernel::SyclTla:
+      if (sycltla_grouped_mm_supported(
+              mat_a, mat_b, offs, bias, out.scalar_type(), out)) {
+        return GroupedMMKernel::SyclTla;
+      }
+      break;
+    case GroupedMMKernel::OneDnn: {
+      const bool a_b_and_out_are_same_type =
+          (mat_a.dtype() == mat_b.dtype()) &&
+          (!out_dtype.has_value() || mat_a.dtype() == *out_dtype);
+      // OneDNN only supports 2dx3d and 2dx2d for grouped matmul.
+      if (a_b_and_out_are_same_type && mat_a.dim() == 2 && !bias.has_value()) {
+        return GroupedMMKernel::OneDnn;
+      }
+      break;
+    }
+    default:
+      break;
   }
   return GroupedMMKernel::Fallback;
 }
