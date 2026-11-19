@@ -9,7 +9,6 @@ if not errorlevel 0 (
 pushd test
 
 set GFLAGS_EXE="C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags.exe"
-if "%CPP_FAKETENSOR%" == "1" if exist "%PROJECT_DIR_WIN%\.ci\pytorch\cpp_faketensor_tests.json" goto tests
 if "%SHARD_NUMBER%" == "1" (
   if exist %GFLAGS_EXE% (
     echo Some smoke tests
@@ -22,7 +21,6 @@ if "%SHARD_NUMBER%" == "1" (
   )
 )
 
-:tests
 echo Copying over test times file
 robocopy /E "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.additional_ci_files" "%PROJECT_DIR_WIN%\.additional_ci_files"
 
