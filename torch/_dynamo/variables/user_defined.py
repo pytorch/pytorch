@@ -573,6 +573,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             list.__new__,
             int.__new__,
             float.__new__,
+            complex.__new__,
             str.__new__,
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
@@ -5219,7 +5220,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().tp_getattro_impl(tx, name)
 
 
-_CONSTANT_BASE_TYPES = (int, float, str)
+_CONSTANT_BASE_TYPES = (int, float, str, complex)
 
 _constant_base_methods: dict[type, set[Any]] = {
     t: {m for m in t.__dict__.values() if callable(m)} for t in _CONSTANT_BASE_TYPES
