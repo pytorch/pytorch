@@ -7,6 +7,7 @@ import cutlass.cute as cute
 from cutlass import const_expr
 from cutlass.cute.nvgpu import cpasync
 
+from ...cutedsl.compat import block_copy, SmemAllocator
 from ...cutedsl.types import MathFn, NumericType
 from ._types import Shape
 from .kernel import _PointwiseOp
@@ -17,13 +18,6 @@ from .layout import (
     TMA_TILE as _BOX,
     TmaLayout,
 )
-
-
-try:
-    from cutlass.block import block_copy
-    from cutlass.memory import SmemAllocator
-except ImportError:
-    from cutlass.utils import block_copy, SmemAllocator
 
 
 def fake_tensor(
