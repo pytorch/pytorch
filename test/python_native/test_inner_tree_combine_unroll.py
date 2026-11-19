@@ -195,7 +195,11 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"split": (1024, 8192, 8191, 512, 512)}, "one count, got 8192 and 8191"),
             ({"rows_per_block": 64}, "at most 32 threads per block, got 64"),
             ({"wpr": 2}, "at most 32 threads per block, got 64"),
-            ({"stage_e": 4, "rows_per_block": 2}, "at most 32 threads per block"),
+            # The general axis rejects stage_e outright, so the row axis covers it.
+            (
+                {"axis": "row", "stage_e": 4, "rows_per_block": 2},
+                "at most 32 threads per block, got 64",
+            ),
         ],
         name_fn=lambda updates, msg: "_".join(
             f"{k}_{v}" for k, v in updates.items()
@@ -228,11 +232,11 @@ class TestInnerTreeCombineUnroll(TestCase):
         )
         kwargs = dict(nouts=2, order="inner_tree")
         tile.TileReduce(traits["welford"], None, "general", 0, itree=valid, **kwargs)
-        fields = {"trait": "welford"} | updates
-        trait = traits[fields.pop("trait")]
+        fields = {"trait": "welford", "axis": "general"} | updates
+        trait, axis = traits[fields.pop("trait")], fields.pop("axis")
         plan = valid._replace(**fields)
         with self.assertRaisesRegex(ValueError, msg):
-            tile.TileReduce(trait, None, "general", 0, itree=plan, **kwargs)
+            tile.TileReduce(trait, None, axis, 0, itree=plan, **kwargs)
 
 
 @unittest.skipUnless(
