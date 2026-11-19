@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from types import SimpleNamespace
 from unittest import mock
+
+import sympy
 
 import torch
 from torch._dynamo.exc import BackendCompilerFailed
@@ -11,6 +14,7 @@ from torch._inductor.heuristics.registry import (
     get_template_heuristic,
     override_template_heuristics,
 )
+from torch._inductor.heuristics.template import decompose_k as decompose_k_heuristics
 from torch._inductor.heuristics.template.bmm import (
     CUDABlackwellBMMTemplateConfigHeuristic,
 )
@@ -32,9 +36,11 @@ from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
 from torch._inductor.select_algorithm import NoValidChoicesError
+from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -1373,6 +1379,164 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertTrue(configs[0]["WARP_SPECIALIZE"])
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
+    def _two_ctas_configs_kept(self, k, block_k, two_ctas, shape_env):
+        # 2CTA autoWS with K <= BLOCK_K can hang on the GPU, so it is pruned
+        # unless K > BLOCK_K is provable.
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        mat1.get_dtype.return_value = torch.bfloat16
+        mat2.get_dtype.return_value = torch.bfloat16
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        base = {
+            "A_ROW_MAJOR": True,
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": block_k,
+            "num_stages": 7,
+            "num_warps": 4,
+            "EPILOGUE_SUBTILE": 8,
+            "WARP_SPECIALIZE": True,
+            "FLATTEN": False,
+            "USE_META_WS": True,
+            "TWO_CTAS": two_ctas,
+        }
+        graph = SimpleNamespace(sizevars=SizeVarAllocator(shape_env))
+        with (
+            V.set_graph_handler(graph),
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch.object(
+                TMATemplateConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base]),
+            ),
+            mock.patch.object(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                "_allow_tf32",
+                return_value=False,
+                create=True,
+            ),
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.get_num_sms",
+                return_value=148,
+            ),
+            mock.patch.object(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                "_autows_constraints_ok",
+                return_value=True,
+            ),
+            mock.patch.object(
+                MMKernelInputs,
+                "mnk_symbolic",
+                return_value=(sympy.Integer(5944), sympy.Integer(8192), k),
+            ),
+        ):
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        return len(configs) == 1
+
+    @parametrize(
+        "k,block_k,two_ctas,kept",
+        (
+            (64, 64, True, False),
+            (65, 64, True, True),
+            (128, 128, True, False),
+            (129, 128, True, True),
+            (256, 256, True, False),
+            (512, 256, True, True),
+            (64, 64, False, True),
+        ),
+    )
+    def test_two_ctas_needs_more_than_one_k_tile(self, k, block_k, two_ctas, kept):
+        self.assertEqual(
+            self._two_ctas_configs_kept(
+                sympy.Integer(k), block_k, two_ctas, ShapeEnv()
+            ),
+            kept,
+        )
+
+    def test_two_ctas_symbolic_k_pruned_without_guard(self):
+        from torch._dynamo.source import ConstantSource
+
+        shape_env = ShapeEnv()
+        # Backed, hint far above BLOCK_K, but K > BLOCK_K is not provable.
+        k = shape_env.create_symbol(1024, ConstantSource("k"))
+        num_guards = len(shape_env.guards)
+        self.assertFalse(self._two_ctas_configs_kept(k, 64, True, shape_env))
+        self.assertEqual(len(shape_env.guards), num_guards)
+
+    def test_two_ctas_symbolic_k_with_range_above_block_k_kept(self):
+        from torch._dynamo.source import ConstantSource
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        shape_env = ShapeEnv()
+        k = shape_env.create_symbol(1024, ConstantSource("k"))
+        # e.g. mark_dynamic(min=65): the range guard already bounds runtime K.
+        shape_env.constrain_symbol_range(k, compiler_min=65, compiler_max=1 << 20)
+        self.assertEqual(shape_env.var_to_range[k], ValueRanges(65, 1 << 20))
+        num_guards = len(shape_env.guards)
+        self.assertTrue(self._two_ctas_configs_kept(k, 64, True, shape_env))
+        self.assertEqual(len(shape_env.guards), num_guards)
+
+    def test_two_ctas_unbacked_k_pruned(self):
+        shape_env = ShapeEnv()
+        k = shape_env.create_unbacked_symint().node.expr
+        num_guards = len(shape_env.guards)
+        self.assertFalse(self._two_ctas_configs_kept(k, 64, True, shape_env))
+        self.assertEqual(len(shape_env.guards), num_guards)
+
+    @parametrize("k,kept_indices", ((512, ()), (1024, (0, 3, 1, 4))))
+    def test_decompose_k_two_ctas_needs_more_than_one_k_tile(self, k, kept_indices):
+        # k_split=8: K=512 gives 64-wide partitions, one K tile for the BLOCK_K=64
+        # 2CTA partial configs (1 and 4), which are pruned (the BLOCK_K=128
+        # configs would leave an empty final partition). K=1024 keeps them.
+        m, n, k_split = 256, 128, 8
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        for node in (mat1, mat2):
+            node.get_dtype.return_value = torch.bfloat16
+            node.get_device.return_value = torch.device(GPU_TYPE)
+        mat1.get_stride.return_value = [k, 1]
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        graph = SimpleNamespace(sizevars=SizeVarAllocator(ShapeEnv()))
+        mod = "torch._inductor.heuristics.template.decompose_k"
+        with (
+            V.set_graph_handler(graph),
+            config.patch(
+                {
+                    "triton.decompose_k_bmm_backends": "TRITON",
+                    "max_autotune_prune_choices_based_on_shared_mem": False,
+                }
+            ),
+            mock.patch.object(
+                MMKernelInputs,
+                "shapes_symbolic",
+                return_value=((m, k), (k, n)),
+            ),
+            mock.patch.object(
+                MMKernelInputs, "strides_symbolic", return_value=((k, 1), (n, 1))
+            ),
+            mock.patch.object(
+                MMKernelInputs,
+                "mnk_symbolic",
+                return_value=tuple(sympy.Integer(x) for x in (m, n, k)),
+            ),
+            mock.patch.object(MMKernelInputs, "output_layout"),
+            mock.patch(f"{mod}.get_k_splits", return_value=[k_split]),
+            mock.patch(f"{mod}.use_triton_blackwell_tma_template", return_value=True),
+            # Not present on every base; create=True keeps the mock harmless there.
+            mock.patch(f"{mod}.mm_allow_tf32", return_value=False, create=True),
+            mock.patch(
+                f"{mod}.blackwell_tma_mma_layout_supported",
+                return_value=True,
+                create=True,
+            ),
+            mock.patch(f"{mod}.effective_two_ctas", side_effect=lambda c: c.two_ctas),
+        ):
+            heuristic = decompose_k_heuristics.DecomposeKConfigHeuristics()
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        self.assertEqual(
+            [c["bmm_config_index"] for c in configs if c["bmm_backend"] == "triton"],
+            list(kept_indices),
+        )
+
 
 @instantiate_parametrized_tests
 class TestBlackwellBMMTemplate(TestCase):
@@ -1875,6 +2039,18 @@ class TestBlackwellBMMTemplate(TestCase):
             b,
             flatten_output=True,
         )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
+    def test_blackwell_bmm_template_2cta_rejects_single_k_tile(self) -> None:
+        # K <= BLOCK_K (64): a single K tile, where 2CTA autoWS can hang.
+        bsz, m, k, n = 2, 384, 64, 128
+        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        self._assert_blackwell_bmm_2cta_rejected(a, b, flatten_output=False)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

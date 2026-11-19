@@ -3552,6 +3552,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs, element_size=element_size
             ):
                 continue
+            if (
+                use_meta_ws
+                and template_kwargs.get("TWO_CTAS", False)
+                and self._single_k_tile(kernel_inputs, template_kwargs["BLOCK_K"])
+            ):
+                continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
@@ -3581,6 +3587,24 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             if two_ctas:
                 out["ctas_per_cga"] = (2, 1, 1)
             yield out
+
+    @staticmethod
+    def _single_k_tile(kernel_inputs: MMKernelInputs, block_k: int) -> bool:
+        """Whether K may fit in one BLOCK_K tile; True unless K > BLOCK_K is provable.
+
+        A 2CTA autoWS kernel with a single K tile can hang on the GPU once each
+        CTA pair runs several persistent tiles (B200: BLOCK_M=128, BLOCK_N=256,
+        BLOCK_K=64, num_stages=7 hangs at K=64 for M >= 5760, and runs at
+        K >= 128). The autotune subprocess then waits out its result timeout
+        for every such choice, on every compile of the shape.
+
+        This adds no guard: unlike the guard_or_false checks in
+        ScaledMMConfigMixin._valid, a K that is not provably > BLOCK_K (an
+        unbacked K, or a backed symbolic K without a range) loses its 2CTA
+        configs instead of installing a guard at each 2CTA BLOCK_K.
+        """
+        _, _, k = kernel_inputs.mnk_symbolic()
+        return not V.graph.sizevars.statically_known_gt(k, block_k)
 
     @staticmethod
     def _autows_constraints_ok(
