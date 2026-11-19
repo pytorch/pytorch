@@ -127,7 +127,6 @@ from torch._guards import (
     Source,
     StorageOverlap,
     StorageOverlapPartition,
-    TracingContext,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -336,9 +335,10 @@ def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> boo
 
 
 class NativeMethodMetadata(NamedTuple):
-    # Only class receivers are portable; instance tokens must not keep receivers alive.
-    receiver: type | tuple[type, int]
+    # Pickled by reference, so it is the loading process's class.
+    receiver: type
     name: str
+    receiver_id: int | None = None  # process-local instance identity
 
 
 def _native_method_metadata(
@@ -348,8 +348,6 @@ def _native_method_metadata(
         return None
     receiver = value.__self__
     is_cls = issubclass(type(receiver), type)
-    if portable and not is_cls:
-        return None
     if not portable:
         from .variables.object_protocol import type_is_immutable
 
@@ -360,30 +358,35 @@ def _native_method_metadata(
         kind = types.ClassMethodDescriptorType if is_cls else types.MethodDescriptorType
         if type(descr) is not kind:
             return None
-    if is_cls and not _resolves_by_reference(receiver):
+        if not is_cls:
+            expected = NativeMethodMetadata(owner, value.__name__, id(receiver))
+            return expected if _native_method_matches(value, expected) else None
+    if not is_cls or not _resolves_by_reference(receiver):
         return None
-    expected = NativeMethodMetadata(
-        cast(type, receiver) if is_cls else (type(receiver), id(receiver)),
-        value.__name__,
-    )
-    return expected if _native_method_matches(value, expected) else None
+    if getattr(receiver, value.__name__, None) != value:
+        return None
+    return NativeMethodMetadata(cast(type, receiver), value.__name__)
 
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
-    if type(value) is not types.BuiltinMethodType or value.__name__ != expected.name:
-        return False
-    receiver = value.__self__
-    if type(expected.receiver) is tuple:
-        owner, receiver_id = expected.receiver
-        if type(receiver) is not owner or id(receiver) != receiver_id:
+    if expected.receiver_id is not None:
+        owner = expected.receiver
+        name = expected.name
+        if type(value) is not types.BuiltinMethodType or value.__name__ != name:
             return False
-        # Instance metadata only resolves descriptors on immutable builtin classes.
-        descr = getattr(owner, expected.name, None)
-        return type(descr) is types.MethodDescriptorType and value == descr.__get__(
-            receiver
+        receiver = value.__self__
+        # Metadata only binds descriptors on immutable builtin classes.
+        return (
+            type(receiver) is owner
+            and id(receiver) == expected.receiver_id
+            and value == getattr(owner, name).__get__(receiver)
         )
-    return receiver is expected.receiver and value == getattr(
-        expected.receiver, expected.name
+    # The type check first: == would otherwise run the new value's __eq__.
+    return (
+        type(value) is types.BuiltinMethodType
+        and value.__self__ is expected.receiver
+        and value.__name__ == expected.name
+        and value == getattr(expected.receiver, expected.name)
     )
 
 
@@ -3660,7 +3663,7 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
-        if self.save_guards and type(expected.receiver) is tuple:
+        if self.save_guards and expected.receiver_id is not None:
             raise torch._dynamo.exc.PackageError(
                 f"Instance method {expected.name!r} at {guard.name} needs receiver identity. "
                 "Bind it in the saved function."
@@ -3669,20 +3672,19 @@ class GuardBuilder(GuardBuilderBase):
 
         def guard_fn(value: object) -> bool:
             nonlocal last_match
-            if last_match is not None and value is last_match():
-                return value is not None
+            if value is not None and last_match is not None and value is last_match():
+                return True
             if not _native_method_matches(value, expected):
                 return False
             last_match = weakref.ref(value)
             return True
 
-        binding = expected.receiver
-        owner = cast(type, binding[0] if type(binding) is tuple else binding)
-        method = f"{owner.__module__}.{owner.__qualname__}.{expected.name}"
-        code = f"___check_native_method({self.arg_ref(guard)}, {method})"
+        code = (
+            f"___check_native_method({self.arg_ref(guard)}, "
+            f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
+        )
         self._set_guard_export_info(guard, [code])
-        token = (id(owner), binding[1] if type(binding) is tuple else None)
-        key = f"{code} {token}"
+        key = f"{code} {(id(expected.receiver), expected.receiver_id)}"
         if key in self.already_added_code_parts:
             return
         self.already_added_code_parts.add(key)
@@ -7623,6 +7625,12 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
             seen.add(x)
 
 
+def guard_mixed_scope_alias(left: Source, right: Source) -> None:
+    # make_dupe_guard cannot relate a local argument to a preloaded global.
+    if is_from_local_source(left) != is_from_local_source(right):
+        install_guard(*(s.make_guard(GuardBuilder.ID_MATCH) for s in (left, right)))
+
+
 def record_lexical_alias(
     reads: set[tuple[Source, int]], source: Source | None, canonical: Source | None
 ) -> None:
@@ -7634,11 +7642,8 @@ def record_lexical_alias(
         if is_from_source(source, read) or is_from_source(canonical, read)
     }
     if scopes:
-        endpoints = (source, canonical)
-        reads.update((s, scope) for s in endpoints for scope in scopes)
-        # make_dupe_guard skips mixed local/global sources, so pin both endpoints.
-        if is_from_local_source(source) != is_from_local_source(canonical):
-            install_guard(*(s.make_guard(GuardBuilder.ID_MATCH) for s in endpoints))
+        reads.update((s, scope) for s in (source, canonical) for scope in scopes)
+        guard_mixed_scope_alias(source, canonical)
 
 
 def make_dupe_guard(
@@ -7699,6 +7704,8 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
+    from torch._guards import TracingContext
+
     guards_context = TracingContext.get().guards_context
     if guards_context.skip_install:
         return
