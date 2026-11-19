@@ -1825,6 +1825,28 @@ void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
   [encoder setBytes:ptr length:size atIndex:idx];
 }
 
+void MetalKernelFunction::setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors) {
+  std::vector<uint64_t> arguments;
+  arguments.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    if (t.device().is_cpu()) {
+      TORCH_CHECK_VALUE(t.dim() == 0 && t.element_size() <= sizeof(uint64_t), "Expected MPS tensors or CPU scalars");
+      std::memcpy(&arguments.emplace_back(0), t.const_data_ptr(), t.element_size());
+      if (t.scalar_type() == kDouble) {
+        arguments.back() = c10::bit_cast<uint32_t>(static_cast<float>(*t.const_data_ptr<double>()));
+      }
+      continue;
+    }
+    arguments.push_back(reinterpret_cast<uint64_t>(get_tensor_gpu_address(t)));
+    // Buffers reached only through an argument buffer must be declared, or Metal neither orders the
+    // kernel after pending writes to them nor retains them, which the allocator uses to track buffers in use
+    if (const auto buffer = getMTLBufferStorage(t)) {
+      [encoder useResource:buffer usage:MTLResourceUsageRead | MTLResourceUsageWrite];
+    }
+  }
+  setArg(idx, arguments);
+}
+
 void MetalKernelFunction::setErrorBufferIndex(unsigned idx) {
   auto stream = ::at::mps::getCurrentMPSStream();
   [encoder setBuffer:stream->getErrorBuffer() offset:0 atIndex:idx];
