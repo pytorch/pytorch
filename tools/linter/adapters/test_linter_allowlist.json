@@ -112,7 +112,6 @@
   "test/distributed/fsdp/test_fsdp_misc.py",
   "test/distributed/fsdp/test_fsdp_mixed_precision.py",
   "test/distributed/fsdp/test_fsdp_multiple_forward.py",
-  "test/distributed/fsdp/test_fsdp_multiple_wrapping.py",
   "test/distributed/fsdp/test_fsdp_optim_state.py",
   "test/distributed/fsdp/test_fsdp_overlap.py",
   "test/distributed/fsdp/test_fsdp_pure_fp16.py",
