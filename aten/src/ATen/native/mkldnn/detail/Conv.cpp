@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Conv.h>
-#include <ATen/native/mkldnn/detail/Utils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -536,6 +536,7 @@ void do_compute_binary(
   auto& expected_src =
       reorder_src ? src.reorder_if_differ_in(pd.src_desc()) : src;
   if (reorder_src) {
+    // May replace dst's buffer and layout when they differ from pd.dst_desc().
     dst.reinit_if_possible(pd.dst_desc());
   }
   // make sure other has same format with dst.
