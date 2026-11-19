@@ -272,9 +272,9 @@ def vm(
     ``torch.vm(fn, ...)`` all work.
 
     Args:
-        fn: a Python function, a bound method, or an ``nn.Module`` (its
-            ``forward`` is taken; calling the result skips module hooks). Can
-            be omitted to use ``torch.vm`` as a decorator with options.
+        fn: a Python function, a bound method, or an ``nn.Module`` (which is
+            called as ``module(...)`` calls it, hooks included). Can be omitted
+            to use ``torch.vm`` as a decorator with options.
         passes: what is done to the function: one ordered list. Defaults to
             :data:`DEFAULT_PASSES`. The passes over the control-flow graph of
             the function are applied once, before it runs; the passes over a
@@ -356,7 +356,14 @@ def vm(
     if fn is None:
         return functools.partial(vm, **options)
     if isinstance(fn, torch.nn.Module):
-        return types.MethodType(vm(type(fn).forward, **options), fn)
+        module = fn
+
+        # The module is called, not its forward: its hooks run as they do in
+        # the interpreter.
+        def call(*args: Any, **kwargs: Any) -> Any:
+            return module(*args, **kwargs)
+
+        return vm(call, **options)
     if isinstance(fn, types.MethodType):
         return types.MethodType(vm(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
