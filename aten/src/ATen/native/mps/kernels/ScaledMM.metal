@@ -274,6 +274,25 @@ REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(float8_e4m3fn);
 
 #if C10_METAL_HAS_MPP
 
+template <typename T, typename Accum>
+inline void scaled_mm_store_accum(
+    thread const Accum& accum,
+    uint row_start,
+    uint col_start,
+    thread const ScaledMMArgs<T>& args,
+    constant ScaledMMParams<>& p) {
+  for (uint16_t i = 0; i < accum.get_capacity(); ++i) {
+    if (accum.is_valid_element(i)) {
+      const auto coord = accum.get_multidimensional_index(i);
+      const uint row = row_start + coord[1];
+      const uint col = col_start + coord[0];
+      if (row < p.m && col < p.n) {
+        scaled_mm_store(accum[i], row, col, args, p);
+      }
+    }
+  }
+}
+
 template <typename T>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_mm_mpp(
@@ -319,16 +338,7 @@ kernel void scaled_mm_mpp(
     op.run(aa, bb, accum);
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  for (uint16_t i = 0; i < accum.get_capacity(); ++i) {
-    if (accum.is_valid_element(i)) {
-      const auto coord = accum.get_multidimensional_index(i);
-      const uint row = row_start + coord[1];
-      const uint col = col_start + coord[0];
-      if (row < p.m && col < p.n) {
-        scaled_mm_store(accum[i], row, col, args, p);
-      }
-    }
-  }
+  scaled_mm_store_accum(accum, row_start, col_start, args, p);
 }
 
 #define REGISTER_SCALED_MM_MPP_WITH_OUT_T(T)                                \
@@ -348,4 +358,67 @@ REGISTER_SCALED_MM_MPP_WITH_OUT_T(half);
 REGISTER_SCALED_MM_MPP_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_MPP_WITH_OUT_T(float8_e4m3fn);
 
+#if __METAL_VERSION__ >= 410
+
+// Metal 4.1 MPP multiplies fp8 operands directly, without staging them as half
+// in threadgroup memory. A must be row-major and B column-major (both
+// K-contiguous), which is the layout cuBLASLt requires too.
+template <typename T>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_native(
+    device float8_e4m3fn* a [[buffer(0)]],
+    device float8_e4m3fn* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const float* scale_a [[buffer(3)]],
+    device const float* scale_b [[buffer(4)]],
+    device const uchar* bias [[buffer(5)]],
+    constant ScaledMMParams<>& p [[buffer(6)]],
+    uint2 group [[threadgroup_position_in_grid]]) {
+  constexpr auto tile = scaled_mm_native_tile;
+  // MPP rejects const-qualified element types, hence non-const a and b
+  using fp8_tensor =
+      tensor<device metal_fp8_e4m3_format, dextents<int32_t, 2>, tensor_inline>;
+  const auto operand = [&](device float8_e4m3fn* data, uint rows, int64_t ld) {
+    return fp8_tensor(
+        reinterpret_cast<device uchar*>(data),
+        dextents<int32_t, 2>(p.k, rows),
+        array<int32_t, 2>{1, int32_t(ld)});
+  };
+  const uint row_start = group.y * tile;
+  const uint col_start = group.x * tile;
+  auto a_tile = operand(a, p.m, p.a_row_stride).slice(0, row_start);
+  auto b_tile = operand(b, p.n, p.b_col_stride).slice(0, col_start);
+  // A single run over all of K, so the default multiply mode needs no zeroed
+  // accumulator
+  constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      tile, tile, static_cast<int>(dynamic_extent), false, true);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroups<scaled_mm_simdgroups>>
+      op;
+  auto accum = op.template get_destination_cooperative_tensor<
+      decltype(a_tile),
+      decltype(b_tile),
+      float>();
+  op.run(a_tile, b_tile, accum);
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
+  scaled_mm_store_accum(accum, row_start, col_start, args, p);
+}
+
+#define REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(T)              \
+  template [[host_name("scaled_mm_native_" #T)]] kernel void \
+  scaled_mm_native<T>(                                       \
+      device float8_e4m3fn*,                                 \
+      device float8_e4m3fn*,                                 \
+      device T*,                                             \
+      device const float*,                                   \
+      device const float*,                                   \
+      device const uchar*,                                   \
+      constant ScaledMMParams<>&,                            \
+      uint2);
+
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(float);
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(half);
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(bfloat);
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(float8_e4m3fn);
+
+#endif // __METAL_VERSION__ >= 410
 #endif // C10_METAL_HAS_MPP
