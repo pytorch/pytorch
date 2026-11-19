@@ -108,7 +108,7 @@ pub fn clear_shortcuts() {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true, demote=true))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -122,6 +122,7 @@ pub fn compile(
     unroll: bool,
     callees: bool,
     shortcuts: bool,
+    demote: bool,
 ) -> PyResult<CfgFunction> {
     let table = OpcodeTable::load(py)?;
     let options = Options {
@@ -134,6 +135,7 @@ pub fn compile(
         unroll,
         callees,
         shortcuts,
+        demote,
         ..Options::default()
     };
     let function = vm::lower(py, &table, func, &options)?;
@@ -199,7 +201,7 @@ impl CfgFunction {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<PyObject> {
         let result =
-            unsafe { self.inner.call(self.wrapped.as_ptr(), args.as_ptr(), kwargs.map_or(null_mut(), |k| k.as_ptr())) };
+            unsafe { self.inner.call_measured(self.wrapped.as_ptr(), args.as_ptr(), kwargs.map_or(null_mut(), |k| k.as_ptr())) };
         if result.is_null() {
             Err(PyErr::fetch(py))
         } else {
@@ -345,6 +347,8 @@ impl CfgFunction {
         let (compiled, interpreted) = cf.callees.summary();
         out.set_item("compiled_callees", compiled)?;
         out.set_item("interpreted_callees", interpreted)?;
+        out.set_item("demoted_callees", cf.callees.demoted())?;
+        out.set_item("demoted", cf.is_demoted())?;
         out.set_item("log", state.log.clone())?;
         Ok(out.into_any().unbind())
     }
