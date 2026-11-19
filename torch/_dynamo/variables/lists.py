@@ -293,10 +293,14 @@ class BaseListVariable(VariableTracker):
                 )
             )
 
+        clone_kwargs = {}
+        if isinstance(self, TupleVariable) and self.python_type() is tuple:
+            clone_kwargs["identity_token"] = object() if new_items else None
         return self.clone(
             items=new_items,
             source=None,
             mutation_type=ValueMutationNew(),
+            **clone_kwargs,
         )
 
     def call_tree_map_with_path_branch(
@@ -340,10 +344,14 @@ class BaseListVariable(VariableTracker):
                 )
             )
 
+        clone_kwargs = {}
+        if isinstance(self, TupleVariable) and self.python_type() is tuple:
+            clone_kwargs["identity_token"] = object() if new_items else None
         return self.clone(
             items=new_items,
             source=None,
             mutation_type=ValueMutationNew(),
+            **clone_kwargs,
         )
 
     def mp_subscript_impl(
@@ -2033,6 +2041,25 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
     _cpython_type = tuple
 
+    _nonvar_fields = {
+        "identity_token",
+        *BaseListVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        identity_token: object | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        self.identity_token = identity_token if items else None
+
+    def clone(self, **kwargs: Any) -> VariableTracker:
+        if "items" in kwargs and "identity_token" not in kwargs:
+            kwargs["identity_token"] = None
+        return super().clone(**kwargs)
+
     def tp_richcompare_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2086,11 +2113,42 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
         if cls is tuple or cls.__init__ is tuple.__init__:
             no_keywords(tx, "tuple", kwargs)
         if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-            init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
-            return TupleVariable(init_args, mutation_type=ValueMutationNew())
+            if (
+                len(args) == 2
+                and isinstance(args[1], TupleVariable)
+                and args[1].python_type() is tuple
+            ):
+                return args[1]
+            init_args: list[VariableTracker] = (
+                unpack_iterable(tx, args[1]) if len(args) == 2 else []
+            )
+            return TupleVariable(
+                init_args,
+                identity_token=object() if init_args else None,
+                mutation_type=ValueMutationNew(),
+            )
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], args[1:], tx=tx
         )
+
+    def getitem_const(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        if self.python_type() is tuple and pyslice_check(arg):
+            index = arg.as_index_slice(tx)
+            if index.step == 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["slice step cannot be zero"]
+                )
+            if index.indices(len(self.items)) == (0, len(self.items), 1):
+                return self
+            items = self.items[index]
+            return TupleVariable(
+                items,
+                identity_token=object() if items else None,
+                mutation_type=ValueMutationNew() if self.mutation_type else None,
+            )
+        return super().getitem_const(tx, arg)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
@@ -2117,8 +2175,19 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
                 f"can only concatenate tuple (not '{other.python_type_name()}') to tuple",
             )
 
+        other = other.realize()
+        if (
+            pytuple_checkexact(self)
+            and isinstance(other, TupleVariable)
+            and not other.items
+        ):
+            return self
+
+        items = self.items + unpack_iterable(tx, other)
         return TupleVariable(
-            self.items + unpack_iterable(tx, other), mutation_type=ValueMutationNew()
+            items,
+            identity_token=object() if items else None,
+            mutation_type=ValueMutationNew(),
         )
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
