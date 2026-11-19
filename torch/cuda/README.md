@@ -5,9 +5,9 @@ to program each locality domain of modern GPUs, enabling better locality of
 reference. This follows the general trend of moving compute to data instead of
 moving data to compute.
 
-The birds-eye view is 1) we create an SM-localized GreenContext object and then
-2) we pass kernels localized memory to operate on within that context. In its
-barest form, this works as follows:
+At a high level, this involves 1) creating an SM-localized `GreenContext`
+object and then 2) passing kernels localized memory to operate on within that
+context. In its simplest form, this works as follows:
 
 ```python
 import torch
@@ -52,12 +52,11 @@ This _succeeds_, but the kernel runs entirely on SMs associated with locality
 domain 0, and thus must fetch data from locality domain 1 for every read of
 `foo`. Performance will be considerably worse.
 
-Localization is a form of NUMA.
+Localization is analogous to NUMA (non-uniform memory access).
 
 ## Automated optimizations
 
-We introduce the new torch.cuda.localize API to enable automatic localization
-of entire networks. Usage is simple:
+`torch.cuda.localize` enables automatic localization of entire networks:
 
 ```python
 import torch
@@ -73,7 +72,7 @@ with torch.inference_mode():
 
 Localization and subsequent forward calls must run inside `torch.inference_mode()`.
 Keep `TORCH_CUBLAS_WORKSPACE_CACHE` unset or `0` before starting the process.
-We strongly encourage compiling the localized module with `mode="reduce-overhead"`, as shown above.
+Compiling the localized module with `mode="reduce-overhead"`, as shown above, is strongly recommended.
 
 The internal `_register_localizable_op` helper can register custom operations
 prior to invoking `torch.cuda.localize`; it is not a public API.
@@ -83,14 +82,14 @@ the same way it handles `torch.nn.Linear`.
 
 ### How it works
 
-The torch.cuda.localize API call walks the module tree for module types registered
+`torch.cuda.localize` walks the module tree for module types registered
 in `_LOCALIZABLE_OPS` (`torch.nn.Linear` by default). For each matching module, it
 swaps out the parameters named by the op's localized argument positions -- `weight` and
-`bias` for a linear -- with a torch.Tensor subclass. That subclass will transform every
+`bias` for a linear -- with a `torch.Tensor` subclass. That subclass transforms every
 localizable op into a fork/join pattern: it runs the op twice (once per green
-stream), and it pre-splits the weights into localized allocations. It will then
-concatenate the two outputs back together to form a single (unlocalized)
-tensor, so that downstream ops are none the wiser about what happened.
+stream), and it pre-splits the weights into localized allocations. It then
+concatenates the two outputs to form a single (unlocalized) tensor, so that
+downstream ops are unaffected.
 
 ### Issues and limitations
 
@@ -101,14 +100,14 @@ For every localizable op, we do considerable additional work:
 * An event is enqueued in the caller stream;
 * Two green streams each wait on that caller event;
 * Two kernel launches instead of one;
-* Each green stream records an event on their localized green stream;
+* Each green stream records an event on itself;
 * The caller stream waits on both green events;
 * A concatenate operation produces a non-localized tensor; and
 * The green streams wait for the caller to finish consuming their outputs before
   reusing the branch buffers.
 
 This adds latency per localizable op and can dominate performance for small ops.
-There is also additional overhead during torch.cuda.localize as it reallocates
+There is also additional overhead during `torch.cuda.localize`, as it reallocates
 weights using a slower mechanism than the normal allocator.
 
 CUDA graphs reduce CPU launch overhead by replaying the captured work.
@@ -116,13 +115,13 @@ Use `torch.compile(..., mode='reduce-overhead')` to enable CUDA graphs.
 
 #### No cost model
 
-`torch.cuda.localize` does not include any cost model at present. This means it
-will blindly localize every op that you tell it to, and not all ops will
-benefit from localization. Worse, as the overheads mentioned above imply, there
-is non-zero cost to localizing that will worsen performance on some workloads.
+`torch.cuda.localize` does not include a cost model at present. It
+localizes every registered op unconditionally, and not all ops benefit from
+localization. As the overheads described above imply, localization has a
+non-zero cost that can worsen performance on some workloads.
 
-Thus: it is likely localization will benefit part of your model, and slowdown
-other parts.
+As a result, localization is likely to speed up some parts of a model and slow
+down others.
 
 #### Numerics change
 

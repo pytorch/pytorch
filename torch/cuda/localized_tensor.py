@@ -73,10 +73,11 @@ class _LocalizationContext:
     Heavyweight: each ``GreenContext`` claims an SM partition and each
     ``MemPool`` reserves caching-allocator state. Create
     one per device and reuse it across all LocalizedTensors on that device.
-    ``_LocalizationContext.for_device(...)`` does this caching for you.
+    ``_LocalizationContext.for_device(...)`` returns a cached instance per
+    device.
 
-    This context should *not* be used to cache data as it is intended to have a
-    longer lifetime.
+    Do not use this context to cache data: it is intended to outlive
+    individual tensors.
 
     Each ``_LocalizedTensor`` owns its fork/join events. Stream handles come
     from each green context's round-robin pool, so different tensors may use
@@ -124,8 +125,7 @@ class _LocalizationContext:
         """Return the cached ``_LocalizationContext`` for ``device``,
         creating it lazily on first call.
 
-        Specifying a default `None` device will create the context for the
-        current device.
+        If ``device`` is ``None``, the current device is used.
 
         Raises ``RuntimeError`` if green-context localization is
         unsupported on this device (requires CUDA 13.4+, and
@@ -182,10 +182,9 @@ _LOCALIZATION_CONTEXT_CACHE: dict[int, _LocalizationContext] = {}
 # Localizable-op registry.
 # ---------------------------------------------------------------------------
 #
-# Downstream wrappers (TRT-LLM, etc.) register their linear-shaped custom
-# ops here so :class:`_LocalizedTensor`'s dispatch override knows how to
-# split them across the locality-domain branches.  Three argument
-# categories per op:
+# Downstream libraries register their linear-shaped custom ops here so
+# :class:`_LocalizedTensor`'s dispatch override knows how to split them
+# across the locality-domain branches.  Three argument categories per op:
 #
 #   - ``localized_args``: arg positions that are pre-localized; each is
 #     expected to be a :class:`_LocalizedTensor` (or ``None``) and the
@@ -194,8 +193,8 @@ _LOCALIZATION_CONTEXT_CACHE: dict[int, _LocalizationContext] = {}
 #
 #   - ``sliced_args``: arg positions that should be split per-branch as a
 #     view but are *not* pool-localized.  Used for per-output-channel
-#     side tensors like quantization scales -- they're small enough that
-#     their default-pool storage doesn't meaningfully cost locality.
+#     side tensors like quantization scales -- they are small enough that
+#     keeping them in the default pool has negligible locality cost.
 #     Values may be ``None``, an empty list, a Tensor, or a List[Tensor];
 #     the dispatch handles each accordingly.
 #
@@ -238,9 +237,9 @@ def _register_localizable_op(
     else through unchanged, runs ``op(*per_branch_args, **kwargs)`` on the
     branch's green-context-backed stream, and concatenates outputs.
 
-    .. note:: The tensors are concatenated along dimension -1. If this is
-    inappropriate for your network/use case, please file an issue and ask to
-    specify the concatenation dimension as well.
+    .. note::
+        Branch outputs are always concatenated along dimension -1; the
+        concatenation dimension is not currently configurable.
 
     Args:
         op: the ``OpOverload`` to register, e.g.
@@ -361,8 +360,8 @@ class _LocalizedTensor(torch.Tensor):
     # ``__torch_function__`` runs before aten decomposition, which is where
     # we want to intercept ``linear``: ``aten.linear`` is decomposed to
     # ``aten.t`` + ``aten.mm`` early in the dispatch chain, so by the time
-    # ``__torch_dispatch__`` sees an op the 'linear' we want to override is long
-    # gone.  Every localizable op -- the built-in ``F.linear`` as much as a
+    # ``__torch_dispatch__`` runs, the ``linear`` op we want to override is
+    # already gone.  Every localizable op -- the built-in ``F.linear`` as much as a
     # downstream custom op -- arrives here as ``func`` and is looked up in
     # ``_LOCALIZABLE_OPS``, which :func:`localize` populates before it can
     # hand out a _LocalizedTensor.
@@ -538,8 +537,8 @@ class _LocalizedTensor(torch.Tensor):
                     f"Tensors for sliced_args; got {type(v).__name__}"
                 )
 
-        # Every position we substitute per branch.  Localized wins if a
-        # position was somehow registered as both.
+        # Every position we substitute per branch.  Localized takes precedence
+        # if a position is registered as both.
         substitutions: dict[int, list[Any]] = {**sliced_per_branch, **localized_halves}
 
         # Mark non-localized inputs as ready on the calling stream so each
@@ -620,12 +619,12 @@ def _localize_tensor(
 
     Used by :func:`localize` for each localizable layer's parameters.
     Returns a :class:`_LocalizedTensor` whose halves are allocated in
-    per-locality-domain mempools.  Public callers should reach for
+    per-locality-domain mempools.  Public callers should use
     :func:`localize` (which walks an ``nn.Module`` tree) instead of invoking
     this directly.
 
-    If `num_partitions` is `None`, the tensor will be divided into however many
-    partitions makes sense for the hardware.
+    If ``num_partitions`` is ``None``, the tensor is divided into one partition
+    per locality domain of the device.
 
     Everything is localized onto ``tensor``'s own device; splitting a tensor
     across some other device's locality domains would mean moving it there.
@@ -779,8 +778,8 @@ def localize(
             in green-context-pinned mempools so their addresses are
             stable across iterations; marking them static lets
             cudagraph_trees skip the per-iter ``_foreach_copy_`` it
-            would otherwise emit.  Disable for A/B benches that want
-            to attribute the cudagraph win to this knob.
+            would otherwise emit.  Set to ``False`` to leave the halves
+            unmarked.
 
     If a parameter's device does not support green-context localization
     (hardware without locality domains, or a driver older than CUDA
