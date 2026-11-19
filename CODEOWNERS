@@ -971,8 +971,8 @@
 # owner: @atalman @huydhn @malfet
 /.ci/docker/ @atalman @huydhn @malfet
 # label: module: ci, module: inductor
-# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
 #
 # [infra_github_automation]
 # label: module: ci, module: github automation
