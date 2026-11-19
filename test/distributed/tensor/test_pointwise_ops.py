@@ -715,6 +715,42 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
     @with_comms
+    @parametrize("reduce_op", ["max", "min"])
+    def test_inplace_on_partial_max_min_raises(self, reduce_op):
+        # The out-of-place versions of these ops reduce a pending
+        # Partial("max"/"min") input first. An in-place op cannot change its
+        # input's placement, so it raises instead.
+        device_mesh = self.build_device_mesh()
+        rows = torch.arange(
+            2 * self.world_size, dtype=torch.float32, device=self.device_type
+        ).reshape(self.world_size, 2)
+        sharded = distribute_tensor(rows, device_mesh, [Shard(0)])
+        d_input = sharded.amax(0) if reduce_op == "max" else sharded.amin(0)
+        self.assertEqual(d_input.placements, (Partial(reduce_op),))
+        d_other = distribute_tensor(
+            torch.ones(2, device=self.device_type), device_mesh, [Replicate()]
+        )
+
+        inplace_ops = {
+            "sign_": lambda x: x.sign_(),
+            "sgn_": lambda x: x.sgn_(),
+            "nan_to_num_": lambda x: x.nan_to_num_(),
+            "add_": lambda x: x.add_(d_other),
+            "sub_": lambda x: x.sub_(d_other),
+            "_foreach_add_": lambda x: torch._foreach_add_([x], [d_other]),
+            "_foreach_sub_": lambda x: torch._foreach_sub_([x], [d_other]),
+        }
+        for name, op in inplace_ops.items():
+            with (
+                self.subTest(op=name),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "in-place operations that require placement changes are not supported",
+                ),
+            ):
+                op(d_input)
+
+    @with_comms
     def test_neg_partial(self):
         # test that neg preserves Partial placement without communication
         # math: -(A1 + A2) = -A1 + -A2
@@ -1492,7 +1528,9 @@ class DistPartialNaNInfTest(DTensorTestBase):
         # at the dtype limit; the other ranks hold ordinary values. NCCL's
         # all_reduce MAX/MIN ignores NaN (the result is NaN only if every rank
         # holds NaN). Rules that break only when NaN propagates are covered by
-        # test_partial_max_min_with_nan and test_bucketize_partial_input.
+        # test_partial_max_min_with_nan and test_bucketize_partial_input, and
+        # the inf-norm rules, which break on every backend, by
+        # test_inf_norm_of_pending_partial in test_math_ops.py.
         nan, inf = float("nan"), float("inf")
         mesh = self.build_device_mesh()
 
@@ -1562,24 +1600,6 @@ class DistPartialNaNInfTest(DTensorTestBase):
             ),
             "amin P(min)": (torch.amin, hidden_min),
             "min P(min)": (torch.min, hidden_min),
-        }
-
-        # abs is not monotone: rank 0's -9 does not win the reduction, but
-        # |-9| does. No NaN needed, so this breaks on every backend.
-        neg_max = pending("max", [-9.0, 1.0], [1.0, 2.0])
-        cases |= {
-            "vector_norm(inf) P(max)": (
-                lambda x: torch.linalg.vector_norm(x, inf),
-                neg_max,
-            ),
-            "_foreach_norm(inf) P(max)": (
-                lambda x: torch._foreach_norm([x], inf)[0],
-                neg_max,
-            ),
-            "vector_norm(-inf) P(min)": (
-                lambda x: torch.linalg.vector_norm(x, -inf),
-                pending("min", [-9.0, 4.0], [1.0, 2.0]),
-            ),
         }
 
         # inf - inf makes NaN on rank 0 only. Column 1 breaks when the

@@ -985,6 +985,42 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(out_0.placements[0].reduce_op, "sum")
 
     @with_comms
+    def test_inf_norm_of_pending_partial(self):
+        # inf/-inf norms reduce a pending Partial("max"/"min") input first: abs
+        # is not monotone, so norms of the local values can disagree with the
+        # norm of the reduced input. E.g. Partial("max") with local values
+        # [-9, 1] on rank 0 and [1, 2] on the other ranks: the input is [1, 2]
+        # and its inf-norm is 2, but max(norm([-9, 1]), norm([1, 2])) = 9.
+        device_mesh = self.build_device_mesh()
+        inf = float("inf")
+        rows = torch.tensor([[1.0, 2.0]], device=self.device_type).repeat(
+            self.world_size, 1
+        )
+        rows[0] = torch.tensor([-9.0, 1.0])
+        # Local value on rank r is rows[r]
+        partial_max = distribute_tensor(rows, device_mesh, [Shard(0)]).amax(0)
+        self.assertEqual(partial_max.placements, (Partial("max"),))
+        full_max = partial_max.full_tensor()
+        self.assertEqual(
+            torch.linalg.vector_norm(partial_max, inf).full_tensor(),
+            torch.linalg.vector_norm(full_max, inf),
+        )
+        self.assertEqual(
+            torch._foreach_norm([partial_max], inf)[0].full_tensor(),
+            torch._foreach_norm([full_max], inf)[0],
+        )
+
+        # Partial("min") of [-9, 4] and [1, 2]: the input is [-9, 2] and its
+        # -inf-norm is 2, but min(norm([-9, 4]), norm([1, 2])) = 1.
+        rows[0] = torch.tensor([-9.0, 4.0])
+        partial_min = distribute_tensor(rows, device_mesh, [Shard(0)]).amin(0)
+        self.assertEqual(partial_min.placements, (Partial("min"),))
+        self.assertEqual(
+            torch.linalg.vector_norm(partial_min, -inf).full_tensor(),
+            torch.linalg.vector_norm(partial_min.full_tensor(), -inf),
+        )
+
+    @with_comms
     def test_foreach_powsum_sharded(self):
         """Test that _foreach_powsum produces correct values and placements for sharded input."""
         device_mesh = self.build_device_mesh()
