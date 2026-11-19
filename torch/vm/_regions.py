@@ -1091,9 +1091,9 @@ def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> 
     """What tells, without the walk of ``_describe``, that a later call is
     like this one, which was described the long way, and gives what the
     walk would (``Usual`` of the runtime). None if this call is not of the
-    kind it knows: it came with a set, a method or an object with
-    attributes, a module was looked at for the first time or is not watched,
-    a tensor of a module came on its own as well."""
+    kind it knows: it came with a set or a method of a builtin, a module was
+    looked at for the first time or is not watched, a tensor of a module
+    came on its own as well."""
     if _function_stack():
         return None
     epoch = _runtime.module_epoch()
@@ -1118,6 +1118,18 @@ def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> 
             return ("value", obj) if len(part) == 2 and part[0] is cls else None
         if part[0] == "object":
             return ("object", obj)
+        if part[0] == "again":
+            # A list, a dict, a cell or an object with attributes that the
+            # call had before: the one it holds there.
+            index = -1 - part[1] if type(part[1]) is int else -1
+            if 0 <= index < len(inputs.held) and inputs.held[index] is obj:
+                return ("again", index) if id(obj) in held else None
+            return None
+        if cls is types.MethodType:
+            if part[0] != "method" or part[1] != id(obj.__func__):
+                return None
+            inner = spec(obj.__self__, part[2])
+            return None if inner is None else ("method", obj.__func__, inner)
         if cls is types.CellType:
             if part[0] != "cell" or id(obj) in held:
                 return None
@@ -1126,7 +1138,7 @@ def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> 
             return None if inner is None else ("cell", inner)
         if cls is tuple or cls is list or cls is dict:
             if cls is not tuple:
-                if part[0] == "again" or id(obj) in held:
+                if id(obj) in held:
                     return None
                 held.add(id(obj))
             values = obj.values() if cls is dict else obj
@@ -1172,6 +1184,14 @@ def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> 
             if len(items) != len(children) or any(item is None for item in items):
                 return None
             return ("node", cls, node.flatten_fn, part[1], items)
+        if part[0] == "instance" and part[1] is cls and id(obj) not in held:
+            # An object that is its class and its attributes.
+            held.add(id(obj))
+            state = vars(obj)
+            items = [spec(item, sub) for item, sub in zip(state.values(), part[3])]
+            if tuple(state) != part[2] or any(item is None for item in items):
+                return None
+            return ("instance", cls, part[2], items)
         return None
 
     nodes = []
