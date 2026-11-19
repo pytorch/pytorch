@@ -85,7 +85,7 @@ def register_decomposition(
             raise AssertionError(f"Duplicated function name {f.__name__}")
         function_name_set.add(f.__name__)
 
-        scripted_func = torch.jit.script(f)
+        scripted_func = torch.jit._script.script(f)
         torch._C._jit_pass_inline(scripted_func.graph)
 
         for _ in range(2):

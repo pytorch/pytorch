@@ -773,6 +773,95 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output.sum().backward()
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_uneven_shard_dim1(self):
+        # A (2, 9) weight over 8 ranks pads every shard to (2, 2): ranks 0-3
+        # hold 2 columns, rank 4 holds 1 and ranks 5-7 hold none
+        def pad(local_tensor):
+            padded = local_tensor.new_zeros(2, 2)
+            padded[:, : local_tensor.size(1)] = local_tensor
+            return padded
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            if payload == "tensor":
+                return (pad(local_tensor),), None
+            # Columns as rows, like a shard dim moved to the front
+            return (AllGatherInput(pad(local_tensor).t().contiguous(), dim=0),), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            (gathered,) = all_gather_outputs
+            # The extension drops the gathered padding
+            if payload == "tensor":
+                weight = gathered.view(2, -1)[:, :9]
+            else:
+                weight = gathered[:9].t()
+            return _finish_post_all_gather(weight.contiguous(), out)
+
+        inp = torch.randn((2, 9), device=device_type)
+        dist.broadcast(inp, src=0)
+        for payload in ("tensor", "record"):
+            model = nn.Linear(9, 2, bias=False, device=device_type)
+            dist.broadcast(model.weight.detach(), src=0)
+            ref_model = copy.deepcopy(model)
+            fully_shard(model, shard_placement_fn=lambda param: Shard(1))
+            self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+            for _ in range(2):
+                output = model(inp)
+                ref_output = ref_model(inp)
+                self.assertEqual(output, ref_output)
+                output.sum().backward()
+                ref_output.sum().backward()
+                check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_uneven_shard_dim1_keeps_padding(self):
+        # Rows of the gathered (2, 9) weight hold padding on 8 ranks, which a
+        # prefix of the output can't drop, so every rank raises
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            padded = local_tensor.new_zeros(2, 2)
+            padded[:, : local_tensor.size(1)] = local_tensor
+            return (padded,), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            (gathered,) = all_gather_outputs
+            return _finish_post_all_gather(gathered.contiguous(), out)
+
+        model = nn.Linear(9, 2, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda param: Shard(1))
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        with self.assertRaisesRegex(
+            ValueError, "must drop the padding in each row of the all-gather outputs"
+        ):
+            model(torch.randn((2, 9), device=device_type))
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_legacy_uneven_shard_dim1(self):
+        def shard_dim1(in_features: int) -> None:
+            model = nn.Linear(in_features, 2, bias=False, device=device_type)
+            model.weight = nn.Parameter(TwoTensor(model.weight, model.weight.clone()))
+            fully_shard(model, shard_placement_fn=lambda param: Shard(1))
+
+        # A (2, 9) weight over 8 ranks needs padded shards, and the 1-argument hook
+        # gets no outer_size to pad with, so every rank refuses it, including the
+        # full ranks 0-3. Even shards and the 5-argument hook pass.
+        msg = "FSDP does not support uneven sharding on dim 1 for all-gather extensions whose fsdp_pre_all_gather takes only mesh: torch.Size([2, 9]) (world size: 8)"
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
+            with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
+                shard_dim1(9)
+            shard_dim1(16)
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=2):
+            shard_dim1(9)
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_layout_cache(self):
         # FSDP caches layouts per kind, dim, size and dtype of the inputs. Shard(1)
         # reassembles a plain tensor's rows but concatenates a dim-0 record.
