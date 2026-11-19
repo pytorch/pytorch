@@ -206,7 +206,9 @@ def is_cudnn_sdp_python_available() -> bool:
     Returns whether ``nvidia-cudnn-frontend``'s ``cudnn.torch`` module can be
     found. It imports the ``cudnn`` package to look, but not ``cudnn.torch``,
     and does not check the version: :func:`enable_cudnn_sdp_python` still
-    raises if the installed package is older than it requires.
+    raises if the installed package is older than it requires. An installed
+    ``cudnn`` package that fails to import is reported as unavailable;
+    :func:`enable_cudnn_sdp_python` raises the underlying error.
     """
     return _cudnn.is_available()
 
@@ -216,10 +218,12 @@ def cudnn_sdp_python_enabled() -> bool:
     .. warning:: This API is beta and subject to change.
 
     Returns whether :func:`enable_cudnn_sdp_python` has installed the cuDNN
-    frontend's implementation. A call reaches it only when cuDNN scaled dot
-    product attention is selected (see
-    :func:`torch.backends.cuda.enable_cudnn_sdp`), and the frontend passes
-    configurations it does not support to the built-in C++ implementation.
+    frontend's implementation. Dense scaled dot product attention reaches it
+    only when the cuDNN backend is selected (see
+    :func:`torch.backends.cuda.enable_cudnn_sdp`). Every varlen call reaches
+    it, and it passes on the calls that did not select cuDNN. Either way, the
+    frontend passes configurations it does not support to the built-in C++
+    implementation.
     """
     return _cudnn.is_enabled()
 

@@ -1,6 +1,8 @@
 # Owner(s): ["module: sdpa"]
 
+import functools
 import importlib.machinery
+import importlib.util
 import itertools
 import sys
 import types
@@ -26,21 +28,37 @@ _NO_CUDNN_ATTENTION = "cuDNN attention unsupported"
 _PROVIDER = _cudnn._CUDNN_MODULE_PATH
 
 
+@functools.cache
 def _cudnn_python_available() -> bool:
     if not torch.cuda.is_available():
         return False
-    if not attention.is_cudnn_sdp_python_available():
-        return False
-    # Only a missing or too-old dependency means unavailable: any other failure
-    # to import an installed provider, or a provider without the dispatch
-    # counter these tests read, must fail the tests rather than skip them.
+    # Only a missing or too-old frontend means unavailable. An installed one
+    # that fails to load must fail the tests rather than skip them, so this
+    # does not use is_cudnn_sdp_python_available(), which reports that as
+    # unavailable too.
     try:
         _cudnn._check_frontend_version(_PROVIDER)
+    except ModuleNotFoundError as e:
+        if e.name != "cudnn":
+            raise
+        return False
     except _cudnn._FrontendVersionError:
         return False
     q = torch.empty(_SHAPE, device="cuda", dtype=torch.bfloat16)
     params = torch.backends.cuda.SDPAParams(q, q, q, None, 0.0, True, False)
     return torch.backends.cuda.can_use_cudnn_attention(params, False)
+
+
+def _requires_cudnn_python(test):
+    # Checked when the test runs, not when the module is imported, so a gate
+    # that raises fails only the tests that need the frontend.
+    @functools.wraps(test)
+    def wrapper(self, *args, **kwargs):
+        if not _cudnn_python_available():
+            raise unittest.SkipTest("cuDNN Python SDPA unavailable")
+        return test(self, *args, **kwargs)
+
+    return wrapper
 
 
 def _varlen_cudnn_supported(device) -> bool:
@@ -181,7 +199,9 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         # flash attention registry as a second switch.
         _use_provider(self, _fake_install(self.live, "cudnn"), version="1.32.2")
         required = f"nvidia-cudnn-frontend>={_cudnn._MIN_FRONTEND_VERSION}"
-        with self.assertRaisesRegex(RuntimeError, f"{required}.*1.32.2"):
+        with self.assertRaisesRegex(
+            _cudnn._FrontendVersionError, f"{required}.*1.32.2"
+        ):
             _cudnn.enable()
         self.assertFalse(_cudnn.is_enabled())
         self.assertEqual(self.live, [])
@@ -192,14 +212,14 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         # still wins.
         _use_provider(self, None, version="1.32.2")
         with mock.patch.dict(sys.modules, {_PROVIDER: None}):
-            with self.assertRaisesRegex(RuntimeError, "is required"):
+            with self.assertRaisesRegex(_cudnn._FrontendVersionError, "is required"):
                 _cudnn.enable()
 
     def test_prerelease_of_the_required_version_is_rejected(self):
         # A pre-release may predate the changes the minimum version stands for.
         version = f"{_cudnn._MIN_FRONTEND_VERSION}rc1"
         _use_provider(self, _fake_install(self.live, "cudnn"), version=version)
-        with self.assertRaisesRegex(RuntimeError, "is required"):
+        with self.assertRaisesRegex(_cudnn._FrontendVersionError, "is required"):
             _cudnn.enable()
         self.assertEqual(self.live, [])
 
@@ -304,7 +324,7 @@ class TestCuDNNPythonSDPA(TestCase):
         self.assertEqual(self._sdpa(q), ref)
         self.assertEqual(len(calls), 1)
 
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @_requires_cudnn_python
     def test_selected_backend_serves_forward_and_backward(self, device):
         # Both implementations launch cuDNN kernels, so kernel names cannot tell
         # them apart; the provider's dispatch counter can.
@@ -317,6 +337,7 @@ class TestCuDNNPythonSDPA(TestCase):
         )
         grad = torch.randn(_SHAPE, device=device, dtype=torch.bfloat16)
 
+        self.assertTrue(attention.is_cudnn_sdp_python_available())
         attention.enable_cudnn_sdp_python(True)
         calls = provider.calls
         fwd0, bwd0 = calls["fwd"], calls["bwd"]
@@ -333,14 +354,14 @@ class TestCuDNNPythonSDPA(TestCase):
         for got, want in pairs:
             self.assertEqual(got.float(), want, atol=3e-2, rtol=3e-2)
 
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @_requires_cudnn_python
     def test_provider_leaves_the_flash_attention_registry_alone(self, device):
         # A frontend that registered "CUDNN" there too would give a second
         # switch for the same overrides.
         attention.enable_cudnn_sdp_python(True)
         self.assertNotIn("CUDNN", attention.list_flash_attention_impls())
 
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @_requires_cudnn_python
     def test_disable_restores_builtin_path(self, device):
         import cudnn.torch as provider
 
@@ -354,7 +375,7 @@ class TestCuDNNPythonSDPA(TestCase):
             F.scaled_dot_product_attention(q, q, q, is_causal=True)
         self.assertEqual(provider.calls["fwd"], fwd0)
 
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @_requires_cudnn_python
     def test_varlen_follows_the_selected_backend(self, device):
         # The provider serves the varlen calls that selected cuDNN and leaves
         # the ones that selected flash to torch.
@@ -389,7 +410,7 @@ class TestCuDNNPythonSDPA(TestCase):
                 for g, e in zip(got, expected):
                     self.assertEqual(g, e, atol=3e-2, rtol=3e-2)
 
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @_requires_cudnn_python
     def test_varlen_out_follows_the_selected_backend(self, device):
         import cudnn.torch as provider
 
@@ -414,7 +435,7 @@ class TestCuDNNPythonSDPA(TestCase):
                 attention.enable_cudnn_sdp_python(False)
                 self.assertEqual(out, expected, atol=3e-2, rtol=3e-2)
 
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @_requires_cudnn_python
     @parametrize("layout", ["bhsd", "bshd"])
     @parametrize("is_causal", [False, True])
     def test_compiled_matches_eager(self, device, layout, is_causal):
@@ -452,7 +473,7 @@ class TestCuDNNPythonSDPA(TestCase):
             self.assertEqual(got.stride(), want.stride())
             self.assertEqual(got, want, atol=2e-2, rtol=2e-2)
 
-    @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
+    @_requires_cudnn_python
     def test_outputs_match_the_aten_meta_function(self, device):
         # Every query layout: the provider's outputs must have the shapes,
         # strides and dtypes that the retained ATen meta function reports.
