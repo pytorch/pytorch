@@ -153,6 +153,20 @@ _PINNED_CONFIG_ERRORS = (
 )
 
 
+def kernel_dsl_name(fn) -> str:
+    """Name of the DSL a kernel is written in, for diagnostics.
+
+    Gluon kernels compile through Triton and share this autotuning
+    path, but reporting them as Triton kernels misdirects debugging.
+    Matched by class name to avoid importing triton.experimental.
+    """
+    return (
+        "gluon"
+        if any(cls.__name__ == "GluonJITFunction" for cls in type(fn).__mro__)
+        else "triton"
+    )
+
+
 def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
     """
     Enable Triton debug asserts whenever indirect indexing asserts are on,
@@ -1024,8 +1038,9 @@ class CachingAutotuner(KernelInterface):
             return
         if self.launchers:
             raise AssertionError("launchers already populated before precompile")
+        dsl = kernel_dsl_name(self.fn)
         if not self.configs:
-            raise NoTritonConfigsError("No triton configs are available")
+            raise NoTritonConfigsError(f"No {dsl} configs are available")
 
         compile_results = []
         exc_msg = ""
@@ -1035,7 +1050,7 @@ class CachingAutotuner(KernelInterface):
             except (OutOfResources, PTXASError, IntelGPUError) as e:
                 exc_msg = f"{type(e).__name__}: {e}"
         if len(compile_results) == 0:
-            raise NoTritonConfigsError(f"No valid triton configs. {exc_msg}")
+            raise NoTritonConfigsError(f"No valid {dsl} configs. {exc_msg}")
         self.compile_results = compile_results
         self.configs = None
 
@@ -1296,7 +1311,8 @@ class CachingAutotuner(KernelInterface):
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
                     raise NoTritonLaunchersError(
-                        f"No valid triton configs. {type(exc).__name__}: {exc}"
+                        f"No valid {kernel_dsl_name(self.fn)} configs. "
+                        f"{type(exc).__name__}: {exc}"
                     )
             self.launchers = launchers
         finally:
@@ -1436,6 +1452,7 @@ class CachingAutotuner(KernelInterface):
         )
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
+        compile_meta["num_ctas"] = getattr(cfg, "num_ctas", 1)
 
         cfg_kwargs = {**cfg.kwargs}
         if self.device_props.type == "hip":
@@ -1551,6 +1568,7 @@ class CachingAutotuner(KernelInterface):
         options = {
             "num_warps": compile_meta["num_warps"],
             "num_stages": compile_meta["num_stages"],
+            "num_ctas": compile_meta["num_ctas"],
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
@@ -1610,8 +1628,21 @@ class CachingAutotuner(KernelInterface):
         if not ASTSource:
             raise RuntimeError("Installed triton version too old, please upgrade")
 
+        # Gluon needs its own ASTSource for the extended IR builder.
+        ast_source_class = ASTSource
+        try:
+            from triton.experimental.gluon._runtime import (
+                GluonASTSource,
+                GluonJITFunction,
+            )
+        except ImportError:
+            pass
+        else:
+            if isinstance(self.fn, GluonJITFunction):
+                ast_source_class = GluonASTSource
+
         compile_args = (
-            ASTSource(
+            ast_source_class(
                 self.fn,
                 compile_meta["signature"],
                 compile_meta["constants"],
@@ -2423,10 +2454,6 @@ class CachingAutotuner(KernelInterface):
 
         # Prefer Level 0 launch metadata schema (versioned, stable contract)
         # over hasattr probing of CompiledKernel internals.
-        # TODO: When the AOTI C++ launch path gains cuLaunchKernelEx support for
-        # CTA clusters, add num_ctas/cluster_dims here from the schema.
-        # Currently num_ctas is already captured via config_to_dict(launcher.config)
-        # for scratch space scaling, but is not used in the actual kernel launch.
         binary_metadata = binary.metadata
         legacy_tensordesc_meta = (
             binary_metadata.get("tensordesc_meta")
@@ -5569,6 +5596,7 @@ def template(
     triton_meta: TritonMeta,
     num_consumer_groups=0,
     num_buffers_warp_spec=0,
+    num_ctas=1,
     filename=None,
     inductor_meta: InductorMeta | None = None,
     **kwargs,
@@ -5580,6 +5608,7 @@ def template(
     config_args = {
         "num_stages": num_stages,
         "num_warps": num_warps,
+        "num_ctas": num_ctas,
     }
     config_kwargs = {}
 
@@ -5648,6 +5677,8 @@ def config_to_dict(config: Config) -> dict[str, Any]:
     # grids are looked up by comparing these dicts.
     if (ctas_per_cga := config_ctas_per_cga(config)) is not None:
         config_dict["ctas_per_cga"] = ctas_per_cga
+    if getattr(config, "num_ctas", 1) != 1:
+        config_dict["num_ctas"] = config.num_ctas
     if HAS_WARP_SPEC:
         config_dict.update(
             {
