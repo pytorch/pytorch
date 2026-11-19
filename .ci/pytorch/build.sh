@@ -25,12 +25,9 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-sm90 ]]; then
   # The build the H100 perf workflow measures carries the runtime of torch.vm,
-  # a Rust crate, and the image has no cargo.
-  if ! command -v cargo >/dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-    # shellcheck source=/dev/null
-    source "$HOME/.cargo/env"
-  fi
+  # a Rust crate. The image's cargo keeps its registry where a build cannot
+  # write.
+  export CARGO_HOME="$HOME/.cargo"
   export USE_TORCH_VM=1
 fi
 
