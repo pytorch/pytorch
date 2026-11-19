@@ -411,6 +411,20 @@ class _LocalizedTensor(torch.Tensor):
                 halves = tuple(h.detach() for h in inp._halves)
                 return _LocalizedTensor(halves, inp._ctx)
 
+        for schema_arg, value in zip(op._schema.arguments, args):
+            alias_info = schema_arg.alias_info
+            if alias_info is not None and alias_info.is_write:
+                if any(
+                    isinstance(t, _LocalizedTensor)
+                    for t in (value if isinstance(value, (list, tuple)) else (value,))
+                ):
+                    raise NotImplementedError(
+                        f"{op} would modify a localized tensor in place, which is "
+                        "not supported: the write would only reach a temporary "
+                        "copy and be silently dropped. Load or modify weights "
+                        "before calling torch.cuda.localize()."
+                    )
+
         # Slow path: reify each _LocalizedTensor by concatenating its halves and
         # re-dispatch on plain tensors.  We intentionally walk args manually
         # (not via tree_map) because pytree treats _LocalizedTensor as a node
@@ -744,6 +758,12 @@ def localize(
     Unlocalizable holders of a tied weight (such as ``nn.Embedding``) will
     reify the full tensor on each forward via the slow concat path, but
     produce correct results.
+
+    Localized parameters are read-only: in-place updates (``copy_``,
+    ``load_state_dict``, ``nn.init``, optimizer steps) raise
+    :class:`NotImplementedError` instead of silently doing nothing.  Load
+    or modify weights before calling :func:`localize`.  Converting a
+    localized module with ``.half()`` or ``.to()`` is likewise unsupported.
 
     Unregistered module types, and registered ones that are already
     localized, are left alone.  The same ``module`` object is returned for

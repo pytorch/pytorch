@@ -475,6 +475,20 @@ class TestLocalizeContract(TestCase):
         self.assertEqual(tuple(m.fc.bias.shape), (128,))
 
     @_requires_green_contexts
+    def test_inplace_update_of_localized_param_raises(self):
+        m = _OneLinear(64, 128).cuda()
+        sd = {k: torch.zeros_like(v) for k, v in m.state_dict().items()}
+        with torch.inference_mode():
+            torch.cuda.localize(m)
+            with self.assertRaisesRegex(NotImplementedError, "in place"):
+                m.fc.weight.copy_(torch.zeros(128, 64, device="cuda"))
+            with self.assertRaisesRegex(RuntimeError, "in place"):
+                m.load_state_dict(sd)
+            with self.assertRaisesRegex(NotImplementedError, "in place"):
+                torch._foreach_add_([m.fc.weight], 1.0)
+            m(torch.randn(4, 64, device="cuda"))
+
+    @_requires_green_contexts
     def test_localize_idempotent(self):
         """Re-localizing should be a no-op."""
         m = _OneLinear(64, 128).cuda()
