@@ -2969,6 +2969,27 @@ def frame_binds_in_a_comprehension(n):
     return [sorted(frame_variables()) for i in range(n)], sorted(frame_variables())
 
 
+def frame_evals(a):
+    b = a + 1  # noqa: F841
+    return eval("a + b"), eval("a + b", {"a": 10, "b": 20})
+
+
+def frame_execs(a):
+    scope = {}
+    exec("c = a * 3", {"a": a}, scope)
+    exec("d = a + 1")
+    return scope, locals()["d"]
+
+
+def frame_reads_through_another_name(a, b):
+    read = locals
+    return sorted(read())
+
+
+def frame_super(obj, x):
+    return obj.scale(x)
+
+
 def frame_fails(a):
     b = a + 1
     c = [b]
@@ -3051,23 +3072,23 @@ class TestVmFrames(TestCase):
             self.assertEqual(compiled(*args, **more), f(*args, **more))
         self.assertIn("store_local", compiled.dump())
 
-    def test_function_that_reads_its_frame_is_not_compiled(self):
-        def uses_eval(a):
-            return eval("a + 1")
-
-        def passes_locals_on(a, b):
-            read = locals
-            return sorted(read())
-
-        for f, args, why in (
-            (uses_eval, (1,), r"eval\(\) reads the local variables of the frame"),
-            (passes_locals_on, (1, 2), "locals, vars or dir is not called where"),
-        ):
-            with self.assertRaisesRegex(torch.vm.Unsupported, why):
-                torch.vm(f, fallback=False)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.assertEqual(torch.vm(f)(*args), f(*args))
+    @parametrize(
+        "f,args",
+        (
+            (frame_evals, (1,)),
+            (frame_execs, (2,)),
+            (frame_reads_through_another_name, (1, 2)),
+            (frame_super, (FrameChild(), 3)),
+        ),
+        name_fn=lambda f, args: f.__name__,
+    )
+    def test_function_that_reads_its_frame_is_compiled(self, f, args):
+        compiled = torch.vm(f, fallback=False)
+        for _ in range(4):
+            self.assertEqual(compiled(*args), f(*args))
+        if f is frame_super:
+            # `parent = super()` finds the class and the instance in the frame.
+            self.assertIn("FrameChild.scale", compiled.stats()["compiled_callees"])
 
     @parametrize("inline", (False, True))
     def test_traceback_has_the_variables(self, inline):
@@ -3147,7 +3168,6 @@ class TestVmFrames(TestCase):
             got = compiled(x, y)
         self.assertEqual(list(got), ["x", "y", "z", "w"])
         self.assertEqual(got, f(x, y))
-        self.assertIn("locals %", compiled.dump())
 
     def test_global_called_locals_that_is_something_else_is_called(self):
         def f(a):
@@ -3285,7 +3305,7 @@ class TestVmFrames(TestCase):
                 traceback.clear_frames(e.__traceback__)
                 self.assertIsNone(probes[-1]())
 
-    def test_callee_that_reads_its_frame_runs_in_the_interpreter(self):
+    def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
             return eval("'{}={}'.format(name, value)")
 
@@ -3294,12 +3314,11 @@ class TestVmFrames(TestCase):
 
         compiled = torch.vm(f, fallback=False)
         self.assertEqual(compiled(FrameChild(), 3), ("x=3", 7))
-        # What an interpreted function calls is not compiled either.
-        self.assertEqual(compiled.stats()["compiled_callees"], [])
-        interpreted = compiled.stats()["interpreted_callees"]
-        self.assertEqual(
-            [name.rsplit(".", 1)[-1] for name in interpreted], ["scale", "fmt"]
-        )
+        self.assertEqual(compiled.stats()["interpreted_callees"], [])
+        names = [
+            name.rsplit(".", 1)[-1] for name in compiled.stats()["compiled_callees"]
+        ]
+        self.assertEqual(sorted(names), ["fmt", "scale", "scale"])
 
 
 def breaker_signals_itself(log):

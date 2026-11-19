@@ -447,6 +447,9 @@ def _is_pure(callee: Any) -> bool:
 # Instructions that take a value without looking at it: one that keeps it
 # alive, and one that binds a variable of the frame to it.
 _KEEPS = ("hold", "store_local")
+# What finds its caller's variables in the frame when called without
+# arguments: a region runs its instructions from frames of its own.
+_FRAME_READERS = (locals, vars, dir, super)
 
 
 def _problem(
@@ -462,6 +465,8 @@ def _problem(
         reason = _callee_problem(callee, local, given)
         if reason is not None:
             return reason
+        if len(uses) == 1 and any(callee is reader for reader in _FRAME_READERS):
+            return "reads the variables of the frame"
         if any(callee is scalar for scalar in _SCALARS):
             if any(isinstance(env.get(v), torch.Tensor) for v in uses[1:]):
                 return "reads the data of a tensor"
