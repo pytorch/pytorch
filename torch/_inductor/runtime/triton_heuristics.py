@@ -4783,6 +4783,14 @@ def _handle_combo_kernel_per_subkernel_blocks(
         if "stitched_launch_candidates" in combo_meta:
             launch_candidates = combo_meta["stitched_launch_candidates"]
             block_config = combo_meta.get("default_config") or {}
+            if any(
+                combo_meta.get(f"heuristic_{i}", "pointwise") != "pointwise"
+                for i in range(combo_meta["num_kernels"])
+            ):
+                # Reduction subkernels already run their coordinate-descent-tuned
+                # standalone winners; retuning blocks or warps here would change
+                # their summation order.
+                inductor_meta["coordinate_descent_tuning"] = False
             # Blocks are args here (not baked), so coordinate descent can refine
             # the per-subkernel block sizes on top of the compile-time winners.
             field_order, field_limits, field_minimums = _combo_coordesc_meta(
