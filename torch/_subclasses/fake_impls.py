@@ -1423,6 +1423,75 @@ def repeat_interleave_tensor(
     return repeats.new_empty(output_size)  # type: ignore[return-value]
 
 
+@register_op_impl(aten._use_cudnn_ctc_loss.default)
+def _use_cudnn_ctc_loss(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensor,
+    targets: FakeTensor,
+    input_lengths: list[int],
+    target_lengths: list[int],
+    blank: int,
+) -> bool:
+    return (
+        torch._C._has_cudnn
+        and torch._C._get_cudnn_enabled()
+        and blank == 0
+        and log_probs.dim() == 3
+        and log_probs.dtype == torch.float
+        and log_probs.device.type == "cuda"
+        and targets.dim() == 1
+        and targets.dtype == torch.int
+        and targets.device.type == "cpu"
+        and targets.is_contiguous()
+        and len(input_lengths) == len(target_lengths)
+        and all(il == log_probs.size(0) for il in input_lengths)
+        and all(tl < 256 and tl <= il for il, tl in zip(input_lengths, target_lengths))
+    )
+
+
+@register_op_impl(aten._use_cudnn_ctc_loss.Tensor)
+def _use_cudnn_ctc_loss_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensor,
+    targets: FakeTensor,
+    input_lengths: FakeTensor,
+    target_lengths: FakeTensor,
+    blank: int,
+) -> bool:
+    return False
+
+
+@register_op_impl(aten._cudnn_ctc_loss.default)
+@register_op_impl(aten._cudnn_ctc_loss.Tensor)
+def _cudnn_ctc_loss(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    log_probs: FakeTensor,
+    targets: FakeTensor,
+    input_lengths: FakeTensor | list[int],
+    target_lengths: FakeTensor | list[int],
+    blank: int,
+    deterministic: bool,
+    zero_infinity: bool,
+) -> tuple[FakeTensor, FakeTensor]:
+    torch._check(log_probs.dim() == 3, lambda: "log_probs must be 3-D")
+    torch._check(log_probs.dtype == torch.float, lambda: "log_probs must be float")
+    torch._check(targets.dim() == 1, lambda: "targets must be 1-D")
+    torch._check(targets.dtype == torch.int, lambda: "targets must be int32")
+    torch._check(blank == 0, lambda: "blank must be label 0 for cudnn_ctc_loss")
+    batch_size = log_probs.size(1)
+
+    for lengths in (input_lengths, target_lengths):
+        size = len(lengths) if isinstance(lengths, list) else lengths.numel()
+        torch._check(size == batch_size, lambda: "lengths must match batch_size")
+
+    costs = log_probs.new_empty(batch_size)
+    grad = torch.empty_like(log_probs, memory_format=torch.contiguous_format)
+    return costs, grad  # type: ignore[return-value]
+
+
 @register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(

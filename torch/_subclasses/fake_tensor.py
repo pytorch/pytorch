@@ -3093,6 +3093,9 @@ class FakeTensorMode(TorchDispatchMode):
         if func is aten.to_mkldnn.default:
             raise _BypassDispatchCache("mkldnn tensor")
 
+        if func is aten._use_cudnn_ctc_loss.default:
+            raise _BypassDispatchCache("reads cudnn flag")
+
         if func.name() == "inductor::resize_storage_bytes_":
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
 
