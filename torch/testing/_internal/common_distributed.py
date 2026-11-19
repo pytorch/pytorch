@@ -578,11 +578,15 @@ def requires_multicast_support():
 def evaluate_platform_supports_symm_mem():
     if TEST_CUDA:
         if TEST_WITH_ROCM:
-            # Keep in sync with ROCSHMEM_SUPPORTED_ARCH in caffe2/CMakeLists.txt.
-            # Match the offload target exactly: "gfx1250" is a prefix of
-            # "gfx1250-strict", and rocSHMEM is not built for the strict target.
+            # gfx1250-strict is its own offload target and is built for
+            # rocSHMEM. See ROCSHMEM_SUPPORTED_ARCH in caffe2/CMakeLists.txt.
             gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-            return gcn_name.split(":", 1)[0] in ("gfx942", "gfx950", "gfx1250")
+            return gcn_name.split(":", 1)[0] in (
+                "gfx942",
+                "gfx950",
+                "gfx1250",
+                "gfx1250-strict",
+            )
         else:
             return True
     elif TEST_XPU:

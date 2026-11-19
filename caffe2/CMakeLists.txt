@@ -1617,7 +1617,9 @@ if(USE_ROCM)
     # rocSHMEM >= 3.5.0 exports the device reduce used by Triton.
     if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.5.0")
       # rocSHMEM upstream ships device code for a subset of AMD gfx targets only.
-      set(ROCSHMEM_SUPPORTED_ARCH gfx90a gfx942 gfx950 gfx1100 gfx1201 gfx1250)
+      # gfx1250-strict is its own offload target. rocSHMEM lists it next to
+      # gfx1250 for ROCm >= 7.14 (projects/rocshmem/CMakeLists.txt).
+      set(ROCSHMEM_SUPPORTED_ARCH gfx90a gfx942 gfx950 gfx1100 gfx1201 gfx1250 gfx1250-strict)
       set(_torch_rocshmem_build_arches)
       foreach(_arch ${PYTORCH_ROCM_ARCH})
         list(FIND ROCSHMEM_SUPPORTED_ARCH "${_arch}" _rocsmem_supported_idx)
