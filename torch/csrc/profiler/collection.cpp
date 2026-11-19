@@ -374,15 +374,17 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   auto overload_name = config_.experimental_config.capture_overload_names
       ? fn.overload_name()
       : "";
-  auto [event, corr_id] = torch_ops_.op_events_.emplace_back(
-      fn.seqNr(),
-      fn.forwardThreadId(),
-      fn.scope(),
-      fn.isAsync(),
-      fn.handle(),
-      fn.debugHandle(),
-      torch_ops_.op_names_.intern(fn.name()),
-      torch_ops_.op_names_.intern(overload_name));
+  auto [event, corr_id] =
+      torch_ops_.op_events_.emplace_back(KinetoObserverContext::Event{
+          .scalar_fields_ =
+              {.sequence_number_ = fn.seqNr(),
+               .forward_tid_ = fn.forwardThreadId(),
+               .scope_ = fn.scope(),
+               .is_async_ = fn.isAsync(),
+               .record_function_id_ = fn.handle(),
+               .debug_handle_ = fn.debugHandle()},
+          .name_ = torch_ops_.op_names_.intern(fn.name()),
+          .overload_name_ = torch_ops_.op_names_.intern(overload_name)});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs(), config_.profile_memory);
     auto kwinputs = fn.kwinputs();
@@ -490,11 +492,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto it = op_events_.begin();
   for ([[maybe_unused]] const auto _ :
        c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
-    auto& first = *it;
-    auto& second = *++it;
+    const auto& name = *it->name_;
+    auto& first = it->scalar_fields_;
+    auto& second = (++it)->scalar_fields_;
     if (first.scope_ == at::RecordScope::FUNCTION &&
         second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
-        first.name_->starts_with("autograd::engine::evaluate_function: ")) {
+        name.starts_with("autograd::engine::evaluate_function: ")) {
       first.sequence_number_ = second.sequence_number_;
       first.forward_tid_ = second.forward_tid_;
     }
@@ -515,15 +518,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     TorchOpBasicFields basic_fields{
-        event->sequence_number_,
-        event->forward_tid_,
-        event->scope_,
-        event->is_async_,
-        event->record_function_id_,
-        event->debug_handle_,
-        *event->name_,
-        *event->overload_name_,
-        event->end_tid_};
+        event->scalar_fields_, *event->name_, *event->overload_name_};
     auto position = basic_fields.name_.find(windows_pattern);
     if (position != std::string::npos) {
       basic_fields.name_.replace(

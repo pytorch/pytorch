@@ -124,18 +124,23 @@ TORCH_API OpArgData parseArgData(const DecodedInputs& inputs);
 template <EventType>
 struct ExtraFields;
 
-struct TorchOpBasicFields {
+// The fields of a TorchOp other than its names. An op's Event holds these
+// while it is recorded, and its names live in OpNames.
+struct TorchOpScalarFields {
   int64_t sequence_number_{0};
   uint64_t forward_tid_{0};
   at::RecordScope scope_{};
   bool is_async_{false};
   uint64_t record_function_id_{0};
   int64_t debug_handle_{0};
-  std::string name_;
-  std::string overload_name_;
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
+};
+
+struct TorchOpBasicFields : TorchOpScalarFields {
+  std::string name_;
+  std::string overload_name_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -455,11 +460,17 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         extra_fields_{std::move(extra_fields)} {}
 };
 
-// Stores each distinct op name once. A profiled step repeats a few names
-// across thousands of ops.
+// The op names recorded by one thread, with each distinct name stored once.
+// A profiled step repeats a few dozen names across thousands of ops. Each
+// op's Event points at its name in this table instead of holding a copy.
+//
+// `intern(name)` returns the address of the table's copy of `name`.
+// The first call for a given text stores a copy, and later calls return the
+// same address. The address stays valid until `clear()`.
 class OpNames {
  public:
-  // The returned pointer stays valid until `clear()`.
+  // Looks `name` up by its characters. The caller's string can be a temporary
+  // that is destroyed when the op ends.
   const std::string* intern(std::string_view name) {
     auto it = index_.find(name);
     if (it == index_.end()) [[unlikely]] {
@@ -475,27 +486,24 @@ class OpNames {
   }
 
  private:
-  // A deque never moves its elements, which `index_` and callers point into.
+  // Owns the names. Appending to a deque leaves its existing elements in
+  // place, which keeps the addresses returned by `intern` valid.
   std::deque<std::string> names_;
+  // Finds a stored name by its text. Each key views an element of `names_`
+  // and maps to that element's address.
   ska::flat_hash_map<std::string_view, const std::string*> index_;
 };
 
 struct KinetoObserverContext : public at::ObserverContext {
   struct Event {
-    // The fields of TorchOpBasicFields, with the names held in OpNames.
-    int64_t sequence_number_;
-    uint64_t forward_tid_;
-    at::RecordScope scope_;
-    bool is_async_;
-    uint64_t record_function_id_;
-    int64_t debug_handle_;
+    TorchOpScalarFields scalar_fields_;
+    // The op's names, stored in the thread's OpNames.
     const std::string* name_;
     const std::string* overload_name_;
 
     c10::approx_time_t start_time_;
 
     // Set in the exit callback.
-    uint64_t end_tid_{0};
     c10::approx_time_t end_time_{
         std::numeric_limits<c10::approx_time_t>::min()};
 
@@ -657,6 +665,7 @@ class TORCH_API ThreadLocalSubqueue {
       std::pair<event_t*, uint64_t> emplace_back(Args&&... args);
       static uint64_t correlationID(const OpList::Iterator& e);
     } op_events_;
+    // The names that `op_events_` point to.
     OpNames op_names_;
 
     // report_input_shapes
