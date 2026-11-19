@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/InnerProduct.h>
-#include <ATen/native/mkldnn/detail/Utils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -481,6 +481,7 @@ void backward_weights_compute_impl(
       {DNNL_ARG_SCRATCHPAD, scratchpad}};
 
   if (with_diff_bias) {
+    // May replace diff_bias's buffer and layout when they differ from pd.diff_bias_desc().
     diff_bias.reinit_if_possible(pd.diff_bias_desc());
     args.insert({DNNL_ARG_DIFF_BIAS, diff_bias});
   }
