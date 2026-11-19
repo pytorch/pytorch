@@ -5310,8 +5310,8 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("offset", (1, -5))
     def test_operator_length_hint_symbolic(self, offset):
-        # A symbolic hint and a symbolic default are both specialized, so the
-        # type and range checks run at trace time instead of at runtime.
+        # A symbolic hint stays symbolic with its sign guarded; a symbolic
+        # default is specialized.
         def fn(x):
             try:
                 hint = operator.length_hint(WithLengthHint(x.shape[0] + offset))
@@ -5323,27 +5323,50 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
         self.assertEqual(opt_fn(torch.ones(3)), fn(torch.ones(3)))
 
+    def test_list_extend_symbolic_length_hint_no_recompile(self):
+        class SizedHint:
+            def __init__(self, t):
+                self.t = t
+
+            def __iter__(self):
+                return iter([1, 2])
+
+            def __length_hint__(self):
+                return self.t.shape[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True, fullgraph=True)
+        def fn(t):
+            out = [0]
+            out.extend(SizedHint(t))
+            return t.sum() + len(out)
+
+        for n in (3, 4, 5, 6):
+            self.assertEqual(fn(torch.ones(n)), n + 3)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_operator_length_hint_non_constant(self):
         # id() of an object created while tracing is a compile-time-only int
-        # that is not a python constant, so neither the hint nor the default
-        # (which PyObject_LengthHint converts to an ssize_t up front) can be
-        # validated here; the default is converted even when it is unused.
+        # that is not a python constant. A non-constant hint is returned
+        # unchecked, but the default (which PyObject_LengthHint converts to an
+        # ssize_t up front, even when unused) cannot be converted here.
         def hint_fn(x):
-            return operator.length_hint(WithLengthHint(id([1, 2]))), x + 1
+            hint = operator.length_hint(WithLengthHint(id([1, 2])))
+            return isinstance(hint, int), x + 1
 
         def default_fn(x):
             return operator.length_hint(NoHint(), id([1, 2])), x + 1
 
-        for fn, gb_type in (
-            (hint_fn, "length_hint with a non-constant result"),
-            (default_fn, "length_hint with a non-constant default"),
+        x = torch.ones(3)
+        opt_fn = torch.compile(hint_fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), hint_fn(x))
+
+        opt_fn = torch.compile(default_fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported, "length_hint with a non-constant default"
         ):
-            with self.subTest(gb_type=gb_type):
-                opt_fn = torch.compile(
-                    fn, backend="eager", dynamic=True, fullgraph=True
-                )
-                with self.assertRaisesRegex(Unsupported, gb_type):
-                    opt_fn(torch.ones(3))
+            opt_fn(x)
 
     def test_operator_concat(self):
         for seq_type in (list, tuple):

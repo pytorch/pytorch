@@ -44,6 +44,7 @@ from ..exc import (
     Unsupported,
 )
 from ..utils import (
+    _unpack_fast_types,
     check_positional,
     cmp_name_to_op_mapping,
     get_fake_value,
@@ -83,6 +84,7 @@ from .object_protocol import (
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
+    pyobject_length_hint,
     python_constant_repr_impl,
     repr_guard,
     type_implements_nb_index,
@@ -561,9 +563,7 @@ class BaseListVariable(VariableTracker):
         sz = len(self.items)
         if istype(args[0], (ListVariable, TupleVariable)):
             self.items.extend(args[0].items)
-        elif isinstance(args[0], UserDefinedObjectVariable):
-            self.items.extend(unpack_iterable(tx, args[0]))
-        elif isinstance(
+        elif not isinstance(args[0], UserDefinedObjectVariable) and isinstance(
             args[0],
             (
                 ConstDictVariable,
@@ -573,17 +573,30 @@ class BaseListVariable(VariableTracker):
                 OrderedSetVariable,
             ),
         ):
+            # Like CPython, only exact dicts and sets skip __iter__; user
+            # subclasses (UserDefinedDict/SetVariable) take the generic path.
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
         elif isinstance(args[0], ConstantVariable):
             items = unpack_iterable(tx, args[0])
             self.items.extend(items)
+        elif istype(iterable := args[0].realize(), _unpack_fast_types()):
+            # Builtin iterables that Dynamo unpacks directly, without the
+            # iterator and the length hint, as lazily_unpack does.
+            self.items.extend(iterable.unpack_var_sequence(tx))
         else:
-            # Use the native append, matching CPython's internal list_extend
+            # list_extend_iter_lock_held: get the iterator, ask the iterable for
+            # a length hint, then run the iterator using the native append,
             # which bypasses a subclass's overridden append (e.g. immutable_list).
-            unpack_and_apply_fn(
-                tx, args[0], lambda item: self.list_append(tx, [item], {})
-            )
+            iterator = generic_getiter(tx, iterable)
+            pyobject_length_hint(tx, iterable, 8)
+            while True:
+                try:
+                    item = pyiter_next(tx, iterator)
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    break
+                self.list_append(tx, [item], {})
 
         if len(self.items) > sz:
             tx.output.side_effects.mutation(self)
@@ -2670,8 +2683,6 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        from .builder import SourcelessBuilder
-
         # bytearray_extend: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if not self.is_mutable():
             return None
@@ -2693,8 +2704,7 @@ class ByteArrayVariable(VariableTracker):
             iterator = generic_getiter(tx, iterable)
             # CPython asks the argument for a length hint (default 32) once it
             # has the iterator and before it reads any item.
-            hint_fn = SourcelessBuilder.create_internal_builtin(operator.length_hint)
-            hint_fn.call_function(tx, [iterable, ConstantVariable.create(32)], {})
+            pyobject_length_hint(tx, iterable, 32)
             # One item at a time, like CPython: a bad byte must leave the rest
             # of the iterator unread, and __index__ may grow the iterable.
             while True:
