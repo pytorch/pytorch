@@ -363,30 +363,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         fresh_globals[name] = object
         self.assertFalse(loaded.guard_check(x))
 
-    def _check_reloaded_guard(self, fn, initial, valid, invalid):
-        x = torch.ones(1)
-        compiled = _aot_compile(fn, x, *initial)
-        data = AOTCompiledFunction.serialize(compiled).serialized_data
-        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
-        self.assertTrue(loaded.guard_check(x, *valid))
-        self.assertEqual(loaded(x, *valid), fn(x, *valid))
-        self.assertFalse(loaded.guard_check(x, *invalid))
-
-    def test_native_method_receiver_alias_guard_survives_serialization(self):
-        def compare(x, left, right):
-            return x + (list.count.__get__(left) == list.count.__get__(right))
-
-        left, right = [], []
-        self._check_reloaded_guard(compare, ([], []), (left, right), (left, left))
-
-    def test_native_method_descriptor_guard_survives_serialization(self):
-        def metadata(x, method):
-            return x + 1, method.__qualname__
+    def test_native_method_guards_survive_serialization(self):
+        def fn(x, left, right, method):
+            equal = list.count.__get__(left) == list.count.__get__(right)
+            return x + equal, x + 1, method.__qualname__
 
         receiver = collections.OrderedDict()
         base = dict.__setitem__.__get__(receiver)
         derived = type(receiver).__setitem__.__get__(receiver)
-        self._check_reloaded_guard(metadata, (base,), (base,), (derived,))
+        x, left, right = torch.ones(1), [], []
+        compiled = _aot_compile(fn, x, [], [], base)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x, left, right, base))
+        self.assertEqual(loaded(x, left, right, base), fn(x, left, right, base))
+        self.assertFalse(loaded.guard_check(x, left, left, base))
+        self.assertFalse(loaded.guard_check(x, left, right, derived))
 
     def test_constant_mro_length_changed_before_reload(self):
         x = torch.ones(1)
