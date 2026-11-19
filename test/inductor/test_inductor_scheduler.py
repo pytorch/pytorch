@@ -57,6 +57,7 @@ from torch._inductor.utils import (
     snode_args_kwargs,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_TRITON
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -74,12 +75,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
-    HAS_GPU,
-    IS_BIG_GPU,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -2702,7 +2698,7 @@ class TestScheduler(TestCase):
         self.assertFalse(cleaned.skip_cudagraph)
 
     @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "GPU capability is < SM70")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_TRITON, "GPU capability is < SM70")
     @xfailIfNoAcceleratorTriton
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
@@ -2724,7 +2720,7 @@ class TestScheduler(TestCase):
 
     @xfailIfNoAcceleratorTriton
     @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "GPU capability is < SM70")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_TRITON, "GPU capability is < SM70")
     @parametrize(
         "options",
         [

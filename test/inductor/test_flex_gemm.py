@@ -38,6 +38,8 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     BF16X9_SUPPORTED,
+    CDNA5OrLater,
+    RDNA3OrLater,
     SM100OrLater,
     SM120OrLater,
     TEST_CUDA,
@@ -1500,7 +1502,14 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
 
-MISSING_CUTEDSL = SM100OrLater and not lowering.has_flex_gemm_quack()
+# ROCm gfx11/gfx12 report a capability >= (10, 0) and took this skip before
+# SM100OrLater became NVIDIA-only; keep that.
+ROCM_CAPABILITY_GE_10 = torch.version.hip is not None and (
+    RDNA3OrLater() or CDNA5OrLater()
+)
+MISSING_CUTEDSL = (
+    SM100OrLater or ROCM_CAPABILITY_GE_10
+) and not lowering.has_flex_gemm_quack()
 
 
 @unittest.skipIf(MISSING_CUTEDSL, "requires CuTeDSL")

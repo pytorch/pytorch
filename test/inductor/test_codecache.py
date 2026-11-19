@@ -5501,7 +5501,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"use_static_triton_launcher": True})
@@ -5553,7 +5553,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5597,7 +5597,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5661,7 +5661,7 @@ class TestAutotuneCache(TestCase):
     @requires_triton()
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5771,7 +5771,7 @@ class TestRemoteAOTAutogradCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})

@@ -366,6 +366,8 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM53OrLater))
 # A kernel spinning on a host-written flag with a system-scope relaxed load
 PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM70OrLater))
+# A GPU that Triton can target; says nothing about whether Triton is installed
+PLATFORM_SUPPORTS_TRITON: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM70OrLater))
 PLATFORM_SUPPORTS_INT_MM: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM80OrLater))
 PLATFORM_SUPPORTS_ASYNC_INPUT_MM: bool = LazyVal(lambda: evaluate_platform_supports_async_input_mm())
 

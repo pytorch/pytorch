@@ -20,7 +20,11 @@ from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA, tf32_off
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_TRITON,
+    TEST_CUDA,
+    tf32_off,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -52,7 +56,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
-from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -1839,7 +1842,9 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(o_ref.dtype, o.dtype)
 
     @onlyAccelerator
-    @unittest.skipIf(TEST_CUDA and not has_triton(), "triton")
+    @unittest.skipIf(
+        TEST_CUDA and not PLATFORM_SUPPORTS_TRITON, "triton requires CUDA with SM>=7.0"
+    )
     def test_rms_norm_decomp_cuda(self, device):
         @torch.compile
         def rms_norm_sinh(a, b, c):

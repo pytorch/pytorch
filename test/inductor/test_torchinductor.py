@@ -24907,7 +24907,8 @@ if RUN_GPU:
             for a, e in zip(actual, expected):
                 torch.testing.assert_close(a, e)
 
-        @unittest.skipIf(not SM90OrLater, "TMA requires SM90+")
+        # ROCm ran this test before SM90OrLater became NVIDIA-only; keep it running.
+        @unittest.skipIf(not SM90OrLater and not TEST_WITH_ROCM, "TMA requires SM90+")
         @config.patch(
             {
                 "triton.use_tensor_descriptor": True,

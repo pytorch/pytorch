@@ -13799,7 +13799,10 @@ class TestCppWrapperFallbackProfiling(TestCase):
                 else:
                     FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
 
-    @unittest.skipIf(not SM90OrLater, "CUTLASS mm templates require SM90+")
+    # ROCm passed this gate before SM90OrLater became NVIDIA-only; keep that.
+    @unittest.skipIf(
+        not SM90OrLater and not TEST_WITH_ROCM, "CUTLASS mm templates require SM90+"
+    )
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
@@ -13814,7 +13817,7 @@ class TestCppWrapperFallbackProfiling(TestCase):
         """
         # Dense mm only uses CUTLASS 3.x kernels, which need SM90+; on SM80 the
         # CUTLASS backend has no choices and autotuning raises NoValidChoicesError.
-        if not SM90OrLater:
+        if not SM90OrLater and not TEST_WITH_ROCM:
             raise unittest.SkipTest("CUTLASS mm templates require SM90+")
         from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
