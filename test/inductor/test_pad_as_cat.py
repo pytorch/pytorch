@@ -9,6 +9,7 @@ from torch._inductor import metrics
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 # required so that metrics.num_bytes_accessed is populated
@@ -160,7 +161,7 @@ class TestPadAsCat(TestCase):
 
 
 class TestGroupedPointwiseCat(TestCase):
-    @requires_gpu()
+    @requires_gpu_and_triton
     def test_pad_cat_grouped_exact_kernels_and_single_alloc(self):
         def fn_pad(*inputs):
             return torch.cat([F.pad(x, (0, 32)) for x in inputs], dim=0)
@@ -198,7 +199,7 @@ class TestGroupedPointwiseCat(TestCase):
                 code_combo.split("def call(")[-1].count(" = empty_strided_"), 1
             )
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     def test_pad_cat_with_following_pointwise(self):
         def fn(*inputs):
             return torch.cat([F.pad(x.t(), (0, 16)) for x in inputs], dim=0) * 2.0 + 1.0
@@ -218,7 +219,7 @@ class TestGroupedPointwiseCat(TestCase):
             )
         self.assertEqual(code_unfused.count(".run("), 17)
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     def test_compute_budget_scales_width_and_guards_large_compute(self):
         # 1. Small compute (16 x 64 x 128 -> ~0.25 MiB per 8-input group <= 4 MiB) -> 2 groups of 8.
         def fn_sin_add(*inputs):
@@ -290,7 +291,7 @@ class TestGroupedPointwiseCat(TestCase):
         self.assertEqual(act_mix, fn_mixed_size(*all_args))
         self.assertEqual(code_mix.count(".run("), 3)
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     def test_duplicate_inputs_and_skipped_empty_1d(self):
         def fn(empty_1d, *xs):
             pads = [F.pad(x, (0, 16)) for x in xs]
@@ -306,7 +307,7 @@ class TestGroupedPointwiseCat(TestCase):
         self.assertEqual(act, ref)
         self.assertEqual(code.count(".run("), 2)
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     def test_foreach_raw_inputs_and_mixed_guards(self):
         def fn_raw(*raws):
             return torch.cat(raws, dim=0)
@@ -356,7 +357,7 @@ class TestGroupedPointwiseCat(TestCase):
         self.assertEqual(act_nine, fn_nine(*nine))
         self.assertEqual(code_nine.count(".run("), 3)
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     def test_dynamic_shape_compute_stays_safe_and_pad_groups(self):
         def fn_pad(*xs):
             return torch.cat([F.pad(x, (0, 16)) for x in xs], dim=0)
@@ -377,7 +378,7 @@ class TestGroupedPointwiseCat(TestCase):
         self.assertEqual(act_sin, fn_sin(*xs))
         self.assertEqual(code_sin.count(".run("), 10)
 
-    @requires_gpu()
+    @requires_gpu_and_triton
     def test_channels_last_conv_cat_preserves_layout(self):
         def fn(x, w_out, *ws):
             c = torch.cat([F.conv2d(x, w, padding=1) for w in ws], dim=1)
