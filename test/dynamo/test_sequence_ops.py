@@ -487,6 +487,30 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
             x.__init__(5)
         self.assertEqual(x, [])
 
+    @make_dynamo_test
+    def test_deque_extend_trims_per_item(self):
+        # deque_append_lock_held trims to maxlen after every item, so the
+        # iterable sees a deque that never grows past maxlen.
+        d = collections.deque([0, 1], maxlen=2)
+        seen = []
+
+        def gen():
+            for i in range(2, 5):
+                seen.append(len(d))
+                yield i
+
+        d.extend(gen())
+        self.assertEqual(list(d), [3, 4])
+        self.assertEqual(seen, [2, 2, 2])
+
+    @make_dynamo_test
+    def test_deque_extend_self(self):
+        d = collections.deque([1, 2])
+        d.extend(d)
+        self.assertEqual(list(d), [1, 2, 1, 2])
+        d += d
+        self.assertEqual(len(d), 8)
+
     # --- deque re-init (deque.__init__) ---
 
     @make_dynamo_test
