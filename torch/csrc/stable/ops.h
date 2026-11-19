@@ -1702,6 +1702,196 @@ inline torch::stable::Tensor from_file(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+/// Stable version of the roll op.
+///
+/// Shifts elements along the specified dimensions.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The input tensor.
+/// @param shifts The shifts to apply.
+/// @param dims The dimensions to roll. An empty list rolls the flattened
+/// tensor.
+/// @return The rolled tensor.
+inline torch::stable::Tensor roll(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef shifts,
+    torch::headeronly::IntHeaderOnlyArrayRef dims = {}) {
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(shifts),
+      torch::stable::detail::from(dims)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::roll", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the repeat_interleave.self_int op.
+///
+/// Repeats each element along a dimension.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The input tensor.
+/// @param repeats The number of repeats per element.
+/// @param dim The dimension to repeat. Defaults to the flattened input.
+/// @param output_size The optional output size along the repeated dimension.
+/// @return The tensor with repeated elements.
+inline torch::stable::Tensor repeat_interleave(
+    const torch::stable::Tensor& self,
+    int64_t repeats,
+    std::optional<int64_t> dim = std::nullopt,
+    std::optional<int64_t> output_size = std::nullopt) {
+  std::array<StableIValue, 4> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(repeats),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(output_size)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::repeat_interleave", "self_int", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the equal op.
+///
+/// Checks whether two tensors have the same shape and elements.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The input tensor.
+/// @param other The tensor to compare with self.
+/// @return Whether the tensors are equal.
+inline bool equal(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  std::array<StableIValue, 2> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::equal", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<bool>(stack[0]);
+}
+
+/// Stable version of the nonzero op.
+///
+/// Finds the indices of nonzero elements.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The input tensor.
+/// @return A tensor of nonzero indices.
+inline torch::stable::Tensor nonzero(const torch::stable::Tensor& self) {
+  std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::nonzero", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the expand op.
+///
+/// Returns a broadcasted view of the input tensor.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The input tensor.
+/// @param size The target sizes.
+/// @param implicit Whether the expansion is implicit. Defaults to false.
+/// @return The expanded view.
+inline torch::stable::Tensor expand(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    bool implicit = false) {
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(implicit)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::expand", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the all op.
+///
+/// Tests whether all elements evaluate to true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The input tensor.
+/// @return The scalar result tensor.
+inline torch::stable::Tensor all(const torch::stable::Tensor& self) {
+  std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::all", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the median.dim op.
+///
+/// Computes the median along a dimension.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The input tensor.
+/// @param dim The dimension to reduce.
+/// @param keepdim Whether to retain the reduced dimension. Defaults to false.
+/// @return The median values and their indices.
+inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> median(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    bool keepdim = false) {
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::median", "dim", stack.data(), TORCH_ABI_VERSION));
+  return std::make_tuple(
+      torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
+      torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
+}
+
+/// Stable version of the index_fill_.int_Tensor op.
+///
+/// Fills indexed positions along a dimension in place.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+///
+/// @param self The tensor to modify.
+/// @param dim The dimension to index.
+/// @param index The indices to fill.
+/// @param value The zero-dimensional tensor containing the fill value.
+/// @return The modified input tensor.
+inline torch::stable::Tensor& index_fill_(
+    torch::stable::Tensor& self,
+    int64_t dim,
+    const torch::stable::Tensor& index,
+    const torch::stable::Tensor& value) {
+  std::array<StableIValue, 4> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(index),
+      torch::stable::detail::from(value)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::index_fill_", "int_Tensor", stack.data(), TORCH_ABI_VERSION));
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return self;
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0

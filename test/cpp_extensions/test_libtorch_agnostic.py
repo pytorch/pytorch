@@ -1508,6 +1508,59 @@ for warning in w:
         self.assertEqual(x, expected)
 
     @skipIfTorchVersionLessThan(2, 10)
+    def test_my_roll(self, device):
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = torch.ops.libtorch_agn_2_10.my_roll(x, [-1], [1])
+        self.assertEqual(actual, x.roll(-1, 1))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_repeat_interleave(self, device):
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = torch.ops.libtorch_agn_2_10.my_repeat_interleave(x, 2, 1, 6)
+        self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_equal(self, device):
+        x = torch.tensor([0, 3, 1], device=device)
+        equal = torch.ops.libtorch_agn_2_10.my_equal
+        self.assertTrue(equal(x, x.clone()))
+        self.assertFalse(equal(x, x + 1))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_nonzero(self, device):
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        self.assertEqual(torch.ops.libtorch_agn_2_10.my_nonzero(x), x.nonzero())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_expand(self, device):
+        x = torch.tensor([[0, 3, 1]], device=device)
+        actual = torch.ops.libtorch_agn_2_10.my_expand(x, [2, 3])
+        expected = x.expand(2, 3)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_all(self, device):
+        x = torch.tensor([True, False], device=device)
+        self.assertEqual(torch.ops.libtorch_agn_2_10.my_all(x), x.all())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_median(self, device):
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = torch.ops.libtorch_agn_2_10.my_median(x, 1, True)
+        self.assertEqual(actual, x.median(1, keepdim=True))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_index_fill(self, device):
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        index = torch.tensor([1], device=device)
+        value = torch.tensor(7, device=device)
+        expected = x.clone().index_fill_(1, index, value)
+        actual = torch.ops.libtorch_agn_2_10.my_index_fill(x, 1, index, value)
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, expected)
+
+    @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
     @parametrize("memory_format", [None, torch.channels_last, torch.contiguous_format])
     def test_my_empty(self, device, layout, memory_format):
