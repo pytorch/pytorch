@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     slowTest,
+    TEST_NUMPY,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -5466,7 +5467,7 @@ class TestVmRegions(TestCase):
             (region,) = self.compiled_regions(off)
             self.assertEqual((region["variants"], region["frozen"]), (1, 0))
 
-    @parametrize("write", ("in_place", "data_swap", "optimizer", "load"))
+    @parametrize("write", ("in_place", "data", "data_swap", "optimizer", "load"))
     def test_write_to_a_built_in_weight_is_seen(self, write):
         torch.manual_seed(0)
         model = RegionNet().eval()
@@ -5476,6 +5477,8 @@ class TestVmRegions(TestCase):
             if write == "in_place":
                 with torch.no_grad():
                     model.conv.weight.mul_(1.5)
+            elif write == "data":
+                model.bn.running_mean.data.add_(0.5)
             elif write == "data_swap":
                 model.conv.bias.data = torch.randn(4)
             elif write == "optimizer":
@@ -5533,6 +5536,27 @@ class TestVmRegions(TestCase):
         (region,) = self.compiled_regions(compiled)
         self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
 
+    @unittest.skipUnless(TEST_NUMPY, "needs NumPy")
+    def test_memory_of_a_numpy_array_is_not_built_in(self):
+        import numpy as np
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        array = np.random.rand(4, 3, 3, 3).astype(np.float32)
+        model.conv.weight = torch.nn.Parameter(torch.from_numpy(array))
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in(), torch.no_grad():
+            for i in range(10):
+                if i >= 6:
+                    # Nothing PyTorch has says that this happened.
+                    array *= 1.5
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+
     @slowTest
     def test_inductor_folds_built_in_weights(self):
         torch.manual_seed(0)
@@ -5545,7 +5569,7 @@ class TestVmRegions(TestCase):
             model.bn.running_var.uniform_(0.5, 2)
             for i in range(12):
                 if i == 8:
-                    model.bn.weight.mul_(3)
+                    model.bn.weight.data.mul_(3)
                 x = torch.randn(2, 3, 6, 6)
                 self.assertEqual(compiled(model, x), model(x), atol=1e-5, rtol=1e-5)
         (region,) = self.compiled_regions(compiled)
