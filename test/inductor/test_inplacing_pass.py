@@ -140,6 +140,46 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
 
+    @inductor_config.patch(reinplace_whenever_possible=True)
+    def test_chained_input_view_add_permission(self):
+        def f(x, a, b):
+            v = x.view(2, 4)
+            v[0].add_(a)
+            v[1].add_(b)
+
+        inputs = (
+            torch.arange(8, dtype=torch.float32),
+            torch.ones(4),
+            torch.full((4,), 2.0),
+        )
+        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(*inputs)
+        gm.graph.eliminate_dead_code()
+        updater = FakeTensorUpdater(gm)
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(updater, gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        input_node = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        rows_written_to_input = [
+            n.args[0].args[2]
+            for n in gm.graph.nodes
+            if n.target is aten.copy_.default
+            and n.args[0].target is aten.select.int
+            and get_node_storage(n.args[0]) == get_node_storage(input_node)
+        ]
+        self.assertIn(0, rows_written_to_input)
+
+        expected_input = inputs[0].clone()
+        f(expected_input, *inputs[1:])
+        actual_input = inputs[0].clone()
+        gm(actual_input, *inputs[1:])
+        self.assertEqual(actual_input, expected_input)
+        compiled_input = inputs[0].clone()
+        torch.compile(f, fullgraph=True)(compiled_input, *inputs[1:])
+        self.assertEqual(compiled_input, expected_input)
+
     def test_input_copyback_preserves_earlier_result(self):
         def f(x, indices, value, replacement):
             updated = aten.index_put.default(x, [indices], value)
