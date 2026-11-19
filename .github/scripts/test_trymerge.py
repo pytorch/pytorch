@@ -3980,14 +3980,19 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         )
         self.assertEqual(self.repo.mock_calls, [])
 
-    def test_a_forced_merge_skips_the_same_checks_on_lower_prs(self) -> None:
-        self.skip_internal.return_value = True
-        self.assertStopsBeforeLanding(skip_mandatory_checks=True)
-        gated = [call.args[0] for call in self.rule.call_args_list]
-        self.assertEqual(gated, [self.top, self.lower])
-        for call in self.rule.call_args_list:
-            self.assertIs(call.kwargs["skip_mandatory_checks"], True)
-            self.assertIs(call.kwargs["skip_internal_checks"], True)
+    def test_lower_prs_skip_the_same_checks_as_the_top_pr(self) -> None:
+        for mandatory, internal in ((True, False), (False, True)):
+            with self.subTest(mandatory=mandatory, internal=internal):
+                self.rule.reset_mock()
+                self.skip_internal.reset_mock()
+                self.skip_internal.return_value = internal
+                self.assertStopsBeforeLanding(skip_mandatory_checks=mandatory)
+                self.skip_internal.assert_called_once_with(self.top, 1)
+                gated = [call.args[0] for call in self.rule.call_args_list]
+                self.assertEqual(gated, [self.top, self.lower])
+                for call in self.rule.call_args_list:
+                    self.assertIs(call.kwargs["skip_mandatory_checks"], mandatory)
+                    self.assertIs(call.kwargs["skip_internal_checks"], internal)
 
     def test_reads_the_stack_again_for_every_attempt(self) -> None:
         current = replace(NATIVE_STACK)
