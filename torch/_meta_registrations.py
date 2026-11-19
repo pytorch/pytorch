@@ -9,7 +9,6 @@ from typing_extensions import ParamSpec
 import torch
 import torch._prims_common as utils
 from torch import SymBool, SymFloat, Tensor
-from torch._decomp.decompositions import _upsample_output_memory_format
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
@@ -18,6 +17,7 @@ from torch._decomp import (
     is_torch_decomp_decomposition,
     meta_table,
 )
+from torch._decomp.decompositions import _upsample_output_memory_format
 from torch._ops import OpOverload
 from torch._prims import _prim_elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
