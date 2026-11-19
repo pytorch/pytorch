@@ -17,6 +17,7 @@ use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyList, PyTuple};
+use std::collections::HashMap;
 
 type Obj = *mut ffi::PyObject;
 
@@ -110,6 +111,8 @@ pub struct Snapshot {
     /// tensors it held.
     places: Vec<u32>,
     tensors: Vec<Seen>,
+    /// Which of the tensors an object is.
+    index: HashMap<usize, u32>,
 }
 
 struct Seen {
@@ -189,7 +192,8 @@ pub fn snapshot(places: &Bound<'_, PyList>, tensors: &Bound<'_, PyList>) -> PyRe
             None => return Ok(None),
         }
     }
-    Ok(Some(Snapshot { places: which, tensors: found }))
+    let index = found.iter().enumerate().map(|(i, one)| (one.object, i as u32)).collect();
+    Ok(Some(Snapshot { places: which, tensors: found, index }))
 }
 
 impl Snapshot {
@@ -498,11 +502,33 @@ enum Node {
     List(Vec<Node>),
     /// A dict: its keys in order, and what they hold.
     Dict(Vec<Py<PyAny>>, Vec<Node>),
+    /// A variable that a nested function shares: what it holds.
+    Cell(Box<Node>),
+    /// A pytree node: its class, what flattens it, the text of the context
+    /// it flattens to, and what it holds.
+    Flat(Py<PyAny>, Py<PyAny>, String, Vec<Node>),
+    Module(Box<Looked>),
+}
+
+/// A module whose tensors were found as a look had left them.
+struct Looked {
+    module: Py<PyAny>,
+    /// Its `_ModuleState` and the `_Known` that had: it may have another.
+    state: Py<PyAny>,
+    known: Py<PyAny>,
+    snapshot: Py<Snapshot>,
+    tensors: Py<PyList>,
+    /// Which tensor of the call its first one is.
+    first: usize,
+    kinds: Vec<u8>,
+    numbers: Vec<u8>,
+    offsets: Vec<u8>,
 }
 
 /// What a call of a region was like, for the calls after it that are like
-/// it: tensors, numbers and plain values where it had them, in tuples, lists
-/// and dicts built the same way, with no module changed since. `look` tells whether a call is one, in one pass and without the
+/// it: the same modules with nothing in them changed, tensors, numbers and
+/// plain values where it had them, in tuples, lists and dicts built the same
+/// way. `look` tells whether a call is one, in one pass and without the
 /// interpreter, and gives what describing it the long way would give: its
 /// key and what the region is handed. What it does not know (a set, a
 /// method, an object with attributes) the long way is for.
@@ -541,9 +567,33 @@ fn node(spec: &Bound<'_, PyAny>) -> PyResult<Node> {
         "object" => Node::Object(spec.get_item(1)?.unbind()),
         "tuple" => Node::Tuple(nodes(spec.get_item(1)?)?),
         "list" => Node::List(nodes(spec.get_item(1)?)?),
+        "cell" => Node::Cell(Box::new(node(&spec.get_item(1)?)?)),
         "dict" => {
             let keys = spec.get_item(1)?.try_iter()?.map(|key| Ok(key?.unbind())).collect::<PyResult<_>>()?;
             Node::Dict(keys, nodes(spec.get_item(2)?)?)
+        }
+        "node" => Node::Flat(
+            spec.get_item(1)?.unbind(),
+            spec.get_item(2)?.unbind(),
+            spec.get_item(3)?.extract()?,
+            nodes(spec.get_item(4)?)?,
+        ),
+        "module" => {
+            let known = spec.get_item(3)?;
+            let bytes = |name: &str| -> PyResult<Vec<u8>> {
+                Ok(known.getattr(name)?.cast::<PyBytes>()?.as_bytes().to_vec())
+            };
+            Node::Module(Box::new(Looked {
+                module: spec.get_item(1)?.unbind(),
+                state: spec.get_item(2)?.unbind(),
+                snapshot: known.getattr("snapshot")?.cast::<Snapshot>()?.clone().unbind(),
+                tensors: known.getattr("tensors")?.cast::<PyList>()?.clone().unbind(),
+                first: spec.get_item(4)?.extract()?,
+                kinds: bytes("kinds")?,
+                numbers: bytes("numbers")?,
+                offsets: bytes("offsets")?,
+                known: known.unbind(),
+            }))
         }
         other => return Err(PyValueError::new_err(format!("unknown kind {other:?}"))),
     })
@@ -553,23 +603,47 @@ fn node(spec: &Bound<'_, PyAny>) -> PyResult<Node> {
 struct Walk<'a> {
     api: &'a capi::TcfgApi,
     usual: &'a Usual,
-    /// The tensors of the call, and where each is among them.
+    /// The tensors of the call; of those, the ones that are no module's, with
+    /// where they are; and the modules, whose tensors are at `first`.
     flat: Vec<Obj>,
     free: Vec<(Obj, usize)>,
+    looked: Vec<&'a Looked>,
     /// The lists and dicts, and the integers with what they are.
     held: Vec<Obj>,
     ints: Vec<(Obj, i64)>,
+    /// The pytree nodes with what they were flattened to, and the cells
+    /// with what they hold: references kept for as long as the walk has
+    /// what is in them.
+    flattened: Vec<(Obj, Obj)>,
     unwritten: bool,
 }
 
+impl Drop for Walk<'_> {
+    fn drop(&mut self) {
+        for (_, parts) in &self.flattened {
+            unsafe { ffi::Py_DECREF(*parts) };
+        }
+    }
+}
+
 impl<'a> Walk<'a> {
+    fn kept(&self, obj: Obj) -> bool {
+        self.flattened.iter().any(|(o, _)| *o == obj)
+    }
+
     unsafe fn visit(&mut self, node: &'a Node, obj: Obj) -> bool {
         match node {
             Node::Tensor(expected) => {
                 if !self.usual.types.contains(&(ffi::Py_TYPE(obj) as usize)) {
                     return false;
                 }
-                let position = self.free.iter().find(|(o, _)| *o == obj).map(|(_, p)| *p);
+                let mut position = self.free.iter().find(|(o, _)| *o == obj).map(|(_, p)| *p);
+                if position.is_none() {
+                    position = self.looked.iter().find_map(|looked| {
+                        let index = looked.snapshot.get().index.get(&(obj as usize))?;
+                        Some(looked.first + *index as usize)
+                    });
+                }
                 let position = position.unwrap_or_else(|| {
                     self.flat.push(obj);
                     self.free.push((obj, self.flat.len() - 1));
@@ -627,6 +701,96 @@ impl<'a> Walk<'a> {
                     && items.iter().zip(keys).all(|((key, _), expected)| same_value(*key, expected.as_ptr()))
                     && items.iter().zip(values).all(|((_, value), node)| self.visit(node, *value))
             }
+            Node::Cell(inner) => {
+                if ffi::Py_TYPE(obj) != &raw mut pyffi::PyCell_Type || self.held.contains(&obj) {
+                    return false;
+                }
+                self.held.push(obj);
+                // A new reference, kept until the walk is over: the list of
+                // what is held takes one of its own.
+                let contents = pyffi::PyCell_Get(obj);
+                if contents.is_null() {
+                    return false;
+                }
+                self.flattened.push((obj, contents));
+                self.visit(inner, contents)
+            }
+            Node::Flat(class, flatten, context, children) => {
+                // Twice in a call, it is met "again": not what this is for.
+                if ffi::Py_TYPE(obj) as Obj != class.as_ptr() || self.kept(obj) {
+                    return false;
+                }
+                let parts = ffi::PyObject_CallOneArg(flatten.as_ptr(), obj);
+                if parts.is_null() {
+                    ffi::PyErr_Clear();
+                    return false;
+                }
+                self.flattened.push((obj, parts));
+                if ffi::PyTuple_CheckExact(parts) == 0 || ffi::PyTuple_GET_SIZE(parts) != 2 {
+                    return false;
+                }
+                let (items, now) = (ffi::PyTuple_GET_ITEM(parts, 0), ffi::PyTuple_GET_ITEM(parts, 1));
+                let text = ffi::PyObject_Repr(now);
+                if text.is_null() {
+                    ffi::PyErr_Clear();
+                    return false;
+                }
+                let same = pyffi::str_to_string(text) == *context;
+                ffi::Py_DECREF(text);
+                if !same {
+                    return false;
+                }
+                let count = if ffi::PyList_CheckExact(items) != 0 {
+                    ffi::PyList_GET_SIZE(items)
+                } else if ffi::PyTuple_CheckExact(items) != 0 {
+                    ffi::PyTuple_GET_SIZE(items)
+                } else {
+                    return false;
+                };
+                count as usize == children.len()
+                    && children.iter().enumerate().all(|(i, child)| {
+                        let item = if ffi::PyList_CheckExact(items) != 0 {
+                            ffi::PyList_GET_ITEM(items, i as isize)
+                        } else {
+                            ffi::PyTuple_GET_ITEM(items, i as isize)
+                        };
+                        self.visit(child, item)
+                    })
+            }
+            Node::Module(looked) => {
+                if obj != looked.module.as_ptr() {
+                    return false;
+                }
+                static KNOWN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+                let name = *KNOWN.get_or_init(|| ffi::PyUnicode_InternFromString(c"known".as_ptr()) as usize);
+                let known = ffi::PyObject_GetAttr(looked.state.as_ptr(), name as Obj);
+                if known.is_null() {
+                    ffi::PyErr_Clear();
+                    return false;
+                }
+                ffi::Py_DECREF(known);
+                let snapshot = looked.snapshot.get();
+                // The look it had is the one that was taken, none of its
+                // tensors came on their own before it, and they are what
+                // they were.
+                if known != looked.known.as_ptr()
+                    || self.flat.len() != looked.first
+                    || self.free.iter().any(|(o, _)| snapshot.index.contains_key(&(*o as usize)))
+                {
+                    return false;
+                }
+                let same = snapshot.compare(self.api);
+                if same == 0 {
+                    return false;
+                }
+                self.unwritten = self.unwritten && same == 2;
+                let tensors = looked.tensors.as_ptr();
+                for i in 0..ffi::PyList_GET_SIZE(tensors) {
+                    self.flat.push(ffi::PyList_GET_ITEM(tensors, i));
+                }
+                self.looked.push(looked);
+                true
+            }
         }
     }
 }
@@ -664,7 +828,10 @@ impl Usual {
     /// of. `spec`: per position, what was there, as a tuple that begins
     /// with `"tensor"` (and which one of the call), `"int"`, `"value"` or
     /// `"object"` (and the object), `"tuple"` or `"list"` (and the items),
-    /// or `"dict"` (the keys, the values). `parts` and `modes` are those of the key, `known` is
+    /// `"cell"` (what it holds), `"dict"` (the keys, the values), `"node"` (the class of a pytree
+    /// node, what flattens it, the text of its context, its children) or
+    /// `"module"` (the module, its state, what its tensors were found to
+    /// be, the first one's place in the call). `parts` and `modes` are those of the key, `known` is
     /// `_Inputs.known`, `types` the types of a tensor, `wide` the limit of
     /// an integer that counts as a number, `hooks` the dicts that must stay
     /// empty.
@@ -721,8 +888,10 @@ impl Usual {
                 usual: self,
                 flat: Vec::with_capacity(64),
                 free: Vec::new(),
+                looked: Vec::new(),
                 held: Vec::new(),
                 ints: Vec::new(),
+                flattened: Vec::new(),
                 unwritten: true,
             };
             for (position, node) in self.positions.iter().zip(&self.nodes) {
@@ -731,13 +900,22 @@ impl Usual {
                 }
             }
             // The kinds, numbers and offsets of the tensors, as `tensor_key`
-            // gives them.
+            // gives them; those of a module are what its look found.
             let total = walk.flat.len();
             let mut kinds: Vec<u8> = Vec::with_capacity(total * 24);
             let mut numbers: Vec<u8> = Vec::with_capacity(total * 64);
             let mut offsets: Vec<u8> = Vec::with_capacity(total * 8);
+            let mut looked = walk.looked.iter().peekable();
             let mut at = 0;
             while at < total {
+                if let Some(module) = looked.peek().filter(|module| module.first == at) {
+                    kinds.extend_from_slice(&module.kinds);
+                    numbers.extend_from_slice(&module.numbers);
+                    offsets.extend_from_slice(&module.offsets);
+                    at += ffi::PyList_GET_SIZE(module.tensors.as_ptr()) as usize;
+                    looked.next();
+                    continue;
+                }
                 let mut info = TcfgTensorInfo::empty();
                 if (api.tensor_info)(walk.flat[at], &mut info) == 0 {
                     return Ok(None);
