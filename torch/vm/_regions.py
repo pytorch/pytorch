@@ -159,6 +159,9 @@ _PLAIN = frozenset(
 )
 _TENSORS = frozenset({torch.Tensor, nn.Parameter})
 _TENSOR_TYPES = tuple(_TENSORS)
+# How many times regions wait for one that was surveyed before them to be
+# compiled, before they go ahead without it.
+_MOST_WAITS = 256
 _HEAPTYPE = 1 << 9
 
 
@@ -1181,7 +1184,7 @@ class _Region:
             and _state.traced is None
             and _runtime.profiling_depth() == 0
         )
-        if ready and self.surveyed:
+        if ready and self.surveyed and not self.plan.options.held_back(self):
             self.decide(args)
             if self.hot:
                 return self(*args)
@@ -1190,11 +1193,10 @@ class _Region:
         try:
             if not ready or self.surveyed:
                 return self.replay(args)
-            outputs = self.survey(args)
-            if self.surveyed and self in self.plan.regions:
-                # Nothing to take out: compiled now, for the next call.
-                self.decide(args)
-            return outputs
+            # Compiled at the next call, not now: the regions of the blocks
+            # that follow are surveyed in this call too, and if this one
+            # goes on into those blocks, their graphs would be for nothing.
+            return self.survey(args)
         finally:
             _state.pending -= 1
 
@@ -1228,6 +1230,7 @@ class _Region:
             plan.split(self, None, "no tensor or module involved")
         else:
             self.surveyed = True
+            plan.options.wait(self)
         return outputs
 
     def decide(self, args: tuple[Any, ...]) -> None:
@@ -1800,6 +1803,8 @@ class _Plan:
         self.name = replay.name
         self.block = replay.block
         self.globals = replay.globals
+        # What the blocks of one function have in common.
+        self.function = (id(replay.globals), replay.name.rsplit(" (block", 1)[0])
         self.insts = insts
         # The other blocks of the function, as a path comes by them.
         self.blocks: dict[int, list[dict[str, Any]]] = {self.block: insts}
@@ -1912,6 +1917,37 @@ class Regions:
         # What the backend made of each graph, by the code of the graph and
         # what its inputs are like.
         self.compiled: dict[Any, Callable[..., Any]] = {}
+        # Per function: the regions that were surveyed and are compiled at
+        # their next call, in the order they were surveyed, and how often
+        # another region waited for each.
+        self.waiting: dict[Any, dict[_Region, int]] = {}
+
+    def wait(self, region: _Region) -> None:
+        self.waiting.setdefault(region.plan.function, {})[region] = 0
+
+    def held_back(self, region: _Region) -> bool:
+        """Whether a region is to put off its first graph: one that was
+        surveyed before it, in the same function, has not made up its mind.
+        It may go on into the block of this one (a loop body, say, which is
+        called many times before the other is called again), and the graphs
+        of this one would then be for nothing."""
+        waiting = self.waiting.get(region.plan.function)
+        if not waiting:
+            return False
+        for other in list(waiting):
+            if other is region:
+                del waiting[other]
+                return False
+            if other.hot or other not in other.plan.regions:
+                del waiting[other]
+                continue
+            waiting[other] += 1
+            if waiting[other] > _MOST_WAITS:
+                # It is not called again, it seems.
+                del waiting[other]
+                continue
+            return True
+        return False
 
     def __call__(self, region: Any) -> bool:
         insts = region.instructions()

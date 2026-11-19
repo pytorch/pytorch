@@ -4534,13 +4534,15 @@ class TestVmRegions(TestCase):
         compiled = torch.vm(
             region_pair, passes=with_graphs("aot_eager"), fallback=False
         )
-        for i in range(8):
+        for i in range(12):
             pair = RegionPair(torch.randn(3), torch.randn(3))
             kinds = {"double"} if i % 2 else {"single", "plain"}
             result, expected = compiled(pair, kinds), region_pair(pair, kinds)
             self.assertIs(type(result), RegionPair)
             self.assertEqual(tuple(result), tuple(expected), atol=0, rtol=0)
-        self.assertGreaterEqual(len(self.compiled_regions(compiled)), 2)
+        # One region, which goes on through the branch: a graph per set.
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 2)
         # Neither was turned away as something a trace might change.
         reasons = " / ".join(self.left_to_vm(compiled, "region_pair"))
         self.assertNotIn("from before the region", reasons)
