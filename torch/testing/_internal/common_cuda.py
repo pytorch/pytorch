@@ -370,13 +370,10 @@ def evaluate_platform_supports_fp8():
                 # gfx120 and gfx95 only support OCP, so gate them on 6.5.
                 archs.extend(['gfx95', 'gfx120'])
             if ROCM_VERSION >= (7, 14):
-                archs.append('gfx1250')
+                archs.extend(['gfx1250', 'gfx1250-strict'])
             if ROCM_VERSION >= (10, 3):
-                archs.extend(["gfx1170", "gfx1171", "gfx1250-strict"])
+                archs.extend(["gfx1170", "gfx1171"])
             gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-            # "gfx1250" is a prefix of "gfx1250-strict".
-            if 'gfx1250-strict' in gcn_name:
-                return ROCM_VERSION >= (10, 3)
             for arch in archs:
                 if arch in gcn_name:
                     return True
@@ -412,9 +409,7 @@ def evaluate_platform_supports_mx_gemm():
                 gcn_name = torch.cuda.get_device_properties(0).gcnArchName
                 if 'gfx950' in gcn_name:
                     return True
-                # "gfx1250" is a prefix of "gfx1250-strict", so test strict first.
-                if 'gfx1250-strict' in gcn_name:
-                    return ROCM_VERSION >= (10, 3)
+                # Also matches gfx1250-strict, which has the same floor.
                 return 'gfx1250' in gcn_name and ROCM_VERSION >= (7, 14)
         else:
             return SM100OrLater
@@ -449,10 +444,8 @@ def hipsparselt_supported_archs():
     # Keep in sync with hipSparseLtSupportedArchs() in
     # aten/src/ATen/native/sparse/cuda/cuSPARSELtOps.cpp. Gating on a wider set
     # than the runtime supports turns a skip into a hard TORCH_CHECK failure.
-    if ROCM_VERSION >= (10, 3):
+    if ROCM_VERSION >= (7, 14):
         return ['gfx942', 'gfx950', 'gfx1250', 'gfx1250-strict']
-    elif ROCM_VERSION >= (7, 14):
-        return ['gfx942', 'gfx950', 'gfx1250']
     elif ROCM_VERSION >= (7, 12):
         return ['gfx942', 'gfx950']
     return []
