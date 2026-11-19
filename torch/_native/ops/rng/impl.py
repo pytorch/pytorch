@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from ... import cutedsl_utils as cu
+from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
 from ...utils.scalar import f32
@@ -20,8 +21,6 @@ else:
 
 
 _DTYPES = (torch.float32,)
-
-_ARCH_MAJORS = cu.POINTWISE_ARCH_MAJORS
 
 
 def _serveable(self: torch.Tensor, generator: torch.Generator | None) -> bool:
