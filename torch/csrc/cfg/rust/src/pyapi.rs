@@ -245,15 +245,16 @@ impl CfgFunction {
         let cf = &self.inner;
         let state = cf.state.borrow();
         let out = PyDict::new_bound(py);
-        out.set_item("calls", state.calls)?;
+        out.set_item("calls", cf.calls())?;
         let blocks = PyList::empty_bound(py);
         let unlowered = PyList::empty_bound(py);
         let (mut sites, mut hits, mut misses) = (0u64, 0u64, 0u64);
         for (b, bs) in state.blocks.iter().enumerate() {
             let d = PyDict::new_bound(py);
             d.set_item("block", b)?;
-            d.set_item("executions", bs.execs)?;
-            d.set_item("specialized_executions", bs.spec_execs)?;
+            let (entries, specialized) = cf.block_entries(b, bs);
+            d.set_item("executions", entries)?;
+            d.set_item("specialized_executions", specialized)?;
             d.set_item("profile_runs", bs.profile_runs)?;
             d.set_item("versions", bs.versions.len())?;
             d.set_item("entry_guard_misses", bs.entry_misses)?;
