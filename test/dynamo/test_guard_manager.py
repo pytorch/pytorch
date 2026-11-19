@@ -2129,6 +2129,68 @@ class TagSafetyChecks(RecursiveDictTagTests):
 class RecursiveDictGuardTests(RecursiveDictTagTests):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_tensor_subclass_reassignment_invalidates(self):
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.Tensor.add:
+                    return torch.tensor(111)
+                return super().__torch_function__(func, types, args, kwargs)
+
+        class B(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.Tensor.add:
+                    return torch.tensor(222)
+                return super().__torch_function__(func, types, args, kwargs)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.tensor(1).as_subclass(A)
+
+            def forward(self, y):
+                return self.x + y
+
+        from torch._dynamo.testing import CompileCounter
+
+        mod = Mod()
+        counter = CompileCounter()
+        opt_fn = torch.compile(mod, backend=counter, fullgraph=True)
+
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(111))
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(111))
+        self.assertEqual(counter.frame_count, 1)
+
+        mod.x.__class__ = B
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(222))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_tensor_attribute_addition_invalidates(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.tensor(1)
+
+            def forward(self, y):
+                if hasattr(self.x, "bonus"):
+                    return y + self.x.bonus
+                return y + self.x
+
+        from torch._dynamo.testing import CompileCounter
+
+        mod = Mod()
+        counter = CompileCounter()
+        opt_fn = torch.compile(mod, backend=counter, fullgraph=True)
+
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(2))
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(2))
+        self.assertEqual(counter.frame_count, 1)
+
+        mod.x.bonus = 10
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(11))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_closure_cell_reassignment_invalidates(self):
         class A(torch.nn.Module):
             def forward(self, x):
