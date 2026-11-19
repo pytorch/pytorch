@@ -66,6 +66,7 @@ def _fake_cute_compile():
             sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
         ),
         mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
+        mock.patch.object(toolchains, "compress_cute_module"),
     ):
         yield seen
 
@@ -272,7 +273,9 @@ class TestExportJobs(unittest.TestCase):
             tc.export(dict(b), "/tmp", arch="sm_90a")
             self.assertIn(f"--host-target '{pin}'", seen["options"])
             tc.export(dict(b, options="--host-target 'llvm -mcpu=neoverse-n1'"), "/tmp")
-            self.assertEqual(seen["options"], "--host-target 'llvm -mcpu=neoverse-n1'")
+            self.assertEqual(
+                tc._declared_host_target(seen["options"]), "llvm -mcpu=neoverse-n1"
+            )
 
     def test_export_refuses_an_unpinned_machine(self) -> None:
         # Falling back to the DSL default would target the builder's CPU, which is the
@@ -1020,13 +1023,16 @@ def _fake_triton(**metadata):
     cast(Any, fake_triton).compile = fake_compile
     cast(Any, fake_triton).compiler = fake_compiler
     cast(Any, fake_triton).runtime = _Poisoned("triton.runtime")
-    with mock.patch.dict(
-        sys.modules,
-        {
-            "triton": fake_triton,
-            "triton.compiler": fake_compiler,
-            "triton.backends.compiler": fake_backends_compiler,
-        },
+    with (
+        mock.patch.dict(
+            sys.modules,
+            {
+                "triton": fake_triton,
+                "triton.compiler": fake_compiler,
+                "triton.backends.compiler": fake_backends_compiler,
+            },
+        ),
+        mock.patch.object(toolchains, "compress_cuda_image", lambda data, arch: data),
     ):
         yield seen
 
@@ -2401,6 +2407,14 @@ class TestSourceClosureAndRuntimes(unittest.TestCase):
 
 
 class TestToolchainRegistry(unittest.TestCase):
+    def test_missing_parent_runtime_is_reported(self) -> None:
+        class MissingRuntime(toolchains.Toolchain):
+            REQUIRED_RUNTIMES = ("_native_aot_missing_test_package.bindings",)
+
+        self.assertEqual(
+            MissingRuntime.missing_runtimes(), list(MissingRuntime.REQUIRED_RUNTIMES)
+        )
+
     def test_cutedsl_registered(self):
         self.assertIn("cutedsl", toolchains.TOOLCHAINS)
 
@@ -2409,7 +2423,7 @@ class TestToolchainRegistry(unittest.TestCase):
         # collection, so the registration is what a triton declaration stands on.
         tc = toolchains.get_toolchain("triton")
         self.assertEqual((tc.kind, tc.artifact_exts), ("triton", (".cubin",)))
-        self.assertEqual(tc.REQUIRED_RUNTIMES, ("triton",))
+        self.assertEqual(tc.REQUIRED_RUNTIMES, ("triton", "cuda.bindings.nvfatbin"))
 
     def test_unknown_kind_raises(self):
         with self.assertRaisesRegex(RuntimeError, "unknown toolchain kind"):
