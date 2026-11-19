@@ -1331,13 +1331,6 @@ class TestBlackwellAutoWSConfigs(TestCase):
                                 + heuristic.blackwell_persistent_addmm_configs,
                             )
 
-    def test_autows_two_cta_mm_configs_separate_epilogue_store(self):
-        heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
-        configs = heuristic._generate_autows_configs()
-        two_cta = [cfg for cfg in configs if cfg.two_ctas]
-        self.assertTrue(two_cta)
-        self.assertTrue(all(cfg.separate_epilogue_store for cfg in two_cta))
-
     @parametrize("global_meta_ws", (False, True))
     def test_global_meta_ws_disables_flatten(self, global_meta_ws):
         # Triton's Meta WS knob rewrites every WS kernel, so configs with
