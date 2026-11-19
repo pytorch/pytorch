@@ -17,16 +17,17 @@ import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.autograd.graph import get_gradient_edge, GradientEdge
-from torch.distributed.fsdp import FSDPModule, GradientReductionHandle
 from torch.distributed.pipelining._utils import (
     _derive_grad_metas,
     _DTensorMeta,
+    _is_sharded_data_parallel,
     _make_tensor_from_meta,
     _MeshCache,
     _StageBackwardMeta,
     _StageForwardMeta,
     _StageMeta,
     _TensorMeta,
+    _Waitable,
     extract_tensor_meta,
     extract_tensor_metas,
     flatten_args,
@@ -228,7 +229,7 @@ class _PipelineStageBase(ABC):
         self.bwd_cache: dict[int, tuple[torch.Tensor | None, ...]] = {}
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: list[Any] = []
-        self._gradient_reduction_handle: GradientReductionHandle | None = None
+        self._gradient_reduction_handle: _Waitable | None = None
 
         # Initialize has_backward to false; this will be set to true if loss
         # function is passed to pipeline schedule
@@ -923,7 +924,7 @@ class _PipelineStageBase(ABC):
         if self._gradient_reduction_handle is not None:
             self._gradient_reduction_handle.wait()
             self._gradient_reduction_handle = None
-            if isinstance(self.submod, FSDPModule):
+            if _is_sharded_data_parallel(self.submod):
                 self.submod.set_manual_backward_finalization(False)
         # map microbatch ID to list of forward tensor args
         self._forward_chunk_states.clear()
@@ -1126,8 +1127,8 @@ class _PipelineStageBase(ABC):
                 with self.submod.no_sync():  # type: ignore[operator]
                     result = perform_backward(backward_type)()
 
-        # If submod is a FSDP or replicate module
-        elif isinstance(self.submod, FSDPModule):
+        # If submod shards its parameters for data parallelism, e.g. FSDP2
+        elif _is_sharded_data_parallel(self.submod):
             self.submod.set_reshard_after_backward(False)
             self.submod.set_requires_gradient_sync(False)
             result = perform_backward(backward_type)()
@@ -1165,7 +1166,7 @@ class _PipelineStageBase(ABC):
 
         composite_kwargs = kwargs or {}
 
-        if isinstance(self.submod, FSDPModule) and self.has_backward:
+        if _is_sharded_data_parallel(self.submod) and self.has_backward:
             self.submod.set_manual_backward_finalization(True)
 
         if self._runtime_validate:
@@ -1415,7 +1416,7 @@ class _PipelineStageBase(ABC):
 
     def perform_reduce_grad(self, grad_scale_factor: int):
         r"""Finalize FSDP gradient accumulation and scale stage gradients."""
-        if isinstance(self.submod, FSDPModule) and self.has_backward:
+        if _is_sharded_data_parallel(self.submod) and self.has_backward:
             self.start_gradient_reduction()
             self.wait_for_gradient_reduction(grad_scale_factor)
             return
@@ -1426,7 +1427,7 @@ class _PipelineStageBase(ABC):
 
     def start_gradient_reduction(self) -> None:
         """Start FSDP gradient reduction without waiting for it."""
-        if not isinstance(self.submod, FSDPModule):
+        if not _is_sharded_data_parallel(self.submod):
             raise RuntimeError("Asynchronous gradient reduction requires FSDP")
         if self._gradient_reduction_handle is not None:
             raise RuntimeError("A gradient reduction is already pending")
@@ -1436,7 +1437,7 @@ class _PipelineStageBase(ABC):
 
     def wait_for_gradient_reduction(self, grad_scale_factor: int) -> None:
         """Wait for FSDP gradient reduction and scale the gradients."""
-        if not isinstance(self.submod, FSDPModule):
+        if not _is_sharded_data_parallel(self.submod):
             raise RuntimeError("Asynchronous gradient reduction requires FSDP")
         if self._gradient_reduction_handle is None:
             raise RuntimeError("No gradient reduction is pending")
@@ -2343,7 +2344,7 @@ class PipelineStage(_PipelineStageBase):
         # Metadata inference runs real fwd/bwd, which unshards FSDP params and
         # accumulates grads.  Reshard to free memory and clear stale grads.
         for module in self.submod.modules():
-            if isinstance(module, FSDPModule):
+            if _is_sharded_data_parallel(module):
                 module.reshard()
                 for param in module.parameters():
                     param.grad = None
