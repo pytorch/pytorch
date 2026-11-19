@@ -9,6 +9,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/irange.h>
 
 /**
  * Note [compute_scales_value]
@@ -61,6 +62,29 @@ inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>
     return std::nullopt;
   }
   return scales->at(idx);
+}
+
+// Memory format for the output of a forward upsampling op. suggest_memory_format() also requires
+// the stride of a size-1 batch dimension to fit the layout, so e.g. `hwc_image.permute(2, 0, 1)[None]`
+// is reported as contiguous; retry with a batch stride that fits any layout.
+inline c10::MemoryFormat output_memory_format(const Tensor& input) {
+  auto memory_format = input.suggest_memory_format();
+  if (memory_format != c10::MemoryFormat::Contiguous || input.dim() < 4 || input.size(0) != 1) {
+    return memory_format;
+  }
+  auto sizes = input.sizes();
+  auto strides = input.strides().vec();
+  strides[0] = 1;
+  for (const auto i : c10::irange(1, input.dim())) {
+    strides[0] = std::max(strides[0], strides[i] * sizes[i]);
+  }
+  if (input.dim() == 4 && c10::is_channels_last_strides_2d(sizes, strides)) {
+    return c10::MemoryFormat::ChannelsLast;
+  }
+  if (input.dim() == 5 && c10::is_channels_last_strides_3d(sizes, strides)) {
+    return c10::MemoryFormat::ChannelsLast3d;
+  }
+  return memory_format;
 }
 
 } // namespace upsample

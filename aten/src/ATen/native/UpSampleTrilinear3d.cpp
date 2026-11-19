@@ -35,7 +35,7 @@ TORCH_META_FUNC(upsample_trilinear3d) (
       "Non-empty 5D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(native::upsample::output_memory_format(input)));
 }
 
 TORCH_META_FUNC(upsample_trilinear3d_backward) (

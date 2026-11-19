@@ -9920,6 +9920,36 @@ class TestNNDeviceType(NNTestCase):
             device, antialias, align_corners, mode, memory_format
         )
 
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos"])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("dtype", [torch.uint8, torch.float32])
+    def test_upsampling2d_channels_last_view_with_size1_batch(self, device, mode, antialias, dtype):
+        if antialias and mode not in ("bilinear", "bicubic", "lanczos"):
+            self.skipTest("antialias is only supported for bilinear, bicubic and lanczos")
+        if mode == "lanczos" and (not antialias or torch.device(device).type != "cpu"):
+            self.skipTest("lanczos requires antialias=True and is CPU only")
+        if dtype == torch.uint8 and torch.device(device).type != "cpu" and mode != "nearest":
+            self.skipTest("uint8 is only supported on CPU")
+        # Channels-last contiguous, but the size-1 batch dim has stride 3 rather than H * W * C.
+        x = torch.randint(0, 256, (31, 47, 3), dtype=torch.uint8, device=device).to(dtype).permute(2, 0, 1)[None]
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        x_ref = torch.empty_like(x, memory_format=torch.channels_last).copy_(x)
+        for size in [(20, 30), (62, 94)]:
+            out = F.interpolate(x, size=size, mode=mode, antialias=antialias)
+            expected = F.interpolate(x_ref, size=size, mode=mode, antialias=antialias)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(out, expected)
+
+    @parametrize_test("mode", ["nearest", "nearest-exact", "trilinear"])
+    def test_upsampling3d_channels_last_view_with_size1_batch(self, device, mode):
+        x = torch.rand(5, 31, 47, 3, device=device).permute(3, 0, 1, 2)[None]
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last_3d))
+        x_ref = torch.empty_like(x, memory_format=torch.channels_last_3d).copy_(x)
+        out = F.interpolate(x, size=(7, 20, 30), mode=mode)
+        expected = F.interpolate(x_ref, size=(7, 20, 30), mode=mode)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+        self.assertEqual(out, expected)
+
     @onlyCUDA
     @skipIfRocm
     @parametrize_test("align_corners", [True, False])
@@ -10213,15 +10243,8 @@ class TestNNDeviceType(NNTestCase):
         if non_contig is False:
             self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
 
-        # FIXME if-clause shows the current behaviour which is definitely unexpected.
-        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
-        # See for more details: https://github.com/pytorch/pytorch/pull/100373
-        if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
-            self.assertTrue(output_ui8.is_contiguous())
-            self.assertTrue(output_f32.is_contiguous())
-        else:
-            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
-            self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
+        self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
+        self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
         if mode == "bilinear":
             torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
