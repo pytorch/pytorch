@@ -44,6 +44,13 @@ void checkSameDtype(
   }
 }
 
+// Stock ProcessGroupNCCL's "<pg_desc>:<pg_uid>"; NCCLX telemetry joins on it.
+[[maybe_unused]] std::string defaultCommName(
+    const std::string& desc,
+    const std::string& name) {
+  return desc.empty() ? name : c10::str(desc, ':', name);
+}
+
 } // namespace
 
 ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
@@ -81,6 +88,18 @@ void waitForNcclCompletion(
   }
   if (status != ncclSuccess) {
     throw NCCLException(nccl_api, std::string(operation), status, comm);
+  }
+}
+
+void abortCommIgnoringErrors(
+    NcclApi& api,
+    ncclComm_t comm,
+    std::chrono::milliseconds timeout,
+    std::string_view operation) {
+  try {
+    waitForNcclCompletion(api, comm, api.commAbort(comm), timeout, operation);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << e.what();
   }
 }
 
@@ -278,7 +297,7 @@ void ProcessGroupNCCL::init(at::Device device) {
     device_ = bootstrap->getDevice();
 
     if (nccl_comm_ == nullptr) {
-      nccl_comm_ = bootstrap->createNcclComm(name_, options_c10d_->config);
+      nccl_comm_ = bootstrap->createNcclComm(name_, commConfig());
     }
   }
 
@@ -288,6 +307,20 @@ void ProcessGroupNCCL::init(at::Device device) {
   TracingGuard tracingGuard(name_, comm_size_, "init", rank_, sequence_number_);
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL initialized for rank: " << rank_;
+}
+
+ncclConfig_t ProcessGroupNCCL::commConfig() {
+  ncclConfig_t config = options_c10d_->config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (config.commName != nullptr) {
+    return config;
+  }
+  if (comm_name_.empty()) {
+    comm_name_ = defaultCommName(getGroupDesc(), name_);
+  }
+  config.commName = comm_name_.c_str();
+#endif
+  return config;
 }
 
 void ProcessGroupNCCL::initNcclResources() {
@@ -398,11 +431,17 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
     newRank = static_cast<int>(std::distance(ranks.begin(), it));
   }
 
-  const std::string& name = ncclOpts->group_name;
   ncclConfig_t config =
       newRank == -1 ? ncclOpts->config : cloneNcclConfig(ncclOpts->config);
+  [[maybe_unused]] bool defaultName = false;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name.c_str();
+  if (newRank != -1 && config.commName == nullptr) {
+    // NCCL keeps the pointer for the child comm's lifetime, so leak it as the
+    // NCCLConfig pybind setter does.
+    config.commName = strdup(
+        defaultCommName(ncclOpts->group_desc, ncclOpts->group_name).c_str());
+    defaultName = true;
+  }
 #endif
 
   // Collective on the parent comm: every parent rank calls commSplit exactly
@@ -423,6 +462,9 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
         "NCCL split failed");
   } catch (...) {
     comm_state_ = CommState::ERROR;
+    // The failed call may have aborted the parent; drop its symmetric-memory
+    // registration while nccl_comm_ still names it.
+    retireComm();
     nccl_comm_ = nullptr;
     throw;
   }
@@ -435,18 +477,19 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
   childOpts->timeout = ncclOpts->timeout;
   childOpts->config = config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (defaultName) {
+    // Keep the default out of the child's Options: splitGroup and shrink clone
+    // them, and a grandchild must compute its own name, not inherit this one.
+    childOpts->config.commName = nullptr;
+  }
+#endif
   // Do not inherit enable_reconfigure: reconfigure() performs blocking
   // rendezvous on this shared Store connection.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  // commName above borrows `name`, which belongs to the Options handed to
-  // split() -- a clone that dies with the caller's frame. Every consumer of a
-  // stored config assigns commName from a live string before passing it to
-  // NCCL (createNcclComm, reconfigure(), this function), so store no pointer
-  // rather than one that outlives its string.
-  childOpts->config.commName = nullptr;
-#endif
   childOpts->group_name = ncclOpts->group_name;
   childOpts->group_desc = ncclOpts->group_desc;
+  // Validated by the child constructor against the process-global key.
+  childOpts->encryption_psk = ncclOpts->encryption_psk;
 
   // The child's membership in world-rank terms, as stock's split() records it.
   // nccl2 never reads this itself; its one consumer is FlightRecorderHook,
@@ -465,8 +508,18 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   }
   childOpts->global_ranks_in_group = std::move(childRanks);
 
-  auto child = c10::make_intrusive<ProcessGroupNCCL>(
-      store, newRank, static_cast<int>(ranks.size()), childOpts);
+  c10::intrusive_ptr<ProcessGroupNCCL> child;
+  try {
+    child = c10::make_intrusive<ProcessGroupNCCL>(
+        store, newRank, static_cast<int>(ranks.size()), childOpts);
+  } catch (...) {
+    abortCommIgnoringErrors(
+        *nccl_api_,
+        new_comm,
+        ncclOpts->timeout,
+        "NCCL abort of split child failed");
+    throw;
+  }
   child->initFromComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }
@@ -1971,7 +2024,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
   // Record start event before NCCL operations
   work->recordStart("gather");
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3)
   if (contiguous_output) {
     void* recvbuff =
         rank_ == root ? output_tensor_list.front().data_ptr() : nullptr;

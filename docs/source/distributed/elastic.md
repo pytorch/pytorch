@@ -30,6 +30,7 @@ elastic/events
 elastic/subprocess_handler
 elastic/control_plane
 elastic/numa
+elastic/utils
 ```
 
 ```{toctree}

@@ -26,6 +26,7 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -143,7 +144,7 @@ ReconfigureQuorum findReconfigureQuorum(
     return {};
   }
   int previousRank = -1;
-  for (int i = 0; i < quorum.size; ++i) {
+  for (const auto i : c10::irange(quorum.size)) {
     auto info = parseNCCLReconfigureHandle(handles[i]);
     if (info.uuid != quorum.uuid || info.rank <= previousRank) {
       return {};
@@ -155,18 +156,6 @@ ReconfigureQuorum findReconfigureQuorum(
   std::ignore = handles;
   return {};
 #endif
-}
-
-void abortCommIgnoringErrors(
-    NcclApi& api,
-    ncclComm_t comm,
-    std::chrono::milliseconds timeout,
-    std::string_view operation) {
-  try {
-    waitForNcclCompletion(api, comm, api.commAbort(comm), timeout, operation);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << e.what();
-  }
 }
 
 std::vector<uint8_t> uniqueIdToBytes(const ncclUniqueId& uniqueId) {
@@ -387,7 +376,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
         reconfigure_uuid_,
         " but it is not initialized");
     std::unordered_set<int> keptRanks;
-    for (int i = 0; i < quorum.size; ++i) {
+    for (const auto i : c10::irange(quorum.size)) {
       keptRanks.insert(parseNCCLReconfigureHandle(handles[i]).rank);
     }
     for (int rank = 0; rank < comm_size_; ++rank) {
@@ -452,10 +441,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     }
   }
 
-  ncclConfig_t config = options_c10d_->config;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name_.c_str();
-#endif
+  ncclConfig_t config = commConfig();
   populateNcclConfigFromHints(config, opts.hints, name_);
   // ReconfigureOptions::timeout must bound initialization even when the
   // process-group config normally uses blocking NCCL calls.
