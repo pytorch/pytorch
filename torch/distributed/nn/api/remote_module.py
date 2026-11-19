@@ -96,7 +96,7 @@ def _create_module_with_interface(
 ):
     module = _create_module(module_cls, args, kwargs, device)
     if module_interface_cls is not None:
-        module = torch.jit.script(module)
+        module = torch.jit._script.script(module)
     return rpc.RRef(module, module_interface_cls)
 
 
@@ -181,9 +181,9 @@ class _RemoteModule(nn.Module):
             args (Sequence, optional): args to be passed to ``module_cls``.
             kwargs (Dict, optional): kwargs to be passed to ``module_cls``.
             _module_interface_cls (type, optional): The TorchScript interface type for the module
-                to be created. The type object should be decorated by @torch.jit.interface.
-                If not provided, the generated RemoteModule is not torchscript-able.
-                Warning, this is an experimental API and susceptible to frequent changes.
+                to be created. This experimental internal-only path requires an existing
+                TorchScript interface; public interface creation is no longer supported.
+                Omit this argument for an ordinary RemoteModule.
 
         Returns:
             A remote module instance which wraps the :class:`~nn.Module` created by the
@@ -564,9 +564,9 @@ class _RemoteModule(nn.Module):
             module_rref (RRef[nn.Module]): The module reference shared by both the caller and
                 the created remote module.
             _module_interface_cls (type, optional): The TorchScript interface type for the module
-                to be created. The type object should be decorated by @torch.jit.interface.
-                If not provided, the generated RemoteModule is not torchscript-able.
-                Warning, this is an experimental API and susceptible to frequent changes.
+                to be created. This experimental internal-only path requires an existing
+                TorchScript interface; public interface creation is no longer supported.
+                Omit this argument for an ordinary RemoteModule.
 
         Returns:
             A remote module instance which wraps the :class:`~nn.Module` created by the
@@ -738,7 +738,7 @@ def _recursive_script_module_receiver(
 ):
     """Deserializes a RecursiveScriptModule that does not contain a script RemoteModule."""
     f = io.BytesIO(recursive_script_module_serialized)
-    m = torch.jit.load(f)
+    m = torch.jit._serialization.load(f)
     return m
 
 
@@ -751,7 +751,7 @@ def _recursive_script_module_reducer(recursive_script_module):
         )
 
     f = io.BytesIO()
-    torch.jit.save(recursive_script_module, f)
+    torch.jit._serialization.save(recursive_script_module, f)
     return (_recursive_script_module_receiver, (f.getvalue(),))
 
 

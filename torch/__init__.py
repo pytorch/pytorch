@@ -1821,6 +1821,7 @@ def use_deterministic_algorithms(
           an MPS tensor
         * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
           in some cases
+        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1845,7 +1846,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
-        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
@@ -2693,9 +2693,7 @@ del _LegacyStorage
 # needs to be before the submodule imports to avoid circular dependencies
 def _assert(condition: object, message: object) -> None:
     r"""A wrapper around Python's assert which is symbolically traceable."""
-    if type(condition) is not torch.Tensor and overrides.has_torch_function(
-        (condition,)
-    ):
+    if overrides.has_torch_function((condition,)):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
         )
