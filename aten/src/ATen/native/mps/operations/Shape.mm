@@ -89,6 +89,11 @@ static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, int64_t di
 }
 
 // NOTE: `output` is expected to already have the correct size.
+// float4_e2m1fn_x2 has no Metal type and cannot be cast, so its elements are moved as bytes
+static std::string cat_type_str(const Tensor& t) {
+  return t.scalar_type() == kFloat4_e2m1fn_x2 ? "uchar" : scalarToMetalTypeString(t);
+}
+
 template <typename idx_type_t>
 static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
   const auto idx_type_name = get_type_str<idx_type_t>();
@@ -136,10 +141,8 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
           id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
-          auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("cat_{}_{}_{}",
-                                                                        get_type_str<idx_type_t>(),
-                                                                        scalarToMetalTypeString(input),
-                                                                        scalarToMetalTypeString(output)));
+          auto pipeline_state = lib.getPipelineStateForFunc(
+              fmt::format("cat_{}_{}_{}", get_type_str<idx_type_t>(), cat_type_str(input), cat_type_str(output)));
           getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input}, stream);
           [computeEncoder setComputePipelineState:pipeline_state];
           mtl_setArgs(computeEncoder, input, output, shared_params, input_params);
