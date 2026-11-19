@@ -123,10 +123,11 @@ class Graphs(BuiltinPass):
             written to since (in place, through ``.data``, by an optimizer) or
             replaced makes the region compile again with that tensor as an
             input of the graph. Not built in: a tensor the region itself
-            writes, and memory PyTorch does not see the writes to (shared with
-            another process, or a NumPy array's). ``regions()`` reports
-            ``frozen`` per region. On by default (``TORCH_VM_FREEZE=0`` turns
-            it off).
+            writes, the matrix of a matrix product or of an embedding lookup
+            (nothing folds, and it would be a second copy), and memory PyTorch
+            does not see the writes to (shared with another process, or a NumPy
+            array's). ``regions()`` reports ``frozen`` per region. On by
+            default (``TORCH_VM_FREEZE=0`` turns it off).
     """
 
     engine: ClassVar[str] = "graphs"
