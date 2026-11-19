@@ -15,7 +15,10 @@
 
 namespace at::cuda::tunable {
 
-class StreamTimer : public ITimer {
+// Exported because TunableOp<T> instantiates these in its header, so any
+// translation unit outside the library that subclasses it -- a test, say --
+// has to resolve them.
+class TORCH_CUDA_CPP_API StreamTimer : public ITimer {
   public:
     StreamTimer();
     StreamTimer(const StreamTimer&) = delete;
@@ -35,7 +38,7 @@ class StreamTimer : public ITimer {
     cudaEvent_t end_{};
 };
 
-class StreamTimerNoSync : public ITimer {
+class TORCH_CUDA_CPP_API StreamTimerNoSync : public ITimer {
   public:
     StreamTimerNoSync();
     StreamTimerNoSync(const StreamTimerNoSync&) = delete;
