@@ -1,0 +1,1414 @@
+{
+  "$defs": {
+    "failure": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "operation-local"
+            },
+            "code": {
+              "enum": [
+                "response-limit",
+                "xml-boundary",
+                "xml-shape",
+                "json-shape",
+                "value-shape",
+                "list-scope",
+                "list-truncated",
+                "list-count"
+              ]
+            },
+            "stage": {
+              "enum": [
+                "transport",
+                "xml",
+                "json",
+                "projection"
+              ]
+            }
+          },
+          "required": [
+            "class",
+            "stage",
+            "code"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "class": {
+              "const": "global-fatal"
+            },
+            "code": {
+              "enum": [
+                "source-boundary",
+                "environment-boundary",
+                "oidc-unavailable",
+                "credentials",
+                "identity",
+                "owner-region",
+                "request-boundary",
+                "request-budget",
+                "framing",
+                "redirect",
+                "tls",
+                "network",
+                "authentication",
+                "deadline",
+                "internal",
+                "finalization"
+              ]
+            },
+            "stage": {
+              "enum": [
+                "source",
+                "environment",
+                "oidc",
+                "credentials",
+                "identity",
+                "owner-region",
+                "request",
+                "transport",
+                "framing",
+                "http",
+                "xml",
+                "json",
+                "projection",
+                "finalization",
+                "internal"
+              ]
+            }
+          },
+          "required": [
+            "class",
+            "stage",
+            "code"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-GetBucketEncryption": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "not-configured"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "algorithms": {
+              "items": {
+                "enum": [
+                  "AES256",
+                  "aws:kms",
+                  "aws:kms:dsse"
+                ]
+              },
+              "maxItems": 3,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "state": {
+              "const": "configured"
+            }
+          },
+          "required": [
+            "state",
+            "algorithms"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-GetBucketLocation": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "region-matched"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-GetBucketOwnershipControls": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "not-configured"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "BucketOwnerPreferred"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "ObjectWriter"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "BucketOwnerEnforced"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-GetBucketPolicy": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "not-configured"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "present-unreviewed"
+            },
+            "statements": {
+              "maximum": 4096,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "state",
+            "statements"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-GetBucketPolicyStatus": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "public": {
+              "type": "boolean"
+            },
+            "state": {
+              "const": "present"
+            }
+          },
+          "required": [
+            "state",
+            "public"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-GetPublicAccessBlock": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "not-configured"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "all_enabled": {
+              "type": "boolean"
+            },
+            "block_public_acls": {
+              "type": "boolean"
+            },
+            "block_public_policy": {
+              "type": "boolean"
+            },
+            "ignore_public_acls": {
+              "type": "boolean"
+            },
+            "restrict_public_buckets": {
+              "type": "boolean"
+            },
+            "state": {
+              "const": "present"
+            }
+          },
+          "required": [
+            "state",
+            "block_public_acls",
+            "ignore_public_acls",
+            "block_public_policy",
+            "restrict_public_buckets",
+            "all_enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-HeadBucket": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "owner-region-matched"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "const": "head-status"
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-HeadObject": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "maximum": 99999999999999999999,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "delete_marker": {
+              "const": false
+            },
+            "state": {
+              "const": "current-key-present"
+            },
+            "version_id_present": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "state",
+            "bytes",
+            "version_id_present",
+            "delete_marker"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "current-key-not-found"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "delete-marker-present"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "head-status",
+                "head-version-metadata"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-ListObjectVersions": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "exact_current_delete_markers": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exact_current_versions": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exact_delete_markers": {
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exact_entries": {
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exact_noncurrent_versions": {
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "other_prefix_entries": {
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "const": "complete"
+            }
+          },
+          "required": [
+            "state",
+            "exact_entries",
+            "exact_current_versions",
+            "exact_noncurrent_versions",
+            "exact_delete_markers",
+            "exact_current_delete_markers",
+            "other_prefix_entries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "projection-ListObjectsV2": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "exact_entries": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "other_prefix_entries": {
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "const": "complete"
+            }
+          },
+          "required": [
+            "state",
+            "exact_entries",
+            "other_prefix_entries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "access-denied",
+                "authentication",
+                "service-status"
+              ]
+            },
+            "state": {
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "response": {
+      "additionalProperties": false,
+      "properties": {
+        "body_limit_exceeded": {
+          "type": "boolean"
+        },
+        "framing": {
+          "enum": [
+            "unaccepted",
+            "head-no-body",
+            "status-no-body",
+            "content-length",
+            "chunked",
+            "close-delimited"
+          ]
+        },
+        "http_status": {
+          "maximum": 599,
+          "minimum": 200,
+          "type": "integer"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9+/=_-]{1,256}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "response_bytes": {
+          "anyOf": [
+            {
+              "maximum": 262144,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "response_complete": {
+          "type": "boolean"
+        },
+        "response_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "http_status",
+        "framing",
+        "response_complete",
+        "response_bytes",
+        "response_sha256",
+        "request_id",
+        "body_limit_exceeded"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:pytorch-release-audit:hf-cache-metadata-tail:repair1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "all_operations_attempted": {
+      "type": "boolean"
+    },
+    "all_responses_projected": {
+      "type": "boolean"
+    },
+    "collector_cleanup_confirmed": {
+      "type": "boolean"
+    },
+    "fatal_code": {
+      "anyOf": [
+        {
+          "enum": [
+            "source-boundary",
+            "environment-boundary",
+            "oidc-unavailable",
+            "credentials",
+            "identity",
+            "owner-region",
+            "request-boundary",
+            "request-budget",
+            "framing",
+            "redirect",
+            "tls",
+            "network",
+            "authentication",
+            "deadline",
+            "internal",
+            "finalization"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fatal_stage": {
+      "anyOf": [
+        {
+          "enum": [
+            "source",
+            "environment",
+            "oidc",
+            "credentials",
+            "identity",
+            "HeadBucket",
+            "GetBucketLocation",
+            "GetBucketPolicy",
+            "GetBucketPolicyStatus",
+            "GetPublicAccessBlock",
+            "GetBucketOwnershipControls",
+            "GetBucketEncryption",
+            "HeadObject",
+            "ListObjectsV2",
+            "ListObjectVersions",
+            "finalization",
+            "internal"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "identity_matches": {
+      "type": "boolean"
+    },
+    "operations": {
+      "additionalProperties": false,
+      "properties": {
+        "GetBucketEncryption": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-GetBucketEncryption"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "GetBucketLocation": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-GetBucketLocation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "GetBucketOwnershipControls": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-GetBucketOwnershipControls"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "GetBucketPolicy": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-GetBucketPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "GetBucketPolicyStatus": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-GetBucketPolicyStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "GetPublicAccessBlock": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-GetPublicAccessBlock"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "HeadBucket": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-HeadBucket"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "HeadObject": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-HeadObject"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "ListObjectVersions": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-ListObjectVersions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        },
+        "ListObjectsV2": {
+          "additionalProperties": false,
+          "properties": {
+            "disposition": {
+              "enum": [
+                "not-attempted",
+                "projected",
+                "operation-error",
+                "fatal"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "projection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projection-ListObjectsV2"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/response"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "response",
+            "projection",
+            "failure"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "HeadBucket",
+        "GetBucketLocation",
+        "GetBucketPolicy",
+        "GetBucketPolicyStatus",
+        "GetPublicAccessBlock",
+        "GetBucketOwnershipControls",
+        "GetBucketEncryption",
+        "HeadObject",
+        "ListObjectsV2",
+        "ListObjectVersions"
+      ],
+      "type": "object"
+    },
+    "owner_region_matches": {
+      "type": "boolean"
+    },
+    "probe_error": {
+      "type": "boolean"
+    },
+    "request_counts": {
+      "additionalProperties": false,
+      "properties": {
+        "GetBucketEncryption": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "GetBucketLocation": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "GetBucketOwnershipControls": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "GetBucketPolicy": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "GetBucketPolicyStatus": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "GetPublicAccessBlock": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "HeadBucket": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "HeadObject": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ListObjectVersions": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ListObjectsV2": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "identity": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "identity",
+        "HeadBucket",
+        "GetBucketLocation",
+        "GetBucketPolicy",
+        "GetBucketPolicyStatus",
+        "GetPublicAccessBlock",
+        "GetBucketOwnershipControls",
+        "GetBucketEncryption",
+        "HeadObject",
+        "ListObjectsV2",
+        "ListObjectVersions"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "const": 1
+    },
+    "write_authorized": {
+      "const": false
+    }
+  },
+  "required": [
+    "schema",
+    "identity_matches",
+    "owner_region_matches",
+    "operations",
+    "request_counts",
+    "all_operations_attempted",
+    "all_responses_projected",
+    "probe_error",
+    "fatal_stage",
+    "fatal_code",
+    "write_authorized",
+    "collector_cleanup_confirmed"
+  ],
+  "title": "Fixed HF-cache metadata tail result,design repair1",
+  "type": "object"
+}
