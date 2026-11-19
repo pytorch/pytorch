@@ -662,5 +662,55 @@ class FStringMutationTests(TestCase):
         self._check(fn, torch.randn(3), Obj([1, 2]))
 
 
+class _HasStr:
+    def __str__(self):
+        return "HasStr"
+
+
+class _FormatOverride(_HasStr):
+    def __format__(self, spec):
+        return "Format" + spec
+
+
+@instantiate_parametrized_tests
+class ObjectFormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "call",
+        [
+            subtest(lambda o: o.__format__(""), name="bound"),
+            subtest(lambda o: type(o).__format__(o, ""), name="type"),
+        ],
+    )
+    def test_empty_spec_calls_str(self, call):
+        def fn(x, o):
+            return x + 1, call(o)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.randn(2), _HasStr())[1], "HasStr")
+
+    def test_user_override(self):
+        def fn(x, o):
+            return x + 1, o.__format__("x")
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x, o = torch.randn(2), _FormatOverride()
+        self.assertEqual(compiled(x, o)[1:], fn(x, o)[1:])
+
+    @parametrize("spec", ["d", 1])
+    def test_type_error(self, spec):
+        def fn(x, o):
+            try:
+                o.__format__(spec)
+            except TypeError as e:
+                return x + 1, str(e)
+            return x, ""
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x, o = torch.randn(2), _HasStr()
+        self.assertEqual(compiled(x, o)[1], fn(x, o)[1])
+
+
 if __name__ == "__main__":
     run_tests()

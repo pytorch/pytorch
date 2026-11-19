@@ -487,6 +487,17 @@ def unmodeled_setter(
     )
 
 
+def _object_format(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    from .object_protocol import object_format
+
+    return object_format(tx, self, args[0])
+
+
 def type_qualified_name(type_: type) -> str:
     """Equivalent to _PyType_GetFullyQualifiedName, for a raw type object.
 
@@ -1813,7 +1824,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # Lookup walks the class MRO (see `_lookup_tp_table`), so a subclass table
     # adds to (rather than replaces) the entries it inherits, with the
     # most-derived class winning on name collisions.
-    tp_methods: dict[str, Method] = {}
+    tp_methods: dict[str, Method] = {"__format__": Method(_object_format)}
     # Declarative attribute tables, split to match CPython: tp_getset holds the
     # PyGetSetDef attributes, tp_members the PyMemberDef ones.
     tp_getset: dict[str, GetSet] = {
