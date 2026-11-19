@@ -426,7 +426,6 @@
   "test/inductor/test_mmdecomp.py",
   "test/inductor/test_module_level_kernels.py",
   "test/inductor/test_move_constructors_to_gpu.py",
-  "test/inductor/test_multi_kernel.py",
   "test/inductor/test_native_matmul.py",
   "test/inductor/test_nested_reduction.py",
   "test/inductor/test_nv_universal_gemm.py",
