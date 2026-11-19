@@ -20,6 +20,7 @@ import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.precompile_package import precompile_capture
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
@@ -3669,9 +3670,7 @@ class TestInvokeSubgraphReuse(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_method_receiver_alias_guards_retrace(self):
-        class Pair:
-            def __init__(self, left, right):
-                self.left, self.right = left, right
+        from types import SimpleNamespace
 
         @nested_compile_region
         def region(x, pair):
@@ -3681,7 +3680,8 @@ class TestInvokeSubgraphReuse(TestCase):
             return region(x, first) + region(x, second)
 
         x, shared = torch.ones(1), []
-        first, second = Pair([], []), Pair(shared, shared)
+        first = SimpleNamespace(left=[], right=[])
+        second = SimpleNamespace(left=shared, right=shared)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         with self._count_speculate_calls() as count:
             result = compiled(x, first, second)
@@ -6075,6 +6075,9 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
 
         with self._count_speculate_calls() as count:
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x4, x8a, x8b)
+
+        with precompile_capture(fn, backend="eager") as call:
+            self.assertEqual(call(x4, x8a, x8b), ref)
 
         # shape[0]=4 and shape[0]=8 → 2 traces, third call reuses shape=8
         self.assertEqual(count(), 2)
