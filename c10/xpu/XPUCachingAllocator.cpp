@@ -22,6 +22,15 @@ constexpr size_t kDeviceAlignment = 512;
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
+// The SYCL IPC memory extension was reorganized in compiler 2026.2.
+#if SYCL_COMPILER_VERSION >= 20260200
+namespace sycl_ipc = sycl::ext::oneapi::experimental::ipc;
+namespace sycl_ipc_memory = sycl::ext::oneapi::experimental::ipc::memory;
+#else
+namespace sycl_ipc = sycl::ext::oneapi::experimental::ipc_memory;
+namespace sycl_ipc_memory = sycl::ext::oneapi::experimental::ipc_memory;
+#endif
+
 struct Block;
 
 struct BlockComparatorSize {
@@ -196,6 +205,11 @@ struct ExpandableSegment {
       handles_.resize(end, std::nullopt);
     }
 
+#if SYCL_COMPILER_VERSION >= 20260200
+    const bool ipc_supported = xpu::get_raw_device(device_).has(
+        sycl::aspect::ext_oneapi_ipc_physical_memory);
+#endif
+
     // Allocate and map physical memory for each segment.
     for (const auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
@@ -208,7 +222,7 @@ struct ExpandableSegment {
                 segment_size_
 #if SYCL_COMPILER_VERSION >= 20260200
                 ,
-                syclex::properties{syclex::enable_ipc{true}}
+                syclex::properties{syclex::enable_ipc{ipc_supported}}
 #endif
                 )});
         auto& mem = handle->handle;
@@ -265,6 +279,10 @@ struct ExpandableSegment {
   SegmentRange share(SegmentRange range, std::ostream& ss) {
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
+    TORCH_CHECK(
+        xpu::get_raw_device(device_).has(
+            sycl::aspect::ext_oneapi_ipc_physical_memory),
+        "Expandable segment IPC sharing is not supported on this device.");
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(begin < end);
@@ -311,6 +329,10 @@ struct ExpandableSegment {
       std::istream& ss) {
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
+    TORCH_CHECK(
+        xpu::get_raw_device(device).has(
+            sycl::aspect::ext_oneapi_ipc_physical_memory),
+        "Expandable segment IPC sharing is not supported on this device.");
     ShareHeader header{};
     ss.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
     TORCH_CHECK(
@@ -892,7 +914,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, sycl::queue* queue) {
-    if (C10_UNLIKELY(!allocation_scopes_.empty())) {
+    if (!allocation_scopes_.empty()) [[unlikely]] {
       // Search allocation_scopes_ in LIFO order so the innermost scope wins.
       for (auto& entry : std::views::reverse(allocation_scopes_)) {
         // lookup for mempool id matching current capture graph
@@ -1557,7 +1579,7 @@ class DeviceCachingAllocator {
   // Returns true iff the calling thread's current stream is actively recording
   // into a XPU graph.
   bool is_capture_context() const {
-    if (C10_LIKELY(num_active_captures_ == 0)) {
+    if (num_active_captures_ == 0) [[likely]] {
       return false;
     }
     return xpu::getCurrentXPUStream(device_index).is_capturing();
@@ -1578,7 +1600,7 @@ class DeviceCachingAllocator {
   // handle deferred event which is not used by xpugraph
   void insert_events_deferred_until_no_capture(
       const std::shared_ptr<GatheredContext>& context) {
-    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+    if (!deferred_blocks.empty()) [[unlikely]] {
       for (auto* block : deferred_blocks) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         // Strip stream uses added during capture;
@@ -1756,7 +1778,7 @@ class DeviceCachingAllocator {
     auto context = maybeGatherContext(RecordContext::STATE);
 
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(!is_capture_context())) {
+    if (!is_capture_context()) [[likely]] {
       process_events(context);
     }
     size_t size = round_size(orig_size);
@@ -1860,7 +1882,7 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_allocated);
 
     if (!block->stream_uses.empty()) {
-      if (C10_UNLIKELY(is_capture_context())) {
+      if (is_capture_context()) [[unlikely]] {
         deferred_blocks.insert(block);
       } else {
         insert_events(block);
@@ -1883,7 +1905,7 @@ class DeviceCachingAllocator {
       return;
     }
     const bool inserted = block->stream_uses.insert(stream).second;
-    if (C10_UNLIKELY(is_capture_context())) {
+    if (is_capture_context()) [[unlikely]] {
       if (inserted) {
         block_to_xpugraph_stream_uses[block].insert(stream);
       }
@@ -2283,11 +2305,9 @@ class DeviceCachingAllocator {
       }
       offset = static_cast<const char*>(block->ptr) -
           static_cast<const char*>(base_block->ptr);
-      sycl::ext::oneapi::experimental::ipc_memory::handle handle =
-          sycl::ext::oneapi::experimental::ipc_memory::get(
-              base_block->ptr, c10::xpu::get_device_context());
-      sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
-          handle.data();
+      sycl_ipc::handle_data_t handle_data =
+          sycl_ipc_memory::get(base_block->ptr, c10::xpu::get_device_context())
+              .data();
       TORCH_INTERNAL_ASSERT(
           handle_data.size() <= std::numeric_limits<char>::max(),
           "IPC handle size exceeds maximum allowed size.");
@@ -2421,13 +2441,11 @@ class NativeCachingAllocator : public XPUAllocator {
 
       if (type == SHAREABLE_XPU_MALLOC) {
         auto handle_size = static_cast<size_t>(ss.get());
-        sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
-            handle_size);
+        sycl_ipc::handle_data_t handle_data(handle_size);
         ss.read(
             reinterpret_cast<char*>(handle_data.data()),
             static_cast<std::streamsize>(handle_size));
-
-        xpu_ipc_ptr = sycl::ext::oneapi::experimental::ipc_memory::open(
+        xpu_ipc_ptr = sycl_ipc_memory::open(
             handle_data,
             c10::xpu::get_device_context(),
             c10::xpu::get_raw_device(device));
@@ -2441,12 +2459,11 @@ class NativeCachingAllocator : public XPUAllocator {
     }
 
     // clear() must be called explicitly to release IPC resources. Using a
-    // destructor would risk calling ipc_memory::close after the SYCL runtime
+    // destructor would risk calling ipc::memory::close after the SYCL runtime
     // has already shut down during process exit.
     void clear() {
       if (xpu_ipc_ptr) {
-        sycl::ext::oneapi::experimental::ipc_memory::close(
-            xpu_ipc_ptr, c10::xpu::get_device_context());
+        sycl_ipc_memory::close(xpu_ipc_ptr, c10::xpu::get_device_context());
         xpu_ipc_ptr = nullptr;
       }
       if (expandable_segment) {
@@ -2532,7 +2549,7 @@ class NativeCachingAllocator : public XPUAllocator {
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_memory_allocation(
           c10::kXPU, reinterpret_cast<uintptr_t>(*devPtr));
     }
@@ -2546,7 +2563,7 @@ class NativeCachingAllocator : public XPUAllocator {
     TORCH_CHECK(block, "invalid device pointer: ", ptr);
     device_allocators[block->device]->free(block);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_memory_deallocation(
           c10::kXPU, reinterpret_cast<uintptr_t>(block->ptr));
     }

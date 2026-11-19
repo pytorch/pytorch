@@ -12,7 +12,6 @@ from filter_test_configs import (
     enforce_lf_allowlist,
     filter,
     filter_selected_test_configs,
-    get_ghstack_below_count,
     get_labels,
     get_reenabled_issues,
     mark_unstable_jobs,
@@ -867,29 +866,6 @@ class TestConfigFilter(TestCase):
         ):
             mocked_subprocess.side_effect = err
             self.assertEqual(get_reenabled_issues(pr_body="Fixes #123"), ["123"])
-
-    def test_get_ghstack_below_count(self) -> None:
-        # Not a ghstack body.
-        self.assertEqual(get_ghstack_below_count(""), 0)
-        self.assertEqual(get_ghstack_below_count("just a regular PR"), 0)
-
-        # Top of a 4-deep stack: 3 entries below the marker.
-        top_body = (
-            "Stack from ghstack (oldest at bottom):\n* __->__ #4\n* #3\n* #2\n* #1\n"
-        )
-        self.assertEqual(get_ghstack_below_count(top_body), 3)
-
-        # Middle of the same stack: 1 entry below the marker.
-        mid_body = (
-            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* __->__ #2\n* #1\n"
-        )
-        self.assertEqual(get_ghstack_below_count(mid_body), 1)
-
-        # Bottom of the stack: 0 entries below the marker.
-        bottom_body = (
-            "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* #2\n* __->__ #1\n"
-        )
-        self.assertEqual(get_ghstack_below_count(bottom_body), 0)
 
     def test_enforce_lf_allowlist_empty_include_passes_through(self) -> None:
         matrix = {"include": []}

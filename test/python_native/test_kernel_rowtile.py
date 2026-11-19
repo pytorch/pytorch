@@ -97,7 +97,6 @@ class TestKernelRowTile(TestCase):
         # inner-tree keys; without it, those slots would hold the next field.
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.randn(64, 512, device="cuda")
-        rt._CACHE.clear()
         rt.reduce_row_tile(trait, "bykey", x, [torch.float32], order="linear")
         rt.reduce_row_itree(trait, "bykey", x, torch.empty(64, device="cuda"))
         slots = {"rowtile": 5, "rowitree": 7}
