@@ -1,9 +1,9 @@
 import functools
 import inspect
 import os
+from collections import OrderedDict
 from functools import cached_property
 from typing import Any
-from typing_extensions import Unpack
 
 from torch.utils._triton import get_triton_version
 
@@ -53,6 +53,11 @@ def _triton_allocator_var():
     return _allocator
 
 
+# Encoded descriptors kept per descriptor position, so a dynamic size that
+# alternates between a few values does not re-encode on every launch.
+_HOST_TMA_CACHE_ENTRIES = 4
+
+
 def make_host_tma_expander():
     """Bind the TMA arg helpers once, so the launcher does not resolve them per call.
 
@@ -60,10 +65,13 @@ def make_host_tma_expander():
     ([CUtensorMap, *shape, *strides]) for one descriptor and caches them per
     descriptor position.
 
-    On a cache hit (same base address) it returns the previously-encoded
-    CUtensorMap, skipping both the TensorDescriptor construction/validation and
-    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
-    contents), so reuse is safe whenever the address/shape/strides match.
+    On a cache hit (same base address, shape and strides, among the last
+    _HOST_TMA_CACHE_ENTRIES seen at that position) it returns the
+    previously-encoded CUtensorMap, skipping both the TensorDescriptor
+    construction/validation and cuTensorMapEncodeTiled. The descriptor only
+    encodes addressing (not buffer contents), so reuse is safe whenever the
+    address/shape/strides match; shape and strides can change between launches
+    when they are dynamic sizes read at launch.
 
     `tensor` must already be TMA-aligned; the launcher calls _host_tma_aligned
     and keeps the (possibly cloned) result alive across the launch, since the
@@ -75,15 +83,17 @@ def make_host_tma_expander():
     def expand_host_tma_descriptor(
         cache, pos, tensor, cacheable, shape, strides, block, meta
     ):
-        data_ptr = tensor.data_ptr()
-        if cacheable:
-            cached = cache.get(pos)
-            if cached is not None and cached[0] == data_ptr:
-                return cached[1]
+        key = (tensor.data_ptr(), tuple(shape), tuple(strides))
+        entries = cache.setdefault(pos, OrderedDict()) if cacheable else None
+        if entries is not None and key in entries:
+            entries.move_to_end(key)
+            return entries[key]
         desc = TensorDescriptor(tensor, shape, strides, block)
         expanded = tuple(make_tensordesc_arg(desc, meta))
-        if cacheable:
-            cache[pos] = (data_ptr, expanded)
+        if entries is not None:
+            entries[key] = expanded
+            if len(entries) > _HOST_TMA_CACHE_ENTRIES:
+                entries.popitem(last=False)
         return expanded
 
     return expand_host_tma_descriptor
@@ -121,6 +131,10 @@ class StaticallyLaunchedTritonKernel:
         raise NotImplementedError
 
     supports_global_scratch = False
+
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return False
 
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
@@ -190,6 +204,10 @@ class StaticallyLaunchedTritonKernel:
         if self.profile_scratch_size and self.profile_scratch_size > 0:
             raise NotImplementedError("Profile scratch not yet supported")
         self.has_profile_scratch = self.profile_scratch_size is not None
+
+        self.launch_pdl = getattr(metadata, "launch_pdl", False)
+        if self.launch_pdl and not self.supports_launch_pdl(metadata.target):
+            raise NotImplementedError("PDL launch not supported")
 
         self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
@@ -455,7 +473,7 @@ class StaticallyLaunchedTritonKernel:
         grid_y: int,
         grid_z: int,
         stream: int,
-        *args: Unpack[tuple[object, ...]],
+        *args: *tuple[object, ...],
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
@@ -511,6 +529,8 @@ class StaticallyLaunchedTritonKernel:
         if len(args) != len(arg_tys):
             raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
 
+        # Only launchers with supports_launch_pdl take the trailing launch_pdl flag.
+        launch_pdl = (True,) if self.launch_pdl else ()
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
         self.C_impl._launch_kernel(
@@ -523,11 +543,16 @@ class StaticallyLaunchedTritonKernel:
             arg_tys,
             args,
             stream,
+            *launch_pdl,
         )
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
     supports_global_scratch = not is_rocm()
+
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return not is_rocm() and target.arch >= 90
 
     @cached_property
     def C_impl(self):
