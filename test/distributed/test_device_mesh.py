@@ -314,7 +314,9 @@ class DeviceMeshTest(DTensorTestBase):
             torch.device(self.device_type)
         )
         if default_backend.supports_splitting:
-            self.skipTest(f"{self.backend} supports communicator splitting")
+            self.skipTest(
+                f"{self.backend_str(self.device_type)} supports communicator splitting"
+            )
 
         mesh_shape = (2, self.world_size // 2)
         with mock.patch(
@@ -353,7 +355,9 @@ class DeviceMeshTest(DTensorTestBase):
             torch.device(self.device_type)
         )
         if not default_backend.supports_splitting:
-            self.skipTest(f"{self.backend} does not support communicator splitting")
+            self.skipTest(
+                f"{self.backend_str(self.device_type)} does not support communicator splitting"
+            )
 
         mesh_shape = (2, self.world_size // 2)
         with mock.patch(
