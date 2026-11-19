@@ -54,6 +54,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/detail/Binary.h>
 #include <ATen/native/mkldnn/detail/Eltwise.h>
+#include <ATen/native/mkldnn/detail/Sum.h>
 
 namespace at::native {
 
