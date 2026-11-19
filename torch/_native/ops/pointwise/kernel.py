@@ -651,10 +651,12 @@ def _build_plan(
         )
         if not common_dtype.is_floating_point and compute_dtype.is_floating_point:
             common_dtype = compute_dtype
-    casts = input_casts or (common_dtype,) * len(inputs)
-    input_types = tuple(torch2cute[d] for d in casts)
     scalar_inputs = tuple(t.numel() == 1 for t in inputs)
     host_scalars = tuple(t.device.type == "cpu" and t.dim() == 0 for t in inputs)
+    casts = input_casts or tuple(
+        compute_dtype if host else common_dtype for host in host_scalars
+    )
+    input_types = tuple(torch2cute[d] for d in casts)
     generic_key = common + (input_types, host_scalars)
     common += (input_types, scalar_inputs, host_scalars)
     # Index-aware formulas need the strided path for individual element indices.
@@ -798,6 +800,13 @@ def _build_plan(
         cout = [_fake_iteration(torch2cute[o.dtype]) for o in storage_outs]
         path = "strided"
         kkey = generic_key + ("strided", block, work_per_thread)
+    if input_casts is None:
+        annotations, _ = inspect_functor(fn)
+        start = int(with_index)
+        op.argument_types = tuple(
+            torch2cute[resolve_type(a, common_dtype, compute_dtype)]
+            for a in annotations[start : start + nin]
+        )
     seed_consts = [c.__class__(1) for c in consts]
     compile_ins = cin if cin else None
     compile_consts = seed_consts if seed_consts else None
@@ -833,7 +842,8 @@ def run(
     load: Load | None = None,
 ) -> tuple[torch.Tensor, ...]:
     r"""Run matching nin/nout on the current CUDA device, with CPU inputs limited to 0D.
-    Callers validate aliases and supplied outputs' broadcast shape, dtype and device."""
+    Default device loads round through the common dtype before ``compute`` math;
+    explicit ``input_casts`` bind functor types. Callers validate aliases and outputs."""
     ref = (
         next((t for t in inputs if t.is_cuda), None)
         if inputs
