@@ -8925,13 +8925,11 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    if torch.version.cuda or device_hint(mat1) == "mps":
+    # Match grouped_mm_output_is_tma_padded in C++, which pads on CPU-only builds too.
+    if not torch.version.hip and device_hint(mat1) != "xpu":
         alignment = 16 // out_dtype.itemsize
         size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-        if mat1_is_2d == mat2_is_2d:
-            out_stride = [out_size[1] * size_padded, size_padded, 1]
-        else:
-            out_stride = [size_padded, 1]
+        out_stride = make_contiguous_strides_for([*out_size[:-1], size_padded])
         out = torch.empty_strided(
             out_size, out_stride, dtype=out_dtype, device=mat1.device
         )
@@ -9178,7 +9176,7 @@ def _meta_grouped_mm_common(
 
 
 @register_meta(aten._grouped_mm)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
