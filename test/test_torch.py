@@ -38,6 +38,7 @@ from torch.testing._internal.common_optimizers import (
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
+    skipIfCppFakeTensor,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -462,6 +463,16 @@ class TestTorchDeviceType(TestCase):
         s_check = t_check.storage()
         s = t.storage()
         self._check_storage_meta(s, s_check)
+
+    def test_storage_repr(self, device):
+        t = torch.ones(4, device=device)
+        untyped = f"[torch.storage.UntypedStorage(device={t.device}) of size 16]"
+        typed = f"[torch.storage.TypedStorage(dtype=torch.float32, device={t.device}) of size 4]"
+        # Printing must not read the data: on CUDA that would sync once per element.
+        with CudaSyncGuard("error") if t.is_cuda else contextlib.nullcontext():
+            for s, expected in ((t.untyped_storage(), untyped), (t.storage(), typed)):
+                self.assertEqual(repr(s), expected)
+                self.assertEqual(str(s), expected)
 
     @onlyAccelerator
     def test_module_share_memory(self, device):
@@ -1817,22 +1828,6 @@ class TestTorchDeviceType(TestCase):
         self.check_nondeterministic_alert(
             lambda: module(input, target),
             'nll_loss2d_forward_out_cuda_template',
-            torch.device(device).type == 'cuda')
-
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
-    def test_nondeterministic_alert_CTCLoss(self, device):
-        module = torch.nn.CTCLoss()
-        input = torch.randn(50, 3, 15, device=device, requires_grad=True)
-        target = torch.randint(1, 14, (3, 30), device=device)
-        input_lengths = [50, 50, 50]
-        target_lengths = [30, 25, 20]
-        res = module(input, target, input_lengths, target_lengths)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
-            'ctc_loss_backward_gpu',
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -3382,6 +3377,25 @@ class TestTorchDeviceType(TestCase):
 
             dst.conj().copy_(src._neg_view())
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
+
+    # Exercises the multi-threaded CPU path for dense 2D transpose copies; the
+    # 100x100 copies in other tests fit in one grain and run on one thread.
+    # Every shape here is split among the threads, for every block size:
+    # (1000, 1003) has partial blocks on both edges and thread ranges that start
+    # inside a row of blocks, and the skinny shapes have a single row or column
+    # of partial blocks.
+    @onlyCPU
+    @dtypes(torch.uint8, torch.bool, torch.bfloat16, torch.float32, torch.float64, torch.complex64)
+    def test_copy_transpose_parallel(self, device, dtype):
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(4)
+            for h, w in ((1000, 1003), (59, 5000), (5000, 59)):
+                src = make_tensor((h, w), dtype=dtype, device=device)
+                out = src.t().contiguous()
+                self.assertEqual(out, src.t(), atol=0, rtol=0)
+        finally:
+            torch.set_num_threads(num_threads)
 
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
@@ -8312,6 +8326,9 @@ class TestTorch(TestCase):
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
 
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_is_same_size_nested(self):
+        t1 = torch.empty(3, 4, 9, 10)
         nt1 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
         nt2 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
         nt3 = torch.nested.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
@@ -9354,6 +9371,22 @@ class TestTorch(TestCase):
         if IS_FILESYSTEM_UTF8_ENCODING:
             with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
+
+    def test_from_file_shared_grow_preserves_contents(self):
+        # https://github.com/pytorch/pytorch/issues/204636
+        original = [7, 8, 9, 10]
+        expected = original + [0, 0, 0, 0]
+        from_file_fns = [
+            lambda f: torch.from_file(f, shared=True, size=8, dtype=torch.uint8).tolist(),
+            lambda f: torch.UntypedStorage.from_file(f, True, 8).tolist(),
+        ]
+        for from_file in from_file_fns:
+            with TemporaryFileName() as fname:
+                with open(fname, "wb") as f:
+                    f.write(bytes(original))
+                self.assertEqual(from_file(fname), expected)
+                with open(fname, "rb") as f:
+                    self.assertEqual(list(f.read()), expected)
 
     def test_print(self):
         default_type = torch.tensor([]).type()

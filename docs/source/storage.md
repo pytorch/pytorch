@@ -43,34 +43,12 @@ It also implies that a tensor storage can be changed, as the following example s
 >>> t = torch.ones(3)
 >>> s0 = t.untyped_storage()
 >>> s0
- 0
- 0
- 128
- 63
- 0
- 0
- 128
- 63
- 0
- 0
- 128
- 63
 [torch.storage.UntypedStorage(device=cpu) of size 12]
+>>> s0.tolist()
+[0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63]
 >>> s1 = s0.clone()
->>> s1.fill_(0)
- 0
- 0
- 0
- 0
- 0
- 0
- 0
- 0
- 0
- 0
- 0
- 0
-[torch.storage.UntypedStorage(device=cpu) of size 12]
+>>> s1.fill_(0).tolist()
+[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 >>> # Fill the tensor with a zeroed storage
 >>> t.set_(s1, storage_offset=t.storage_offset(), stride=t.stride(), size=t.size())
 tensor([0., 0., 0.])
