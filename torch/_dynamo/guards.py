@@ -394,11 +394,11 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
 def _method_identity_guards_filtered(
     tx: InstructionTranslatorBase, *, binding_only: bool = False
 ) -> bool:
-    if tx.output.package is not None:
-        return True
     guards = tx.output.tracing_context.guards_context
     if guards.skip_install:
         return not (binding_only and guards.tracing_reuse_hash)
+    if tx.output.package is not None:
+        return True
     if tx.export or torch.compiler.is_exporting():
         # Export can call a bound method on the captured module. Its graph
         # still cannot preserve observations of process-local wrapper identities.
@@ -3882,7 +3882,8 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    # Alias checks compare both source values, including during nested region reuse.
+    # Multi-source guard (two inputs aliasing) — not expressible as a
+    # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, values: values[0] is values[1],
@@ -5189,6 +5190,23 @@ class GuardsStatePickler(FunctionPicklerBase):
                         subclasses.append(inner)
         self._retain_required_state(stack)
 
+    def _constructor_referents(self, value: Any) -> collections.abc.Iterable[Any]:
+        typ = type(value)
+        if typ is types.FunctionType:
+            reduced = self.reducer_override(value)
+            self._function_reductions[value] = reduced
+            return () if reduced is NotImplemented else reduced[1:3]
+        if issubclass(typ, torch.nn.Module) and self._keep(value):
+            skipped = set(self._unguarded_attributes(value))
+            if isinstance(value, torch.nn.parallel.DistributedDataParallel):
+                skipped.update(value._unpicklable_attrs)
+            elif type(value).__setstate__ is not torch.nn.Module.__setstate__:
+                return vars(value).values()
+            return (v for k, v in vars(value).items() if k not in skipped)
+        return (
+            () if issubclass(typ, self._STATE_LEAF_TYPES) else gc.get_referents(value)
+        )
+
     def _retain_required_state(
         self, values: collections.abc.Iterable[Any], *, checking_copy: bool = False
     ) -> None:
@@ -5200,15 +5218,12 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if checking_copy and obj_id in self._dropped_state:
                 raise torch._dynamo.exc.PackageError(
-                    "A mapping proxy copy exposed a constructor dependency on pruned state"
+                    f"A mapping proxy copy exposed a constructor dependency on pruned {type(value).__qualname__} state"
                 )
             self._whole_compared_values[obj_id] = value
             self.missing_values.pop(obj_id, None)
             self.empty_values.pop(obj_id, None)
-            if issubclass(
-                type(value), (list, tuple, set, frozenset, dict)
-            ) or not issubclass(type(value), self._STATE_LEAF_TYPES):
-                stack.extend(gc.get_referents(value))
+            stack.extend(self._constructor_referents(value))
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -5444,6 +5459,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         global_scope: dict[str, Any],
         dictionaries: collections.abc.Collection[dict[Any, Any]],
     ) -> None:
+        """Register candidate dictionaries before pruning locals, which marks discarded roots.
+        Retain constructor dependencies reachable from the surviving roots before freezing slots.
+        """
         value: Any
         for value in itertools.chain(self.guard_tree_values.values(), dictionaries):
             if issubclass(type(value), dict):
@@ -5470,7 +5488,7 @@ class GuardsStatePickler(FunctionPicklerBase):
     ) -> None:
         """Find saved reducers first, then retain dictionaries their constructors can inspect.
 
-        A custom proxy copy can introduce new dependencies after snapshots have been made.
+        A late proxy copy must fail if a newly discovered dependency has already been pruned.
         """
         retained = self.guard_tree_values.keys() | self._verbatim_elements
         opaque: list[Any] = []
@@ -5489,8 +5507,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                         self._retain_required_state(
                             (value,), checking_copy=checking_copy
                         )
-                    elif not issubclass(typ, self._STATE_LEAF_TYPES):
-                        pending.extend(gc.get_referents(value))
+                    else:
+                        pending.extend(self._constructor_referents(value))
                 elif obj_id in self.missing_values or obj_id in self.empty_values:
                     continue
                 elif obj_id in self._pruned_dictionary_ids:
@@ -5511,11 +5529,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                         items = dict.items(cast(dict[object, object], backing))
                         pending.extend(itertools.chain.from_iterable(items))
                 elif typ is types.FunctionType:
-                    # Inspect exactly what will be pickled, evaluating lazy annotations only once.
-                    reduced = self.reducer_override(value)
-                    self._function_reductions[value] = reduced
-                    if reduced is not NotImplemented:
-                        pending.extend(reduced[1:3])
+                    pending.extend(self._constructor_referents(value))
                 elif typ is dict or typ is list or typ is tuple:
                     pending.extend(gc.get_referents(value))
                 elif issubclass(typ, torch.nn.Module):
@@ -5529,12 +5543,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                     ):
                         opaque.extend(gc.get_referents(value))
                         continue
-                    skipped = set(self._unguarded_attributes(value))
-                    if ddp:
-                        skipped.update(value._unpicklable_attrs)
-                    pending.extend(
-                        v for k, v in vars(value).items() if k not in skipped
-                    )
+                    pending.extend(self._constructor_referents(value))
                 elif self._can_prune_instance(value):
                     attrs = vars(value)
                     pruned = self._unguarded_attributes(value)
@@ -6486,8 +6495,9 @@ def pickle_guards_state(
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
     # strict_precompile), never a compiler crash. A PackageError raised inside
-    # reducer_override already carries its message. Iterating a deep local
-    # pytree can also overflow before the pickle itself is written.
+    # reducer_override already carries its message. tree_iter is inside the
+    # try too: it recurses into the local values, so a deep pytree in a local
+    # overflows there rather than in dump.
     try:
         if all(
             torch.compiler.keep_portable_guards_unsafe(
@@ -7980,7 +7990,7 @@ def record_lexical_alias(
     if scopes:
         endpoints = (source, canonical)
         reads.update((s, scope) for s in endpoints for scope in scopes)
-        # Pin both identities: DUPLICATE_INPUT cannot express a mixed local/global alias.
+        # make_dupe_guard skips mixed local/global sources, so pin both endpoints.
         if is_from_local_source(source) != is_from_local_source(canonical):
             install_guard(*(s.make_guard(GuardBuilder.ID_MATCH) for s in endpoints))
 
