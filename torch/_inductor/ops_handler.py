@@ -123,6 +123,15 @@ class OpsHandler(Generic[T]):
         """Computes inductor_prims.randint.  offset has dtype int32."""
         raise NotImplementedError
 
+    def philox_rand(self, seed: T, offset: T, idx: T, dtype: torch.dtype) -> T:
+        """
+        Computes the [0, 1) sample that the stateless _philox_* kernels draw for
+        element idx of a key's output when the output has the given dtype.  seed,
+        offset, and idx have dtype int64; the result is float64 for float64 and
+        float32 otherwise.
+        """
+        raise NotImplementedError
+
     def masked(self, mask: T, body: Callable[[], T], other: T) -> T:
         """
         Computes body, but only perform loads/stores if the boolean mask

@@ -495,6 +495,10 @@ class HalideOverrides(OpOverrides):
         return f"halide_helpers.randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
+    def philox_rand(seed, offset, idx, dtype):
+        raise NotImplementedError("philox_rand")
+
+    @staticmethod
     def load_seed(name, offset):
         return f"{ops.load(name, 0)} + {V.kernel.args.seed_offset('load_seed_offset', offset)}"
 
