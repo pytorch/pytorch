@@ -59,11 +59,13 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata& operator=(const RawTensorMetadata&) = default;
   RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
   ~RawTensorMetadata() = default;
-  explicit RawTensorMetadata(const at::Tensor& t);
+  explicit RawTensorMetadata(const at::Tensor& t, bool with_weak_ref = true);
 
-  // Wrap `weak_self_` in `std::optional` and split device into components to
-  // keep struct default constructable. (which the std::array initializer needs)
-  std::optional<WeakTensor> weak_self_;
+  // `weak_self_` is only set with profile_memory, where tensor IDs need
+  // TensorImpl addresses to stay unique for the whole session.
+  WeakTensor weak_self_;
+  // Split device into components to keep struct default constructable. (which
+  // the std::array initializer needs)
   c10::DeviceType device_type_{c10::DeviceType::CPU};
   c10::DeviceIndex device_index_{-1};
 };
@@ -459,9 +461,11 @@ struct KinetoObserverContext : public at::ObserverContext {
     c10::approx_time_t end_time_{
         std::numeric_limits<c10::approx_time_t>::min()};
 
-    bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
-    collective_meta_t* collective_meta_{};
+    // Only set for NCCL ops and ops called with kwargs. They're held here
+    // because TorchOpStorage's lists store an entry for every op.
+    std::unique_ptr<collective_meta_t> collective_meta_;
+    std::unique_ptr<kwinputs_t> kwinputs_;
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -495,7 +499,7 @@ constexpr int SCALAR_LIST_LENGTH_LIMIT = 30;
 // post-processing.
 class InputOutputEncoder final {
  public:
-  void push(c10::ArrayRef<const c10::IValue> values);
+  void push(c10::ArrayRef<const c10::IValue> values, bool with_weak_refs);
 
   // Used during post-processing to unpack the encoded data.
   // Returns a decoder lambda which takes no arguments; invoking the lambda once
@@ -519,13 +523,15 @@ class InputOutputEncoder final {
   };
 
  private:
-  void push(const at::Tensor& t);
+  void push(const at::Tensor& t, bool with_weak_ref);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
+  AppendOnlyList<c10::TypePtr, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+      scalar_list_types_;
 };
 
 using perf_profiler_t = torch::profiler::impl::linux_perf::PerfProfiler;
@@ -626,15 +632,16 @@ class TORCH_API ThreadLocalSubqueue {
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
-    // report collective communication metadata
-    AppendOnlyList<collective_meta_t, BlockSize> collective_meta_;
-
-    // report kwinputs
-    AppendOnlyList<kwinputs_t, BlockSize> kwinputs_;
-
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
     AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
+
+    // Read once per profiling session and reported for every op. Changing the
+    // setting during a session isn't reflected in its events.
+    bool allow_tf32_cublas_ =
+        at::globalContext().float32Precision(
+            at::Float32Backend::CUDA,
+            at::Float32Op::MATMUL) == at::Float32Precision::TF32;
   } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler
