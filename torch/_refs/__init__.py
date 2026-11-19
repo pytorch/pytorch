@@ -2193,7 +2193,12 @@ def _to_will_alias(
         and (
             memory_format is None
             or memory_format == torch.preserve_format
-            or utils.is_contiguous_for_memory_format(a, memory_format=memory_format)
+            or (
+                utils.suggest_memory_format(a) == memory_format
+                and utils.is_contiguous_for_memory_format_or_false(
+                    a, memory_format=memory_format
+                )
+            )
         )
     )
 

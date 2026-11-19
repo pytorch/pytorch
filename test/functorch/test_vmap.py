@@ -2146,6 +2146,13 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last_3d))(tensor)
 
+    def test_to_memory_format(self):
+        # is_contiguous(memory_format) is NYI inside of vmap, so to() must not query it
+        B0 = 3
+        x = torch.randn(B0, 2, 4, 5, 6).permute(0, 1, 4, 2, 3)
+        result = vmap(lambda t: t.to(memory_format=torch.channels_last))(x)
+        self.assertEqual(result, x)
+
     def test_stride(self):
         B0 = 3
 

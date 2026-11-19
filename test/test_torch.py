@@ -5848,6 +5848,55 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
+    @parametrize(
+        "memory_format",
+        [torch.contiguous_format, torch.channels_last, torch.channels_last_3d],
+        name_fn=lambda mf: str(mf).removeprefix("torch."),
+    )
+    def test_memory_format_to_same_dtype(self, device, memory_format):
+        # https://github.com/pytorch/pytorch/issues/132020
+        if memory_format == torch.channels_last_3d:
+            shape = (2, 3, 4, 5, 6)
+            degenerate_shapes = [(2, 1, 4, 5, 6), (2, 3, 1, 1, 1)]
+        else:
+            shape = (2, 3, 4, 5)
+            degenerate_shapes = [(2, 1, 4, 5), (2, 3, 1, 1)]
+        other_format = torch.channels_last if memory_format == torch.contiguous_format else torch.contiguous_format
+        x = torch.randn(shape, device=device)
+        x_mf = x.contiguous(memory_format=memory_format)
+
+        conversions = (
+            lambda t: t.to(memory_format=memory_format),
+            lambda t: t.to(t.dtype, memory_format=memory_format),
+            lambda t: t.float(memory_format=memory_format),
+            lambda t: torch._refs.to(t, memory_format=memory_format),
+        )
+        aliased = [x_mf] + [torch.randn(s, device=device).to(memory_format=memory_format) for s in degenerate_shapes]
+        copied = [
+            x.contiguous(memory_format=other_format),
+            x_mf[:, :2],
+            x_mf[:, :, ::2],
+            x.transpose(0, -1),
+            torch.randn(shape[:-1] + (1,), device=device).expand(shape),
+        ]
+        # Also contiguous in memory_format, but to() must return memory_format's strides
+        copied += [torch.randn(s, device=device).to(memory_format=other_format) for s in degenerate_shapes]
+        for convert in conversions:
+            for t in aliased:
+                self.assertIs(convert(t), t)
+            for t in copied:
+                out = convert(t)
+                self.assertIsNot(out, t)
+                self.assertEqual(out.stride(), torch.empty(t.shape, memory_format=memory_format).stride())
+                self.assertEqual(out, t)
+
+    @onlyCPU
+    def test_memory_format_to_non_strided(self, device):
+        x = torch.randn(3, 4, device=device)
+        nested = torch.nested.nested_tensor([torch.randn(2, 3), torch.randn(4, 3)], device=device)
+        for t in (x.to_sparse(), x.to_sparse_csr(), nested, nested.transpose(1, 2)):
+            self.assertIs(t.to(memory_format=torch.contiguous_format), t)
+
     def test_memory_format_clone(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):

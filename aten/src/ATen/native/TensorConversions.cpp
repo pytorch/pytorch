@@ -412,11 +412,21 @@ bool to_will_alias(
     std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
+  // suggest_memory_format() also matches non-dense strides, and
+  // is_contiguous() alone is ambiguous for shapes that are contiguous in
+  // several formats (e.g. C == 1), so require both. Nested, batched and
+  // non-strided tensors lack a usable is_contiguous(memory_format).
   return is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
       is_null_or_equal_to(layout, self.layout()) &&
       is_null_or_equal_to(device, self.device()) && !copy &&
       (memory_format == MemoryFormat::Preserve ||
-       self.suggest_memory_format() == memory_format);
+       (self.suggest_memory_format() == memory_format &&
+        (self.layout() != kStrided || self.is_nested() ||
+         self.key_set().has_any(c10::DispatchKeySet(
+             {c10::DispatchKey::FuncTorchBatched,
+              c10::DispatchKey::BatchedNestedTensor,
+              c10::DispatchKey::Batched})) ||
+         self.is_contiguous_or_false(memory_format))));
 }
 
 static inline Tensor to_impl(

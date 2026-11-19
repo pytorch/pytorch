@@ -5134,9 +5134,9 @@ transfers and reusing CPU buffers.
 .. note::
 
     If the ``self`` Tensor already
-    has the correct :class:`torch.dtype` and :class:`torch.device`, then ``self`` is returned.
+    has the correct :class:`torch.dtype`, :class:`torch.device` and ``memory_format``, then ``self`` is returned.
     Otherwise, the returned tensor is a copy of ``self`` with the desired
-    :class:`torch.dtype` and :class:`torch.device`.
+    :class:`torch.dtype`, :class:`torch.device` and ``memory_format``.
 
 .. note::
 
