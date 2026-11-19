@@ -71,6 +71,7 @@ checked.
 import collections
 import contextlib
 import enum
+import gc
 import random
 import sys
 import threading
@@ -1046,13 +1047,27 @@ def _trace(fn: Callable[..., Any], example: list[Any]) -> Any:
     """The graph of what ``fn`` does to tensors like ``example``."""
     from torch.fx.experimental.proxy_tensor import make_fx
 
+    error: BaseException | None = None
+    graph = None
+    # What the trace makes is told from what was there before by its age
+    # (``_Recipes.made``): everything older is out of the youngest
+    # generation now, and nothing leaves it while the trace runs.
+    collecting = gc.isenabled()
+    gc.collect(0)
+    gc.disable()
     try:
-        return make_fx(fn, tracing_mode="fake")(*example)
-    except (_Failed, _Retry):
-        raise
+        graph = make_fx(fn, tracing_mode="fake")(*example)
     except Exception as e:
-        reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
-        raise _Failed(getattr(e, "cfg_index", None), reason) from None
+        error = e
+    finally:
+        if collecting:
+            gc.enable()
+    if error is None:
+        return graph
+    if isinstance(error, (_Failed, _Retry)):
+        raise error
+    reason = f"{type(error).__name__}: {error}".split("\n")[0][:200]
+    raise _Failed(getattr(error, "cfg_index", None), reason) from None
 
 
 # ----------------------------------------------------------------------
@@ -1248,6 +1263,14 @@ class _Recipes:
         self.inputs = inputs
         self.results: list[torch.Tensor] = []
         self.memo: dict[int, list[Any]] = {}
+        self.alive: list[Any] = []
+        self.young: set[int] | None = None
+
+    def made(self, obj: Any) -> bool:
+        """Whether the trace made ``obj``, rather than found it."""
+        if self.young is None:
+            self.young = {id(o) for o in gc.get_objects(generation=0)}
+        return id(obj) in self.young
 
     def of(self, obj: Any, depth: int = 0) -> list[Any]:
         known = self.memo.get(id(obj))
@@ -1286,12 +1309,16 @@ class _Recipes:
             raise Untraceable(f"gives a {cls.__name__}, which a graph cannot return")
         # Before its parts, so that an object that refers to itself ends.
         self.memo[id(obj)] = recipe
+        # Kept alive, so that no other object gets its id while the trace runs.
+        self.alive.append(obj)
         if children is not None:
             parts = [self.of(child, depth + 1) for child in children]
             recipe.append(parts)
             recipe[1] = any(part[1] for part in parts)
-            if recipe[0] == "instance" and not recipe[1]:
-                # Nothing of the graph in it: an object from before.
+            if recipe[0] == "instance" and not recipe[1] and not self.made(obj):
+                # Nothing of the graph in it, and there before the trace: a
+                # configuration, say. One the region makes (an empty cache)
+                # is made on every call.
                 recipe[:] = ["same", False, obj]
         return recipe
 
