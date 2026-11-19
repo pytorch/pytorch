@@ -86,6 +86,19 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    @parametrize("dynamic", [False, True])
+    def test_nbytes_snapshot_after_data_swap(self, dynamic):
+        def fn(x, replacement):
+            size = x.nbytes
+            x.data = replacement
+            return x + 1, (size,), {size: None}
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=dynamic)
+        replacement = torch.ones(5, 2)
+        self.assertEqual(
+            compiled(torch.ones(3), replacement), fn(torch.ones(3), replacement)
+        )
+
     @parametrize("target", ["scalar", "nested", "attribute"])
     def test_storage_offset_reconstruction_after_data_swap(self, target):
         class Box:

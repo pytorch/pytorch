@@ -73,12 +73,14 @@ from torch._library.opaque_object import (
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
     maybe_get_item_memo,
+    unset_fake_temporarily,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch.fx.experimental._backward_state import BackwardState
@@ -1902,9 +1904,10 @@ class VariableBuilder:
             and value == getattr(value.__self__, "apply", None)
         ):
             # handle aliased autograd function `apply` calls
-            obj_source = AttrSource(self.source, "__self__")
-            obj = VariableBuilder(self.tx, obj_source)(value.__self__)
             if isinstance(value, types.BuiltinMethodType):
+                obj = VariableBuilder(self.tx, AttrSource(self.source, "__self__"))(
+                    value.__self__
+                )
                 self.install_guards(GuardBuilder.BUILTIN_MATCH)
                 descriptor = cast(Any, find_bound_builtin_method_descriptor(value))
                 if descriptor is None:
@@ -1917,7 +1920,14 @@ class VariableBuilder:
                     GuardBuilder.CLOSURE_MATCH
                 )
             )
-            return GetAttrVariable(obj, "apply", py_type=type(value))
+            return GetAttrVariable(
+                AutogradFunctionVariable(
+                    value.__self__,
+                    source=AttrSource(self.source, member="__self__"),
+                ),
+                "apply",
+                py_type=type(value),
+            )
         elif (
             isinstance(value, types.MethodType)
             and value.__name__ in ("shuffle", "sample", "seed")
@@ -2420,8 +2430,8 @@ class VariableBuilder:
             result = PropertyVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif type(value) is types.MethodWrapperType:
-            # Fresh wrappers can bind a base slot on a subclass. Guard the binding,
-            # rather than wrapper identity, so equivalent fresh wrappers can reuse graphs.
+            # Attribute lookup can create a fresh method-wrapper. For descriptor
+            # receivers, guard the receiver and operation instead of wrapper identity.
             descriptor = inspect.getattr_static(value.__objclass__, value.__name__)
             if not isinstance(descriptor, types.WrapperDescriptorType):
                 raise AssertionError(
@@ -4308,7 +4318,9 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
     return TupleVariable(items)
 
 
-def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
+def _clone_input(
+    value: Any, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
@@ -4321,7 +4333,8 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             or value.is_nested
         ):
             # NB: ensure strides are preserved
-            value = clone_input(value)
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 

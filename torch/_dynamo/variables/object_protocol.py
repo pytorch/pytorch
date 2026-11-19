@@ -1613,7 +1613,7 @@ def validate_sequence_repeat_count(
     tx: "InstructionTranslatorBase",
     count: VariableTracker,
 ) -> None:
-    n = count.as_python_constant()
+    n = count.guard_as_python_constant()
     if n < -sys.maxsize - 1 or n > sys.maxsize:
         raise_observed_exception(
             OverflowError,
