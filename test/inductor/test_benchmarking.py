@@ -847,11 +847,18 @@ class TestBenchmarker(TestCase):
     def test_rocm_mall_size_queries_hsa(self):
         from torch._inductor.runtime import benchmarking as _bench
 
-        arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+        props = torch.cuda.get_device_properties(0)
+        arch = props.gcnArchName.split(":", 1)[0]
+        hsa_size = _bench._hsa_cache_beyond_l2(bytes(getattr(props.uuid, "bytes", b"")))
         _bench._rocm_mall_size.cache_clear()
         try:
+            size = _bench._rocm_mall_size(0)
+            if hsa_size:
+                self.assertEqual(size, hsa_size)
             if arch in ("gfx942", "gfx950"):
-                self.assertEqual(_bench._rocm_mall_size(0), 256 * 1024 * 1024)
+                # a partitioned GPU (e.g. DPX) reports its share of the 256 MB
+                self.assertGreater(size, 0)
+                self.assertLessEqual(size, 256 * 1024 * 1024)
         finally:
             _bench._rocm_mall_size.cache_clear()
         # no agent has this UUID
