@@ -302,6 +302,13 @@ def create_synthetic_base_metadata(
             )
         )
 
+    def is_out_graph_data_mutating_grad_input(info) -> bool:
+        return (
+            info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+            and info.mutates_data
+            and info.requires_grad
+        )
+
     inner_mutated_tangents_and_memory_formats = [
         # See Note [Tangents memory format]
         (
@@ -309,9 +316,7 @@ def create_synthetic_base_metadata(
             TangentAOTInput(InputMutationAOTOutput(x_desc)),
         )
         for inner_idx, (x, x_desc) in enumerate(zip(inner_args, inner_args_desc))
-        if input_infos[inner_idx].mutation_type == MutationType.MUTATED_OUT_GRAPH
-        and input_infos[inner_idx].mutates_data
-        and input_infos[inner_idx].requires_grad
+        if is_out_graph_data_mutating_grad_input(input_infos[inner_idx])
     ]
     inner_mutated_tangents = [
         x[0][0] for x in inner_mutated_tangents_and_memory_formats
@@ -326,16 +331,13 @@ def create_synthetic_base_metadata(
     output_info = existing_output_infos + input_metadata_output_info
 
     num_outer_mutated_tangents = len(
-        [
-            info
-            for info in m.input_info
-            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
-            and info.mutates_data
-            and info.requires_grad
-        ]
+        [info for info in m.input_info if is_out_graph_data_mutating_grad_input(info)]
     )
 
-    # Regenerate traced tangents to include mutated inputs including synthetic bases
+    # The leading entries of ``m.traced_tangents`` are the tangents of the
+    # outer inputs that are MUTATED_OUT_GRAPH, mutate data, and require grad.
+    # The synthetic base contributes one inner tangent, so slice the original
+    # tangents by the outer count rather than the inner count.
     traced_tangents = (
         inner_mutated_tangents + m.traced_tangents[num_outer_mutated_tangents:]
     )

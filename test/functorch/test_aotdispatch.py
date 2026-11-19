@@ -3484,6 +3484,27 @@ def forward(self, primals_1):
             test_mutation=True,
         )
 
+    # See https://github.com/pytorch/pytorch/issues/204433
+    def test_input_mutation_multiple_aliases_mutated(self):
+        def f(a, b):
+            a.mul_(2)
+            b.mul_(3)
+            return a + b
+
+        def inp_callable(req_grad):
+            x = torch.arange(1, 9, dtype=torch.float32, requires_grad=req_grad)
+            base = x * 2
+            return [x], [base[:5], base[2:7]]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
+    # See https://github.com/pytorch/pytorch/issues/204433
+    @skipIfDynamoInput("Dynamo fails to handle storage mutation next to synthetic base")
     def test_input_mutation_set_storage_next_to_synthetic_base(self):
         def f(a, b, c, d):
             with torch.no_grad():
@@ -3505,15 +3526,9 @@ def forward(self, primals_1):
             out.sum().backward()
             return out, inputs, inputs[-1].grad
 
-        # Exercise synthetic-base metadata reconstruction directly, without
-        # Dynamo graph breaks around storage mutations.
-        compiled_f = aot_function(
-            f,
-            fw_compiler=nop,
-            bw_compiler=nop,
-            keep_inference_input_mutations=True,
+        self.verify_aot_autograd(
+            f, inp_callable, test_mutation=True, keep_inp_mutations=True
         )
-        self.assertEqual(run(f), run(compiled_f))
 
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
