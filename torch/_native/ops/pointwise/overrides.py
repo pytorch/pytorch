@@ -11,6 +11,7 @@ from torch._prims_common import (
 from torch._tensor_iterator import nullary_op
 
 from ... import cutedsl_utils as cu
+from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
 from ...utils.scalar import check_scalar, f32, round_float
@@ -43,8 +44,6 @@ else:
     K = LazyModule("torch._native.ops.pointwise.kernel")
     ops = LazyModule("torch._native.ops.pointwise.ops")
 
-
-_ARCH_MAJORS = cu.POINTWISE_ARCH_MAJORS
 
 _SUPPORTED = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 
@@ -482,8 +481,16 @@ def _run_conversion(
         src = src.view(torch.int8)
     if target.dtype is torch.bool:
         target = target.view(torch.int8)
+    round_f32 = (
+        not to_bool
+        and target.dtype in (torch.float16, torch.bfloat16)
+        and src.dtype != target.dtype
+    )
     if to_bool:
         compute = src.dtype
+    elif round_f32:
+        # ATen's low-precision constructors take float.
+        compute = torch.float32
     elif _needs_int64_detour(src.dtype, target.dtype):
         compute = torch.int64
     else:
@@ -498,8 +505,11 @@ def _run_conversion(
         to_bool,
         ((const_data_ptr(src) % 16 == 0), (const_data_ptr(target) % 16 == 0)),
     )
+    fn = "_to_bool" if to_bool else "_identity"
+    if round_f32:
+        fn = "_copy_float32"
     K.run(
-        ops.get_fn("_to_bool" if to_bool else "_identity"),
+        ops.get_fn(fn),
         key,
         1,
         1,

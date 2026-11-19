@@ -42,6 +42,42 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    @parametrize("api", ("copy_", "_to_copy"))
+    @parametrize(
+        "source_dtype,target_dtype,value",
+        (
+            (torch.float64, torch.float16, 1 + 2**-11 + 2**-40),
+            (torch.float64, torch.bfloat16, 1 + 2**-8 + 2**-40),
+            (torch.int32, torch.bfloat16, 2**24 + 2**16 + 1),
+            (torch.int64, torch.bfloat16, 2**24 + 2**16 + 1),
+            (torch.uint32, torch.bfloat16, 2**24 + 2**16 + 1),
+            (torch.uint64, torch.bfloat16, 2**24 + 2**16 + 1),
+        ),
+    )
+    def test_conversion_matches_aten_rounding(
+        self,
+        device: str,
+        api: str,
+        source_dtype: torch.dtype,
+        target_dtype: torch.dtype,
+        value: float | int,
+    ) -> None:
+        from torch._native.ops.pointwise import overrides
+
+        with torch.backends.python_native.cutedsl.disabled():
+            source = torch.tensor([value], device=device, dtype=source_dtype).repeat(32)
+            expected = source.to(target_dtype)
+        actual = (
+            overrides._to_copy_impl(source, dtype=target_dtype)
+            if api == "_to_copy"
+            else overrides._copy_impl(
+                torch.empty_like(source, dtype=target_dtype), source
+            )
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     def test_default_cast_rounds_through_common_dtype(self, device: str) -> None:
         import cutlass
 

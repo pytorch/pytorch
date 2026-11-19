@@ -542,6 +542,11 @@ def _identity(x: ComputeScalar) -> ComputeScalar:
 
 
 @cute.jit
+def _copy_float32(x: ComputeScalar) -> ComputeScalar:
+    return _math.round_float32(x)
+
+
+@cute.jit
 def _fill(value: ComputeScalar) -> ComputeScalar:
     # Factories share this nullary functor.
     return value
