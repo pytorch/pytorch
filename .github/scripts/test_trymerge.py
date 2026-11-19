@@ -1716,7 +1716,8 @@ class TestGitHubPRGhstackDependencies(TestCase):
         _mock_is_closed: mock.MagicMock,
         *args: Any,
     ) -> None:
-        """The per-stacked-PR gate, which `merge -i` never used to reach at all."""
+        """merge_ghstack_into's own gate on lower PRs. merge_into gates them itself
+        and skips this one (TestNativeStackMergeInto covers that gate)."""
         parent_pr = GitHubPR("pytorch", "pytorch", 106034)
         top_pr = GitHubPR("pytorch", "pytorch", 106068)
         waivers = {(parent_pr.pr_num, "parent-red"), (top_pr.pr_num, "top-red")}
@@ -3893,7 +3894,9 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         self.rule = self.patch(
             "trymerge.find_matching_merge_rule", return_value=(None, [], [], {})
         )
-        self.patch("trymerge.can_skip_internal_checks", return_value=False)
+        self.skip_internal = self.patch(
+            "trymerge.can_skip_internal_checks", return_value=False
+        )
         self.greenlight = self.patch("trymerge.check_greenlight_reviewed_head_sha")
         self.docker = self.patch("trymerge.check_docker_builds_ready")
         self.record = self.patch("trymerge.save_merge_record")
@@ -3976,6 +3979,15 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             False,
         )
         self.assertEqual(self.repo.mock_calls, [])
+
+    def test_a_forced_merge_skips_the_same_checks_on_lower_prs(self) -> None:
+        self.skip_internal.return_value = True
+        self.assertStopsBeforeLanding(skip_mandatory_checks=True)
+        gated = [call.args[0] for call in self.rule.call_args_list]
+        self.assertEqual(gated, [self.top, self.lower])
+        for call in self.rule.call_args_list:
+            self.assertIs(call.kwargs["skip_mandatory_checks"], True)
+            self.assertIs(call.kwargs["skip_internal_checks"], True)
 
     def test_reads_the_stack_again_for_every_attempt(self) -> None:
         current = replace(NATIVE_STACK)
