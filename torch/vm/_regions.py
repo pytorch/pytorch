@@ -1169,6 +1169,11 @@ def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> 
             theirs.update(map(id, known.tensors))
             looked += 1
             return ("module", obj, state, known, inputs.known[looked - 1][0])
+        if cls is collections.OrderedDict:
+            # Described by its keys, as a dict is (``_describe``): not one
+            # of the nodes the runtime looks into, which have their context
+            # as text.
+            return None
         node = pytree.SUPPORTED_NODES.get(cls)
         if node is not None and len(part) == 3 and part[0] is cls:
             if id(obj) in held:
