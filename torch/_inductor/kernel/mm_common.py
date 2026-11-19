@@ -62,6 +62,12 @@ def persistent_grouped_mm_grid(*args):
     return (meta["NUM_SMS"], 1, 1)
 
 
+@SymbolicGridFn
+def persistent_gluon_grouped_mm_grid(*args):
+    meta = args[-1]
+    return (meta["NUM_PROGRAMS"], 1, 1)
+
+
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
