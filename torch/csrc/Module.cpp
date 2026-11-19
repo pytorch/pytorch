@@ -2004,6 +2004,15 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_ensureXPUDeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureXPUDeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 struct TorchModuleState {
   PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
 };
@@ -2407,6 +2416,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_ensureCUDADeviceGuardSet",
      THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {"_ensureXPUDeviceGuardSet",
+     THPModule_ensureXPUDeviceGuardSet,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}
@@ -2885,6 +2898,11 @@ Call this whenever a new thread is created in order to propagate values from
     return t.is_fake();
   });
 
+  py_module.def("_enable_fake_tensor_custom_op_profiles", []() {
+    torch::fake_tensor::custom_op_profiles_ever_enabled.store(
+        true, std::memory_order_relaxed);
+  });
+
   py_module.def("_fake_device", [](const at::Tensor& t) -> c10::Device {
     auto fd = t.unsafeGetTensorImpl()->fake_device();
     TORCH_CHECK(fd.has_value(), "Tensor does not have a fake device");
@@ -3060,6 +3078,17 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("fake"),
       py::arg("constant"));
 
+  py_module.def(
+      "_invalidate_fake_constant_aliases",
+      [](py::object mode, const at::Tensor& tensor) {
+        TORCH_CHECK(tensor.defined(), "Expected a defined tensor");
+        auto fake_mode = torch::fake_tensor::getCppFakeTensorMode(mode.ptr());
+        fake_mode->invalidate_constant_aliases(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("mode"),
+      py::arg("tensor"));
+
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
@@ -3128,8 +3157,8 @@ Call this whenever a new thread is created in order to propagate values from
           // dispatcher too.
           torch::DisableTorchDispatch no_dispatch;
           c10::impl::DisablePythonDispatcher no_python_dispatcher;
-          out_impl = impl->shallow_copy_and_detach(
-              impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+          out_impl = meta.detach().getIntrusivePtr();
+          out_impl->set_allow_tensor_metadata_change(true);
         }
         // Before marking the shared storage, as this can throw
         out_impl->set_requires_grad(meta.requires_grad());
@@ -3175,6 +3204,12 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
       "_set_storage_data_ptr_access_error_msg",
       [](size_t storage_impl_ptr, std::string s) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -3187,6 +3222,19 @@ Call this whenever a new thread is created in order to propagate values from
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->clear_data_ptr_access_error_msg_();
+      });
+
+  py_module.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }
+        }
+        return true;
       });
 
   ASSERT_TRUE(
