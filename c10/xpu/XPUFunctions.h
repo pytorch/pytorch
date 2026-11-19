@@ -44,8 +44,13 @@ static inline void check_device_index(DeviceIndex device_index) {
       ".");
 }
 
-// Registers the host memory range [ptr, ptr + size) as a USM host
-// allocation. Both `ptr` and `size` must be aligned to the system page size.
+// Whether register_host_memory() accepts any host memory range on this build,
+// device and driver. False where only page-aligned ranges can be registered.
+C10_XPU_API bool is_host_memory_registration_supported();
+
+// Registers the host memory range [ptr, ptr + size) as a USM host allocation.
+// Unless is_host_memory_registration_supported(), `ptr` and `size` must be
+// aligned to the system page size.
 C10_XPU_API void register_host_memory(void* ptr, size_t size);
 
 // Unregisters the host memory range [ptr, ptr + size) previously registered via

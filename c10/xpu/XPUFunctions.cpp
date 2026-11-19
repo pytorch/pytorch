@@ -317,6 +317,32 @@ void device_synchronize(c10::DeviceIndex device) {
 #endif
 }
 
+bool is_host_memory_registration_supported() {
+#if SYCL_COMPILER_VERSION >= 20260300
+  static const bool supported = [] {
+    if (device_count() == 0 ||
+        !get_device_context().get_platform().has(
+            sycl::aspect::ext_oneapi_register_host_memory)) {
+      return false;
+    }
+    // Drivers without unaligned support reject the range below.
+    std::vector<char> buffer(16);
+    try {
+      sycl::ext::oneapi::experimental::register_host_memory(
+          buffer.data() + 1, 8, get_device_context());
+      sycl::ext::oneapi::experimental::unregister_host_memory(
+          buffer.data() + 1, get_device_context());
+    } catch (const sycl::exception&) {
+      return false;
+    }
+    return true;
+  }();
+  return supported;
+#else
+  return false;
+#endif
+}
+
 void register_host_memory(void* ptr, size_t size) {
 #if SYCL_COMPILER_VERSION >= 20260200
   TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
@@ -327,21 +353,23 @@ void register_host_memory(void* ptr, size_t size) {
       "Requires the ext_oneapi_register_host_memory extension, "
       "which is not supported on this device. ",
       "Please upgrade to a newer driver.");
+  if (!is_host_memory_registration_supported()) {
 #ifdef _WIN32
-  SYSTEM_INFO si;
-  GetSystemInfo(&si);
-  const size_t page_size = si.dwPageSize;
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    const size_t page_size = si.dwPageSize;
 #else
-  const auto ret = sysconf(_SC_PAGESIZE);
-  TORCH_CHECK(ret > 0, "Failed to query the system page size.");
-  const auto page_size = static_cast<size_t>(ret);
+    const auto ret = sysconf(_SC_PAGESIZE);
+    TORCH_CHECK(ret > 0, "Failed to query the system page size.");
+    const auto page_size = static_cast<size_t>(ret);
 #endif
-  TORCH_CHECK_VALUE(
-      (reinterpret_cast<uintptr_t>(ptr) % page_size) == 0,
-      "ptr must be aligned to the system page size.");
-  TORCH_CHECK_VALUE(
-      (size % page_size) == 0,
-      "size must be a multiple of the system page size.");
+    TORCH_CHECK_VALUE(
+        (reinterpret_cast<uintptr_t>(ptr) % page_size) == 0,
+        "ptr must be aligned to the system page size.");
+    TORCH_CHECK_VALUE(
+        (size % page_size) == 0,
+        "size must be a multiple of the system page size.");
+  }
 
   sycl::ext::oneapi::experimental::register_host_memory(
       ptr, size, get_device_context());

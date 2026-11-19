@@ -2032,6 +2032,40 @@ if __name__ == "__main__":
         pin_memory_utils.unpin_memory(a.data_ptr())
         self.assertFalse(a.is_pinned())
 
+    def test_pin_memory_unaligned(self):
+        import torch.xpu._pin_memory_utils as pin_memory_utils
+
+        if not pin_memory_utils.is_supported():
+            self.skipTest("Pinning unaligned host memory is not supported")
+
+        # Two small tensors sharing a page, like neighbouring CPU storages.
+        buf = torch.empty(4096, dtype=torch.uint8)
+
+        def tensor_at(offset):
+            view = (ctypes.c_uint8 * 8).from_address(buf.data_ptr() + offset)
+            return torch.frombuffer(view, dtype=torch.uint8)
+
+        a, b = tensor_at(8), tensor_at(64)
+        # Freeing memory that is still registered breaks the device, so unpin
+        # even if an assertion fails.
+        pin_memory_utils.pin_memory(a.data_ptr(), a.nbytes)
+        try:
+            pin_memory_utils.pin_memory(b.data_ptr(), b.nbytes)
+            try:
+                self.assertTrue(a.is_pinned())
+                self.assertTrue(b.is_pinned())
+            finally:
+                pin_memory_utils.unpin_memory(b.data_ptr())
+            self.assertTrue(a.is_pinned())
+            src = torch.arange(8, device="xpu", dtype=torch.uint8)
+            a.copy_(src, non_blocking=True)
+            torch.xpu.synchronize()
+            self.assertEqual(a, src.cpu())
+        finally:
+            pin_memory_utils.unpin_memory(a.data_ptr())
+        self.assertFalse(a.is_pinned())
+        self.assertFalse(b.is_pinned())
+
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
         s = torch.xpu.Stream()

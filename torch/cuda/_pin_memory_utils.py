@@ -1,6 +1,10 @@
 import torch
 
 
+def is_supported() -> bool:
+    return torch.cuda.is_available()
+
+
 def pin_memory(data_ptr: int, size: int) -> None:
     cudart = torch.cuda.cudart()
     succ = int(
