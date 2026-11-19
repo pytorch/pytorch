@@ -273,6 +273,19 @@ def _parse_profiler_trace_lines(traces: str) -> list[tuple[str, str, str]]:
     return lines
 
 
+def _normalize_xpu_profiler_traces(traces: str) -> str:
+    r"""Canonicalize UR launch names; drop other UR/ZE calls and profiler overhead."""
+    lines = []
+    for event, node, stack in _parse_profiler_trace_lines(traces):
+        # UR launch names vary across runtime versions.
+        if event.startswith("urEnqueueKernelLaunch"):
+            event = "urEnqueueKernelLaunch"
+        elif event.startswith(("ze", "ur")) or event == "Instrumentation":
+            continue
+        lines.append(f"event={event} node={node} stack_trace={stack}")
+    return "\n".join(lines)
+
+
 class TestFX(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -5855,8 +5868,8 @@ def run_getitem_target():
         _wrapped_methods_to_patch.pop()
 
 
-class TestFXCUDA(JitTestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestFXProfiler(JitTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -5899,12 +5912,12 @@ class TestFXCUDA(JitTestCase):
             )
 
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
-    @blas_library_context("cublaslt")
     def test_profiler_stack_trace_augmentation(self, device):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
         augments profiler events with stack traces from FX metadata registry.
         """
+        device_activity = getattr(ProfilerActivity, self.device_type.upper())
 
         # Simple test model
         class TestModel(torch.nn.Module):
@@ -5925,19 +5938,29 @@ class TestFXCUDA(JitTestCase):
         # Compile the model
         compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
 
-        # Warmup
-        for _ in range(3):
-            _ = compiled_model(torch.randn(10, 10, device=device))
+        # Pin cuBLASLt to keep the CUDA trace stable.
+        blas_context = (
+            blas_library_context("cublaslt")
+            if self.device_type == "cuda"
+            else contextlib.nullcontext()
+        )
+        with blas_context:
+            # Warmup
+            for _ in range(3):
+                _ = compiled_model(torch.randn(10, 10, device=device))
 
-        # Profile with the compiled model
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        ) as prof:
-            result = compiled_model(torch.randn(10, 10, device=device))
+            # Profile with the compiled model
+            with profile(
+                activities=[ProfilerActivity.CPU, device_activity],
+            ) as prof:
+                result = compiled_model(torch.randn(10, 10, device=device))
 
         actual_traces = _enrich_profiler_traces(prof)
 
-        if torch.version.hip:
+        if self.device_type == "xpu":
+            actual_traces = _normalize_xpu_profiler_traces(actual_traces)
+            kernel_event = kernel_event_relu = "urEnqueueKernelLaunch"
+        elif torch.version.hip:
             actual_traces = '\n'.join(
                 line
                 for line in actual_traces.split('\n')
@@ -5958,6 +5981,30 @@ class TestFXCUDA(JitTestCase):
                     "addmm_1": ("linear",),
                 },
             )
+        elif self.device_type == "xpu":
+            expected = f"""\
+event=aten::t node=t stack_trace=x = self.linear1(x)
+event=aten::transpose node=t stack_trace=x = self.linear1(x)
+event=aten::as_strided node=t stack_trace=x = self.linear1(x)
+event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
+event=aten::resize_ node=addmm stack_trace=x = self.linear1(x)
+event=aten::expand node=addmm stack_trace=x = self.linear1(x)
+event=aten::as_strided node=addmm stack_trace=x = self.linear1(x)
+event=aten::empty node=addmm stack_trace=x = self.linear1(x)
+event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
+event=aten::relu node=relu stack_trace=x = self.relu(x)
+event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
+event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
+event=aten::t node=t_1 stack_trace=x = self.linear2(x)
+event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
+event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
+event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
+event=aten::resize_ node=addmm_1 stack_trace=x = self.linear2(x)
+event=aten::expand node=addmm_1 stack_trace=x = self.linear2(x)
+event=aten::as_strided node=addmm_1 stack_trace=x = self.linear2(x)
+event=aten::empty node=addmm_1 stack_trace=x = self.linear2(x)
+event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+            self.assertExpectedInline(actual_traces, expected)
         else:
             # cuBLASLt's internal capture checks need not all appear in the trace.
             actual_traces = "\n".join(
@@ -5987,6 +6034,7 @@ event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
         Test that multiple compiled modules under the same profiler session
         have their events correctly augmented with stack traces.
         """
+        device_activity = getattr(ProfilerActivity, self.device_type.upper())
 
         class ModelA(torch.nn.Module):
             def forward(self, x):
@@ -6010,13 +6058,18 @@ event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
 
         # Profile both models in the same session
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=[ProfilerActivity.CPU, device_activity],
         ) as prof:
             result_a = compiled_a(torch.randn(10, 10, device=device))
             result_b = compiled_b(torch.randn(1, 3, 8, 8, device=device))
 
         actual_traces = _enrich_profiler_traces(prof)
-        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+
+        if self.device_type == "xpu":
+            actual_traces = _normalize_xpu_profiler_traces(actual_traces)
+            kernel_event = "urEnqueueKernelLaunch"
+        else:
+            kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
         self.assertExpectedInline(
             actual_traces,
             f"""\
@@ -6032,6 +6085,7 @@ event={kernel_event} node=sub stack_trace=return x - 1""",
         Test that nested graph modules (e.g., graph modules calling subgraphs)
         have their events correctly augmented with stack traces.
         """
+        device_activity = getattr(ProfilerActivity, self.device_type.upper())
 
         # Model with nested structure
         class Mod(torch.nn.Module):
@@ -6059,14 +6113,19 @@ event={kernel_event} node=sub stack_trace=return x - 1""",
 
         # Profile
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            activities=[ProfilerActivity.CPU, device_activity],
         ) as prof:
             result = compiled_model(
                 torch.randn(10, 10, device=device), torch.randn(10, 10, device=device)
             )
 
         actual_traces = _enrich_profiler_traces(prof)
-        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+
+        if self.device_type == "xpu":
+            actual_traces = _normalize_xpu_profiler_traces(actual_traces)
+            kernel_event = "urEnqueueKernelLaunch"
+        else:
+            kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
         self.assertExpectedInline(
             actual_traces,
             f"""\
@@ -6079,7 +6138,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c""",
         )
 
 
-instantiate_device_type_tests(TestFXCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFXProfiler, globals(), except_for="cpu", allow_xpu=True)
 
 
 class TestFXDevice(JitTestCase):
@@ -6175,7 +6234,7 @@ class TestFXDevice(JitTestCase):
         )
 
 
-instantiate_device_type_tests(TestFXDevice, globals())
+instantiate_device_type_tests(TestFXDevice, globals(), allow_xpu=True)
 
 
 class TestOperatorSignatures(JitTestCase):
