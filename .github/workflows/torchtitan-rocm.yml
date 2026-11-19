@@ -1,0 +1,68 @@
+# Owner(s): ["oncall: distributed", "module: rocm"]
+# ROCm counterpart of torchtitan.yml. Same bottom half (test.sh →
+# test_torchtitan → pytorch_ci_test_runner.sh → run_tests → run_train.sh),
+# different build/test templates and runners. Uses 8 GPUs like the CUDA job.
+name: torchtitan-rocm-test
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # Same ciflow as CUDA torchtitan.yml — applying ciflow/torchtitan runs both.
+      - ciflow/torchtitan/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+      check_experiments: amd-dpx
+
+  build:
+    name: torchtitan-x-pytorch-rocm-build
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-label-type
+    with:
+      runner_prefix: "mt-"
+      build-environment: linux-noble-rocm-py3.11-mi350-torchtitan
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      rocm-arch-list: gfx950
+      build-additional-packages: "torchao"
+      test-matrix: |
+        { include: [
+          { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.8" }
+        ]}
+    secrets: inherit
+
+  test:
+    name: torchtitan-x-pytorch-rocm-test
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - build
+      - get-label-type
+    with:
+      build-environment: ${{ needs.build.outputs.build-environment }}
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+    secrets: inherit
