@@ -1886,9 +1886,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         module._parameters["value"] = torch.nn.Parameter(torch.tensor(5.0))
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
-        for registry in (dict, HiddenValue, dict):
+
+        class VisibleValue(dict):
+            pass
+
+        for registry in (dict, HiddenValue, VisibleValue):
             module._parameters = registry(module._parameters)
             self.assertEqual(compiled(x, module), fn(x, module))
+        module.__dict__["value"] = torch.tensor(9.0)
+        self.assertEqual(compiled(x, module), fn(x, module))
 
     @parametrize("specialize", [False, True])
     def test_registered_attribute_lookup_precedence(self, specialize):
