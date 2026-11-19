@@ -732,10 +732,23 @@ class _Known:
 class _ModuleState:
     """The tensors of a module and of its submodules, for one stamp."""
 
-    __slots__ = ("accessors", "hooked", "ids", "known", "module", "stamp", "token")
+    __slots__ = (
+        "accessors",
+        "epoch",
+        "hooked",
+        "ids",
+        "known",
+        "module",
+        "stamp",
+        "token",
+    )
 
     def __init__(self, module: nn.Module, stamp: int) -> None:
         self.module = weakref.ref(module)
+        # What ``module_epoch`` gave when the stamp was taken, if the dicts
+        # the stamp was read from are watched: while it gives the same, the
+        # stamp is what it was (see ``_module_state``).
+        self.epoch: int | None = None
         self.refresh(module, stamp)
 
     def refresh(self, module: nn.Module, stamp: int) -> None:
@@ -784,15 +797,25 @@ def _forget_module(key: int) -> None:
 def _module_state(module: nn.Module) -> _ModuleState:
     # What is known about a module holds while its stamp is what it was: a
     # parameter, buffer, submodule or hook more or less, a tensor attribute
-    # that was none, another training flag all change it.
-    stamp = _runtime.module_stamp(module, _TENSOR_TYPES)
+    # that was none, another training flag all change it. The stamp is a
+    # walk over the dicts of the module and of every module inside it; they
+    # are watched, so that a call that finds none of them changed since the
+    # last walk (``module_epoch``) does not walk again.
     state = _module_states.get(id(module))
-    if state is None or state.module() is not module:
+    known = state is not None and state.module() is module
+    if known and state.epoch == _runtime.module_epoch():  # type: ignore[union-attr]
+        return state  # type: ignore[return-value]
+    # Not on the first look: a module that is made for one call (a loss, an
+    # activation) would, when it goes, tell every other one that something
+    # changed.
+    stamp, epoch = _runtime.module_look(module, _TENSOR_TYPES, known)
+    if not known:
         state = _module_states[id(module)] = _ModuleState(module, stamp)
         weakref.finalize(module, _forget_module, id(module))
-    elif state.stamp != stamp:
-        state.refresh(module, stamp)
-    return state
+    elif state.stamp != stamp:  # type: ignore[union-attr]
+        state.refresh(module, stamp)  # type: ignore[union-attr]
+    state.epoch = epoch  # type: ignore[union-attr]
+    return state  # type: ignore[return-value]
 
 
 # ----------------------------------------------------------------------
@@ -959,6 +982,7 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
             except LookupError:
                 # Changed since the stamp was taken.
                 state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
+                state.epoch = None
                 return _describe(obj, inputs)
             if len(flat) > first:
                 tensors = flat[first:]
