@@ -1,5 +1,7 @@
 try:
-    from cutlass.block import block_copy as block_copy
-    from cutlass.memory import SmemAllocator as SmemAllocator
+    from cutlass.block import block_copy
+    from cutlass.memory import SmemAllocator
 except ImportError:
-    from cutlass.utils import block_copy as block_copy, SmemAllocator as SmemAllocator
+    from cutlass.utils import block_copy, SmemAllocator
+
+__all__ = ["block_copy", "SmemAllocator"]
