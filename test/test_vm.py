@@ -4506,6 +4506,25 @@ def demote_raises_caller(n, x):
         return e.args[0], x + 1
 
 
+DEMOTE_LOUD = [False]
+
+
+def demote_loud(n):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    if DEMOTE_LOUD[0]:
+        cfg_rs.unsettled()
+    return total
+
+
+def demote_loud_loop(n, x):
+    total = 0
+    for _ in range(500):
+        total = demote_loud(n)
+    return total, x + 1
+
+
 def demote_chain_1(n):
     return demote_python(n)
 
@@ -4570,6 +4589,26 @@ class TestVmDemotion(TestCase):
         # A call that ends in a raise is timed like one that returns.
         self.assertEqual(stats["demoted_callees"], ["demote_raises"])
         self.assertFalse(stats["measuring"])
+
+    def test_a_measurement_that_ran_out_in_the_first_calls_starts_again(self):
+        # The callee is called more often in the first call of the function
+        # than a measurement lasts, and as it is then (something below it
+        # is not what it will be), it cannot be given up.
+        compiled = torch.vm(
+            demote_loud_loop, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        x = torch.ones(2)
+        DEMOTE_LOUD[0] = True
+        self.addCleanup(DEMOTE_LOUD.__setitem__, 0, False)
+        for _ in range(2):
+            compiled(50, x)
+        self.assertEqual(compiled.stats()["demoted_callees"], [])
+        DEMOTE_LOUD[0] = False
+        for _ in range(4):
+            total, _ = compiled(50, x)
+            self.assertEqual(total, demote_python(50))
+        # Measured again once that was over: the loop is slower in the VM.
+        self.assertEqual(compiled.stats()["demoted_callees"], ["demote_loud"])
 
     def test_a_region_that_is_deciding_keeps_measurements_open(self):
         calls = []
