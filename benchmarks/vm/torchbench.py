@@ -294,7 +294,11 @@ def run_one(args):
             out["demoted"] = bool(compiled.stats()["demoted"])
             if args.paired and out["call_s"] <= args.paired_limit:
                 try:
-                    other_model = copy.deepcopy(model) if training else model
+                    # A copy of its own, also where calls do not change the
+                    # model: what Inductor makes asks for writable pointers
+                    # to the weights, which moves the ones torch.vm has
+                    # built into a graph and watches (``freeze=``).
+                    other_model = copy.deepcopy(model)
                     other_opt = optimizer(other_model) if training else None
                     other = torch.compile(fn)
                     settle = []
