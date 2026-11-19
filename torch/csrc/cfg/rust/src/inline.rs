@@ -224,6 +224,12 @@ impl Inliner<'_, '_> {
                     kills: Vec::new(),
                 };
                 insts.insert(0, enter);
+                // Its first variables are the arguments, as in a frame the
+                // function is called under (see `Compiled::enter`).
+                for (slot, arg) in args.iter().enumerate().take(callee.params.len()) {
+                    let bound = Op::StoreLocal(slot as u32, *arg);
+                    insts.insert(1 + slot, Inst { dst: NONE, op: bound, bc: tag(block.bc_start), kills: Vec::new() });
+                }
             }
             if matches!(block.term, Term::Return(_)) {
                 let bc = insts.last().map_or(tag(block.bc_start), |inst| inst.bc);
