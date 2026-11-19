@@ -210,6 +210,10 @@ _MOST_OPEN = 4
 # up to this many times the limit; and after this many traces whose graph
 # was one too many, no further variant is tried.
 _MOST_SHARED = 8
+# How many variants of a region may differ in nothing but which module
+# without tensors they were given, before such a module counts as one that
+# is made for every call.
+_MOST_FRESH = 16
 _MOST_SURPLUS = 4
 # How many times regions wait for one that was surveyed before them to be
 # compiled, before they go ahead without it.
@@ -840,6 +844,10 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
             # Changed since the stamp was taken.
             state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
             return _describe(obj, inputs)
+        if not state.accessors and len(state.ids) == 1:
+            # A loss or an activation: nothing but its class and its mode
+            # says what it is like (see ``_fresh``).
+            return ("bare module", cls, obj.training, id(obj))
         return ("module", id(obj), state.token)
     if cls is types.MethodType:
         return (
@@ -1189,6 +1197,20 @@ def _identities(
             _identities(item, modules, others, seen)
     else:
         others.append(obj)
+
+
+def _fresh(a: Any, b: Any) -> bool:
+    """Whether two keys of variants differ in nothing but which modules
+    without tensors they name. A loss that ``forward`` builds before it
+    calls it is another object on every call, and every call would be a
+    variant of its own."""
+    if type(a) is not tuple or type(b) is not tuple:
+        return a == b
+    if len(a) != len(b):
+        return False
+    if len(a) == 4 and a[0] == "bare module" and b[0] == "bare module":
+        return a[1:3] == b[1:3]
+    return all(_fresh(x, y) for x, y in zip(a, b))
 
 
 def _same_but_values(a: Any, b: Any) -> bool:
@@ -2388,6 +2410,10 @@ class _Region:
             # these, and every one would be a graph of its own.
             self.hot = False
             self.plan.split(self, None, "its inputs take ever new values")
+            return None
+        if sum(1 for k in self.variants if _fresh(key, k)) >= _MOST_FRESH:
+            self.hot = False
+            self.plan.split(self, None, "is given a new module on every call")
             return None
         if key not in self.variants and (
             self.surplus >= _MOST_SURPLUS

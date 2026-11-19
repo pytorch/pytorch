@@ -4162,6 +4162,13 @@ def region_method(model, view, x):
     return model(view(2, 3, 6, 6) + x)
 
 
+def region_loss(model, x, y):
+    # As models of transformers do: the loss is a module made on the spot.
+    logits = model(x)
+    loss = torch.nn.CrossEntropyLoss()
+    return loss(torch.tanh(logits) * 2 + 1, y) + logits.mean()
+
+
 class RegionAlike(torch.nn.Module):
     # Layers that are built alike, with data deciding what comes between.
     def __init__(self):
@@ -5552,6 +5559,27 @@ class TestVmRegions(TestCase):
         # the one it was made with.
         self.assertEqual([ref() is None for ref in batches], [True] * 8)
         self.assertEqual(sum(r["variants"] for r in self.compiled_regions(compiled)), 1)
+
+    def test_module_made_for_every_call_ends_the_region(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.vm(
+            region_loss, passes=with_graphs("aot_eager"), fallback=False
+        )
+        y = torch.randint(0, 5, (2,))
+        with torch.no_grad():
+            for _ in range(40):
+                x = torch.randn(2, 3, 6, 6)
+                expected = region_loss(model, x, y)
+                self.assertEqual(compiled(model, x, y), expected, atol=0, rtol=0)
+        regions = torch.vm.regions(compiled)
+        # The loss was another object on every call: the region that was
+        # handed it gave up, the one that is the model did not.
+        reasons = [r["reason"] for r in regions if r["state"] == "vm"]
+        self.assertIn("is given a new module on every call", reasons)
+        compiled_regions = self.compiled_regions(compiled)
+        self.assertGreaterEqual(len(compiled_regions), 1)
+        self.assertLessEqual(max(r["variants"] for r in compiled_regions), 2)
 
     def test_only_parameters_and_buffers_a_graph_uses_are_built_in(self):
         torch.manual_seed(0)
