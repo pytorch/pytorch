@@ -6009,7 +6009,6 @@ def forward(self, arg0_1, arg1_1):
         ).run(code[0])
 
     @requires_gpu
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/XXXX_TL_INLINE_ASM_ELEMENTWISE_XPU")  # fmt: skip
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     @parametrize("cpp_wrapper", [False, True])
@@ -6062,6 +6061,7 @@ def forward(self, arg0_1, arg1_1):
             self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/XXXX_TL_INLINE_ASM_ELEMENTWISE_XPU")  # fmt: skip
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     @parametrize("cpp_wrapper", [False, True])
