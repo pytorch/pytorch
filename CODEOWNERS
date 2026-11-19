@@ -26,8 +26,8 @@
 #   as a set) appears on exactly one "# label:" line. When a list extends a
 #   sibling's, the shared labels come first and the distinguishing label last.
 # - A label line leaves out an oncall label when one of its module labels
-#   implies it; .github/label_to_label.yml records which modules imply which
-#   oncall.
+#   implies it; label_parents in OWNERSHIP.yaml records which labels imply
+#   which.
 # - Labels planned but not yet created on GitHub (issues can't be routed to
 #   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
