@@ -231,10 +231,8 @@ impl<'a> Builder<'a> {
         if let Some((_, lasti)) = catches {
             let off = self.instrs[self.cfg[b].start].off;
             if lasti {
-                // Only used to restore a line number we do not track.
-                let none = self.extra_const(unsafe { PyObj::from_borrowed(ffi::Py_None()) });
                 let v = self.new_value();
-                insts.push(Inst { dst: v, op: Op::Const(none), bc: off, kills: Vec::new() });
+                insts.push(Inst { dst: v, op: Op::CaughtLasti, bc: off, kills: Vec::new() });
                 stack.push(v);
             }
             let exc = self.new_value();
@@ -830,8 +828,11 @@ impl<'a> Builder<'a> {
                 }
                 Bc::Reraise => {
                     let exc = pop_value!();
+                    // RERAISE 1 puts the frame back on the instruction whose
+                    // offset the handler was entered with.
+                    let lasti = if arg > 0 { peek!(arg as usize) } else { NONE };
                     hold_locals!(off);
-                    term = Some(Term::Reraise(exc));
+                    term = Some(Term::Reraise(exc, lasti));
                 }
                 Bc::WithExceptStart => {
                     // exit, raising offset, previous exception, exception
@@ -1326,6 +1327,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             term,
             preds: builder.cfg[b].preds.iter().map(|p| *p as B).collect(),
             bc_start: instrs[builder.cfg[b].start].off,
+            term_bc: instrs[builder.cfg[b].end - 1].off,
             handler: builder.cfg[b].handler.map_or(NONE, |h| h as B),
         });
     }
@@ -1452,6 +1454,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::LoadSlot(_)
         | Op::FrameEnter(_)
         | Op::FrameLeave
+        | Op::CaughtLasti
         | Op::CaughtException => {}
         Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
             r!(code, defaults, kwdefaults, annotations, closure)
@@ -1536,7 +1539,13 @@ pub fn rewrite_term_uses(term: &mut Term, f: &mut dyn FnMut(V) -> PyResult<V>) -
         Term::Jump(_) => {}
         Term::Br { cond, .. } => *cond = f(*cond)?,
         Term::BrNull { v, .. } => *v = f(*v)?,
-        Term::Return(v) | Term::Reraise(v) => *v = f(*v)?,
+        Term::Return(v) => *v = f(*v)?,
+        Term::Reraise(v, lasti) => {
+            *v = f(*v)?;
+            if *lasti != NONE {
+                *lasti = f(*lasti)?;
+            }
+        }
         Term::Raise { exc, cause } => {
             *exc = f(*exc)?;
             *cause = f(*cause)?;
