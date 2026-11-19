@@ -57,6 +57,23 @@ class TestBenchmarker(TestCase):
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         return (fn, fn_args, fn_kwargs), _callable
 
+    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    @parametrize("benchmarker_cls", (TritonBenchmarker, InductorBenchmarker))
+    def test_benchmark_duty_cycle_dispatch(self, benchmarker_cls):
+        benchmarker = benchmarker_cls()
+        (fn, fn_args, fn_kwargs), _ = self.make_params("cuda")
+        with (
+            patch("torch._inductor.config.autotune_duty_cycle_benchmarking", True),
+            patch("time.sleep") as sleep,
+        ):
+            timing = benchmarker.benchmark(fn, fn_args, fn_kwargs)
+        self.assertGreater(timing, 0)
+        self.assertEqual(sleep.call_count, 8)
+        self.assertEqual(
+            self.get_counter_value(benchmarker_cls, "benchmark_gpu_duty_cycle"), 1
+        )
+        self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 0)
+
     @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
     @decorateIf(
         unittest.expectedFailure,
