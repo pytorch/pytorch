@@ -1294,6 +1294,7 @@ class _Region:
         ops = self.ops_of(graph)
         if ops < options.min_ops:
             raise _Failed(None, f"{ops} tensor operations, not worth a graph")
+        _views_to_reshapes(graph)
         # The parameters are inputs, so the layers of a model that are built
         # alike give the same graph: it is compiled once. A graph that holds a
         # tensor of its own is not looked up, the code does not say which.
@@ -1894,6 +1895,21 @@ class Regions:
                     }
                 )
         return entries
+
+
+def _views_to_reshapes(graph: torch.fx.GraphModule) -> None:
+    """A trace records a reshape as the view it was for the tensor at hand.
+    What the backend makes of the operations before it may lay that tensor
+    out otherwise, and then the view is no longer one: a reshape is the view
+    wherever there is one."""
+    views = (torch.ops.aten.view.default, torch.ops.aten._unsafe_view.default)
+    changed = False
+    for node in graph.graph.nodes:
+        if node.op == "call_function" and node.target in views:
+            node.target = torch.ops.aten.reshape.default
+            changed = True
+    if changed:
+        graph.recompile()
 
 
 def _inductor(graph: torch.fx.GraphModule, inputs: list[Any]) -> Callable[..., Any]:
