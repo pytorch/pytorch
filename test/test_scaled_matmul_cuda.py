@@ -3825,8 +3825,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
 
         a = torch.randn(total_m, K, device=device, dtype=torch.bfloat16)
-        a_fp8, a_scale_quant = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
-        a_scale = a_scale_quant.reciprocal()
+        a_fp8, a_scale = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
         if lhs_block == 1:
             a_scale = a_scale.t().contiguous().t()
         else:
@@ -3838,8 +3837,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         start = 0
         for end in offs.tolist():
             b_i = torch.randn(N, K, device=device, dtype=torch.bfloat16)
-            b_fp8_i, b_scale_nat_quant_i = tensor_to_scale_block(b_i, e4m3_type, rhs_block, 128)
-            b_scale_nat_i = b_scale_nat_quant_i.reciprocal()
+            b_fp8_i, b_scale_nat_i = tensor_to_scale_block(b_i, e4m3_type, rhs_block, 128)
             if rhs_block == 1:
                 b_scale_op_i = b_scale_nat_i.t().contiguous().t()
                 b_scale_ref_i = b_scale_op_i
@@ -3932,11 +3930,9 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
 
         a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
-        a_fp8, a_scale_quant = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
-        a_scale_nat = a_scale_quant.reciprocal()
+        a_fp8, a_scale_nat = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
         b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
-        b_fp8, b_scale_quant = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
-        b_scale_nat = b_scale_quant.reciprocal()
+        b_fp8, b_scale_nat = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
 
         def _op_layout(nat, block):
             if block == 1:
@@ -4042,10 +4038,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         for i in range(B):
             a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
             a_fp8_i, a_q = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
-            a_s = _op_layout(a_q.reciprocal(), lhs_block)
+            a_s = _op_layout(a_q, lhs_block)
             b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
             b_fp8_i, b_q = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
-            b_s = _op_layout(b_q.reciprocal(), rhs_block)
+            b_s = _op_layout(b_q, rhs_block)
             out_ref[i] = scaled_mm_wrap(
                 a_fp8_i, b_fp8_i.t(),
                 scale_a=a_s, scale_recipe_a=lhs_recipe,
@@ -4138,7 +4134,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
         b_fp8, b_q = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
-        scale_b = _op_layout(b_q.reciprocal(), rhs_block)
+        scale_b = _op_layout(b_q, rhs_block)
 
         a_fp8_l, a_scale_l = [], []
         out_ref = torch.empty(M, N, device=device, dtype=torch.bfloat16)
@@ -4146,12 +4142,12 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         for i, end in enumerate(itertools.accumulate(cols)):
             a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
             a_fp8_i, a_q = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
-            a_s = _op_layout(a_q.reciprocal(), lhs_block)
+            a_s = _op_layout(a_q, lhs_block)
             rows = slice(start, end) if rhs_block == 1 else slice(start // 128, end // 128)
             out_ref[:, start:end] = scaled_mm_wrap(
                 a_fp8_i, b_fp8[start:end].t(),
                 scale_a=a_s, scale_recipe_a=lhs_recipe,
-                scale_b=_op_layout(b_q.reciprocal()[rows], rhs_block),
+                scale_b=_op_layout(b_q[rows], rhs_block),
                 scale_recipe_b=rhs_recipe,
                 out_dtype=torch.bfloat16,
             )
@@ -4206,10 +4202,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         for g in range(G):
             a_fp8_g, a_q = tensor_to_scale_block(torch.randn(M, K, device=device, dtype=torch.bfloat16), e4m3_type, 1, 128)
             a_fp8_l.append(a_fp8_g)
-            a_scale[g].copy_(a_q.reciprocal())
+            a_scale[g].copy_(a_q)
         mat_a = torch.stack(a_fp8_l)
         b_fp8, b_q = tensor_to_scale_block(torch.randn(N, K, device=device, dtype=torch.bfloat16), e4m3_type, 1, 128)
-        scale_b = b_q.reciprocal().t().contiguous().t()
+        scale_b = b_q.t().contiguous().t()
         offs = torch.tensor([cols * (g + 1) for g in range(G)], device=device, dtype=torch.int32)
 
         def run(b):
