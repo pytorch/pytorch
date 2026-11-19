@@ -7019,6 +7019,7 @@ class TestVmRegions(TestCase):
             x = next(node for node in gm.graph.nodes if node.op == "placeholder")
             made.append(torch.vm.materialize(input_types[0], at="hi").shape)
             torch.vm.guard(gm, x, torch.vm.Dim(0, range(1, 6)), torch.vm.Contiguous())
+            torch.vm.guard(gm, x, *input_types[0].as_checks())
             for node in gm.graph.nodes:
                 if node.target is torch.ops.aten.tanh.default:
                     node.target = torch.ops.aten.sigmoid.default
@@ -7053,6 +7054,12 @@ class TestVmRegions(TestCase):
             (repr(t), t.nbytes("lo"), t.nbytes()), ("float32[16..32]", 64, 128)
         )
         self.assertEqual(torch.vm.materialize(t, dim0=24).shape, (24,))
+        # The type as guards: what a pass that specializes to it adds.
+        checks = t.as_checks()
+        dtype, device = torch.vm.Dtype(torch.float32), torch.vm.Device(t.device)
+        self.assertEqual(checks, [dtype, device, torch.vm.Dim(0, interval)])
+        self.assertTrue(all(check.holds(torch.zeros(20)) for check in checks))
+        self.assertFalse(all(check.holds(torch.zeros(40)) for check in checks))
         x = torch.zeros(4, 6)[:, ::2]
         self.assertTrue(torch.vm.Dim(-1, {3}).holds(x))
         self.assertTrue(torch.vm.Stride(-1, {2}).holds(x))
