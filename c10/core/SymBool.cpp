@@ -65,6 +65,14 @@ bool SymBool::guard_bool(const char* file, int64_t line) const {
   return a->guard_bool(file, line);
 }
 
+bool SymBool::guard_size_oblivious(const char* file, int64_t line) const {
+  if (auto ma = maybe_as_bool()) {
+    return *ma;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->guard_size_oblivious(file, line);
+}
+
 bool SymBool::guard_or_false(const char* file, int64_t line) const {
   if (auto ma = maybe_as_bool()) {
     return *ma;

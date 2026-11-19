@@ -333,6 +333,7 @@ def check_headeronly_symbols(install_root: Path) -> None:
 
     # Headers that #error on direct inclusion and are reached via a parent header
     non_self_contained_keywords = [
+        "util/complex_math.h",
         "util/complex_utils.h",
     ]
 
