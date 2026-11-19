@@ -9,6 +9,7 @@ import os
 import random
 import sys
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 from functools import reduce
@@ -1297,10 +1298,21 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def _gloo_worker_thread_count(self):
         count = 0
         for tid in os.listdir("/proc/self/task"):
-            with open(f"/proc/self/task/{tid}/comm") as f:
-                if f.read().strip() == "pt_gloo_runloop":
-                    count += 1
+            try:
+                with open(f"/proc/self/task/{tid}/comm") as f:
+                    if f.read().strip() == "pt_gloo_runloop":
+                        count += 1
+            except (FileNotFoundError, ProcessLookupError):
+                pass
         return count
+
+    def _wait_for_no_gloo_worker_threads(self):
+        # pthread_join() returns before the kernel removes the task from
+        # /proc/self/task, so a joined thread can be listed briefly.
+        deadline = time.monotonic() + 10
+        while self._gloo_worker_thread_count() > 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self._gloo_worker_thread_count(), 0)
 
     def _test_destroy_process_group_stops_worker_threads(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1316,7 +1328,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Lingering workers can abort the process at interpreter exit when they
         # release Python-owned tensors.
-        self.assertEqual(self._gloo_worker_thread_count(), 0)
+        self._wait_for_no_gloo_worker_threads()
         # Without worker threads, new work must fail instead of hang.
         with self.assertRaisesRegex(RuntimeError, "has been shut down"):
             pg.allreduce(torch.ones(4))
