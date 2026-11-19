@@ -3658,6 +3658,7 @@ void stop_recording_dict_pointers(
     bool result);
 bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
+void record_nn_module_state(RootGuardManager* root, PyObject* value);
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
 void record_tensor_state(
     RootGuardManager* root,
@@ -3694,6 +3695,15 @@ struct RecordedTensorState {
 struct RecordedDictState {
   PyObject* dict;
   uint64_t version;
+  py::object staging_ref;
+};
+
+struct RecordedNNModuleState {
+  PyObject* module;
+  py::weakref module_weakref;
+  PyTypeObject* type;
+  py::weakref type_weakref;
+  PyObject* dict;
   py::object staging_ref;
 };
 
@@ -3935,6 +3945,14 @@ class GuardManager {
     _is_tag_safe = true;
   }
 
+  // An nn.Module can change type without mutating any watched dictionary.
+  // Record its type while walking the guard tree and recheck it on fast hits.
+  void mark_type_guarded_for_tag_safety() {
+    TORCH_CHECK(
+        _is_tag_safe, "Marking a node type-guarded when it is not tag safe");
+    _needs_type_check_for_tag_safety = true;
+  }
+
   void mark_tag_safe_root() {
     TORCH_CHECK(
         _is_tag_safe, "Marking a node tag_safe_root when its not tag safe");
@@ -3955,6 +3973,12 @@ class GuardManager {
       PyObject* value,
       std::vector<RecordedDictState> dict_pointers) {
     _dict_pointers[value] = std::move(dict_pointers);
+  }
+
+  void stash_nn_module_states(
+      PyObject* value,
+      std::vector<RecordedNNModuleState> nn_module_states) {
+    _nn_module_states[value] = std::move(nn_module_states);
   }
 
   void stash_tensor_pointers(
@@ -4027,6 +4051,8 @@ class GuardManager {
             cloned_root, relational_guard);
       }
     }
+    cloned_mgr->_needs_type_check_for_tag_safety =
+        _needs_type_check_for_tag_safety;
 
     for (const auto& accessor : _accessors) {
       GuardAccessor* cloned_accessor =
@@ -4116,7 +4142,49 @@ class GuardManager {
     return true;
   }
 
-  bool check_dict_pointer_tags_fast(PyObject* value) {
+  bool check_nn_module_states(PyObject* value, bool protect_lifetimes) {
+    for (auto& state : _nn_module_states[value]) {
+      PyObject* module = state.module;
+      PyTypeObject* type = state.type;
+      PyObject* type_ref = nullptr;
+      if (protect_lifetimes) {
+        module = nullptr;
+        if (PyWeakref_GetRef(state.module_weakref.ptr(), &module) == 0 ||
+            PyWeakref_GetRef(state.type_weakref.ptr(), &type_ref) == 0) {
+          Py_XDECREF(module);
+          Py_XDECREF(type_ref);
+          return false;
+        }
+        type = reinterpret_cast<PyTypeObject*>(type_ref);
+      }
+      bool same_type = Py_TYPE(module) == type;
+      if (protect_lifetimes) {
+        Py_DECREF(type_ref);
+      }
+      if (!same_type) {
+        if (protect_lifetimes) {
+          Py_DECREF(module);
+        }
+        return false;
+      }
+      PyObject* dict = PyObject_GenericGetDict(module, nullptr);
+      if (protect_lifetimes) {
+        Py_DECREF(module);
+      }
+      if (dict == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      bool same_dict = dict == state.dict;
+      Py_DECREF(dict);
+      if (!same_dict) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool check_nn_module_state_and_dict_pointer_tags(PyObject* value) {
 #if IS_PYTHON_3_12_PLUS
     if (!_active_dict_tag_values.contains(value)) {
       return false;
@@ -4127,16 +4195,19 @@ class GuardManager {
     // watcher therefore proves no recorded dict changed, without dereferencing
     // a recorded pointer. If the watcher failed to install, bail instead of
     // falling through to the raw-pointer read below.
-    return true;
+    return check_nn_module_states(value, false);
 #else
     // Pre-3.12 has no PyDict_Watch. This raw-pointer path is why recursive dict
     // tags remain opt-in there.
-    return check_dict_pointer_tags(value);
+    return check_nn_module_states(value, true) && check_dict_pointer_tags(value);
 #endif
   }
 
   void release_staging_references(PyObject* value) {
     for (auto& state : _dict_pointers[value]) {
+      state.staging_ref = py::object();
+    }
+    for (auto& state : _nn_module_states[value]) {
       state.staging_ref = py::object();
     }
   }
@@ -4268,7 +4339,7 @@ class GuardManager {
         // Check if the `value` object was recorded earlier
         if (_dict_pointers.contains(value)) {
           // Check for fast path
-          if (check_dict_pointer_tags_fast(value) &&
+          if (check_nn_module_state_and_dict_pointer_tags(value) &&
               check_tensor_guards_fast(value)) {
             std::optional<bool> no_tensor_aliasing_result =
                 check_no_tensor_aliasing_guards_fast(value);
@@ -4315,7 +4386,18 @@ class GuardManager {
       }
     }
 
-    bool result = check_nopybind_template(value);
+    bool result;
+    if (_needs_type_check_for_tag_safety &&
+        is_recording_dict_pointers(_root)) {
+      result = check_leaf_guards_nopybind(value);
+      if (result) {
+        py::object protected_value = py::reinterpret_borrow<py::object>(value);
+        record_nn_module_state(_root, protected_value.ptr());
+        result = check_accessors_nopybind(protected_value.ptr());
+      }
+    } else {
+      result = check_nopybind_template(value);
+    }
 
     if (is_recording) {
       stop_recording_dict_pointers(_root, value, result);
@@ -4341,7 +4423,21 @@ class GuardManager {
           release_staging_references(value);
           return false;
         }
+        bool types_watched = watch_nn_module_types(value);
+        if (!types_watched) {
+          bool state_changed = _disable_dict_tag_matching;
+          disable_recursive_dict_tag_optimization();
+          release_staging_references(value);
+          if (state_changed) {
+            return false;
+          }
+        }
+        TORCH_CHECK(
+            types_watched,
+            "Could not register a type callback for recursive dict tag "
+            "optimization");
         if (_disable_dict_tag_matching ||
+            !check_nn_module_states(value, true) ||
             !check_dict_pointer_tags(value) ||
             !check_tensor_guards_fast(value)) {
           disable_recursive_dict_tag_optimization();
@@ -4461,6 +4557,28 @@ class GuardManager {
       });
     }
 #endif
+    return true;
+  }
+
+  bool watch_nn_module_types(PyObject* value) {
+    for (auto& state : _nn_module_states[value]) {
+      if (_disable_dict_tag_matching) {
+        return false;
+      }
+      PyObject* type = nullptr;
+      if (PyWeakref_GetRef(state.type_weakref.ptr(), &type) == 0) {
+        _disable_dict_tag_matching = true;
+        return false;
+      }
+      if (!_watched_types.contains(type)) {
+        if (!register_weakref_callback(type)) {
+          Py_DECREF(type);
+          return false;
+        }
+        _watched_types.insert(type);
+      }
+      Py_DECREF(type);
+    }
     return true;
   }
 
@@ -4799,10 +4917,14 @@ class GuardManager {
   // tag safe markers
   bool _is_tag_safe = false;
   bool _is_tag_safe_root = false;
+  bool _needs_type_check_for_tag_safety = false;
   bool _disable_dict_tag_matching = false;
   std::unordered_map<PyObject*, std::vector<RecordedDictState>>
       _dict_pointers;
+  std::unordered_map<PyObject*, std::vector<RecordedNNModuleState>>
+      _nn_module_states;
   std::unordered_set<PyObject*> _active_dict_tag_values;
+  std::unordered_set<PyObject*> _watched_types;
   std::unordered_map<PyObject*, std::vector<py::weakref>> _tensor_pointers;
   std::unordered_map<PyObject*, std::vector<RecordedTensorState>>
       _tensor_states;
@@ -5099,6 +5221,7 @@ class RootGuardManager : public GuardManager {
     _is_recording_dict_pointers = false;
     _current_tag_safe_root = nullptr;
     _recorded_dict_pointers.clear();
+    _recorded_nn_module_states.clear();
     _recorded_tensor_pointers.clear();
     _recorded_tensor_states.clear();
     _recorded_dict_tag_guards.clear();
@@ -5109,6 +5232,8 @@ class RootGuardManager : public GuardManager {
       // Stash the pointers only if the guard eval passed
       _current_tag_safe_root->stash_dict_pointers(
           value, std::move(_recorded_dict_pointers));
+      _current_tag_safe_root->stash_nn_module_states(
+          value, std::move(_recorded_nn_module_states));
       _current_tag_safe_root->stash_tensor_pointers(
           value, _recorded_tensor_pointers);
       _current_tag_safe_root->stash_tensor_states(
@@ -5128,6 +5253,20 @@ class RootGuardManager : public GuardManager {
         dict_pointer,
         get_dict_version_unchecked(dict_pointer),
         py::reinterpret_borrow<py::object>(dict_pointer)});
+  }
+
+  void record_nn_module_state(PyObject* value) {
+    PyObject* dict = PyObject_GenericGetDict(value, nullptr);
+    TORCH_CHECK(dict != nullptr, "Could not read nn.Module __dict__");
+    PyTypeObject* type = Py_TYPE(value);
+    _recorded_nn_module_states.push_back({
+        value,
+        py::weakref(py::handle(value)),
+        type,
+        py::weakref(py::handle(reinterpret_cast<PyObject*>(type))),
+        dict,
+        py::reinterpret_borrow<py::object>(value)});
+    Py_DECREF(dict);
   }
 
   void record_tensor_pointer(PyObject* tensor_pointer) {
@@ -5211,6 +5350,7 @@ class RootGuardManager : public GuardManager {
   bool _is_recording_dict_pointers{false};
   GuardManager* _current_tag_safe_root{nullptr};
   std::vector<RecordedDictState> _recorded_dict_pointers;
+  std::vector<RecordedNNModuleState> _recorded_nn_module_states;
   std::vector<py::weakref> _recorded_tensor_pointers;
   std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
   std::vector<RecordedTensorState> _recorded_tensor_states;
@@ -5650,6 +5790,10 @@ bool is_recording_dict_pointers(RootGuardManager* root) {
 
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer) {
   root->record_dict_pointer(dict_pointer);
+}
+
+void record_nn_module_state(RootGuardManager* root, PyObject* value) {
+  root->record_nn_module_state(value);
 }
 
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer) {
@@ -8668,6 +8812,9 @@ PyObject* torch_c_dynamo_guards_init() {
           &GuardManager::is_guarded_value_immutable)
       .def("has_no_accessors", &GuardManager::has_no_accessors)
       .def("mark_tag_safe", &GuardManager::mark_tag_safe)
+      .def(
+          "mark_type_guarded_for_tag_safety",
+          &GuardManager::mark_type_guarded_for_tag_safety)
       .def("mark_tag_safe_root", &GuardManager::mark_tag_safe_root)
       .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)

@@ -2191,6 +2191,158 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
         self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(11))
         self.assertEqual(counter.frame_count, 2)
 
+    def test_module_type_attribute_addition_invalidates(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if hasattr(type(self), "bonus"):
+                    return x + type(self).bonus
+                return x + 1
+
+        from torch._dynamo.testing import CompileCounter
+
+        mod = Mod()
+        counter = CompileCounter()
+        opt_fn = torch.compile(mod, backend=counter, fullgraph=True)
+
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(2))
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(2))
+        self.assertEqual(counter.frame_count, 1)
+
+        Mod.bonus = 10
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(11))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_module_attribute_addition_to_type_invalidates(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if hasattr(self, "bonus"):
+                    return x + self.bonus
+                return x + 1
+
+        from torch._dynamo.testing import CompileCounter
+
+        mod = Mod()
+        counter = CompileCounter()
+        opt_fn = torch.compile(mod, backend=counter, fullgraph=True)
+
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(2))
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(2))
+        self.assertEqual(counter.frame_count, 1)
+
+        Mod.bonus = 10
+        self.assertEqual(opt_fn(torch.tensor(1)), torch.tensor(11))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_nn_module_type_mismatch_is_guard_failure(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class CallableWithoutDict:
+            __slots__ = ()
+
+            def __call__(self, x):
+                return x + 2
+
+        from torch._dynamo.testing import CompileCounter
+
+        counter = CompileCounter()
+
+        def fn(mod, x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+
+        mod = Mod()
+        mod_ref = weakref.ref(mod)
+        self.assertEqual(opt_fn(mod, x), torch.tensor(11))
+        del mod
+        gc.collect()
+        self.assertIsNone(mod_ref())
+        self.assertEqual(opt_fn(CallableWithoutDict(), x), torch.tensor(12))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("nested", (False, True))
+    def test_nn_module_class_reassignment_invalidates(self, nested):
+        class Base(torch.nn.Module):
+            def forward(self, x):
+                return x + self.amount()
+
+        class A(Base):
+            def amount(self):
+                return 1
+
+        class B(Base):
+            def amount(self):
+                return 2
+
+        class Container(torch.nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x):
+                return self.inner(x)
+
+        from torch._dynamo.testing import CompileCounter
+
+        target = A()
+        mod = Container(target) if nested else target
+        counter = CompileCounter()
+        opt_fn = torch.compile(mod, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(counter.frame_count, 1)
+
+        target.__class__ = B
+        self.assertEqual(opt_fn(x), torch.tensor(12))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("nested", (False, True))
+    def test_nn_module_dict_reassignment_invalidates(self, nested):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.amount = 1
+
+            def forward(self, x):
+                return x + self.amount
+
+        class Container(torch.nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x):
+                return self.inner(x)
+
+        from torch._dynamo.testing import CompileCounter
+
+        target = Mod()
+        mod = Container(target) if nested else target
+        counter = CompileCounter()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(counter.frame_count, 1)
+
+        old_state = target.__dict__
+        state = old_state.copy()
+        state["amount"] = 2
+        target.__dict__ = state
+        self.assertEqual(opt_fn(x), torch.tensor(12))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(old_state["amount"], 1)
+
     def test_closure_cell_reassignment_invalidates(self):
         class A(torch.nn.Module):
             def forward(self, x):
@@ -2978,6 +3130,9 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
 
         expected = handler.get_metadata_fn(guard, {float("nan"): None})
         self.assertTrue(handler.eval_fn({float("nan"): None}, expected))
+
+
+instantiate_parametrized_tests(RecursiveDictGuardTests)
 
 
 if __name__ == "__main__":
