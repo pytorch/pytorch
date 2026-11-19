@@ -1667,6 +1667,16 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
                             requires_grad=requires_grad)
             yield SampleInput(t, dim, keepdim)
 
+    # Omit dim so suites that read sample_inputs hit the schema default.
+    t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t)
+    yield SampleInput(t, keepdim=True)
+    # shape [] is 0-dim. torch.tensor(()) is shape (0,) and does not cover this.
+    t0 = make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t0, ())
+    yield SampleInput(t0)
+    yield SampleInput(t0, keepdim=True)
+
 def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs)
 
@@ -1676,13 +1686,6 @@ def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
 
     t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(t, 0, False)
-    # 0-dim + empty dim: covers logsumexp_reduction_dims early return
-    yield SampleInput(t, ())
-
-    # Omit dim so OpInfo hits the schema default and the dim is None ref branch.
-    t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
-    yield SampleInput(t)
-    yield SampleInput(t, keepdim=True)
 
     t = make_tensor((0, S), dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(t, ())
