@@ -73,12 +73,18 @@ may differ::
     @torch.vm(passes=passes)
     def forward(model, x): ...
 
+A pass that has a setting is made with it::
+
+    # loops of up to 16 iterations, where the default is 8
+    torch.vm.passes.Unroll(16)
+
 A pass of one's own goes in the list as well: a Python callable taking a
 ``Region``, the instructions of one basic block (:func:`swap` makes one that
 puts a kernel in the place of a run of operations), or one written in Rust and
 loaded from a library (:func:`load_passes`).
 """
 
+import dataclasses
 import functools
 import importlib
 import os
@@ -198,12 +204,14 @@ def is_available() -> bool:
     return True
 
 
-def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool], Graphs | None]:
+def _plan(
+    given: Iterable[Any],
+) -> tuple[list[Any], dict[str, bool], Graphs | None, dict[str, Any]]:
     """Checks a list of passes, and sorts it into what the engine is given.
 
     Returns the passes over a block in their order (the engine's own by name),
-    which of the passes over the control-flow graph are asked for, and the
-    graph pass if there is one.
+    which of the passes over the control-flow graph are asked for, the graph
+    pass if there is one, and what the passes were made with.
     """
     listed = tuple(given)
     for one in listed:
@@ -223,9 +231,11 @@ def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool], Graphs | No
             "that the loops of an inlined function are unrolled too"
         )
     whole = dict.fromkeys(("inline", "unroll", "shortcuts"), False)
+    settings: dict[str, Any] = {}
     for one in listed:
         if isinstance(one, BuiltinPass) and one.kind == "cfg":
             whole[one.engine] = True
+            settings.update(dataclasses.asdict(one))
     found = next((one for one in listed if isinstance(one, Graphs)), None)
     block = [
         one
@@ -240,7 +250,7 @@ def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool], Graphs | No
         one.engine if isinstance(one, BuiltinPass) and one is not found else one
         for one in block
     ]
-    return engine, whole, found
+    return engine, whole, found, settings
 
 
 def vm(
@@ -351,7 +361,7 @@ def vm(
         return types.MethodType(vm(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
         raise TypeError(f"torch.vm expects a function, not {type(fn).__name__}")
-    block, whole, found = _plan(passes)
+    block, whole, found, settings = _plan(passes)
     runtime = _load_runtime()
     regions = None
     if found is not None:
@@ -371,6 +381,7 @@ def vm(
             unboxed=unboxed,
             inline=whole["inline"],
             unroll=whole["unroll"],
+            max_trip_count=settings.get("max_trip_count", 8),
             callees=callees,
             shortcuts=whole["shortcuts"] and _shortcuts.register(runtime),
             demote=demote,
