@@ -186,7 +186,7 @@ class ModelPool {
 
   ModelEntry& get_available_entry() {
     std::unique_lock lk(models_mutex_);
-    return checkout_available_entry(lk);
+    return take_available_entry(lk);
   }
 
   ModelEntry& get_available_entry(Stream stream) {
@@ -198,7 +198,7 @@ class ModelPool {
 #else
     (void)stream;
 #endif
-    return checkout_available_entry(lk);
+    return take_available_entry(lk);
   }
 
   void return_model_to_available(ModelEntry& entry) {
@@ -276,23 +276,21 @@ class ModelPool {
     return result;
   }
 
-  ModelEntry& checkout_available_entry(std::unique_lock<std::mutex>& lk) {
-    return take_available_entry(lk, /*prefer_unbound=*/use_stream_affinity_);
+  // The newest available model, preferring one no stream is bound to when
+  // prefer_unbound, so existing bindings survive. nullptr if none is available.
+  ModelEntry* newest_available(bool prefer_unbound) {
+    ModelEntry* entry =
+        prefer_unbound ? newest(ModelState::kAvailable, true) : nullptr;
+    return entry != nullptr ? entry : newest(ModelState::kAvailable);
   }
 
-  ModelEntry& take_available_entry(
-      std::unique_lock<std::mutex>& lk,
-      bool prefer_unbound) {
+  ModelEntry& take_available_entry(std::unique_lock<std::mutex>& lk) {
     while (oldest(ModelState::kAvailable) == nullptr) {
       reclaim_finished_models(lk);
     }
-    // Preserve existing bindings when possible. If every available model is
-    // bound, the caller borrows one while its owning stream waits.
-    ModelEntry* entry =
-        prefer_unbound ? newest(ModelState::kAvailable, true) : nullptr;
-    if (entry == nullptr) {
-      entry = newest(ModelState::kAvailable);
-    }
+    // If every available model is bound, the caller borrows one while its
+    // owning stream waits.
+    ModelEntry* entry = newest_available(use_stream_affinity_);
     transition(*entry, ModelState::kAvailable, ModelState::kHeld);
     return *entry;
   }
@@ -344,19 +342,14 @@ class ModelPool {
   // The model for a stream's first call: an available one, after reclaiming
   // finished runs if none is, preferring one no other stream is bound to; else
   // the oldest in-flight one, which the call claims and waits on. nullptr if
-  // every model is held. A model bound to another stream is rebound.
+  // every model is held. The caller binds it, taking it from any stream it was
+  // bound to.
   ModelEntry* entry_to_bind() {
     if (oldest(ModelState::kAvailable) == nullptr) {
       reclaim_finished_runs();
     }
-    ModelEntry* entry = newest(ModelState::kAvailable, /*unbound_only=*/true);
-    if (entry == nullptr) {
-      entry = newest(ModelState::kAvailable);
-    }
-    if (entry == nullptr) {
-      entry = oldest(ModelState::kInFlight);
-    }
-    return entry;
+    ModelEntry* entry = newest_available(/*prefer_unbound=*/true);
+    return entry != nullptr ? entry : oldest(ModelState::kInFlight);
   }
 
   // Moves every finished run back to available, oldest first, so the most

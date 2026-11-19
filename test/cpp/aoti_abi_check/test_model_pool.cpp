@@ -362,6 +362,7 @@ TEST(ModelPoolTest, FirstCallsOnOneStreamShareOneModel) {
   EXPECT_EQ(model_of(lease), oldest);
   lease->start();
   lease.mark_in_flight();
+  EXPECT_EQ(second.wait_for(kBlocked), std::future_status::timeout);
   oldest->finish();
   EXPECT_EQ(model_of(wait_or_abort(second)), oldest);
 }
