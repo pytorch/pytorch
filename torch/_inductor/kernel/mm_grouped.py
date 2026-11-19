@@ -766,11 +766,11 @@ def _flydsl_grouped_shape(
 _FLYDSL_INT32_MAX = (1 << 31) - 1
 
 
-def _flydsl_device_cu_count(device: torch.device) -> int:
+def _flydsl_device_properties(device: torch.device) -> torch._C._CudaDeviceProperties:
     # An index-less device resolves to 0, as in use_flydsl_gemm_template.
     return torch.cuda.get_device_properties(
         device.index if device.index is not None else 0
-    ).multi_processor_count
+    )
 
 
 flydsl_mxfp8_grouped_mm_template = FlyDSLTemplate(
@@ -917,7 +917,7 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     # fit, but the weight and its scales are not split and must fit outright.
     # The tile is sized against the grid cap of the device the kernel launches
     # on; resolve an index-less device the way use_flydsl_gemm_template does.
-    num_cus = _flydsl_device_cu_count(layout.device)
+    num_cus = _flydsl_device_properties(layout.device).multi_processor_count
 
     weight_spans = (
         (g_static, n_static * k_static, n_static * k_static),
@@ -1041,8 +1041,10 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         if isinstance(node.get_layout(), FlexibleLayout):
             node.freeze_layout_with_exact_strides(node.get_stride())
 
-    # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs.
-    num_xcd = max(1, _flydsl_device_cu_count(layout.device) // 32)
+    # The XCC count depends on the compute partition mode. HIP reports it from
+    # ROCm 7.0; before that, assume gfx950's 32 CUs per XCC.
+    props = _flydsl_device_properties(layout.device)
+    num_xcd = props.xcc_count or max(1, props.multi_processor_count // 32)
     return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": num_xcd}]
 
 

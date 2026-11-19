@@ -2215,7 +2215,8 @@ class TestFlyDSLTemplate(TestCase):
             "offs_strided",
         ),
     )
-    def test_flydsl_mxfp8_wgrad_gate(self, case):
+    @parametrize("xcc_count", (None, 2))
+    def test_flydsl_mxfp8_wgrad_gate(self, case, xcc_count):
         """M (the token count) may be dynamic, matched across operands by hint."""
         from torch._inductor.ir import FlexibleLayout
         from torch._inductor.kernel import mm_grouped
@@ -2290,7 +2291,9 @@ class TestFlyDSLTemplate(TestCase):
                 _maybe_evaluate_static=lambda e: e if e.is_number else None
             ),
         )
-        props = mock.Mock(return_value=SimpleNamespace(multi_processor_count=128))
+        # Without a reported XCC count, 128 CUs at 32 CUs per XCC gives 4.
+        device_props = SimpleNamespace(multi_processor_count=128, xcc_count=xcc_count)
+        props = mock.Mock(return_value=device_props)
         with (
             V.set_graph_handler(graph),
             mock.patch.object(
@@ -2311,8 +2314,9 @@ class TestFlyDSLTemplate(TestCase):
             "dynamic_m_independent_scale_symbols",
         )
         if case in accepted:
+            num_xcd = xcc_count or 4
             self.assertEqual(
-                kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": 4}]
+                kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": num_xcd}]
             )
             props.assert_called_once_with(device.index)
             for operand in operands:
