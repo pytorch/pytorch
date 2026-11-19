@@ -1327,7 +1327,13 @@ torch.ones(10) * 2
         cmd = [sys.executable, f"{loc}/global_profiler_exit.py"]
         if stop:
             cmd.append("--stop")
-        env = {**os.environ, "TORCH_CPP_LOG_LEVEL": "WARNING"}
+        # run_test.py retries failures with C++ stack traces on, and those make this
+        # script crash at exit even without a profiler.
+        env = {
+            **os.environ,
+            "TORCH_CPP_LOG_LEVEL": "WARNING",
+            "TORCH_SHOW_CPP_STACKTRACES": "0",
+        }
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), "True", "worker finished before exit")

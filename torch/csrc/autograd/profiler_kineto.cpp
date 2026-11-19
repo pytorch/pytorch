@@ -300,17 +300,16 @@ class GlobalCallbackSession {
   // passes false; bumping there would wrongly drop end-events for ops that
   // straddle the toggle.
   void activate(bool new_session) {
-    // Serialized with markClosed() so the session cannot reopen after the exit
-    // hook has closed and drained it.
     std::lock_guard<std::mutex> lock(mutex_);
     if (closed_.load()) {
       LOG(WARNING) << "Global CPU operation recording was disabled at process "
-                      "exit; this profiling session will not record CPU "
-                      "operations.";
+                      "exit, so this profiling session will not record CPU "
+                      "operations. Kineto may already be destroyed and the "
+                      "correlation ID stack may be unbalanced.";
       return;
     }
-    // Registering after Kineto and the global profiler state exist makes the
-    // handler run before their static destructors.
+    // Register closeGlobalCallbackSession after Kineto and the global profiler
+    // state exist so it runs before their static destructors.
     static c10::once_flag exit_hook;
     c10::call_once(exit_hook, [] { std::atexit(closeGlobalCallbackSession); });
     if (new_session) {
@@ -324,10 +323,9 @@ class GlobalCallbackSession {
     const bool was_active = isActive();
     if (!closed_.exchange(true) && was_active) {
       LOG(WARNING)
-          << "Process is exiting without stopping the profiler. "
-             "Global CPU operation recording is disabled for any subsequent "
-             "profiling sessions, as exit without cleanup may leave the "
-             "backend's correlation ID stack unbalanced.";
+          << "Process is exiting without stopping the profiler, so the "
+             "in-progress trace is lost. Stop the profiler before exit "
+             "to keep it.";
     }
   }
 
@@ -539,12 +537,9 @@ void onFunctionExitGlobal(
   auto in_flight_guard =
       c10::make_scope_exit([] { global_callback_session.exit(); });
 
-  // Balance the correlation id pushed at begin_op on every path below,
-  // including the teardown and stale-session early exits that skip event
-  // finalization.
+  // Pop the correlation id pushed by begin_op on every return path. After the
+  // exit hook closes the session, Kineto may be destroyed, so skip the pop.
   auto correlation_guard = c10::make_scope_exit([&] {
-    // Kineto isn't a leaky singleton, so it may have been destroyed on process
-    // exit.
     if (!global_callback_session.isClosed()) {
       maybePopCorrelationId(fn, ctx_ptr);
     }
