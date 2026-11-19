@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
 from collections import namedtuple
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -10,6 +11,7 @@ import torch.utils._pytree as python_pytree
 import torch.utils.pytree as generic_pytree
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     subtest,
@@ -147,6 +149,11 @@ class TreeMapCompileTests(TestCase):
         result = compiled(lhs, rhs)
         _assert_trees_allclose(self, expected, result)
 
+    @decorateIf(
+        unittest.skip("kwargs unsupported for implementation"),
+        lambda params: params["allowed_impls"] is not None
+        and params["pytree_name"] not in params["allowed_impls"],
+    )
     @parametrize_pytree_module
     @parametrize("kwargs_name,kwargs,allowed_impls", KWARG_CASES)
     def test_tree_map_variants(
@@ -357,6 +364,10 @@ class TreeMapCompileTests(TestCase):
         ):
             compiled(lhs, rhs)
 
+    @decorateIf(
+        unittest.skip("optree treats None as an internal node by default"),
+        lambda params: params["pytree_name"] == "native_optree",
+    )
     @parametrize_pytree_module
     def test_tree_map_none_nodes_default_behavior(
         self, pytree_name: str, pytree

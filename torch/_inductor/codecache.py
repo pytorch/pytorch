@@ -41,8 +41,8 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import override, Self, TypedDict
+from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import override, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
@@ -1710,6 +1710,7 @@ class FxGraphHashDetails:
         self.provenance_tracking_to_timeline = (
             config.trace.provenance_tracking_to_timeline
         )
+        self.provenance_profiler_markers = config.trace.provenance_profiler_markers
 
         # Factory ops with dtype=None are lowered using the ambient default dtype,
         # so cached code compiled under one default dtype is not valid under another.
