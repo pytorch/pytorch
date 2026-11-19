@@ -58,6 +58,9 @@ Required exports (module or declaration object):
                               (the schema's return type). No fallback:
                               the chain's return false IS the fallback.
 
+For all hooks, returning false leaves data, metadata and operator-visible state
+(including RNG) unchanged. Finish decline checks before mutating or enqueueing.
+
 decl_id() names the stub, kernel, artifact directory and coverage op.
 
 Emitted C++ uses ATen/core/Tensor.h. Add per-op headers through cpp_includes()
