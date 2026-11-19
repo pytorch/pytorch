@@ -1198,6 +1198,32 @@ instantiate_device_type_tests(TestVmDevices, globals())
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+@unittest.skipUnless(torch.cuda.is_available(), "needs a GPU")
+class TestVmCUDA(TestCase):
+    """What only a GPU shows."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_stamp_does_not_ask_for_the_data_of_a_tensor(self):
+        torch.vm._load_runtime()
+        stamp = cfg_rs.tensor_stamp
+        weight = torch.randn(3, device="cuda")
+        clone = weight._lazy_clone()
+        first = stamp([weight])
+        # The data of a tensor that shares its memory with a lazy clone may
+        # not be read while a graph of the GPU is recorded on the stream
+        # (and reading it looks at the stream every time): a stamp is made
+        # of where the data is.
+        with torch.cuda.graph(torch.cuda.CUDAGraph()):
+            with self.assertRaisesRegex(RuntimeError, "lazy snapshot"):
+                torch._C._data_address(weight)
+            self.assertEqual(stamp([weight]), first)
+            torch.zeros(3, device="cuda").add_(1)
+        self.assertEqual(stamp([weight]), first)
+        del clone
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmPasses(TestCase):
     """The pass pipeline, guards, and recompilation of single blocks."""
 
@@ -5330,6 +5356,24 @@ class TestVmRegions(TestCase):
             runtime.ShapeGuard(numbers, offsets, [], [("slot", 99)])
         with self.assertRaises(ValueError):
             runtime.ShapeGuard(numbers, offsets, [], [("power", size, size)])
+
+    def test_stamp_of_tensors(self):
+        torch.vm._load_runtime()
+        stamp = importlib.import_module("torch._cfg_rs").tensor_stamp
+        a, b = torch.nn.Parameter(torch.randn(3)), torch.randn(3)
+        first = stamp([a, b])
+        self.assertEqual(stamp([a, b]), first)
+        self.assertNotEqual(stamp([b, a]), first)
+        self.assertNotEqual(stamp([a, b.clone()]), first)
+        b.add_(1)
+        second = stamp([a, b])
+        self.assertNotEqual(second, first)
+        # Not an operation on the tensor: other memory.
+        a.data = torch.randn(3)
+        self.assertNotEqual(stamp([a, b]), second)
+        with torch.inference_mode():
+            unversioned = torch.randn(3)
+        self.assertIsNone(stamp([a, unversioned]))
 
     def test_product_with_one_row_becomes_a_reduction(self):
         from torch.fx.experimental.proxy_tensor import make_fx

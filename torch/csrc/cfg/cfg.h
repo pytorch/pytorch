@@ -88,9 +88,16 @@ struct TcfgTensorInfo {
   int64_t storage_offset;
   int32_t dtype;
   int32_t device;
+  // What says whether a tensor holds what it held: where its data is, and
+  // how often it was written to in place. TCFG_NO_VERSION for a tensor that
+  // does not count that (one made under inference mode).
+  const void* data;
+  uint64_t version;
 };
 
-#define TCFG_API_VERSION 6
+#define TCFG_NO_VERSION UINT64_MAX
+
+#define TCFG_API_VERSION 7
 
 struct TcfgApi {
   uint32_t version;
