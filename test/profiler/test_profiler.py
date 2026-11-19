@@ -1471,6 +1471,16 @@ torch.ones(10) * 2
         # Tensors that were op inputs during profiling can still be swapped.
         torch.utils.swap_tensors(x, torch.zeros(4))
 
+    def test_repeated_op_names(self):
+        # Names that repeat across ops and come from short-lived strings.
+        names = [f"scope_{i % 7}" + "_long_suffix" * (i % 3) for i in range(200)]
+        with profile() as p:
+            for name in names:
+                with record_function(name):
+                    pass
+        recorded = [e.name for e in p.events() if e.name.startswith("scope_")]
+        self.assertEqual(recorded, names)
+
     def test_concrete_inputs_profiling_toggling(self):
         try:
             for before, after in [(True, False), (False, True)]:
