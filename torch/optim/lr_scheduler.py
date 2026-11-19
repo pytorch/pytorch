@@ -918,7 +918,7 @@ class LinearLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:
-        if not (0 < start_factor <=1.0):
+        if not (0 < start_factor <= 1.0):
             raise ValueError(
                 "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
             )
