@@ -17,7 +17,6 @@ from torch._decomp import (
     is_torch_decomp_decomposition,
     meta_table,
 )
-from torch._decomp.decompositions import _upsample_output_memory_format
 from torch._ops import OpOverload
 from torch._prims import _prim_elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -7876,7 +7875,7 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     output = input.new_empty(full_output_size)
 
     # convert output to correct memory format, if necessary
-    memory_format = _upsample_output_memory_format(input)
+    memory_format = utils.upsample_output_memory_format(input)
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     _, n_channels, _, _ = input.shape
@@ -7935,7 +7934,7 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
         input.size(), output_size, num_spatial_dims=3
     )
     return input.new_empty(full_output_size).to(
-        memory_format=_upsample_output_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(input)
     )
 
 
@@ -8583,7 +8582,7 @@ def meta_upsample_bimode2d_aa(
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
-        memory_format=_upsample_output_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(input)
     )
 
 

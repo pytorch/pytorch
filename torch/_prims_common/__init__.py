@@ -2062,6 +2062,29 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
     return torch.contiguous_format
 
 
+def upsample_output_memory_format(input: TensorLikeType) -> torch.memory_format:
+    # Mirrors at::native::upsample::output_memory_format: suggest_memory_format() also requires
+    # the stride of a size-1 batch dimension to fit the layout, so e.g. `hwc.permute(2, 0, 1)[None]`
+    # is reported as contiguous; on CPU, retry with a batch stride that fits any layout.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    memory_format = suggest_memory_format(input)
+    if (
+        memory_format != torch.contiguous_format
+        or input.device.type != "cpu"
+        or input.ndim not in (4, 5)
+        or not guard_or_false(input.shape[0] == 1)
+    ):
+        return memory_format
+    strides = list(input.stride())
+    extents = [s * n for s, n in zip(strides[1:], input.shape[1:])]
+    # pyrefly: ignore [unsupported-operation]
+    strides[0] = reduce(torch.sym_max, extents, 1)
+    if are_strides_like_channels_last_or_false(input.shape, strides):
+        return torch.channels_last if input.ndim == 4 else torch.channels_last_3d
+    return memory_format
+
+
 def prod(xs: Sequence[NumberType]) -> NumberType:
     """Product of elements in input sequence. Returns 1 for empty sequence"""
     return reduce(operator.mul, xs, 1)

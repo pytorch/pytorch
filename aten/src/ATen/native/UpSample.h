@@ -67,13 +67,15 @@ inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>
 // Memory format for the output of a forward upsampling op. suggest_memory_format() also requires
 // the stride of a size-1 batch dimension to fit the layout, so e.g. `hwc_image.permute(2, 0, 1)[None]`
 // would be reported as contiguous when really it's channels-last.
+// Only on CPU: the other devices' kernels, and the device-specific layout heuristics of the Python
+// decompositions, follow suggest_memory_format().
 inline c10::MemoryFormat output_memory_format(const Tensor& input) {
   auto memory_format = input.suggest_memory_format();
-  if (memory_format != c10::MemoryFormat::Contiguous || input.dim() < 4 || input.size(0) != 1) {
+  if (memory_format != c10::MemoryFormat::Contiguous || !input.is_cpu() || input.dim() < 4 || input.size(0) != 1) {
     return memory_format;
   }
   auto sizes = input.sizes();
-  auto strides = input.strides().vec();
+  c10::DimVector strides(input.strides().begin(), input.strides().end());
   strides[0] = 1;
   for (const auto i : c10::irange(1, input.dim())) {
     strides[0] = std::max(strides[0], strides[i] * sizes[i]);
