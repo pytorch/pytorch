@@ -4919,6 +4919,14 @@ def region_infer(model, x):
     return model(x)
 
 
+def region_lookup(table, x):
+    try:
+        scale = table["scale"]
+    except KeyError:
+        scale = 2.0
+    return torch.relu(x * scale) + 1
+
+
 def region_step(model, opt, x, y):
     opt.zero_grad()
     loss = torch.nn.functional.cross_entropy(model(x), y)
@@ -5965,6 +5973,28 @@ class TestVmRegions(TestCase):
                 self.assertEqual(outcome[0], expected[0])
                 if outcome[0] == "raised":
                     self.assertEqual(outcome[1:], expected[1:])
+
+    def test_instruction_that_raises_when_it_is_surveyed_is_left_to_the_vm(self):
+        calls = []
+        compiled = torch.vm(
+            region_lookup, passes=with_graphs("aot_eager"), fallback=False
+        )
+        x = torch.randn(4)
+        said = unittest.mock.patch.object(cfg_rs, "unsettled", lambda: calls.append(1))
+        with said:
+            for _ in range(6):
+                self.assertEqual(compiled({}, x), region_lookup({}, x))
+            early = len(calls)
+            for _ in range(6):
+                self.assertEqual(compiled({}, x), region_lookup({}, x))
+        # The lookup fails on every call. Its region is not surveyed again
+        # on each of them, with every measurement above it kept open.
+        self.assertGreater(early, 0)
+        self.assertEqual(len(calls), early)
+        reasons = self.left_to_vm(compiled, "region_lookup (block 1)")
+        self.assertEqual(reasons, ["raised KeyError when it was first run"])
+        table = {"scale": 3.0}
+        self.assertEqual(compiled(table, x), region_lookup(table, x))
 
     def test_measurement_starts_over_when_a_region_is_compiled(self):
         torch.manual_seed(0)
