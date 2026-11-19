@@ -5331,6 +5331,32 @@ class TestVmRegions(TestCase):
         with self.assertRaises(ValueError):
             runtime.ShapeGuard(numbers, offsets, [], [("power", size, size)])
 
+    def test_product_with_one_row_becomes_a_reduction(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        regions = torch.vm._regions
+        aten = torch.ops.aten
+        row, matrix, bias = torch.randn(1, 640), torch.randn(640, 512), torch.randn(512)
+
+        def products(row, matrix, bias):
+            wide = torch.addmm(bias, row, matrix)
+            return wide, torch.mm(row, matrix), torch.mm(matrix[:2], matrix.t()[:, :2])
+
+        graph = make_fx(products)(row, matrix, bias)
+        regions._rows_to_reductions(graph)
+        targets = [node.target for node in graph.graph.nodes]
+        # The product of two rows is left as it is.
+        self.assertEqual(targets.count(aten.mm.default), 1)
+        self.assertNotIn(aten.addmm.default, targets)
+        self.assertEqual(targets.count(aten.sum.dim_IntList), 2)
+        for got, expected in zip(graph(row, matrix, bias), products(row, matrix, bias)):
+            self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+
+        # A matrix BLAS is through with before threads would pay.
+        small = make_fx(products)(row[:, :64], matrix[:64], bias)
+        regions._rows_to_reductions(small)
+        self.assertNotIn(aten.sum.dim_IntList, [n.target for n in small.graph.nodes])
+
     @slowTest
     def test_inductor(self):
         def train(compile_step):

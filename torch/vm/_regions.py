@@ -2436,6 +2436,8 @@ class _Region:
         if ops < options.min_ops:
             raise _Failed(None, f"{ops} tensor operations, not worth a graph")
         _views_to_reshapes(graph)
+        if options.backend is _inductor:
+            _rows_to_reductions(graph)
         # The parameters are inputs, so the layers of a model that are built
         # alike give the same graph: it is compiled once. A graph that holds a
         # tensor of its own is not looked up, the code does not say which.
@@ -3164,6 +3166,56 @@ def _views_to_reshapes(graph: torch.fx.GraphModule) -> None:
         if node.op == "call_function" and node.target in views:
             node.target = torch.ops.aten.reshape.default
             changed = True
+    if changed:
+        graph.recompile()
+
+
+# How many elements a matrix has from which on a product with one row is
+# made a reduction: one that does not fit a core's cache.
+_ROW_PRODUCT = 1 << 18
+
+
+def _rows_to_reductions(graph: torch.fx.GraphModule) -> None:
+    """A matrix product with one row on the left, as a reduction.
+
+    A decoder that makes one token at a time multiplies one row by every
+    weight of the model. BLAS runs such a product on one core, and since
+    the weights do not fit the cache, the core spends the time waiting for
+    them. As ``(row.T * matrix).sum(0)`` the product is a loop over the
+    columns of the result that Inductor splits over the cores, each of
+    which reads its part of the matrix.
+    """
+    aten = torch.ops.aten
+    changed = False
+    for node in list(graph.graph.nodes):
+        if node.op != "call_function" or node.kwargs:
+            continue
+        if node.target is aten.mm.default:
+            bias, (row, matrix) = None, node.args
+        elif node.target is aten.addmm.default:
+            bias, row, matrix = node.args
+        else:
+            continue
+        shapes = [getattr(n.meta.get("val"), "shape", None) for n in (row, matrix)]
+        if shapes[0] is None or shapes[1] is None or len(shapes[1]) != 2:
+            continue
+        if type(shapes[0][0]) is not int or shapes[0][0] != 1:
+            continue
+        if any(type(n) is not int for n in shapes[1]):
+            continue
+        if shapes[1][0] * shapes[1][1] < _ROW_PRODUCT:
+            continue
+        with graph.graph.inserting_before(node):
+            column = graph.graph.call_function(aten.reshape.default, (row, [-1, 1]))
+            scaled = graph.graph.call_function(aten.mul.Tensor, (matrix, column))
+            result = graph.graph.call_function(
+                aten.sum.dim_IntList, (scaled, [0], True)
+            )
+            if bias is not None:
+                result = graph.graph.call_function(aten.add.Tensor, (result, bias))
+        node.replace_all_uses_with(result)
+        graph.graph.erase_node(node)
+        changed = True
     if changed:
         graph.recompile()
 
