@@ -3894,6 +3894,7 @@ def _upsample_output_memory_format(input: Tensor) -> torch.memory_format:
         return memory_format
     strides = list(input.stride())
     extents = [s * n for s, n in zip(strides[1:], input.shape[1:])]
+    # pyrefly: ignore [unsupported-operation]
     strides[0] = reduce(torch.sym_max, extents, 1)
     if utils.are_strides_like_channels_last_or_false(input.shape, strides):
         return torch.channels_last if input.ndim == 4 else torch.channels_last_3d
