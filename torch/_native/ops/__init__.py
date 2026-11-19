@@ -4,6 +4,7 @@ from . import (
     linear_cross_entropy,
     norm,
     polar,
+    quantize_tensor,
     reductions,
     scaled_grouped_mm,
     scatter_add,
