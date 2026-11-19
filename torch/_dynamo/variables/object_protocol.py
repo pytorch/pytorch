@@ -752,8 +752,11 @@ def pynumber_int(
     # Fast path for int (sub)class instances — mirrors PyLong_Check at the
     # top of PyNumber_Long (abstract.c:1531). Avoids infinite recursion for
     # int subclasses like IntEnum whose __int__ calls int() again.
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), int):
-        return ConstantVariable.create(int(obj.as_python_constant()))
+    is_constant, value = False, None
+    if obj.is_python_constant():
+        is_constant, value = obj.try_as_python_constant()
+    if is_constant and isinstance(value, int):
+        return ConstantVariable.create(int(value))
 
     if obj.tp_as_number.nb_int is not None:
         res = obj.nb_int_impl(tx)
@@ -769,11 +772,9 @@ def pynumber_int(
 
     # String/bytes/bytearray parsing fallback.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1598-L1612
-    if obj.is_python_constant() and isinstance(
-        obj.as_python_constant(), (str, bytes, bytearray)
-    ):
+    if is_constant and isinstance(value, (str, bytes, bytearray)):
         try:
-            return ConstantVariable.create(int(obj.as_python_constant()))
+            return ConstantVariable.create(int(value))
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=[str(e)])
 
@@ -836,8 +837,11 @@ def pynumber_float(
     # Fast path: if the value is already a float constant, return it directly.
     # Mirrors PyFloat_CheckExact fast path at the top of PyNumber_Float
     # (abstract.c:1641-1643).
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), float):
-        return ConstantVariable.create(float(obj.as_python_constant()))
+    is_constant, value = False, None
+    if obj.is_python_constant():
+        is_constant, value = obj.try_as_python_constant()
+    if is_constant and isinstance(value, float):
+        return ConstantVariable.create(float(value))
 
     if obj.tp_as_number.nb_float is not None:
         res = obj.nb_float_impl(tx)
@@ -856,7 +860,13 @@ def pynumber_float(
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1691
     if issubclass(obj.python_type(), (str, bytes)):
         try:
-            return ConstantVariable.create(float(obj.as_python_constant()))
+            return ConstantVariable.create(
+                float(
+                    typing.cast(str | bytes, value)
+                    if is_constant
+                    else obj.as_python_constant()
+                )
+            )
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=[str(e)])
 
@@ -865,14 +875,6 @@ def pynumber_float(
         f"float() argument must be a string or a real number, "
         f"not '{obj.python_type_name()}'",
     )
-
-
-def pyfloat_as_double_macro(obj: VariableTracker) -> float:
-    """Mirrors PyFloat_AS_DOUBLE without redispatching __float__.
-
-    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/cpython/floatobject.h#L15-L18
-    """
-    return float.__float__(obj.as_python_constant())
 
 
 def pyfloat_as_double(
@@ -899,14 +901,16 @@ def pyfloat_as_double(
                 raise_type_error(tx, err_msg)
     elif obj.tp_as_number.nb_index is not None:
         index = pynumber_index(tx, obj)
-        if index.is_python_constant():
-            return ConstantVariable.create(pylong_as_double(tx, index))
+        is_constant, value = index.try_as_python_constant()
+        if is_constant:
+            return ConstantVariable.create(pylong_as_double(tx, index, value=value))
         return index.nb_float_impl(tx)
     else:
         raise_type_error(tx, f"must be real number, not {obj.python_type_name()}")
 
-    if result.is_python_constant():
-        return ConstantVariable.create(pyfloat_as_double_macro(result))
+    is_constant, value = result.try_as_python_constant()
+    if is_constant:
+        return ConstantVariable.create(float.__float__(value))
     return result
 
 
@@ -926,7 +930,9 @@ def getindex(
     return i
 
 
-def pylong_as_double(tx: "InstructionTranslatorBase", obj: VariableTracker) -> float:
+def pylong_as_double(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, *, value: int | None = None
+) -> float:
     """Mirrors PyLong_AsDouble.
 
     https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/longobject.c#L3512-L3543
@@ -935,12 +941,14 @@ def pylong_as_double(tx: "InstructionTranslatorBase", obj: VariableTracker) -> f
         raise_type_error(tx, "an integer is required")
     try:
         # Read the int payload without dispatching subclass overrides.
-        return int.__float__(obj.as_python_constant())
+        return int.__float__(obj.as_python_constant() if value is None else value)
     except OverflowError as exc:
         raise_observed_exception(OverflowError, tx, args=list(exc.args))
 
 
-def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
+def pylong_as_ssize_t(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, *, value: int | None = None
+) -> int:
     """Mirrors PyLong_AsSsize_t: requires an int (or subclass).
     values outside the Py_ssize_t range raise OverflowError.
 
@@ -951,7 +959,7 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
     # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
-    val = specialize_symnode(obj).as_python_constant()
+    val = specialize_symnode(obj).as_python_constant() if value is None else value
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
@@ -1009,8 +1017,9 @@ def pynumber_index(
     # exact int. A SymInt is not constant: nb_index is where it specializes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
-    if obj.is_python_constant() and pylong_check(obj.python_type()):
-        return ConstantVariable.create(operator.index(obj.as_python_constant()))
+    obj_type = maybe_get_python_type(obj)
+    if pylong_check(obj_type) and (const := obj.try_as_python_constant())[0]:
+        return ConstantVariable.create(operator.index(const[1]))
 
     if obj.tp_as_number.nb_index is None:
         raise_type_error(
@@ -1884,8 +1893,13 @@ def python_constant_richcompare_impl(
     """Constant-fold comparison for types with as_python_constant()."""
     if not self.is_python_constant() or not other.is_python_constant():
         return ConstantVariable.create(NotImplemented)
-    self_val = self.as_python_constant()
-    other_val = other.as_python_constant()
+    self_constant = self.try_as_python_constant()
+    if (
+        not self_constant[0]
+        or not (other_constant := other.try_as_python_constant())[0]
+    ):
+        return ConstantVariable.create(NotImplemented)
+    self_val, other_val = self_constant[1], other_constant[1]
     try:
         result = getattr(type(self_val), op)(self_val, other_val)
     except TypeError as e:

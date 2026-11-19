@@ -1087,7 +1087,7 @@ class TensorVariable(VariableTracker):
             # symbolic_shapes, but that end up as int/sympy.Integer
             if not (
                 isinstance(dyn_length, SymNodeVariable)
-                or dyn_length.is_python_constant()
+                or (constant := dyn_length.try_as_python_constant())[0]
             ):
                 raise AssertionError(
                     f"Expected SymNodeVariable or python constant, got {type(dyn_length)}"
@@ -1095,7 +1095,7 @@ class TensorVariable(VariableTracker):
             if isinstance(dyn_length, SymNodeVariable):
                 length = dyn_length.evaluate_expr(tx.output)
             else:
-                length = dyn_length.as_python_constant()
+                length = constant[1]
 
         if idxes is None:
             idxes = range(length)  # type: ignore[arg-type]
@@ -1517,12 +1517,12 @@ class TensorVariable(VariableTracker):
                 )
         elif (
             dtype is not None
-            and fqn(type(dtype.as_python_constant())) == "torch.tensortype"
+            and fqn(type(tensor_type := dtype.as_python_constant()))
+            == "torch.tensortype"
         ):
             # torch.FloatTensor, etc. are all of type "torch.tensortype".
             # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
             # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
-            tensor_type = dtype.as_python_constant()
             tensor_type_const = VariableTracker.build(tx, fqn(tensor_type))
 
             from .builder import wrap_fx_proxy
@@ -2614,7 +2614,9 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                a.is_python_constant() and isinstance(a.as_python_constant(), int)
+                a.is_python_constant()
+                and (constant := a.try_as_python_constant())[0]
+                and isinstance(constant[1], int)
                 for a in args
             )
         ):
@@ -2632,9 +2634,12 @@ class TensorVariable(VariableTracker):
         data_arg = args[0]
         layout = kwargs.get("layout")
         if layout is not None:
-            if not layout.is_python_constant():
+            is_constant, value = False, None
+            if layout.is_python_constant():
+                is_constant, value = layout.try_as_python_constant()
+            if not is_constant:
                 return None
-            if layout.as_python_constant() != torch.strided:
+            if value != torch.strided:
                 return None
         fwd_kwargs = dict(kwargs)
         fwd_kwargs.pop("layout", None)

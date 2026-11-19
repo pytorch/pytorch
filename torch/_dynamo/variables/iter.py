@@ -196,8 +196,11 @@ class ItertoolsVariable(VariableTracker):
                 key = specialize_symnode(key)
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
-                elif key.is_python_constant():
-                    return key.as_python_constant()
+                elif (
+                    key.is_python_constant()
+                    and (constant := key.try_as_python_constant())[0]
+                ):
+                    return constant[1]
                 else:
                     unimplemented(
                         gb_type="Unsupported key type for itertools.groupby",
@@ -278,13 +281,15 @@ class ItertoolsVariable(VariableTracker):
             times = bound.arguments.get("times")
             if times is None:
                 return RepeatIteratorVariable.create(item)
-            if not times.is_python_constant():
+            is_constant, times_val = False, None
+            if times.is_python_constant():
+                is_constant, times_val = times.try_as_python_constant()
+            if not is_constant:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.repeat),
                     [item, times],
                     {},
                 )
-            times_val = times.as_python_constant()
             if not isinstance(times_val, int):
                 raise_type_error(
                     tx,
