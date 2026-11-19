@@ -703,6 +703,9 @@ class BatchLinearLHSFusion(BatchFusion):
         if CallFunctionVarArgs(aten.mm.default).match(node):
             input_m, weight_m = node.args
             bias_m = None
+            # Leave add(mm(...), bias) for the addmm pattern matcher.
+            if any(user.target is aten.add.Tensor for user in node.users):
+                return None
         elif CallFunctionVarArgs(aten.addmm.default).match(
             node
         ) and self._addmm_node_can_be_fused(node):
