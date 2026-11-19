@@ -2,6 +2,7 @@
 
 import sys
 import tempfile
+from contextlib import contextmanager
 from typing import Any, IO
 
 import torch
@@ -23,6 +24,7 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.filesystem import FileSystem
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
@@ -213,6 +215,79 @@ class TestDistributedStateDictSaveLoadZStandard(TestCase):
                 assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
             # Load from file without any resharding
+            fs_reader = FileSystemReader(path=path)
+            load(
+                state_dict=state_dict_to_load_to,
+                storage_reader=fs_reader,
+            )
+
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+
+class TestFileSystemWriterFlushBehavior(TestCase):
+    @parametrize("thread_count", _THREAD_COUNTS)
+    @parametrize("sync_files", [True, False])
+    @parametrize("use_zstd", [False, True])
+    def test_no_per_item_flush(
+        self, thread_count: int, sync_files: bool, use_zstd: bool
+    ) -> None:
+        """
+        Each shard stream is flushed once before os.fsync (only if sync_files)
+        and once on close, never once per write item. With use_zstd, the
+        `zstandard` backend cascades close() into NoCloseWriter.close(); the
+        `pyzstd` backend (used in CI) does not, so there NoCloseWriter.close()
+        runs when the wrapper is released at the end of _write_item.
+        """
+        if use_zstd and not ZStandard.is_available():
+            self.skipTest("zstandard/pyzstd is not installed")
+
+        flush_counts: dict[str, int] = {}
+
+        class FlushCountingFileSystem(FileSystem):
+            @contextmanager
+            def create_stream(self, path, mode):
+                with super().create_stream(path, mode) as stream:
+                    key = str(path)
+                    if key.endswith(".distcp"):
+                        flush_counts[key] = 0
+                        orig_flush = stream.flush
+
+                        def counting_flush():
+                            flush_counts[key] += 1
+                            return orig_flush()
+
+                        stream.flush = counting_flush  # type: ignore[method-assign]
+                    yield stream
+
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+            state_dict_to_save["test_blob"] = BlobState(b"SomeBlobForTesting")
+
+            fs_writer = FileSystemWriter(
+                path=path,
+                thread_count=thread_count,
+                sync_files=sync_files,
+                _extensions=[ZStandard()] if use_zstd else None,
+            )
+            fs_writer.fs = FlushCountingFileSystem()
+            save(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+            )
+
+            # One shard file per thread, each flushed a constant number of times
+            # regardless of how many items it holds.
+            expected_flushes = 2 if sync_files else 1
+            self.assertEqual(
+                sorted(flush_counts.values()), [expected_flushes] * thread_count
+            )
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+            state_dict_to_load_to["test_blob"] = BlobState(b"")
+
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
             fs_reader = FileSystemReader(path=path)
             load(
                 state_dict=state_dict_to_load_to,
@@ -561,6 +636,7 @@ instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadZStandard)
 instantiate_parametrized_tests(TestDistributedReshardOnLoad)
+instantiate_parametrized_tests(TestFileSystemWriterFlushBehavior)
 
 if __name__ == "__main__":
     run_tests()
