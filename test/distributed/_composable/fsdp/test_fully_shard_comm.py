@@ -125,6 +125,22 @@ device = torch.device(get_devtype())
 device_module = torch.get_device_module(device)
 
 
+@instantiate_parametrized_tests
+class TestFullyShardGradientDivideFactors(TestCase):
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_unit_divide_factor_uses_plain_sum(self, dtype):
+        group = MagicMock(spec=dist.ProcessGroup)
+        group.size.return_value = 8
+        self.assertEqual(
+            _get_gradient_divide_factors(group, None, dtype, factor=1.0),
+            (None, None, dist.ReduceOp.SUM, dist.ReduceOp.SUM),
+        )
+        self.assertEqual(
+            _get_gradient_divide_factors(group, None, dtype),
+            (None, None, dist.ReduceOp.AVG, dist.ReduceOp.AVG),
+        )
+
+
 class TestFSDPCommContext(TestCase):
     def test_release_all_gather_state_for_comm_reuse_before_lazy_init(self):
         comm_ctx = FSDPCommContext()
