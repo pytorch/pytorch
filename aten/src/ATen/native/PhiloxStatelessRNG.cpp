@@ -18,8 +18,10 @@
 #include <ATen/ops/_philox_key_fold_in_native.h>
 #include <ATen/ops/_philox_key_split_native.h>
 #include <ATen/ops/_philox_normal_native.h>
+#include <ATen/ops/_philox_normal_shard_native.h>
 #include <ATen/ops/_philox_randint_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
+#include <ATen/ops/_philox_uniform_shard_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #endif
@@ -165,6 +167,59 @@ void philox_distribution_kernel(
   }
 }
 
+// Fills self with its region of the global tensor that key would fill, without
+// generating the rest of the global tensor. Element i of each run is global
+// element start + i, which is value (start + i) % epc of the Philox call at
+// offset + (start + i) / epc.
+template <typename scalar_t, typename sample_func_t, typename param_func_t>
+void philox_shard_kernel(
+    const char* op_name,
+    Tensor& self, const Tensor& key,
+    IntArrayRef global_shape, IntArrayRef global_offset,
+    const sample_func_t& sample_func, const param_func_t& param_func) {
+  auto layout = philox_shard_layout(op_name, self, key, global_shape, global_offset);
+  if (self.numel() == 0) {
+    return;
+  }
+
+  auto output = self.contiguous();
+  scalar_t* out_ptr = output.mutable_data_ptr<scalar_t>();
+  auto key_contig = key.contiguous();
+  const uint64_t seed = key_contig.const_data_ptr<uint64_t>()[0];
+  const uint64_t offset = key_contig.const_data_ptr<uint64_t>()[1];
+  constexpr int64_t epc = elems_per_call<scalar_t>;
+  const int64_t run_len = layout.run_len;
+  for (const auto run : c10::irange(layout.num_runs)) {
+    uint64_t start = layout.base;
+    int64_t rest = run;
+    for (const auto d : c10::irange(layout.grid_sizes.size())) {
+      start += static_cast<uint64_t>(rest % layout.grid_sizes[d] * layout.grid_strides[d]);
+      rest /= layout.grid_sizes[d];
+    }
+    scalar_t* run_ptr = out_ptr + run * run_len;
+    for (int64_t i = 0; i < run_len;) {
+      const uint64_t g = start + static_cast<uint64_t>(i);
+      auto sample = sample_func(seed, offset + g / epc);
+      for (auto lane = static_cast<int64_t>(g % epc); lane < epc && i < run_len; lane++, i++) {
+        run_ptr[i] = param_func(sample[lane]);
+      }
+    }
+  }
+
+  if (output.data_ptr() != self.data_ptr()) {
+    self.copy_(output);
+  }
+}
+
+template <typename scalar_t>
+auto normal_sample(uint64_t seed, uint64_t offset) {
+  if constexpr (std::is_same_v<scalar_t, double>) {
+    return box_muller_double(philox_4x32(seed, offset));
+  } else {
+    return box_muller_float(philox_4x32(seed, offset));
+  }
+}
+
 } // anonymous namespace
 
 Tensor _philox_key_split_cpu(const Tensor& key, int64_t num_splits) {
@@ -249,9 +304,6 @@ Tensor _philox_key_fold_in_tensor_cpu(const Tensor& key, const Tensor& data) {
 Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double high) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
-    auto sample_func = [](uint64_t seed, uint64_t offset) {
-      return uniform_sample<scalar_t>(seed, offset);
-    };
     auto lo = static_cast<scalar_t>(low);
     auto hi = static_cast<scalar_t>(high);
     auto param_func = [lo, hi](auto rand) {
@@ -260,7 +312,7 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
     };
 
     philox_distribution_kernel<scalar_t>(
-        "_philox_uniform_", self, key, sample_func, param_func);
+        "_philox_uniform_", self, key, uniform_sample<scalar_t>, param_func);
   });
   return self;
 }
@@ -282,6 +334,27 @@ Tensor& _philox_uniform_tensor_cpu_(
     cpu_kernel(iter, [](scalar_t x, scalar_t lo, scalar_t hi) -> scalar_t {
       return static_cast<scalar_t>(static_cast<dist_acctype<scalar_t>>(x) * (hi - lo) + lo);
     });
+  });
+  return self;
+}
+
+Tensor& _philox_uniform_shard_cpu_(
+    Tensor& self, const Tensor& key, IntArrayRef global_shape,
+    IntArrayRef global_offset, double low, double high) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_uniform_shard_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_shard_", [&] {
+    auto lo = static_cast<scalar_t>(low);
+    auto hi = static_cast<scalar_t>(high);
+    auto param_func = [lo, hi](auto rand) {
+      return static_cast<scalar_t>(
+          at::transformation::uniform_real(rand, lo, hi));
+    };
+    philox_shard_kernel<scalar_t>(
+        "_philox_uniform_shard_", self, key, global_shape, global_offset,
+        uniform_sample<scalar_t>, param_func);
   });
   return self;
 }
@@ -328,14 +401,6 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
-    auto sample_func = [](uint64_t seed, uint64_t offset) {
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return box_muller_double(philox_4x32(seed, offset));
-      } else {
-        return box_muller_float(philox_4x32(seed, offset));
-      }
-    };
-
     auto mu = static_cast<compute_t>(mean);
     auto sigma = static_cast<compute_t>(stddev);
     auto param_func = [mu, sigma](compute_t rand) {
@@ -343,7 +408,7 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
     };
 
     philox_distribution_kernel<scalar_t>(
-        "_philox_normal_", self, key, sample_func, param_func);
+        "_philox_normal_", self, key, normal_sample<scalar_t>, param_func);
   });
   return self;
 }
@@ -372,6 +437,27 @@ Tensor& _philox_normal_tensor_cpu_(
     cpu_kernel(iter, [](compute_t z, compute_t mu, compute_t sigma) -> scalar_t {
       return static_cast<scalar_t>(z * sigma + mu);
     });
+  });
+  return self;
+}
+
+Tensor& _philox_normal_shard_cpu_(
+    Tensor& self, const Tensor& key, IntArrayRef global_shape,
+    IntArrayRef global_offset, double mean, double stddev) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_normal_shard_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_shard_", [&] {
+    using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+    auto mu = static_cast<compute_t>(mean);
+    auto sigma = static_cast<compute_t>(stddev);
+    auto param_func = [mu, sigma](compute_t rand) {
+      return static_cast<scalar_t>(rand * sigma + mu);
+    };
+    philox_shard_kernel<scalar_t>(
+        "_philox_normal_shard_", self, key, global_shape, global_offset,
+        normal_sample<scalar_t>, param_func);
   });
   return self;
 }

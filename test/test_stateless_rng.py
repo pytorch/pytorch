@@ -585,6 +585,61 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertEqual(result.shape, (3, 0))
         self.assertEqual(result.dtype, dtype)
 
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    @parametrize("key_offset", [0, (1 << 64) - 3])
+    @dtypes(*all_floating_dtypes)
+    def test_shard_matches_global(self, device, dtype, gen_fn_name, key_offset):
+        # Every shard of an uneven split along each dim, plus a box in every dim,
+        # matches the corresponding region of the global tensor. Odd sizes put
+        # run starts at every position within a Philox call.
+        key = torch.tensor([42, key_offset], dtype=torch.uint64, device=device)
+        sharded_ = getattr(random, f"sharded_{gen_fn_name}_")
+        for global_shape in [(101,), (37, 29), (6, 5, 7), (4, 3, 5, 6)]:
+            full = self._gen(gen_fn_name, key, global_shape, dtype=dtype)
+            regions = []
+            for dim, size in enumerate(global_shape):
+                for start in range(0, size, -(-size // 3)):
+                    offset = [0] * len(global_shape)
+                    offset[dim] = start
+                    shape = list(global_shape)
+                    shape[dim] = min(-(-size // 3), size - start)
+                    regions.append((shape, offset))
+            regions.append(([s - 2 for s in global_shape], [1] * len(global_shape)))
+            for shape, offset in regions:
+                region = tuple(slice(o, o + s) for s, o in zip(shape, offset))
+                shard = torch.empty(shape, dtype=dtype, device=device)
+                sharded_(key, shard, global_shape, offset)
+                self.assertEqual(shard, full[region], atol=0, rtol=0)
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    @dtypes(*all_floating_dtypes)
+    def test_shard_noncontiguous_and_empty(self, device, dtype, gen_fn_name):
+        key = random.key(42, device=device)
+        inplace = getattr(random, f"sharded_{gen_fn_name}_")
+        full = self._gen(gen_fn_name, key, (13, 11), dtype=dtype)
+        shard = torch.empty(8, 5, dtype=dtype, device=device).t()
+        inplace(key, shard, (13, 11), (2, 3))
+        self.assertEqual(shard, full[2:7, 3:11], atol=0, rtol=0)
+        empty = torch.empty(0, 11, dtype=dtype, device=device)
+        inplace(key, empty, (13, 11), (13, 0))
+        scalar = torch.empty((), dtype=dtype, device=device)
+        inplace(key, scalar, (), ())
+        self.assertEqual(scalar, self._gen(gen_fn_name, key, (), dtype=dtype))
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    def test_shard_errors(self, device, gen_fn_name):
+        key = random.key(42, device=device)
+        out = torch.empty(4, 5, device=device)
+        inplace = getattr(random, f"sharded_{gen_fn_name}_")
+        with self.assertRaisesRegex(RuntimeError, "key must have shape \\(2,\\)"):
+            inplace(key.expand(4, 1, 2), out, (8, 5), (0, 0))
+        with self.assertRaisesRegex(RuntimeError, "one entry per output dim"):
+            inplace(key, out, (8, 5), (0,))
+        with self.assertRaisesRegex(RuntimeError, "does not fit in global_shape"):
+            inplace(key, out, (8, 5), (5, 0))
+        with self.assertRaisesRegex(RuntimeError, "does not fit in global_shape"):
+            inplace(key, out, (8, 5), (-1, 0))
+
     # Distribution-specific tests
 
     @dtypes(*all_floating_dtypes)

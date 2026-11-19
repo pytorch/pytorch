@@ -22,8 +22,10 @@
 #else
 #include <ATen/ops/_philox_dropout_native.h>
 #include <ATen/ops/_philox_normal_native.h>
+#include <ATen/ops/_philox_normal_shard_native.h>
 #include <ATen/ops/_philox_randint_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
+#include <ATen/ops/_philox_uniform_shard_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #endif
@@ -259,6 +261,98 @@ void philox_distribution_kernel(
   }
 }
 
+// Shard kernel: one thread per (run, chunk), where chunk indexes the Philox
+// calls overlapping a run. Run element i is global element start + i, which is
+// value (start + i) % epc of the call at offset + (start + i) / epc. Each run's
+// start is computed from run_calc, so no per-run keys are materialized.
+template <typename scalar_t, typename sample_t, typename param_t>
+__global__ void philox_shard_kernel(
+    scalar_t* __restrict__ output,
+    const uint64_t* __restrict__ key,
+    int64_t run_len,
+    int64_t chunks_per_run,
+    int64_t total_threads,
+    uint64_t base,
+    OffsetCalculator<1, uint64_t> run_calc,
+    sample_t sample_func,
+    param_t param_func) {
+  constexpr int epc = elems_per_call<scalar_t>;
+  int64_t tid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (tid >= total_threads) return;
+  int64_t run = tid / chunks_per_run;
+  int64_t chunk = tid % chunks_per_run;
+  uint64_t start = base + run_calc.get(run)[0];
+  // Run position of this call's first value; negative when the run starts
+  // mid-call.
+  int64_t pos = chunk * epc - static_cast<int64_t>(start % epc);
+  if (pos >= run_len) return;
+
+  auto key_vec = memory::ld_vec<16>(key);
+  auto* key_vals = reinterpret_cast<const uint64_t*>(&key_vec);
+  auto sample = sample_func(
+      key_vals[0], key_vals[1] + start / epc + static_cast<uint64_t>(chunk));
+
+  int64_t idx = run * run_len + pos;
+  if (pos >= 0 && pos + epc <= run_len && idx % epc == 0) {
+    constexpr int vec_bytes = epc * sizeof(scalar_t);
+    memory::Vec<vec_bytes> v;
+    auto* vals = reinterpret_cast<scalar_t*>(&v);
+    #pragma unroll
+    for (int j = 0; j < epc; j++) {
+      vals[j] = param_func((&sample.x)[j], idx + j);
+    }
+    memory::st_vec<vec_bytes>(output + idx, v);
+  } else {
+    for (int j = 0; j < epc; j++) {
+      if (pos + j >= 0 && pos + j < run_len) {
+        output[idx + j] = param_func((&sample.x)[j], idx + j);
+      }
+    }
+  }
+}
+
+// Fills self with its region of the global tensor that key would fill, without
+// generating the rest of the global tensor.
+template <typename scalar_t, typename sample_t, typename param_t>
+void philox_shard_kernel_launch(
+    const char* op_name,
+    Tensor& self, const Tensor& key,
+    IntArrayRef global_shape, IntArrayRef global_offset,
+    const sample_t& sample_func, const param_t& param_func) {
+  auto layout = philox_shard_layout(op_name, self, key, global_shape, global_offset);
+  if (self.numel() == 0) {
+    return;
+  }
+
+  constexpr int epc = elems_per_call<scalar_t>;
+  constexpr int vec_bytes = epc * sizeof(scalar_t);
+  auto output = self.contiguous();
+  if (reinterpret_cast<uintptr_t>(output.data_ptr()) % vec_bytes != 0) {
+    output = output.clone();
+  }
+
+  const int64_t* grid_strides = layout.grid_strides.data();
+  auto run_calc = OffsetCalculator<1, uint64_t>(
+      static_cast<int>(layout.grid_sizes.size()), layout.grid_sizes.data(), &grid_strides);
+  // Enough calls to cover a run starting at any position within a call.
+  int64_t chunks_per_run = (layout.run_len + 2 * epc - 2) / epc;
+  int64_t total_threads = layout.num_runs * chunks_per_run;
+  constexpr int block_size = 256;
+  int num_blocks = static_cast<int>((total_threads + block_size - 1) / block_size);
+  auto key_contig = key.contiguous();
+  philox_shard_kernel<scalar_t>
+      <<<num_blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
+      output.mutable_data_ptr<scalar_t>(),
+      key_contig.const_data_ptr<uint64_t>(),
+      layout.run_len, chunks_per_run, total_threads, layout.base, run_calc,
+      sample_func, param_func);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  if (output.data_ptr() != self.data_ptr()) {
+    self.copy_(output);
+  }
+}
+
 // Maps a row-major output index to offsets into tensors broadcast to the output.
 template <typename index_t, typename... Ts>
 OffsetCalculator<1 + sizeof...(Ts), index_t> make_row_major_offset_calculator(
@@ -356,6 +450,30 @@ Tensor& _philox_uniform_tensor_cuda_(
       philox_distribution_kernel<scalar_t>(
           "_philox_uniform_", self, key, sample_func, param_func);
     });
+  });
+  return self;
+}
+
+Tensor& _philox_uniform_shard_cuda_(
+    Tensor& self, const Tensor& key, IntArrayRef global_shape,
+    IntArrayRef global_offset, double low, double high) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_uniform_shard_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_shard_", [&] {
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return uniform_sample<scalar_t>(seed, offset);
+    };
+    auto lo = static_cast<scalar_t>(low);
+    auto hi = static_cast<scalar_t>(high);
+    auto param_func = [lo, hi] __device__ (auto rand, int64_t /*idx*/) {
+      return static_cast<scalar_t>(
+          at::transformation::uniform_real(rand, lo, hi));
+    };
+    philox_shard_kernel_launch<scalar_t>(
+        "_philox_uniform_shard_", self, key, global_shape, global_offset,
+        sample_func, param_func);
   });
   return self;
 }
@@ -460,6 +578,30 @@ Tensor& _philox_normal_tensor_cuda_(
       philox_distribution_kernel<scalar_t>(
           "_philox_normal_", self, key, sample_func, param_func);
     });
+  });
+  return self;
+}
+
+Tensor& _philox_normal_shard_cuda_(
+    Tensor& self, const Tensor& key, IntArrayRef global_shape,
+    IntArrayRef global_offset, double mean, double stddev) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_normal_shard_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_shard_", [&] {
+    using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return normal_sample<scalar_t>(seed, offset);
+    };
+    auto mu = static_cast<compute_t>(mean);
+    auto sigma = static_cast<compute_t>(stddev);
+    auto param_func = [mu, sigma] __device__ (compute_t rand, int64_t /*idx*/) {
+      return static_cast<scalar_t>(rand * sigma + mu);
+    };
+    philox_shard_kernel_launch<scalar_t>(
+        "_philox_normal_shard_", self, key, global_shape, global_offset,
+        sample_func, param_func);
   });
   return self;
 }
