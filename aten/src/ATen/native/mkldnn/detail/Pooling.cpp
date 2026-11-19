@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Pooling.h>
-#include <ATen/native/mkldnn/detail/Utils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -46,6 +46,7 @@ void pooling_forward(
       op_attr);
 
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
+  // May replace dst's buffer and layout when they differ from pd.dst_desc().
   dst.reinit_if_possible(pd.dst_desc());
   if (src.has_scale()) {
     dst.set_scale(src.get_scale());
@@ -119,6 +120,7 @@ void pooling_backward(
       op_attr);
 
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
+  // May replace diff_src's buffer and layout when they differ from pd.diff_src_desc().
   diff_src.reinit_if_possible(pd.diff_src_desc());
 
   ideep::tensor scratchpad(pd.scratchpad_desc());
