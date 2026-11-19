@@ -9,6 +9,7 @@
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/impl/COW.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
@@ -28,10 +29,12 @@
 #include <dlfcn.h>
 #endif
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -1678,6 +1681,55 @@ PyObject* siteInfo(const TcfgSite* site) {
   END_HANDLE_TH_ERRORS
 }
 
+// The storages that are to tell of a write, each with the number it was
+// given when it was asked to. A storage tells through the hook that it calls
+// before it hands out a writable pointer to its memory, once: afterwards the
+// hook is gone.
+std::mutex watch_mutex;
+std::unordered_map<const c10::StorageImpl*, uint64_t> watch_numbers;
+std::atomic<uint64_t> watch_last{0};
+
+void storageWritten(c10::StorageImpl* storage) {
+  std::lock_guard<std::mutex> lock(watch_mutex);
+  watch_numbers.erase(storage);
+}
+
+// Whether the storage has the hook. A storage has one hook at a time, and the
+// only other one there is belongs to a lazy clone.
+bool isWatching(c10::StorageImpl* storage) {
+  return storage->has_materializer() &&
+      !c10::impl::cow::is_cow_data_ptr(storage->_mutable_data_ptr_no_checks());
+}
+
+uint64_t tensorWatch(PyObject* obj, int32_t arm) {
+  if (!THPVariable_CheckExact(obj) || !THPVariable_Unpack(obj).defined()) {
+    return 0;
+  }
+  const auto* impl = THPVariable_Unpack(obj).unsafeGetTensorImpl();
+  if (!impl->has_storage()) {
+    return 0;
+  }
+  auto* storage = impl->unsafe_storage().unsafeGetStorageImpl();
+  std::lock_guard<std::mutex> lock(watch_mutex);
+  if (storage->has_materializer()) {
+    // Its own hook, or that of a lazy clone.
+    const auto found = watch_numbers.find(storage);
+    const bool own = isWatching(storage) && found != watch_numbers.end();
+    return own ? found->second : 0;
+  }
+  if (arm == 0) {
+    return 0;
+  }
+  storage->set_materializer(&storageWritten);
+  const uint64_t number = watch_last.fetch_add(1) + 1;
+  watch_numbers[storage] = number;
+  return number;
+}
+
+uint64_t watchSerial() {
+  return watch_last.load();
+}
+
 int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
   const c10::TensorImpl* impl = nullptr;
   if (isUnboxed(obj)) {
@@ -1708,9 +1760,11 @@ int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
   // has built in) first looks at the stream it would be read on, if it is
   // on a GPU: that is paid per tensor, on every call.
   out->data = nullptr;
+  out->watched = 0;
   if (impl->has_storage()) {
     auto* storage = impl->unsafe_storage().unsafeGetStorageImpl();
     out->data = storage->_mutable_data_ptr_no_checks().get();
+    out->watched = isWatching(storage) ? 1 : 0;
   }
   const auto& version = impl->version_counter();
   out->version =
@@ -2171,6 +2225,7 @@ const TcfgApi api_table = {
     nullptr,
 #endif
     &isTracing,       &workspaceEnterRaw, &workspaceLeaveRaw, &callModes,
+    &tensorWatch,     &watchSerial,
 };
 
 } // namespace
