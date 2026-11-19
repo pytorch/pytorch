@@ -54,6 +54,7 @@ from ..pattern_matcher import (
     Arg,
     CallFunction,
     CallFunctionVarArgs,
+    FailedMatch,
     filter_nodes,
     fwd_only,
     get_arg_value,
@@ -63,6 +64,8 @@ from ..pattern_matcher import (
     KeywordArg,
     ListOf,
     Match,
+    MatchContext,
+    MatchResult,
     MultiOutputPattern,
     MULTIPLE,
     PatternMatcherPass as PatternMatcherPassBase,
@@ -113,6 +116,141 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+
+def _is_independent_row(src: fx.Node) -> bool:
+    if src.op == "placeholder":
+        return True
+    # A single-use pointwise producer can write directly into its cat segment.
+    # Only accept producers over graph input vectors, independent of the matrix.
+    return (
+        isinstance(src.target, torch._ops.OpOverload)
+        and torch.Tag.pointwise in src.target.tags
+        and not src.target._schema.is_mutable
+        and torch.Tag.nondeterministic_seeded not in src.target.tags
+        and len(src.users) == 1
+        and bool(src.all_input_nodes)
+        and all(
+            n.op == "placeholder"
+            and isinstance(n.meta.get("val"), torch.Tensor)
+            and n.meta["val"].ndim == 1
+            for n in src.all_input_nodes
+        )
+    )
+
+
+class _SelectScatterRows(CallFunctionVarArgs):
+    """Match independent row writes to a returned CPU matrix."""
+
+    def _match(self, node: fx.Node, ctx: MatchContext) -> MatchResult:
+        # A following pointwise op can fuse with the original select expressions.
+        if any(user.op != "output" for user in node.users):
+            return FailedMatch("scatter result is consumed inside the graph")
+        val = node.meta.get("val")
+        if (
+            not isinstance(val, torch.Tensor)
+            or val.device.type != "cpu"
+            or val.layout != torch.strided
+            or val.dtype != torch.float32
+            or val.ndim != 2
+            or any(type(s) is not int for s in val.shape)
+        ):
+            return FailedMatch("expected a static CPU float matrix")
+        height, width = val.shape
+        # On CPU cat copies each contiguous segment into the output. Keep this
+        # for large matrices and short chains to amortize per-segment overhead.
+        if height * width < 65_536 or width < 64:
+            return FailedMatch("small row scatter")
+
+        writes = []
+        rows: dict[int, fx.Node] = {}
+        current = node
+        while current.target is aten.select_scatter.default:
+            if len(current.users) != 1 or len(writes) == 8:
+                return FailedMatch("shared scatter state or too many writes")
+            base = get_arg_value(current, 0, "self")
+            src = get_arg_value(current, 1, "src")
+            dim = get_arg_value(current, 2, "dim")
+            index = get_arg_value(current, 3, "index")
+            if (
+                type(dim) is not int
+                or dim not in (0, -2)
+                or type(index) is not int
+                or not -height <= index < height
+                or index % height in rows
+            ):
+                return FailedMatch("expected distinct constant row indices")
+            if not isinstance(src, fx.Node) or not _is_independent_row(src):
+                return FailedMatch("expected an independent row")
+            row = src.meta.get("val")
+            if (
+                not isinstance(row, torch.Tensor)
+                or row.dtype != val.dtype
+                or row.device != val.device
+                or row.layout != torch.strided
+                or not statically_known_true(sym_eq(row.shape, (width,)))
+                or not statically_known_true(sym_eq(row.stride(), (1,)))
+                or not isinstance(base, fx.Node)
+            ):
+                return FailedMatch("expected a contiguous row of the output dtype")
+            writes.append(current)
+            rows[index % height] = src
+            current = base
+
+        base_val = current.meta.get("val")
+        if (
+            len(writes) < 3
+            or current.op != "placeholder"
+            or not isinstance(base_val, torch.Tensor)
+            or base_val.layout != torch.strided
+            or not statically_known_true(sym_eq(base_val.stride(), (width, 1)))
+            or not statically_known_true(base_val.storage_offset() == 0)
+            # select_scatter clones the entire backing storage, even for a view.
+            or not statically_known_true(
+                base_val.untyped_storage().nbytes()
+                == height * width * val.element_size()
+            )
+        ):
+            return FailedMatch("expected a chain over a contiguous input matrix")
+
+        indices = sorted(rows)
+        # Each gap adds a separate copy loop. Widely scattered rows can lose to
+        # the original pointwise kernel, especially with multiple CPU threads.
+        gaps = sum(
+            right > left + 1
+            for left, right in itertools.pairwise([-1, *indices, height])
+        )
+        if gaps > 2:
+            return FailedMatch("fragmented row scatter")
+        match = Match(ctx, self, args=(current, [(i, rows[i]) for i in indices]))
+        # PatternMatcherPass checks all matched nodes for mutation and stream
+        # boundaries, and erases them in reverse topological order.
+        match.nodes = writes[::-1]
+        return match
+
+
+@register_graph_pattern(
+    _SelectScatterRows(aten.select_scatter.default), pass_dict=pass_patterns[1]
+)
+def assemble_select_scatter_rows(
+    match: Match, base: fx.Node, rows: list[tuple[int, fx.Node]]
+):
+    indices, sources = zip(*rows)
+
+    def assemble(matrix, *updates):
+        chunks = []
+        start = 0
+        for index, update in zip(indices, updates):
+            if start < index:
+                chunks.append(matrix[start:index])
+            chunks.append(update.unsqueeze(0))
+            start = index + 1
+        if start < matrix.shape[0]:
+            chunks.append(matrix[start:])
+        return torch.cat(chunks)
+
+    match.replace_by_example(assemble, [base, *sources])
+    counters["inductor"]["select_scatter_row_chains"] += 1
 
 
 # Note [CPU flash attention accumulation order]
