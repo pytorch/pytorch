@@ -4466,6 +4466,20 @@ def demote_tensor_caller(n, x):
     return demote_python(n), x
 
 
+def demote_raises(n):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    raise KeyError(total)
+
+
+def demote_raises_caller(n, x):
+    try:
+        demote_raises(n)
+    except KeyError as e:
+        return e.args[0], x + 1
+
+
 def demote_chain_1(n):
     return demote_python(n)
 
@@ -4516,6 +4530,20 @@ class TestVmDemotion(TestCase):
             total, _ = compiled(300, x)
             self.assertEqual(total, demote_python(300))
         self.assertEqual(compiled.stats()["demoted_callees"], [])
+
+    def test_a_callee_that_raises_is_measured(self):
+        compiled = torch.vm(
+            demote_raises_caller, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        x = torch.ones(2)
+        for _ in range(200):
+            total, y = compiled(300, x)
+            self.assertEqual(total, demote_python(300))
+            self.assertEqual(y, x + 1)
+        stats = compiled.stats()
+        # A call that ends in a raise is timed like one that returns.
+        self.assertEqual(stats["demoted_callees"], ["demote_raises"])
+        self.assertFalse(stats["measuring"])
 
     def test_a_region_that_is_deciding_keeps_measurements_open(self):
         calls = []
