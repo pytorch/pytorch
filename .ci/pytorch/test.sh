@@ -182,8 +182,8 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
-if [[ "$TEST_CONFIG" == 'periodic' ]]; then
-  # These custom run_test.py targets cannot be filtered cleanly by -m periodic:
+if [[ "$TEST_CONFIG" == 'periodic' || "$TEST_CONFIG" == 'periodic_daily' ]]; then
+  # These custom run_test.py targets cannot use the periodic/daily marker filters:
   # doctests and autoload bypass pytest; AOT builds extensions before pytest;
   # CI sanity expects its unmarked test to fail.
   TESTS_TO_EXCLUDE="$TESTS_TO_EXCLUDE doctests test_cpp_extensions_aot_ninja test_cpp_extensions_aot_no_ninja test_autoload_enable test_autoload_disable test_ci_sanity_check_fail"
@@ -248,7 +248,7 @@ if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
-if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+if [[ "$TEST_CONFIG" == 'periodic' || "$TEST_CONFIG" == 'periodic_daily' ]]; then
   export PYTORCH_TEST_WITH_PERIODIC=1
   # Allows @periodic tests that are also marked slow (@slowTest or
   # slow-tests.json) to run.
@@ -951,6 +951,7 @@ test_inductor_core() {
               inductor/test_cpu_select_algorithm \
               inductor/test_torchinductor_dynamic_shapes \
               inductor/test_torchinductor \
+              inductor/test_torchinductor_avoid_modular_indexing \
               inductor/test_mkldnn_pattern_matcher \
               inductor/test_torchinductor_codegen_dynamic_shapes \
               inductor/test_max_autotune_blackwell \
@@ -2952,7 +2953,7 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
-elif [[ "${TEST_CONFIG}" == periodic ]]; then
+elif [[ "${TEST_CONFIG}" == periodic || "${TEST_CONFIG}" == periodic_daily ]]; then
   # Sweeps the default test files; run_test.py selects the @periodic tests.
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
