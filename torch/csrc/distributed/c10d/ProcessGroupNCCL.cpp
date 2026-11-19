@@ -131,16 +131,12 @@ ncclRedOpRAII getNcclReduceOp(
     switch (reduceOp) {
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
-        break;
       case ReduceOp::BOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
-        break;
       case ReduceOp::BXOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
-        break;
       default:
         C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
     }
   }
 }
@@ -950,6 +946,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_->enable_reconfigure,
       "ProcessGroupNCCL does not support enable_reconfigure "
       "(reconfigure-based fault tolerance).");
+  TORCH_CHECK(
+      !options_->encryption_psk.has_value(),
+      "ProcessGroupNCCL does not support encryption_psk; use the nccl2 "
+      "backend.");
 
   // An empty global_ranks_in_group means "this group spans the whole world, in
   // rank order"; see groupRanks(). Materialize that mapping here rather than
@@ -1621,11 +1621,12 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && !defined(USE_ROCM)
   // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
   // comms -- a successor PG may have already re-registered under the same
   // group_uid (e.g. restart-after-error), and unconditionally clearing
   // would silently wipe the successor's entry.
+  // ROCm retires through the comm's pre-invalidate hook; see initNCCLComm.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
@@ -2009,7 +2010,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
-    for (int i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
             return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
@@ -2398,6 +2399,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        desyncDebugger_.flush();
         LOG(ERROR) << c10::str(
             pg_->logPrefix(),
             " failure detected by watchdog at work sequence id: ",
@@ -2561,6 +2563,9 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       heartbeat_++;
     }
     done = pg_->workMetaList_.empty();
+
+    lock.unlock();
+    desyncDebugger_.flush();
   }
 }
 
@@ -2593,6 +2598,8 @@ void ProcessGroupNCCL::DesyncDebugger::init(
 void ProcessGroupNCCL::DesyncDebugger::run() {
   if (!enabled_)
     return;
+  // Publish this rank's state before reading the report.
+  flush();
   auto logPrefix = c10::str("Rank ", rank_);
   ::c10d::C10dLoggingData log;
   log.integers["pg_id"] = pgId_;
@@ -2628,7 +2635,6 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
   }
 }
 
-// Log work start to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2636,12 +2642,9 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
     return;
 
   work.startTraceUpdated_ = true;
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
+  pendingStart_ = {work.seq_, opTypeToString(work.opType_)};
 }
 
-// Log work end to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2651,9 +2654,21 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
     logWorkStart(work);
   }
 
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
+  pendingEnd_ = {work.seq_, opTypeToString(work.opType_)};
+}
+
+void ProcessGroupNCCL::DesyncDebugger::flush() {
+  auto start = std::exchange(pendingStart_, std::nullopt);
+  auto end = std::exchange(pendingEnd_, std::nullopt);
+  if (enabled_ && start.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ =
+        c10d::traceUpdate(store_, traceKeyStart_, start->first, start->second);
+  }
+  if (enabled_ && end.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ = c10d::traceUpdate(store_, traceKeyEnd_, end->first, end->second);
+  }
 }
 
 // We want to have both PG ID and global unique ID (guid) for the logging
@@ -2988,7 +3003,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
@@ -3027,7 +3042,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == NCCL_UNIQUE_ID_BYTES,
@@ -3327,11 +3342,37 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
-    // Unregistered in ~ProcessGroupNCCL.
-    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-        getGroupUid(), ncclComm->getNcclComm());
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT. Only the
+    // collective comm is published: a lazily created 2-rank send/recv comm
+    // would otherwise replace it under the same group uid. On CUDA,
+    // ~ProcessGroupNCCL unregisters it unless it was already aborted or
+    // destroyed.
+    if (!singleP2POp) {
+#ifdef USE_ROCM
+      // Register and install the retire hook as one step under the comm's own
+      // lock, which abort() and destroy() also take, so an invalidation cannot
+      // land in between. The pair is captured because abort() nulls the
+      // handle, and the generation tells our entry apart from a successor's at
+      // the same address.
+      NCCLComm::LockType commLock(ncclComm->mutex_);
+      if (!ncclComm->aborted_) {
+        auto& devCommManager =
+            c10d::symmetric_memory::NCCLDevCommManager::get(device);
+        ncclComm_t registeredComm = ncclComm->getNcclComm();
+        devCommManager.register_comm(getGroupUid(), registeredComm);
+        const uint64_t generation =
+            devCommManager.get_comm_generation(getGroupUid(), registeredComm);
+        ncclComm->preInvalidateHook_ =
+            [device, groupUid = getGroupUid(), registeredComm, generation]() {
+              c10d::symmetric_memory::NCCLDevCommManager::get(device)
+                  .unregister_comm(groupUid, registeredComm, generation);
+            };
+      }
+#else
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+          getGroupUid(), ncclComm->getNcclComm());
+#endif
+    }
 #endif
   }
 
@@ -6162,6 +6203,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     auto nccl_opts =
         c10::static_intrusive_pointer_cast<ProcessGroupNCCL::Options>(
             opts_override);
+    TORCH_CHECK(
+        !nccl_opts->encryption_psk.has_value(),
+        "ProcessGroupNCCL does not support encryption_psk; use the nccl2 "
+        "backend.");
     config = &nccl_opts->config;
     // If user provided override options, honor is_high_priority_stream as well
     high_priority_stream = nccl_opts->is_high_priority_stream;

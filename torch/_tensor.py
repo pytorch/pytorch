@@ -158,7 +158,7 @@ class Tensor(torch._C.TensorBase):
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
-                or (type(self) is not Tensor and self.data_ptr() == 0)
+                or (type(self) is not Tensor and not torch._C._has_storage_data(self))
             ):
                 new_tensor = self.clone()
                 if type(new_tensor) is not type(self):
@@ -459,7 +459,11 @@ class Tensor(torch._C.TensorBase):
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
                     not torch._subclasses.fake_tensor.is_fake_tensor(self)
-                    and self.data_ptr() == 0
+                    # Wrapper subclasses have a placeholder storage with no data. A
+                    # tensor with no storage at all (e.g. MKLDNN) is not a wrapper:
+                    # saving it as one would drop its data.
+                    and torch._C._has_storage(self)
+                    and not torch._C._has_storage_data(self)
                 )
             )
         ):
@@ -564,7 +568,13 @@ class Tensor(torch._C.TensorBase):
         return torch._tensor_str._str(self, tensor_contents=tensor_contents)
 
     def backward(
-        self, gradient=None, retain_graph=None, create_graph=False, inputs=None
+        self,
+        gradient=None,
+        retain_graph=None,
+        create_graph=False,
+        inputs=None,
+        *,
+        disallow_implicit_grad_accumulation=False,
     ):
         r"""Computes the gradient of current tensor wrt graph leaves.
 
@@ -609,8 +619,20 @@ class Tensor(torch._C.TensorBase):
                 Tensors that were used to compute the :attr:`tensors`. A mapping of tensors
                 (e.g. ``dict(model.named_parameters())``) is also accepted.
                 Defaults to ``None``.
+            disallow_implicit_grad_accumulation (bool, optional): When a tensor is
+                used more than once in forward, backward accumulates the gradient
+                contributions from each use. If ``True``, raise an error instead of
+                performing that accumulation. See
+                :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
         """
         if has_torch_function_unary(self):
+            # Pass the flag only when set, so overrides written against the
+            # signature without it keep working.
+            flag_kwargs = (
+                {"disallow_implicit_grad_accumulation": True}
+                if disallow_implicit_grad_accumulation
+                else {}
+            )
             return handle_torch_function(
                 Tensor.backward,
                 (self,),
@@ -619,9 +641,15 @@ class Tensor(torch._C.TensorBase):
                 retain_graph=retain_graph,
                 create_graph=create_graph,
                 inputs=inputs,
+                **flag_kwargs,
             )
         torch.autograd.backward(
-            self, gradient, retain_graph, create_graph, inputs=inputs
+            self,
+            gradient,
+            retain_graph,
+            create_graph,
+            inputs=inputs,
+            disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
         )
 
     def index(self, positions, dims):

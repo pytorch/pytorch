@@ -26,6 +26,19 @@ struct add_alpha_functor {
   }
 };
 
+// Same as at::native::lerp: for |w| >= 0.5 interpolate from `e`, which is more
+// accurate and keeps e.g. lerp(-inf, 1, 0.5) == -inf rather than NaN
+template <typename T>
+inline T lerp(T s, T e, T w) {
+  return ::metal::abs(w) < T(0.5) ? s + w * (e - s) : e - (e - s) * (T(1) - w);
+}
+
+inline float2 lerp(float2 s, float2 e, float2 w) {
+  return ::metal::dot(w, w) < 0.25f
+      ? s + c10::metal::mul(w, e - s)
+      : e - c10::metal::mul(e - s, float2(1.0f - w.x, -w.y));
+}
+
 struct lerp_alpha_functor {
   // Computed at opmath precision, matching CPU/CUDA: a low-precision `alpha`
   // both loses accuracy here and cannot represent the weights `lerp.Scalar`
@@ -33,8 +46,7 @@ struct lerp_alpha_functor {
   template <typename T, typename A>
   inline T operator()(const T a, const T b, const A alpha) {
     using op_t = c10::metal::opmath_t<T>;
-    return static_cast<T>(
-        op_t(a) + c10::metal::mul(static_cast<op_t>(alpha), op_t(b) - op_t(a)));
+    return static_cast<T>(lerp(op_t(a), op_t(b), static_cast<op_t>(alpha)));
   }
 };
 
@@ -265,6 +277,17 @@ struct laguerre_polynomial_l_functor {
   template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
   inline float operator()(const T a, const T b) {
     return c10::metal::laguerre_polynomial_l_forward(float(a), float(b));
+  }
+};
+
+struct legendre_polynomial_p_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::legendre_polynomial_p_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::legendre_polynomial_p_forward(float(a), float(b));
   }
 };
 
@@ -688,6 +711,8 @@ REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_FLOAT_BINARY_OP(laguerre_polynomial_l);
 REGISTER_INT2FLOAT_BINARY_OP(laguerre_polynomial_l);
+REGISTER_FLOAT_BINARY_OP(legendre_polynomial_p);
+REGISTER_INT2FLOAT_BINARY_OP(legendre_polynomial_p);
 REGISTER_FLOAT_BINARY_OP(pow);
 REGISTER_INTEGER_BINARY_OP(pow);
 REGISTER_BINARY_OP(pow, float2, float2);
@@ -771,13 +796,13 @@ REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, float2, half2);
 
-// lerp with tensor weight: lerp(s, e, w) = s + w * (e - s)
+// lerp with tensor weight
 // Computed at opmath precision, matching the CPU/CUDA reference, which casts
 // all three operands to `opmath_type` before interpolating.
 struct lerp_functor {
   template <typename T>
   inline T operator()(const T s, const T e, const T w) {
-    return static_cast<T>(s + c10::metal::mul(w, e - s));
+    return lerp(s, e, w);
   }
 };
 

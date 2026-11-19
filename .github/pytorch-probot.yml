@@ -2,6 +2,7 @@ tracking_issue: 24422
 ciflow_tracking_issue: 64124
 ciflow_push_tags:
 - ciflow/b200
+- ciflow/b200-cuspy
 - ciflow/b200-distributed
 - ciflow/b200-symm-mem
 - ciflow/binaries

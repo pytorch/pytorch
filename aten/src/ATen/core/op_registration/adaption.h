@@ -56,7 +56,7 @@ inline void check_and_update_common_device(std::optional<Device>& common_device,
     return;
   }
 
-  if (C10_UNLIKELY(common_device != tensor.device())) {
+  if (common_device != tensor.device()) [[unlikely]] {
     common_device_check_failure(*common_device, tensor, methodName, argName);
   }
 }

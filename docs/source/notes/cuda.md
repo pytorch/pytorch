@@ -131,6 +131,17 @@ is overridden to `ieee`.
 
 We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
 
+On NVIDIA GPUs, the convolution kernels that `torch.compile` generates itself (for example with
+`mode="max-autotune"`) use TF32 only if `torch.backends.cudnn.conv.fp32_precision` is `tf32`, like eager cuDNN
+convolutions. When cuDNN is turned off (`torch.backends.cudnn.enabled = False`), they use full FP32. 1x1
+convolutions that `torch.compile` turns into matrix multiplications follow `torch.backends.cuda.matmul.fp32_precision`
+instead. For example, this turns off TF32 for eager convolutions and for the generated convolution kernels:
+
+```python
+torch.backends.cudnn.conv.fp32_precision = "ieee"
+model = torch.compile(model, mode="max-autotune")
+```
+
 ```{warning}
 
   Old settings with `allow_tf32` as follows is going to be deprecated. We suggest to use the above new settings for
@@ -1395,6 +1406,129 @@ to overlap data transfers with computation.
 
 You can make the {class}`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing `pin_memory=True` to its constructor.
+
+(cuda-device-to-host-copies)=
+
+### Device-to-host copies on NVLink-C2C systems
+
+On systems such as NVIDIA Grace Hopper and Grace Blackwell, NVLink-C2C
+connects the GPU to its local CPU. Transfers between the GPU and local CPU
+memory use this connection without a PyTorch configuration option. PyTorch
+delegates transfers made with {meth}`~torch.Tensor.cpu`,
+{meth}`~torch.Tensor.to`, and {meth}`~torch.Tensor.copy_` to CUDA.
+
+A fast interconnect does not eliminate the cost of preparing CPU memory.
+For a CUDA tensor, `tensor.cpu()` allocates a CPU result in pageable memory
+and waits for the copy to finish. Fresh allocations can require physical
+pages to be allocated and mapped on first access, so the first copy can be
+limited by memory allocation and page faults rather than link bandwidth.
+CUDA may stage a copy into fresh pageable memory through an intermediate
+pinned buffer, adding a CPU copy into the destination.
+Pinned memory also has allocation and registration costs, but
+they are paid upfront during allocation. For benchmarking,
+this must be taken into account, see further below. However,
+pinned memory always avoids the CPU-based staging buffer
+and copy that may be used for pageable memory.
+
+Reusing a pageable buffer can also amortize
+these costs as long as its pages remain mapped and physically allocated.
+On hardware-coherent NVLink-C2C systems, populated pageable and pinned
+buffers on the CPU NUMA node local to the source tensor's GPU can have
+similar transfer performance: either NVLink-C2C bandwidth or GPU copy-engine
+throughput limits both. This does not extend to buffers on remote CPU NUMA
+nodes, where differences in memory mapping can lead to different data paths.
+Reuse does not pin pageable memory: it remains eligible for
+swapping or migration to another CPU NUMA node. Pinned buffers remain useful
+for large, repeated transfers because they prevent these movements and help
+maintain transfer performance across hardware-coherent and non-coherent
+systems. However, excessive pinning can put pressure on available RAM
+(see {ref}`cuda-memory-pinning`).
+
+```{note}
+The term "pinning" has two meanings. In CUDA, pinned memory cannot migrate
+from the CPU to the GPU or to another CPU NUMA node. In the Linux kernel,
+pinning refers to page-locking, which makes the physical pages immovable.
+
+On non-coherent systems, both meanings apply: CUDA must page-lock host
+memory to make it accessible to the GPU, as `cudaMallocHost` does on these
+systems. On hardware-coherent systems, only the CUDA meaning applies.
+Pinned memory is automatically populated and mapped for GPU access.
+
+On hardware-coherent systems, pinned memory does not guarantee immovable
+physical pages. Operating system memory compaction can still cause page
+faults, including for memory allocated with `cudaMallocHost` or registered
+with `cudaHostRegister`. Buffer reuse reduces allocation overhead but does
+not guarantee fault-free transfers.
+```
+
+For direct {meth}`~torch.Tensor.copy_` transfers between contiguous CPU and
+CUDA tensors of the same dtype, host blocking depends on `non_blocking`
+and the CPU memory:
+
+- With `non_blocking=False`, PyTorch synchronizes the CUDA stream before
+  returning, so the call blocks the host regardless of whether the CPU
+  memory is pinned or whether the copy reads from or writes to it.
+- With `non_blocking=True` and pinned or registered CPU memory, ordinary
+  copies do not block the host in either direction. For device-to-host
+  copies, explicitly synchronize before accessing the result on the CPU.
+- With `non_blocking=True` and pageable CPU memory, the call may block the
+  host. The behavior depends on staging and other system conditions,
+  including hardware coherence, and cannot be inferred from the flag alone.
+  Blocking can occur in either direction, with additional conditions when
+  writing to CPU memory.
+
+Even with pinned memory and `non_blocking=True`, CUDA calls can block the
+host when stream queues are full or when another thread holds a driver
+lock during a memory management operation. Other exceptions include
+`CUDA_LAUNCH_BLOCKING=1` when CUDA implements the copy with a kernel, and
+special confidential computing operations such as key rotation.
+
+Copies that require temporary buffers, such as non-contiguous copies or
+dtype conversions, can involve additional allocations and copy operations.
+The behavior above describes the underlying transfer, rather than all work
+performed by such a {meth}`~torch.Tensor.copy_` call.
+
+For repeated transfers, such as activation offloading, allocate pinned CPU
+buffers once and reuse them with {meth}`~torch.Tensor.copy_`:
+
+```python
+# Allocate once for a CUDA tensor t with a fixed shape and dtype.
+cpu_buf = torch.empty(t.shape, dtype=t.dtype, device="cpu", pin_memory=True)
+copy_done = torch.cuda.Event()
+
+# Repeat for each transfer, after producing t on the current stream.
+with torch.no_grad():
+    cpu_buf.copy_(t, non_blocking=True)
+copy_done.record(torch.cuda.current_stream(t.device))
+
+# Independent CPU work can run here while the copy is in flight.
+copy_done.synchronize()
+# cpu_buf is now safe to read on the CPU.
+```
+
+Wait for the copy to complete before reading or modifying `cpu_buf` on the
+CPU, and finish consuming its contents before reusing it. Do not modify the
+source tensor while the copy is in flight. `non_blocking=True` avoids waiting
+on the host, but operations on the same CUDA stream still execute in order.
+To overlap the transfer with independent GPU computation, use a separate
+stream and establish the required dependencies and tensor lifetimes as
+described in {ref}`cuda-stream-semantics`.
+
+For a dense CUDA tensor, `tensor.to("cpu", non_blocking=True)` allocates its
+CPU output in pinned memory. Apply the same synchronization described above
+for {meth}`~torch.Tensor.copy_`: wait for the transfer to complete before
+accessing the result on the CPU.
+
+PyTorch's caching host allocator can reuse freed pinned allocations, which
+amortizes allocation costs. See the `pinned_*` options in
+{ref}`cuda-memory-envvars` for allocator configuration.
+
+When measuring bandwidth, distinguish allocation and the first transfer from
+transfers into a reused buffer, and synchronize to measure completion rather
+than enqueue time. Hardware-coherent systems can access pageable memory
+directly, so do not assume every pageable transfer requires a staging buffer.
+See NVIDIA's [Unified Memory performance tuning guidance](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#performance-tuning)
+for details on populated buffers and memory placement.
 
 (cuda-nn-ddp-instead)=
 

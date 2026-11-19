@@ -21,6 +21,11 @@ from torch._inductor.fx_passes.bucketing import get_collective_type, is_wait_ten
 from torch._inductor.fx_utils import get_fake_args_kwargs
 from torch._inductor.utils import get_collective_config
 from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    maybe_get_fake_mode,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -34,15 +39,15 @@ logger = logging.getLogger(__name__)
 _MIN_GRAM_MMS = 2
 
 
-def _get_fake_mode(node: fx.Node) -> torch._subclasses.fake_tensor.FakeTensorMode:
+def _get_fake_mode(node: fx.Node) -> FakeTensorMode | CppFakeTensorMode:
     """Get FakeTensorMode: V.fake_mode during compilation, from node meta in tests."""
     mode = V.fake_mode
-    if isinstance(mode, torch._subclasses.fake_tensor.FakeTensorMode):
+    if isinstance(mode, FakeTensorMode):
         return mode
     # Standalone call (tests) -- extract from node metadata
     for inp in node.all_input_nodes:
         val = inp.meta.get("val")
-        fake_mode = torch._subclasses.fake_tensor.maybe_get_fake_mode(val)
+        fake_mode = maybe_get_fake_mode(val)
         if fake_mode is not None:
             return fake_mode
     raise RuntimeError(f"No FakeTensorMode available for {node.name}")

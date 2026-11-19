@@ -82,7 +82,8 @@ bool can_use_native_serial_stack_impl(Tensor& result, TensorListType tensors, in
   auto first_tensor_mem_format = first_tensor.suggest_memory_format();
   ScalarType dtype = first_tensor.scalar_type();
 
-  if (!result.is_contiguous(first_tensor_mem_format)) {
+  if (!result.is_contiguous(first_tensor_mem_format) ||
+      !first_tensor.is_contiguous(first_tensor_mem_format)) {
     return false;
   }
 

@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
+    disable_gc,
     HardwareClassification,
     IS_ARM64,
     IS_WINDOWS,
@@ -240,6 +241,20 @@ class ProfilerTree:
         # whole operand type list rather than ending in an argument list.
         name = re.sub(r"^(at::native::xpu::\w+)<.+>$", r"\1<...>", name)
 
+        # An XPU kernel ported to the SYCL free function kernel extension is
+        # enqueued through a wrapper type that takes the kernel as a template
+        # argument, so the profiled name is the wrapper rather than the kernel.
+        # Since oneAPI 2026.2 the profiled name is the kernel signature instead,
+        # with `__sycl_kernel_` prefixed to every qualified name.
+        # Name the kernel, so that porting a kernel does not rewrite the tree.
+        name = re.sub(
+            r"^(?:sycl::\w+::ext::oneapi::experimental::detail::"
+            r"NdRangeFreeFunctionKernelWrapper<&\(\w+ |void __sycl_kernel_)"
+            r"(at::native::xpu::\w+)<.+[>)]$",
+            r"\1<...>",
+            name,
+        )
+
         # HACK: this patches around the fact that PyBind11 improperly sets the
         # __qualname__ attribute on functions and methods; see
         # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
@@ -326,6 +341,8 @@ class TestProfilerTree(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
+    # GC can resume unrelated generators and add frames to the recorded tree.
+    @disable_gc()
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
@@ -1222,7 +1239,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                     urEnqueueUSMMemcpy
                       Memcpy H2D (Host (Driver Allocated) -> Device)
                     urEnqueueKernelLaunchWithArgsExp
-                      at::native::xpu::MultiTensorApplyKernelFunctor<...>
+                      at::native::xpu::multi_tensor_apply_kernel<...>
                     aten::empty
                       [memory]
                     aten::empty

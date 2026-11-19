@@ -1267,7 +1267,7 @@ struct to_ir {
           static_if = !*v.staticIf();
         }
         return CondValue(result, v.refinements().Not(), static_if);
-      } break;
+      }
       case TK_IS:
       case TK_ISNOT: {
         // meta programming on AST for is/is not cases and emit branches base on
@@ -1303,7 +1303,7 @@ struct to_ir {
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
           return CondValue(cond_value, refinements, std::nullopt);
         }
-      } break;
+      }
       default: {
         if (expr.kind() == TK_APPLY) {
           auto apply = Apply(expr);
@@ -1340,7 +1340,7 @@ struct to_ir {
           static_if = maybe_ivalue->toBool();
         }
         return CondValue(expr_out, RefinementSet({}), static_if);
-      } break;
+      }
     }
   }
 
@@ -3536,7 +3536,7 @@ struct to_ir {
           v = graph->insertUncheckedCast(v, type);
         }
         return std::make_shared<SimpleValue>(v);
-      } break;
+      }
       case prim::GetAttr: {
         checkApplyNumInputsRange(apply, 2, 3);
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);
@@ -3560,7 +3560,7 @@ struct to_ir {
             return emitSugaredExpr(apply.inputs()[2], 1);
           }
         }
-      } break;
+      }
       case prim::Uninitialized: {
         checkApplyNumInputs(apply, 1);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -3670,7 +3670,7 @@ struct to_ir {
         checkApplyNumInputs(apply, 2);
         const auto result = emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
-      } break;
+      }
       // This represents the "__new__" method on classes
       // because it takes a ClassValue as input.
       // So if we see:
@@ -4196,10 +4196,10 @@ struct to_ir {
       case TK_APPLY: {
         auto apply = Apply(tree);
         return emitApplyExpr(apply, n_binders, type_hint);
-      } break;
+      }
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree), type_hint);
-      } break;
+      }
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
@@ -4814,43 +4814,43 @@ struct to_ir {
       }
       case TK_CONST: {
         return emitConst(Const(tree));
-      } break;
+      }
       case TK_TRUE: {
         return graph->insertConstant(true, tree->range());
-      } break;
+      }
       case TK_FALSE: {
         return graph->insertConstant(false, tree->range());
-      } break;
+      }
       case TK_NONE: {
         return graph->insertConstant(IValue(), tree->range());
-      } break;
+      }
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree), type_hint);
-      } break;
+      }
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));
-      } break;
+      }
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         return emitListLiteral(ll, type_hint);
-      } break;
+      }
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
         return graph->insertNode(graph->createTuple(values))->output();
-      } break;
+      }
       case TK_DICT_LITERAL: {
         auto dc = DictLiteral(tree);
         return emitDictLiteral(dc, type_hint);
-      } break;
+      }
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
         return emitListComprehension(lc, type_hint);
-      } break;
+      }
       case TK_DICT_COMP: {
         auto dc = DictComp(tree);
         return emitDictComprehension(dc, type_hint);
-      } break;
+      }
       default:
         throw(ErrorReport(tree) << "Cannot emit expr for: " << tree);
     }

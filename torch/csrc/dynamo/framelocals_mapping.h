@@ -12,11 +12,7 @@
 
 extern "C" {
 
-#if IS_PYTHON_3_11_PLUS
 using FrameLocalsFrameType = _PyInterpreterFrame;
-#else
-using FrameLocalsFrameType = PyFrameObject;
-#endif // IS_PYTHON_3_11_PLUS
 
 /**
  * Utility to view a frame's localsplus (locals + cells + freevars)

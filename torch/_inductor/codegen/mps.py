@@ -20,7 +20,9 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
+from ..codecache import code_hash, get_path
+from ..scheduler import WhyNoFuse
+from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata, Placeholder
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
@@ -30,12 +32,15 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
+from .cpp_wrapper_gpu import cpp_string_literal
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ops_handler import ReductionType, StoreMode
-    from ..scheduler import Scheduler, SchedulerNode
+    from ..scheduler import BaseSchedulerNode, Scheduler, SchedulerNode
     from .common import OpVarT
 
 log = logging.getLogger(__name__)
@@ -333,8 +338,23 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def log1p(x: CSEVariable) -> str:
+        return f"c10::metal::log1p({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
         return f"metal::precise::exp({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def expm1(x: CSEVariable) -> str:
+        # same form as expm1_functor in UnaryKernel.metal
+        V.kernel.headers.add("special_math")
+        return (
+            f"(metal::fabs({x}) < 0.1f ? c10::metal::expm1f({x})"
+            f" : metal::precise::exp({x}) - 1.0f)"
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -600,6 +620,7 @@ class MetalOverrides(OpOverrides):
             "hermite_polynomial_h",
             "hermite_polynomial_he",
             "laguerre_polynomial_l",
+            "legendre_polynomial_p",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
@@ -624,6 +645,10 @@ class MetalKernel(SIMDKernel):
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
     simd_group_size = 32
+    # thread_position_in_grid is 32-bit per axis; Metal silently truncates larger grids
+    max_grid_size = torch.iinfo(torch.uint32).max
+    # Power-of-two stride of the in-kernel loop over ranges that may not fit the grid
+    grid_stride = 2**31
     # Device that generated kernels are launched on. Subclasses reusing the
     # Metal-style call plumbing for another device can override this instead of
     # copying call_kernel(). A retarget is not usable on its own yet: the
@@ -635,7 +660,7 @@ class MetalKernel(SIMDKernel):
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
-    headers: OrderedSet[str] = OrderedSet(["utils"])
+    headers: OrderedSet[str]
     multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
@@ -644,6 +669,7 @@ class MetalKernel(SIMDKernel):
         **kwargs: Any,
     ) -> None:
         super().__init__(tiling, **kwargs)
+        self.headers = OrderedSet(["utils"])
         self.acc_var_ids = itertools.count()
         # Reductions shorter than a simdgroup run serially, in one thread per output
         rnumel = self.features.reduction_numel
@@ -803,9 +829,14 @@ class MetalKernel(SIMDKernel):
         if reduction_type == "any":
             acc = self._new_idxvar(dtype)
             self.indexing_code.writeline(f"{acc} = false;")
-            self.indexing_code.writeline(
-                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-            )
+            # Serial reductions keep acc thread-local, so barriers protect nothing here.
+            # They would also be unsafe: a serial threadgroup spans many rows, and under a
+            # grid-stride loop its threads can handle different numbers of rows, while
+            # Metal requires every thread of a threadgroup to reach each barrier.
+            if self.max_threadgroup_size > 1:
+                self.indexing_code.writeline(
+                    "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                )
             self.compute.splice(
                 f"""
                 if ({value}) {{
@@ -813,9 +844,10 @@ class MetalKernel(SIMDKernel):
                 }}
             """
             )
-            self.stores.writeline(
-                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-            )
+            if self.max_threadgroup_size > 1:
+                self.stores.writeline(
+                    "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                )
             return acc
 
         self.headers.add("reduction_utils")
@@ -1069,6 +1101,19 @@ class MetalKernel(SIMDKernel):
         self.compute.clear()
         self.stores.clear()
 
+    def grid_stride_prefixes(self) -> OrderedSet[str]:
+        """Prefixes of non-reduction ranges that may exceed the grid. These launch
+        min(numel, grid_stride) threads that each loop over the range in grid_stride steps."""
+        # 32-bit indexing already guards the whole iteration space to fit in int32
+        if self.get_index_dtype_as_torch_dtype() != torch.int64:
+            return OrderedSet()
+        return OrderedSet(
+            t.prefix
+            for t in self.active_range_trees()
+            if not t.is_reduction
+            and not V.graph.sizevars.statically_known_leq(t.numel, self.max_grid_size)
+        )
+
     def codegen_kernel(self, name: str = "generated_kernel") -> str:
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
@@ -1081,6 +1126,7 @@ class MetalKernel(SIMDKernel):
             code.writeline("compile_mps_shader('''")
 
         idx_vars = self.active_range_trees()
+        strided = self.grid_stride_prefixes()
         with code.indent():
             if not V.graph.cpp_wrapper:
                 for header in self.headers:
@@ -1148,7 +1194,9 @@ class MetalKernel(SIMDKernel):
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
                 )
                 thread_pos_var_name = (
-                    idx_vars[0].name if len(idx_vars) == 1 else "thread_pos"
+                    idx_vars[0].name
+                    if len(idx_vars) == 1 and not strided
+                    else "thread_pos"
                 )
                 thread_pos_suffix = "," if self.inside_reduction else ""
                 code.writeline(
@@ -1160,13 +1208,40 @@ class MetalKernel(SIMDKernel):
                     )
             code.writeline(") {")
             with code.indent():
-                if len(idx_vars) > 1:
+                if len(idx_vars) > 1 or strided:
                     for idx, var in enumerate(idx_vars):
-                        code.writeline(
-                            f"auto {var.name} = thread_pos.{chr(120 + idx)};"
+                        pos = (
+                            f"thread_pos.{chr(120 + idx)}"
+                            if len(idx_vars) > 1
+                            else "thread_pos"
                         )
-                code.splice(self.indexing_code)
-                code.splice(self.body)
+                        if var.prefix not in strided:
+                            code.writeline(f"auto {var.name} = {pos};")
+                            continue
+                        numel = (
+                            self.sexpr(var.numel)
+                            if isinstance(var.numel, sympy.Integer)
+                            else f"{var.prefix}numel"
+                        )
+                        code.writeline(
+                            f"for ({self.index_dtype} {var.name} = {pos}; {var.name} < {numel}; {var.name} += {self.grid_stride}) {{"
+                        )
+                with code.indent(len(strided)):
+                    code.splice(self.indexing_code)
+                    code.splice(self.body)
+                    # Threads of a threadgroup share their non-reduction indices and so
+                    # iterate in lockstep; the next iteration must not overwrite threadgroup
+                    # memory that other threads are still reading.
+                    if (
+                        strided
+                        and self.inside_reduction
+                        and self.max_threadgroup_size > 1
+                    ):
+                        code.writeline(
+                            "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+                        )
+                if strided:
+                    code.writeline("}" * len(strided))
             code.writeline("}")
 
         if V.graph.cpp_wrapper:
@@ -1223,10 +1298,13 @@ class MetalKernel(SIMDKernel):
         # For reduction kernels, limit the maximum size over reduction dimensions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
+            strided = self.grid_stride_prefixes()
             threads = [
                 expr_printer(
                     Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
+                    else Min(v.numel, self.grid_stride)  # type: ignore[misc]
+                    if v.prefix in strided
                     else v.numel
                 )
                 for v in self.active_range_trees()
@@ -1277,7 +1355,7 @@ class MetalKernel(SIMDKernel):
             self.compute.writelines(
                 [
                     f"if (!{cond}) {{",
-                    f"    TORCH_REPORT_ERROR(error_buf, {repr(msg)});",
+                    f"    TORCH_REPORT_ERROR(error_buf, {cpp_string_literal(msg)});",
                     "    return;",
                     "}",
                 ]
@@ -1321,17 +1399,82 @@ class MetalKernel(SIMDKernel):
 
 
 class MetalScheduling(SIMDScheduling):
+    """Scheduling for MPS: emits Metal kernels, plus external template kernels
+    (e.g. Helion) that render and emit their own Python source."""
+
     kernel_type = MetalKernel  # type: ignore[assignment]
 
     def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
 
+    def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        # MPS has no Metal templates, so every template here is an external one
+        # (e.g. Helion), whose fusion hooks generate Triton code; fusing other
+        # nodes into it gives wrong results or breaks MPS wrapper codegen. Helion
+        # turns template fusion off on Metal; this covers templates that leave it
+        # on. A multi-output template still absorbs its MultiOutput children: the
+        # scheduler fuses those before asking the backend.
+        if node1.is_template() or node2.is_template():
+            WhyNoFuse(node1, node2)("MPS does not fuse into external templates")
+            return False
+        return super().can_fuse(node1, node2)
+
+    can_fuse_vertical = can_fuse
+    can_fuse_horizontal = can_fuse
+
+    def codegen_template(
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
+        *,
+        only_gen_src_code: bool = False,
+        hint_override: int | None = None,
+    ) -> str | None:
+        # Checked before rendering, since rendering is where Helion autotunes.
+        if V.graph.cpp_wrapper:
+            raise NotImplementedError(
+                "External template kernels (e.g. Helion) are not supported on MPS "
+                "with cpp_wrapper or AOTInductor; use torch.compile with the default "
+                "Python wrapper"
+            )
+        return super().codegen_template(
+            template_node,
+            epilogue_nodes,
+            prologue_nodes,
+            only_gen_src_code=only_gen_src_code,
+            hint_override=hint_override,
+        )
+
     def define_kernel(
-        self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
+        self, src_code: str, node_schedule: list[SchedulerNode], kernel: SIMDKernel
     ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
+
+        if not isinstance(kernel, MetalKernel):
+            # External template kernels (e.g. Helion) render their own Python source
+            # and emit it themselves, as with TritonScheduling.
+            fn_name = f"generated_kernel_{wrapper.next_kernel_suffix()}"
+            named_src = src_code.replace(
+                str(Placeholder.DESCRIPTIVE_NAME), fn_name
+            ).replace(str(Placeholder.KERNEL_NAME), fn_name)
+            _, _, kernel_path = get_path(code_hash(named_src.strip()), "py")
+            if not kernel.emit_kernel_override(
+                wrapper,
+                named_src,
+                fn_name,
+                node_schedule,
+                kernel_path,
+                get_kernel_metadata,
+            ):
+                raise NotImplementedError(
+                    f"MPS cannot emit {type(kernel).__name__}: only Metal kernels and "
+                    "kernels whose emit_kernel_override emits their source are supported"
+                )
+            wrapper.src_to_kernel[src_code] = fn_name
+            return fn_name
 
         if V.graph.cpp_wrapper:
             # C++ path: one library per kernel (each has a single "generated_kernel" function)
@@ -1368,7 +1511,7 @@ class MetalScheduling(SIMDScheduling):
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
         for line in body_lines:
-            wrapper.header.writeline(line)
+            wrapper.header.writeline(line.replace("\\", "\\\\").replace("'", "\\'"))
         wrapper.header.writeline(f"''', {headers_repr})")
 
         return fn_name

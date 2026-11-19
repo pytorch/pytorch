@@ -31,6 +31,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typelist.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typetraits.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_transposetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
 )

@@ -1,6 +1,6 @@
 """Stateless PRNG APIs.
 
-These are experimental and subject to change without notice.
+These are a prototype and subject to change without notice.
 Access via ``torch.func._random``.
 """
 
@@ -41,7 +41,8 @@ def key(
     Args:
         seed (int): The seed value for the PRNG.
         device (:class:`torch.device`, optional): The desired device for the
-            returned key. Default: ``cpu``.
+            returned key. Default: the current default device (see
+            :func:`torch.set_default_device`).
         impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
             supported.
 
@@ -227,8 +228,8 @@ def uniform_(
     key: torch.Tensor,
     result: torch.Tensor,
     *,
-    low: float = 0.0,
-    high: float = 1.0,
+    low: float | torch.Tensor = 0.0,
+    high: float | torch.Tensor = 1.0,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with uniform random values from a PRNG key.
 
@@ -240,12 +241,19 @@ def uniform_(
     dimensions of ``result`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``low`` / ``high`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         result (Tensor): The output tensor to fill in-place.
-        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
-        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        low (float or Tensor): Lower bound (inclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``result``
+            and gives a bound per element. Default: ``0.0``.
+        high (float or Tensor): Upper bound (exclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``result``
+            and gives a bound per element. Default: ``1.0``.
 
     Returns:
         ``result``, filled with uniform random values.
@@ -256,14 +264,24 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
-    return torch.ops.aten._philox_uniform_(result, key, low, high)
+    if not isinstance(low, torch.Tensor) and not isinstance(high, torch.Tensor):
+        return torch.ops.aten._philox_uniform_(result, key, low, high)
+
+    def wrap_scalar(bound):
+        # float64 matches the scalar overload's double rounding.
+        if isinstance(bound, torch.Tensor):
+            return bound
+        return torch.tensor(bound, dtype=torch.float64, device=result.device)
+
+    low, high = wrap_scalar(low), wrap_scalar(high)
+    return torch.ops.aten._philox_uniform_.Tensor(result, key, low, high)
 
 
 def uniform(
     key: torch.Tensor,
     *shape: tuple[int, ...],
-    low: float = 0.0,
-    high: float = 1.0,
+    low: float | torch.Tensor = 0.0,
+    high: float | torch.Tensor = 1.0,
     dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     r"""Generate uniformly distributed random values from a PRNG key.
@@ -277,12 +295,19 @@ def uniform(
     dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``low`` / ``high`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         *shape (int): The desired output shape.
-        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
-        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        low (float or Tensor): Lower bound (inclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``shape``
+            and gives a bound per element. Default: ``0.0``.
+        high (float or Tensor): Upper bound (exclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``shape``
+            and gives a bound per element. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
 
     Returns:
@@ -366,7 +391,8 @@ def randint_(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
 
     Returns:
@@ -375,9 +401,9 @@ def randint_(
     .. note::
 
         Values are reduced into ``[low, high)`` with a modulo, which is exactly
-        uniform only when ``high - low`` is a power of two. Ranges of ``2 ** 28``
-        or more are rejected for 32-bit dtypes; use a 64-bit dtype if you need a
-        range that large. See :func:`randint` for the bias in detail.
+        uniform only when ``high - low`` is a power of two. Other ranges of
+        ``2 ** 28`` or more are rejected for 32-bit dtypes; use a 64-bit dtype if
+        you need a range that large. See :func:`randint` for the bias in detail.
 
     Example::
 
@@ -457,7 +483,8 @@ def randint(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
         dtype (:class:`torch.dtype`, optional): The desired dtype: any integer
             dtype other than ``torch.bool``. Default: ``torch.int32``.

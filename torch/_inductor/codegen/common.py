@@ -17,8 +17,8 @@ from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
-from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
-from typing_extensions import Self, TypeVar
+from typing import Any, cast, ClassVar, Generic, NamedTuple, Self, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import sympy
 
@@ -961,12 +961,13 @@ def check_shape(
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
 
 
-def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
+def check_nan(var: CSEVariableType) -> None:
     backend = get_current_backend()
     if backend == "triton":
         msg = "NaN or Inf found"
-        buffer.writeline(
-            f"tl.device_assert(({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf')), '{msg}')"
+        V.kernel.device_assert_async(
+            f"({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf'))",
+            msg,
         )
 
 
@@ -3016,7 +3017,7 @@ class CSEProxy(DefaultHandler):
                     check_shape(V.kernel.compute, csevar, shape_to_check)
 
             if config.runtime_triton_nan_asserts:
-                check_nan(V.kernel.compute, csevar)
+                check_nan(csevar)
 
             return csevar
 
@@ -3116,13 +3117,18 @@ class CSEProxy(DefaultHandler):
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
-            var = self.kernel.cse.generate(
+            wrapped = self.kernel.cse.generate(
                 self.kernel.compute,
                 stm,
                 bounds=new_bounds,
                 dtype=var.dtype,
                 shape=var.shape,
             )
+            if wrap_neg and var.bounds.upper >= 0:
+                # wrapped equals var where var is non-negative, so a backend can
+                # carry what it knows about such values, like being zero.
+                wrapped.update_on_args("indirect_indexing", (var,), {})
+            var = wrapped
 
         sympy_var = self.parent_handler.indirect_indexing(var, size, check)
         if generate_assert(check):

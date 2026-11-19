@@ -1159,7 +1159,8 @@
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      # Keep double backward finite for empty reductions.
+      self: (grad / self.sym_numel().max(1)).expand_symint(self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
@@ -1396,6 +1397,21 @@
   mean: at::zeros_symint(mean.sym_sizes(), grad.options())
   std: at::zeros_symint(std.sym_sizes(), grad.options())
   result: zeros_like(mean_t)
+
+# Reparameterized gradients.
+- name: _philox_uniform.Tensor(Tensor self, Tensor key, Tensor low, Tensor high) -> Tensor
+  self: zeros_like(grad)
+  key: non_differentiable
+  low, high: philox_uniform_bounds_backward(grad, key, low, high, grad_input_mask)
+  result: (low_t + (high_t - low_t) * at::empty_like(result)._philox_uniform_(key)).to(result.scalar_type())
+
+# Separate in-place entry: a forward formula derived from the out-of-place one
+# would never read self_t.
+- name: _philox_uniform_.Tensor(Tensor(a!) self, Tensor key, Tensor low, Tensor high) -> Tensor(a!)
+  self: zeros_like(grad)
+  key: non_differentiable
+  low, high: philox_uniform_bounds_backward(grad, key, low, high, grad_input_mask)
+  result: self_t.copy_(low_t + (high_t - low_t) * at::empty_like(result)._philox_uniform_(key))
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
@@ -1811,7 +1827,7 @@
 - name: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   self, A: triangular_solve_backward(grad_solution, grad_cloned_coefficient, self, A, solution, upper, transpose, unitriangular, grad_input_mask)
   solution: triangular_solve_jvp(solution, A_p, A_t, self_t, upper, transpose, unitriangular)
-  cloned_coefficient: A_t
+  cloned_coefficient: A_t.expand_as(cloned_coefficient)
 
 - name: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
   self, B: linalg_solve_triangular_backward(grad, self, result, upper, left, unitriangular, grad_input_mask)

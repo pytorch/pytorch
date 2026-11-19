@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch._inductor.analysis.device_info import (
     _device_mapping,
+    datasheet_dram_bw_gbs,
     datasheet_tops,
     DeviceInfo,
     lookup_device_info,
@@ -288,6 +289,12 @@ class TestUtils(TestCase):
         self.assertIsNotNone(upper)
         self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
         self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
+
+    def test_datasheet_info_for_intel_data_center_gpu_max_1550(self):
+        device_name = "Intel(R) Data Center GPU Max 1550"
+        self.assertEqual(datasheet_tops(torch.float16, device_name=device_name), 419.43)
+        self.assertEqual(datasheet_tops(torch.float32, device_name=device_name), 26.2)
+        self.assertEqual(datasheet_dram_bw_gbs(device_name=device_name), 1638.4)
 
     def test_register_device_info_normalizes_name(self):
         info = DeviceInfo(tops={}, dram_bw_gbs=123.0, dram_gb=1.0)

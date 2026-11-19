@@ -101,7 +101,7 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
         # Use deterministic equal-sized groups.
         offs = build_equal_k_group_offs(K, G, device)
 
-        # Create FP8 inputs directly (similar to test_scaled_grouped_gemm_2d_2d)
+        # Create FP8 inputs directly (similar to test_scaled_grouped_gemm_rowwise)
         # Input shapes: (M, K) and (N, K) where K is the total K dimension
         x_lp = torch.randn(M, K, device=device, dtype=self.base_dtype).to(
             self.float8_dtype

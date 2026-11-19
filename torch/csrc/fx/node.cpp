@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 #include <structmember.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <algorithm>
@@ -69,7 +70,7 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
     if (!new_tuple) {
       throw PythonError();
     }
-    for (Py_ssize_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       PyObject* elem = PyTuple_GET_ITEM(a, i); // Borrowed reference.
       // PyTuple_SET_ITEM steals reference to result of map_aggregate
       PyTuple_SET_ITEM(new_tuple.get(), i, map_aggregate(elem, fn));
@@ -93,7 +94,7 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
     if (!result) {
       throw PythonError();
     }
-    for (Py_ssize_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       PyObject* elem = PyList_GET_ITEM(a, i); // borrowed ref
       THPObjectPtr mapped(map_aggregate(elem, fn));
       if (PyList_Append(result.get(), mapped.get()) < 0) {
@@ -508,7 +509,7 @@ static PyObject* NodeBase_get_sort_key(PyObject* self, void* /*closure*/) {
   if (!tuple) {
     return nullptr; // Out of memory
   }
-  for (Py_ssize_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     PyObject* value = PyLong_FromSsize_t(vec[i]);
     if (!value) {
       return nullptr;
@@ -532,7 +533,7 @@ static int NodeBase_set_sort_key(
   Py_ssize_t size = PyTuple_GET_SIZE(value);
   NodeSortKey new_vec;
   new_vec.reserve(size);
-  for (Py_ssize_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     int64_t val = PyLong_AsSsize_t(PyTuple_GET_ITEM(value, i));
     if (val == -1 && PyErr_Occurred()) {
       return -1;

@@ -1736,6 +1736,255 @@ def forward(self, x_1, w_1):
             torch.baddbmm(input_t, batch1, batch2, alpha=alpha, beta=beta, out=out)
             self.assertEqual(out, expected)
 
+    @dtypes(torch.float)
+    def test_matmul_cow_input(self, device, dtype):
+        # mm
+        a = torch.randn(4, 8, device=device, dtype=dtype)
+        b = torch.randn(8, 16, device=device, dtype=dtype)
+        a_cow = torch._lazy_clone(a)
+        b_cow = torch._lazy_clone(b)
+        a_copy, b_copy = a_cow.clone(), b_cow.clone()
+        torch.mm(a_cow, b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        self.assertEqual(a_cow, a_copy)
+        self.assertEqual(b_cow, b_copy)
+
+        # bmm
+        a_b = torch.randn(2, 4, 8, device=device, dtype=dtype)
+        b_b = torch.randn(2, 8, 16, device=device, dtype=dtype)
+        a_b_cow = torch._lazy_clone(a_b)
+        b_b_cow = torch._lazy_clone(b_b)
+        a_b_copy, b_b_copy = a_b_cow.clone(), b_b_cow.clone()
+        torch.bmm(a_b_cow, b_b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(a_b_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_b_cow))
+        self.assertEqual(a_b_cow, a_b_copy)
+        self.assertEqual(b_b_cow, b_b_copy)
+
+        # addmm
+        bias = torch.randn(4, 16, device=device, dtype=dtype)
+        bias_cow = torch._lazy_clone(bias)
+        a_cow = torch._lazy_clone(a)
+        b_cow = torch._lazy_clone(b)
+        bias_copy, a_copy, b_copy = bias_cow.clone(), a_cow.clone(), b_cow.clone()
+        torch.addmm(bias_cow, a_cow, b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(bias_cow))
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        self.assertEqual(bias_cow, bias_copy)
+        self.assertEqual(a_cow, a_copy)
+        self.assertEqual(b_cow, b_copy)
+
+        # matmul
+        a_cow = torch._lazy_clone(a)
+        b_cow = torch._lazy_clone(b)
+        a_copy, b_copy = a_cow.clone(), b_cow.clone()
+        torch.matmul(a_cow, b_cow)
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        self.assertEqual(a_cow, a_copy)
+        self.assertEqual(b_cow, b_copy)
+
+    def test_qlinear_cow_input(self, device):
+        M, K, N = 4, 8, 16
+        qx = torch.randint(-128, 127, (M, K), dtype=torch.int8, device=device)
+        qw = torch.randint(-128, 127, (K, N), dtype=torch.int8, device=device)
+        w_scale = torch.ones(N, dtype=torch.float32, device=device)
+        w_zp = torch.zeros(N, dtype=torch.int32, device=device)
+        bias = torch.zeros(N, dtype=torch.float32, device=device)
+        qx_cow = torch._lazy_clone(qx)
+        qw_cow = torch._lazy_clone(qw)
+        w_scale_cow = torch._lazy_clone(w_scale)
+        w_zp_cow = torch._lazy_clone(w_zp)
+        bias_cow = torch._lazy_clone(bias)
+        qx_copy, qw_copy = qx_cow.clone(), qw_cow.clone()
+        w_scale_copy, w_zp_copy, bias_copy = (
+            w_scale_cow.clone(),
+            w_zp_cow.clone(),
+            bias_cow.clone(),
+        )
+        torch.ops.onednn.qlinear_pointwise(
+            qx_cow,
+            1.0,
+            0,
+            qw_cow,
+            w_scale_cow,
+            w_zp_cow,
+            bias_cow,
+            1.0,
+            0,
+            torch.float32,
+            "none",
+            [],
+            "",
+        )
+        self.assertTrue(torch._C._is_cow_tensor(qx_cow))
+        self.assertTrue(torch._C._is_cow_tensor(qw_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_scale_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_zp_cow))
+        self.assertTrue(torch._C._is_cow_tensor(bias_cow))
+        self.assertEqual(qx_cow, qx_copy)
+        self.assertEqual(qw_cow, qw_copy)
+        self.assertEqual(w_scale_cow, w_scale_copy)
+        self.assertEqual(w_zp_cow, w_zp_copy)
+        self.assertEqual(bias_cow, bias_copy)
+
+    def test_qconv_cow_input(self, device):
+        x = torch.randint(-128, 127, (2, 4, 8, 8), dtype=torch.int8, device=device)
+        w = torch.randint(-128, 127, (4, 4, 3, 3), dtype=torch.int8, device=device)
+        w_scale = torch.ones(4, dtype=torch.float32, device=device)
+        bias = torch.zeros(4, dtype=torch.float32, device=device)
+        x_cow = torch._lazy_clone(x)
+        w_cow = torch._lazy_clone(w)
+        w_scale_cow = torch._lazy_clone(w_scale)
+        bias_cow = torch._lazy_clone(bias)
+        x_copy, w_copy, w_scale_copy, bias_copy = (
+            x_cow.clone(),
+            w_cow.clone(),
+            w_scale_cow.clone(),
+            bias_cow.clone(),
+        )
+        torch.ops.onednn.qconv2d_pointwise(
+            x_cow,
+            1.0,
+            0,
+            w_cow,
+            w_scale_cow,
+            None,
+            bias_cow,
+            [1, 1],
+            [0, 0],
+            [1, 1],
+            1,
+            1.0,
+            0,
+            torch.float32,
+            "none",
+            [],
+            "",
+        )
+        self.assertTrue(torch._C._is_cow_tensor(x_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_cow))
+        self.assertTrue(torch._C._is_cow_tensor(w_scale_cow))
+        self.assertTrue(torch._C._is_cow_tensor(bias_cow))
+        self.assertEqual(x_cow, x_copy)
+        self.assertEqual(w_cow, w_copy)
+        self.assertEqual(w_scale_cow, w_scale_copy)
+        self.assertEqual(bias_cow, bias_copy)
+
+    def test_scaled_mm_cow_input(self, device):
+        a = torch.randn(16, 16, device=device).to(torch.float8_e4m3fn)
+        b = torch.randn(16, 16, device=device).to(torch.float8_e4m3fn).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        bias = torch.randn(16, device=device, dtype=torch.bfloat16)
+        a_cow = torch._lazy_clone(a)
+        b_cow = torch._lazy_clone(b)
+        scale_a_cow = torch._lazy_clone(scale_a)
+        scale_b_cow = torch._lazy_clone(scale_b)
+        bias_cow = torch._lazy_clone(bias)
+        a_copy, b_copy, scale_a_copy, scale_b_copy, bias_copy = (
+            a_cow.clone(),
+            b_cow.clone(),
+            scale_a_cow.clone(),
+            scale_b_cow.clone(),
+            bias_cow.clone(),
+        )
+        torch._scaled_mm(
+            a_cow,
+            b_cow,
+            scale_a=scale_a_cow,
+            scale_b=scale_b_cow,
+            bias=bias_cow,
+            out_dtype=torch.bfloat16,
+        )
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        self.assertTrue(torch._C._is_cow_tensor(scale_a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(scale_b_cow))
+        self.assertTrue(torch._C._is_cow_tensor(bias_cow))
+        self.assertEqual(a_cow, a_copy)
+        self.assertEqual(b_cow, b_copy)
+        self.assertEqual(scale_a_cow, scale_a_copy)
+        self.assertEqual(scale_b_cow, scale_b_copy)
+        self.assertEqual(bias_cow, bias_copy)
+
+    def test_woq_matmul_int4_cow_input(self, device):
+        a = torch.randn(8, 32, dtype=torch.bfloat16)
+        b = torch.randn(32, 32)
+        inner_k_tiles = 2
+        q_group = 32
+        w = b.transpose(0, 1).contiguous()
+        to_quant = w.reshape(-1, q_group)
+        max_val = to_quant.amax(dim=1, keepdim=True)
+        min_val = to_quant.amin(dim=1, keepdim=True)
+        scales = (max_val - min_val).clamp(min=1e-6) / 15
+        zeros = torch.clamp(-min_val.div(scales).round(), 0, 15).to(torch.int8)
+        out = (
+            to_quant.div(scales)
+            .add(zeros)
+            .round()
+            .clamp_(0, 15)
+            .to(torch.int32)
+            .reshape(w.shape)
+        )
+        out = (out[::, 1::2] << 4 | out[::, 0::2]).to(torch.uint8)
+        scales = (
+            scales.view(w.shape[0], -1).transpose(0, 1).contiguous().to(torch.bfloat16)
+        )
+        zeros = zeros.view(w.shape[0], -1).transpose(0, 1).contiguous()
+        b_int4pack = torch._convert_weight_to_int4pack(out.to(device), inner_k_tiles)
+        a_dev = a.to(device)
+        scales_dev = scales.to(device)
+        zeros_dev = zeros.to(device)
+
+        # 1st call: primitive-cache miss
+        a_cow = torch._lazy_clone(a_dev)
+        b_cow = torch._lazy_clone(b_int4pack)
+        scales_cow = torch._lazy_clone(scales_dev)
+        zeros_cow = torch._lazy_clone(zeros_dev)
+        a_copy, b_copy, scales_copy, zeros_copy = (
+            a_cow.clone(),
+            b_cow.clone(),
+            scales_cow.clone(),
+            zeros_cow.clone(),
+        )
+        torch._weight_int4pack_mm_with_scales_and_zeros(
+            a_cow, b_cow, q_group, scales_cow, zeros_cow
+        )
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow))
+        self.assertTrue(torch._C._is_cow_tensor(scales_cow))
+        self.assertTrue(torch._C._is_cow_tensor(zeros_cow))
+        self.assertEqual(a_cow, a_copy)
+        self.assertEqual(b_cow, b_copy)
+        self.assertEqual(scales_cow, scales_copy)
+        self.assertEqual(zeros_cow, zeros_copy)
+
+        # 2nd call: primitive-cache hit
+        a_cow2 = torch._lazy_clone(a_dev)
+        b_cow2 = torch._lazy_clone(b_int4pack)
+        scales_cow2 = torch._lazy_clone(scales_dev)
+        zeros_cow2 = torch._lazy_clone(zeros_dev)
+        a_copy2, b_copy2, scales_copy2, zeros_copy2 = (
+            a_cow2.clone(),
+            b_cow2.clone(),
+            scales_cow2.clone(),
+            zeros_cow2.clone(),
+        )
+        torch._weight_int4pack_mm_with_scales_and_zeros(
+            a_cow2, b_cow2, q_group, scales_cow2, zeros_cow2
+        )
+        self.assertTrue(torch._C._is_cow_tensor(a_cow2))
+        self.assertTrue(torch._C._is_cow_tensor(b_cow2))
+        self.assertTrue(torch._C._is_cow_tensor(scales_cow2))
+        self.assertTrue(torch._C._is_cow_tensor(zeros_cow2))
+        self.assertEqual(a_cow2, a_copy2)
+        self.assertEqual(b_cow2, b_copy2)
+        self.assertEqual(scales_cow2, scales_copy2)
+        self.assertEqual(zeros_cow2, zeros_copy2)
+
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
 

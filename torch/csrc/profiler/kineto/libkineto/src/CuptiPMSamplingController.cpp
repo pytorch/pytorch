@@ -11,9 +11,11 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <stdexcept>
 #include <utility>
 
 #include "Logger.h"
+#include "ThrowUtil.h"
 
 /*
  * ======================== CUPTI PM SAMPLING CONTROLLER
@@ -27,8 +29,7 @@
  *   1. Bound sample counts for large traces.
  *   2. Handle on-demand/async profiling, plus interaction with auto-trace/sync.
  *   3. Push hard-coded constants into user-provided vars.
- *   4. Add tests.
- *   5. Bound drain retries so shutdown cannot block indefinitely.
+ *   4. Bound drain retries so shutdown cannot block indefinitely.
  *
  * ==============================================================================
  */
@@ -42,7 +43,19 @@ constexpr std::chrono::milliseconds kDecodePollInterval{10};
 
 CuptiPMSamplingController::CuptiPMSamplingController(
     CuptiPMSamplingConfig config)
-    : config_(std::move(config)) {}
+    : CuptiPMSamplingController(
+          std::move(config),
+          std::make_unique<CuptiPMSamplingApi>()) {}
+
+CuptiPMSamplingController::CuptiPMSamplingController(
+    CuptiPMSamplingConfig config,
+    std::unique_ptr<ICuptiPMSamplingApi> api)
+    : config_(std::move(config)), api_(std::move(api)) {
+  if (!api_) {
+    KINETO_THROW(
+        std::invalid_argument, "CUPTI PM sampling requires a non-null API");
+  }
+}
 
 CuptiPMSamplingController::~CuptiPMSamplingController() {
   static_cast<void>(stop());
@@ -66,10 +79,10 @@ bool CuptiPMSamplingController::prepare() {
     if (!validateConfig()) {
       return false;
     }
-    api_.configure(config_);
+    api_->configure(config_);
   } catch (...) {
     logCurrentException("Failed to prepare CUPTI PM sampling");
-    api_.disable();
+    api_->disable();
     return false;
   }
   prepared_ = true;
@@ -88,7 +101,7 @@ void CuptiPMSamplingController::start() {
 
   stopRequested_.store(false, std::memory_order_relaxed);
   try {
-    api_.start();
+    api_->start();
     active_ = true;
     // Decode needs to happen on an async thread as it needs to synchronously
     // fetch new samples from the api
@@ -121,7 +134,7 @@ bool CuptiPMSamplingController::stop() {
   if (active_) {
     std::vector<CuptiPMSample> decodedSamples;
     try {
-      api_.stop();
+      api_->stop();
       if (!decodeFailed_.load(std::memory_order_relaxed)) {
         drain(decodedSamples);
       }
@@ -130,7 +143,7 @@ bool CuptiPMSamplingController::stop() {
     }
     active_ = false;
   }
-  api_.disable();
+  api_->disable();
   prepared_ = false;
   return wasActive;
 }
@@ -172,7 +185,7 @@ void CuptiPMSamplingController::decodeLoop() {
 bool CuptiPMSamplingController::decodeBatch(
     std::vector<CuptiPMSample>& decodedSamples) {
   decodedSamples.clear();
-  const bool isBufferDrained = api_.decode(decodedSamples);
+  const bool isBufferDrained = api_->decode(decodedSamples);
   std::lock_guard<std::mutex> lock(samplesMutex_);
   for (auto& sample : decodedSamples) {
     // CUPTI recommends discarding the first sample because it may contain

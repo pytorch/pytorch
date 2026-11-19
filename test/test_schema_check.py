@@ -19,7 +19,9 @@ from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    ops, OpDTypes, instantiate_device_type_tests, preserves_device_selection,
+)
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
@@ -102,13 +104,9 @@ class IncorrectAliasTensor(torch.Tensor):
         return tree_map(wrap, out)
 
 # Tests various schema checking functionalities.
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "SchemaCheckMode is ignored by dynamo")
 class TestSchemaCheck(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        if TEST_WITH_TORCHDYNAMO:
-            self.skipTest("SchemaCheckMode is ignored by dynamo")
-        super().setUp()
 
     # Tests that SchemaCheckMode records operator order with grad
     def test_schema_check_mode_operator_order(self):
@@ -508,6 +506,7 @@ class TestSchemaCheck(JitTestCase):
 
 class TestSchemaCheckModeOpInfo(JitTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(JitTestCase.setUp)
 
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)

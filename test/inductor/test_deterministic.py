@@ -6,10 +6,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.utils import counters
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
@@ -113,6 +115,48 @@ class DeterministicTest(TestCase):
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
+
+    @parametrize("fp_fusion", [True, False])
+    @parametrize("deterministic", [False, True])
+    def test_fp_fusion(self, deterministic, fp_fusion):
+        from torch._inductor.utils import run_and_get_code
+
+        with inductor_config.patch(
+            {"deterministic": deterministic, "triton.enable_fp_fusion": fp_fusion}
+        ):
+            x = torch.randn(16, device=GPU_TYPE)
+            _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
+        # Deterministic mode alone keeps FMA contraction.
+        self.assertIn(f"'enable_fp_fusion': {fp_fusion}", code)
+
+    @inductor_config.patch({"deterministic": True, "triton.enable_fp_fusion": False})
+    def test_pointwise_config_numerics(self):
+        # XBLOCK=128 and XBLOCK=256 contract different products into an FMA here.
+        def fn(x, buf):
+            return x / x.shape[0] * 0.01 + buf * 0.99
+
+        x = torch.randn(16384, device=GPU_TYPE)
+        buf = torch.randn(16384, device=GPU_TYPE)
+        xblocks, outs = [], []
+        # Force opposite timing winners (smallest vs largest XBLOCK).
+        for prefer_small in (True, False):
+            seen = set()
+
+            def bench(self, launcher, *args, **kwargs):
+                xblock = launcher.config.kwargs["XBLOCK"]
+                seen.add(xblock)
+                return float(xblock) if prefer_small else 1.0 / xblock
+
+            torch._dynamo.reset()
+            with (
+                fresh_cache(),
+                unittest.mock.patch.object(CachingAutotuner, "bench", bench),
+            ):
+                outs.append(torch.compile(fn, dynamic=True)(x, buf))
+            xblocks.append(min(seen) if prefer_small else max(seen))
+
+        self.assertNotEqual(xblocks[0], xblocks[1])
+        self.assertEqual(outs[0].view(torch.int32), outs[1].view(torch.int32))
 
     @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
     @inductor_config.patch(batch_invariant=True)
