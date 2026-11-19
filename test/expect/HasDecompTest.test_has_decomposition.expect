@@ -397,6 +397,7 @@ aten::_grid_sampler_2d_cpu_fallback
 aten::_grid_sampler_2d_cpu_fallback.out
 aten::_grid_sampler_2d_cpu_fallback_backward
 aten::_grouped_mm
+aten::_grouped_mm.out
 aten::_has_same_storage_numel
 aten::_histogramdd_bin_edges
 aten::_histogramdd_bin_edges.out
