@@ -41,7 +41,6 @@ else:
 KinetoProfiler = None
 IterationCount = 5
 ActivateIteration = 2
-device = None
 
 
 def blueprint(text):
@@ -50,6 +49,8 @@ def blueprint(text):
 
 # onIterationStart() will be called by C++ training engine in cpp_thread_test_lib.cpp
 class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
+    device = None
+
     def onIterationStart(self, iteration: int) -> None:
         global KinetoProfiler, IterationCount
         # it is important to start the profiler on the same thread that step() is called
@@ -66,18 +67,11 @@ class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
             KinetoProfiler.step()
 
     def emulateTraining(self, iteration: int, thread_id: int) -> None:
-        global device
-        # blueprint(f"training iteration {iteration} in thread {thread_id}")
-        torch_device = getattr(torch, device)
-        if not hasattr(torch_device, "synchronize"):
-            raise AssertionError(f"Device {device} does not have synchronize method")
-        sync_func = torch_device.synchronize
-
         with torch.autograd.profiler.record_function("user_function"):
-            a = torch.ones(1, device=device)
-            b = torch.ones(1, device=device)
+            a = torch.ones(1, device=self.device)
+            b = torch.ones(1, device=self.device)
             torch.add(a, b).cpu()
-            sync_func()
+            torch.accelerator.synchronize()
 
 
 class CppThreadTest(TestCase):
@@ -100,8 +94,7 @@ class CppThreadTest(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        global device
-        device = self.device_type
+        type(self).EventHandler.device = self.device_type
 
         # this clears off events from initialization
         self.start_profiler(False)
@@ -129,7 +122,7 @@ class CppThreadTest(TestCase):
             print(f"\33[31m{text}\33[0m")
         self.assertTrue(condition, msg)
 
-    def check_trace(self, expected, mem=False) -> None:
+    def check_trace(self, expected, device_type, mem=False) -> None:
         blueprint("verifying trace")
         event_list = type(self).TraceObject.events()
         for key, values in expected.items():
@@ -143,7 +136,7 @@ class CppThreadTest(TestCase):
             )
 
             if mem:
-                mem_key = f"{self.device_type}_memory_usage"
+                mem_key = f"{device_type}_memory_usage"
                 actual = 0
                 for ev in filtered:
                     sev = str(ev)
@@ -182,13 +175,16 @@ class CppThreadTest(TestCase):
         "The XPU Profiler will not cover this case for now. Will support it in next period.",
     )
     def test_with_enable_profiler_in_child_thread(self, device) -> None:
+        type(self).EventHandler.device = device
+        device_type = torch.device(device).type
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
         self.check_trace(
             {
                 "aten::add": [self.ThreadCount, "CPU"],
-                "user_function": [self.ThreadCount, self.device_type.upper()],
-            }
+                "user_function": [self.ThreadCount, device_type.upper()],
+            },
+            device_type,
         )
 
     @skipCUDAIf(
@@ -200,13 +196,16 @@ class CppThreadTest(TestCase):
         "The XPU Profiler will not cover this case for now. Will support it in next period.",
     )
     def test_without_enable_profiler_in_child_thread(self, device) -> None:
+        type(self).EventHandler.device = device
+        device_type = torch.device(device).type
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, False)
         self.check_trace(
             {
                 "aten::add": [1, "CPU"],
-                "user_function": [1, self.device_type.upper()],
-            }
+                "user_function": [1, device_type.upper()],
+            },
+            device_type,
         )
 
     @skipCUDAIf(
@@ -218,17 +217,22 @@ class CppThreadTest(TestCase):
         "The XPU Profiler will not cover this case for now. Will support it in next period.",
     )
     def test_profile_memory(self, device) -> None:
+        type(self).EventHandler.device = device
+        device_type = torch.device(device).type
         self.start_profiler(True)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
         self.check_trace(
             {
                 "aten::add": [self.ThreadCount, "CPU"],
             },
+            device_type,
             mem=True,
         )
 
 
-instantiate_device_type_tests(CppThreadTest, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    CppThreadTest, globals(), except_for=("cpu", "privateuse1")
+)
 
 if __name__ == "__main__":
     run_tests()
