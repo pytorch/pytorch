@@ -4158,6 +4158,10 @@ class RegionTwoHeads(torch.nn.Module):
         return self.used(x) + self.cache
 
 
+def region_method(model, view, x):
+    return model(view(2, 3, 6, 6) + x)
+
+
 class RegionAlike(torch.nn.Module):
     # Layers that are built alike, with data deciding what comes between.
     def __init__(self):
@@ -5526,6 +5530,28 @@ class TestVmRegions(TestCase):
                 seen = (region["variants"], region["compiles"], region["frozen"])
                 self.assertEqual(seen, (1, compiles, frozen))
                 change()
+
+    def test_method_of_a_tensor_does_not_keep_the_tensor(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.vm(
+            region_method, passes=with_graphs("aot_eager"), fallback=False
+        )
+        x = torch.randn(2, 3, 6, 6)
+        batches = []
+        with torch.no_grad():
+            for _ in range(8):
+                batch = torch.randn(216)
+                expected = region_method(model, batch.view, x)
+                got = compiled(model, batch.view, x)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+                batches.append(weakref.ref(batch))
+                del batch
+        gc.collect()
+        # A method of a tensor is an input like the tensor: no variant holds
+        # the one it was made with.
+        self.assertEqual([ref() is None for ref in batches], [True] * 8)
+        self.assertEqual(sum(r["variants"] for r in self.compiled_regions(compiled)), 1)
 
     def test_only_parameters_and_buffers_a_graph_uses_are_built_in(self):
         torch.manual_seed(0)
