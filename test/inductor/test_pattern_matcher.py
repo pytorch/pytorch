@@ -4,6 +4,7 @@ import os
 import types
 import unittest
 from collections.abc import Callable
+from functools import partial
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -4039,6 +4040,184 @@ class TestPatternMatcher(TestCase):
         )
         compiled_fn(x, y)
         self.assertEqual(counter, 1)
+
+
+@instantiate_parametrized_tests
+class TestSpecificPatternCache(TestCase):
+    def test_tensor_metadata(self):
+        cache = pattern_matcher._SpecificPatternCache()
+        lookup = partial(cache.lookup, storage_sensitive=True)
+        x = torch.empty(12)
+        table, key = lookup([x[:6]], None)
+        pattern = Arg()
+        table[key] = pattern
+        same_table, same_key = lookup([torch.empty(12)[:6]], None)
+        self.assertIs(same_table[same_key], pattern)
+        for other in (
+            x[1:7],
+            torch.empty(18)[:6],
+            x[:6].view(2, 3),
+            x[::2],
+            torch.empty(12, dtype=torch.float64)[:6],
+            torch.empty(12, requires_grad=True)[:6],
+            torch._neg_view(x[:6]),
+        ):
+            other_table, other_key = lookup([other], None)
+            self.assertNotIn(other_key, other_table)
+        z = torch.empty(6, dtype=torch.complex64)
+        self.assertNotEqual(lookup([z], None)[1], lookup([z.conj()], None)[1])
+
+    @parametrize("field", ("shape", "stride", "offset", "storage"))
+    def test_symbolic_metadata(self, field):
+        cache = pattern_matcher._SpecificPatternCache()
+        lookup = partial(cache.lookup, storage_sensitive=True)
+        static_table, static_key = lookup([torch.empty(6)], None)
+        pattern = Arg()
+        static_table[static_key] = pattern
+        previous_key = None
+        for _ in range(2):
+            shape_env = ShapeEnv()
+            symbol = shape_env.create_unspecified_symint_and_symbol(
+                12, ConstantSource("extent"), DimDynamic.DYNAMIC
+            )
+            with FakeTensorMode(shape_env=shape_env):
+                if field == "shape":
+                    x = torch.empty(symbol)
+                elif field == "stride":
+                    x = torch.empty_strided((2, 2), (symbol, 1))
+                elif field == "offset":
+                    x = torch.empty(30).as_strided((6,), (1,), symbol)
+                else:
+                    x = torch.empty(symbol).as_strided((6,), (1,), 0)
+                num_guards = len(shape_env.guards)
+                table, key = lookup([x], shape_env)
+                self.assertIs(table, cache.symbolic)
+                self.assertEqual(len(shape_env.guards), num_guards)
+                self.assertNotIn(key, table)
+                if previous_key is not None:
+                    self.assertEqual(key, previous_key)
+                table[key] = pattern
+                same_table, same_key = lookup([x], shape_env)
+                self.assertIs(same_table[same_key], pattern)
+                previous_key = key
+        self.assertIs(static_table[static_key], pattern)
+
+    def test_ordinary_and_storage_sensitive_keys(self):
+        cache = pattern_matcher._SpecificPatternCache()
+        left = torch.empty(8)[:4]
+        right = torch.empty(16)[1:5]
+        ordinary_table, key = cache.lookup([left], None)
+        ordinary_table[key] = Arg()
+        self.assertEqual(cache.lookup([right], None)[1], key)
+        with torch.inference_mode():
+            inference_input = torch.empty(4)
+        self.assertNotEqual(cache.lookup([inference_input], None)[1], key)
+        view_table, view_key = cache.lookup([left], None, storage_sensitive=True)
+        self.assertNotIn(view_key, view_table)
+        _, other_key = cache.lookup([right], None, storage_sensitive=True)
+        self.assertNotEqual(other_key, view_key)
+
+    def _mutable_ops(self):
+        lib = self.enterContext(
+            torch.library._scoped_library("pm_af_cache", "FRAGMENT")
+        )
+        for name in ("original", "replacement"):
+            lib.define(f"{name}(Tensor(a!) out) -> ()")
+
+            def impl(out):
+                out.add_(1)
+
+            lib.impl(name, impl, "CompositeExplicitAutograd")
+            torch.library.register_fake(
+                f"pm_af_cache::{name}", lambda out: None, lib=lib
+            )
+        ops = torch.ops.pm_af_cache
+        return ops.original.default, ops.replacement.default
+
+    def test_auto_functionalized_reuses_storage_sensitive_pattern(self):
+        original, replacement_op = self._mutable_ops()
+
+        def search(out):
+            result = auto_functionalized(original, out=out)[1]
+            return result + out.storage_offset() + out.untyped_storage().nbytes()
+
+        def replacement(out):
+            result = auto_functionalized(replacement_op, out=out)[1]
+            return result + out.storage_offset() + out.untyped_storage().nbytes()
+
+        traces = {"search": 0, "replacement": 0}
+
+        def trace(fn, args, **kwargs):
+            traces["replacement" if fn is replacement else "search"] += 1
+            return fwd_only(fn, args, **kwargs)
+
+        patterns = PatternMatcherPass()
+        register_replacement(search, replacement, [torch.empty(6)], trace, patterns)
+        traces["search"] = 0
+        for extent, offset in ((6, 0), (12, 0), (12, 1)):
+
+            def target(base):
+                out = base[offset : offset + 6]
+                result = auto_functionalized(
+                    original,
+                    {"out": (base, out.size(), out.stride(), out.storage_offset())},
+                    out=out,
+                )[1]
+                return result + out.storage_offset() + out.untyped_storage().nbytes()
+
+            for _ in range(2):
+                x = torch.randn(extent)
+                expected = target(x)
+                gm = make_fx(target, tracing_mode="fake")(x)
+                gm.graph.eliminate_dead_code()
+                self.assertEqual(patterns.apply(gm.graph), 1)
+                gm.graph.lint()
+                gm.recompile()
+                self.assertEqual(gm(x), expected, atol=0, rtol=0)
+                self.assertTrue(
+                    any(
+                        node.target is auto_functionalized
+                        and node.args[0] is replacement_op
+                        for node in gm.graph.nodes
+                    )
+                )
+        self.assertEqual(traces, {"search": 3, "replacement": 6})
+
+    @parametrize("case", ("default_dtype", "long_view_chain"))
+    def test_auto_functionalized_replacement(self, case):
+        from torch.testing._internal.common_utils import set_default_dtype
+
+        original, replacement_op = self._mutable_ops()
+
+        def search(out):
+            result = auto_functionalized(original, out=out)[1]
+            return result + torch.finfo(torch.get_default_dtype()).bits
+
+        def replacement(out):
+            if case == "long_view_chain":
+                for _ in range(600):
+                    out = out.t()
+            result = auto_functionalized(replacement_op, out=out)[1]
+            return result + torch.finfo(torch.get_default_dtype()).bits
+
+        def target(base):
+            out = base[1:3]
+            metadata = {"out": (base, out.size(), out.stride(), out.storage_offset())}
+            result = auto_functionalized(original, metadata, out=out)[1]
+            return result + 32
+
+        base = torch.arange(12, dtype=torch.float32).reshape(4, 3)
+        patterns = PatternMatcherPass()
+        with set_default_dtype(torch.float32):
+            register_replacement(search, replacement, [base[1:3]], fwd_only, patterns)
+        for dtype in (torch.float32, torch.float64):
+            with set_default_dtype(dtype):
+                gm = make_fx(target, tracing_mode="fake")(base)
+                gm.graph.eliminate_dead_code()
+                self.assertEqual(patterns.apply(gm.graph), int(dtype == torch.float32))
+                gm.graph.lint()
+                gm.recompile()
+                self.assertEqual(gm(base), target(base))
 
 
 @inductor_config.patch(fx_graph_cache=False)

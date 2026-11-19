@@ -63,9 +63,11 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import canonicalize_dim, is_integer_dtype
 from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
     is_fake_tensor,
     maybe_clear_fake_constant,
     maybe_get_fake_constant,
+    maybe_get_fake_mode,
     unset_fake_temporarily,
 )
 from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current, make_fx
@@ -331,7 +333,12 @@ class Match:
     def preserve_auto_functionalized_metadata(
         self, replacement: torch.fx.GraphModule, args: Sequence[Any]
     ) -> bool:
-        """Forward captured view metadata when the replacement mutates a matched input."""
+        """Preserve captured bases and infer replacement-local view metadata.
+
+        Extra placeholders retain original base/geometry dependencies without
+        changing the registered Python function's signature. Replacement-local
+        views require both a read-only schema alias and matching fake storage.
+        """
         if not self.auto_functionalized_nodes:
             return True
         from torch._higher_order_ops.auto_functionalize import get_mutable_args
@@ -342,6 +349,198 @@ class Match:
 
         placeholders = [n for n in replacement.graph.nodes if n.op == "placeholder"]
         original_inputs = dict(zip(placeholders, args))
+        captured_bases = OrderedSet(entry[0] for entry in metadata_by_input.values())
+        unknown = object()
+        roots = {}
+
+        def find_root(value):
+            path = []
+            while value not in roots:
+                path.append(value)
+                if value in original_inputs:
+                    original = original_inputs[value]
+                    if original in metadata_by_input:
+                        root = metadata_by_input[original][0]
+                    else:
+                        root = original if original in captured_bases else unknown
+                    break
+                parent = alias_parent(value)
+                if parent is unknown or parent is value:
+                    root = parent
+                    break
+                value = parent
+            else:
+                root = roots[value]
+            for node in path:
+                roots[node] = root
+            return root
+
+        def alias_parent(value):
+            if not isinstance(value, torch.fx.Node):
+                return unknown
+            result = value.meta.get("val")
+            if not is_fake_tensor(result):
+                return unknown
+            producer = value
+            return_index = 0
+            indexed = value.target is operator.getitem
+            if indexed:
+                if len(value.args) != 2:
+                    return unknown
+                index = value.args[1]
+                if type(index) is not int:
+                    return unknown
+                producer, return_index = value.args[0], index
+            if (
+                not isinstance(producer, torch.fx.Node)
+                or producer.op != "call_function"
+                or not isinstance(producer.target, torch._ops.OpOverload)
+                or producer.target.namespace not in ("aten", "prims")
+            ):
+                return unknown
+            schema = producer.target._schema
+            if schema.is_mutable or not schema.returns:
+                return unknown
+            list_return = len(schema.returns) == 1 and isinstance(
+                schema.returns[0].type, torch.ListType
+            )
+            if list_return:
+                if not indexed or not isinstance(
+                    schema.returns[0].type.getElementType(), torch.TensorType
+                ):
+                    return unknown
+                return_index = 0
+            elif indexed:
+                if len(schema.returns) == 1 or not (
+                    -len(schema.returns) <= return_index < len(schema.returns)
+                ):
+                    return unknown
+                return_index %= len(schema.returns)
+            elif len(schema.returns) != 1:
+                return unknown
+            returned = schema.returns[return_index]
+            if not list_return and not isinstance(returned.type, torch.TensorType):
+                return unknown
+
+            schema_info = torch._C._SchemaInfo(schema)
+            output_arg = torch._C._SchemaArgument(
+                torch._C._SchemaArgType.output, return_index
+            )
+            aliases = []
+            for i, argument in enumerate(schema.arguments):
+                actual = (
+                    producer.args[i]
+                    if i < len(producer.args)
+                    else producer.kwargs.get(argument.name, argument.default_value)
+                )
+                declared_alias = schema_info.may_contain_alias(
+                    output_arg,
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, i),
+                )
+                if declared_alias:
+                    # A unique Tensor input is required, not an ambiguous list
+                    # or wildcard relationship to several arguments.
+                    if not isinstance(actual, torch.fx.Node) or not isinstance(
+                        actual.meta.get("val"), torch.Tensor
+                    ):
+                        return unknown
+                    aliases.append(actual)
+                actual_values = torch.fx.map_arg(actual, _get_match_node_value)
+                for tensor in pytree.tree_leaves(actual_values):
+                    if not isinstance(tensor, torch.Tensor):
+                        continue
+                    if not is_fake_tensor(tensor) or maybe_get_fake_mode(
+                        tensor
+                    ) is not maybe_get_fake_mode(result):
+                        return unknown
+                    # pyrefly: ignore [missing-attribute]
+                    shares_storage = torch._C._is_alias_of(result, tensor)
+                    if shares_storage != declared_alias:
+                        # Alias schemas can also copy (reshape/contiguous), and
+                        # some undeclared aliases exist (aten::_unsafe_view).
+                        return unknown
+            if returned.alias_info is None:
+                return value if not aliases and not indexed else unknown
+            if len(aliases) != 1:
+                return unknown
+            return aliases[0]
+
+        # Reuse traced symbolic expressions. Reading geometry from a tensor at
+        # runtime would observe a potentially compacted backend layout.
+        symbolic_nodes = {}
+        for n in replacement.graph.nodes:
+            if isinstance(n.meta.get("val"), torch.SymInt):
+                symbolic_nodes.setdefault(n.meta["val"].node.expr, n)
+
+        def view_metadata(value, root):
+            from torch._prims_common import compute_required_storage_length
+
+            tensor = value.meta.get("val")
+            base = _get_match_node_value(root)
+            if (
+                not is_fake_tensor(base)
+                or base.element_size() != tensor.element_size()
+                or base.dtype != tensor.dtype
+                or base.is_conj() != tensor.is_conj()
+                or base.is_neg() != tensor.is_neg()
+            ):
+                return unknown
+            extent = compute_required_storage_length(
+                base.size(),
+                base.stride(),
+                base.storage_offset(),  # pyrefly: ignore [bad-argument-type]
+            )
+            view_extent = compute_required_storage_length(
+                tensor.size(), tensor.stride(), tensor.storage_offset()
+            )
+            if not guard_or_false(view_extent <= extent):
+                return unknown
+
+            def resolve_expr(expr):
+                from torch.fx.experimental.proxy_tensor import _sympy_handlers
+
+                if expr in symbolic_nodes and symbolic_nodes[expr] < value:
+                    return symbolic_nodes[expr]
+                if expr.is_Integer:
+                    return int(expr)
+                target = _sympy_handlers().get(expr.func)
+                if target is None:
+                    return unknown
+                inputs = [resolve_expr(arg) for arg in expr.args]
+                if any(arg is unknown for arg in inputs):
+                    return unknown
+
+                def emit(*args):
+                    with replacement.graph.inserting_before(value):
+                        result = replacement.graph.call_function(target, args)
+                    result.meta["val"] = target(
+                        *torch.fx.map_arg(args, _get_match_node_value)
+                    )
+                    return result
+
+                result = (
+                    functools.reduce(emit, inputs) if len(inputs) > 2 else emit(*inputs)
+                )
+                symbolic_nodes[expr] = result
+                return result
+
+            def geometry(number):
+                return (
+                    resolve_expr(number.node.expr)
+                    if isinstance(number, torch.SymInt)
+                    else number
+                )
+
+            entry = (
+                root,
+                tuple(geometry(n) for n in tensor.size()),
+                tuple(geometry(n) for n in tensor.stride()),
+                geometry(tensor.storage_offset()),
+            )
+            if any(v is unknown for v in pytree.tree_leaves(entry)):
+                return unknown
+            return entry
+
         updates = []
         for node in replacement.graph.nodes:
             if node.target is not torch.ops.higher_order.auto_functionalized:
@@ -361,7 +560,13 @@ class Match:
                     elif value in original_inputs:
                         entries.append(metadata_by_input.get(original_inputs[value]))
                     else:
-                        return False
+                        root = find_root(value)
+                        if root is unknown:
+                            return False
+                        entry = None if root is value else view_metadata(value, root)
+                        if entry is unknown:
+                            return False
+                        entries.append(entry)
                 if any(entry is not None for entry in entries):
                     metadata[name] = (
                         entries if isinstance(values, (list, tuple)) else entries[0]
@@ -2129,7 +2334,7 @@ def _get_match_node_value(node: torch.fx.Node) -> Any:
 class _SpecificPatternCache:
     """
     check_fn's retraced specific patterns, keyed by input metadata.  Entries
-    for static shapes stay valid across compiles.  Symbolic sizes are keyed by
+    for static shapes stay valid across compiles.  Symbolic metadata is keyed by
     their sympy exprs, which (like the SymInts the cached pattern's
     expected_meta embeds) only mean something within one ShapeEnv, so those
     entries are dropped as soon as a different ShapeEnv shows up.
@@ -2141,21 +2346,55 @@ class _SpecificPatternCache:
         self.shape_env: ShapeEnv | None = None
 
     def lookup(
-        self, args: Sequence[Any], shape_env: ShapeEnv | None
+        self,
+        args: Sequence[Any],
+        shape_env: ShapeEnv | None,
+        *,
+        storage_sensitive: bool = False,
     ) -> tuple[dict[tuple[Any, ...], PatternExpr], tuple[Any, ...]] | None:
         """The (table, key) to cache args under, or None if not cacheable."""
-        key: list[Any] = []
+        key: list[Any] = [storage_sensitive, torch.get_default_dtype()]
         symbolic = False
+
+        def symint_key(value: Any) -> Any:
+            nonlocal symbolic
+            if isinstance(value, torch.SymInt):
+                symbolic = True
+                return value.node.expr
+            return value
+
         for arg in args:
             if isinstance(arg, torch.Tensor):
+                if not storage_sensitive:
+                    # empty_strided recreates ordinary inputs with the current
+                    # inference mode and canonical storage.
+                    geometry: list[Any] = [*arg.shape, *arg.stride()]
+                    if arg._has_symbolic_sizes_strides:
+                        for i, dim in enumerate(geometry):
+                            if isinstance(dim, torch.SymInt):
+                                symbolic = True
+                                geometry[i] = dim.node.expr
+                    key.append(
+                        (
+                            tuple(geometry),
+                            arg.dtype,
+                            arg.device,
+                            arg.requires_grad,
+                            arg.is_inference(),
+                        )
+                    )
+                    continue
+                # Storage extent and offset are observable while tracing views.
+                metadata = extract_tensor_metadata(arg)
                 meta: list[Any] = []
-                for s in itertools.chain(arg.shape, arg.stride()):
-                    if isinstance(s, torch.SymInt):
-                        symbolic = True
-                        meta.append(s.node.expr)
-                    else:
-                        meta.append(s)
-                key.append((tuple(meta), arg.dtype, arg.device, arg.requires_grad))
+                for field in dataclasses.fields(metadata):
+                    value = getattr(metadata, field.name)
+                    meta.append(
+                        tuple(symint_key(v) for v in value)
+                        if isinstance(value, tuple)
+                        else symint_key(value)
+                    )
+                key.append(tuple(meta))
             elif isinstance(arg, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 symbolic = True
                 key.append(arg.node.expr)
@@ -2267,10 +2506,15 @@ def register_replacement(
     def check_fn(match: Match) -> bool:
         if not match.auto_functionalized_nodes:
             return check_match(match, trace_fn)
+        guard = _RejectViewQueries()
         if trace_fn is joint_fwd_bwd:
-            return False
+            # AOTAutograd itself inspects views. Guard only the registered rule.
+            def trace(fn, *args, **kwargs):
+                return trace_fn(guard(fn), *args, **kwargs)
+        else:
+            trace = guard(trace_fn)
         try:
-            return check_match(match, _RejectViewQueries()(trace_fn))
+            return check_match(match, trace)
         except FailedMatch:
             return False
 
@@ -2399,10 +2643,10 @@ def register_replacement(
             # same shapes across layers.
             specific_arg_info = _trace_arg_info(argnames_static, args)
             specific_argnames = specific_arg_info.flat_argnames
-            cached = (
-                None
-                if match.auto_functionalized_nodes
-                else specific_pattern_cache.lookup(args, fake_mode.shape_env)
+            cached = specific_pattern_cache.lookup(
+                args,
+                fake_mode.shape_env,
+                storage_sensitive=bool(match.auto_functionalized_nodes),
             )
             specific_pattern = cached[0].get(cached[1]) if cached else None
 
@@ -2511,6 +2755,33 @@ def register_replacement(
                         args + [_get_match_node_value(n) for n in symbolic_metadata],
                         get_decomp_fn=get_decomp_fn,
                     )
+                    if trace_fn is joint_fwd_bwd:
+                        replacement_graph = match.replacement_graph.graph
+                        placeholders = [
+                            n for n in replacement_graph.nodes if n.op == "placeholder"
+                        ]
+                        num_primals = len(pytree.tree_leaves(args))
+                        num_metadata = len(symbolic_metadata)
+                        # Application passes original primals and tangents first,
+                        # followed by the metadata dependencies.
+                        cursor = placeholders[-1]
+                        for placeholder in placeholders[
+                            num_primals : num_primals + num_metadata
+                        ]:
+                            cursor.append(placeholder)
+                            cursor = placeholder
+                        output = next(
+                            n for n in replacement_graph.nodes if n.op == "output"
+                        )
+                        outputs = output.args[0]
+                        if not isinstance(outputs, (list, tuple)) or any(
+                            grad is not None for grad in outputs[-num_metadata:]
+                        ):
+                            return False
+                        # The added scalar primals have no gradients and are not
+                        # outputs of the original joint pattern.
+                        output.args = (outputs[:-num_metadata],)
+                        match.replacement_graph.recompile()
                     match.replacement_extra_args = tuple(symbolic_metadata)
                 else:
                     match.replacement_graph = trace(
