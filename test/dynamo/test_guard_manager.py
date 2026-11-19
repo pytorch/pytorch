@@ -688,6 +688,24 @@ user_stack=None)
         self.assertFalse(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({}))
 
+        empty = {}
+        empty_guard = guards.DICT_VERSION(
+            RootGuardManager(), empty, ["x.version == empty.version"], None
+        )
+        self.assertTrue(empty_guard(empty))
+        empty.update({"a": 1})
+        self.assertFalse(empty_guard(empty))
+
+    @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
+    @mock.patch("torch._dynamo.guards._is_free_threaded", True)
+    def test_recursive_dict_tags_disabled_on_free_threaded_python(self):
+        with mock.patch.object(
+            GuardManagerWrapper, "find_tag_safe_roots"
+        ) as find_tag_safe_roots:
+            opt_fn = torch.compile(lambda x: x + 1, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(torch.ones(1)), torch.full((1,), 2.0))
+        find_tag_safe_roots.assert_not_called()
+
     def test_dynamic_indices_guard(self):
         root = RootGuardManager()
 
@@ -1636,28 +1654,22 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(4, 4))
 
 
+@unittest.skipIf(
+    torch._dynamo.guards._is_free_threaded,
+    "recursive dict tags are disabled on free-threaded Python",
+)
 class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
-        self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
+        config_patch = torch._dynamo.config.patch(
+            use_recursive_dict_tags_for_guards=True
+        )
+        config_patch.__enter__()
+        self.addCleanup(config_patch.__exit__, None, None, None)
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
     hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
     def test_immutable_tag_safe(self):
         class Bar:
@@ -2116,6 +2128,73 @@ class TagSafetyChecks(RecursiveDictTagTests):
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_closure_cell_reassignment_invalidates(self):
+        class A(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class B(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        def make_module():
+            helper = A()
+
+            class Outer(torch.nn.Module):
+                def forward(self, x):
+                    return helper(x)
+
+            index = Outer.forward.__code__.co_freevars.index("helper")
+            return Outer(), Outer.forward.__closure__[index]
+
+        from torch._dynamo.testing import CompileCounter
+
+        mod, cell = make_module()
+        old_helper = cell.cell_contents
+        counter = CompileCounter()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(counter.frame_count, 1)
+
+        cell.cell_contents = B()
+        self.assertEqual(opt_fn(x), torch.tensor(12))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertIsInstance(old_helper, A)
+
+    def test_dict_clone_event_invalidates(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.state = {}
+
+            def forward(self, x):
+                if "key" in self.state:
+                    return x + self.state["key"]
+                return x + 1
+
+        from torch._dynamo.testing import CompileCounter
+
+        mod = Mod()
+        counter = CompileCounter()
+        opt_fn = torch.compile(mod, backend=counter, fullgraph=True)
+        x = torch.tensor(1)
+
+        self.assertEqual(opt_fn(x), torch.tensor(2))
+        self.assertEqual(opt_fn(x), torch.tensor(2))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Updating an empty dict emits PyDict_EVENT_CLONED without ADDED events.
+        mod.state.update({"key": 5})
+        self.assertEqual(opt_fn(x), torch.tensor(6))
+        self.assertEqual(counter.frame_count, 2)
 
     def test_disabling(self):
         class Mod(torch.nn.Module):
