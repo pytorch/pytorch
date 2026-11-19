@@ -20,6 +20,7 @@ __all__ = [
     "NarrowDims",
     "ResolveDispatch",
     "TensorAccessors",
+    "Unroll",
 ]
 
 
@@ -43,6 +44,17 @@ class Inline(BuiltinPass):
     of that guard."""
 
     engine: ClassVar[str] = "inline"
+    kind: ClassVar[str] = "cfg"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Unroll(BuiltinPass):
+    """``for i in range(k)`` with a constant ``k`` of at most 8 is replaced by
+    ``k`` copies of its body, under a guard on ``range``. A loop whose copies
+    would come to more than 600 instructions is left as it is. Applied after
+    :class:`Inline`."""
+
+    engine: ClassVar[str] = "unroll"
     kind: ClassVar[str] = "cfg"
 
 
