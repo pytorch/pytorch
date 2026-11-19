@@ -118,26 +118,34 @@ for simple_op in SIMPLE_OPS_LIST:
     globals()[_get_func_name(simple_op)] = register_simple(simple_op)
 
 
+def _set_wrapper_metadata(self: ComplexTensor, like: torch.Tensor) -> None:
+    # Autograd returns `self` for in-place ops, so its sizes/strides must match `like`'s.
+    # The wrapper's storage is synthetic, so use the meta `set_`, which grows it as needed.
+    python_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+    with (
+        torch._C._ExcludeDispatchKeyGuard(python_key),
+        torch._C._PreserveDispatchKeyGuard(),
+    ):
+        torch._C._set_meta_in_tls_dispatch_include(True)
+        aten.set_.source_Storage_storage_offset(
+            self,
+            self.untyped_storage(),
+            like.storage_offset(),
+            like.shape,
+            like.stride(),
+        )
+
+
 def register_inplace_view(op: OpType) -> Callable[..., Any]:
     """Register an in-place view op, which must also update the wrapper's own metadata."""
 
     def impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
         # Run on aliases first so that an error leaves both components untouched.
         re = op(aten.alias(self.re), *args, **kwargs)
-        op(aten.alias(self.im), *args, **kwargs)
-        op(self.re, *args, **kwargs)
-        op(self.im, *args, **kwargs)
-        # Autograd returns `self` for in-place ops, so its sizes/strides must match `re`'s.
-        # The wrapper's storage is synthetic, so use the meta `set_`, which grows it as needed.
-        python_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
-        with (
-            torch._C._ExcludeDispatchKeyGuard(python_key),
-            torch._C._PreserveDispatchKeyGuard(),
-        ):
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            aten.set_.source_Storage_storage_offset(
-                self, self.untyped_storage(), re.storage_offset(), re.shape, re.stride()
-            )
+        im = op(aten.alias(self.im), *args, **kwargs)
+        _set_wrapper_metadata(self, re)
+        self._re = re
+        self._im = im
         return self
 
     func_name = _get_func_name(op)
