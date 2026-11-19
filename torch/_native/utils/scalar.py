@@ -12,7 +12,10 @@ def check_scalar(value: bool | int | float, dtype: torch.dtype) -> None:
         round_float(value, dtype)
         return
     limits = torch.iinfo(dtype)
-    if not limits.min <= value <= limits.max:
+    upper_ok = (
+        value < limits.max + 1 if isinstance(value, float) else value <= limits.max
+    )
+    if not (limits.min <= value and upper_ok):
         raise OverflowError(f"scalar {value} overflows {dtype}")
 
 

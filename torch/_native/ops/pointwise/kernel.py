@@ -894,6 +894,7 @@ def run(
         vec_bits,
         load,
         layouts,
+        tuple(torch._C._is_alias_of(o, t) for o in (out or ()) for t in inputs),
         input_casts,
         result_dtypes,
     )
