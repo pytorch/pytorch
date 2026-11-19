@@ -14,6 +14,7 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -2034,13 +2035,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_dtype_view_clone_elimination(self):
         """
-        This test verifies that dtype views (tensors sharing storage but with
-        different dtypes, e.g., int32 -> float32) have their clones eliminated
-        when passed to mutating custom ops. The fix_auto_functionalized_dtype_views
-        pass detects dtype views that alias graph inputs and removes unnecessary
-        clone operations.
-
-        Also tests negative cases where clones SHOULD be retained.
+        Dtype views of graph inputs should mutate without allocating a clone.
+        Slice views and intermediate tensors must retain their expected values.
         """
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -2079,13 +2075,11 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     compiled_f = torch.compile(
                         f_dtype_view, fullgraph=True, backend="inductor"
                     )
-                    result = compiled_f(cache.clone(), data)
+                    result, code = run_and_get_code(compiled_f, cache.clone(), data)
 
                     self.assertEqual(result.dtype, torch.int32)
                     self.assertEqual(result, result_eager)
-                    self.assertEqual(
-                        counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
-                    )
+                    self.assertNotIn("= empty_strided_cpu(", "\n".join(code))
 
             # Negative cases (slice view, intermediate tensor) - clone should be retained
             def f_slice(cache, data):
@@ -2121,8 +2115,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                         counters["inductor"]["fix_auto_functionalized_dtype_views"], 0
                     )
 
-            # Two mutations through the same dtype view: counter is 1, not 2 -
-            # reinplace_inplaceable_ops already inplaces the second.
+            # Both mutations reuse the graph input's storage.
             def f_twice(cache, data1, data2):
                 v = cache.view(torch.float32)
                 torch.ops.mylib.mutate_inplace(v, data1)
@@ -2139,12 +2132,10 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 torch._dynamo.reset()
                 compiled_f = torch.compile(f_twice, fullgraph=True, backend="inductor")
                 cache_compiled = cache.clone()
-                compiled_f(cache_compiled, data1, data2)
+                _, code = run_and_get_code(compiled_f, cache_compiled, data1, data2)
 
                 self.assertEqual(cache_compiled, cache_eager)
-                self.assertEqual(
-                    counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
-                )
+                self.assertNotIn("= empty_strided_cpu(", "\n".join(code))
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_dtype_view_clone_elimination_shared_storage(self):

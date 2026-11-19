@@ -883,6 +883,15 @@ def reinplace_inplaceable_ops_core(
                 copy_nodes[mutated_arg] = copy_node
             if copy_node is None or node_order[copy_node] <= node_order[node]:
                 return False
+            if mutated_arg.op in ("placeholder", "get_attr") or (
+                copy_node is copy_node_for_reinplaced_arg(node, mutated_arg)
+            ):
+                return not any_use_of_views_after_node(
+                    node,
+                    shared_view_nodes,
+                    copy_node=copy_node,
+                    mutated_arg=mutated_arg_base,
+                )
             base_val = mutated_arg_base.meta["val"]
             if not (
                 base_val.is_contiguous()
@@ -904,18 +913,17 @@ def reinplace_inplaceable_ops_core(
                         if isinstance(user.meta.get("val"), torch.Tensor)
                     ]
                 )
-            if copy_node is not copy_node_for_reinplaced_arg(node, mutated_arg):
-                source_storage = get_node_storage(copy_node.args[1])
-                if source_storage is None or source_storage == mutated_storage:
-                    return False
-                output_storages = FakeTensorUpdater._storage_ids(node.meta["val"])
-                tracked_storages = OrderedSet(
-                    get_node_storage(result) for result in result_nodes
-                )
-                if output_storages is None or any(
-                    storage not in tracked_storages for storage in output_storages
-                ):
-                    return False
+            source_storage = get_node_storage(copy_node.args[1])
+            if source_storage is None or source_storage == mutated_storage:
+                return False
+            output_storages = FakeTensorUpdater._storage_ids(node.meta["val"])
+            tracked_storages = OrderedSet(
+                get_node_storage(result) for result in result_nodes
+            )
+            if output_storages is None or any(
+                storage not in tracked_storages for storage in output_storages
+            ):
+                return False
             for result in result_nodes:
                 if get_node_storage(copy_node.args[1]) == get_node_storage(result):
                     if not _is_layout_preserving_view_copy_back(
