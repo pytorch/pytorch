@@ -3981,7 +3981,7 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         self.assertEqual(self.repo.mock_calls, [])
 
     def test_lower_prs_skip_the_same_checks_as_the_top_pr(self) -> None:
-        for mandatory, internal in ((True, False), (False, True)):
+        for mandatory, internal in ((True, False), (False, True), (True, True)):
             with self.subTest(mandatory=mandatory, internal=internal):
                 self.rule.reset_mock()
                 self.skip_internal.reset_mock()
