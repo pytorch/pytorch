@@ -7554,7 +7554,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
-    @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
+    @unittest.skipIf(
+        not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU"
+    )
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
