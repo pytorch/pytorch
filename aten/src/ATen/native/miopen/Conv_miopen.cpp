@@ -345,9 +345,15 @@ size_t getWorkspaceSize(
 template<typename algo_t>
 size_t getMaxWorkspaceSize(const ConvolutionArgs& args, const algo_t algo)
 {
+    size_t ws_size = getWorkspaceSize(args, algo);
     size_t max_block_size = 0;
-    c10::cuda::CUDACachingAllocator::cacheInfo(at::cuda::current_device(), &max_block_size);
-    return std::min(getWorkspaceSize(args, algo), max_block_size);
+    try {
+        c10::cuda::CUDACachingAllocator::cacheInfo(at::cuda::current_device(), &max_block_size);
+    } catch (const c10::Error&) {
+        // A CUDAPluggableAllocator does not implement cacheInfo.
+        return ws_size;
+    }
+    return std::min(ws_size, max_block_size);
 }
 
 template<typename perf_t>
