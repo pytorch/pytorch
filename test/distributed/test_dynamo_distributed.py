@@ -466,6 +466,156 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         finally:
             DDP._active_ddp_module = None
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_ddp_optimizer_fakify_first_call_scoping(self):
+        import gc
+        import inspect
+
+        from torch._dynamo.backends.distributed import SubmodCompiler
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fc0 = nn.Linear(512, 512, bias=False)
+                self.fc1 = nn.Linear(512, 512, bias=False)
+                self.fc2 = nn.Linear(512, 512, bias=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.fc2(self.fc1(self.fc0(x)))
+
+        ddp_model = FakeDDP(Model(), bucket_cap_mb=1)
+        inp = torch.randn(2, 512)
+        expected = ddp_model(inp)
+
+        compile_entry_flags: list[bool] = []
+        replay_flags: list[bool] = []
+        after_run_node_flags: list[bool] = []
+        orig_compile_submod = SubmodCompiler.compile_submod
+        orig_run_node = SubmodCompiler.run_node
+
+        def patched_compile_submod(self_sc, real_mod, new_args, kwargs):
+            if len(compile_entry_flags) == 2:
+                # Simulate cyclic GC finalizing earlier leaked run_node frames
+                # right as a later bucket enters compile_submod.
+                gc.collect()
+            compile_entry_flags.append(
+                torch._guards.TracingContext.get().fakify_first_call
+            )
+            # Keep caller (run_node) frame in a reference cycle so a __del__
+            # guard would not be reset on return when cyclic GC is disabled.
+            frame = inspect.currentframe()
+            self.assertIsNotNone(frame)
+            cycle: list[object] = [frame.f_back]
+            cycle.append(cycle)
+            del frame, cycle
+
+            compiled = orig_compile_submod(self_sc, real_mod, new_args, kwargs)
+            orig_forward = compiled.forward
+
+            def wrapped_forward(*f_args, **f_kwargs):
+                tc = torch._guards.TracingContext.try_get()
+                if tc is not None:
+                    replay_flags.append(tc.fakify_first_call)
+                return orig_forward(*f_args, **f_kwargs)
+
+            compiled.forward = wrapped_forward
+            return compiled
+
+        def patched_run_node(self_sc, n):
+            is_submod = n.op == "call_module"
+            out = orig_run_node(self_sc, n)
+            if is_submod:
+                after_run_node_flags.append(
+                    torch._guards.TracingContext.get().fakify_first_call
+                )
+            return out
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with (
+                patch.object(SubmodCompiler, "compile_submod", patched_compile_submod),
+                patch.object(SubmodCompiler, "run_node", patched_run_node),
+            ):
+                opt_model = torch.compile(ddp_model, backend="aot_eager")
+                actual = opt_model(inp)
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+            gc.collect()
+
+        self.assertEqual(compile_entry_flags, [True, True, True])
+        self.assertEqual(replay_flags, [False, False, False])
+        self.assertEqual(after_run_node_flags, [False, False, False])
+        self.assertEqual(actual, expected)
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_ddp_optimizer_fakify_first_call_reset_on_compile_error(self):
+        import gc
+
+        from torch._dynamo.backends.distributed import SubmodCompiler
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fc0 = nn.Linear(512, 512, bias=False)
+                self.fc1 = nn.Linear(512, 512, bias=False)
+                self.fc2 = nn.Linear(512, 512, bias=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.fc2(self.fc1(self.fc0(x)))
+
+        ddp_model = FakeDDP(Model(), bucket_cap_mb=1)
+        inp = torch.randn(2, 512)
+
+        compile_entry_flags: list[bool] = []
+        after_run_node_flags: list[bool] = []
+        seen_tcs: list[torch._guards.TracingContext] = []
+        orig_compile_submod = SubmodCompiler.compile_submod
+        orig_run_node = SubmodCompiler.run_node
+
+        def patched_compile_submod(self_sc, real_mod, new_args, kwargs):
+            tc = torch._guards.TracingContext.get()
+            seen_tcs.append(tc)
+            compile_entry_flags.append(tc.fakify_first_call)
+            if len(compile_entry_flags) == 2:
+                raise RuntimeError("compile_submod boom")
+            return orig_compile_submod(self_sc, real_mod, new_args, kwargs)
+
+        def patched_run_node(self_sc, n):
+            is_submod = n.op == "call_module"
+            try:
+                return orig_run_node(self_sc, n)
+            finally:
+                if is_submod:
+                    after_run_node_flags.append(
+                        torch._guards.TracingContext.get().fakify_first_call
+                    )
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with (
+                patch.object(SubmodCompiler, "compile_submod", patched_compile_submod),
+                patch.object(SubmodCompiler, "run_node", patched_run_node),
+                self.assertRaisesRegex(
+                    torch._dynamo.exc.BackendCompilerFailed, "compile_submod boom"
+                ),
+            ):
+                opt_model = torch.compile(ddp_model, backend="aot_eager")
+                opt_model(inp)
+            last_tc_flag = seen_tcs[-1].fakify_first_call
+            seen_tcs.clear()
+        finally:
+            seen_tcs.clear()
+            if gc_was_enabled:
+                gc.enable()
+            gc.collect()
+
+        self.assertEqual(compile_entry_flags, [True, True])
+        self.assertEqual(after_run_node_flags, [False, False])
+        self.assertFalse(last_tc_flag)
+
     @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
     def test_unbacked_symbol_splitting_direct(self):
         class Model(nn.Module):

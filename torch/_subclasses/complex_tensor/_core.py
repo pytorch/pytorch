@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Self, TYPE_CHECKING
 
 import torch
 from torch import Tensor
