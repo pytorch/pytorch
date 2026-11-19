@@ -1709,6 +1709,44 @@ class TestFunctionalIntrospection(unittest.TestCase):
                         {(DispatchKey.CUDA, op): manifest}, grouped
                     )
 
+    def test_functional_hook_selects_required_tensor(self) -> None:
+        from torchgen.gen import get_grouped_native_functions, parse_native_yaml
+        from torchgen.model import DispatchKey
+        from torchgen.native_aot import (
+            first_tensor_arg,
+            NativeAotManifest,
+            validate_native_aot_manifests,
+        )
+
+        native = os.path.join(REPO, "aten", "src", "ATen", "native")
+        parsed = parse_native_yaml(
+            os.path.join(native, "native_functions.yaml"),
+            os.path.join(native, "tags.yaml"),
+        )
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        functions = {str(f.func.name): f for f in parsed.native_functions}
+        for op, tensor in (
+            ("remainder.Scalar_Tensor", "other"),
+            ("convolution", "input"),
+        ):
+            with self.subTest(op=op):
+                manifest = NativeAotManifest(
+                    op=op, dispatch_key=DispatchKey.CUDA, structured=False
+                )
+                validate_native_aot_manifests(
+                    {(DispatchKey.CUDA, op): manifest}, grouped
+                )
+                self.assertEqual(first_tensor_arg(functions[op]), tensor)
+        manifest = NativeAotManifest(
+            op="empty.memory_format", dispatch_key=DispatchKey.CUDA, structured=False
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "require a non-optional Tensor argument"
+        ):
+            validate_native_aot_manifests(
+                {(DispatchKey.CUDA, manifest.op): manifest}, grouped
+            )
+
 
 class TestAtomicWrites(unittest.TestCase):
     def test_a_failed_write_leaves_neither_a_partial_file_nor_a_tmp(self):
