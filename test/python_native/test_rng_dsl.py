@@ -13,7 +13,7 @@ import unittest
 from contextlib import nullcontext
 
 import torch
-from torch._native.cutedsl_utils import POINTWISE_ARCH_MAJORS
+from torch._native.cutedsl.config import POINTWISE_ARCH_MAJORS
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
