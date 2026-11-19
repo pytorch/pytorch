@@ -86,6 +86,28 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_testing.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
+    @common_utils.parametrize(
+        "fn",
+        [
+            common_utils.subtest(lambda a, b: a + b, name="tensor"),
+            common_utils.subtest(lambda a, b: a + True, name="scalar"),
+            common_utils.subtest(
+                lambda a, b: torch.add(a, b, alpha=False), name="alpha_zero"
+            ),
+        ],
+    )
+    def test_add_bool(self, fn):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return fn(a, b)
+
+        a = torch.tensor([True, False, False])
+        b = torch.tensor([True, True, False])
+
+        onnx_program = self.export(Model(), (a, b))
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertNotIn("Add", [node.op_type for node in onnx_program.model.graph])
+
     def test_onnx_export_conditional(self):
         class CondModel(torch.nn.Module):
             def forward(self, x):
