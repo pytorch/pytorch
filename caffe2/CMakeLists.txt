@@ -1378,50 +1378,23 @@ endif()
 # ==========================================================
 
 
-# Build model tracer for tracing-based selective build
-if(TRACING_BASED AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(
-    ${TORCH_ROOT}/torch/csrc/jit/mobile/model_tracer
-    ${CMAKE_BINARY_DIR}/model_tracer
-  )
-  string(APPEND CMAKE_CXX_FLAGS " -DENABLE_RECORD_KERNEL_FUNCTION_DTYPE")
-endif()
-
 # Codegen selected_mobile_ops.h for template selective build
 if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
   message("running gen_selected_mobile_ops_header for:  '${SELECTED_OP_LIST}'")
   file(GLOB lite_interpreter_python CONFIGURE_DEPENDS "${TOOLS_PATH}/lite_interpreter/*.py")
-  if(${TRACING_BASED})
-    file(GLOB code_analyzer_python CONFIGURE_DEPENDS "${TOOLS_PATH}/code_analyzer/*.py")
-    add_custom_command(
-      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-      COMMAND
-        Python::Interpreter
-        -m tools.code_analyzer.gen_oplist
-        --model_file_list_path "${SELECTED_OP_LIST}"
-        --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
-      DEPENDS
-        ${torchgen_python}
-        ${lite_interpreter_python}
-        ${code_analyzer_python}
-        "${SELECTED_OP_LIST}"
-        "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-      WORKING_DIRECTORY "${TORCH_ROOT}")
-  else()
-    add_custom_command(
-      OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-      COMMAND
-        Python::Interpreter
-        -m tools.lite_interpreter.gen_selected_mobile_ops_header
-        --yaml_file_path "${SELECTED_OP_LIST}"
-        --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
-      DEPENDS
-        ${torchgen_python}
-        ${lite_interpreter_python}
-        "${SELECTED_OP_LIST}"
-        "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-      WORKING_DIRECTORY "${TORCH_ROOT}")
-  endif()
+  add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+    COMMAND
+      Python::Interpreter
+      -m tools.lite_interpreter.gen_selected_mobile_ops_header
+      --yaml_file_path "${SELECTED_OP_LIST}"
+      --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+    DEPENDS
+      ${torchgen_python}
+      ${lite_interpreter_python}
+      "${SELECTED_OP_LIST}"
+      "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    WORKING_DIRECTORY "${TORCH_ROOT}")
 
   add_custom_target(
     __selected_mobile_ops_header_gen

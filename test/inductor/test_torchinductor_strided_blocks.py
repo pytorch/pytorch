@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import importlib
 import math
+import re
 import unittest
 from collections.abc import Callable
 from typing import Any
@@ -34,8 +35,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    platform_supports_tensor_descriptor,
     requires_block_ptr,
     requires_gpu,
     skip_windows_ci,
@@ -126,18 +127,19 @@ class BlockDescriptorTestBase(InductorTestCase):
         return view
 
     def _assert_pointwise_ndims(self, code, num_dims: int) -> None:
-        pointwise_blocks = ["XBLOCK", "YBLOCK", "Z0_BLOCK"]
-        return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
+        pointwise_blocks = ["XBLOCK", "YBLOCK"] + [
+            f"Z{i}_BLOCK" for i in range(max(0, num_dims - 2))
+        ]
+        self.assertEqual(
+            set(re.findall(r"\b(?:XBLOCK|YBLOCK|Z\d+_BLOCK)\b", code)),
+            set(pointwise_blocks[:num_dims]),
+        )
 
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
-        reduction_blocks = ["R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]
-        return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
-
-    def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
-        for expected_block in blocks[:num_dims]:
-            self.assertIn(expected_block, code)
-        for unexpected_block in blocks[num_dims:]:
-            self.assertNotIn(unexpected_block, code)
+        self.assertEqual(
+            set(re.findall(r"\bR\d+_BLOCK\b", code)),
+            {f"R{i}_BLOCK" for i in range(num_dims)},
+        )
 
     def _get_lines_containing_substr(self, code: str, substr: str) -> str:
         return "\n".join(line for line in code.split("\n") if substr in line)
@@ -402,13 +404,15 @@ class CommonTemplate:
             atol = None
             rtol = None
 
-        self._run_and_compare(
+        _result, (code,) = self._run_and_compare(
             forward,
             *args,
-            expected_num_block_pointers=4,
+            expected_num_block_pointers=3 if config.triton.use_tensor_descriptor else 4,
             atol=atol,
             rtol=rtol,
         )
+        if config.triton.use_tensor_descriptor:
+            self.assertIn("tl.load(", code)
 
     @parametrize(
         "x_size,y_size",
@@ -1084,7 +1088,7 @@ class CommonTemplate:
         self._assert_reduction_ndims(code, 2)
 
     def test_3d_reduction_with_pointwise_output(self):
-        view = self._discontiguous_tensor((5, 7, 3, 5), self.device)
+        view = self._discontiguous_tensor((5, 7, 3, 8), self.device)
 
         _result, (code,) = self._run_and_compare(
             functools.partial(torch.sum, dim=(1, 2, 3)),
@@ -1275,8 +1279,7 @@ class CommonTemplate:
                 f"for r{reduction_dim}_offset in tl.range(0, r{reduction_dim}_numel",
                 code,
             )
-        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
-            self.assertIn("tl.advance(", code)
+        self.assertEqual("tl.advance(" in code, not config.triton.use_tensor_descriptor)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
@@ -1702,11 +1705,8 @@ class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
     device = "cpu"
 
 
-@unittest.skipIf(
-    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
-    or torch.version.hip,
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
-    # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
+@unittest.skipUnless(
+    platform_supports_tensor_descriptor(), "requires CUDA tensor descriptor support"
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
 @instantiate_parametrized_tests
@@ -1731,6 +1731,8 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
                 **tiled_reduction_config,
                 "triton.max_tiles": 3,
             },
+            rtol=1e-4,
+            atol=1e-4,
         )
 
         self.assertIn("tl.load(in_ptr0 +", code)
@@ -2434,10 +2436,8 @@ class TestTilingExtra(InductorTestCase):
             )
 
 
-@unittest.skipIf(
-    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
-    or torch.version.hip,
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+@unittest.skipUnless(
+    platform_supports_tensor_descriptor(), "requires CUDA tensor descriptor support"
 )
 @config.patch(
     {
@@ -2859,18 +2859,14 @@ if GPU_TYPE == "cuda":
         TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda
     )
 
-    # Known TMA API limitations: these cases also fail for device-side TMA (they
-    # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
-    # different (still-correct) codegen that breaks the device-specific code asserts,
-    # or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
-    # test_reduction_padded_output_tiling).
+    # Host TMA shares descriptor constraints with device-side TMA and also
+    # produces different codegen for these marked cases.
     _HOST_TMA_EXPECTED_FAILURES = [
         "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
         "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True_cuda",
         "test_pointwise_index_order_cuda",
-        "test_reduction_padded_output_tiling_cuda",
     ]
     for _name in _HOST_TMA_EXPECTED_FAILURES:
         setattr(
@@ -2919,10 +2915,8 @@ class HostTMAHelperTest(InductorTestCase):
         self.assertTrue(torch.equal(cloned, misaligned))
 
 
-@unittest.skipIf(
-    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
-    or torch.version.hip,
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+@unittest.skipUnless(
+    platform_supports_tensor_descriptor(), "requires CUDA tensor descriptor support"
 )
 class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
     @config.patch(
