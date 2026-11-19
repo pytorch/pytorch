@@ -246,10 +246,29 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         self.assertIs(type(iterator), type(fn(x, owner)[1]))
         self.assertEqual(error.name, "missing")
         self.assertIs(error.obj, iterator)
+        eager_iterator = fn(x, owner)[1]
         owner.clear()
-        reason = "mutated" if kind == "ordered" else "changed size"
-        with self.assertRaisesRegex(RuntimeError, f"{reason} during iteration"):
+        with self.assertRaises(RuntimeError) as expected:
+            next(eager_iterator)
+        with self.assertRaises(RuntimeError) as actual:
             next(iterator)
+        self.assertEqual(actual.exception.args, expected.exception.args)
+
+    @parametrize("factory", [dict, OrderedDict, set])
+    def test_escape_iterator_after_owner_mutation(self, factory):
+        def fn(x, owner):
+            if factory is set:
+                owner.add(3)
+            else:
+                owner[3] = 3
+            return x + 1, iter(owner)
+
+        x = torch.ones(1)
+        owner = factory({1: 1, 2: 2})
+        result, iterator = torch.compile(fn, backend="eager")(x, owner)
+        self.assertEqual(result, x + 1)
+        self.assertIn(3, owner)
+        self.assertEqual(list(iterator), list(owner))
 
     @make_dynamo_test
     def test_list_iteration(self):
