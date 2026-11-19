@@ -20,7 +20,7 @@ import torch
 import torch.distributed as dist
 from torch._dynamo import OptimizedModule
 from torch.cuda.graph_annotations import mark_kernels
-from torch.distributed.fsdp import FSDPModule, UnshardHandle
+from torch.distributed.fsdp import FSDPModule
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
@@ -33,6 +33,8 @@ from ._p2p import (
 )
 from ._recv_buffers import _RecvInfo
 from ._utils import (
+    _is_sharded_data_parallel,
+    _Waitable,
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
     InferenceMode,
@@ -1458,7 +1460,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
         self._update_losses(self._stage, losses)
 
         # This option defers only FSDP finalization. Other stages still need PP scaling.
-        if self._finalize_gradients or not isinstance(self._stage.submod, FSDPModule):
+        if self._finalize_gradients or not _is_sharded_data_parallel(
+            self._stage.submod
+        ):
             self._stage.perform_reduce_grad(
                 self._n_microbatches if self.scale_grads else 1
             )
@@ -1694,7 +1698,9 @@ or equal to the number of stages ({self._num_stages})."
         self._update_losses(self._stage, losses)
 
         # This option defers only FSDP finalization. Other stages still need PP scaling.
-        if self._finalize_gradients or not isinstance(self._stage.submod, FSDPModule):
+        if self._finalize_gradients or not _is_sharded_data_parallel(
+            self._stage.submod
+        ):
             self._stage.perform_reduce_grad(
                 self._n_microbatches if self.scale_grads else 1
             )
@@ -3316,7 +3322,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self.fwd_recv_ops: dict[tuple[int, int], list[dist.Work]] = {}
 
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
-        self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
+        self.unshard_ops: dict[int, list[_Waitable]] = defaultdict(list)
         self.unsharded_stages = set()
         # A deferred FSDP stage keeps its unsharded parameters and accumulated
         # gradients across schedule calls. The next UNSHARD consumes the
@@ -3546,7 +3552,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
     def _assert_unsharded(self, stage: _PipelineStageBase):
         """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
-        stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+        stage_uses_fsdp = _is_sharded_data_parallel(stage.submod)
         if stage_uses_fsdp:
             stage_idx = stage.stage_index
             if stage_idx in self.unshard_ops:
@@ -3560,6 +3566,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def _validate_deferred_gradient_reduction(self) -> None:
         comm_ctx_to_stage: dict[int, int] = {}
         for stage in self._stages:
+            # Only FSDP2's stages can share a communication context.
             if not isinstance(stage.submod, FSDPModule):
                 continue
             comm_ctx_id = id(stage.submod._get_fsdp_state()._comm_ctx)
@@ -3625,7 +3632,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 raise AssertionError(f"{action=} missing mb_index")
             stage_idx = action.stage_index
             stage = stage_index_to_stage[stage_idx]
-            stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+            stage_uses_fsdp = _is_sharded_data_parallel(stage.submod)
             # see [Note: V-schedule special case]
             is_next_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
             is_prev_stage_on_this_rank = stage_idx - 1 in stage_index_to_stage
@@ -3682,9 +3689,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             f"Unsharding already in progress for {stage_idx=}"
                         )
                     for submodule in stage.submod.modules():
-                        if not isinstance(submodule, FSDPModule):
+                        if not _is_sharded_data_parallel(submodule):
                             continue
-                        handle = cast(UnshardHandle, submodule.unshard(async_op=True))
+                        handle = cast(_Waitable, submodule.unshard(async_op=True))
                         self.unshard_ops[stage_idx].append(handle)
             elif comp_type == RESHARD:
                 if stage_uses_fsdp:
@@ -3706,7 +3713,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             f"Resharding {stage_idx=} before finishing unshard"
                         )
                     for submodule in stage.submod.modules():
-                        if not isinstance(submodule, FSDPModule):
+                        if not _is_sharded_data_parallel(submodule):
                             continue
                         submodule.reshard()
                     self.unsharded_stages.remove(stage_idx)

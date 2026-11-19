@@ -7,7 +7,16 @@ import logging
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import cast, Literal, overload, Protocol, TYPE_CHECKING, TypeAlias
+from typing import (
+    cast,
+    Literal,
+    overload,
+    Protocol,
+    runtime_checkable,
+    TYPE_CHECKING,
+    TypeAlias,
+)
+from typing_extensions import TypeIs
 
 import torch
 from torch import fx
@@ -39,6 +48,46 @@ class GetMeshCallback(Protocol):
 # This uniquely identifies a mesh within the same "universe" where all stages share
 # the same rank tensor.
 MeshCacheKey: TypeAlias = tuple[tuple[str, ...], _MeshLayout | None]
+
+
+class _Waitable(Protocol):
+    """An asynchronous collective's handle, such as FSDP2's ``UnshardHandle``."""
+
+    def wait(self) -> None: ...
+
+
+@runtime_checkable
+class _ShardedDataParallelModule(Protocol):
+    """The methods with which pipeline stages and schedules drive a stage module
+    that shards its parameters for data parallelism.
+
+    A module counts as sharded data parallel if it has these methods, as FSDP2's
+    ``FSDPModule`` does, and so do modules of other libraries with the same
+    methods, such as FlexShard's (meta-pytorch/flex_shard). Schedules then
+    unshard and reshard the module around its stages' compute, accumulate its
+    gradients without reducing them across microbatches, and reduce them once
+    at the end of the step.
+    """
+
+    def set_manual_backward_finalization(self, enabled: bool) -> None: ...
+
+    def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None: ...
+
+    def set_reshard_after_backward(self, reshard_after_backward: bool) -> None: ...
+
+    def finalize_backward(self, *, async_op: bool = False) -> _Waitable | None: ...
+
+    def unshard(self, *, async_op: bool = False) -> _Waitable | None: ...
+
+    def reshard(self) -> None: ...
+
+
+def _is_sharded_data_parallel(module: object) -> TypeIs[_ShardedDataParallelModule]:
+    """Whether ``module`` is a sharded data parallel stage module: whether it has
+    the methods of :class:`_ShardedDataParallelModule`."""
+    # Unlike isinstance with a runtime protocol, issubclass caches its result
+    # per class, which keeps the check cheap for every submodule of a stage.
+    return issubclass(type(module), _ShardedDataParallelModule)
 
 
 class PipeliningMetadataError(RuntimeError):
