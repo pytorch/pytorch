@@ -2712,13 +2712,27 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
-    def test_newly_constructed_default_dict(self):
+    @parametrize("factory_kind", ["list", "copy", "bound_copy"])
+    def test_newly_constructed_default_dict(self, factory_kind):
+        copy_descriptor = dict.copy
+
         def f(x):
-            d = defaultdict(list)
+            if factory_kind == "list":
+                factory = list
+            else:
+                receiver = {id(object()): 1}
+                factory = (
+                    receiver.copy
+                    if factory_kind == "copy"
+                    else copy_descriptor.__get__(receiver, dict)
+                )
+            d = defaultdict(factory)
             d[0] = [
                 42,
             ]
-            return x + 1, d
+            if factory_kind == "list":
+                return x + 1, d
+            return x + len(d[1])
 
         x = torch.ones(2)
         ref = f(x)

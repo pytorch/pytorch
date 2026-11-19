@@ -2413,6 +2413,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        return VariableTracker.try_as_python_constant(self)
+
     def is_python_constant(self) -> bool:
         # The container base infers constness from the elements without probing
         # as_python_constant(), so it would report a user subclass as a constant
@@ -5481,13 +5484,30 @@ class DefaultDictVariable(ConstDictVariable):
             return False
         return super().is_python_constant()
 
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        if self._checking_python_constant:
+            return False, None
+        self._checking_python_constant = True
+        try:
+            is_constant, factory = self.default_factory.try_as_python_constant()
+            if not is_constant:
+                return False, None
+            is_constant, value = self._try_as_python_constant_dict()
+            if not is_constant:
+                return False, None
+            return True, collections.defaultdict(factory, value)
+        except NotImplementedError:
+            return False, None
+        finally:
+            self._checking_python_constant = False
+
     def as_python_constant(self) -> Any:
-        if not self.default_factory.is_python_constant():
+        is_constant, factory = self.default_factory.try_as_python_constant()
+        if not is_constant:
             raise AsPythonConstantNotImplementedError(
                 self,
                 "defaultdict default_factory is not a Python constant",
             )
-        factory = self.default_factory.as_python_constant()
         # pyrefly: ignore[no-matching-overload]
         return collections.defaultdict(factory, super().as_python_constant())
 

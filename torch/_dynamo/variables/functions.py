@@ -2541,12 +2541,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         finally:
             _converting.discard(self_id)
 
-    def is_python_constant(self) -> bool:
+    def try_as_python_constant(self) -> tuple[bool, Any]:
         try:
-            self.as_python_constant()
-            return True
+            return True, self.as_python_constant()
         except (NotImplementedError, Unsupported):
-            return False
+            return False, None
 
     def _get_function_impl(
         self, _converting: set[int], allow_sourced_cells: bool
