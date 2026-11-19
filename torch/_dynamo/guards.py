@@ -35,6 +35,7 @@ import logging
 import math
 import pickle
 import sys
+import sysconfig
 import textwrap
 import traceback
 import types
@@ -275,6 +276,7 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
+_is_free_threaded = sysconfig.get_config_var("Py_GIL_DISABLED") == 1
 
 
 def _sequence_length(value: object) -> int:
@@ -532,8 +534,10 @@ class GuardManagerWrapper:
         return self.diff_guard_sources
 
     def finalize(self) -> None:
-        if config.use_recursive_dict_tags_for_guards and justknobs_check(
-            "pytorch/compiler:use_recursive_dict_tags_for_guards"
+        if (
+            config.use_recursive_dict_tags_for_guards
+            and not _is_free_threaded
+            and justknobs_check("pytorch/compiler:use_recursive_dict_tags_for_guards")
         ):
             self.find_tag_safe_roots()
         self.prepare_diff_guard_manager()
