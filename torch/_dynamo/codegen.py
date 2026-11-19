@@ -38,7 +38,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import unimplemented
+from .exc import unimplemented, Unsupported
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -133,12 +133,24 @@ class PyCodegen:
         self.pycodes.append(pycode.format(*[a.reconstruct_pycode(self) for a in args]))
 
     def restore_stack(
-        self, stack_values: list[Any], *, value_from_source: bool = True
+        self,
+        stack_values: list[Any],
+        *,
+        tx: "InstructionTranslatorBase | None" = None,
+        value_from_source: bool = True,
     ) -> None:
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
-            self.foreach(stack_values)
+            for value in stack_values:
+                try:
+                    self(value)
+                except Unsupported as error:
+                    if tx is not None:
+                        self.tx.output.record_reconstruction_failure(
+                            tx, self, value, error
+                        )
+                    raise
             # `restore_stack` is called once per codegen pass (e.g. pass1 for
             # use tracking, pass2 for actual emission). Reset the stack counter
             # so each pass produces the same `__stackN` names.

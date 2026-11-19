@@ -96,6 +96,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
+from .bytecode_analysis import JUMP_OPCODES, livevars_analysis
 from .bytecode_transformation import (
     create_binary_slice,
     create_binary_subscr,
@@ -189,6 +190,7 @@ from .variables.builder import (
 )
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
+from .variables.iter import DictIterator
 from .variables.misc import NullVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -202,7 +204,10 @@ from .variables.user_defined import RandomCallOnSource, UserDefinedDictVariable
 if TYPE_CHECKING:
     from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._dynamo.package import CompilePackage
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import (
+        InstructionTranslatorBase,
+        SpeculationEntry,
+    )
     from torch._dynamo.variables.functions import LocalGeneratorObjectVariable
     from torch._inductor import _CudagraphAnnotation
     from torch.multiprocessing.reductions import StorageWeakRef
@@ -723,6 +728,16 @@ def noop_graph_call(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
     return ()
 
 
+@dataclass
+class _FailedReconstruction:
+    value: VariableTracker
+    owner: "InstructionTranslatorBase"
+    name: str
+    instruction: Instruction
+    log_index: int
+    error: weakref.ReferenceType[exc.Unsupported]
+
+
 class OutputGraph(OutputGraphCommon):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -813,6 +828,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.region_tracker = GraphRegionTracker()
         self._emit_debugger_breakpoint: bool = False
+        self._failed_reconstruction: _FailedReconstruction | None = None
         self._shallow_copy_placeholder_snapshots: dict[torch.fx.Node, torch.Tensor] = {}
 
         # tracked_fakes says where any tensor that was wrapped to fake came
@@ -2304,6 +2320,8 @@ class OutputGraph(OutputGraphCommon):
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
 
+        self._failed_reconstruction = None
+
         # Finalize shapes_spec wiring: errors if any spec assumption/derived
         # check still has unbound IntVar dependencies (i.e. an IntVar
         # appears in an expression but never as a bare-IntVar input slot).
@@ -2845,8 +2863,115 @@ class OutputGraph(OutputGraphCommon):
         # codegen cells before we apply side effects
         self.codegen_cells(tx, cg)
 
-        cg.restore_stack(stack_values, value_from_source=not tx.export)
+        cg.restore_stack(stack_values, tx=tx, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg, log_side_effects)
+
+    def record_reconstruction_failure(
+        self,
+        tx: "InstructionTranslatorBase",
+        cg: PyCodegen,
+        value: VariableTracker,
+        error: exc.Unsupported,
+    ) -> None:
+        self._failed_reconstruction = None
+        # The exact base reconstructor raises immediately, so a direct root's
+        # cache/source state is unchanged and no child failure can qualify.
+        if (
+            type(value) is not DictIterator
+            or type(value).reconstruct is not VariableTracker.reconstruct
+            or type(value).as_python_constant is not VariableTracker.as_python_constant
+            or value.source is not None
+            or value.mutation_type is not None
+            or cg.top_of_stack is value
+            or cg.tempvars.get(value) is not None
+            or error.gb_type != "Reconstruction failure"
+            or type(error.__cause__) is not NotImplementedError
+            or tx.output is not self
+            or cg.tx is not self.root_tx
+        ):
+            return
+        owners: list[tuple[InstructionTranslatorBase, str]] = []
+        current = tx
+        while current is not None:
+            if (
+                current.block_stack
+                or current.active_generic_context_managers
+                or current.current_instruction.exn_tab_entry is not None
+                or current.debug_locals
+                or current.exn_vt_stack
+            ):
+                return
+            for name, local in current.symbolic_locals.items():
+                if local is value and name not in current.cell_and_freevars():
+                    owners.append((current, name))
+            current = current.parent
+        if len(owners) == 1:
+            owner, name = owners[0]
+            self._failed_reconstruction = _FailedReconstruction(
+                value,
+                owner,
+                name,
+                owner.current_instruction,
+                tx.speculation_log.index,
+                weakref.ref(error),
+            )
+
+    def should_reject_reconstruction_checkpoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        entry: "SpeculationEntry",
+        error: BaseException,
+    ) -> bool:
+        failure = self._failed_reconstruction
+        if (
+            failure is None
+            or error is not failure.error()
+            or not isinstance(error, exc.Unsupported)
+            or error.skip_frame
+            or tx.one_graph
+            or tx.error_on_graph_break
+            or tx.output is not self
+            or tx.speculation_log.index != failure.log_index
+            or not any(
+                e is entry for e in tx.speculation_log.entries[: failure.log_index]
+            )
+            or entry.filename != tx.f_code.co_filename
+        ):
+            return False
+        owner = failure.owner
+        current = tx
+        while current is not None and current is not owner:
+            current = current.parent
+        if (
+            current is None
+            or owner.current_instruction is not failure.instruction
+            or owner.symbolic_locals.get(failure.name) is not failure.value
+            or failure.value.source is not None
+            or failure.value.mutation_type is not None
+        ):
+            return False
+        instruction = owner.current_instruction
+        if tx is owner:
+            start = entry.instruction_pointer
+            stop = tx.indexof[instruction]
+            if not (0 <= start <= stop < len(tx.instructions)):
+                return False
+            for inst in tx.instructions[start:stop]:
+                if (
+                    inst.opcode in JUMP_OPCODES
+                    or inst.exn_tab_entry is not None
+                    or inst.opname in ("RETURN_VALUE", "RETURN_CONST", "YIELD_VALUE")
+                    or (
+                        inst.argval == failure.name
+                        and (
+                            inst.opname.startswith(("STORE_FAST", "DELETE_FAST"))
+                            or inst.opname == "LOAD_FAST_AND_CLEAR"
+                        )
+                    )
+                ):
+                    return False
+            instruction = tx.instructions[start]
+        return failure.name in livevars_analysis(owner.instructions, instruction)
 
     def cleanup_graph(self) -> None:
         """
@@ -3922,6 +4047,7 @@ class OutputGraph(OutputGraphCommon):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
+        self._failed_reconstruction = None
         self.local_generators.clear()
         self.nn_modules.clear()
         self.used_inlined_inbuilt_modules_names.clear()

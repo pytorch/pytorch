@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import abc
 import itertools
+import operator
 import unittest
 
 import torch
@@ -72,6 +73,77 @@ class GraphBreakingInt(int):
 @instantiate_parametrized_tests
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("depth", [1, 4, 8])
+    @parametrize("tensor_branch", [False, True])
+    def test_unreconstructable_dict_iterator_does_not_retry_helpers(
+        self, depth, tensor_branch
+    ):
+        def leaf(x, events):
+            if tensor_branch:
+                if x.sum() < 0:
+                    return x.sin()
+            else:
+                torch._dynamo.graph_break()
+            events.append("leaf")
+            return x.cos()
+
+        child = leaf
+        for _ in range(depth):
+
+            def wrap(inner):
+                def helper(x, events):
+                    return inner(x + 1, events) * 2
+
+                return helper
+
+            child = wrap(child)
+
+        def owner(x, events):
+            iterator = iter({1: x})
+            events.append("owner")
+            x.add_(0.25)
+            y = child(x, events)
+            return y + next(iterator)
+
+        def fn(x, events):
+            return owner(x.sin(), events).cos()
+
+        attempts = []
+        recorder = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def backend(gm, inputs):
+            attempts.append(torch._guards.CompileContext.get().attempt + 1)
+            return recorder(gm, inputs)
+
+        x = torch.linspace(0.1, 0.8, 4)
+        events = []
+        eager_events = []
+        expected = fn(x.clone(), eager_events)
+        compiled = torch.compile(fn, backend=backend)
+        self.assertEqual(compiled(x, events), expected)
+        self.assertEqual(events, eager_events)
+        # One initial break and one failed reconstruction; a direct CALL also restarts once.
+        self.assertEqual(attempts[0], 2 if tensor_branch else 3)
+        branch_ops = ["sum", operator.lt] if tensor_branch else []
+        graphs = [
+            [n.target for n in gm.graph.nodes if n.op.startswith("call")]
+            for gm in recorder.graphs
+        ]
+        self.assertEqual(
+            graphs,
+            [
+                ["sin"],
+                [operator.add] * depth + branch_ops,
+                ["cos"] + [operator.mul] * depth,
+                ["cos"],
+            ],
+        )
+        count = len(attempts)
+        events.clear()
+        self.assertEqual(compiled(x, events), expected)
+        self.assertEqual(events, eager_events)
+        self.assertEqual(len(attempts), count)
 
     @torch._dynamo.config.patch(trace_autograd_ops=False)
     def test_requires_grad_restart_before_backward(self):

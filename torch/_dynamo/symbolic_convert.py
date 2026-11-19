@@ -1218,6 +1218,11 @@ def break_graph_if_unsupported(
                 if self.maybe_has_backedge():
                     self.raise_loop_graph_break(self.f_code, excp)
 
+                if self.output.should_reject_reconstruction_checkpoint(
+                    self, speculation, excp
+                ):
+                    raise
+
                 self.log_graph_break(
                     self.code_options,
                     reason=f"{msg_prefix}:\n\n{str(excp)}",
@@ -1988,6 +1993,10 @@ class InstructionTranslatorBase(
             # Nested fallback would retain a caller resume on each loop iteration.
             if self.parent is not None and self.parent.maybe_has_backedge():
                 self.raise_loop_graph_break(self.f_code, e)
+            if self.output.should_reject_reconstruction_checkpoint(
+                self, self.current_speculation, e
+            ):
+                raise
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
