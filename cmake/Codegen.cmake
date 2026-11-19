@@ -183,11 +183,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   if(SELECTED_OP_LIST)
-    if(TRACING_BASED)
-      message(STATUS "Running tracing-based selective build given operator list: ${SELECTED_OP_LIST}")
-      list(APPEND CUSTOM_BUILD_FLAGS
-        --op_selection_yaml_path ${SELECTED_OP_LIST})
-    elseif(NOT STATIC_DISPATCH_BACKEND)
+    if(NOT STATIC_DISPATCH_BACKEND)
       message(WARNING
         "You have to run tracing-based selective build with dynamic dispatch.\n"
         "Switching to STATIC_DISPATCH_BACKEND=CPU."
