@@ -122,11 +122,11 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 # ==========================
 # On subsequent calls:
 #   1. Input structure match -- same treespec, tags, tensor metadata.
-#   2. Reject mutations of remapped sources read by the cached trace.
-#   3. Source replacement -- clone each guard's source with a replacement map
+#      Reject mutations of remapped sources read by the cached trace.
+#   2. Source replacement -- clone each guard's source with a replacement map
 #      (old: L['self'].layers[0].weight -> new: L['self'].layers[1].weight),
 #      then evaluate against the new source's runtime value.
-#   4. Validate aliases, remapped shapes and capture metadata before replaying guards.
+#   3. Validate aliases, remapped shapes and capture metadata before replaying guards.
 #
 # A shared resolve_cache memoizes intermediate source resolution (e.g.
 # L['self'].layers is evaluated once and reused across all guards).
@@ -146,10 +146,11 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #       VariableBuilder. Deduplicates via input_source_to_var.
 #
 #   LiftedBoundSymbol: reuse the explicit binding or rebuild the captured property.
-#   The winning match installs remapped guards and predicates and propagates key order and reads.
 #   LiftedSyntheticObject(ctor_fn, ctor_args, ctor_arg_sources)
 #       Synthetic object (opaque type with SyntheticLocalSource).
 #       Reconstructed via synthetic_graph_input with cached constructor info.
+#
+# The winning match installs remapped guards and predicates and propagates key order and reads.
 #
 # SAFETY
 # ======
@@ -165,8 +166,8 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 # 1. Intermediates — values produced during tracing with no originating source
 #    (e.g. the result of a prior FX op). These can reach a nested compile region
 #    only via (a) the region's explicit function arguments, or (b) closure
-#    capture. We do not support nested-function regions that close over tensors,
-#    so only (a) applies. For explicit arguments, the set of types we support is
+#    capture. A region created during tracing cannot close over an intermediate tensor.
+#    Regions created outside the frame can capture sourced tensors. For explicit inputs the set is
 #    small and well-defined: TensorVariable, SymNodeVariable, and
 #    ConstantVariable (enum members included). Each has a cheap structural
 #    comparison (tensor metadata, symnode identity, constant value equality).
@@ -245,6 +246,14 @@ def classify_vt(vt: Any) -> InputTag | None:
     return None
 
 
+def _argument_source(tag: InputTag, vt: VariableTracker) -> Source | None:
+    if tag is InputTag.OBJECT and (canonical := vt.unwrap().source) is not None:
+        # Bound receiver reads can be rooted at the owner of mod.forward.__self__.
+        if vt.source is not None and is_from_source(vt.source, canonical):
+            return canonical
+    return vt.source
+
+
 def build_input_fingerprint(
     tx: "InstructionTranslatorBase",
     fn_args_vt: Any,
@@ -285,7 +294,7 @@ def build_fingerprint_fast(fn_args_vt: Any) -> InputFingerprint:
         flat_vts.append((tag, vt))
         # Always append (even None) to keep positional alignment with flat_vts
         # so that source_replacement zip pairing is correct across calls.
-        arg_sources.append(getattr(vt, "source", None))
+        arg_sources.append(_argument_source(tag, vt))
     return InputFingerprint(flat_vts, arg_sources)
 
 
@@ -326,7 +335,7 @@ def build_fingerprint_with_pytree(
         else:
             flat_vts.append((tag, vt))
             # Always append (even None) to keep positional alignment with flat_vts.
-            arg_sources.append(getattr(vt, "source", None))
+            arg_sources.append(_argument_source(tag, vt))
 
     def flatten(node_vt: VariableTracker) -> pytree.TreeSpec:
         nonlocal has_unknown
@@ -531,7 +540,6 @@ def is_reuse_eligible(
     When ``has_reuse_hash_fn`` is True, side-effect and mutation checks are
     skipped because the hash key replaces guards — there are no guards to
     go stale from mutations.
-    The caller must include these dependencies in the key.
     """
     if not has_reuse_hash_fn:
         reads = tracing_info.lexical_sources
@@ -686,10 +694,6 @@ def build_reuse_condition(
                 f"subgraph_reuse: failed to resolve source '{source.name}' for {type_str} guard"
             ) from None
 
-        # Explicit object aliases are checked by the positional alias pattern.
-        if type_str == "DUPLICATE_INPUT" and not isinstance(value, torch.Tensor):
-            continue
-
         # TODO(anijain2305): vLLM workaround -- skip CONSTANT_MATCH on
         # strings. Re-evaluate once vLLM migrates off this pattern.
         # if type_str == "CONSTANT_MATCH" and isinstance(value, str):
@@ -761,7 +765,9 @@ def _project_source(
 
 @dataclass
 class SubgraphReuseMatch:
-    """Replay guards on acceptance. Building a capture can register graph inputs and update PGO."""
+    """Replay remapped guards on acceptance. Building a candidate can install ordinary guards,
+    register graph inputs and update PGO even when the candidate is rejected.
+    """
 
     entry: InvokeSubgraphReuseEntry
     source_replacement: dict[Source, Source]
@@ -1180,7 +1186,6 @@ def is_reusable(
                 return _reject_reuse("lexical alias changed")
         tensors = [resolve(remap(s)) for s in condition.tensor_sources]
     except Exception:
-        # Resolving a candidate source can run arbitrary user getters.
         return _reject_reuse("cannot resolve aliases", exc_info=True)
     if input_aliases(tx, fingerprint, tensors) != condition.aliases:
         return _reject_reuse("argument or capture aliases differ")
@@ -1191,9 +1196,8 @@ def is_reusable(
         if isinstance(lifted, LiftedBoundSymbol):
             match.remap_bound_symbol(lifted)
 
-    if match.symbol_replacements and not _shape_guards_match(
-        tx.output.shape_env, match
-    ):
+    env = tx.output.shape_env
+    if match.symbol_replacements and not _shape_guards_match(env, match):
         return False
     for source, new_source in capture_checks:
         if new_source is not source or match.symbol_replacements:
@@ -1777,6 +1781,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 raise
 
+        fingerprint_args = fn_args_vt
+        if isinstance(fn_var, UnspecializedNNModuleVariable):
+            fingerprint_args = [fn_var, *fn_args_vt]
+
         # TODO (anijain2305) - Collect issues why this does not work for export,
         # and enable if request arises.
         reuse = not tx.output.export
@@ -1794,7 +1802,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     fn_var,
                     cached.body_name,
                 )
-                fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
+                fingerprint = build_input_fingerprint(tx, fingerprint_args, kwargs)
                 with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
                     sources = build_source_replacement(
                         cached.arg_sources, fingerprint.arg_sources
@@ -1807,7 +1815,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # the first call when there's nothing in the cache yet.
         elif reuse and has_reuse_entries(tx, fn_var):
             with dynamo_timed("invoke_subgraph_reuse_lookup"):
-                fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
+                fingerprint = build_input_fingerprint(tx, fingerprint_args, kwargs)
                 match = find_reuse_match(
                     tx,
                     fn_var,
@@ -1858,7 +1866,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # Subgraph reuse: save entry for future cache hits
         if reuse:
-            fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
+            fingerprint = build_input_fingerprint(tx, fingerprint_args, kwargs)
             traced_sources = tracing_info.traced_sources.copy()
             # Reused VariableTrackers bypass VariableBuilder's source recording.
             for proxy in p_args[2:]:

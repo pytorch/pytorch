@@ -695,7 +695,8 @@ class TpReprTests(TestCase):
         self.assertTrue(same)
         self.assertTrue(distinct)
 
-    def test_repr_of_hash_of_compile_time_object(self):
+    @parametrize("observe", [repr, lambda h: ["0", "1"][h % 2]])
+    def test_repr_of_hash_of_compile_time_object(self, observe):
         # hash() returning id(self) on a sourceless object yields a
         # FakeIdVariable (HASH kind). Its text must not embed a temporary hash.
         class Obj:
@@ -703,7 +704,7 @@ class TpReprTests(TestCase):
                 return id(self)
 
         def fn(x):
-            s = repr(hash(Obj()))
+            s = observe(hash(Obj()))
             return x + 1, s.isdigit()
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
