@@ -5100,6 +5100,37 @@ def region_infer_twice(model, x):
     return model(x) + model(x)
 
 
+class RegionKeeps(torch.nn.Module):
+    # Keeps what it computes on the way in a dict, for whoever asks later.
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 4, 3, padding=1)
+        self.fc = torch.nn.Linear(4 * 6 * 6, 5)
+        self.outputs = {}
+
+    def forward(self, x):
+        h = torch.relu(self.conv(x))
+        self.outputs["conv"] = h
+        h = torch.tanh(h.flatten(1))
+        self.outputs["flat"] = h
+        out = self.fc(h)
+        self.outputs["out"] = out
+        return out
+
+
+class RegionKeepsAndReads(RegionKeeps):
+    def forward(self, x):
+        h = torch.relu(self.conv(x))
+        self.outputs["conv"] = h
+        return self.fc(torch.tanh(self.outputs["conv"].flatten(1)))
+
+
+def region_stores(model, x, kept):
+    h = torch.relu(model.conv(x))
+    kept["conv"] = h
+    return model.fc(torch.tanh(h.flatten(1)))
+
+
 def region_lookup(table, x):
     try:
         scale = table["scale"]
@@ -6176,6 +6207,88 @@ class TestVmRegions(TestCase):
         self.assertEqual(reasons, ["raised KeyError when it was first run"])
         table = {"scale": 3.0}
         self.assertEqual(compiled(table, x), region_lookup(table, x))
+
+    def test_item_stored_in_a_dict_of_a_module_does_not_end_the_region(self):
+        torch.manual_seed(0)
+        model, reference = RegionKeeps().eval(), RegionKeeps().eval()
+        reference.load_state_dict(model.state_dict())
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        kept = id(model.outputs)
+        seen = []
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(compiled(model, x), reference(x), atol=0, rtol=0)
+                # The dict the module had, with what eager leaves in it.
+                self.assertEqual(id(model.outputs), kept)
+                self.assertIs(type(model.outputs), dict)
+                self.assertEqual(list(model.outputs), ["conv", "flat", "out"])
+                for name, value in reference.outputs.items():
+                    self.assertIs(type(model.outputs[name]), torch.Tensor)
+                    self.assertEqual(model.outputs[name], value, atol=0, rtol=0)
+                seen.append(id(model.outputs["conv"]))
+        self.assertEqual(len(set(seen[-3:])), 3)
+        # One graph of all of it: on the parent, the stores cut it into
+        # three runs, none of them worth a graph.
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["ops"], 6)
+
+    def test_dict_of_a_module_that_the_region_reads_is_left_to_the_vm(self):
+        torch.manual_seed(0)
+        model, reference = RegionKeepsAndReads().eval(), RegionKeepsAndReads().eval()
+        reference.load_state_dict(model.state_dict())
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager", min_ops=1), fallback=False
+        )
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(compiled(model, x), reference(x), atol=0, rtol=0)
+                expected = reference.outputs["conv"]
+                self.assertEqual(model.outputs["conv"], expected, atol=0, rtol=0)
+        reasons = " / ".join(
+            r["reason"] for r in torch.vm.regions(compiled) if r["state"] == "vm"
+        )
+        self.assertIn("reads a dict that a module holds", reasons)
+
+    def test_dict_of_a_module_that_something_else_has_is_left_as_it_is(self):
+        torch.manual_seed(0)
+        model, reference = RegionKeeps().eval(), RegionKeeps().eval()
+        reference.load_state_dict(model.state_dict())
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager", min_ops=1), fallback=False
+        )
+        # Whoever has the dict could read it while a trace has something
+        # else in its place.
+        outputs = model.outputs
+        with torch.no_grad():
+            for _ in range(20):
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(compiled(model, x), reference(x), atol=0, rtol=0)
+                self.assertIs(model.outputs, outputs)
+                for name, value in reference.outputs.items():
+                    self.assertEqual(outputs[name], value, atol=0, rtol=0)
+        # The stores are the VM's: three regions around them.
+        self.assertEqual(len(self.compiled_regions(compiled)), 3)
+
+    def test_item_stored_in_a_dict_the_region_was_handed(self):
+        torch.manual_seed(0)
+        model = RegionKeeps().eval()
+        compiled = torch.vm(
+            region_stores, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                kept, expected = {}, {}
+                want = region_stores(model, x, expected)
+                self.assertEqual(compiled(model, x, kept), want, atol=0, rtol=0)
+                self.assertEqual(list(kept), ["conv"])
+                self.assertEqual(kept["conv"], expected["conv"], atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["ops"], 6)
 
     def test_measurement_starts_over_when_a_region_is_compiled(self):
         torch.manual_seed(0)
