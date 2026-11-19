@@ -73,6 +73,15 @@ variant". When a region is called with inputs that differ from earlier ones
 in such numbers only, the next variant leaves those numbers open: its graph
 computes with them, and it holds for every call that satisfies what its trace
 needed to know about them (see "Sizes" below).
+
+In a call of inference (no gradients recorded, every module in eval mode) the
+parameters and buffers are not inputs of an Inductor graph but part of it, so
+that Inductor folds what follows from them alone (``freeze=``). Such a variant
+checks on every call that they are the tensors it was made with and that
+nothing wrote to them in place: ``tensor_stamp`` hashes, per tensor, the
+object, the address of its memory and its version counter.
+A variant whose tensors changed is made again for what they are then, and
+a region this happens to twice takes them as inputs from then on.
 """
 
 import ast
@@ -81,6 +90,7 @@ import collections
 import contextlib
 import enum
 import gc
+import operator
 import random
 import sys
 import threading
@@ -88,6 +98,7 @@ import time
 import types
 import weakref
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 import torch
@@ -202,6 +213,12 @@ _MOST_SURPLUS = 4
 # How many times regions wait for one that was surveyed before them to be
 # compiled, before they go ahead without it.
 _MOST_WAITS = 256
+# How many graphs of a compiled function may have the tensors of its modules
+# built in: such a graph is the graph of one module and no other.
+_MOST_FROZEN = 8
+# How many times a region may find the tensors of a module changed under a
+# graph that had them built in, before its graphs take them as inputs.
+_MOST_MELTS = 2
 _HEAPTYPE = 1 << 9
 # How many variants of a region may leave what they were given with other
 # items, keys or attributes than it had. A cache that is filled on the first
@@ -1975,7 +1992,10 @@ class _Variant:
         "ops",
         "proven",
         "recipes",
+        "rest",
         "shape",
+        "stamp",
+        "state",
     )
 
     def __init__(
@@ -2006,14 +2026,22 @@ class _Variant:
         self.shape: Any = None
         self.conditions: list[str] = []
         self.numbers: list[int] = []
+        # For a variant whose graph has the tensors of its modules built in
+        # (``freeze``): what picks the tensors the graph still takes, and
+        # the built-in ones, out of those of a call, and the stamp of the
+        # built-in ones when the graph was made.
+        self.rest: Callable[[list[Any]], list[Any]] | None = None
+        self.state: Callable[[list[Any]], list[Any]] | None = None
+        self.stamp: int | None = None
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
+        taken = flat if self.rest is None else self.rest(flat)
         if self.numbers:
             ints = inputs.ints
-            results = self.compiled(*flat, *[ints[k] for k in self.numbers])
+            results = self.compiled(*taken, *[ints[k] for k in self.numbers])
         else:
-            results = self.compiled(*flat)
+            results = self.compiled(*taken)
         if self.direct:
             return tuple(results)
         built: dict[int, Any] = {}
@@ -2028,6 +2056,21 @@ class _Variant:
     def affects(self, effects: list[Any], grows: bool) -> None:
         self.effects, self.grows = effects, grows
         self.direct = self.direct and not effects
+
+    def freeze(self, count: int, positions: list[int], stamp: int) -> None:
+        """Says that the graph has the tensors at ``positions``, of the
+        ``count`` a call has, built in as they were at ``stamp``."""
+        taken = set(positions)
+        self.rest = _picker([i for i in range(count) if i not in taken])
+        self.state = _picker(positions)
+        self.stamp = stamp
+
+    def fresh(self, inputs: _Inputs) -> bool:
+        """Whether what the graph has built in is what the modules hold: the
+        same tensors, not written to since."""
+        if self.state is None:
+            return True
+        return _runtime.tensor_stamp(self.state(inputs.flat)) == self.stamp
 
     def holds(self) -> bool:
         """Whether what the path read is still what it was."""
@@ -2061,6 +2104,10 @@ class _Region:
         self.seconds = 0.0
         # Traces that were made for nothing: their graph was one too many.
         self.surplus = 0
+        # How many times a graph with the weights built in met other
+        # weights. A region that does so again and again has modules that
+        # are being trained, and its graphs take the weights from then on.
+        self.melts = 0
 
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
@@ -2071,6 +2118,10 @@ class _Region:
         except _Opaque:
             return self.decline(args)
         variant = self.variants.get(key, self)
+        if variant is not self and variant is not None:
+            if not variant.fresh(inputs):  # type: ignore[union-attr]
+                self.melt(variant)  # type: ignore[arg-type]
+                variant = self
         if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
             variant = self.widened(key, inputs)
             if variant is not None:
@@ -2090,8 +2141,21 @@ class _Region:
         if known is not None:
             for variant in reversed(known.open):
                 if variant.shape.holds(key[2], inputs.offsets) and variant.holds():
-                    return variant
+                    if variant.fresh(inputs):
+                        return variant
+                    self.melt(variant)
+                    return self.widened(key, inputs)
         return None
+
+    def melt(self, variant: _Variant) -> None:
+        """Takes out a variant whose graph has weights built in that the
+        modules no longer have."""
+        self.melts += 1
+        for other in [k for k, v in self.variants.items() if v is variant]:
+            del self.variants[other]
+        for known in self.sizes.values():
+            if variant in known.open:
+                known.open.remove(variant)
 
     def install(self, region: Any) -> bool:
         """Puts the region into the block a pass is working on."""
@@ -2120,6 +2184,14 @@ class _Region:
             outputs = variant.run(inputs)
         except Exception as e:
             torch.set_rng_state(generator)
+            if variant.stamp is not None:
+                # The graph without the weights built in may do.
+                self.melt(variant)
+                self.melts = _MOST_MELTS
+                again = self.specialize(key, args, inputs)
+                if again is None:
+                    return self.decline(args)
+                return self.first_run(key, again, args, inputs)
             self.variants[key] = None
             known = self.sizes.get(_kind(key))
             if known is not None and variant in known.open:
@@ -2357,6 +2429,7 @@ class _Region:
 
         def region(*example: Any) -> tuple[Any, ...]:
             fake = example[: len(flat)]
+            versions = [f._version for f in fake]
             fakes = {id(real): f for real, f in zip(flat, fake)}
             copies = _Copies(
                 fakes, inputs.ints, dict(zip(numbers, example[len(flat) :]))
@@ -2389,18 +2462,49 @@ class _Region:
                 except Untraceable as e:
                     raise _Failed(self.definition(value), str(e)) from None
             found["effects"] = _effects_of(copies, recipes, stored)
+            found["written"] = _written(flat, fake, versions, stored)
             return tuple(recipes.results)
 
         graph = _trace(region, opening.example() if opening else list(flat), opening)
         ops = self.ops_of(graph)
-        compiled, conditions = self.finish(graph, inputs, key, opening)
+        frozen = self.freezable(inputs, modules, found["written"])
+        compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
         variant = _Variant(compiled, found["recipes"], ops, keep)
         variant.affects(*found["effects"])
+        if built is not None:
+            variant.freeze(len(flat), *built)
         if opening is not None:
             self.leave_open(variant, key, inputs, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return variant
+
+    def freezable(
+        self, inputs: _Inputs, modules: dict[int, nn.Module], written: set[int]
+    ) -> list[int]:
+        """The tensors of a call that its graph may have built in instead of
+        taking them: the parameters and buffers of the modules, when the
+        call is one of inference (no gradients recorded, no module in
+        training) and the region has not found the modules with other
+        weights twice. Not the ones the region itself writes to or replaces. A
+        tensor a module keeps in a plain attribute is a cache more often
+        than a weight, and stays an input."""
+        options = self.plan.options
+        if options.backend not in _BUILDS_IN or torch.is_grad_enabled():
+            return []
+        if not options.freeze or options.frozen >= _MOST_FROZEN:
+            return []
+        if self.melts >= _MOST_MELTS:
+            return []
+        state: set[int] = set()
+        for module in modules.values():
+            for part in module.modules():
+                if part.training:
+                    return []
+                state.update(map(id, part._parameters.values()))
+                state.update(map(id, part._buffers.values()))
+        flat = inputs.flat
+        return [i for i, t in enumerate(flat) if id(t) in state and i not in written]
 
     def leave_open(
         self, variant: _Variant, key: Any, inputs: _Inputs, opening: _Open, texts: Any
@@ -2428,14 +2532,22 @@ class _Region:
         inputs: _Inputs,
         key: Any,
         opening: _Open | None,
-    ) -> tuple[Any, list[str] | None]:
+        frozen: list[int],
+    ) -> tuple[Any, list[str] | None, tuple[list[int], int] | None]:
         """Hands a traced graph to the backend, unless it has seen it. Also
-        returns, for a graph with open sizes, the conditions it holds under."""
+        returns, for a graph with open sizes, the conditions it holds under,
+        and for one that has the tensors at ``frozen`` built in, those
+        positions and the stamp of the tensors."""
         options = self.plan.options
         ops = self.ops_of(graph)
         if ops < options.min_ops:
             raise _Failed(None, f"{ops} tensor operations, not worth a graph")
         _views_to_reshapes(graph)
+        if frozen:
+            # A region is handed every tensor of a module it takes: the
+            # ones its graph does not use are no part of it.
+            placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
+            frozen = [i for i in frozen if placeholders[i].users]
         if options.backend is _inductor:
             _rows_to_reductions(graph)
         # The parameters are inputs, so the layers of a model that are built
@@ -2456,6 +2568,24 @@ class _Region:
             same = (graph.code, key[1], bytes(tensors), key[3], opened, left)
         # What this trace needed of the sizes, before the backend adds to it.
         own = opening.conditions() if opening is not None else None
+        # None for tensors that do not count their writes.
+        tensors = [inputs.flat[i] for i in frozen]
+        stamp = _runtime.tensor_stamp(tensors) if frozen else None
+        if stamp is not None and self.compiles < options.max_variants:
+            example = opening.example() if opening is not None else list(inputs.flat)
+            taken = set(frozen)
+            rest = [e for i, e in enumerate(example) if i not in taken]
+            try:
+                with_weights = _built_in(graph, inputs.flat, frozen)
+                compiled = _BUILDS_IN[options.backend](with_weights, rest)
+            except Exception:
+                # The graph that takes its weights is still to be had.
+                compiled = None
+            if compiled is not None:
+                options.frozen += 1
+                self.compiles += 1
+                conditions = opening.conditions() if opening is not None else None
+                return compiled, conditions, (frozen, stamp)
         made = options.compiled.get(same)
         if made is None:
             if self.compiles >= options.max_variants:
@@ -2472,9 +2602,9 @@ class _Region:
                 options.compiled[same] = made
             self.compiles += 1
         if own is None:
-            return made[0], None
+            return made[0], None, None
         theirs: list[str] = made[1] or []
-        return made[0], list(dict.fromkeys([*own, *theirs]))
+        return made[0], list(dict.fromkeys([*own, *theirs])), None
 
     def definition(self, value: int) -> int | None:
         """The instruction of the region that defines a value."""
@@ -2826,12 +2956,15 @@ class _Path(_Region):
         final = _Inputs()
         key = self.key(args, final)
         self.sizes.setdefault(_kind(key), _Sizes(key[2]))
-        compiled, conditions = self.finish(graph, inputs, key, opening)
+        frozen = self.freezable(inputs, found["modules"], found["written"])
+        compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
         variant = _Variant(compiled, found["recipes"], self.ops_of(graph), keep)
         variant.direct = False
         variant.leap = found["leap"]
         variant.guards = found["guards"]
         variant.affects(*found["effects"])
+        if built is not None:
+            variant.freeze(len(inputs.flat), *built)
         if opening is not None:
             self.leave_open(variant, key, final, opening, conditions)
         self.seconds += time.perf_counter() - start
@@ -2865,6 +2998,7 @@ class _Path(_Region):
 
         def path(*example: Any) -> tuple[Any, ...]:
             fake = example[: len(flat)]
+            versions = [f._version for f in fake]
             fakes = {id(real): f for real, f in zip(flat, fake)}
             copies = _Copies(
                 fakes, inputs.ints, dict(zip(numbers, example[len(flat) :]))
@@ -2922,6 +3056,8 @@ class _Path(_Region):
                     raise _Retry(limit=born - 1) from None
             found["leap"] = (block, index, values, [v for v in live if v not in values])
             found["effects"] = _effects_of(copies, recipes, stored)
+            found["written"] = _written(flat, fake, versions, stored)
+            found["modules"] = modules
             found["guards"] = walk.guards
             found["used"] = [
                 p for p, v in enumerate(self.inputs) if v in walk.used and p in keyed
@@ -3050,16 +3186,24 @@ class Regions:
     __name__ = "regions"
 
     def __init__(
-        self, backend: Backend, min_ops: int, max_variants: int, warmup: int
+        self,
+        backend: Backend,
+        min_ops: int,
+        max_variants: int,
+        warmup: int,
+        freeze: bool = True,
     ) -> None:
         self.backend = backend
         self.min_ops = min_ops
         self.max_variants = max_variants
         self.warmup = warmup
+        self.freeze = freeze
         self.plans: list[_Plan] = []
         # What the backend made of each graph, by the code of the graph and
         # what its inputs are like.
         self.compiled: dict[Any, Any] = {}
+        # How many graphs have the tensors of their modules built in.
+        self.frozen = 0
         # Per function: the regions that were surveyed and are compiled at
         # their next call, in the order they were surveyed, and how often
         # another region waited for each.
@@ -3125,6 +3269,8 @@ class Regions:
                         "ends": sorted({v.leap[:2] for v in variants if v.leap}),
                         "ops": max((v.ops for v in variants), default=0),
                         "seconds": part.seconds,
+                        # How many variants have the weights built in.
+                        "frozen": sum(v.stamp is not None for v in variants),
                         # Per variant that leaves sizes open: what it needs
                         # of them.
                         "open": [
@@ -3220,6 +3366,58 @@ def _rows_to_reductions(graph: torch.fx.GraphModule) -> None:
         graph.recompile()
 
 
+def _picker(positions: list[int]) -> Callable[[list[Any]], list[Any]]:
+    """What takes the items at ``positions`` out of a list, as a list."""
+    if len(positions) < 2:
+        return lambda items: [items[p] for p in positions]
+    pick = operator.itemgetter(*positions)
+    return lambda items: list(pick(items))
+
+
+def _written(
+    flat: list[torch.Tensor], fake: Any, versions: list[int], stored: list[Any]
+) -> set[int]:
+    """The inputs of a trace that it wrote to, and the ones the region puts
+    another tensor in the place of: at the next call they are not what they
+    were, so no graph has them built in."""
+    written = {i for i, f in enumerate(fake) if f._version != versions[i]}
+    where = {id(tensor): i for i, tensor in enumerate(flat)}
+    for module, name, _ in stored:
+        position = where.get(id(vars(module).get(name)))
+        if position is not None:
+            written.add(position)
+    return written
+
+
+def _built_in(
+    graph: torch.fx.GraphModule, flat: list[torch.Tensor], positions: list[int]
+) -> torch.fx.GraphModule:
+    """A copy of a graph that has the tensors at ``positions`` as buffers of
+    its own where the graph has inputs."""
+    graph = deepcopy(graph)
+    placeholders = [node for node in graph.graph.nodes if node.op == "placeholder"]
+    for position in positions:
+        node, name = placeholders[position], f"_state_{position}"
+        graph.register_buffer(name, flat[position])
+        with graph.graph.inserting_before(node):
+            constant = graph.graph.get_attr(name)
+        node.replace_all_uses_with(constant)
+        graph.graph.erase_node(node)
+    graph.recompile()
+    return graph
+
+
+def _inductor_frozen(
+    graph: torch.fx.GraphModule, inputs: list[Any]
+) -> Callable[..., Any]:
+    """Inductor on a graph whose weights are buffers of the graph: it folds
+    what is computed from them alone (a batch norm into the convolution in
+    front of it, the mask a model builds from nothing but a size), and lays
+    the weights of convolutions out the way the kernels want them."""
+    with torch._inductor.config.patch({"freezing": True}):
+        return torch._inductor.compile(graph, inputs)
+
+
 def _inductor(graph: torch.fx.GraphModule, inputs: list[Any]) -> Callable[..., Any]:
     return torch._inductor.compile(graph, inputs)
 
@@ -3235,10 +3433,18 @@ def _aot_eager(
 
 
 _BACKENDS: dict[str, Backend] = {"inductor": _inductor, "aot_eager": _aot_eager}
+# The backends that gain from a graph that has the weights as buffers of its
+# own, and what makes something of such a graph for each.
+_BUILDS_IN: dict[Backend, Backend] = {_inductor: _inductor_frozen}
 
 
 def make_pass(
-    runtime: Any, backend: str | Backend, min_ops: int, max_variants: int, warmup: int
+    runtime: Any,
+    backend: str | Backend,
+    min_ops: int,
+    max_variants: int,
+    warmup: int,
+    freeze: bool = True,
 ) -> Regions:
     global _runtime
     if isinstance(backend, str):
@@ -3246,4 +3452,4 @@ def make_pass(
             raise ValueError(f"unknown backend {backend!r}; known: {sorted(_BACKENDS)}")
         backend = _BACKENDS[backend]
     _runtime = runtime
-    return Regions(backend, min_ops, max_variants, warmup)
+    return Regions(backend, min_ops, max_variants, warmup, freeze)

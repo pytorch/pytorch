@@ -114,6 +114,19 @@ class Graphs(BuiltinPass):
             other, share what the backend made of it, and sizes that differ
             from call to call are left open in one graph rather than compiled
             one by one.
+        freeze: with ``"inductor"``, build the parameters and buffers of the
+            modules a region reads into its graph when the call is one of
+            inference (no gradients recorded, every module in eval mode), so
+            that Inductor folds what follows from them alone (a batch norm into
+            the convolution before it) and lays convolution weights out for the
+            kernels. Such a graph is checked on every call: a tensor that was
+            written to in place since (by an optimizer, say) or replaced makes
+            the region compile again with the tensors of that call, and a
+            region this happens to twice takes its weights as inputs from then
+            on. A tensor the region itself writes is not built in. A write
+            through ``.data`` does not count as one to the tensor, and is not
+            seen. ``regions()`` reports ``frozen`` per region. On by default
+            (``TORCH_VM_FREEZE=0`` turns it off).
     """
 
     engine: ClassVar[str] = "graphs"
@@ -121,6 +134,7 @@ class Graphs(BuiltinPass):
     backend: str | Callable[..., Any] = "inductor"
     min_ops: int = 4
     max_variants: int = 32
+    freeze: bool | None = None
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
