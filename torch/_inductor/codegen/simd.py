@@ -84,7 +84,13 @@ from ..utils import (
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
-from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
+from .common import (
+    CSEVariable,
+    index_prevent_reordering,
+    InplacedBuffer,
+    Kernel,
+    PythonPrinter,
+)
 from .multi_kernel import MultiKernel, SizeHintMultiKernel
 from .simd_kernel_features import (
     DisableReduction,
@@ -750,6 +756,22 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return self.store(name, index, value)
         finally:
             self.inside_reduction = prior
+
+    def remove_kernel_local_buffers(self) -> None:
+        super().remove_kernel_local_buffers()
+        # decide_inplace_update() records both names of an in-place pair as
+        # mutations. When none of the arg's names keeps a store here (the
+        # reused input is not stored by this kernel, the stores of the
+        # kernel-local outputs were just removed), the kernel only reads the
+        # arg. Drop its names so it is not reported in mutated_arg_names,
+        # which makes autotuning clone it or back it up to pinned host memory.
+        for name in self.inplaced_to_remove:
+            buf = self.args.inplace_buffers[name]
+            if isinstance(buf, InplacedBuffer) and not any(
+                n in self.store_buffer_names and n not in self.inplaced_to_remove
+                for n in buf.other_names
+            ):
+                self.mutations.difference_update(buf.other_names)
 
     def should_use_cooperative_reduction(self) -> bool:
         return False  # defined in subclass

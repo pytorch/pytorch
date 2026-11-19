@@ -23974,6 +23974,32 @@ if RUN_GPU:
             self.assertTrue(len(re.findall(r"in_out_ptr\d+", code)) > 0)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_inplace_arg_without_store_not_mutated(self):
+            # z reuses the bmm output in place (in_out_ptr0), then its store is
+            # removed since only the reductions in the same kernel read it. The
+            # kernel only loads in_out_ptr0, so autotuning must not clone or
+            # back it up. sigmoid(sum) reuses the sum buffer (in_out_ptr1) and
+            # is stored.
+            def fn(a, b, mean, var, gamma, beta, w):
+                y = torch.bmm(a, b)
+                z = torch.relu((y - mean) * torch.rsqrt(var + 1e-5) * gamma + beta)
+                return z.amax(-1), torch.sigmoid((z * w).sum(-1))
+
+            inps = [
+                torch.randn(4, 256, 64, device=GPU_TYPE),
+                torch.randn(4, 64, 512, device=GPU_TYPE),
+                torch.randn(512, device=GPU_TYPE),
+                torch.rand(512, device=GPU_TYPE) + 0.5,
+                torch.randn(512, device=GPU_TYPE),
+                torch.randn(512, device=GPU_TYPE),
+                torch.randn(512, device=GPU_TYPE),
+            ]
+            code = run_and_get_triton_code(torch.compile(fn), *inps)
+            FileCheck().check("'mutated_arg_names': ['in_out_ptr1']").check(
+                "tl.load(in_out_ptr0"
+            ).check("tl.store(in_out_ptr1").run(code)
+            self.assertNotIn("tl.store(in_out_ptr0", code)
+
         @torch._functorch.config.patch("donated_buffer", True)
         # The inplace updating does not happen after we fused the
         # layernorm backward.
