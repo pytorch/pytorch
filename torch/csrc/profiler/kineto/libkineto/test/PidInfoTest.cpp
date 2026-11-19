@@ -14,6 +14,14 @@
 
 using namespace KINETO_NAMESPACE;
 
+TEST(ProcessNameTest, currentProcess) {
+#ifdef _WIN32
+  EXPECT_EQ(processName(processId()), "PidInfoTest.exe");
+#else
+  EXPECT_EQ(processName(processId()), "PidInfoTest");
+#endif
+}
+
 TEST(ThreadNameTest, setAndGet) {
   setThreadName("ThreadNameTest");
   EXPECT_EQ(getThreadName(), "ThreadNameTest");
