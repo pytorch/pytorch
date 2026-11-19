@@ -75,6 +75,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     maybe_get_fake_device,
     maybe_get_item_memo,
     maybe_set_fake_device,
@@ -786,7 +787,7 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
-        self.container_id_tokens: set[VariableTracker] = set()
+        self.deepcopy_id_types: dict[VariableTracker, type] = {}
         self.builtin_method_keys = BuiltinMethodKeyTracker()
         # List of TensorVariables that are leaf tensors created in-graph
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
@@ -1768,7 +1769,7 @@ class OutputGraph(OutputGraphCommon):
         return self
 
     @property
-    def fake_mode(self) -> torch._subclasses.FakeTensorMode:
+    def fake_mode(self) -> torch._subclasses.FakeTensorMode | CppFakeTensorMode:
         if self.tracing_context.fake_mode is None:
             raise AssertionError("tracing_context.fake_mode must not be None")
         return self.tracing_context.fake_mode
@@ -3999,7 +4000,7 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
         self.input_source_to_var.clear()
-        self.container_id_tokens.clear()
+        self.deepcopy_id_types.clear()
         self.builtin_method_keys.clear()
         self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()

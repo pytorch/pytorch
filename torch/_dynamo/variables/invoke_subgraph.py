@@ -16,12 +16,14 @@ from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 import sympy
 
 import torch
+import torch._dynamo.source as sources
 import torch._higher_order_ops
-from torch._dynamo import config as dynamo_config, graph_break_hints
+from torch._dynamo import config, graph_break_hints, utils
 from torch._dynamo.exc import unimplemented
 from torch._dynamo.guards import (
     _receiver_alias_pattern,
     extract_tensor_metadata,
+    guard_mixed_scope_alias,
     GUARD_VALUE_DISPATCH,
     GuardBuilder,
     GuardCheckSpec,
@@ -30,18 +32,8 @@ from torch._dynamo.guards import (
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
-from torch._dynamo.source import (
-    ConstDictKeySource,
-    is_from_source,
-    SyntheticLocalSource,
-    TensorPropertySource,
-)
-from torch._dynamo.utils import (
-    _make_inlined,
-    constants_identical,
-    tensor_always_has_static_shape,
-    unpack_iterable,
-)
+from torch._dynamo.source import SyntheticLocalSource
+from torch._dynamo.utils import _make_inlined, constants_identical, unpack_iterable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -247,10 +239,11 @@ def classify_vt(vt: Any) -> InputTag | None:
 
 
 def _argument_source(tag: InputTag, vt: VariableTracker) -> Source | None:
+    # Attribute guards follow the realized object, including preloaded aliases.
     if tag is InputTag.OBJECT and (canonical := vt.unwrap().source) is not None:
-        # Bound receiver reads can be rooted at the owner of mod.forward.__self__.
-        if vt.source is not None and is_from_source(vt.source, canonical):
-            return canonical
+        if vt.source is not None and vt.source != canonical:
+            guard_mixed_scope_alias(vt.source, canonical)
+        return canonical
     return vt.source
 
 
@@ -546,7 +539,7 @@ def is_reuse_eligible(
         for _, vt in fingerprint.flat_vts:
             record_lexical_alias(reads, vt.source, vt.unwrap().source)
         if any(
-            is_from_source(vt.source, read)
+            sources.is_from_source(vt.source, read)
             for tag, vt in fingerprint.flat_vts
             if tag is not InputTag.CONSTANT and vt.source is not None
             for read, _ in reads
@@ -806,25 +799,23 @@ class SubgraphReuseMatch:
         original = lifted.source
         if original is None or (source := self.remap_source(original)) is original:
             return lifted.expr
-        if lifted.expr not in self.symbol_replacements:
-            if isinstance(source, TensorPropertySource):
-                tensor = self.build_capture(source.base)
-                example = tensor.as_proxy().node.meta["example_value"]
-                prop = getattr(example, source.prop.method_name())
-                value = prop() if source.idx is None else prop(source.idx)
-            else:
-                vt = self.build_capture(source)
-                value = (
-                    vt.sym_num
-                    if isinstance(vt, SymNodeVariable)
-                    else vt.as_python_constant()
-                )
-            if isinstance(value, torch.SymInt):
-                value = value.node._expr
-            else:
-                value = sympy.Integer(value)
-            self.symbol_replacements[lifted.expr] = value
-        return self.symbol_replacements[lifted.expr]
+        if lifted.expr in self.symbol_replacements:
+            return self.symbol_replacements[lifted.expr]
+        if isinstance(source, sources.TensorPropertySource):
+            tensor = self.build_capture(source.base)
+            example = tensor.as_proxy().node.meta["example_value"]
+            prop = getattr(example, source.prop.method_name())
+            dim = prop() if source.idx is None else prop(source.idx)
+        else:
+            vt = self.build_capture(source)
+            dim = (
+                vt.sym_num
+                if isinstance(vt, SymNodeVariable)
+                else vt.as_python_constant()
+            )
+        raw = dim.node._expr if isinstance(dim, torch.SymInt) else sympy.Integer(dim)
+        self.symbol_replacements[lifted.expr] = raw
+        return raw
 
     def remap_symint(self, value: Any) -> Any:
         if not self.symbol_replacements or not isinstance(value, torch.SymInt):
@@ -860,18 +851,20 @@ class SubgraphReuseMatch:
             return True
         parameter = (
             type(value) is torch.nn.Parameter
-            and dynamo_config.skip_no_tensor_aliasing_guards_on_parameters
+            and config.skip_no_tensor_aliasing_guards_on_parameters
         )
         if (
             source is not new_source
             and (plain or parameter)
             and value.layout is torch.strided
-            and dynamo_config._dynamic_shapes_spec is None
+            and config._dynamic_shapes_spec is None
             and value not in tx.output.tracing_context.tensor_to_context
             and not example._has_symbolic_sizes_strides
             and source not in self.entry.lifted_capture_sources
         ):
-            static_shapes, _ = tensor_always_has_static_shape(value, True, new_source)
+            static_shapes, _ = utils.tensor_always_has_static_shape(
+                value, True, new_source
+            )
             context = _automatic_dynamic(value, tx, new_source, static_shapes)
             if isinstance(context, symbolic_shapes.StatelessSymbolicContext) and all(
                 dim is symbolic_shapes.DimDynamic.STATIC
@@ -1081,7 +1074,7 @@ def is_reusable(
                     else None
                 )
                 if cached_src is not None and any(
-                    is_from_source(cached_src, read)
+                    sources.is_from_source(cached_src, read)
                     for read, _ in condition.lexical_sources
                 ):
                     return _reject_reuse("lexical constant changed")
@@ -1099,7 +1092,7 @@ def is_reusable(
     for old, new in zip(cached_entry.arg_sources, fingerprint.arg_sources):
         if old is not None and bindings.setdefault(old, new) != new:
             return _reject_reuse("conflicting argument binding")
-        if isinstance(old, ConstDictKeySource) and type(old) is not type(new):
+        if isinstance(old, sources.ConstDictKeySource) and type(old) is not type(new):
             return _reject_reuse("incompatible dictionary key source")
     for old in condition.overlapping_args:
         projected = _project_source(old, bindings)
@@ -1480,7 +1473,7 @@ def stamp_out_subgraph(
                 proxy = bindings[binding_key]
             else:
                 source = match.remap_source(subgraph_input.source)
-                if isinstance(source, TensorPropertySource):
+                if isinstance(source, sources.TensorPropertySource):
                     tensor = match.build_capture(source.base)
                     idx = source.idx
                     args = [] if idx is None else [ConstantVariable.create(idx)]
@@ -1631,7 +1624,9 @@ def build_subgraph_input_mapping(
                 # The first creator of a shared symbol need not be read by this region.
                 expr = example.node._expr
                 dep = (
-                    source.base if isinstance(source, TensorPropertySource) else source
+                    source.base
+                    if isinstance(source, sources.TensorPropertySource)
+                    else source
                 )
                 if dep not in traced_sources or expr in explicit_symbols:
                     source = None
