@@ -66,11 +66,11 @@ import torch
 import torch.fx as fx
 import torch.nn as nn
 from torch._dynamo.debug_utils import (
-    _cuda_system_info_comment,
     AccuracyError,
     backend_accuracy_fails,
     BuckTargetWriter,
     cast_to_fp64,
+    device_system_info_comment,
     extra_deps,
     extra_imports,
     generate_config_string,
@@ -610,7 +610,7 @@ if "__compile_source__" in globals():
             model_str += f"# torch cuda version: {torch.version.cuda}\n"
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-        model_str += _cuda_system_info_comment()
+        model_str += device_system_info_comment(args)
 
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"

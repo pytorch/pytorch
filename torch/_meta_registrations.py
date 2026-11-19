@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import wraps
 from typing import TypeVar
@@ -12,7 +12,9 @@ from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
+    decomposition_table,
     global_decomposition_table,
+    is_torch_decomp_decomposition,
     meta_table,
 )
 from torch._ops import OpOverload
@@ -8923,13 +8925,11 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    if torch.version.cuda or device_hint(mat1) == "mps":
+    # Match grouped_mm_output_is_tma_padded in C++, which pads on CPU-only builds too.
+    if not torch.version.hip and device_hint(mat1) != "xpu":
         alignment = 16 // out_dtype.itemsize
         size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-        if mat1_is_2d == mat2_is_2d:
-            out_stride = [out_size[1] * size_padded, size_padded, 1]
-        else:
-            out_stride = [size_padded, 1]
+        out_stride = make_contiguous_strides_for([*out_size[:-1], size_padded])
         out = torch.empty_strided(
             out_size, out_stride, dtype=out_dtype, device=mat1.device
         )
@@ -9176,7 +9176,7 @@ def _meta_grouped_mm_common(
 
 
 @register_meta(aten._grouped_mm)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -9733,4 +9733,35 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
+def cpp_meta_supports_symint(op: OpOverload) -> bool:
+    # Whether FakeTensorMode prefers op's C++ Meta kernel to its decomposition.
+    return torch.Tag.view_copy in op.tags or op in cpp_meta_supports_symint_ops
+
+
+def _register_static_shape_decomps(ops: Iterable[torch._ops.OperatorBase]) -> None:
+    # Meta membership and sparse inputs are checked at dispatch time.
+    for op in ops:
+        if (
+            isinstance(op, OpOverload)
+            and is_torch_decomp_decomposition(op)
+            and not cpp_meta_supports_symint(op)
+        ):
+            schema = op._schema
+            torch._C._fake_dispatch_register_static_shape_decomp(
+                schema.name, schema.overload_name
+            )
+
+
+def _register_cpp_meta_supports_symint_ops() -> None:
+    for op in cpp_meta_supports_symint_ops:
+        schema = op._schema
+        torch._C._fake_dispatch_register_cpp_meta_supports_symint(
+            schema.name, schema.overload_name
+        )
+
+
 activate_meta()
+# Initial decorators run before their function names are bound in the module.
+_register_static_shape_decomps(decomposition_table)
+torch._decomp._static_shape_decomps_initialized = True
+_register_cpp_meta_supports_symint_ops()

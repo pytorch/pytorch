@@ -32,10 +32,11 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_5,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -43,28 +44,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def setUpModule():
-    # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-    # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-    # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
-    # safe; libkineto re-subscribes on its next profile, so kineto tests are
-    # unaffected. See pylibcupti().finalize.
-    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_5:
-        from torch.profiler._cuspy.cupti_python import pylibcupti
-
-        try:
-            pylibcupti().finalize()
-        except Exception:
-            pass
-
-
 def _isolated(test_fn):
     """Run a cuspy test in a fresh subprocess. Cuspy needs the single
     process-wide CUPTI subscriber, but libkineto grabs it for the process lifetime once
-    any kineto-CUDA profile runs (setUpModule's prime, or another test in a full run),
-    and decoded-record native state can leak between tests. Re-running the test alone in
-    a child gives it a clean process: setUpModule's finalize releases the child's own
-    prime, so Cuspy subscribes, with no cross-test interference."""
+    any kineto-CUDA profile runs, and decoded-record native state can leak between
+    tests. Re-running the test alone in a child gives it a clean process, so Cuspy
+    subscribes, with no cross-test interference."""
 
     @functools.wraps(test_fn)
     def wrapper(self):
@@ -257,9 +242,9 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertTrue(cfg["use_approx_timestamps"])
         self.assertTrue(cfg["configured"])
 
-        # First-come-first-serve: a second configure() is ignored.
+        # Before collection starts, later calls can supply parsed arguments.
         cuspy_core.configure(buffer_size=4096)
-        self.assertEqual(cuspy_core.get_config()["buffer_size"], 2048)
+        self.assertEqual(cuspy_core.get_config()["buffer_size"], 4096)
 
     @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_singleton_snapshots_config(self):
@@ -2660,6 +2645,249 @@ class TestCuspyRecordsCUDA(TestCase):
         self.assertEqual(submission_id_sets[0], {node_a_event_id})
 
 
+@unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+@instantiate_parametrized_tests
+class TestCuspyHes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        from torch.profiler._cuspy import core
+
+        core._reset_for_test()
+        self.cupti = MagicMock()
+        self.cupti.get_version.return_value = 130500
+        self.cupti.subscribe.return_value = 1234
+        self.native = MagicMock()
+        self.native.buffer_request_callback_address.return_value = 1
+        self.native.buffer_complete_callback_address.return_value = 2
+        self.native.approximate_time_callback_address.return_value = 3
+        self.cupti.arm_approx_timestamp_callback.return_value = True
+        self.driver = MagicMock()
+        self.driver.CUresult.CUDA_SUCCESS = 0
+        self.driver.cuInit.return_value = (0,)
+        for p in (
+            patch.object(core.cupti_python, "pylibcupti", return_value=self.cupti),
+            patch.object(core, "_cuspy_native", self.native),
+            patch.object(core, "_has_active_cuda_context", return_value=False),
+            patch.object(torch.cuda, "is_initialized", return_value=False),
+            patch.object(torch.version, "cuda", "13.5"),
+            patch.dict(sys.modules, {"cuda.bindings": MagicMock(driver=self.driver)}),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+        self.cuspy = core.Cuspy()
+        for p in (
+            patch.object(self.cuspy._clock, "calibrate"),
+            patch.object(self.cuspy, "flush"),
+            patch.object(self.cuspy, "_drain_and_dispatch"),
+            patch.object(self.cuspy, "_drain_and_dispatch_loop"),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(core._reset_for_test)
+        self.addCleanup(self.cuspy.stop)
+
+    def test_hes_configuration_and_repeated_windows(self):
+        from torch.profiler._cuspy import core
+
+        order = MagicMock()
+        for method, name in (
+            (self.cupti.subscribe, "subscribe"),
+            (self.cupti.activity_enable_hes, "hes"),
+            (self.driver.cuInit, "init"),
+        ):
+            order.attach_mock(method, name)
+        core.enable_hes_early()
+        self.assertEqual([c[0] for c in order.mock_calls], ["subscribe", "hes", "init"])
+        self.assertTrue(self.cupti.subscribe.call_args.kwargs["allow_multiple"])
+        self.cupti.arm_user_defined_records.assert_not_called()
+        self.native.configure_buffers.assert_not_called()
+        core.configure(buffer_size=8192, background_flush_period_s=0.5)
+        core.configure(background_drain_period_s=0.25)
+        for _ in range(2):
+            observer = self.cuspy.register([], lambda _columns: None)
+            self.assertEqual(self.native.configure_buffers.call_args.args, (8192,))
+            self.assertEqual(
+                self.native.configure_decoder.call_args.args[4:6], (True, 500_000_000)
+            )
+            self.assertEqual(self.cuspy.background_drain_period_s, 0.25)
+            core.configure(buffer_size=8192)
+            with self.assertRaisesRegex(RuntimeError, "configuration cannot change"):
+                core.configure(buffer_size=4096)
+            self.cuspy.unregister(observer)
+            self.assertEqual(self.cuspy._subscriber, 1234)
+        self.cupti.subscribe.assert_called_once()
+        self.cupti.unsubscribe.assert_not_called()
+        core.release_hes()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.has_live_subscription())
+        self.cupti.finalize.assert_not_called()
+
+    @parametrize("failure", ["subscribe", "udr"])
+    def test_failed_registration_allows_configuration_and_retry(self, failure):
+        from torch.profiler._cuspy import core, cupti_python
+
+        if failure == "subscribe":
+            core.configure(use_approx_timestamps=True)
+            self.cupti.subscribe.side_effect = [
+                cupti_python.CuptiError("subscribe failed"),
+                1234,
+            ]
+        else:
+            core.enable_hes_early()
+            wrapper = object.__new__(cupti_python._PyLibCupti)
+            wrapper._lib = MagicMock()
+            wrapper._lib.cuptiActivitySetAttribute_v2.return_value = 0
+            wrapper._lib.cuptiActivityRegisterCallbacks_v2.side_effect = [1, 0]
+            self.cupti.arm_user_defined_records.side_effect = (
+                wrapper.arm_user_defined_records
+            )
+        with self.assertRaises((RuntimeError, cupti_python.CuptiError)):
+            self.cuspy.register([], lambda _columns: None)
+        self.assertFalse(self.cuspy._config_frozen)
+        self.assertEqual(self.cuspy._observers, [])
+        core.configure(buffer_size=8192, use_approx_timestamps=False)
+        observer = self.cuspy.register([], lambda _columns: None)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+        self.assertTrue(self.cuspy._started)
+        self.cuspy.unregister(observer)
+        core.release_hes()
+        self.assertFalse(core.has_live_subscription())
+
+    @parametrize("before_hes", [False, True])
+    def test_approx_requires_exclusive_subscription(self, before_hes):
+        from torch.profiler._cuspy import core
+
+        if before_hes:
+            core.configure(use_approx_timestamps=True)
+            core.enable_hes_early()
+            self.assertFalse(self.cupti.subscribe.call_args.kwargs["allow_multiple"])
+        else:
+            core.enable_hes_early()
+            original = core.get_config()
+            with self.assertRaisesRegex(
+                RuntimeError, "requires exclusive CUPTI ownership"
+            ):
+                core.configure(buffer_size=8192, use_approx_timestamps=True)
+            self.assertEqual(core.get_config(), original)
+            self.cupti.unsubscribe.assert_not_called()
+        core.configure(buffer_size=8192)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+        core.release_hes()
+
+    @parametrize("failure", ["hes", "driver"])
+    def test_failed_early_hes_releases_subscription(self, failure):
+        from torch.profiler._cuspy import core
+
+        operation = (
+            self.cupti.activity_enable_hes if failure == "hes" else self.driver.cuInit
+        )
+        operation.side_effect = RuntimeError("initialization failed")
+        with self.assertRaisesRegex(RuntimeError, "initialization failed"):
+            core.enable_hes_early()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.is_hes_enabled())
+        core.configure(buffer_size=8192)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+
+    @parametrize("consumer", ["observer", "callback"])
+    def test_release_requires_closed_consumers(self, consumer):
+        from torch.profiler._cuspy import core
+
+        core.enable_hes_early()
+        if consumer == "observer":
+            observer = self.cuspy.register([], lambda _columns: None)
+
+            def close() -> None:
+                self.cuspy.unregister(observer)
+        else:
+            handler = self.cuspy.register_callback_handler(0, 0, lambda *args: None)
+
+            def close() -> None:
+                self.cuspy.unregister_callback_handler(handler)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "closing all Cuspy activity observers"
+        ):
+            core.release_hes()
+        self.cupti.unsubscribe.assert_not_called()
+        close()
+        core.release_hes()
+        core.release_hes()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.has_live_subscription())
+
+    def test_release_retries_failed_unsubscribe(self):
+        from torch.profiler._cuspy import core, cupti_python
+
+        core.enable_hes_early()
+        self.cupti.unsubscribe.side_effect = [
+            cupti_python.CuptiError("unsubscribe failed"),
+            None,
+        ]
+        with self.assertRaisesRegex(cupti_python.CuptiError, "unsubscribe failed"):
+            core.release_hes()
+        self.assertTrue(core.is_hes_enabled())
+        core.release_hes()
+        self.assertEqual(self.cupti.unsubscribe.call_count, 2)
+        self.assertFalse(core.has_live_subscription())
+
+    def test_failed_clock_change_leaves_configuration_unchanged(self):
+        from torch.profiler._cuspy import core, cupti_python
+
+        core.configure(use_approx_timestamps=True)
+        core.enable_hes_early()
+        before = core.get_config()
+        self.cupti.disarm_approx_timestamp_callback.return_value = False
+        with self.assertRaises(cupti_python.CuptiError):
+            core.configure(buffer_size=8192, use_approx_timestamps=False)
+        self.assertEqual(core.get_config(), before)
+
+    def test_configuration_waits_for_activity_setup(self):
+        from torch.profiler._cuspy import core
+
+        entered, resume, configured = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        errors = []
+
+        def arm(*args):
+            entered.set()
+            with self.assertRaisesRegex(RuntimeError, "configuration cannot change"):
+                core.configure(buffer_size=8192)
+            if not resume.wait(5):
+                raise RuntimeError("setup did not resume")
+
+        def configure():
+            try:
+                core.configure(buffer_size=8192)
+            except RuntimeError as error:
+                errors.append(error)
+            finally:
+                configured.set()
+
+        self.cupti.arm_user_defined_records.side_effect = arm
+        setup = threading.Thread(target=self.cuspy.register_callbacks)
+        writer = threading.Thread(target=configure)
+        setup.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            writer.start()
+            self.assertFalse(configured.wait(0.1))
+        finally:
+            resume.set()
+            setup.join(5)
+            if writer.ident is not None:
+                writer.join(5)
+        self.assertFalse(setup.is_alive())
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIn("configuration cannot change", str(errors[0]))
+        self.assertNotEqual(self.cuspy.buffer_size, 8192)
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuspyCUDA(TestCase):
     """Collection through Cuspy directly (not via torch.profiler.profile)."""
@@ -3684,7 +3912,7 @@ class TestCuspyProfilerCUDA(TestCase):
         cuspy_core._reset_for_test()
         self.addCleanup(cuspy_core._reset_for_test)
 
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipUnless(
         SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
     )
@@ -3697,10 +3925,38 @@ class TestCuspyProfilerCUDA(TestCase):
                 "-c",
                 """
 import torch
+from cupti.cupti import ActivityKind
 from torch.profiler._cuspy import core as cuspy_core
+from torch.profiler._cuspy.records import Kernel
 
 cuspy_core.enable_hes_early()
-assert cuspy_core.is_hes_enabled()
+if not cuspy_core.is_hes_enabled():
+    raise AssertionError("HES was not enabled")
+cuspy_core.configure(buffer_size=2 * 1024 * 1024)
+collector = cuspy_core.Cuspy()
+if collector.buffer_size != 2 * 1024 * 1024:
+    raise AssertionError("buffer configuration after early HES was ignored")
+subscriber = collector._subscriber
+if subscriber is None:
+    raise AssertionError("early HES did not retain its subscriber")
+cuspy_core.enable_hes_early()
+for _ in range(2):
+    seen = []
+    kind = ActivityKind.CONCURRENT_KERNEL
+    observer = collector.register(
+        {kind: {Kernel.END}},
+        lambda cols: seen.append(cols[kind]) if kind in cols else None,
+    )
+    torch.randn(256, 256, device="cuda").sum().item()
+    collector.flush(sync=True)
+    collector.unregister(observer)
+    if not any(len(fields[Kernel.END.id]) for fields in seen):
+        raise AssertionError("HES + UDR produced no kernel records")
+    if collector._subscriber != subscriber:
+        raise AssertionError("HES subscriber changed between collection sessions")
+cuspy_core.release_hes()
+if cuspy_core.has_live_subscription():
+    raise AssertionError("release_hes retained the HES subscriber")
 """,
             ],
             text=True,
@@ -4313,9 +4569,12 @@ cuspy_core.enable_hes_early()
                 try:
                     cuspy_core.enable_hes_early()
                 except CuptiError as e:
-                    # HES is unsupported on this platform (cuptiActivityEnableHWTrace
-                    # -> CUPTI_ERROR_NOT_SUPPORTED): skip the HES leg of the parity check.
-                    if "CUPTI_ERROR_NOT_SUPPORTED" not in str(e):
+                    # Skip only an explicit unsupported-platform result from the
+                    # subscriber-scoped ENABLE_HES attribute; preserve other errors.
+                    if (
+                        "cuptiActivitySetAttribute_v2(ENABLE_HES) failed with "
+                        "CUPTI_ERROR_NOT_SUPPORTED"
+                    ) not in str(e):
                         raise
                     print("SKIP_HES"); raise SystemExit(0)
                 if not cuspy_core.is_hes_enabled():
@@ -4454,14 +4713,19 @@ cuspy_core.enable_hes_early()
             print("OK")
             """
         )
-        # Run parity once with HES off and once with it on (the HES child self-skips
-        # via SKIP_HES when the platform doesn't support hardware events). Each child
+        # Run parity once with HES off and once with it on, except for the CUDA 13.5
+        # workaround below. The HES child self-skips via SKIP_HES when hardware
+        # events are unavailable. Each child
         # prints its Cuspy metadata after RESULT; the HES-on Cuspy must match the
         # HES-off Cuspy (which already matched stock above).
         import json
 
         captured = {}
-        for hes in (False, True):
+        # On CUDA 13.5 builds, skip HES on pre-SM100 GPUs (e.g. L4):
+        # the unsupported-HES fallback raises CUPTI_ERROR_NOT_COMPATIBLE.
+        # Tracking: https://github.com/pytorch/pytorch/issues/204831
+        skip_hes = torch.version.cuda == "13.5" and not SM100OrLater
+        for hes in (False,) if skip_hes else (False, True):
             env = dict(os.environ)
             if hes:
                 env["PARITY_HES"] = "1"
