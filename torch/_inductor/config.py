@@ -422,6 +422,7 @@ post_grad_fusion_options: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
         "devices": ("xpu",),
         "min_fuse_set_size": 2,
+        "static_widths_only": True,
     },
 }
 
