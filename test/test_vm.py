@@ -3884,6 +3884,37 @@ def region_counter(x, i):
     return ((x + i).sin() * i).cos().exp().tanh()
 
 
+class RegionLinears(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(6, 8),
+            torch.nn.Tanh(),
+            torch.nn.Linear(8, 6),
+            torch.nn.ReLU(),
+        )
+        self.layers = torch.nn.ModuleList(torch.nn.Linear(6, 6) for _ in range(5))
+
+    def forward(self, x):
+        return self.net(x)
+
+
+def region_note(log, x, out):
+    log.append(out.shape[0])
+    x.add_(1)
+    return float(out.sum())
+
+
+def region_partway(model, x, log, note):
+    # The call is in another block than the model's, where a path comes by
+    # it, and its callee is an argument, so that it is not inlined.
+    out = model(x)
+    total = 0.0
+    if note is not None:
+        total = note(log, x, out)
+    return out * 2, total
+
+
 def region_clock(model, x):
     start = time.perf_counter_ns()
     out = model(x)
@@ -4672,6 +4703,30 @@ class TestVmRegions(TestCase):
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.vm(region_infer, passes=with_graphs("nope"))
+
+    def test_path_ends_before_a_call_that_fails_part_way(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        compiled = torch.vm(
+            region_partway, passes=with_graphs("aot_eager"), fallback=False
+        )
+        log, expected_log = [], []
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 4, 4, 5, 6):
+                x = torch.randn(n, 6)
+                expected_x = x.clone()
+                expected = region_partway(model, expected_x, expected_log, region_note)
+                out, total = compiled(model, x, log, region_note)
+                self.assertEqual(out, expected[0], atol=0, rtol=0)
+                self.assertEqual(total, expected[1])
+                # The trace ran the append and the addition and then could
+                # not go on. The VM runs the call, and the region does not
+                # do the two as well.
+                self.assertEqual(log, expected_log)
+                self.assertEqual(x, expected_x, atol=0, rtol=0)
+        # What came before the call is still a graph.
+        where = [r["where"] for r in self.compiled_regions(compiled)]
+        self.assertTrue(any(w.startswith("region_partway") for w in where), where)
 
     @slowTest
     def test_inductor(self):
