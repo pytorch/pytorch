@@ -794,8 +794,16 @@ def _remove_dir(path_dir: str) -> None:
 def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
+        # This runs on compile-pool threads. Without env=, the child execs with the
+        # live C environ, which a concurrent os.environ insert on another thread can
+        # reallocate and free, so the compiler may start without PATH.
         subprocess.run(
-            cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            cmd,
+            cwd=cwd,
+            env=os.environ.copy(),
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
     except subprocess.CalledProcessError as e:
         output = e.stdout.decode(*SUBPROCESS_DECODE_ARGS)
@@ -1821,6 +1829,13 @@ def get_caching_allocator_macro() -> list[str]:
     return macros
 
 
+def get_force_inline_welford_macro() -> list[str]:
+    # Read by the Welford helpers in torch/csrc/inductor/cpp_prefix.h.
+    if config.cpp.force_inline_welford:
+        return ["TORCH_INDUCTOR_FORCE_INLINE_WELFORD"]
+    return []
+
+
 def get_cpp_torch_options(
     cpp_compiler: str,
     vec_isa: VecISA,
@@ -1881,6 +1896,7 @@ def get_cpp_torch_options(
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights, use_mmap_weights_external)
     caching_allocator_macros = get_caching_allocator_macro()
+    force_inline_welford_macros = get_force_inline_welford_macro()
 
     definitions = (
         torch_cpp_wrapper_definitions
@@ -1889,6 +1905,7 @@ def get_cpp_torch_options(
         + fb_macro_passthrough_args
         + mmap_self_macros
         + caching_allocator_macros
+        + force_inline_welford_macros
     )
     include_dirs = (
         sys_libs_include_dirs
@@ -1898,6 +1915,22 @@ def get_cpp_torch_options(
     )
     cflags = sys_libs_cflags + omp_cflags
     ldflags = sys_libs_ldflags + omp_ldflags
+    # Unless the compiler asks the linker to link as needed, as Ubuntu's GCC
+    # does by default, the OpenMP added above makes the linker record libgomp
+    # even when the model calls no OpenMP function. The shared library then
+    # fails to load without torch on a machine that has no libgomp. Dropping
+    # libraries nothing references cannot drop one the model uses. Links with
+    # libtorch are left alone, because a library there can matter without
+    # being referenced, when its static initializers register something. A
+    # static library is linked later by the program that uses it, so there
+    # the program's own link flags decide.
+    if (
+        _IS_LINUX
+        and aot_mode
+        and not config.aot_inductor.link_libtorch
+        and config.aot_inductor.cross_target_platform is None
+    ):
+        ldflags.append("Wl,--as-needed")
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
@@ -2345,6 +2378,9 @@ def get_cpp_torch_device_options(
         # referenced, because a static initializer in it registers something.
         if _IS_MACOS and aot_mode and not link_libtorch:
             ldflags.append("Wl,-dead_strip_dylibs")
+
+    if device_type == "mtia":
+        definitions.append(" USE_MTIA")
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
@@ -3085,12 +3121,11 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
-        lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options({self._target_name} PRIVATE {lflags})
+            target_link_options({self._target_name} PRIVATE {self._ldflags_args})
 
             # Add libraries
             target_link_libraries({self._target_name} PRIVATE {libs})
