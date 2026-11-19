@@ -16,6 +16,7 @@
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSSleep.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/mps/Stream.h>
 #endif
@@ -184,16 +185,28 @@ static PyObject* MPSModule_releaseEvent(PyObject* /*_unused*/, PyObject* args) {
 
 static PyObject* MPSModule_recordEvent(PyObject* /*_unused*/, PyObject* args) {
   HANDLE_TH_ERRORS
-  const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().recordEvent(event_id);
+  PyObject* event_id_o = nullptr;
+  PyObject* stream_id_o = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &event_id_o, &stream_id_o)) {
+    return nullptr;
+  }
+  const uint32_t event_id = THPUtils_unpackUInt32(event_id_o);
+  const int64_t stream_id = THPUtils_unpackLong(stream_id_o);
+  at::detail::getMPSHooks().recordEvent(event_id, stream_id);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* MPSModule_waitForEvent(PyObject* /*_unused*/, PyObject* args) {
   HANDLE_TH_ERRORS
-  const uint32_t event_id = THPUtils_unpackUInt32(args);
-  at::detail::getMPSHooks().waitForEvent(event_id);
+  PyObject* event_id_o = nullptr;
+  PyObject* stream_id_o = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &event_id_o, &stream_id_o)) {
+    return nullptr;
+  }
+  const uint32_t event_id = THPUtils_unpackUInt32(event_id_o);
+  const int64_t stream_id = THPUtils_unpackLong(stream_id_o);
+  at::detail::getMPSHooks().waitForEvent(event_id, stream_id);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -317,8 +330,8 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_acquireEvent", MPSModule_acquireEvent, METH_O, nullptr},
     {"_mps_releaseEvent", MPSModule_releaseEvent, METH_O, nullptr},
-    {"_mps_recordEvent", MPSModule_recordEvent, METH_O, nullptr},
-    {"_mps_waitForEvent", MPSModule_waitForEvent, METH_O, nullptr},
+    {"_mps_recordEvent", MPSModule_recordEvent, METH_VARARGS, nullptr},
+    {"_mps_waitForEvent", MPSModule_waitForEvent, METH_VARARGS, nullptr},
     {"_mps_synchronizeEvent", MPSModule_synchronizeEvent, METH_O, nullptr},
     {"_mps_queryEvent", MPSModule_queryEvent, METH_O, nullptr},
     {"_mps_elapsedTimeOfEvents",
@@ -608,6 +621,10 @@ void initModule(PyObject* module) {
   });
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
+  m.def("_mps_sleep", [](int64_t cycles) {
+    pybind11::gil_scoped_release no_gil;
+    at::mps::sleep(cycles);
   });
   m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
     PyObject* obj = py_storage.ptr();

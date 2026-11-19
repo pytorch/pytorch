@@ -21,6 +21,7 @@ from .heuristics.template.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    FlexAttentionConfigContext,
     IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
@@ -32,16 +33,17 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _use_autotune_backend
+from .utils import _use_autotune_backend, ModularIndexingUse
 from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Sequence
     from functools import partial
 
     from triton import Config as TritonConfig
 
+    from . import ir
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
@@ -73,6 +75,21 @@ class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
     def __lt__(self, other: typing.Self) -> bool: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiTemplateFusionDecision:
+    """A backend's decision for fusing a MultiTemplateBuffer with a candidate.
+
+    ``fuse=False`` declines the fusion. ``fuse=True`` accepts it with ``choice``,
+    one of the buffer's Triton template choices, which the buffer is finalized to
+    when the scheduler commits the fusion. ``choice`` may be omitted only if the
+    buffer is already finalized to a Triton template. The scheduler declines an
+    accepted fusion that has no valid template or fails a legality check.
+    """
+
+    fuse: bool
+    choice: ChoiceCaller | None = None
 
 
 @dataclasses.dataclass
@@ -170,15 +187,45 @@ class InductorChoices:
         seq_len: sympy.Expr,
         dtype: torch.dtype,
         device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(
+            head_dim, seq_len, dtype, v_head_dim
+        )
+
+    def refine_flex_attention_fwd_configs(
+        self, configs: list[Any], context: FlexAttentionConfigContext
+    ) -> list[Any]:
+        """Return the forward configs to autotune, given the full attention context.
+
+        The result may replace ``configs`` rather than subset it and must be
+        non-empty unless ``configs`` is; a single config takes the lowering's
+        one-config path.
+        ``append_flex_attention_choices`` still receives the unrefined pool.
+        Only the stock pool is refined: when the active handler overrides
+        ``get_flex_attention_fwd_configs``, this base implementation returns the
+        pool unchanged, including when an override of this method delegates here.
+        """
+        # The pool comes from the active handler. With composed choices that is
+        # not necessarily the contributor this hook is bound to.
+        handler = V.choices
+        lookup = getattr(handler.get_flex_attention_fwd_configs, "__func__", None)
+        if lookup is not _STOCK_FLEX_ATTENTION_FWD_CONFIGS:
+            return configs
+        flex_heuristics = handler.get_config_heuristics(context.device.type)
+        refine = getattr(flex_heuristics, "refine_flex_attn_fwd_configs", None)
+        return configs if refine is None else refine(configs, context)
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self,
+        head_dim: int,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype, v_head_dim)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
@@ -200,7 +247,8 @@ class InductorChoices:
         """Append backend-specific forward flex-attention template choices.
 
         Default is a no-op. Subclasses may override to inject additional
-        autotuning candidates (e.g. TLX templates in fbcode).
+        autotuning candidates (e.g. TLX templates in fbcode). ``configs`` is the
+        unrefined pool; the Triton ``choices`` were built from the refined one.
         """
         return choices
 
@@ -325,9 +373,9 @@ class InductorChoices:
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
         # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
-        # origami only contributes Triton GEMM configs under autotuning, so with it
-        # off there is nothing that needs fixed strides and flexible layouts should
-        # be preserved (matches non-origami behavior).
+        # origami only contributes configs under autotuning, so with it off there is
+        # nothing that needs fixed strides and flexible layouts should be preserved
+        # (matches non-origami behavior).
         if (
             _origami_enabled()
             and IS_ROCM
@@ -452,9 +500,57 @@ class InductorChoices:
         """Hook to override the autotuning best choice after benchmarking."""
         return best_choice
 
+    def multi_template_fusion_decision(
+        self,
+        scheduler: Scheduler,
+        multi_node: ir.MultiTemplateBuffer,
+        other_nodes: Sequence[BaseSchedulerNode],
+        epilogue: bool,
+    ) -> MultiTemplateFusionDecision | None:
+        """Hook to decide a MultiTemplateBuffer fusion instead of benchmarking it.
+
+        Called from ``Scheduler.speedup_by_fusion`` for a pair where one side's
+        template node is a MultiTemplateBuffer; ``other_nodes`` are the nodes of
+        the other side, an epilogue if ``epilogue`` else a prologue. Returning
+        None keeps the default benchmark-based decision. Decisions are immediate
+        (they do not compete as pending template fusions); an accepted one is
+        committed right away if it passes the scheduler's legality checks. Not
+        consulted when ``config.multi_kernel_hints`` is set. The hook should not
+        mutate state.
+        """
+        return None
+
     def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
         """Hook to transform fused kernel names during codegen"""
         return fused_name
+
+    def use_modular_indexing(
+        self,
+        device: torch.device | str | None,
+        *,
+        numel: int | sympy.Expr | None = None,
+        reduction_numel: int | sympy.Expr | None = None,
+        kind: ModularIndexingUse,
+    ) -> bool:
+        """
+        Decide whether a load/store index may contain ModularIndexing/FloorDiv
+        of loop variables (True) or must use the affine alternative: realizing
+        a dim-merging view, splitting a reduction at a dim boundary, lowering
+        repeat/roll/strided slice_scatter without modular arithmetic, keeping
+        %, // index arithmetic behind an indirect variable, or undoing a loop
+        reindexing during fusion that leaves a non-affine index. kind names
+        the construct and device is the device of the affected kernel. Every
+        call site passes numel, the number of elements that kernel touches
+        (an int or an expression of the graph's size variables); a reduction
+        also passes reduction_numel, the number of elements reduced into each
+        output, so that an override can tell 64 sums of 4097 elements from
+        4097 sums of 64.
+
+        The default follows config.avoid_modular_indexing for every device
+        and construct. Override it through V.set_choices_handler to decide
+        per backend, construct or size.
+        """
+        return not config.avoid_modular_indexing
 
     @staticmethod
     def should_use_cooperative_reduction(
@@ -563,7 +659,8 @@ class InductorChoices:
         # Chosen GB200 thresholds: 32768 for xnumel < num_sm, otherwise 40960.
         # Reducing these thresholds further did not improve scenario (2), but
         # hurts scenario (1).
-        if props.major is not None and props.major >= 10:
+        # On ROCm major is the gfx major, not an NVIDIA SM version.
+        if props.type == "cuda" and props.major is not None and props.major >= 10:
             if xnumel < num_sm:
                 return 32768
             return 40960
@@ -826,6 +923,8 @@ class InductorChoices:
             proximity_score,
         )
 
+
+_STOCK_FLEX_ATTENTION_FWD_CONFIGS = InductorChoices.get_flex_attention_fwd_configs
 
 InductorChoicesFactory: typing.TypeAlias = typing.Callable[[], InductorChoices]
 InductorChoicesFactoryConfig: typing.TypeAlias = InductorChoicesFactory | None
