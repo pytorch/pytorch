@@ -1160,7 +1160,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             return
         # Probe subclass keys before dict_merge considers its raw-storage fast path.
         if not fast_merge_verified and (
-            pyanydict_checkexact(other) or generic_hasattr_str(tx, other, "keys")
+            pyanydict_checkexact(other)
+            or not istype(
+                other.realize(), (variables.ListVariable, variables.TupleVariable)
+            )
+            and generic_hasattr_str(tx, other, "keys")
         ):
             self.dict_merge(tx, other, container_name=container_name)
         else:
@@ -2414,7 +2418,7 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # A missing OrderedDict-only attribute raises before call_method runs.
-        if not hasattr(dict, name):
+        if mro_lookup(dict, name) is NO_SUCH_SUBOBJ:
             self._guard_type()
         return super().tp_getattro_impl(tx, name)
 

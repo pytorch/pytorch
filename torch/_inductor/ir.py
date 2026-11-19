@@ -7720,12 +7720,12 @@ class ExternKernel(InputsKernel):
             if not isinstance(example_output, (list, tuple))
             else example_output
         )
-        # When graph_partition is enabled, skip - partitioning handles sparse outputs
+        # Skip when partitioning splits off cudagraph-unsafe ops: it handles sparse outputs
         for t in example_out_li:
             if (
                 isinstance(t, torch.Tensor)
                 and t.is_sparse
-                and not config.graph_partition
+                and not V.graph.partition_plan.cudagraphs_per_partition
             ):
                 msg = "sparsity not handled. Please file issue for sparse inference weights."
                 if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
@@ -8331,10 +8331,10 @@ class ExternKernel(InputsKernel):
             return
         op_name = self.get_op_name()
         name = self.get_assert_name()
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None
-        wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
+        wrapper.write_assert_size_stride(
+            name, self.get_size(), self.get_stride(), op_name, dtype
+        )
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         # Preserve the existing Python-wrapper behavior for inplace-view
@@ -9671,28 +9671,8 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
-        if V.graph.fx_wrapper:
-            # TODO fix
-            pass
-        elif V.graph.cpp_wrapper:
-            symbol_str = f"std::to_string({symbol})"
-            sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
-                self.scalar, simplify=False
-            )
-            # TODO: when we start compiling in C++20, annotate with [[unlikely]].
-            wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
-            )
-        else:
-            sizevar = V.graph.wrapper_code.codegen_python_sizevar(
-                self.scalar, simplify=False
-            )
-            wrapper.writeline(f"if not ({sizevar}):")
-            wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
-            # No one should ever use this buffer, but for uniformity
-            # define the variable and assign it None
-            wrapper.writeline(f"{self.get_name()} = None")
+        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)), None)
+        wrapper.codegen_scalar_assert(self.scalar, self.msg, self.get_name(), symbol)
 
 
 @ir_dataclass(frozen=False)
