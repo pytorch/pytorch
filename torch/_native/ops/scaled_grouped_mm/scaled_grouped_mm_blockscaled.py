@@ -383,8 +383,6 @@ def scaled_grouped_mm_blockscaled(
     if out is None:
         size, stride = _output_size_stride(mat_a, mat_b, ngroups)
         out = torch.empty_strided(size, stride, device=device, dtype=torch.bfloat16)
-    if ngroups == 0:
-        return out
     # An empty contraction leaves no K tile to accumulate, so write the zeros here.
     if logical_k_a == 0:
         return out.zero_()
@@ -558,6 +556,9 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
     if mat_a.size(-1) * fmt.logical_vals_per_elem % 32 != 0:
         return False
     if not isinstance(offs, Tensor) or offs.dim() != 1 or offs.stride(0) != 1:
+        return False
+    # Our kernel has no group limit, but ATen's MSLK path rejects these counts.
+    if not 1 <= offs.size(0) <= 1024:
         return False
     scales = (scale_a[0], scale_b[0])
     if any(const_data_ptr(scale) % 16 != 0 for scale in scales):
