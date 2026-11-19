@@ -752,8 +752,10 @@ def pynumber_int(
     # Fast path for int (sub)class instances — mirrors PyLong_Check at the
     # top of PyNumber_Long (abstract.c:1531). Avoids infinite recursion for
     # int subclasses like IntEnum whose __int__ calls int() again.
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), int):
-        return ConstantVariable.create(int(obj.as_python_constant()))
+    if obj.is_python_constant():
+        value = obj.as_python_constant()
+        if isinstance(value, int) and type(value).__int__ is int.__int__:
+            return ConstantVariable.create(int(value))
 
     if obj.tp_as_number.nb_int is not None:
         res = obj.nb_int_impl(tx)
@@ -1242,9 +1244,12 @@ def is_nb_not_implemented(result: VariableTracker) -> bool:
 
 
 def is_python_subtype(w: VariableTracker, v: VariableTracker) -> bool:
-    """Check if w's underlying Python type is a proper subtype of v's."""
+    """Check if w's underlying Python type is a subtype of v's (PyType_IsSubtype).
+
+    Uses the MRO, not issubclass, so ABC virtual subclasses do not count.
+    """
     try:
-        return issubclass(w.python_type(), v.python_type())
+        return v.python_type() in w.python_type().__mro__
     except NotImplementedError:
         return False
 
@@ -1986,7 +1991,7 @@ def generic_richcompare(
         v_type is not None
         and w_type is not None
         and v_type is not w_type
-        and issubclass(w_type, v_type)
+        and v_type in w_type.__mro__
     ):
         checked_reverse = True
         result = w.tp_richcompare_impl(tx, v, reflected)
