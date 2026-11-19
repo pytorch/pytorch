@@ -2850,6 +2850,7 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "test_configs.max_mm_configs": 4,
             "max_autotune_gemm_backends": "TRITON",
+            "post_grad_fusion_options": {},
         }
     )
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
@@ -3107,6 +3108,7 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "test_configs.max_mm_configs": 4,
             "max_autotune_gemm_backends": "ATEN, TRITON",
+            "post_grad_fusion_options": {},
         }
     )
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")

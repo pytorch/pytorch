@@ -542,6 +542,21 @@ class BatchLinearLHSFusion(BatchFusion):
         return value is not None and len(value.shape) == 2
 
     @staticmethod
+    def _section_symbols_are_bound(graph: torch.fx.Graph, section: object) -> bool:
+        symbols = free_symbols(section)
+        if not symbols:
+            return True
+        bound = OrderedSet()
+        for node in graph.nodes:
+            if node.op != "placeholder":
+                continue
+            value = node.meta.get("val")
+            if isinstance(value, torch.Tensor):
+                bound |= free_symbols(list(value.shape))
+                bound |= free_symbols(list(value.stride()))
+        return symbols <= bound
+
+    @staticmethod
     def _reaches_user_visible_output(
         node: torch.fx.Node, graph: torch.fx.Graph
     ) -> bool:
@@ -678,6 +693,14 @@ class BatchLinearLHSFusion(BatchFusion):
             return None
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
         if not statically_known_true(weight_val.shape[1] > 0):
+            return None
+        if self.graph_search_options.get(
+            "static_widths_only", False
+        ) and not isinstance(weight_val.shape[1], int):
+            return None
+        # A symbolic split section must be bound by this graph's inputs;
+        # otherwise it is a free symbol in a body subgraph and cannot lower.
+        if not self._section_symbols_are_bound(node.graph, weight_val.shape[1]):
             return None
         if bias_m is not None:
             if not isinstance(bias_m, torch.fx.Node):
