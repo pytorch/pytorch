@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 12;
+pub const TCFG_API_VERSION: u32 = 13;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -53,6 +53,7 @@ pub struct TcfgTensorInfo {
     pub device: i32,
     pub data: *const std::ffi::c_void,
     pub version: u64,
+    pub watched: i32,
 }
 
 pub const TCFG_NO_VERSION: u64 = u64::MAX;
@@ -70,6 +71,7 @@ impl TcfgTensorInfo {
             version: 0,
             dtype: 0,
             device: 0,
+            watched: 0,
         }
     }
 
@@ -133,6 +135,8 @@ pub struct TcfgApi {
     pub workspace_enter: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pub workspace_leave: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
     pub call_modes: unsafe extern "C" fn() -> u64,
+    pub tensor_watch: unsafe extern "C" fn(Obj, i32) -> u64,
+    pub watch_serial: unsafe extern "C" fn() -> u64,
 }
 
 /// Whether compiled functions run under an interpreter frame of their own.

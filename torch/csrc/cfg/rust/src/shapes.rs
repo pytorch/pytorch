@@ -76,15 +76,17 @@ pub fn tensor_key<'py>(
 }
 
 /// A number that changes when one of the tensors is another object, has its
-/// data somewhere else, or was written to in place: what a graph that has
-/// the contents of the tensors built into it is good for. None if one of
-/// them does not count its writes.
+/// data somewhere else, was written to in place, or has told of a write that
+/// it was watched for (`tensor_watch`): what a graph that has the contents
+/// of the tensors built into it is good for. None if one of them does not
+/// count its writes.
 #[pyfunction]
 pub fn tensor_stamp(tensors: &Bound<'_, PyList>) -> PyResult<Option<u64>> {
     let api = capi::api()
         .ok_or_else(|| PyRuntimeError::new_err("torch.vm is not initialized"))?;
     let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
     let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+    let mut watched = false;
     for tensor in tensors.iter() {
         let mut info = TcfgTensorInfo::empty();
         if unsafe { (api.tensor_info)(tensor.as_ptr(), &mut info) } == 0 {
@@ -96,8 +98,28 @@ pub fn tensor_stamp(tensors: &Bound<'_, PyList>) -> PyResult<Option<u64>> {
         mix(tensor.as_ptr() as u64);
         mix(info.data as u64);
         mix(info.version);
+        mix(info.watched as u64);
+        watched |= info.watched != 0;
+    }
+    if watched {
+        // A tensor that has told of a write and is watched again is watched
+        // under another number.
+        mix(unsafe { (api.watch_serial)() });
     }
     Ok(Some(stamp))
+}
+
+/// Has the memory of a tensor tell of the next write to it that its version
+/// counter does not count (`arm`), and returns the number it is watched
+/// under: one that nothing was watched under before, unless the tensor was
+/// being watched already. Without `arm`, only returns that number. 0 if the
+/// tensor is not being watched: it was written to since, or cannot be (it
+/// shares its memory with a lazy clone).
+#[pyfunction]
+pub fn tensor_watch(tensor: &Bound<'_, PyAny>, arm: bool) -> PyResult<u64> {
+    let api = capi::api()
+        .ok_or_else(|| PyRuntimeError::new_err("torch.vm is not initialized"))?;
+    Ok(unsafe { (api.tensor_watch)(tensor.as_ptr(), arm as i32) })
 }
 
 /// What the tensors of a module were when a region last looked at them one
@@ -113,12 +135,16 @@ pub struct Snapshot {
     tensors: Vec<Seen>,
     /// Which of the tensors an object is.
     index: HashMap<usize, u32>,
+    /// The last number a tensor was watched under when this was taken
+    /// (`tensor_watch`), if one of these was being watched.
+    serial: Option<u64>,
 }
 
 struct Seen {
     object: usize,
     data: usize,
     version: u64,
+    watched: bool,
     /// Rank, element type, device, flags and dispatch keys, then the storage
     /// offset, the sizes and the strides.
     key: Vec<i64>,
@@ -142,7 +168,8 @@ unsafe fn seen(api: &capi::TcfgApi, tensor: *mut pyo3::ffi::PyObject) -> Option<
     if strided {
         key.extend_from_slice(std::slice::from_raw_parts(info.strides, rank));
     }
-    Some(Seen { object: tensor as usize, data: info.data as usize, version: info.version, key })
+    let watched = info.watched != 0;
+    Some(Seen { object: tensor as usize, data: info.data as usize, version: info.version, watched, key })
 }
 
 /// What is at a place, borrowed; null if nothing is.
@@ -193,7 +220,8 @@ pub fn snapshot(places: &Bound<'_, PyList>, tensors: &Bound<'_, PyList>) -> PyRe
         }
     }
     let index = found.iter().enumerate().map(|(i, one)| (one.object, i as u32)).collect();
-    Ok(Some(Snapshot { places: which, tensors: found, index }))
+    let serial = found.iter().any(|one| one.watched).then(|| unsafe { (api.watch_serial)() });
+    Ok(Some(Snapshot { places: which, tensors: found, index, serial }))
 }
 
 impl Snapshot {
@@ -227,9 +255,14 @@ impl Snapshot {
             if info.data as usize != known.data
                 || info.version != known.version
                 || info.version == capi::TCFG_NO_VERSION
+                || (info.watched != 0) != known.watched
             {
                 same = 1;
             }
+        }
+        // One that told of a write may be watched again, under another number.
+        if self.serial.is_some_and(|serial| serial != (api.watch_serial)()) {
+            same = 1;
         }
         same
     }
