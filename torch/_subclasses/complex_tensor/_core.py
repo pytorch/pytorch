@@ -71,6 +71,10 @@ class ComplexTensor(Tensor):
             raise AssertionError(
                 f"Expected imag pinning {real.is_pinned()}, got {imag.is_pinned()}"
             )
+        if real.storage_offset() != imag.storage_offset():
+            real = real.clone()
+            imag = imag.clone()
+            storage_offset = real.storage_offset()
 
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
