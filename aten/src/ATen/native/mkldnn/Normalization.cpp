@@ -83,8 +83,8 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/detail/BatchNorm.h>
-#include <ATen/native/mkldnn/detail/Binary.h>
 #include <ATen/native/mkldnn/detail/LayerNorm.h>
+#include <ATen/native/mkldnn/detail/Sum.h>
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 
