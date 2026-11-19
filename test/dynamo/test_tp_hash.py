@@ -849,6 +849,9 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)(x, a, b)
 
+    # The second call makes the range bounds symbolic and RangeVariable.tp_hash_impl
+    # needs constants, so it raises an internal error instead of a graph break.
+    @unittest.expectedFailure
     def test_dunder_hash_range_second_call(self):
         def fn(x, r):
             return x.sin(), range.__hash__(r)

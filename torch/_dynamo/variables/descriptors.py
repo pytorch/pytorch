@@ -119,6 +119,8 @@ def descr_repr(
 def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
     if py_type is object:
         return variables.VariableTracker
+    if py_type is type:
+        return variables.TypeVariable
 
     from .base import VariableTrackerMeta
 
