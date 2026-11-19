@@ -995,14 +995,17 @@ def nested_compile_region(
             argument retains the same name. Both mappings accept only the
             Inductor config keys {supported_config_keys}.
             ``fw_inductor_config_patches`` also accepts ``triton.cudagraphs``,
-            which covers the backward too:
-            with ``torch._inductor.config.graph_partition=True`` and
-            ``triton.cudagraphs`` on, a region set to ``False`` runs outside
-            CUDA Graph capture. Opting in, opting out with ``graph_partition``
-            off, setting it on a region nested in another region, and
-            combining it with ``torch._dynamo.override_cudagraphs`` raise an
-            error. AOTInductor does not apply the setting but still rejects the
-            last two, and a region compiled on its own (e.g. by
+            which covers the backward too: with ``triton.cudagraphs`` on, a
+            region set to ``False`` runs outside CUDA Graph capture, in its own
+            graph partition (turned on for that compile if ``graph_partition``
+            is off). With ``graph_partition`` off, anything that disables
+            capture of the whole graph under ``graph_partition=False``, such as
+            a CPU op or a CPU input or output of the region itself, still does.
+            Opting in, opting out under ``cpp_wrapper`` or ``fx_wrapper`` with
+            ``graph_partition`` off, setting it on a region nested in another
+            region, and combining it with ``torch._dynamo.override_cudagraphs``
+            raise an error. AOTInductor does not apply the setting but still
+            rejects the last two, and a region compiled on its own (e.g. by
             ``regional_inductor_invoke_subgraph``) rejects it.
             Warning: this is an experimental feature under development and
             not ready for use yet.
