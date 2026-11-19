@@ -1259,6 +1259,7 @@ instantiate_device_type_tests(TestVmDevices, globals())
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 @unittest.skipUnless(torch.cuda.is_available(), "needs a GPU")
+@instantiate_parametrized_tests
 class TestVmCUDA(TestCase):
     """What only a GPU shows."""
 
@@ -1281,6 +1282,73 @@ class TestVmCUDA(TestCase):
             torch.zeros(3, device="cuda").add_(1)
         self.assertEqual(stamp([weight]), first)
         del clone
+
+    def building_in(self):
+        """Has ``aot_eager`` regions build weights in, as Inductor ones do."""
+        regions = torch.vm._regions
+        return unittest.mock.patch.dict(
+            regions._BUILDS_IN, {regions._aot_eager: regions._aot_eager}
+        )
+
+    @parametrize("write", ("in_place", "data", "data_swap", "optimizer", "load"))
+    def test_write_to_a_built_in_weight_is_seen(self, write):
+        torch.manual_seed(0)
+        model = RegionNet().eval().cuda()
+        x = torch.randn(2, 3, 6, 6, device="cuda")
+
+        def change():
+            if write == "in_place":
+                with torch.no_grad():
+                    model.conv.weight.mul_(1.5)
+            elif write == "data":
+                model.bn.running_mean.data.add_(0.5)
+            elif write == "data_swap":
+                model.conv.bias.data = torch.randn(4, device="cuda")
+            elif write == "optimizer":
+                opt = torch.optim.SGD(model.parameters(), lr=0.5)
+                model(x).sum().backward()
+                opt.step()
+            else:
+                model.load_state_dict(RegionNet().state_dict())
+
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in():
+            for compiles in (1, 2, 2, 2):
+                with torch.no_grad():
+                    for _ in range(6):
+                        self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+                regions = torch.vm.regions(compiled)
+                (region,) = [r for r in regions if r["state"] == "compiled"]
+                frozen = 0 if write == "load" and compiles > 1 else 1
+                seen = (region["variants"], region["compiles"], region["frozen"])
+                self.assertEqual(seen, (1, compiles, frozen))
+                # The tensors of the model are what they were: one that
+                # shared its memory with a lazy clone would be slower to
+                # read for every eager call of the model.
+                tensors = [*model.parameters(), *model.buffers()]
+                self.assertFalse(any(torch._C._is_cow_tensor(t) for t in tensors))
+                change()
+
+    def test_weight_that_is_watched_again_is_not_taken_for_unwritten(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval().cuda()
+        x = torch.randn(2, 3, 6, 6, device="cuda")
+        passes = with_graphs("aot_eager")
+        first = torch.vm(region_infer, passes=passes, fallback=False)
+        second = torch.vm(region_infer_twice, passes=passes, fallback=False)
+        with self.building_in(), torch.no_grad():
+            for _ in range(6):
+                self.assertEqual(first(model, x), model(x), atol=0, rtol=0)
+            # Not an operation on the weight, so its version stays; and the
+            # second function, which builds the weight in as it is now, has
+            # it watched again before the first is called.
+            model.conv.weight.data.mul_(2)
+            for _ in range(6):
+                expected = region_infer_twice(model, x)
+                self.assertEqual(second(model, x), expected, atol=0, rtol=0)
+            self.assertEqual(first(model, x), model(x), atol=0, rtol=0)
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
@@ -5033,6 +5101,10 @@ def region_infer(model, x):
     return model(x)
 
 
+def region_infer_twice(model, x):
+    return model(x) + model(x)
+
+
 def region_lookup(table, x):
     try:
         scale = table["scale"]
@@ -7650,6 +7722,31 @@ class TestVmRegions(TestCase):
         with torch.inference_mode():
             unversioned = torch.randn(3)
         self.assertIsNone(stamp([a, unversioned]))
+
+    def test_tensor_tells_of_a_write_that_its_version_does_not_count(self):
+        torch.vm._load_runtime()
+        watch, stamp = cfg_rs.tensor_watch, cfg_rs.tensor_stamp
+        weight = torch.nn.Parameter(torch.randn(3))
+        self.assertEqual(watch(weight, False), 0)
+        number = watch(weight, True)
+        self.assertGreater(number, 0)
+        self.assertEqual(watch(weight, True), number)
+        first = stamp([weight])
+        float(weight.detach().sum())
+        self.assertEqual((watch(weight, False), stamp([weight])), (number, first))
+        weight.data.mul_(2)
+        self.assertEqual((weight._version, watch(weight, False)), (0, 0))
+        self.assertNotEqual(stamp([weight]), first)
+        # Watched again, it is watched under another number: what knew it
+        # under the first can tell that it was written to in between.
+        again = watch(weight, True)
+        self.assertGreater(again, number)
+        self.assertNotEqual(stamp([weight]), first)
+        # Memory that is shared with a lazy clone tells in its own way.
+        shared = torch.randn(3)
+        clone = shared._lazy_clone()
+        self.assertEqual(watch(shared, True), 0)
+        del clone
 
     def test_product_with_one_row_becomes_a_reduction(self):
         from torch.fx.experimental.proxy_tensor import make_fx
