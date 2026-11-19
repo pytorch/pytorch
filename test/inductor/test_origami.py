@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from unittest import mock
 
 import sympy
-
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -1615,7 +1614,7 @@ class TestOrigamiPackageVersionGate(TestCase):
     """_origami_package_supported() decides whether the installed rocm-origami
     works with the ROCm the build targets. No GPU or origami package needed."""
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def test_package_version_gate(self):
         from torch._inductor.heuristics.template.triton import (
