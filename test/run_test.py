@@ -49,6 +49,10 @@ from torch.testing._internal.common_utils import (
 
 # using tools/ to optimize test run.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+CPP_FAKETENSOR_TESTS = REPO_ROOT / ".ci/pytorch/cpp_faketensor_tests.json"
+STAGED_CPP_FAKETENSOR = (
+    os.getenv("CPP_FAKETENSOR") == "1" and CPP_FAKETENSOR_TESTS.exists()
+)
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
@@ -66,6 +70,7 @@ from tools.testing.discover_tests import (
 )
 from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -130,10 +135,12 @@ NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-# The periodic config hosts slow-gated tests (test.sh sets
-# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+# The periodic configs host slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for them), so they get slow's per-file timeout budget.
 IS_SLOW = (
-    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+    "slow" in TEST_CONFIG
+    or "slow" in BUILD_ENVIRONMENT
+    or TEST_CONFIG in ("periodic", "periodic_daily")
 )
 IS_S390X = platform.machine() == "s390x"
 
@@ -352,7 +359,6 @@ XPU_BLOCKLIST = [
     "test_cuda_sanitizer",
     "test_functionalization_of_rng_ops",
     "test_jiterator",
-    "test_matmul_cuda",
     "test_sparse_semi_structured",
     "test_stateless_rng",
 ]
@@ -597,10 +603,9 @@ def _torchci_report_args(
 
 def _torchci_reports_default() -> str | None:
     # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
-    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
-    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    # uploads this folder.
     in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
-    if not in_pytorch_ci or torch.version.xpu:
+    if not in_pytorch_ci:
         return None
     return str(REPO_ROOT / "test/torchci-reports")
 
@@ -633,6 +638,10 @@ def run_test(
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
     is_cpp_test = _is_cpp_test(test_file)
+    if STAGED_CPP_FAKETENSOR:
+        if not options.pytest:
+            raise RuntimeError("Staged C++ FakeTensor tests require pytest")
+        unittest_args.extend(["--cpp-faketensor-tests", str(CPP_FAKETENSOR_TESTS)])
     # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
@@ -1871,7 +1880,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
@@ -2048,6 +2057,7 @@ def must_serial(file: str | ShardedTest) -> bool:
         file = file.name
     return (
         os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
+        or STAGED_CPP_FAKETENSOR
         or DISTRIBUTED_TEST_PREFIX in os.getenv("TEST_CONFIG", "")
         or DISTRIBUTED_TEST_PREFIX in file
         or file in CUSTOM_HANDLERS
@@ -2430,7 +2440,7 @@ def do_sharding(
         test_class_times=test_class_times,
         must_serial=(lambda _: True) if uses_xdist else must_serial,
         sort_by_time=sort_by_time,
-        allow_pytest_sharding=not uses_xdist,
+        allow_pytest_sharding=not (uses_xdist or STAGED_CPP_FAKETENSOR),
         xdist_workers=lambda file: serial_file_xdist_workers(
             file, options, NUM_PROCS_FOR_SHARDING_CALC
         ),
@@ -2503,7 +2513,10 @@ def run_tests(
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
-    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
+    periodic_marker = {
+        "periodic": "periodic and not periodic_daily",
+        "periodic_daily": "periodic_daily",
+    }.get(TEST_CONFIG)
 
     # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
     # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
@@ -2708,8 +2721,23 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    if STAGED_CPP_FAKETENSOR:
+        options.enable_td = False
+        if num_shards != 1:
+            raise RuntimeError("Staged C++ FakeTensor tests require a single shard")
+        selectors = json.loads(CPP_FAKETENSOR_TESTS.read_text())["tests"]
+        files = {selector.split("::")[0].removesuffix(".py") for selector in selectors}
+        if unknown := files - set(TESTS):
+            raise RuntimeError(f"Unknown C++ FakeTensor test files: {sorted(unknown)}")
+        selected_tests = [test for test in selected_tests if test in files]
+        if not selected_tests:
+            raise RuntimeError("C++ FakeTensor selection contains no test files")
 
-    test_prioritizations = import_results()
+    test_prioritizations = (
+        TestPrioritizations(selected_tests, {})
+        if STAGED_CPP_FAKETENSOR
+        else import_results()
+    )
     if len(test_prioritizations.get_all_tests()) == 0:
         options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)

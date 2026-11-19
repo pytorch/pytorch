@@ -1342,11 +1342,8 @@ class TruncToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        # Keep TruncToInt's behavior from before _is_integer_check_safe was
-        # introduced. Callers rely on integer-valued composite expressions
-        # being unwrapped; narrowing this check leaves uninterpretable
-        # TruncToInt nodes in symbolic runtime assertions.
-        if number.is_integer is True:
+        # Float(0.0).is_integer is True in sympy, but it must become Integer(0)
+        if number.is_integer is True and not number.is_Float:
             return number
         if isinstance(number, IntTrueDiv):
             base, divisor = number.args
