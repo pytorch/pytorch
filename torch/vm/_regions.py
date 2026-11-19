@@ -4165,10 +4165,13 @@ def _watched(
 
 def _worth_building_in(graph: torch.fx.GraphModule, positions: list[int]) -> list[int]:
     """Which of the inputs at ``positions`` a graph gains from having built
-    in. Not a matrix that the graph only multiplies with, or only looks rows
-    up in by indices that depend on the call: the product and the lookup
-    are the same with the matrix as an input, and built in it is a second
-    copy of the largest tensors a model has."""
+    in. Not a matrix that the graph only looks rows up in by indices that
+    depend on the call, nor, on a CPU, one that it only multiplies with: the
+    lookup and the product are the same with the matrix as an input, and
+    built in it is a second copy of the largest tensors a model has. On a
+    GPU Inductor makes one product of the products of an input whose
+    matrices are constants (the projections of an attention layer), so
+    there the matrix of a product is built in."""
     aten = torch.ops.aten
     products = (aten.addmm.default, aten.mm.default)
     products += (aten.matmul.default, aten.linear.default)
@@ -4180,18 +4183,25 @@ def _worth_building_in(graph: torch.fx.GraphModule, positions: list[int]) -> lis
         if node.op == "call_function" and all(n in constant for n in given):
             constant.add(node)
 
-    def plain(node: torch.fx.Node, user: torch.fx.Node) -> bool:
+    def multiplied(user: torch.fx.Node) -> bool:
         if user.target in products:
             return True
-        if user.target is aten.embedding.default:
-            return user.args[0] is node and user.args[1] not in constant
         return user.target in turned and all(u.target in products for u in user.users)
+
+    def looked_up(node: torch.fx.Node, user: torch.fx.Node) -> bool:
+        if user.target is not aten.embedding.default:
+            return False
+        return user.args[0] is node and user.args[1] not in constant
 
     worth = []
     for position in positions:
         node = placeholders[position]
-        shape = getattr(node.meta.get("val"), "shape", ())
-        if len(shape) >= 2 and node.users and all(plain(node, u) for u in node.users):
+        val = node.meta.get("val")
+        device = getattr(val, "device", None)
+        on_cpu = device is None or device.type == "cpu"
+        users = node.users
+        plain = all(looked_up(node, u) or (on_cpu and multiplied(u)) for u in users)
+        if len(getattr(val, "shape", ())) >= 2 and users and plain:
             continue
         worth.append(position)
     return worth
