@@ -114,6 +114,8 @@ class TestAutogradComplex(TestCase):
 
 
 class TestReductionComplexDtypeBackwardDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("op", [torch.sum, torch.mean, torch.prod])
     @parametrize("dim", [None, 0])
     def test_real_input_complex_dtype_grad(self, device, op, dim):
