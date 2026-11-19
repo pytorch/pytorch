@@ -31,12 +31,13 @@ from urllib.parse import unquote, urlsplit
 
 from labels import (
     DISTRIBUTED,
+    DISTRIBUTED_MODULES,
     is_forbidden,
-    is_sub_queue,
     load_templates,
     load_valid_labels,
-    PTD_TRIAGED,
+    PARALLELISMS,
     strip_redundant,
+    SUB_QUEUES,
     TRIAGE_SKILL,
 )
 
@@ -439,19 +440,22 @@ def plan_effects(
         ]
         return effects
 
+    # Completion markers are derived below, never taken from the plan.
     requested = [
         label
         for label in plan.get("labels", [])
-        if label not in (BOT_TRIAGED, PTD_TRIAGED)
+        if label not in (BOT_TRIAGED, "triaged")
     ]
-    # Stage 2 routes to the parent queue only. The distributed triage picks the
-    # sub-queue, and it stops early on an issue that already has one.
-    sub_queues = [label for label in requested if is_sub_queue(label)]
+    # A complete distributed route has the parent queue and exactly one sub-queue.
+    sub_queues = SUB_QUEUES.intersection(requested)
     if sub_queues:
-        effects.notes.append(f"mapped {sub_queues} to {DISTRIBUTED!r}")
-        requested = [
-            DISTRIBUTED if label in sub_queues else label for label in requested
-        ]
+        requested.append(DISTRIBUTED)
+    if len(sub_queues) > 1:
+        effects.notes.append(
+            f"more than one sub-queue requested {sorted(sub_queues)}; flagging for review"
+        )
+        requested = [label for label in requested if label not in SUB_QUEUES]
+        requested.append(TRIAGE_REVIEW)
     if decision == "transfer":
         effects.notes.append(
             f"transfer to {plan.get('transfer_repo', '?')} is not supported; flagging for review"
@@ -480,6 +484,15 @@ def plan_effects(
     if forbidden or (not labels and (unknown or decision in LABELING_DECISIONS)):
         labels.append(TRIAGE_REVIEW)
     if decision == "triage_review":
+        labels.append(TRIAGE_REVIEW)
+    sub_queue = next((label for label in labels if label in SUB_QUEUES), None)
+    if DISTRIBUTED in labels and sub_queue is None:
+        effects.notes.append("no distributed sub-queue; flagging for review")
+        labels.append(TRIAGE_REVIEW)
+    if sub_queue == PARALLELISMS and not DISTRIBUTED_MODULES & (
+        existing_labels | set(labels)
+    ):
+        effects.notes.append("no distributed module label; flagging for review")
         labels.append(TRIAGE_REVIEW)
     keys = list(dict.fromkeys(plan.get("templates", [])))
     effects.close = decision in CLOSING_TEMPLATES
@@ -520,13 +533,8 @@ def plan_effects(
             and annotation.get("match") == "uncertain"
         ):
             labels.append(TRIAGE_REVIEW)
-    if "triaged" in labels and TRIAGE_REVIEW in existing_labels | set(labels):
-        effects.notes.append("dropped 'triaged': the issue needs human review")
-        labels = [label for label in labels if label != "triaged"]
 
     effects.redact_body = decision == "request_reproduction"
-    if effects.redact_body:
-        labels = [label for label in labels if label != "triaged"]
     if decision == "request_info" and "request_more_info" not in keys:
         keys.insert(0, "request_more_info")
     repro_template = "request_self_contained_reproduction"
@@ -548,11 +556,17 @@ def plan_effects(
         )
     posted = posted or reference_posted
 
+    # PT2 and fully routed distributed issues can complete triage in this pass.
+    completing_queues = {"oncall: pt2"}
+    if sub_queue is not None:
+        completing_queues |= {DISTRIBUTED, sub_queue}
     if (
         decision == "label"
         and not {TRIAGE_REVIEW, "needs reproduction"} & (existing_labels | set(labels))
-        and not any(
-            label.startswith("oncall:") and label != "oncall: pt2" for label in labels
+        and all(
+            label in completing_queues
+            for label in labels
+            if label.startswith("oncall:")
         )
         and not {"request_more_info", repro_template} & set(keys)
     ):
