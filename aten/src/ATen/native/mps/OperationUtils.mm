@@ -1822,7 +1822,6 @@ void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
 
 void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
   TORCH_CHECK(size > 0);
-  TORCH_CHECK(size <= 4096, "Metal inline arguments exceed 4 KB; reduce the kernel's fusion size");
   [encoder setBytes:ptr length:size atIndex:idx];
 }
 
@@ -1831,27 +1830,19 @@ void MetalKernelFunction::setTensorListArg(unsigned idx, c10::ArrayRef<at::Tenso
   arguments.reserve(tensors.size());
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
-      TORCH_CHECK(t.dim() == 0, "Expected a CPU scalar in a Metal tensor argument list");
-      uint64_t value = 0;
+      TORCH_CHECK_VALUE(t.dim() == 0 && t.element_size() <= sizeof(uint64_t), "Expected MPS tensors or CPU scalars");
+      std::memcpy(&arguments.emplace_back(0), t.const_data_ptr(), t.element_size());
       if (t.scalar_type() == kDouble) {
-        const auto scalar = static_cast<float>(*reinterpret_cast<const double*>(t.const_data_ptr()));
-        std::memcpy(&value, &scalar, sizeof(scalar));
-      } else {
-        TORCH_CHECK(t.element_size() <= sizeof(value), "CPU scalar is too large for a Metal argument slot");
-        std::memcpy(&value, t.const_data_ptr(), t.element_size());
+        arguments.back() = c10::bit_cast<uint32_t>(static_cast<float>(*t.const_data_ptr<double>()));
       }
-      arguments.push_back(value);
       continue;
     }
-    TORCH_CHECK(t.device().is_mps(), "Expected a list of MPS tensors, but got a tensor on ", t.device());
     arguments.push_back(reinterpret_cast<uint64_t>(get_tensor_gpu_address(t)));
-    auto buffer = getMTLBufferStorage(t);
-    if (!buffer) {
-      continue;
-    }
     // Buffers reached only through an argument buffer must be declared, or Metal neither orders the
     // kernel after pending writes to them nor retains them, which the allocator uses to track buffers in use
-    [encoder useResource:buffer usage:MTLResourceUsageRead | MTLResourceUsageWrite];
+    if (const auto buffer = getMTLBufferStorage(t)) {
+      [encoder useResource:buffer usage:MTLResourceUsageRead | MTLResourceUsageWrite];
+    }
   }
   setArg(idx, arguments);
 }

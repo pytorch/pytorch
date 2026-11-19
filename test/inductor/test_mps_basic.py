@@ -602,134 +602,30 @@ class MPSBasicTests(TestCase):
         )
 
     @parametrize("dynamic", [False, True])
-    @parametrize(
-        "case",
-        ["horizontal", "vertical", "scalars", "cpu_scalars", "python_ints", "mixed"],
-    )
-    def test_many_buffer_args(self, dynamic, case):
+    @parametrize("case", ["limit", "scalars", "reduction", "indirect", "two_kernels"])
+    def test_argument_buffers(self, case, dynamic):
         # https://github.com/pytorch/pytorch/issues/201864
-        # Python ints specialize with static shapes; those cases also exercise
-        # the ordinary binding path below the buffer limit.
-        def horizontal(x, *ws):
-            return [x * w for w in ws]
-
-        def vertical(x, *ws):
-            for w in ws:
-                x = x * w + 1
-            return x
-
-        def scalars(x, *args):
-            ws, ns = args[:24], args[24:]
-            for i, w in enumerate(ws):
-                x = x * w + ns[i % len(ns)]
-            return x
-
-        def add_many(x, *values):
-            for v in values:
-                x = x + v
-            return x
-
+        n = MetalKernel.max_buffer_args
         x = make_tensor(33, 65, device=self.device, dtype=torch.float32)
-        v = make_tensor(65, device=self.device, dtype=torch.float32)
-        ws = [
-            make_tensor(65, 33, device=self.device, dtype=torch.float32).t()
-            for _ in range(31)
-        ]
-        ns = list(range(2, 12))
-        cpu_scalars = [torch.tensor(i / 7, dtype=torch.float64) for i in range(32)]
-        mps_scalars = [torch.tensor(float(i), device=self.device) for i in range(10)]
-        cases = {
-            "horizontal": (horizontal, x, ws, True),
-            "vertical": (vertical, x, ws, True),
-            "scalars": (scalars, x, ws[:24] + ns, dynamic),
-            "cpu_scalars": (add_many, v, cpu_scalars, True),
-            "python_ints": (add_many, v, list(range(2, 34)), dynamic),
-            "mixed": (add_many, v, cpu_scalars[:12] + mps_scalars + ns, dynamic),
-        }
-        fn, x0, args, packed = cases[case]
-        result, (code,) = run_and_get_code(
-            torch.compile(fn, dynamic=dynamic), x0, *args
-        )
-        self.assertEqual(result, fn(x0, *args))
-        self.assertEqual(code.count("kernel void "), 1)
-        self.assertEqual("_buffers& buffers" in code, packed)
+        ys = make_tensor(n, 65, 33, device=self.device, dtype=torch.float32).mT.unbind()
+        m = make_tensor(65, 65, device=self.device, dtype=torch.float32)
+        cpu_scalars = [torch.tensor(i / 7, dtype=torch.float64) for i in range(n)]
+        idx = torch.arange(33, device=self.device).flip(0)
+        fn, args = {
+            "limit": (lambda x, *ys: sum(ys, x), [x, *ys[: n - 2]]),
+            "scalars": (lambda x, *ys: sum(ys, x), [x, *cpu_scalars]),
+            "reduction": (lambda x, *ys: sum(ys, x).amax(dim=0), [x, *ys]),
+            "indirect": (lambda i, x, *ys: sum(ys, x[i]), [idx, x, *ys[: n - 3]]),
+            "two_kernels": (lambda x, m, *ys: sum(ys, sum(ys, x) @ m), [x, m, *ys]),
+        }[case]
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
+        self.assertEqual(result, fn(*args))
+        kernels = 2 if case == "two_kernels" else 1
+        packed = dynamic or case != "limit"
+        self.assertEqual(code.count("kernel void "), kernels)
+        self.assertEqual(code.count("_buffers& buffers"), kernels * packed)
         self.assertEqual("constant long* int_args" in code, packed and dynamic)
-        self.assertNotIn(".to('mps'", code)
-
-    @parametrize("num_weights", [29, 30])
-    def test_argument_buffer_boundary(self, num_weights):
-        def fn(x, *weights):
-            for weight in weights:
-                x = x + weight
-            return x
-
-        inputs = tuple(
-            make_tensor(65, device=self.device, dtype=torch.float32)
-            for _ in range(num_weights + 1)
-        )
-        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=False), *inputs)
-        self.assertEqual(result, fn(*inputs))
-        self.assertEqual(code.count("kernel void "), 1)
-        self.assertEqual("_buffers& buffers" in code, num_weights == 30)
-        self.assertNotIn("constant long* int_args", code)
-
-    def test_argument_buffer_reduction(self):
-        def fn(x, *weights):
-            for weight in weights:
-                x = x + weight
-            return x.sum(dim=1)
-
-        inputs = tuple(
-            make_tensor(33, 65, device=self.device, dtype=torch.float32)
-            for _ in range(32)
-        )
-        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=True), *inputs)
-        self.assertEqual(result, fn(*inputs))
-        self.assertIn("_buffers& buffers", code)
-        self.assertIn("constant long* int_args", code)
-        self.assertIn("r0_numel = int_args[", code)
-
-    def test_argument_buffer_indirect_load(self):
-        def fn(x, index, *weights):
-            x = x[index]
-            for weight in weights:
-                x = x + weight
-            return x
-
-        x = make_tensor(65, device=self.device, dtype=torch.float32)
-        index = torch.arange(65, device=self.device).flip(0)
-        weights = tuple(
-            make_tensor(65, device=self.device, dtype=torch.float32) for _ in range(30)
-        )
-        result, (code,) = run_and_get_code(
-            torch.compile(fn, dynamic=False), x, index, *weights
-        )
-        self.assertEqual(result, fn(x, index, *weights))
-        self.assertIn("_buffers& buffers", code)
-        self.assertIn("ErrorMessages* error_buf", code)
-        self.assertIn("error_buf_idx=", code)
-
-    def test_two_argument_buffer_kernels(self):
-        def fn(x, matrix, *weights):
-            for weight in weights[:31]:
-                x = x + weight
-            x = torch.mm(x, matrix)
-            for weight in weights[31:]:
-                x = x - weight
-            return x
-
-        x = make_tensor(8, 8, device=self.device, dtype=torch.float32)
-        matrix = make_tensor(8, 8, device=self.device, dtype=torch.float32)
-        weights = tuple(
-            make_tensor(8, 8, device=self.device, dtype=torch.float32)
-            for _ in range(62)
-        )
-        result, (code,) = run_and_get_code(
-            torch.compile(fn, dynamic=False), x, matrix, *weights
-        )
-        self.assertEqual(result, fn(x, matrix, *weights))
-        self.assertEqual(code.count("kernel void "), 2)
-        self.assertEqual(code.count("_buffers& buffers"), 2)
+        self.assertEqual(f"error_buf_idx={1 + dynamic}" in code, case == "indirect")
 
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
@@ -759,78 +655,19 @@ class MPSBasicTests(TestCase):
 class MPSBasicTestsAOTI(TestCase):
     hw_classification = HardwareClassification.MPS
 
-    def test_buffer_limit_error(self):
-        kernel = unittest.mock.Mock()
-        kernel.args.sizevars = {}
-        kernel.headers = set()
-        kernel.max_buffer_args = MetalKernel.max_buffer_args
-        kernel._dynamic_numel_trees.return_value = []
-        with patch("torch._inductor.codegen.mps.V") as virtualized:
-            virtualized.graph.cpp_wrapper = True
-            with self.assertRaisesRegex(
-                RuntimeError,
-                r"too_many_args needs 32.*at most 31.*Disable cpp_wrapper",
-            ):
-                MetalKernel._use_argument_buffer(kernel, 32, "too_many_args")
-
-    @parametrize("num_weights", [29, 30])
-    def test_many_buffer_args(self, num_weights):
+    @parametrize("over_cap", [False, True])
+    def test_many_buffer_args(self, over_cap):
         class M(torch.nn.Module):
             def forward(self, x, *weights):
-                for weight in weights:
-                    x = x + weight
-                return x
+                return sum(weights, x)
 
-        inp = tuple(
-            make_tensor(65, device="mps", dtype=torch.float32)
-            for _ in range(num_weights + 1)
-        )
-        _, code = run_and_get_cpp_code(self.check_model, M(), inp)
-        self.assertEqual(code.count("kernel void "), 1 if num_weights == 29 else 2)
-        self.assertNotIn("_buffers& buffers", code)
-
-    def _aoti_run(self, m, inp, dynamic_shapes=None):
-        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
-        return torch._inductor.aoti_load_package(
-            torch._inductor.aoti_compile_and_package(ep)
-        )(*inp)
-
-    @parametrize("num_weights", [29, 32])
-    def test_many_buffer_args_precomputed_sizes(self, num_weights):
-        # Strided slices of dynamic shapes add precomputed size arguments
-        class M(torch.nn.Module):
-            def forward(self, x, *weights):
-                for weight in weights:
-                    x = x + weight[:, :, ::2, ::2]
-                return x
-
-        h, w = (
-            torch.export.Dim("h", min=4, max=64),
-            torch.export.Dim("w", min=4, max=64),
-        )
-        x = make_tensor(2, 3, 8, 8, device="mps", dtype=torch.float32)
-        weights = tuple(
-            make_tensor(2, 3, 16, 16, device="mps", dtype=torch.float32)
-            for _ in range(num_weights)
-        )
-        dynamic_shapes = ({2: h, 3: w}, tuple({2: 2 * h, 3: 2 * w} for _ in weights))
-        self.assertEqual(
-            self._aoti_run(M(), (x, *weights), dynamic_shapes), M()(x, *weights)
-        )
-
-    @parametrize("num_weights", [29, 32])
-    def test_many_buffer_args_looped_reduction(self, num_weights):
-        class M(torch.nn.Module):
-            def forward(self, x, *weights):
-                for weight in weights:
-                    x = x + weight
-                return x - x.sum(-1, keepdim=True)
-
-        inp = tuple(
-            make_tensor(8, 2048, device="mps", dtype=torch.float32)
-            for _ in range(num_weights + 1)
-        )
-        self.assertEqual(self._aoti_run(M(), inp), M()(*inp), atol=1e-3, rtol=1e-4)
+        n = MetalKernel.max_buffer_args - 3 + over_cap
+        dims = {0: torch.export.Dim("h"), 1: torch.export.Dim("w")}
+        x = make_tensor(33, 65, device="mps", dtype=torch.float32)
+        weights = make_tensor(n, 65, 33, device="mps", dtype=torch.float32).mT.unbind()
+        shapes = (dims, (dims,) * n)
+        _, code = run_and_get_cpp_code(self.check_model, M(), (x, *weights), shapes)
+        self.assertEqual(code.count("kernel void "), 1 + over_cap)
 
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)

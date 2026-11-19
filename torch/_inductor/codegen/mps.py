@@ -7,7 +7,7 @@ import itertools
 import logging
 import math
 from pathlib import Path
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -21,11 +21,7 @@ from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..codecache import code_hash, get_path
-from ..scheduler import (
-    filter_graph_level_symbols,
-    get_scheduler_node_symbol_uses,
-    WhyNoFuse,
-)
+from ..scheduler import WhyNoFuse
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata, Placeholder
 from ..virtualized import ops, OpsWrapper, V
 from .common import (
@@ -37,7 +33,7 @@ from .common import (
     PythonPrinter,
 )
 from .cpp_wrapper_gpu import cpp_string_literal
-from .simd import IterationRangesEntry, IterationRangesRoot, SIMDKernel, SIMDScheduling
+from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
@@ -641,13 +637,6 @@ MetalOverrides._initialize_pointwise_overrides("mps")
 MetalOverrides._initialize_special_ops()
 
 
-class _TensorArg(NamedTuple):
-    outer: str
-    inner: str
-    metal_type: str
-    on_cpu: bool
-
-
 class MetalKernel(SIMDKernel):
     """Implement Metal codegen based on the SIMDKernel abstraction"""
 
@@ -690,55 +679,6 @@ class MetalKernel(SIMDKernel):
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
-
-    def _tensor_args(self) -> list[_TensorArg]:
-        rc = []
-        for outer, inner in self.args.output_buffers.items():
-            if outer in self.removed_buffers:
-                continue
-            dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
-            rc.append(_TensorArg(outer, str(inner), f"device {dtype_str}*", False))
-        for outer, inner in self.args.input_buffers.items():
-            if outer in self.removed_buffers:
-                continue
-            dtype = V.graph.get_dtype(outer)
-            outer_buf = V.graph.try_get_buffer(outer)
-            is_scalar = outer_buf is not None and outer_buf.get_size() == []
-            device = outer_buf.get_device() if outer_buf is not None else None
-            on_cpu = is_scalar and device is not None and device.type == "cpu"
-            # MPS does not support float64, but scalar inputs are fine
-            if dtype == torch.float64:
-                if not is_scalar:
-                    raise RuntimeError("float64 is not supported by MPS")
-                dtype_str = "float"
-            else:
-                dtype_str = self.dtype_to_str(dtype)
-            rc.append(_TensorArg(outer, inner, f"constant {dtype_str}*", on_cpu))
-        return rc
-
-    def _dynamic_numel_trees(self) -> list[IterationRangesRoot]:
-        return [
-            t
-            for t in self.active_range_trees()
-            if not isinstance(t.numel, sympy.Integer)
-        ]
-
-    def _use_argument_buffer(self, num_tensor_args: int, kernel_name: str) -> bool:
-        """
-        Kernels that need more buffer arguments than Metal allows take all their
-        tensors in one argument buffer and all their ints in one array.
-        """
-        n_args = num_tensor_args + len(self.args.sizevars)
-        n_args += len(self._dynamic_numel_trees()) + ("error" in self.headers)
-        if n_args <= self.max_buffer_args:
-            return False
-        if V.graph.cpp_wrapper:
-            raise RuntimeError(
-                f"Metal kernel {kernel_name} needs {n_args} buffer arguments, "
-                f"but cpp_wrapper supports at most {self.max_buffer_args}. "
-                "Disable cpp_wrapper to use argument buffers."
-            )
-        return True
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         """Codegen a load from an InputBuffer"""
@@ -1203,20 +1143,7 @@ class MetalKernel(SIMDKernel):
                 )
                 code.writeline(header_contents)
 
-            tensor_args = self._tensor_args()
-            use_argbuf = self._use_argument_buffer(len(tensor_args), fn_name)
-            int_args = [
-                *self.args.sizevars.values(),
-                *(f"{t.prefix}numel" for t in self._dynamic_numel_trees()),
-            ]
-            if use_argbuf:
-                code.writeline(f"struct {fn_name}_buffers {{")
-                with code.indent():
-                    for _, inner, metal_type, on_cpu in tensor_args:
-                        field_type = "ulong" if on_cpu else metal_type
-                        code.writeline(f"{field_type} {inner};")
-                code.writeline("};")
-
+            head = []
             if self.inside_reduction and self.max_threadgroup_size > 1:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
@@ -1228,21 +1155,51 @@ class MetalKernel(SIMDKernel):
                     if isinstance(total_reduction_size, sympy.Integer)
                     else self.max_threadgroup_size
                 )
-                code.writeline(
+                head.append(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
-            code.writeline(f"kernel void {fn_name}(")
+            head.append(f"kernel void {fn_name}(")
             with code.indent():
-                if use_argbuf:
-                    code.writeline(f"constant {fn_name}_buffers& buffers,")
-                    if int_args:
-                        code.writeline("constant long* int_args,")
-                else:
-                    for arg in tensor_args:
-                        code.writeline(f"{arg.metal_type} {arg.inner},")
-                    # Sizevars followed by dynamic numels
-                    for inner in int_args:
-                        code.writeline(f"constant long& {inner},")
+                tensors = []
+                for outer, inner in self.args.output_buffers.items():
+                    if outer in self.removed_buffers:
+                        continue
+                    dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
+                    tensors.append((f"device {dtype_str}*", inner, False))
+                for outer, inner in self.args.input_buffers.items():
+                    dtype = V.graph.get_dtype(outer)
+                    # MPS does not support float64, but scalar inputs are fine
+                    if dtype == torch.float64:
+                        outer_buf = V.graph.try_get_buffer(outer)
+                        if outer_buf is None or outer_buf.get_size() != []:
+                            raise RuntimeError("float64 is not supported by MPS")
+                        dtype_str = "float"
+                    else:
+                        dtype_str = self.dtype_to_str(dtype)
+                    on_cpu = V.graph.is_zero_dim_cpu_buffer(outer)
+                    tensors.append((f"constant {dtype_str}*", inner, on_cpu))
+                ints = list(self.args.sizevars.values())
+
+                # Write dynamic values as inputs
+                for idx_var in idx_vars:
+                    if isinstance(idx_var.numel, sympy.Integer):
+                        pass
+                    else:
+                        ints.append(f"{idx_var.prefix}numel")
+                n_args = len(tensors) + len(ints) + ("error" in self.headers)
+                pack_ints = n_args > self.max_buffer_args
+                pack_tensors = pack_ints and not V.graph.cpp_wrapper
+                params = [f"{t} {n}," for t, n, _ in tensors]
+                if pack_tensors:
+                    fields = [f"{'ulong' if c else t} {n};" for t, n, c in tensors]
+                    head = [f"struct {fn_name}_buffers {{", *fields, "};", *head]
+                    params = [f"constant {fn_name}_buffers& buffers,"]
+                int_params = [f"constant long& {n}," for n in ints]
+                if pack_ints and ints:
+                    int_params = ["constant long* int_args,"]
+                with code.indent(-1):
+                    code.writelines(head)
+                code.writelines(params + int_params)
 
                 # Add error buffer parameter if error header is used
                 if "error" in self.headers:
@@ -1268,13 +1225,12 @@ class MetalKernel(SIMDKernel):
                     )
             code.writeline(") {")
             with code.indent():
-                if use_argbuf:
-                    for _, inner, metal_type, on_cpu in tensor_args:
-                        value = f"buffers.{inner}"
-                        if on_cpu:
-                            value = f"reinterpret_cast<{metal_type}>(&{value})"
-                        code.writeline(f"{metal_type} {inner} = {value};")
-                    for idx, inner in enumerate(int_args):
+                if pack_tensors:
+                    for metal_type, inner, on_cpu in tensors:
+                        cast = f"({metal_type})&" if on_cpu else ""
+                        code.writeline(f"{metal_type} {inner} = {cast}buffers.{inner};")
+                if pack_ints:
+                    for idx, inner in enumerate(ints):
                         code.writeline(f"const long {inner} = int_args[{idx}];")
                 if len(idx_vars) > 1 or strided:
                     for idx, var in enumerate(idx_vars):
@@ -1335,29 +1291,33 @@ class MetalKernel(SIMDKernel):
             str(call_arg): arg_type for call_arg, arg_type in zip(call_args, arg_types)
         }
 
-        tensor_args = self._tensor_args()
-        args = [arg.outer for arg in tensor_args]
+        args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
+        args = [arg for arg in args if arg not in self.removed_buffers]
+        num_tensors = len(args)
         args += [str(v) for v in self.args.sizevars]
-        arg_types: list[Any] = [arg_name_to_type[arg] for arg in args]
+        arg_types = [arg_name_to_type[arg] for arg in args]
 
         # Add any dynamic ints as inputs
-        for tree in self._dynamic_numel_trees():
-            if isinstance(tree.numel, sympy.Symbol):
+        for tree in self.range_trees:
+            if isinstance(tree.numel, (sympy.Integer, int)):
+                # Don't need to pass in integers as inputs
+                continue
+            elif isinstance(tree.numel, sympy.Symbol):
                 expr = tree.numel
             else:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree).inner
 
-            args.append(str(expr))
-            arg_types.append(int)
+            if not tree.is_reduction or self.inside_reduction:
+                args.append(str(expr))
+                arg_types.append(int)
 
-        if self._use_argument_buffer(len(tensor_args), name):
-            # Tensor lists contain GPU addresses and inline CPU scalar values.
-            int_args = args[len(tensor_args) :]
-            args = [f"[{', '.join(arg.outer for arg in tensor_args)}]"]
-            if int_args:
-                args.append(f"[{', '.join(int_args)}]")
-            arg_types = [list] * len(args)
-
+        if len(args) + ("error" in self.headers) > self.max_buffer_args:
+            tensors, ints = args[:num_tensors], args[num_tensors:]
+            if not V.graph.cpp_wrapper:
+                args = [f"[{', '.join(a)}]" for a in (tensors, ints) if a]
+            elif ints:
+                args[num_tensors:] = [f"{{{', '.join(ints)}}}"]
+                arg_types[num_tensors:] = [list]
         expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
 
         def format_threads(threads: list[str], kwarg: str) -> str:
@@ -1489,29 +1449,11 @@ class MetalScheduling(SIMDScheduling):
         if node1.is_template() or node2.is_template():
             WhyNoFuse(node1, node2)("MPS does not fuse into external templates")
             return False
-        if not super().can_fuse(node1, node2):
+        cap = MetalKernel.max_buffer_args - 1
+        too_many = node1.scheduler.fusion_prevent_too_many_reads_and_writes
+        if V.graph.cpp_wrapper and too_many(node1, node2, cap):
             return False
-        # cpp_wrapper cannot pass tensors in an argument buffer yet, so it caps
-        # fusion at Metal's buffer argument limit instead
-        if not V.graph.cpp_wrapper:
-            return True
-        if self.scheduler is None:
-            raise AssertionError("MetalScheduling.can_fuse needs a scheduler")
-        # can_fuse_horizontal retries reduction epilogues with the consumer first
-        if node2.get_operation_names() & node1.ancestors:
-            node1, node2 = node2, node1
-        # Reserve the graph-level symbols plus up to 3 dynamic numels. The C++
-        # wrapper does not emit an error buffer.
-        snodes = (*node1.get_nodes(), *node2.get_nodes())
-        uses = OrderedSet().union(*(get_scheduler_node_symbol_uses(n) for n in snodes))
-        symbols = filter_graph_level_symbols(uses)
-        scalar_args = len(symbols) + 3 if symbols else 0
-        if self.scheduler.fusion_prevent_too_many_reads_and_writes(
-            node1, node2, self.kernel_type.max_buffer_args - scalar_args
-        ):
-            WhyNoFuse(node1, node2)("exceeds Metal's buffer argument limit")
-            return False
-        return True
+        return super().can_fuse(node1, node2)
 
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
@@ -1598,11 +1540,7 @@ class MetalScheduling(SIMDScheduling):
         for line in metal_src.split("\n"):
             if line.strip().startswith("#include"):
                 continue
-            body_lines.append(
-                line.replace(
-                    "kernel void generated_kernel(", f"kernel void {fn_name}("
-                ).replace("generated_kernel_buffers", f"{fn_name}_buffers")
-            )
+            body_lines.append(line.replace("generated_kernel", fn_name))
 
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
