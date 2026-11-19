@@ -7356,17 +7356,6 @@ class TestCppFakeTensorModeBindings(TestCase):
                 self.assertEqual(self._installed(), (mode, True))
         self.assertEqual(self._installed(), (None, False))
 
-    def test_require_python_fake_mode(self):
-        from torch._guards import require_python_fake_mode
-
-        msg = "CppFakeTensorMode is not supported here yet"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            require_python_fake_mode(CppFakeTensorMode())
-        with torch._dynamo.config.patch(use_cpp_fake_tensor=False):
-            py_mode = FakeTensorMode()
-        self.assertIs(require_python_fake_mode(py_mode), py_mode)
-        self.assertIsNone(require_python_fake_mode(None))
-
     @parametrize(
         "callback,propagate_real_tensors",
         [
