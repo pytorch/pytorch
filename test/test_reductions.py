@@ -1492,6 +1492,34 @@ class TestReductionsDevice(TestCase):
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
+    @dtypes(torch.float)
+    @skipIfMPS
+    def test_reduction_out_aliases_input(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/205616
+        ops = (torch.amax, torch.amin, torch.mean, torch.nanmean, torch.nansum, torch.sum, torch.prod)
+        for op in ops:
+            with self.subTest(op=op.__name__):
+                x = torch.tensor(3.0, dtype=dtype, device=device)
+                self.assertEqual(op(x, 0, out=x), 3.0)
+                self.assertEqual(op(x, 0, out=x.view_as(x)), 3.0)
+
+                x = torch.tensor([[3.0], [5.0]], dtype=dtype, device=device)
+                expected = op(x.clone(), 1, keepdim=True)
+                self.assertEqual(op(x, 1, keepdim=True, out=x), expected)
+                self.assertEqual(x, expected)
+
+                # Row 0 holds every column's max in one input and min in the other.
+                base = torch.arange(1.0, 25.0, dtype=dtype, device=device).view(8, 3)
+                for x in (base.clone(), base.flip(0).contiguous()):
+                    expected = op(x.clone(), 0)
+                    self.assertEqual(op(x, 0, out=x[0]), expected)
+
+        for op in (torch.sum, torch.amax, torch.std):
+            with self.subTest(op=op.__name__):
+                x = make_tensor((8, 3), dtype=dtype, device=device)
+                with self.assertRaisesRegex(RuntimeError, "would need to be resized"):
+                    op(x, 0, out=x)
+
     @onlyAccelerator
     @skipIfMPS
     @dtypes(torch.float16, torch.float32)
