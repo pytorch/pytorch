@@ -4729,6 +4729,11 @@ class RegionNet(torch.nn.Module):
         return self.fc(torch.tanh(x.flatten(1)))
 
 
+def region_ordered(model, feats):
+    h = torch.relu(feats["a"]) + torch.tanh(feats["b"])
+    return model.fc(torch.sigmoid(h).flatten(1))
+
+
 class RegionBranch(torch.nn.Module):
     # Branches on data between two stretches that trace.
     def __init__(self):
@@ -5917,6 +5922,26 @@ class TestVmRegions(TestCase):
             for _ in range(400):
                 compiled(model, x)
         self.assertFalse(compiled.stats()["measuring"])
+
+    def test_region_that_is_handed_an_ordered_dict(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.vm(
+            region_ordered, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with torch.no_grad():
+            # Once the module has been looked at, a call is told from the
+            # one before it by what it was handed: an OrderedDict is
+            # described as a dict is, which the runtime took for a node of
+            # another kind and raised TypeError.
+            for _ in range(12):
+                feats = collections.OrderedDict(
+                    a=torch.randn(2, 4, 6, 6), b=torch.randn(2, 4, 6, 6)
+                )
+                expected = region_ordered(model, feats)
+                self.assertEqual(compiled(model, feats), expected, atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 1)
 
     def test_object_made_by_a_region_is_made_on_every_call(self):
         torch.manual_seed(0)
