@@ -541,6 +541,7 @@ class NNModuleVariable(VariableTracker):
         if name == "__dict__":
             return self.get_dict_vt(tx)
 
+        out = None
         subobj = base_dict.get(name, NO_SUCH_SUBOBJ)
         if subobj is NO_SUCH_SUBOBJ and name not in all_class_attribute_names:
             for field in ("_parameters", "_buffers", "_modules"):
@@ -548,14 +549,12 @@ class NNModuleVariable(VariableTracker):
                     continue
                 registry = base_dict[field]
                 registry_source = AttrSource(self.source, field)
-                if (
-                    type(registry) is not dict
-                    and type(registry) is not collections.OrderedDict
-                ):
+                if not istype(registry, (dict, collections.OrderedDict)):
                     mapping = VariableBuilder(tx, registry_source)(registry)
                     key = VariableTracker.build(tx, name)
                     if pysequence_contains(tx, mapping, key).as_python_constant():
-                        return generic_getitem(tx, mapping, key)
+                        out = generic_getitem(tx, mapping, key)
+                        break
                     continue
                 present = name in registry
                 guard = (
@@ -570,7 +569,7 @@ class NNModuleVariable(VariableTracker):
                 if present:
                     subobj = registry[name]
                     break
-        if subobj is NO_SUCH_SUBOBJ:
+        if subobj is NO_SUCH_SUBOBJ and out is None:
             try:
                 subobj = inspect.getattr_static(base, name)
                 object_member = False
@@ -599,7 +598,8 @@ class NNModuleVariable(VariableTracker):
             guard_to_detect_forward_monkeypatching(self.source, base)
 
         if object_member:
-            out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
+            if out is None:
+                out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
 
             if isinstance(out, (NNModuleVariable, UnspecializedNNModuleVariable)):
                 # nn_module_stack source is BC surface area. Ensure that
@@ -1713,7 +1713,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    lazy_ids = hooks_source is not None and name.startswith("_forward_")
+                    lazy_ids = hooks_source is not None
                     if hooks_source is not None and (
                         not torch._dynamo.config.skip_nnmodule_hook_guards
                         or hooks_type is not dict
