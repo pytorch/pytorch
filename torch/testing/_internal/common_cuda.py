@@ -194,6 +194,23 @@ def blas_library_context(backend):
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
+# Same rule as CUDAHooks::isGPUArch: an unanchored substring match on
+# gcnArchName. The match stops when the next character is '-'. A ':'
+# feature suffix still belongs to the matched target, so "gfx1250"
+# matches "gfx1250:xnack-" and not "gfx1250-strict". Family prefixes
+# such as "gfx94" still match. evaluate_gfx_arch_within stays exact.
+def gcn_arch_matches(gcn_name, arch):
+    start = 0
+    while True:
+        found = gcn_name.find(arch, start)
+        if found < 0:
+            return False
+        end = found + len(arch)
+        if end >= len(gcn_name) or gcn_name[end] != "-":
+            return True
+        start = found + 1
+
+
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
         return False
@@ -374,10 +391,7 @@ def evaluate_platform_supports_fp8():
             if ROCM_VERSION >= (10, 3):
                 archs.extend(["gfx1170", "gfx1171"])
             gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-            for arch in archs:
-                if arch in gcn_name:
-                    return True
-            return False
+            return any(gcn_arch_matches(gcn_name, arch) for arch in archs)
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():

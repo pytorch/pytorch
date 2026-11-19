@@ -44,6 +44,7 @@ from torch.testing._internal.common_cuda import (
     BF16X9_API_SUPPORTED,
     blas_library_context,
     CUDA_DEVICE_IS_INTEGRATED,
+    gcn_arch_matches,
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
@@ -1236,7 +1237,8 @@ print("RETRIED")
                     for i in range(torch.cuda.device_count())
                 ]
                 hipblaslt_preferred = all(
-                    any(arch in name for arch in archs) for name in gcn_arch_names
+                    any(gcn_arch_matches(name, arch) for arch in archs)
+                    for name in gcn_arch_names
                 )
                 if hipblaslt_preferred:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)

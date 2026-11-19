@@ -49,7 +49,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
     _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION, \
-    PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM
+    PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM, gcn_arch_matches
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -87,8 +87,9 @@ def blaslt_supported_device():
                 archs.append('gfx95')
             if ROCM_VERSION >= (7, 14):
                 archs.extend(['gfx1250', 'gfx1250-strict'])
+            gcn_arch_name = torch.cuda.get_device_properties(0).gcnArchName
             for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                if gcn_arch_matches(gcn_arch_name, arch):
                     return True
         else:
             return True
