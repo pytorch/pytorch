@@ -42,10 +42,11 @@ classes, and tuples, lists, dicts, pytree nodes and plain objects of those
 (an object that is its class and its ``__dict__``: a cache, say). A trace
 runs on copies of the lists, dicts and objects, so that what the code does to
 them shows: storing an item or an attribute is then something the region does
-to the real ones after its graph has run (``_Variant.effects``). An
-instruction that takes anything else from before the region stays with the
-VM. What a region gives back may also be an object it made itself, which
-every call then makes again from the results of the graph (``_Recipes``).
+to the real ones after its graph has run (``_Variant.effects``), as is
+storing a tensor in an attribute of a module that held one. An instruction
+that takes anything else from before the region stays with the VM. What a
+region gives back may also be an object it made itself, which every call then
+makes again from the results of the graph (``_Recipes``).
 
 The last region of a block does not end with the block. Its trace goes on into
 the blocks that follow, along the way the values of the trace take through
@@ -470,15 +471,29 @@ def _module_change_started(code: types.CodeType, offset: int) -> None:
     if traced is None:
         return
     arguments = sys._getframe(1).f_locals
-    module = arguments.get("self")
+    module: Any = arguments.get("self")
     if id(module) not in traced:
         return
     name = _MODULE_CHANGES[code]
-    if name == "__setattr__" and isinstance(module, nn.RNNBase):
-        if arguments.get("name") in _DERIVED:
+    if name == "__setattr__":
+        attribute: Any = arguments.get("name")
+        if isinstance(module, nn.RNNBase) and attribute in _DERIVED:
             # Derived from the parameters, which the trace replaced: put
             # back when the trace is over (see ``_Watch``).
             return
+        current = vars(module).get(attribute, module)
+        value: Any = arguments.get("value", code)
+        if current is value:
+            return
+        watch = _state.watch
+        if watch is not None and type(value) is FakeTensor:
+            if type(current) is FakeTensor or type(current) in _TENSORS:
+                # A tensor the module keeps as a plain attribute (a mask it
+                # builds, a cache) gets another tensor of the trace. The
+                # trace goes on with it, and the region stores what the
+                # graph computes for it when it has run (``_Watch.stored``).
+                watch.stores[(id(vars(module)), attribute)] = (module, attribute)
+                return
     raise Untraceable(f"{name} on a module the region was given")
 
 
@@ -524,6 +539,9 @@ class _Watch:
 
     def __init__(self, modules: dict[int, nn.Module]) -> None:
         self.modules = list(modules.values())
+        # Attributes that hold a tensor and were given another one of the
+        # trace, by the dict they are in and their name.
+        self.stores: dict[tuple[int, str], tuple[nn.Module, str]] = {}
         self.saved: list[tuple[dict[Any, Any], dict[Any, Any]]] = []
         for module in self.modules:
             for m in module.modules():
@@ -541,7 +559,35 @@ class _Watch:
         return (*(_runtime.module_identity(m, _DERIVED) for m in self.modules), *hooks)
 
     def changed(self) -> bool:
-        return self.stamp() != self.before
+        now = self.stamp()
+        if now == self.before:
+            return False
+        if self.stores and not self.changed_otherwise():
+            self.before = now
+            return False
+        return True
+
+    def changed_otherwise(self) -> bool:
+        """Whether more is different than the tensors that were stored."""
+        for held, saved in self.saved:
+            if len(held) != len(saved):
+                return True
+            for key, value in saved.items():
+                if held.get(key, self) is value or key in _DERIVED:
+                    continue
+                if (id(held), key) not in self.stores:
+                    return True
+        return False
+
+    def stored(self) -> list[tuple[nn.Module, str, Any]]:
+        """The tensors a trace left in attributes of the modules."""
+        before = {id(held): saved for held, saved in self.saved}
+        found = []
+        for (held, name), (module, _) in self.stores.items():
+            value = vars(module).get(name)
+            if value is not before[held].get(name):
+                found.append((module, name, value))
+        return found
 
     def restore(self) -> None:
         for held, saved in self.saved:
@@ -958,9 +1004,16 @@ def _checked(
     return _Recipes(reachable, given, {id(f): i for i, f in enumerate(fake)})
 
 
-def _effects_of(copies: _Copies, recipes: "_Recipes") -> tuple[list[Any], bool]:
+def _effects_of(
+    copies: _Copies, recipes: "_Recipes", stored: list[tuple[nn.Module, str, Any]]
+) -> tuple[list[Any], bool]:
+    """What a region does after its graph has run: to what it was given,
+    and to the modules whose tensors its trace replaced."""
     try:
-        return _effects(copies, recipes)
+        effects, grows = _effects(copies, recipes)
+        for module, name, value in stored:
+            effects.append(("module", module, name, recipes.of(value)))
+        return effects, grows
     except Untraceable as e:
         raise _Failed(None, str(e)) from None
 
@@ -968,7 +1021,11 @@ def _effects_of(copies: _Copies, recipes: "_Recipes") -> tuple[list[Any], bool]:
 def _apply(
     effect: Any, results: Any, built: dict[int, Any], flat: Any, held: Any
 ) -> None:
-    kind, target = effect[0], held[effect[1]]
+    kind = effect[0]
+    if kind == "module":
+        setattr(effect[1], effect[2], _build(effect[3], results, built, flat, held))
+        return
+    target = held[effect[1]]
     if kind == "list":
         target[:] = [_build(part, results, built, flat, held) for part in effect[2]]
     elif kind == "set":
@@ -1670,6 +1727,7 @@ class _Region:
                         # Read from a global, a closure or a plain object. Left
                         # to the VM, it is an input of the next region.
                         raise _Failed(i, "gives a tensor from outside the region")
+                stored = _state.watch.stored() if _state.watch is not None else []
             recipes = _checked(copies, fake, grads, reachable, given)
             found["recipes"] = []
             for value in self.outputs:
@@ -1677,7 +1735,7 @@ class _Region:
                     found["recipes"].append(recipes.of(env[value]))
                 except Untraceable as e:
                     raise _Failed(self.definition(value), str(e)) from None
-            found["effects"] = _effects_of(copies, recipes)
+            found["effects"] = _effects_of(copies, recipes, stored)
             return tuple(recipes.results)
 
         graph = _trace(region, list(flat))
@@ -2100,6 +2158,7 @@ class _Path(_Region):
             try:
                 with _swapped(modules, fakes), _traps(modules):
                     block, index = walk.run()
+                    stored = _state.watch.stored() if _state.watch is not None else []
             except Untraceable as e:
                 if walk.entered and getattr(e, "cfg_index", None) is None:
                     # One of the generators moved somewhere on the path.
@@ -2131,7 +2190,7 @@ class _Path(_Region):
                         raise _Failed(self.definition(value), str(e)) from None
                     raise _Retry(limit=born - 1) from None
             found["leap"] = (block, index, values, [v for v in live if v not in values])
-            found["effects"] = _effects_of(copies, recipes)
+            found["effects"] = _effects_of(copies, recipes, stored)
             found["guards"] = walk.guards
             found["used"] = [
                 p for p, v in enumerate(self.inputs) if v in walk.used and p in keyed
