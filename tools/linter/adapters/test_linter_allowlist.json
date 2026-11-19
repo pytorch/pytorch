@@ -502,7 +502,6 @@
   "test/package/test_repackage.py",
   "test/package/test_resources.py",
   "test/package/test_save_load.py",
-  "test/profiler/test_cpp_thread.py",
   "test/profiler/test_cuspy.py",
   "test/profiler/test_execution_trace.py",
   "test/profiler/test_kineto.py",
