@@ -73,6 +73,38 @@ class TestPointwiseTma(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    @parametrize("alias_first", (False, True))
+    def test_plan_cache_distinguishes_aliasing(
+        self, device: str, alias_first: bool
+    ) -> None:
+        from cutlass import Float32
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        key = ("aliasing_plan", alias_first)
+        with torch.backends.python_native.cutedsl.disabled():
+            x = torch.arange(64 * 64, device=device, dtype=torch.float32).view(64, 64)
+            y = torch.ones_like(x).t()
+            for alias in (alias_first, not alias_first):
+                target = x if alias else torch.empty_like(x)
+                expected = x + y
+                (actual,) = kernel.run(
+                    ops.get_fn("_add"),
+                    key,
+                    2,
+                    1,
+                    (Float32(1),),
+                    Float32,
+                    [x, y],
+                    (x.dtype,),
+                    out=[target],
+                    load="tma",
+                )
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(sum(k[1] == key for k in kernel._PLAN), 2)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize(
         "layout",

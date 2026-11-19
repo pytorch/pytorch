@@ -64,6 +64,7 @@ class TestCuTeDSLPointwise(TestCase):
     def test_transpose_payload_block_ownership(
         self, device: str, normalize: bool
     ) -> None:
+        import cutlass
         import cutlass.cute as cute
 
         from torch._native.cutedsl import launch
@@ -76,13 +77,21 @@ class TestCuTeDSLPointwise(TestCase):
         dtype = torch.int8 if normalize else torch.float32
         src = torch.arange(516, device=device).to(dtype).view(-1, 1)
         dst = torch.full_like(src, -7)
-        op = _PayloadTranspose(torch2cute[dtype], 2, 1, 2, 129, 1, normalize)
+        op = _PayloadTranspose(torch2cute[dtype], 1, normalize, False)
 
         @cute.jit
         def one_block(src: Any, dst: Any, stream: Any) -> None:
-            op.kernel(src, dst).launch(
-                grid=[1, 1, 1], block=[_PAYLOAD_THREADS, 1, 1], stream=stream
+            divisors = tuple(
+                cute.FastDivmodDivisorV2(cutlass.Int32(v)) for v in (2, 1, 2, 129, 1)
             )
+            op.kernel(
+                src,
+                dst,
+                divisors,
+                cutlass.Int32(129),
+                cutlass.Int32(4),
+                cutlass.Int32(1),
+            ).launch(grid=[1, 1, 1], block=[_PAYLOAD_THREADS, 1, 1], stream=stream)
 
         fake_src = launch.fake_compact(torch2cute[dtype], (516, 1), align=16)
         fake_dst = launch.fake_compact(torch2cute[dtype], (516, 1), align=16)
@@ -111,7 +120,7 @@ class TestCuTeDSLPointwise(TestCase):
         outer, a, b = shape[0], shape[1], shape[-1]
         middle = math.prod(shape[2:-1])
         spec = (outer, b, middle, a, 1, dtype.itemsize)
-        fn = compile_tma(dtype.itemsize, outer, middle, a, b)
+        fn = compile_tma(dtype.itemsize)
         source = launch.read_only(
             transpose_copy._tiled_view(src, spec, dtype.itemsize, source=True)
         )
@@ -142,6 +151,33 @@ class TestCuTeDSLPointwise(TestCase):
                     .view(-1)
                 )
             self.assertEqual(_storage_bytes(dst), expected)
+
+    @parametrize(
+        "dtype,shapes",
+        (
+            (torch.float32, ((2, 5, 2, 3, 7), (2, 9, 2, 7, 11))),
+            (torch.uint16, ((2, 512, 2, 2048, 1), (2, 1024, 2, 1024, 1))),
+        ),
+    )
+    def test_transpose_copy_reuses_runtime_geometry(
+        self, device: str, dtype: torch.dtype, shapes: tuple[tuple[int, ...], ...]
+    ) -> None:
+        from torch._native.ops.pointwise import transpose_copy
+
+        cached = None
+        for shape in shapes:
+            outer, a, middle, b, inner = shape
+            with _disabled():
+                src = _random_bits(shape, dtype, device=device).transpose(1, 3)
+                expected = src.contiguous()
+                target = torch.empty_like(expected)
+            transpose_copy.run(
+                src, target, (outer, b, middle, a, inner, dtype.itemsize)
+            )
+            self.assertEqual(target, expected, atol=0, rtol=0)
+            if cached is None:
+                cached = len(transpose_copy._PLANS)
+            self.assertEqual(len(transpose_copy._PLANS), cached)
 
 
 instantiate_device_type_tests(TestCuTeDSLPointwise, globals(), only_for="cuda")
