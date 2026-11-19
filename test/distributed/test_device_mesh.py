@@ -34,8 +34,18 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
+from torch.testing._internal.common_distributed import (
+    ACCELERATOR_DIST_BACKENDS,
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_HPU,
+    TEST_XPU,
+    TestCase,
+    xfailIf,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -232,7 +242,8 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @with_comms(backend="nccl-legacy")
+    # None -> the test's default backend (eg: xccl on XPU, etc)
+    @with_comms(backend="nccl-legacy" if device_type == "cuda" else None)
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
@@ -242,6 +253,8 @@ class DeviceMeshTest(DTensorTestBase):
 
     # TODO: need to refactor the other tests in this file to test both
     # eager_init=True and eager_init=False scenarios.
+    # XCCL can't split groups: https://github.com/intel/torch-xpu-ops/issues/5385 (with < 4 XPUs this runs on gloo)
+    @xfailIf(TEST_XPU and device_count >= 4)
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
@@ -249,11 +262,13 @@ class DeviceMeshTest(DTensorTestBase):
 
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl":
-            curr_device = torch.cuda.current_device()
+        if self.backend in ACCELERATOR_DIST_BACKENDS:
+            curr_device = torch.accelerator.current_device_index()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
+    # XCCL can't split groups: https://github.com/intel/torch-xpu-ops/issues/5385 (with < 4 XPUs this runs on gloo)
+    @xfailIf(TEST_XPU and device_count >= 4)
     @with_comms(eager_init=True)
     def test_device_mesh_preserve_rank_order_eager(self):
         mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
@@ -284,6 +299,7 @@ class DeviceMeshTest(DTensorTestBase):
             ordered_mesh.get_local_rank(1), ordered_mesh.get_coordinate()[1]
         )
 
+    @requires_nccl()
     @with_comms(eager_init=True, backend="nccl-legacy")
     def test_device_mesh_preserve_rank_order_eager_nccl_legacy(self):
         mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)

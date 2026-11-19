@@ -466,6 +466,10 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
             "WORLD_SIZE": f"{num_gpus}",
         }
+    if dist.is_xccl_available() and torch.xpu.device_count() > 0:
+        DISTRIBUTED_TESTS_CONFIG["xccl"] = {
+            "WORLD_SIZE": f"{torch.xpu.device_count()}",
+        }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
