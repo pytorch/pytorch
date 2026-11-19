@@ -119,7 +119,7 @@ if typing.TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
 
 try:
@@ -2822,25 +2822,50 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
 
 
 @contextmanager
-def preserve_rng_state() -> Generator[None, None, None]:
+def preserve_rng_state(
+    device_type: str | None = None, device_index: int | None = None
+) -> Generator[None, None, None]:
+    """Preserve CPU and accelerator RNG state across the context.
+
+    With no device type, retain the existing CUDA/XPU behavior. When a device
+    type is provided, preserve only that accelerator's RNG state.
+    The device module must accept ``device_index`` in ``get_rng_state`` and
+    ``set_rng_state``.
+    """
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    device_module = None
+    device_rng_state = None
+    device: str | int | None = None
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        if torch.xpu.is_available():
-            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        if device_type is None:
+            if torch.cuda.is_available():
+                cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+            if torch.xpu.is_available():
+                xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        else:
+            device_module = torch.get_device_module(device_type)
+            if device_module.is_available():
+                device = device_type if device_index is None else device_index
+                device_rng_state = torch.clone(device_module.get_rng_state(device))
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            if torch.xpu.is_available():
-                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            if device_type is None:
+                if torch.cuda.is_available():
+                    torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                if torch.xpu.is_available():
+                    torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            elif (
+                device_module is not None
+                and device_rng_state is not None
+                and device is not None
+            ):
+                device_module.set_rng_state(device_rng_state, device)
 
 
 def is_jit_model(
@@ -3676,7 +3701,7 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
 
 
 def deepcopy_to_fake_tensor(
-    obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    obj: Any, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
@@ -4157,7 +4182,9 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
+def get_concrete_sizes_from_symints(
+    msg: str, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> str:
     """
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.
@@ -5767,7 +5794,7 @@ def has_torch_function(vt: VariableTracker) -> bool:
 
 # see note [Tensor Fakification and Symbol Caching]
 def to_fake_tensor(
-    t: torch.Tensor, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    t: torch.Tensor, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     symbolic_context = None
     source = None
