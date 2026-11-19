@@ -26,7 +26,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
 CUDA_ARCHES = ["13.2", "13.4", "13.5"]
-CUDA_WINDOWS_ARCHES = ["13.2", "13.4"]
+CUDA_WINDOWS_ARCHES = ["13.2", "13.4", "13.5"]
 CUDA_STABLE = "13.2"
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
@@ -45,7 +45,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.5": "9",
 }
 
-ROCM_ARCHES = ["10.0", "10.1"]
+ROCM_ARCHES = ["10.1", "10.2"]
 
 
 class RocmPreviewLane(NamedTuple):
@@ -120,10 +120,16 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
         ),
+        "windows": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.5.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cudnn-cu13==9.28.1.4; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
+        ),
     },
     # dependency on latest patch version for (major, minor)
-    "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
+    "10.2": ("rocm[libraries,device-all]==10.2.*"),
     # binary_populate_env.sh appends ==<pin> at build time, so pin bumps
     # don't change generated workflows.
     ROCM_PREVIEW.arch: (
@@ -135,27 +141,29 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # .ci/docker/requirements-ci.txt and .ci/wheel/windows/build_install_deps.py (XPU
     # builds only) exist because of this pin (#201218); lift them when XPU moves to 2026.2.
     "xpu": (
-        "intel-cmplr-lib-rt==2026.1.2 | "
-        "intel-cmplr-lib-ur==2026.1.2 | "
-        "intel-cmplr-lic-rt==2026.1.2 | "
-        "intel-sycl-rt==2026.1.2 | "
-        "oneccl-devel==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-license==2026.1.0 | "
-        "onemkl-sycl-blas==2026.1.0 | "
-        "onemkl-sycl-dft==2026.1.0 | "
-        "onemkl-sycl-lapack==2026.1.0 | "
-        "onemkl-sycl-rng==2026.1.0 | "
-        "onemkl-sycl-sparse==2026.1.0 | "
-        "dpcpp-cpp-rt==2026.1.2 | "
-        "intel-opencl-rt==2026.1.2 | "
-        "mkl==2026.1.0 | "
-        "intel-openmp==2026.1.2 | "
-        "tbb==2023.1.0 | "
-        "tcmlib==1.5.0 | "
-        "umf==1.1.0 | "
-        "intel-pti==1.1.0 | "
+        "intel-cmplr-lib-rt==2026.2.0 | "
+        "intel-cmplr-lib-ur==2026.2.0 | "
+        "intel-cmplr-lic-rt==2026.2.0 | "
+        "intel-sycl-rt==2026.2.0 | "
+        "oneccl-devel==2022.2.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.2.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "modified-libfabric==2.6.13; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        # onemkl-license 2026.2.0 ships a win_amd64 wheel only; the Linux mkl
+        # wheel dropped its onemkl-license requirement in 2026.2.
+        "onemkl-license==2026.2.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+        "onemkl-sycl-blas==2026.2.0 | "
+        "onemkl-sycl-dft==2026.2.0 | "
+        "onemkl-sycl-lapack==2026.2.0 | "
+        "onemkl-sycl-rng==2026.2.0 | "
+        "onemkl-sycl-sparse==2026.2.0 | "
+        "dpcpp-cpp-rt==2026.2.0 | "
+        "intel-opencl-rt==2026.2.0 | "
+        "mkl==2026.2.0 | "
+        "intel-openmp==2026.2.0 | "
+        "tbb==2023.2.0 | "
+        "tcmlib==1.6.0 | "
+        "umf==1.2.0 | "
+        "intel-pti==1.2.0 | "
         "pyzes==0.1.3; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }

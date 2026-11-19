@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfCppFakeTensor,
     subtest,
     suppress_warnings,
     TEST_WITH_TSAN,
@@ -131,6 +132,28 @@ class TestXpu(TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_triangular_solve_out_xpu_kernel(self):
+        dispatch_table = torch._C._dispatch_dump("aten::triangular_solve.X")
+        xpu_registration = next(
+            (
+                line
+                for line in dispatch_table.splitlines()
+                if line.startswith("XPU: registered at ")
+            ),
+            "",
+        )
+        self.assertIn("RegisterXPU_", xpu_registration)
+
+        b = torch.tensor([[2.0], [5.0]], device="xpu")
+        a = torch.tensor([[2.0, 0.0], [1.0, 2.0]], device="xpu")
+        out = torch.empty_like(b)
+        cloned_a = torch.empty_like(a)
+        solution, cloned = torch.ops.aten.triangular_solve.X(
+            b, a, upper=False, X=out, M=cloned_a
+        )
+        self.assertEqual(solution, torch.tensor([[1.0], [2.0]], device="xpu"))
+        self.assertEqual(cloned, a)
+
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
         device_properties = torch.xpu.get_device_properties(current_device)
@@ -205,16 +228,17 @@ class TestXpu(TestCase):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             """\
 import torch
-from torch.multiprocessing import Process
+from torch.multiprocessing import get_context
 def run(rank):
     torch.xpu.set_device(rank)
 if __name__ == "__main__":
     size = 2
     processes = []
+    ctx = get_context("fork")
     for rank in range(size):
         # it would work fine without the line below
         torch.xpu.set_device(0)
-        p = Process(target=run, args=(rank,))
+        p = ctx.Process(target=run, args=(rank,))
         p.start()
         processes.append(p)
     for p in processes:
@@ -502,6 +526,44 @@ print(f"{r1}, {r2}")
         x = torch.xpu.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_concurrent_pre_init(self):
+        # Several threads querying device_count() before XPU is initialized
+        # must not interleave their rebuilds of the Sysman device list, and
+        # must not leave an inflated count cached behind them (which would
+        # make every later torch.manual_seed() walk off default_generators).
+        test_script = """\
+import threading
+import torch
+
+num_threads = 16
+counts = [None] * num_threads
+barrier = threading.Barrier(num_threads)
+
+def query(i):
+    barrier.wait()
+    counts[i] = torch.xpu.device_count()
+
+threads = [threading.Thread(target=query, args=(i,)) for i in range(num_threads)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+torch.xpu.init()
+expected = torch._C._xpu_getDeviceCount()
+torch.manual_seed(0)
+print(set(counts) == {expected}, torch.xpu.device_count() == expected)
+"""
+
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual("True True", r)
+
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_cached_zes_device_infos(self):
@@ -615,23 +677,25 @@ print(torch.xpu.is_initialized())
 
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
-        s0 = torch.xpu.Stream(device=0, priority=low)
+        for priority in range(high, low + 1):
+            s = torch.xpu.Stream(device=0, priority=priority)
+            self.assertEqual(priority, s.priority)
+            self.assertEqual(torch.device("xpu:0"), s.device)
 
-        self.assertEqual(low, s0.priority)
-        self.assertEqual(torch.device("xpu:0"), s0.device)
+            e = torch.xpu.Event()
+            e.record()
+            s.wait_event(e)
+            s.synchronize()
+            self.assertTrue(s.query())
 
-        s1 = torch.xpu.Stream(device=0, priority=high)
-
-        self.assertEqual(high, s1.priority)
-        self.assertEqual(torch.device("xpu:0"), s1.device)
-
-        # Streams of every priority must be usable, including the lowest one.
-        event = torch.xpu.Event()
-        for stream in (s0, s1):
-            event.record()
-            stream.wait_event(event)
-            stream.synchronize()
-            self.assertTrue(stream.query())
+            x = torch.randn(2, 3, 8, 8)
+            w = torch.randn(4, 3, 3, 3)
+            expected = torch.nn.functional.conv2d(x, w)
+            with s:
+                # Run a oneDNN op on a stream of each priority.
+                out = torch.nn.functional.conv2d(x.to("xpu"), w.to("xpu"))
+            s.synchronize()
+            self.assertEqual(out.cpu(), expected)
 
     def test_event_repr(self):
         e = torch.xpu.Event()
@@ -998,6 +1062,7 @@ print(torch.xpu.is_initialized())
         self.assertIs(result, t)
         self.assertTrue(t.is_shared())
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_share_memory_nested(self):
         a = torch.randn(3, 4, device="xpu")
         b = torch.randn(5, 4, device="xpu")
@@ -1915,8 +1980,6 @@ if __name__ == "__main__":
             self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
 
-        # Same-device exercises maybeCopyTensor's dlDeviceToTorchDevice path which requires
-        # the data pointer for XPU.
         z = torch.from_dlpack(x, device=x.device, copy=copy)
         self.assertEqual(z, x)
         self.assertEqual(z.device, x.device)
@@ -4513,9 +4576,6 @@ class TestMemPool(TestCase):
 instantiate_parametrized_tests(TestXpu)
 instantiate_device_type_tests(
     TestXpuGraphRng, globals(), only_for="xpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
 )
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())

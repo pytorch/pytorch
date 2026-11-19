@@ -65,6 +65,7 @@ from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    check_aot_cudagraphs,
     cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
     format_default_skip_message,
@@ -136,11 +137,14 @@ from .graph import GraphLowering
 from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
+    _unstable_customized_partition_wrapper,
     align_inputs_from_check_idxs,
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
     get_first_incompatible_cudagraph_node,
+    GraphPartitionMode,
+    GraphPartitionPlan,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
@@ -936,12 +940,10 @@ def maybe_disable_comprehensive_padding(
 
 
 def maybe_disable_graph_partition(
-    cpp_wrapper: bool, aot_mode: bool
+    cpp_wrapper: bool, aot_mode: bool, fx_wrapper: bool
 ) -> AbstractContextManager[None, None]:
-    """
-    graph partition does not support cpp_wrapper and aot_mode yet.
-    """
-    if cpp_wrapper or aot_mode:
+    """Graph partitioning is only supported by the non-AOT Python wrapper."""
+    if cpp_wrapper or fx_wrapper or aot_mode:
         return config.patch(graph_partition=False)
     else:
         return contextlib.nullcontext()
@@ -1043,6 +1045,7 @@ def compile_fx_inner(
     compile_region_name: str | None = None,
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
+    """Compile an AOT-produced FX graph into an OutputCode with Inductor."""
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
@@ -1059,6 +1062,10 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
+        # The only place override_cudagraphs is applied: after torch.compile options,
+        # which may reset it, and before the cpp_wrapper patch, which may turn it off.
+        if isinstance(kwargs["cudagraphs"], BoxedBool):
+            stack.enter_context(cudagraph_annotation_context(kwargs["cudagraphs"]))
         # When cpp_wrapper is enabled, ensure the required triton config
         # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
         # needed because lazy backward compilation may run after the
@@ -1770,7 +1777,7 @@ class _InProcessFxCompile(FxCompile):
             with (
                 V.set_fake_mode(fake_mode),
                 maybe_disable_comprehensive_padding(example_inputs),
-                maybe_disable_graph_partition(cpp_wrapper, aot_mode),
+                maybe_disable_graph_partition(cpp_wrapper, aot_mode, fx_wrapper),
             ):
                 const_output_index = None
                 const_graph = None
@@ -1818,6 +1825,17 @@ class _InProcessFxCompile(FxCompile):
                             const_graph.codegen_with_cpp_wrapper()
                         )
 
+                # Per compile: override_cudagraphs can turn capture off for this
+                # graph while config.triton.cudagraphs stays on.
+                partition_plan = (
+                    GraphPartitionPlan(
+                        GraphPartitionMode.FROM_CONFIG,
+                        cudagraphs_per_partition=bool(cudagraphs)
+                        or _unstable_customized_partition_wrapper.wrapper is not None,
+                    )
+                    if config.graph_partition
+                    else GraphPartitionPlan.no_partition()
+                )
                 graph = GraphLowering(
                     gm,
                     # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -1842,6 +1860,7 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
+                    partition_plan=partition_plan,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -1873,6 +1892,8 @@ class _InProcessFxCompile(FxCompile):
                                 output_strides.append(None)
 
                     _check_triton_bf16_support(graph)
+                    if graph.aot_mode and config.aot_inductor.cudagraphs:
+                        check_aot_cudagraphs(graph)
 
                     # TODO: The switching between AOT mode and not here is a bit
                     # messy, but it's localized to the block of code below so I'm
@@ -2006,11 +2027,11 @@ class _InProcessFxCompile(FxCompile):
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
-                    # When graph_partition is enabled, skip this check - partitioning handles dynamic shapes
+                    # Skip when partitioning splits off cudagraph-unsafe ops: it handles dynamic shapes
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
-                        and not config.graph_partition
+                        and not V.graph.partition_plan.cudagraphs_per_partition
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
@@ -2035,11 +2056,11 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = disable
 
                     # pyrefly: ignore [unbound-name]
-                    # When graph_partition is enabled, skip this check - partitioning handles incompatible ops
+                    # Skip when partitioning splits off cudagraph-unsafe ops: it handles incompatible ops
                     if (
                         cudagraphs
                         # pyrefly: ignore [unbound-name]
-                        and not config.graph_partition
+                        and not V.graph.partition_plan.cudagraphs_per_partition
                         # pyrefly: ignore [unbound-name]
                         and not V.graph.disable_cudagraphs_reason
                     ):
@@ -2078,7 +2099,12 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                V.graph.device_type,
+                                cpu_nodes_partitioned_out=(
+                                    # pyrefly: ignore [unbound-name]
+                                    V.graph.partition_plan.cudagraphs_per_partition
+                                ),
                             )
                         )
 
@@ -2255,12 +2281,19 @@ def cudagraphify(
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
-    from torch._inductor.cudagraph_trees import (
-        cudagraphify_impl as new_cudagraphify_impl,
-    )
-
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
+        from torch._inductor.graph_tree_backend import is_graph_tree_backend_available
+
+        if not is_graph_tree_backend_available():
+            raise RuntimeError(
+                "No Graph Trees backend is available for the current accelerator"
+            )
+
+        from torch._inductor.cudagraph_trees import (
+            cudagraphify_impl as new_cudagraphify_impl,
+        )
+
         managed_input_rerecord_limit = (
             config.triton.cudagraph_managed_input_rerecord_limit
         )
@@ -2296,7 +2329,11 @@ def cudagraphify(
     def run(new_inputs: Sequence[InputType]) -> Any:
         compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
-            with dynamo_utils.preserve_rng_state():
+            accelerator = torch.accelerator.current_accelerator()
+            with dynamo_utils.preserve_rng_state(
+                device_type=None if accelerator is None else accelerator.type,
+                device_index=device_index,
+            ):
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
             thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
@@ -2635,13 +2672,17 @@ def fw_compiler_freezing(
     return wrapper
 
 
+def get_wrapper_cudagraph_skip_reason() -> str | None:
+    if config.graph_partition and (config.cpp_wrapper or config.fx_wrapper):
+        wrapper = "fx-wrapper" if config.fx_wrapper else "cpp-wrapper"
+        return f"{wrapper} does not support graph partition yet"
+    return None
+
+
 def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]:
-    if log_cudagraph_skip and config.triton.cudagraphs and config.graph_partition:
-        log_cudagraph_skip_and_bump_counter(
-            format_default_skip_message(
-                "cpp-wrapper does not support graph partition yet"
-            )
-        )
+    skip_reason = get_wrapper_cudagraph_skip_reason()
+    if log_cudagraph_skip and config.triton.cudagraphs and skip_reason:
+        log_cudagraph_skip_and_bump_counter(format_default_skip_message(skip_reason))
 
     autotune_at_compile_time = (
         config.triton.autotune_at_compile_time
@@ -2656,9 +2697,7 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
         "triton.cudagraphs": (
-            config.triton.cudagraphs
-            and not V.aot_compilation
-            and not config.graph_partition
+            config.triton.cudagraphs and not V.aot_compilation and skip_reason is None
         ),
         "triton.store_cubin": True,
     }
@@ -2797,7 +2836,10 @@ def create_compiler_config_extra(
         and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
         is not None
     ):
-        if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
+        skip_reason = get_wrapper_cudagraph_skip_reason()
+        if annotation.fwd and skip_reason:
+            log.warning("ignoring override_cudagraphs annotation: %s", skip_reason)
+        elif annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
             cudagraphs = BoxedBool(annotation.fwd)
             if annotation.fwd:
                 cudagraphs_log.info(
@@ -2970,26 +3012,25 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
-    with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
-        result = inner_compile(
-            gm,
-            example_inputs,
-            static_input_idxs=get_static_input_idxs(fixed),
-            cudagraphs=compiler_config_extra.cudagraphs,
-            graph_id=compiler_config_extra.graph_id,
-            is_inference=is_inference,
-            boxed_forward_device_index=compiler_config_extra.forward_device_index,
-        )
+    result = inner_compile(
+        gm,
+        example_inputs,
+        static_input_idxs=get_static_input_idxs(fixed),
+        cudagraphs=compiler_config_extra.cudagraphs,
+        graph_id=compiler_config_extra.graph_id,
+        is_inference=is_inference,
+        boxed_forward_device_index=compiler_config_extra.forward_device_index,
+    )
 
-        if (
-            not is_inference
-            and isinstance(result, CompiledFxGraph)
-            and result.partition_maps
-            and result.has_uncaptured_partition
-        ):
-            compiler_config_extra.forward_is_cudagraph_partitioned.value = True
+    if (
+        not is_inference
+        and isinstance(result, CompiledFxGraph)
+        and result.partition_maps
+        and result.has_uncaptured_partition
+    ):
+        compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
-        return result
+    return result
 
 
 def compile_fx_backward(
@@ -3055,12 +3096,9 @@ def compile_fx_backward(
         _recursive_record_original_output_strides(gm)
 
         with (
-            (
-                config.patch(get_cpp_wrapper_config())
-                if config.cpp_wrapper
-                else contextlib.nullcontext()
-            ),
-            cudagraph_annotation_context(cudagraphs),
+            config.patch(get_cpp_wrapper_config())
+            if config.cpp_wrapper
+            else contextlib.nullcontext()
         ):
             return inner_compile(
                 gm,
