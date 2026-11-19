@@ -36,9 +36,75 @@ class TestPointwiseIndexing(TestCase):
         value = torch.empty_strided(shape, strides, device="meta")
         self.assertEqual(can_use_32bit_indexing(value), expected)
 
+    @parametrize("operation", ("floor_divide", "pow.Tensor_Tensor"))
+    def test_inplace_variant_mutates_its_input(self, operation: str) -> None:
+        from torch._native.ops.pointwise.table import variant_aten_name
+
+        value = torch.tensor([7, -7] if operation == "floor_divide" else [2, 3])
+        other = torch.full_like(value, 2)
+        expected = value // other if operation == "floor_divide" else value**other
+        name = variant_aten_name(operation, "inplace")
+        if name is None:
+            self.fail(f"missing in-place variant for {operation}")
+        packet, _, overload = name.partition(".")
+        result = getattr(getattr(torch.ops.aten, packet), overload or "default")(
+            value, other
+        )
+        self.assertIs(result, value)
+        self.assertEqual(value, expected)
+
 
 class TestPointwiseKernel(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("operation", ("logaddexp", "bitwise_left_shift.Tensor"))
+    def test_mixed_dtype_adapter(self, device: str, operation: str) -> None:
+        from torch._native.ops.pointwise import overrides, table
+
+        row = next(r for r in table.POINTWISE_DEF_TABLE if r.aten == operation)
+        integer = operation.startswith("bitwise_")
+        with torch.backends.python_native.cutedsl.disabled():
+            x = torch.full(
+                (32,),
+                1 if integer else 0,
+                device=device,
+                dtype=torch.int32 if integer else torch.float32,
+            )
+            y = (
+                torch.tensor(3, dtype=torch.int64)
+                if integer
+                else torch.zeros(32, device=device, dtype=torch.float64)
+            )
+            expected = (
+                torch.bitwise_left_shift(x, y) if integer else torch.logaddexp(x, y)
+            )
+        self.assertTrue(overrides._make_cond(row, "functional")(x, y))
+        actual = overrides._make_impl(row, "functional")(x, y)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("case", ("float64_output", "integer_output", "cuda_scalar_input"))
+    def test_adapter_declines_double_rounding(self, device: str, case: str) -> None:
+        from torch._native.ops.pointwise import overrides, table
+
+        row = next(r for r in table.POINTWISE_DEF_TABLE if r.aten == "add.Tensor")
+        with torch.backends.python_native.cutedsl.disabled():
+            dtype = torch.int32 if case == "integer_output" else torch.float64
+            x = torch.ones(32, device=device, dtype=dtype)
+            y = torch.zeros_like(x)
+            out = torch.empty_like(
+                x, dtype=torch.bfloat16 if case == "integer_output" else torch.float16
+            )
+            if case == "cuda_scalar_input":
+                x = x.half()
+                y = torch.zeros((), device=device, dtype=torch.float64)
+                out = None
+        variant = "functional" if out is None else "out"
+        kwargs = {} if out is None else {"out": out}
+        self.assertFalse(overrides._make_cond(row, variant)(x, y, **kwargs))
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -628,7 +694,7 @@ class TestPointwiseKernel(TestCase):
             ((2, 3, 5), (55, 17, 2), (2, 1, 5), (23, 0, 3), (49, 1, 7)),
             ((), (), (), (), ()),
             ((1,) * 30 + (3, 5), (0,) * 30 + (13, 2), (1,), (1,), (0,) * 30 + (17, 3)),
-        )
+        ) + tuple(((n,), (2,), (1,), (1,), (2,)) for n in range(1, 253))
         count = None
         with torch.backends.python_native.cutedsl.disabled():
             for shape, strides, rhs_shape, rhs_strides, out_strides in cases * 2:
@@ -655,6 +721,7 @@ class TestPointwiseKernel(TestCase):
                 if count is None:
                     count = len(kernel._KERNELS)
                 self.assertEqual(len(kernel._KERNELS), count)
+                self.assertLessEqual(len(kernel._PLAN), 256)
 
     @onlyCUDA
     @skipIfNoCuteDSL
