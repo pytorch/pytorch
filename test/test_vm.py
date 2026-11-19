@@ -1230,6 +1230,29 @@ class TestVmDevices(TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(block_stats(compiled, "versions"), [1])
 
+    def test_the_default_computes_what_eager_computes_bit_for_bit(self, device):
+        layers = (torch.nn.Linear(16, 32), torch.nn.GELU(), torch.nn.LayerNorm(32))
+        model = torch.nn.Sequential(*layers, torch.nn.Linear(32, 4)).to(device)
+        twin = copy.deepcopy(model)
+
+        def step(model, opt, x, y):
+            opt.zero_grad()
+            loss = torch.nn.functional.cross_entropy(model(x), y)
+            loss.backward()
+            opt.step()
+            return loss
+
+        compiled = torch.vm(step, fallback=False)
+        opt = torch.optim.Adam(model.parameters(), lr=1e-2)
+        twin_opt = torch.optim.Adam(twin.parameters(), lr=1e-2)
+        x = torch.randn(8, 16, device=device)
+        y = torch.randint(4, (8,), device=device)
+        for _ in range(12):
+            loss, expected = compiled(model, opt, x, y), step(twin, twin_opt, x, y)
+            self.assertEqual(loss, expected, atol=0, rtol=0)
+        for ours, theirs in zip(model.parameters(), twin.parameters()):
+            self.assertTrue(torch.equal(ours, theirs))
+
 
 instantiate_device_type_tests(TestVmDevices, globals())
 
@@ -7800,6 +7823,21 @@ class TestVmApi(TestCase):
                     self.assertEqual(forward(model, x), expected)
             states = [r["state"] for r in torch.vm.regions(forward)]
             self.assertIn("compiled", states)
+
+    def test_the_default_is_exact_and_what_is_not_is_asked_for(self):
+        self.assertTrue(torch.vm.is_exact())
+        for one in DEFAULT:
+            self.assertIs(one.exact, True, repr(one))
+        # The passes of the engine that are no default keep a result as well.
+        unrolling = [
+            P.Unroll(64) if isinstance(p, P.Unroll) else p for p in narrowing()
+        ]
+        self.assertTrue(torch.vm.is_exact(unrolling))
+        self.assertTrue(torch.vm.is_exact(()))
+        # A graph compiler does not, and a pass of one's own is not taken to.
+        self.assertFalse(torch.vm.is_exact(with_graphs("inductor")))
+        self.assertFalse(torch.vm.is_exact(with_graphs("aot_eager")))
+        self.assertFalse(torch.vm.is_exact([*DEFAULT, lambda region: False]))
 
     def test_a_module_is_called_with_its_hooks(self):
         model = torch.nn.Linear(3, 3)
