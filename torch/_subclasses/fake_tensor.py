@@ -519,6 +519,22 @@ def maybe_get_fake_constant(x: object) -> Tensor | None:
     return None
 
 
+def maybe_set_fake_constant(x: Any, constant: Tensor) -> None:
+    fake_mode = maybe_get_fake_mode(x)
+    if isinstance(fake_mode, FakeTensorMode) or (
+        isinstance(fake_mode, CppFakeTensorMode) and not is_fake_tensor(x)
+    ):
+        # Wrapper subclasses carry the constant on the outer object.
+        x.constant = constant
+    elif isinstance(fake_mode, CppFakeTensorMode):
+        real_constant = (
+            maybe_get_fake_constant(constant) if is_fake_tensor(constant) else constant
+        )
+        maybe_clear_fake_constant(x)
+        if real_constant is not None and not is_fake(real_constant):
+            torch._C._set_fake_constant(x, real_constant)
+
+
 def maybe_clear_fake_constant(x: object) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.constant = None
@@ -983,10 +999,11 @@ def _enter_fake_mode(
         prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
         torch._C._set_only_lift_cpu_tensors(True)
 
-        # In the case of CPU-only build or cuda device unavailable,
-        # we patch the cuda device guard to use NoOpDeviceGuardImpl.
-        # This enables us to trace over cuda kernels under FakeTensorMode.
+        # In the case of a CUDA/XPU build with no device available, we
+        # patch the device guard to use FakeGuardImpl. This enables us to
+        # trace over device kernels under FakeTensorMode.
         torch._C._ensureCUDADeviceGuardSet()
+        torch._C._ensureXPUDeviceGuardSet()
 
     if mode is not maybe_prev_fake_mode:
         install()
@@ -1045,16 +1062,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         static_shapes: bool | None = None,
         export: bool = False,
     ) -> None:
-        if export:
-            raise NotImplementedError(
-                "CppFakeTensorMode does not support export=True yet"
-            )
-
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(
-            FakeTensorConverter(copy_data=copy_data, cpp_fakes=True),
+            FakeTensorConverter(copy_data=copy_data, export=export, cpp_fakes=True),
             shape_env,
             creation_traceback=CapturedTraceback.extract(),
         )
@@ -1075,6 +1087,10 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     ) -> None:
         # HOP backward caches reuse metadata hashing without the Python dispatch cache.
         FakeTensorMode._prep_args_for_hash(self, result, args, state, id_hashed_objects)
+
+    def reset_nt_tensor_id_counter(self) -> None:
+        # C++ fake modes do not maintain a NestedTensor id counter.
+        pass
 
     def maybe_run_unsafe_fallback(
         self,
@@ -4465,7 +4481,7 @@ def _set_cache_key(
 # Just for use to allow copying a module to fake tensors,
 # does not apply elsewhere
 class FakeCopyMode(TorchFunctionMode):
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
         self.fake_mode = fake_mode
 
     def __torch_function__(
@@ -4474,7 +4490,7 @@ class FakeCopyMode(TorchFunctionMode):
         types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] | None = None,
-    ) -> FakeTensor:
+    ) -> Tensor:
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
@@ -4490,7 +4506,7 @@ class FakeCopyMode(TorchFunctionMode):
                     f"Expected 2 args and 0 kwargs for __deepcopy__, got {len(args)} args and {len(kwargs)} kwargs"
                 )
             tensor = cast(Tensor, args[0])
-            memo = cast(dict[int, FakeTensor], args[1])
+            memo = cast(dict[int, Tensor], args[1])
 
             if id(tensor) in memo:
                 return memo[id(tensor)]

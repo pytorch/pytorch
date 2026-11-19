@@ -7,6 +7,7 @@ import unittest
 import torch
 from torch._inductor import config
 from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
 
 
 importlib.import_module("filelock")
@@ -56,6 +57,7 @@ class XpuBasicTests(TestCase):
 
         self.common(fn, (torch.rand(2, 3, 16, 16), torch.rand(2, 3, 16, 16)))
 
+    @unittest.skipIf(not HAS_XPU_AND_TRITON, "requires XPU and Triton")
     @config.patch(
         {
             "graph_partition": False,
