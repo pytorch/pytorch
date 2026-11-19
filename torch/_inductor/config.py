@@ -2659,6 +2659,14 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # decompose_k_threshold for fp32 matmuls that use TF32 on datacenter
+    # Blackwell and whose 128x128 output tiles fill less than one wave (the
+    # smaller of the two thresholds applies). Such a GEMM benefits from
+    # splitting K at a smaller K/M and K/N ratio.
+    decompose_k_threshold_tf32 = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD_TF32", "4")
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
