@@ -1128,15 +1128,10 @@ class TestMaxAutotune(TestCase):
         not has_datacenter_blackwell_tma_device(), "Need data-center Blackwell TMA"
     )
     def test_blackwell_ws_operand_ring_first_large_staging(self):
-        import triton.language as tl
-
         from torch._inductor.heuristics.template.triton import USE_META_WS
 
-        if (
-            not USE_META_WS
-            or "smem_operand_ring_first" not in inspect.signature(tl.range).parameters
-        ):
-            raise unittest.SkipTest("Needs Meta autoWS with smem_operand_ring_first")
+        if not USE_META_WS:
+            raise unittest.SkipTest("Needs Meta autoWS")
 
         a = torch.randn(4096, 512, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(512, 4096, device=GPU_TYPE, dtype=torch.bfloat16)

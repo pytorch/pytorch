@@ -1219,14 +1219,8 @@ class TritonTemplateKernel(TritonKernel):
         """autoWS loop-header kwarg for large epilogue staging slots."""
 
         def hook() -> str:
-            import triton.language as tl
-
             meta = self.meta
-            if (
-                meta.get("TWO_CTAS")
-                or "smem_operand_ring_first"
-                not in inspect.signature(tl.range).parameters
-            ):
+            if meta.get("TWO_CTAS"):
                 return ""
             buffers = {**self.args.output_buffers, **self.args.inplace_buffers}
             names = [
