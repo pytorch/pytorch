@@ -617,7 +617,8 @@ class TritonBenchmarker(Benchmarker):
             raise
 
 
-# Infinity Cache (MALL) bytes by gfx target, used only when HSA cannot be queried.
+# Infinity Cache (MALL) bytes by gfx target, used when HSA cannot be queried or
+# reports no cache beyond L2.
 # RDNA sizes are for the largest SKU of each target. Unlisted targets get 0 (L2 only).
 _ROCM_MALL_SIZE_FALLBACK = {
     "gfx906": 0,  # MI50/MI60
@@ -639,7 +640,9 @@ _ROCM_MALL_SIZE_FALLBACK = {
 
 def _hsa_cache_beyond_l2(uuid: bytes) -> int | None:
     """Bytes of the outermost cache beyond L2 that HSA reports for the GPU agent
-    whose UUID is `uuid`, or None if HSA cannot be queried or has no such agent.
+    whose UUID is `uuid`. 0 if HSA reports an L2 but no L3/L4. None if HSA is not
+    loaded or fails, reports no L2 (no cache topology), or no agent or more than
+    one agent has this UUID.
 
     torch's ROCm device properties do not include the Infinity Cache, but HSA's
     HSA_AGENT_INFO_CACHE_SIZE lists every cache level (L1, L2, L3, L4).
@@ -647,14 +650,16 @@ def _hsa_cache_beyond_l2(uuid: bytes) -> int | None:
     cache size there.
     """
     import ctypes
+    import os
 
     hsa_agent_info_device, hsa_agent_info_cache_size = 17, 18
     hsa_amd_agent_info_uuid, hsa_device_type_gpu = 0xA011, 1
     if len(uuid) != 16 or uuid == b"0" * 16:
         return None
     try:
-        hsa = ctypes.CDLL("libhsa-runtime64.so.1")
-    except OSError:
+        # Use the HSA runtime HIP already loaded; never load a second copy.
+        hsa = ctypes.CDLL("libhsa-runtime64.so.1", mode=os.RTLD_NOLOAD)
+    except (OSError, AttributeError):  # not loaded, or no RTLD_NOLOAD
         return None
     if hsa.hsa_init() != 0:
         return None
@@ -925,9 +930,19 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         flush: Callable[[], Any]
         if read_flush:
             passes = 2
-            flush = _rocm_read_flush(buffer, passes)
-            # keep the warmup's total reads
-            memory_warmup_iters = -(-memory_warmup_iters // passes)
+            try:
+                flush = _rocm_read_flush(buffer, passes)
+                # compile and launch once, so a Triton failure falls back here
+                flush()
+            except Exception:
+                log.warning(
+                    "Triton read flush failed; falling back to zero_()", exc_info=True
+                )
+                flush = buffer.zero_
+            else:
+                # each flush is two buffer passes; run about as many passes in the
+                # warmup as the zero_() flush did
+                memory_warmup_iters = -(-memory_warmup_iters // passes)
         else:
             flush = buffer.zero_
 
