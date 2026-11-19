@@ -33,7 +33,10 @@ from torch.testing._internal.common_distributed import (
     initialize_temp_directories,
     MultiProcessTestCase,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 from torch.testing._internal.distributed.distributed_test import (
     Barrier,
     DistributedTest,
@@ -43,6 +46,7 @@ from torch.testing._internal.distributed.distributed_test import (
 
 class TestProcessGroupOCCL(TestDistBackend, DistributedTest._DistTestBase):
     # OCCL collectives are dummy; we only validate registration and basic API.
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         # Bypass TestDistBackend.setUp (which expects many inherited tests) and
