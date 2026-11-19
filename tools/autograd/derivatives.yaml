@@ -2327,6 +2327,10 @@
   self: _upsample_lanczos2d_aa_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_h, scales_w)
   result: auto_linear
 
+- name: _upsample_inter_area2d(Tensor self, SymInt[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: not_implemented("_upsample_inter_area2d")
+  result: auto_linear
+
 - name: upsample_trilinear3d(Tensor self, SymInt[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
   self: upsample_trilinear3d_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_d, scales_h, scales_w)
   result: auto_linear

@@ -856,34 +856,16 @@ struct HelperInterpBase {
     return wt_max;
   }
 
-  // Note [ Support for antialias=False as a subcase of antialias=True ]
-  // This function was originally written with the hard assumption that
-  // antialias=True and it was later extended to support antialias=False.
-  // The only difference between aa and no-aa is in how the
-  // weights and indices are computed (and their number). In aa their number is
-  // variable but with no-aa, they're fixed to interp_size. The same "filters"
-  // can be used otherwise. HOWEVER, support for antialias=False here may not be
-  // optimally optimized: the code assumes an arbitrary number of weights and
-  // indices, but this can be optimized further when aa=False since we know
-  // their actual dimensions.
-  template <typename scalar_t, typename aa_filter_fn_t, int weight_index_stride=sizeof(scalar_t)>
-  static inline std::tuple<std::vector<Tensor>, int, scalar_t> _compute_index_ranges_weights(
-    int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
-    int64_t reshape_dim, scalar_t scale,
-    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, bool align_corners
+  // Allocates the {xmin, xsize, stride, weights, weights indices} tensors used by the separable kernels,
+  // for output_size output indices with max_interp_size weights each, and fills them using
+  // compute_weights_fn(i, weights_ptr, xmin, xsize), which returns the largest weight of output index i.
+  template <typename scalar_t, int weight_index_stride, typename compute_weights_fn_t>
+  static inline std::tuple<std::vector<Tensor>, int, scalar_t> _make_index_ranges_weights(
+    int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim, int max_interp_size,
+    compute_weights_fn_t compute_weights_fn
   ) {
 
     std::vector<Tensor> output;
-
-    scalar_t support;
-    int max_interp_size = 0;
-    if (antialias) {
-        support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-        max_interp_size = (int) std::ceil(support) * 2 + 1;
-    } else {
-        support = interp_size * 0.5;
-        max_interp_size = interp_size;
-    }
 
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
@@ -919,30 +901,7 @@ struct HelperInterpBase {
     scalar_t wt_max = 0.0;
     for (const auto i : c10::irange(output_size)) {
       int64_t xmin = 0, xsize = 0;
-      scalar_t wt_max_i;
-      if (antialias) {
-        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights_aa(
-            i,
-            input_size,
-            scale,
-            support,
-            wt_ptr + i * max_interp_size,
-            max_interp_size,
-            aa_filter_fn,
-            xmin,
-            xsize);
-      } else {
-        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights(
-            i,
-            input_size,
-            scale,
-            wt_ptr + i * max_interp_size,
-            max_interp_size,
-            aa_filter_fn,
-            align_corners,
-            xmin,
-            xsize);
-      }
+      scalar_t wt_max_i = compute_weights_fn(i, wt_ptr + i * max_interp_size, xmin, xsize);
       wt_max = std::max(wt_max, wt_max_i);
 
       idx_ptr_xmin[i] = xmin * stride;
@@ -951,6 +910,45 @@ struct HelperInterpBase {
       wt_idx_ptr[i] = i * max_interp_size * weight_index_stride;
     }
     return {std::move(output), max_interp_size, wt_max};
+  }
+
+  // Note [ Support for antialias=False as a subcase of antialias=True ]
+  // This function was originally written with the hard assumption that
+  // antialias=True and it was later extended to support antialias=False.
+  // The only difference between aa and no-aa is in how the
+  // weights and indices are computed (and their number). In aa their number is
+  // variable but with no-aa, they're fixed to interp_size. The same "filters"
+  // can be used otherwise. HOWEVER, support for antialias=False here may not be
+  // optimally optimized: the code assumes an arbitrary number of weights and
+  // indices, but this can be optimized further when aa=False since we know
+  // their actual dimensions.
+  template <typename scalar_t, typename aa_filter_fn_t, int weight_index_stride=sizeof(scalar_t)>
+  static inline std::tuple<std::vector<Tensor>, int, scalar_t> _compute_index_ranges_weights(
+    int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
+    int64_t reshape_dim, scalar_t scale,
+    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, bool align_corners
+  ) {
+
+    scalar_t support;
+    int max_interp_size = 0;
+    if (antialias) {
+        support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
+        max_interp_size = (int) std::ceil(support) * 2 + 1;
+    } else {
+        support = interp_size * 0.5;
+        max_interp_size = interp_size;
+    }
+
+    return _make_index_ranges_weights<scalar_t, weight_index_stride>(
+        output_size, stride, ndims, reshape_dim, max_interp_size,
+        [&](int64_t i, scalar_t* wt_ptr, int64_t& xmin, int64_t& xsize) {
+          if (antialias) {
+            return HelperInterpBase::_compute_indices_min_size_weights_aa(
+                i, input_size, scale, support, wt_ptr, max_interp_size, aa_filter_fn, xmin, xsize);
+          }
+          return HelperInterpBase::_compute_indices_min_size_weights(
+              i, input_size, scale, wt_ptr, max_interp_size, aa_filter_fn, align_corners, xmin, xsize);
+        });
   }
 
   /*
@@ -1006,7 +1004,15 @@ struct HelperInterpBase {
 
     auto [indices_weights, aligned_interp_size, wt_max] = HelperInterpBase::_compute_index_ranges_weights<double, aa_filter_fn_t, sizeof(int16_t)>(
         input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias, align_corners);
-    interp_size = aligned_interp_size;
+    return _convert_weights_to_int16(std::move(indices_weights), aligned_interp_size, wt_max, output_size, align_i32);
+  }
+
+  // Converts in place the double weights computed by _make_index_ranges_weights<double, sizeof(int16_t)>
+  // to int16, and returns them with the number of weights per output index and the weights precision.
+  static inline std::tuple<std::vector<Tensor>, int, unsigned int> _convert_weights_to_int16(
+    std::vector<Tensor> indices_weights, int interp_size, double wt_max, int64_t output_size, bool align_i32
+  ) {
+    int aligned_interp_size = interp_size;
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f64 = indices_weights[3];
@@ -1504,6 +1510,136 @@ struct HelperInterpLanczos : public HelperInterpBase {
 
 };
 
+// mode="inter-area": OpenCV's cv::resize with INTER_AREA. As in OpenCV, the weights depend on both axes:
+// - If the output is no larger than the input along both axes (kLinear = false), each output pixel is
+//   the average of the input pixels under it, weighted by how much of each it covers. E.g. for a width
+//   of 5 -> 2, output pixel 0 covers input pixels 0, 1 and half of 2, with weights 0.4, 0.4 and 0.2.
+// - Otherwise (kLinear = true), each output pixel uses at most 2 input pixels: it copies the one it
+//   falls in, or blends the 2 it straddles by how much of it lies on each side. E.g. a width of 2 -> 5
+//   gives [a, a, (a+b)/2, b, b]. OpenCV uses this on both axes, including one that shrinks (e.g.
+//   100x50 -> 50x100), where for a shrink factor above 2 it skips input pixels.
+template <bool kLinear>
+struct HelperInterpInterArea : public HelperInterpBase {
+
+  // Number of input pixels per output pixel with kLinear. The area weights use up to ceil(scale) + 1.
+  static constexpr int interp_size = 2;
+
+  // cv::resize's scale (input size / output size) and inverse scale for one axis.
+  static inline std::pair<double, double> scales(
+      int64_t input_size, int64_t output_size, const std::optional<double>& opt_scale) {
+    const double inv_scale = (opt_scale.has_value() && opt_scale.value() > 0)
+        ? opt_scale.value()
+        : static_cast<double>(output_size) / input_size;
+    return {1.0 / inv_scale, inv_scale};
+  }
+
+  static inline int max_interp_size(double scale) {
+    return kLinear ? 2 : static_cast<int>(std::ceil(scale)) + 1;
+  }
+
+  // Weights of output index i, written to wt_ptr (max_interp_size values, zero-padded). Returns the
+  // largest weight.
+  template <typename scalar_t>
+  static inline scalar_t compute_weights(
+      int64_t i, int64_t input_size, double scale, double inv_scale, scalar_t* wt_ptr,
+      int64_t max_interp_size, int64_t& xmin, int64_t& xsize) {
+    std::fill(wt_ptr, wt_ptr + max_interp_size, static_cast<scalar_t>(0));
+    if constexpr (kLinear) {
+      // Coefficients of the area mode in cv::hal::resize. Past the last input pixel, OpenCV uses the
+      // last pixel with weight 1.
+      const auto sx = static_cast<int64_t>(std::floor(i * scale));
+      if (sx >= input_size - 1) {
+        xmin = input_size - 1;
+        xsize = 1;
+        wt_ptr[0] = 1;
+        return 1;
+      }
+      float fx = static_cast<float>((i + 1) - (sx + 1) * inv_scale);
+      fx = fx <= 0 ? 0.f : fx - std::floor(fx);
+      xmin = sx;
+      xsize = 2;
+      wt_ptr[0] = 1.f - fx;
+      wt_ptr[1] = fx;
+      return std::max(wt_ptr[0], wt_ptr[1]);
+    } else {
+      // computeResizeAreaTab in OpenCV's resize.cpp: the partially covered input pixels at both ends
+      // (if covered by more than 1e-3), and the fully covered ones in between, each weighted by its
+      // covered width divided by the output pixel's width.
+      const double fsx1 = i * scale;
+      const double fsx2 = fsx1 + scale;
+      const double cell_width = std::min(scale, input_size - fsx1);
+      auto sx2 = std::min(static_cast<int64_t>(std::floor(fsx2)), input_size - 1);
+      auto sx1 = std::min(static_cast<int64_t>(std::ceil(fsx1)), sx2);
+      xsize = 0;
+      scalar_t wt_max = 0;
+      auto emit = [&](float w) {
+        wt_ptr[xsize++] = w;
+        wt_max = std::max(wt_max, static_cast<scalar_t>(w));
+      };
+      xmin = sx1;
+      if (sx1 - fsx1 > 1e-3) {
+        xmin = sx1 - 1;
+        emit(static_cast<float>((sx1 - fsx1) / cell_width));
+      }
+      for (int64_t sx = sx1; sx < sx2; sx++) {
+        emit(static_cast<float>(1.0 / cell_width));
+      }
+      if (fsx2 - sx2 > 1e-3) {
+        emit(static_cast<float>(std::min(std::min(fsx2 - sx2, 1.), cell_width) / cell_width));
+      }
+      return wt_max;
+    }
+  }
+
+  static inline std::vector<Tensor> compute_index_ranges_weights(
+    at::ScalarType scalar_type,
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool /*align_corners*/,
+    const std::optional<double>& opt_scale,
+    bool /*antialias*/
+  ) {
+    const auto s = scales(input_size, output_size, opt_scale);
+    const double scale = s.first, inv_scale = s.second;
+    const int max_size = max_interp_size(scale);
+    std::vector<Tensor> indices_weights;
+    AT_DISPATCH_FLOATING_TYPES(scalar_type, "compute_index_ranges_weights", [&] {
+      indices_weights = std::get<0>(HelperInterpBase::_make_index_ranges_weights<scalar_t, sizeof(scalar_t)>(
+          output_size, stride, ndims, reshape_dim, max_size,
+          [&](int64_t i, scalar_t* wt_ptr, int64_t& xmin, int64_t& xsize) {
+            return compute_weights<scalar_t>(i, input_size, scale, inv_scale, wt_ptr, max_size, xmin, xsize);
+          }));
+    });
+    return indices_weights;
+  }
+
+  static inline std::tuple<std::vector<Tensor>, int, unsigned int> compute_index_ranges_int16_weights(
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool /*align_corners*/,
+    const std::optional<double>& opt_scale,
+    bool /*antialias*/,
+    bool align_i32=false
+  ) {
+    const auto s = scales(input_size, output_size, opt_scale);
+    const double scale = s.first, inv_scale = s.second;
+    const int max_size = max_interp_size(scale);
+    auto [indices_weights, interp_size, wt_max] = HelperInterpBase::_make_index_ranges_weights<double, sizeof(int16_t)>(
+        output_size, stride, ndims, reshape_dim, max_size,
+        [&](int64_t i, double* wt_ptr, int64_t& xmin, int64_t& xsize) {
+          return compute_weights<double>(i, input_size, scale, inv_scale, wt_ptr, max_size, xmin, xsize);
+        });
+    return HelperInterpBase::_convert_weights_to_int16(std::move(indices_weights), interp_size, wt_max, output_size, align_i32);
+  }
+
+};
+
 // Generic upsampling interpolation kernel for N-d case.
 // Input is assumed to be like NCHW, NCL, NCKHW - interpolated spatial dimension
 // are those from the end up to batch size N and number of channels C.
@@ -1622,7 +1758,7 @@ void upsample_separable_1d(
   unsigned int weights_precision = 0;
 
   if (input_scalar_type == at::kByte) {
-    // This is a special branch to provide uint8 dtype support for bilinear, bicubic and lanczos modes only
+    // This is a special branch to provide uint8 dtype support for bilinear, bicubic, lanczos and inter-area modes only
     TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4 || F::interp_size == 6);
     int unused = 0;
     std::tie(indices_weights, unused, weights_precision) =
@@ -2068,6 +2204,55 @@ void upsample_lanczos2d_aa_kernel_impl(
     /*antialias=*/true);
 }
 
+// cv::resize uses the area weights if the output is no larger than the input along both axes, and the
+// weights with at most 2 input pixels per output pixel otherwise.
+bool inter_area_uses_linear_weights(
+    const Tensor& input, const Tensor& output, std::optional<double> scales_h, std::optional<double> scales_w) {
+  using H = HelperInterpInterArea<false>;
+  return H::scales(input.size(2), output.size(2), scales_h).first < 1 ||
+      H::scales(input.size(3), output.size(3), scales_w).first < 1;
+}
+
+template <class F>
+void upsample_inter_area2d_kernel_impl_for(
+    const Tensor& output,
+    const Tensor& input,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  if (input.dtype() == at::kByte) {
+    #ifdef CPU_CAPABILITY_AVX2
+      if (input.size(1) <= 4) {
+        return upsample_avx_bilinear_bicubic_uint8<scale_t, F>(
+          input, output, /*align_corners=*/false, {scales_h, scales_w},
+          /*antialias=*/true);
+      }
+    #elif defined(__aarch64__)
+      if (input.size(1) == 3
+          && input.is_contiguous(at::MemoryFormat::ChannelsLast)
+          && output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+        return upsample_neon_bilinear_bicubic_uint8<scale_t, F>(
+          input, output, /*align_corners=*/false, {scales_h, scales_w},
+          /*antialias=*/true);
+      }
+    #endif  // CPU_CAPABILITY_AVX2
+  }
+  return upsample_separable_Nd_kernel_impl<2, scale_t, F>(
+    output, input, /*align_corners=*/false, {scales_h, scales_w},
+    /*antialias=*/true);
+}
+
+void upsample_inter_area2d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  if (inter_area_uses_linear_weights(input, output, scales_h, scales_w)) {
+    upsample_inter_area2d_kernel_impl_for<HelperInterpInterArea<true>>(output, input, scales_h, scales_w);
+  } else {
+    upsample_inter_area2d_kernel_impl_for<HelperInterpInterArea<false>>(output, input, scales_h, scales_w);
+  }
+}
+
 template <
     typename scalar_t,
     typename scale_type,
@@ -2242,4 +2427,6 @@ REGISTER_DISPATCH(_upsample_bicubic2d_aa_backward_kernel, &upsample_bicubic2d_aa
 
 REGISTER_DISPATCH(_upsample_lanczos2d_aa_kernel, &upsample_lanczos2d_aa_kernel_impl)
 REGISTER_DISPATCH(_upsample_lanczos2d_aa_backward_kernel, &upsample_lanczos2d_aa_backward_kernel_impl)
+
+REGISTER_DISPATCH(_upsample_inter_area2d_kernel, &upsample_inter_area2d_kernel_impl)
 } // namespace at::native

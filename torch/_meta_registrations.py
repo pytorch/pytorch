@@ -8619,6 +8619,11 @@ but got grad_output_size({i}) = {grad_output.size(i)}""",
     )
 
 
+@register_meta(aten._upsample_inter_area2d.default)
+def meta_upsample_inter_area2d(input, output_size, scales_h=None, scales_w=None):
+    return meta_upsample_bimode2d_aa(input, output_size, False, scales_h, scales_w)
+
+
 # From aten/src/ATen/native/cuda/AmpKernels.cu
 @register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
 def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
