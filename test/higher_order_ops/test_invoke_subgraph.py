@@ -4003,19 +4003,40 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(count(), 2)
         self.assertEqual(ref, res)
 
-    def test_subgraph_namedtuple_output(self):
-        # A rebuilt plain tuple would lose the namedtuple type, so this output
-        # is retraced rather than reused.
+    def test_subgraph_reuse_namedtuple_output(self):
         NT = collections.namedtuple("NT", ["a", "b"])
 
         @nested_compile_region
         def gn(x):
-            return NT(x.sin(), x.cos())
+            return NT(x.sin(), torch.max(x, dim=0))
 
         def fn(x):
             o1 = gn(x)
             o2 = gn(o1.a)
-            return o2.a + o2.b
+            return o2.a + o2.b.values, type(o2), type(o2.b)
+
+        x = torch.randn(4, 8, requires_grad=True)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_no_reuse_outer_frame_container(self):
+        # A sourceless list created by the caller is returned as-is, so a
+        # rebuilt copy would break identity with the caller's list.
+        @nested_compile_region
+        def gn(x, lst):
+            return x.sin(), lst
+
+        def fn(x):
+            lst = [2, 3]
+            a, l1 = gn(x, lst)
+            b, l2 = gn(a, lst)
+            lst.append(4)
+            return a + b, l1 is lst, l2 is lst, len(l2)
 
         x = torch.randn(8, requires_grad=True)
         ref = fn(x)
@@ -4024,6 +4045,59 @@ class TestInvokeSubgraphReuse(TestCase):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(count(), 2)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_no_reuse_aliased_output_container(self):
+        @nested_compile_region
+        def gn(x):
+            lst = [x.sin()]
+            return lst, lst
+
+        def fn(x):
+            l1, l2 = gn(x)
+            l3, l4 = gn(l1[0])
+            return l3[0], l1 is l2, l3 is l4
+
+        x = torch.randn(8, requires_grad=True)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 2)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_no_reuse_sourceful_constant_output(self):
+        # Per-instance attributes returned as-is are not guarded by the reuse
+        # condition, so they must not be baked into the cached output. Ten
+        # blocks also exceed max_reuse_entries if each one saved an entry.
+        for attr_value in (lambda i: i == 1, lambda i: i):
+            torch._dynamo.reset()
+            self._check_sourceful_constant_output(attr_value)
+
+    def _check_sourceful_constant_output(self, attr_value):
+        class Block(torch.nn.Module):
+            def __init__(self, i):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+                self.attr = attr_value(i)
+
+            @nested_compile_region
+            def forward(self, x):
+                return self.linear(x), self.attr
+
+        blocks = torch.nn.ModuleList([Block(i) for i in range(10)])
+
+        def fn(x):
+            attrs = []
+            for blk in blocks:
+                x, a = blk(x)
+                attrs.append(a)
+            return x, attrs
+
+        x = torch.randn(4, 8, requires_grad=True)
+        ref = fn(x)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(ref, res)
 
     def test_subgraph_reuse_tuple_output(self):

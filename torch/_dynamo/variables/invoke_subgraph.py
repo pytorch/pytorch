@@ -15,6 +15,7 @@ from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 import torch
 import torch._higher_order_ops
 from torch._dynamo import graph_break_hints
+from torch._dynamo.current_scope_id import current_scope_id
 from torch._dynamo.exc import unimplemented
 from torch._dynamo.guards import (
     extract_tensor_metadata,
@@ -24,7 +25,12 @@ from torch._dynamo.guards import (
     UnsupportedGuardCheckSpec,
 )
 from torch._dynamo.source import SyntheticLocalSource
-from torch._dynamo.utils import _make_inlined, constants_identical, unpack_iterable
+from torch._dynamo.utils import (
+    _make_inlined,
+    constants_identical,
+    is_namedtuple_cls,
+    unpack_iterable,
+)
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.dicts import ConstDictVariable
@@ -33,7 +39,10 @@ from torch._dynamo.variables.higher_order_ops import WrapHigherOrderVariable
 from torch._dynamo.variables.lists import ListVariable, TupleVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
-from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+from torch._dynamo.variables.user_defined import (
+    UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
+)
 from torch._guards import (
     Guard,
     InvokeSubgraphReuseCondition,
@@ -462,6 +471,12 @@ class OutputLeaf:
     index: int
 
 
+@dataclass(frozen=True)
+class NamedTupleTemplate:
+    cls: type
+    items: tuple[Any, ...]
+
+
 class _UnsupportedOutput(Exception):
     pass
 
@@ -472,11 +487,13 @@ def build_output_template(
     """Describe the function's return value so a cache hit can rebuild it.
 
     Tensors become OutputLeaf(i), where i is the position of that VT among the
-    subgraph outputs. Constants are kept by value: they were fixed by the first
-    trace, which reuse guards make equivalent. Fresh (sourceless) tuples, lists
-    and dicts with constant keys are recursed into; a cache hit rebuilds them
-    as new containers, so sourceful containers (which would need to keep
-    their identity) are rejected. Raises _UnsupportedOutput otherwise.
+    subgraph outputs. Sourceless constants are kept by value; sourceful ones
+    (e.g. a per-instance attribute) are rejected because nothing guards them
+    on reuse. Tuples, namedtuples, lists and dicts with constant keys are
+    recursed into, but only if they were created inside the subgraph: a cache
+    hit rebuilds them as new objects, so containers whose identity is visible
+    outside (sourceful, created in the caller, or returned more than once)
+    are rejected. Raises _UnsupportedOutput otherwise.
     """
     # Index among tensor outputs only: a cache hit materializes just the tensor
     # outputs (from output_metadata), in graph-output order.
@@ -487,6 +504,18 @@ def build_output_template(
             output_index.setdefault(id(vt), tensor_pos)
             tensor_pos += 1
 
+    outer_scope = current_scope_id()
+    seen: set[int] = set()
+
+    def check_fresh_container(vt: VariableTracker, mutable: bool) -> None:
+        name = type(vt).__name__
+        if vt.source is not None or id(vt) in seen:
+            raise _UnsupportedOutput(f"non-fresh {name}")
+        mt = vt.mutation_type
+        if mutable and (mt is None or mt.scope <= outer_scope):
+            raise _UnsupportedOutput(f"{name} created outside the subgraph")
+        seen.add(id(vt))
+
     def build(vt: VariableTracker) -> Any:
         vt = vt.realize()
         if isinstance(vt, TensorVariable):
@@ -494,15 +523,21 @@ def build_output_template(
                 raise _UnsupportedOutput("tensor that is not a subgraph output")
             return OutputLeaf(output_index[id(vt)])
         if is_constant_like(vt):
+            if vt.source is not None:
+                raise _UnsupportedOutput("sourceful constant")
             return vt.value
-        if vt.source is None and type(vt) in (TupleVariable, ListVariable):
-            items = cast(TupleVariable | ListVariable, vt).items
-            return vt.python_type()(build(item) for item in items)
-        if (
-            vt.source is None
-            and type(vt) is ConstDictVariable
-            and vt.python_type() is dict
-        ):
+        if type(vt) is TupleVariable:
+            check_fresh_container(vt, mutable=False)
+            return tuple(build(item) for item in vt.items)
+        if isinstance(vt, UserDefinedTupleVariable) and is_namedtuple_cls(vt.tuple_cls):
+            check_fresh_container(vt, mutable=False)
+            items = tuple(build(item) for item in vt.items)
+            return NamedTupleTemplate(vt.tuple_cls, items)
+        if type(vt) is ListVariable:
+            check_fresh_container(vt, mutable=True)
+            return [build(item) for item in vt.items]
+        if type(vt) is ConstDictVariable and vt.python_type() is dict:
+            check_fresh_container(vt, mutable=True)
             out = {}
             for k, v in vt.items.items():
                 if not is_constant_like(k.vt):
@@ -522,6 +557,9 @@ def rebuild_output(
     def build(t: Any) -> Any:
         if isinstance(t, OutputLeaf):
             return outputs[t.index]
+        if isinstance(t, NamedTupleTemplate):
+            items = [build(x) for x in t.items]
+            return t.cls(items) if pytree.is_structseq_class(t.cls) else t.cls(*items)
         if type(t) in (tuple, list):
             return type(t)(build(x) for x in t)
         if type(t) is dict:
