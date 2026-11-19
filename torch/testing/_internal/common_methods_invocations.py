@@ -1369,8 +1369,11 @@ def error_inputs_dot_vdot(op_info, device, is_ref=False, **kwargs):
 
 
 def error_inputs_bool_matmul(op_info, device, **kwargs):
-    # No backend implements these products for bool; they must raise
-    # NotImplementedError like CPU instead of failing inside a GPU kernel.
+    # CPU, CUDA and MPS raise NotImplementedError for these products on bool.
+    # MPS used to fail inside its Metal kernel lookup instead. XPU raises a
+    # RuntimeError from oneDNN, so it is not covered here.
+    if torch.device(device).type not in ("cpu", "cuda", "mps"):
+        return
     make_input = partial(make_tensor, device=device, dtype=torch.bool)
     mat, vec, batch = make_input(S, S), make_input(S), make_input(2, S, S)
     input, args = {
