@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     parametrize,
     scoped_load_inline,
+    skipIfCppFakeTensor,
     skipIfWindows,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -3158,6 +3159,7 @@ main()
         """
         self.run_as_subprocess(script)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_free_activation_memory_subclass(self):
         # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
@@ -4586,6 +4588,16 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
+    def test_disallow_implicit_grad_accumulation_not_supported(self):
+        a = torch.randn(3, requires_grad=True)
+        loss = a.sin().sum()
+        with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "disallow_implicit_grad_accumulation=True is not supported with Compiled Autograd",
+            ):
+                loss.backward(disallow_implicit_grad_accumulation=True)
+
     def test_anomaly_mode_backward(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -5426,6 +5438,10 @@ def wrap_test_class(orig_cls):
             ]
             dct[name] = make_wrapped(fn, ctx_fns)
 
+    # Without a GPU the inductor-backend tests are left unwrapped (see above), so
+    # only GPU jobs run them under compiled autograd. Inheriting a GENERIC label
+    # would make those jobs skip them too.
+    dct["hw_classification"] = None
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
         (orig_cls,),
@@ -5736,10 +5752,6 @@ xfail_divergence_from_eager = {
 
 skipped_tests = set()
 skipped_tests.add("test_graph_queue_callback")
-
-if not HAS_GPU_AND_TRITON:
-    # Found Tesla M60 which is too old to be supported by the triton GPU compiler
-    skipped_tests.add("test_type_conversions")
 
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")

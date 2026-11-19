@@ -80,6 +80,10 @@ struct TORCH_API MPSGuardImpl final
     return getDefaultMPSStream()->unwrap();
   }
 
+  bool queryStream(const Stream& stream) const override {
+    return getStreamByID(stream.id())->query();
+  }
+
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const override {
     MPSStream* previous = getCurrentMPSStream();

@@ -353,7 +353,6 @@ option(
   BUILD_MOBILE_TEST
   "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)"
   OFF)
-option(BUILD_JNI "Build JNI bindings" OFF)
 option(BUILD_MOBILE_AUTOGRAD
        "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
@@ -415,7 +414,6 @@ option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
-option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_MAGMA "Use MAGMA" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
@@ -431,17 +429,12 @@ cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
 # Builds NCCL-EP if true.
-cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" OFF
+cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" ON
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-# On macOS, NNPACK's FFT-based convolutions are slower than im2col + Accelerate and spread NaN/Inf
-# across the whole tile, see https://github.com/pytorch/pytorch/issues/157237
-if(APPLE AND NOT IOS)
-  option(USE_NNPACK "Use NNPACK" OFF)
-else()
-  option(USE_NNPACK "Use NNPACK" ON)
-endif()
+# NNPACK has been removed; still reported via caffe2/core/macros.h.in
+set(USE_NNPACK OFF)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
@@ -750,8 +743,6 @@ if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
     FATAL_ERROR
       "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
 endif()
-option(TRACING_BASED
-       "Master flag to build Lite Interpreter with tracing build option" OFF)
 # This is a fix for a rare build issue on Ubuntu: symbol lookup error:
 # miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol:
 # mkl_blas_dsyrk
@@ -1272,10 +1263,6 @@ if(BUILD_LITE_INTERPRETER)
   string(APPEND CMAKE_CXX_FLAGS " -DBUILD_LITE_INTERPRETER")
 endif()
 
-if(TRACING_BASED)
-  string(APPEND CMAKE_CXX_FLAGS " -DTRACING_BASED")
-endif()
-
 if(USE_PYTORCH_METAL)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
@@ -1627,16 +1614,6 @@ endif()
 # built in the previous Modules section above).
 if(BUILD_BINARY)
   add_subdirectory(binaries)
-endif()
-
-# ---[ JNI
-if(BUILD_JNI)
-  if(NOT MSVC)
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
-  endif()
-  set(BUILD_LIBTORCH_WITH_JNI 1)
-  set(FBJNI_SKIP_TESTS 1)
-  add_subdirectory(android/pytorch_android)
 endif()
 
 # Parse custom debug info
