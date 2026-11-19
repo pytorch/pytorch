@@ -568,18 +568,19 @@ class GuardManagerWrapper:
         allow entire nested structures to be skipped once their identity tag
         matches.
 
-        3. Pure ``nn.Module`` - The value is an ``nn.Module`` whose sole
-        accessor is ``GetGenericDictGuardAccessor``—i.e., it only exposes its
-        ``__dict__`` and nothing else that could mutate between runs.
+        3. Pure ``nn.Module`` - The value is an ``nn.Module`` whose accessors
+        only inspect its ``__dict__`` and type, and whose local leaf guards only
+        check identity or type. Module state and dictionary mutations are
+        revalidated on the fast path.
 
         A node whose subtree contains a relational guard with no dedicated
         dict-tag fast path is not tag safe. Relational guards carry state across
         multiple guarded values, so skipping one side of the relation can turn
         a real failure into a false positive.
 
-        For every tag safe node, verifying the identity/tag of just the top-level
-        dictionary is enough to guarantee the entire subtree is unchanged, enabling
-        a *fast-path* guard check.
+        For every tag safe root, watched dictionary state plus the replayed
+        mutable-object checks are enough to validate the subtree without fully
+        traversing it.
 
         -----------------------------------------------------------------------
         tag safe root
@@ -746,6 +747,7 @@ class GuardManagerWrapper:
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
+                    node.mark_type_guarded_for_tag_safety()
                     # Return the current node as tag safe root, discarding the
                     # subtree tag safe roots.
                     return [node], has_unoptimized_relational_guard
