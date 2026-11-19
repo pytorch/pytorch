@@ -494,13 +494,9 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(caching_precompile=True, error_on_recompile=True)
     def test_cached_apply_checks_method(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x, method):
-            return method(x)
-
+        fn = torch.compile(lambda x, method: method(x), backend="eager", fullgraph=True)
         x = torch.ones(1)
-        target = CustomFunc1.apply
-        self.assertEqual(fn(x, target), x + x)
+        self.assertEqual(fn(x, CustomFunc1.apply), x + x)
         with self.assertRaisesRegex(torch._dynamo.exc.RecompileError, "method"):
             fn(x, CustomFunc1.__subclasshook__)
 
