@@ -24,7 +24,7 @@ from io import BytesIO, StringIO
 from itertools import pairwise
 from types import MethodType
 from typing import Any, TYPE_CHECKING
-from unittest import main, mock, skip, TestCase
+from unittest import main, mock, TestCase
 from urllib.error import HTTPError, URLError
 
 from github_utils import gh_fetch_url, gh_graphql, GHGraphQLError, GitHubComment
@@ -74,6 +74,7 @@ from trymerge import (
     can_skip_internal_checks,
     categorize_checks,
     check_greenlight_reviewed_head_sha,
+    check_native_stack_mergeability,
     check_stacked_pr_merge_rule,
     CLASSIFICATION_WAIT_SECONDS,
     ClassificationWaitWindow,
@@ -855,12 +856,6 @@ class TestTryMerge(TestCase):
         # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
-    @skip("GitHub doesn't keep this data anymore")
-    def test_gql_retrieve_checksuites(self, *args: Any) -> None:
-        "Fetch comments and conclusions for PR with 60 commits"
-        pr = GitHubPR("pytorch", "pytorch", 94787)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 182)
-
     def test_team_members(self, *args: Any) -> None:
         "Test fetching team members works"
         dev_infra_team = gh_get_team_members("pytorch", "pytorch-dev-infra")
@@ -1547,17 +1542,28 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
-    @skip(
-        reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
+    # Pin the stack's state: the two bottom PRs merged, the top two open. The
+    # merge-rule check and the lower PR's checks are mocked; the tests below cover
+    # how their errors and waivers are handled.
+    @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
+    @mock.patch.object(
+        GitHubPR,
+        "is_closed",
+        autospec=True,
+        side_effect=lambda pr: pr.pr_num in (106032, 106033),
     )
-    @mock.patch("trymerge.read_merge_rules")
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=True)
+    @mock.patch("trymerge.find_matching_merge_rule")
     @mock.patch("trymerge.GitRepo")
     @mock.patch("trymerge.get_ghstack_prs")
     def test_merge_ghstack_into(
         self,
         mock_get_ghstack_prs: mock.MagicMock,
         mock_repo: mock.MagicMock,
-        mock_merge_rules: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        mock_can_skip_internal_checks: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        _mock_get_checkrun_conclusions: mock.MagicMock,
         *args: Any,
     ) -> None:
         """
@@ -1576,24 +1582,37 @@ class TestGitHubPRGhstackDependencies(TestCase):
             (pr, "rev123"),
         ]
 
-        mock_merge_rules.return_value = [
-            MergeRule(
-                "Mock title", patterns=["*"], approved_by=[], mandatory_checks_name=None
-            )
-        ]
-
         mock_repo.cherry_pick.return_value = None
         mock_repo.amend_commit_message.return_value = None
+        mock_find_matching_merge_rule.return_value = (None, [], [], {})
 
         # Call the method under test
-        res = pr.merge_ghstack_into(mock_repo, True)
+        res = pr.merge_ghstack_into(mock_repo, False, comment_id=7)
 
         self.assertEqual(res, [pr2, pr])
+        mock_get_ghstack_prs.assert_called_once_with(mock_repo, pr, open_only=False)
 
-        mock_repo.cherry_pick.assert_any_call("rev2")
-        mock_repo.cherry_pick.assert_any_call("rev123")
+        self.assertEqual(
+            mock_repo.cherry_pick.call_args_list,
+            [mock.call("rev2"), mock.call("rev123")],
+        )
 
-        self.assertTrue(mock.call("rev1") not in mock_repo.cherry_pick.call_args_list)
+        # Only the open PR below the one being merged gets the stacked rule check
+        mock_find_matching_merge_rule.assert_called_once_with(
+            pr2,
+            mock_repo,
+            skip_mandatory_checks=False,
+            skip_internal_checks=True,
+            ignore_current_checks=None,
+            classification_wait=None,
+        )
+        mock_can_skip_internal_checks.assert_called_once_with(pr, 7)
+
+        # Each cherry-pick is followed by the amend of its own message
+        self.assertEqual(
+            [name for name, _, _ in mock_repo.method_calls],
+            ["cherry_pick", "amend_commit_message"] * 2,
+        )
 
         # Verify the first call
         message = mock_repo.amend_commit_message.call_args_list[0].args[0]
@@ -1602,22 +1621,21 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "### Background: Gradient Pre-Divide"
         )
         suffix = (
-            "\nPull Request resolved: https://github.com/pytorch/pytorch/pull/106034\nApproved by: \nghstack "
-            "dependencies: #106032, #106033\n"
+            "\nPull Request resolved: https://github.com/pytorch/pytorch/pull/106034\n"
+            "Approved by: https://github.com/rohan-varma\n"
+            "ghstack dependencies: #106032, #106033\n"
         )
 
         self.assertTrue(message.startswith(prefix))
         self.assertTrue(message.endswith(suffix))
 
         # Verify the second call
-        mock_repo.amend_commit_message.assert_any_call(
-            "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\n"
-            "Differential Revision: ["
-            "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\n"
-            "Pull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\n"
-            "Approved by: \n"
-            "ghstack dependencies: #106032, #106033, #106034\n"
+        self.assertEqual(
+            mock_repo.amend_commit_message.call_args_list[1].args[0],
+            f"{pr.get_title()} (#106068)\n\n{RE_GHSTACK_DESC.sub('', pr.get_body())}\n"
+            "Pull Request resolved: https://github.com/pytorch/pytorch/pull/106068\n"
+            "Approved by: https://github.com/ezyang, https://github.com/fegin\n"
+            "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
     @mock.patch.object(GitHubPR, "is_closed", return_value=False)
@@ -1710,10 +1728,13 @@ class TestGitHubPRGhstackDependencies(TestCase):
 
         top_pr.merge_ghstack_into(mock_repo, True, ignore_current_checks=waivers)
 
-        mock_find_matching_merge_rule.assert_called_once()
-        self.assertEqual(
-            mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"],
-            waivers,
+        mock_find_matching_merge_rule.assert_called_once_with(
+            parent_pr,
+            mock_repo,
+            skip_mandatory_checks=True,
+            skip_internal_checks=False,
+            ignore_current_checks=waivers,
+            classification_wait=None,
         )
 
     @mock.patch.object(GitHubPR, "get_checkrun_conclusions", return_value={})
@@ -4300,12 +4321,44 @@ class TestNativeStackMain(NoNetworkTestCase):
             native_stack=NATIVE_STACK,
         )
 
-    def test_check_mergeability_does_not_read_the_stack(self) -> None:
+    def test_check_mergeability_checks_stack_on_default_branch(self) -> None:
         self.args.check_mergeability = True
+        check = self.patch("trymerge.check_native_stack_mergeability")
         trymerge_main()
-        self.get_stack.assert_not_called()
-        # No merge command was issued, so the refusal carries no tag
-        self.assertRefused(status=None)
+        self.get_stack.assert_called_once_with("pytorch", "pytorch", 1002)
+        check.assert_called_once_with(mock.ANY, mock.ANY, NATIVE_STACK)
+        self.assertEqual(check.call_args.args[1].pr_num, 1002)
+        self.post.assert_not_called()
+        self.merge.assert_not_called()
+
+    def test_check_mergeability_skips_pr_without_usable_stack_quietly(self) -> None:
+        self.args.check_mergeability = True
+        check = self.patch("trymerge.check_native_stack_mergeability")
+        local = self.patch("trymerge.GitHubPR.merge_changes_locally")
+        viable_strict = replace(NATIVE_STACK, base_ref="viable/strict")
+        fork = {**stacked_pr_info(), "isCrossRepository": True}
+        for name, stack, info in (
+            ("no stack", None, stacked_pr_info()),
+            ("other trunk", viable_strict, stacked_pr_info()),
+            ("fork", NATIVE_STACK, fork),
+        ):
+            with self.subTest(name):
+                self.get_stack.return_value = stack
+                self.info.return_value = info
+                trymerge_main()
+        self.assertEqual(self.get_stack.call_count, 2)
+        check.assert_not_called()
+        local.assert_not_called()
+        self.post.assert_not_called()
+        self.merge.assert_not_called()
+
+    def test_check_mergeability_fails_when_the_stack_cannot_be_read(self) -> None:
+        self.args.check_mergeability = True
+        self.get_stack.side_effect = NativeStackError("GraphQL errors: Timeout")
+        with self.assertRaisesRegex(NativeStackError, "Timeout"):
+            trymerge_main()
+        self.post.assert_not_called()
+        self.merge.assert_not_called()
 
     def test_fork_pr_does_not_read_the_stack(self) -> None:
         self.info.return_value = {**stacked_pr_info(), "isCrossRepository": True}
@@ -4741,6 +4794,23 @@ class TestNativeStackMergeEndToEnd(LandingTestCase):
         self.assertEqual(self.trunk_log(self.root, "%s"), subjects)
         self.assertEqual(self.bases, [self.root])
 
+    def test_mergeability_check_lands_nothing(self) -> None:
+        trunk = self.add_commits(TRUNK)
+        head = self.repo.rev_parse("HEAD")
+        check_native_stack_mergeability(self.repo, self.prs[103], self.stack)
+        self.assertEqual(self.bases, [trunk])
+        self.assertEqual(self.trunk_log(trunk), [])
+        self.assertEqual(self.repo.rev_parse("HEAD"), head)
+        self.assertEqual(self.git("status", "--porcelain", cwd=self.repo.repo_dir), "")
+
+    def test_mergeability_check_refuses_stack_that_conflicts_with_trunk(self) -> None:
+        # user/b, PR #102, adds file3.txt
+        self.add_commits(TRUNK, files={"file3.txt": "trunk\n"})
+        with self.assertRaisesRegex(
+            NativeStackError, "PR #102 has conflicts with the commits below it"
+        ):
+            check_native_stack_mergeability(self.repo, self.prs[103], self.stack)
+
     def merge_then_patch_revert(self) -> tuple[list[str], Any]:
         """Lands the stack, then patches what try_revert writes to GitHub, with no
         stack for the refresh of the reverted branches to read (see
@@ -5148,7 +5218,6 @@ class TestMainStatusTags(NoNetworkTestCase):
         self.args.comment_id = None
         local = self.patch("trymerge.GitHubPR.merge_changes_locally")
         cases = {
-            "PR targets user/1001 rather than main": stacked_pr_info(),
             "Can't merge closed PR": {**stacked_pr_info(base="main"), "closed": True},
         }
         for refusal, info in cases.items():
