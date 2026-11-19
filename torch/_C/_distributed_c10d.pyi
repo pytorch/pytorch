@@ -3,13 +3,15 @@
 from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
-from typing_extensions import Self
+from typing import Any, overload, Self
 
 import torch
 from torch import Tensor
 from torch._C import ScriptObject
 from torch._C._autograd import DeviceType
+from torch.distributed._backends.fake import (  # Runtime alias for BC
+    FakeProcessGroup as FakeProcessGroup,
+)
 from torch.distributed.distributed_c10d import GroupName
 from torch.futures import Future
 
@@ -295,6 +297,7 @@ class HookOpName(Enum):
     REDUCE_SCATTER_BASE = ...
     REDUCE_SCATTER_TENSOR_COALESCED = ...
     ALLTOALL_BASE = ...
+    RECONFIGURE = ...
     UNKNOWN = ...
 
 class PreHookArgs:
@@ -304,12 +307,15 @@ class PreHookArgs:
     output_tensors: list[Tensor]
     root: int
     op_id: int
+    device: torch.device | None
 
 class PostHookArgs:
     name: HookOpName
     async_op: bool
     work: Work | None
     op_id: int
+    group: ProcessGroup | None
+    window: Window | None
 
 class Store:
     def set(self, key: str, value: str) -> None: ...
@@ -357,6 +363,12 @@ class TCPStore(Store):
         multi_tenant: bool = ...,
         master_listen_fd: int | None = ...,
         use_libuv: bool | None = ...,
+        *,
+        tls_cert: str | None = ...,
+        tls_key: str | None = ...,
+        tls_ca: str | None = ...,
+        tls_psk: str | None = ...,
+        tls_psk_file: str | None = ...,
     ) -> None: ...
     @property
     def host(self) -> str: ...
@@ -399,6 +411,12 @@ class _DistributedBackendOptions:
     split_from: Backend | None
     enable_reconfigure: bool
 
+class WorkResult(Enum):
+    SUCCESS = 0
+    TIMEOUT = 1
+    COMM_ERROR = 2
+    UNKNOWN = 100
+
 class Work:
     def is_completed(self) -> bool: ...
     def is_success(self) -> bool: ...
@@ -406,6 +424,7 @@ class Work:
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def block_current_stream(self) -> None: ...
     def get_future(self) -> Future: ...
+    def get_future_result(self) -> Future: ...
     def source_rank(self) -> int: ...
     def _source_rank(self) -> int: ...
     def result(self) -> list[Tensor]: ...
@@ -842,33 +861,9 @@ class ProcessGroup:
     @property
     def group_desc(self) -> str: ...
 
-class FakeProcessGroup(Backend):
-    class Options(Backend.Options):
-        fake_option: int
-        error_on_collective: bool
-        simulate_uniform_ranks: bool
-
-        def __init__(self) -> None: ...
-
-    @staticmethod
-    def _create_internal(
-        rank: int,
-        world_size: int,
-        options: FakeProcessGroup.Options | None = ...,
-    ) -> FakeProcessGroup: ...
-    # getOptions() returns null when the group was built without options, and
-    # callers (test_device_mesh) branch on that, so this must stay optional.
-    # Backend.options is not, which makes the narrowing a real LSP violation
-    # rather than a stub inaccuracy: this property is bound to a different C++
-    # method than the base one, and widening it to match would misdescribe
-    # behavior three assertIsNone checks already pin.
-    @property
-    # pyrefly: ignore  # bad-override
-    def options(self) -> FakeProcessGroup.Options | None: ...
-
 class FakeWork(Work):
     seq_id: int
-    def __init__(self) -> None: ...
+    def __init__(self, result: list[Tensor] = ...) -> None: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
 
@@ -940,6 +935,7 @@ class ProcessGroupNCCL(Backend):
         split_from: ProcessGroupNCCL
         split_color: int
         lazy_init: bool
+        encryption_psk: str | None
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 

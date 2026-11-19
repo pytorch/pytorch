@@ -382,6 +382,10 @@ def get_closure(fn):
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the
 # values global in the function.
+# Before Python 3.14, a name used only in a local variable annotation (like
+# `a_local_capture : Foo`) was still captured as a closure variable. Since 3.14
+# it is not; use `a_local_capture = torch.jit.annotate(Foo, ...)` instead, which
+# references `Foo` as a value.
 # In Python 3.9 declaring class as global will make it invisible to
 # `inspect.getsource`, see https://bugs.python.org/issue42666 .
 # This could be worked around by manually adding it to `global()` dictionary.
@@ -1585,8 +1589,7 @@ def _get_model_id(obj) -> str | None:
 # In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
 # that were previously dropped. To preserve the behavior, explicitly drop them there
 
-if sys.version_info >= (3, 11):
-    _drop(enum.Enum.__new__)
-    _drop(enum.Enum.__format__)
-    _drop(enum.Enum.__repr__)
-    _drop(enum.Enum.__str__)
+_drop(enum.Enum.__new__)
+_drop(enum.Enum.__format__)
+_drop(enum.Enum.__repr__)
+_drop(enum.Enum.__str__)
