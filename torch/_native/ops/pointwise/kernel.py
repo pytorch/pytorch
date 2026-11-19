@@ -894,6 +894,7 @@ def run(
         vec_bits,
         load,
         layouts,
+        tuple(torch._C._is_alias_of(o, t) for o in (out or ()) for t in inputs),
         input_casts,
         result_dtypes,
     )
@@ -919,6 +920,10 @@ def run(
             result_dtypes,
         ),
     )
+    if len(_PLAN) > 256:
+        oldest = next(iter(_PLAN), None)
+        if oldest is not None:
+            _PLAN.pop(oldest, None)
     dev = ref.device
     outs = (
         list(out)

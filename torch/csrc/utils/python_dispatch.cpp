@@ -8,6 +8,7 @@
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/symbol.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
@@ -20,6 +21,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/Synchronized.h>
@@ -1090,13 +1092,16 @@ void initDispatchBindings(PyObject* module) {
              const py::args& args,
              const py::kwargs& kwargs) {
             const auto& op = self.opHandle();
-            // Python kernels unwrap wrapped Tensor arguments into numbers.
-            torch::jit::ToIValueAllowNumbersAsTensors allow_numbers(true);
-            auto stack = torch::jit::createStackForSchema(
-                op.schema(),
-                args,
-                kwargs,
-                /*self=*/std::nullopt);
+            const auto symbol = c10::Symbol::fromQualString(op.schema().name());
+            auto stack = [&] {
+              torch::jit::ToIValueAllowNumbersAsTensors allow_numbers(
+                  symbol.is_prims() || symbol.is_nvprims() ||
+                  (symbol.is_aten() &&
+                   torch::should_allow_numbers_as_tensors(
+                       symbol.toUnqualString())));
+              return torch::jit::createStackForSchema(
+                  op.schema(), args, kwargs, /*self=*/std::nullopt);
+            }();
             self.callBoxed(op, keyset, &stack);
             return torch::jit::createPyObjectForStack(std::move(stack));
           })

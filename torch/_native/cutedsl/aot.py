@@ -14,9 +14,13 @@ def export_args(
     read_only: Collection[str] = (),
 ) -> dict[str, Any]:
     r"""Derive fake scalar arguments and AOT metadata from the callable signature."""
-    parameters = list(inspect.signature(fn).parameters.values())
+    parameters = list(inspect.signature(fn, eval_str=True).parameters.values())
     args = [*tensors]
     for param in parameters[len(tensors) : -1]:
+        if param.annotation is inspect.Parameter.empty:
+            raise TypeError(
+                f"AOT scalar argument {param.name!r} requires a type annotation"
+            )
         args.append(param.annotation(1))
     args.append(cute.runtime.make_fake_stream())
     tensor_args, scalars = [], []

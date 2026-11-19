@@ -5,7 +5,6 @@ import cuda.bindings.driver as cuda
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr
-from cutlass.block import block_copy
 from cutlass.cute.nvgpu import cpasync
 
 from ...cutedsl.types import MathFn, NumericType
@@ -18,6 +17,13 @@ from .layout import (
     TMA_TILE as _BOX,
     TmaLayout,
 )
+
+
+try:
+    from cutlass.block import block_copy
+    from cutlass.memory import SmemAllocator
+except ImportError:
+    from cutlass.utils import block_copy, SmemAllocator
 
 
 def fake_tensor(
@@ -114,12 +120,10 @@ class ElementwiseTma(_PointwiseOp):
                 layouts.append(None)
             else:
                 layout = shared_layout(self.storage, self.transposed[k])
-                info = cpasync.make_tiled_tma_atom(
+                atom, tma_tensor = cpasync.make_tiled_tma_atom(
                     cpasync.CopyBulkTensorTileG2SOp(), inputs[k], layout, (_BOX, _BOX)
                 )
-                operands.append(
-                    (info, cute.zipped_divide(info.tma_tensor, (_BOX, _BOX)))
-                )
+                operands.append((atom, cute.zipped_divide(tma_tensor, (_BOX, _BOX))))
                 layouts.append(layout)
         batch, rows, cols = outputs[0].shape
         row_tiles, groups = rows // _BOX, cute.ceil_div(cols, _BOX * _STAGES)
@@ -147,7 +151,7 @@ class ElementwiseTma(_PointwiseOp):
         )
         ncols, nrows = output.shape[2] // _BOX, output.shape[1] // _BOX
         stages = cutlass.min(ncols - col, _STAGES)
-        smem = cutlass.memory.SmemAllocator()
+        smem = SmemAllocator()
         buffers: Any = [
             None
             if self.transposed[k] is None
@@ -164,7 +168,7 @@ class ElementwiseTma(_PointwiseOp):
         if warp == 0:
             for k in cutlass.range_constexpr(self.nin):
                 if const_expr(self.transposed[k] is not None):
-                    cpasync.prefetch_descriptor(inputs[k][0].atom)
+                    cpasync.prefetch_descriptor(inputs[k][0])
             for stage in cutlass.range_constexpr(_STAGES):
                 if stage < stages:
                     barrier = barriers + stage
@@ -173,14 +177,14 @@ class ElementwiseTma(_PointwiseOp):
                         cute.arch.fence_proxy(kind="async.shared", space="cta")
                     for k in cutlass.range_constexpr(self.nin):
                         if const_expr(self.transposed[k] is not None):
-                            info, tiles = inputs[k]
+                            atom, tiles = inputs[k]
                             coord = (
                                 (row, batch * ncols + col + stage)
                                 if self.transposed[k]
                                 else (batch * nrows + row, col + stage)
                             )
                             block_copy(
-                                info.atom,
+                                atom,
                                 cute.group_modes(tiles[((None, None), coord)], 0, 2),
                                 cute.group_modes(buffers[k][None, None, stage], 0, 2),
                                 tma_bar_ptr=barrier,
