@@ -675,6 +675,10 @@ class GraphPartitionMode(enum.Enum):
     NONE = "none"
     # config.graph_partition=True.
     FROM_CONFIG = "from_config"
+    # Forced on, with graph_partition off, for a compile whose nested region opts
+    # out of CUDA Graphs while the rest is captured: the region gets its own
+    # uncaptured partition.
+    REGION_OPT_OUT = "region_opt_out"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -682,7 +686,9 @@ class GraphPartitionPlan:
     """How one compile is split into partitions, and what the partitions are for.
 
     Decided once before lowering; GraphLowering and CompiledFxGraph carry it
-    instead of reading config.graph_partition. ConstructorMoverPass,
+    instead of reading config.graph_partition. A region that opts out of CUDA
+    Graphs can force partitioning on for one compile (REGION_OPT_OUT) without
+    patching the config. ConstructorMoverPass,
     the cpp_wrapper/fx_wrapper setup and compile_fx's override_cudagraphs
     handling still read the config itself, and the scheduler's
     partition-minimizing reorder requires both it and config.triton.cudagraphs,
@@ -704,6 +710,18 @@ class GraphPartitionPlan:
     def uses_graph_partition(self) -> bool:
         """Whether codegen emits partition functions and a Runner."""
         return self.mode is not GraphPartitionMode.NONE
+
+    @property
+    def splits_off_unsafe_ops(self) -> bool:
+        """Whether the whole-graph cudagraph checks (CPU ops, dynamic shapes,
+        incompatible ops) are skipped because partitioning splits such ops off.
+        Not under REGION_OPT_OUT: that compile keeps those checks, although the
+        scheduler still leaves out of capture whatever else it would not
+        capture under partitioning."""
+        return (
+            self.cudagraphs_per_partition
+            and self.mode is not GraphPartitionMode.REGION_OPT_OUT
+        )
 
     @staticmethod
     def no_partition() -> GraphPartitionPlan:
