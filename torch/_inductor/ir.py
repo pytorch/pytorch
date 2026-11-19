@@ -6666,6 +6666,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, hint_override: int | None = None
     ) -> tuple[ChoiceCaller, float]:
         timings = self.choice_timings(hint_override=hint_override)
+        # topk rebench (config.autotune_topk_rebench_margin): a re-timed near-tie
+        # may pick ATen; the returned ms stays in the single-shot regime of
+        # `timings` so benchmark fusion compares like with like
+        topk = torch._inductor.select_algorithm.topk_rebench_pick(timings)
+        if topk is not None:
+            return topk
         min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
         return (min_choice, timings[min_choice])
 
