@@ -186,7 +186,7 @@ _filter_state: _FilterState = _FilterState()
 _libs: dict[tuple[str, str], torch.library.Library] = {}
 
 # Decomposition-style routers for the compile / export path, keyed by the
-# overridden op's OpOverload. Built in `_register_overrides_from_graph`
+# overridden op's OpOverload and dispatch key. Built in `_register_overrides_from_graph`
 # alongside the eager `Library.impl` routers.
 #
 # This dict is *not* written into any global compile/export decomp table (in
@@ -206,7 +206,52 @@ _libs: dict[tuple[str, str], torch.library.Library] = {}
 #
 # Keeping the table registry-local means `import torch._native` stays cheap
 # and consumers control exactly when and where overrides take effect.
-_native_decomp_overrides: dict[object, Callable] = {}
+_native_decomp_overrides: dict[tuple[object, str], Callable] = {}
+
+
+class _DispatchKeyRouter:
+    """Select a compile router without losing another backend's registration."""
+
+    def __init__(self, routers: dict[str, Callable]) -> None:
+        self.routers: dict[torch._C.DispatchKey, Callable] = {
+            getattr(torch._C.DispatchKey, key): router
+            for key, router in routers.items()
+        }
+        self.keys: torch._C.DispatchKeySet = torch._C._dispatch_keyset_full_after(
+            torch._C.DispatchKey.BackendSelect
+        )
+        for key in self.routers:
+            self.keys = self.keys.add(key)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        keys = torch._C.DispatchKeySet(torch._C.DispatchKey.Undefined)
+        has_tensors = False
+
+        def include(value: Any) -> None:
+            nonlocal keys, has_tensors
+            if isinstance(value, torch.Tensor):
+                keys = keys | torch._C._dispatch_keys(value)
+                has_tensors = True
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    include(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    include(item)
+
+        include(args)
+        include(kwargs)
+        if has_tensors:
+            keys = keys | torch._C._dispatch_tls_local_include_set()
+            keys = keys - torch._C._dispatch_tls_local_exclude_set()
+            key = (keys & self.keys).highestPriorityTypeId()
+            router = self.routers.get(key)
+            return NotImplemented if router is None else router(*args, **kwargs)
+        for key in sorted(self.routers, key=lambda key: key.value, reverse=True):
+            result = self.routers[key](*args, **kwargs)
+            if result is not NotImplemented:
+                return result
+        return NotImplemented
 
 
 # Re-entrancy guard for the Dynamo shortcut in `eager_router` (see the
@@ -379,7 +424,7 @@ def _install_override(
         existing._destroy()
 
     lib = torch.library.Library(lib_symbol, "IMPL", dispatch_key)
-    lib.impl(op_symbol, kernel, dispatch_key, with_keyset=True)
+    lib.impl(op_symbol, torch._disable_dynamo(kernel), dispatch_key, with_keyset=True)
     _override_libs[key] = lib
 
 
@@ -550,6 +595,13 @@ def _scalar_arg_coercer(
     ]
     if not tensor_slots:
         return None
+    weak_scalars = overload._schema.name.removesuffix("_") in _WEAK_SCALAR_OPS
+    is_division = overload._schema.name in ("aten::div", "aten::div_")
+    from torch._prims_common import (
+        elementwise_dtypes,
+        ELEMENTWISE_TYPE_PROMOTION_KIND,
+        get_computation_dtype,
+    )
 
     def coerce(args: tuple[Any, ...]) -> _CoercedScalars:
         scalar_slots = [
@@ -559,27 +611,21 @@ def _scalar_arg_coercer(
         ]
         if not scalar_slots:
             return args, None
-        if overload._schema.name.removesuffix("_") not in _WEAK_SCALAR_OPS:
+        if not weak_scalars or all(
+            not isinstance(arg, torch.Tensor) or arg.dim() == 0 for arg in args
+        ):
             return None
         operands = [
             a for a in args if isinstance(a, (torch.Tensor, bool, int, float, complex))
         ]
-        from torch._prims_common import (
-            elementwise_dtypes,
-            ELEMENTWISE_TYPE_PROMOTION_KIND,
-            get_computation_dtype,
-        )
-
         _, cast_dtype = elementwise_dtypes(
             *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
         )
         tensor_dtypes = [a.dtype for a in operands if isinstance(a, torch.Tensor)]
-        compute_dtype = None
-        if overload._schema.name not in (
-            "aten::div",
-            "aten::div_",
-        ):
-            compute_dtype = get_computation_dtype(cast_dtype)
+        compute_dtype = None if is_division else get_computation_dtype(cast_dtype)
+        if compute_dtype is not None and compute_dtype != cast_dtype:
+            if cast_dtype not in tensor_dtypes:
+                return None
         out = list(args)
         for i in scalar_slots:
             out[i] = _weak_wrap(args[i], tensor_dtypes, cast_dtype, compute_dtype)
@@ -1137,7 +1183,12 @@ def native_decomp_table(
 
         table = dict(default_decompositions())
     # Merge overrides last so they win on conflicts.
-    table.update(_native_decomp_overrides)
+    routers: dict[object, dict[str, Callable]] = {}
+    for (overload, key), router in _native_decomp_overrides.items():
+        routers.setdefault(overload, {})[key] = router
+    table.update(
+        {overload: _DispatchKeyRouter(routes) for overload, routes in routers.items()}
+    )
     return table
 
 
@@ -1178,7 +1229,7 @@ def _register_overrides_from_graph(
     # behavior intact and drop any decomp table entry.
     if not cond_impl:
         if overload is not None:
-            _native_decomp_overrides.pop(overload, None)
+            _native_decomp_overrides.pop((overload, dispatch_key), None)
         return
 
     # Capture the backend handle so fallback calls bypass this router.
@@ -1254,12 +1305,6 @@ def _register_overrides_from_graph(
             if coerced is None:
                 return _fallback.call_boxed(keyset, *original_args, **kwargs)
             args, cast_dtype = coerced
-        if cast_dtype is not None and all(
-            not isinstance(arg, torch.Tensor) or arg.dim() == 0 for arg in original_args
-        ):
-            # Native scalar kernels retain the wrapped-number promotion tier.
-            return _fallback.call_boxed(keyset, *original_args, **kwargs)
-
         result = _dispatch(
             args,
             kwargs,
@@ -1273,6 +1318,12 @@ def _register_overrides_from_graph(
         return _cast_to_weak_dtype(result, cast_dtype)
 
     def compile_router(*args: Any, **kwargs: Any) -> Any:
+        cast_dtype = None
+        if _coerce_scalars is not None:
+            coerced = _coerce_scalars(args)
+            if coerced is None:
+                return NotImplemented
+            args, cast_dtype = coerced
         result = _dispatch(
             args,
             kwargs,
@@ -1281,14 +1332,16 @@ def _register_overrides_from_graph(
         )
         if result is _NO_MATCH:
             return NotImplemented
-        return result
+        if overload is not None and overload._schema.is_mutable:
+            return result
+        return _cast_to_weak_dtype(result, cast_dtype)
 
     # Eager path: install a fresh override for this (lib, op, key).
     _install_override(lib_symbol, op_symbol, dispatch_key, eager_router)
 
     # Only callers using native_decomp_table() opt into this compile router.
     if overload is not None:
-        _native_decomp_overrides[overload] = compile_router
+        _native_decomp_overrides[(overload, dispatch_key)] = compile_router
 
 
 def _register_all_overrides() -> None:
