@@ -22,7 +22,7 @@ from ...utils.device import check_current
 from ...utils.tensor import const_data_ptr, row_alignment
 from ._packing import (
     flat_copy,
-    FLAT_EPT as _PACKED_EPT,
+    FLAT_ELEMENTS_PER_THREAD as _PACKED_ELEMENTS_PER_THREAD,
     FLAT_THREADS as _PACKED_THREADS,
     transpose_words,
 )
@@ -37,8 +37,8 @@ if TYPE_CHECKING:
 
 
 _PAYLOAD_THREADS = 128
-_PAYLOAD_EPT = 2
-_PAYLOAD_CHUNK = _PAYLOAD_THREADS * _PAYLOAD_EPT
+_PAYLOAD_VECTORS_PER_THREAD = 2
+_PAYLOAD_CHUNK = _PAYLOAD_THREADS * _PAYLOAD_VECTORS_PER_THREAD
 _PLANS: dict[CacheKey, "Function"] = {}
 
 _TORCH_WORD: dict[int, torch.dtype] = {
@@ -233,7 +233,7 @@ class _PayloadTranspose:
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         rows = cute.size(dst) // (self.inner * self.vector_words)
-        for i in cutlass.range_constexpr(_PAYLOAD_EPT):
+        for i in cutlass.range_constexpr(_PAYLOAD_VECTORS_PER_THREAD):
             local = tidx + i * _PAYLOAD_THREADS
             if cutlass.const_expr(self.inner <= _PAYLOAD_CHUNK):
                 dst_row = bidx * self.rows_per_block + local // self.inner
@@ -270,7 +270,9 @@ class _PackedTranspose:
         geometry = (self.b, self.middle, self.a, self.inner, self.numel)
         flat_copy(src, dst, geometry, self.bits, self.pack, False).launch(
             grid=[
-                cute.ceil_div(cute.size(dst), _PACKED_THREADS * _PACKED_EPT),
+                cute.ceil_div(
+                    cute.size(dst), _PACKED_THREADS * _PACKED_ELEMENTS_PER_THREAD
+                ),
                 1,
                 1,
             ],

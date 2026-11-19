@@ -5,7 +5,7 @@ from cutlass import Float32, Float64, Int32, Int64
 
 import torch
 
-from ..utils.scalar import f32
+from ..utils.scalar import f32, round_float
 from .types import NumericType, Scalar
 
 
@@ -31,11 +31,13 @@ cute2torch: dict[NumericType, torch.dtype] = {v: k for k, v in torch2cute.items(
 
 
 def scalar_arg(value: bool | int | float | complex, dtype: torch.dtype) -> Scalar:
-    r"""Box runtime scalars with direct integer-to-FP32 rounding."""
+    r"""Box scalars with native rounding before narrow floating conversions."""
     if isinstance(value, int) and dtype in (
         torch.float16,
         torch.bfloat16,
         torch.float32,
     ):
         value = f32(value)
+    if isinstance(value, (int, float)) and dtype in (torch.float16, torch.bfloat16):
+        value = round_float(value, dtype)
     return torch2cute[dtype](value)

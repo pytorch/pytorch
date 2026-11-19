@@ -8,7 +8,7 @@ from ._transpose import source_offset
 
 
 FLAT_THREADS: int = 256
-FLAT_EPT: int = 4
+FLAT_ELEMENTS_PER_THREAD: int = 4
 
 
 @cute.kernel
@@ -22,7 +22,7 @@ def flat_copy(
 ) -> None:
     tid, _, _ = cute.arch.thread_idx()
     bid, _, _ = cute.arch.block_idx()
-    base = bid * (FLAT_THREADS * FLAT_EPT) + tid
+    base = bid * (FLAT_THREADS * FLAT_ELEMENTS_PER_THREAD) + tid
     transpose_flat(src, dst, base, geometry, bits, pack, normalize)
 
 
@@ -88,7 +88,7 @@ def transpose_flat(
     normalize: cutlass.Constexpr,
 ) -> None:
     b, middle, a, inner, _ = geometry
-    for k in cutlass.range_constexpr(FLAT_EPT):
+    for k in cutlass.range_constexpr(FLAT_ELEMENTS_PER_THREAD):
         index = base + k * FLAT_THREADS
         if index < cute.size(dst):
             if cutlass.const_expr(pack > 1):
