@@ -6656,6 +6656,33 @@ class TestVmRegions(TestCase):
                 self.assertEqual(compiled(*usual), mixed(*usual))
             self.assertEqual(self.looks(compiled, *usual), ([], []))
 
+    def test_weights_that_moved_are_looked_at_anew(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in(), torch.no_grad():
+            for _ in range(10):
+                compiled(model, x)
+            self.assertEqual(self.looks(compiled, model, x)[1], [])
+            # Asked for a pointer it could be written through, a weight that
+            # a graph has built in gets memory of its own: it has moved.
+            address = torch._C._data_address
+            tensors = [*model.parameters(), *model.buffers()]
+            before = [address(tensor) for tensor in tensors]
+            for tensor in tensors:
+                tensor.data_ptr()
+            self.assertNotEqual([address(tensor) for tensor in tensors], before)
+            self.assertEqual(compiled(model, x), region_infer(model, x))
+            # What the graph has built in is checked on the calls that find
+            # the weight moved, and not on the ones after.
+            for _ in range(6):
+                compiled(model, x)
+            self.assertEqual(self.looks(compiled, model, x)[1], [])
+            self.assertEqual(compiled(model, x), region_infer(model, x))
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.vm(region_infer, passes=with_graphs("nope"))
