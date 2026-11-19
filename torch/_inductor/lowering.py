@@ -1647,6 +1647,15 @@ def repeat(x, repeats):
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return clone(expand(x, new_size))
+    if not V.choices.use_modular_indexing(
+        x.get_device(), numel=sympy_product(new_size), kind="repeat"
+    ):
+        # Interleave [r0, n0, r1, n1, ...] so the merge of each pair is handled
+        # by View.create, which realizes the expanded copy instead of indexing
+        # the input with ModularIndexing.
+        expand_size = [s for pair in zip(repeats, old_size) for s in pair]
+        unit_size = [s for n in old_size for s in (1, n)]
+        return view(expand(view(x, unit_size), expand_size), new_size)
 
     x_loader: Callable[[Any], Any]
 
@@ -4525,6 +4534,48 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
+    if (
+        step != 1
+        and V.graph.sizevars.statically_known_multiple_of(dim_size, step)
+        and not V.choices.use_modular_indexing(
+            x.get_device(), numel=sympy_product(x.get_size()), kind="slice_scatter"
+        )
+    ):
+        # Iterate [..., dim_size // step, step, ...] so the scattered position
+        # j * step + r and the src index j are linear, realize that, and
+        # reinterpret the contiguous result in x's shape (inlining the merge
+        # would bring FloorDiv(i, step) back).
+        first, offset = FloorDiv(start, step), ModularIndexing(start, 1, step)
+
+        def split_inner_fn(idx):
+            j, r = idx[dim], idx[dim + 1]
+            pos = j * step + r
+            index_expr = functools.partial(ops.index_expr, dtype=torch.int64)
+            mask = [ops.eq(index_expr(r), index_expr(offset))]
+            if start != 0:
+                mask.append(ops.ge(index_expr(j), index_expr(first)))
+            if end != dim_size:
+                mask.append(ops.lt(index_expr(pos), index_expr(sympy.expand(end))))
+            mask = functools.reduce(ops.and_, mask)
+            src_idx = [*idx[:dim], j - first, *idx[dim + 2 :]]
+            src_val = ops.masked(
+                mask, lambda: src_loader(src_idx), 0 if is_integer_type(x) else 0.0
+            )
+            return ops.where(
+                mask, src_val, x_loader([*idx[:dim], pos, *idx[dim + 2 :]])
+            )
+
+        split_size = list(x.get_size())
+        split_size[dim : dim + 1] = [FloorDiv(dim_size, step), step]
+        out = Pointwise.create(
+            device=x.get_device(),
+            dtype=x.get_dtype(),
+            inner_fn=split_inner_fn,
+            ranges=split_size,
+        )
+        out.realize()
+        return view(out, list(x.get_size()))
+
     def inner_fn(idx):
         if start == 0 and end == dim_size and step == 1:
             # selecting every element is the same as just src.clone()
@@ -5261,10 +5312,10 @@ def index_put_fallback(self, indices, values, accumulate):
 
     # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
     # because boolean indices trigger .nonzero() during CUDA graph capture
-    # When graph_partition is enabled, skip - partitioning handles this
+    # Skip when partitioning splits off cudagraph-unsafe ops: it handles this.
     fx_node = V.graph.current_node
     if (
-        not config.graph_partition
+        not V.graph.partition_plan.cudagraphs_per_partition
         and fx_node is not None
         and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
     ):
@@ -9654,9 +9705,9 @@ def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantB
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
-    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
-    # we run into memory cleanup issue
-    if not config.graph_partition and any(
+    # Skip when partitioning splits off cudagraph-unsafe ops: it handles control
+    # flow.
+    if not V.graph.partition_plan.cudagraphs_per_partition and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):
