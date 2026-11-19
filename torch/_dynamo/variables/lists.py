@@ -3734,6 +3734,20 @@ class ListReverseIteratorVariable(IteratorVariable):
         self.it_index = -1
         return remaining
 
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3999-L4009
+        remaining = self.it_index + 1
+        if self.is_exhausted or remaining > len(self.source_seq.items):  # type: ignore[attr-defined]
+            remaining = 0
+        return ConstantVariable.create(remaining)
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]
             codegen.add_push_null(
