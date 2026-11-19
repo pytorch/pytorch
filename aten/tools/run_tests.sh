@@ -23,7 +23,8 @@ python test/run_test.py --cpp --verbose -i \
   cpp/Dict_test \
   cpp/cpu_generator_test \
   cpp/legacy_vmap_test \
-  cpp/operators_test
+  cpp/operators_test \
+  cpp/test_parallel
 
 run_if_exists() {
   local test_name="$1"
