@@ -1653,11 +1653,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 hooks_type = type(hooks_dict)
-                if (
-                    name.startswith("_forward_")
-                    and hooks_type is not dict
-                    and hooks_type is not collections.OrderedDict
-                ):
+                if hooks_type is not dict and hooks_type is not collections.OrderedDict:
                     # The ordinary builder preserves subclass mapping protocols.
                     return super().tp_getattro_impl(tx, name)
                 if self.source is not None and hooks_dict in tx.output.side_effects:
@@ -1674,7 +1670,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    lazy_ids = hooks_source is not None and name.startswith("_forward_")
+                    lazy_ids = hooks_source is not None
                     if lazy_ids and not torch._dynamo.config.skip_nnmodule_hook_guards:
                         install_guard(hooks_source.make_guard(GuardBuilder.TYPE_MATCH))
                     result = _build_hooks_dict(
@@ -1685,13 +1681,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         flags=name.endswith(("with_kwargs", "always_called")),
                     )
                     # The private length probe cannot expose or mutate this tracker.
-                    if hooks_source is not None and (
-                        _track_empty_hooks
-                        or (
-                            hooks_type is not dict
-                            and hooks_type is not collections.OrderedDict
-                        )
-                    ):
+                    if hooks_source is not None and _track_empty_hooks:
                         return tx.output.side_effects.track_mutable(hooks_dict, result)
                     return result
 
