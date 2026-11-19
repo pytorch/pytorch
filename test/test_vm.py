@@ -7701,6 +7701,16 @@ class TestVmRegions(TestCase):
 instantiate_parametrized_tests(TestVmRegions)
 
 
+def vm_twelve(x):
+    for _ in range(12):
+        x = x + 1
+    return x
+
+
+def vm_thirteen(x):
+    return vm_twelve(x) + 1
+
+
 def vm_scaled(x, y):
     return unr_loop(x, y)[0] * 2
 
@@ -7741,6 +7751,30 @@ class TestVmApi(TestCase):
     def test_unroll_goes_behind_inline(self):
         with self.assertRaisesRegex(ValueError, "the engine inlines first"):
             torch.vm(lambda x: x, passes=(P.Unroll(), P.Inline()))
+
+    def test_unroll_takes_the_number_of_iterations(self):
+        x = torch.zeros(2)
+        usual = torch.vm(vm_twelve, fallback=False)
+        self.assertEqual(usual(x), x + 12)
+        self.assertEqual(usual.stats()["unrolled_loops"], 0)
+        for most, unrolled in ((11, 0), (12, 1), (16, 1)):
+            passes = (P.Inline(), P.Unroll(most))
+            fn = torch.vm(vm_twelve, passes=passes, fallback=False)
+            self.assertEqual(fn(x), x + 12)
+            self.assertEqual(fn.stats()["unrolled_loops"], unrolled)
+        # A loop that comes in with an inlined call is unrolled as well.
+        passes = (P.Inline(), P.Unroll(12))
+        outer = torch.vm(vm_thirteen, passes=passes, fallback=False)
+        self.assertEqual(outer(x), x + 13)
+        self.assertEqual(len(outer.stats()["inlined"]), 1)
+        self.assertEqual(outer.stats()["unrolled_loops"], 1)
+        said = "torch.vm.passes.Unroll(max_trip_count=16)"
+        self.assertEqual(repr(P.Unroll(16)), said)
+        self.assertEqual(P.Unroll(8), P.Unroll())
+        with self.assertRaisesRegex(ValueError, "at least one iteration"):
+            P.Unroll(0)
+        with self.assertRaisesRegex(TypeError, "number of iterations"):
+            P.Unroll("8")
 
     def test_the_graph_pass_is_asked_for(self):
         self.assertFalse(any(isinstance(p, P.Graphs) for p in DEFAULT))
