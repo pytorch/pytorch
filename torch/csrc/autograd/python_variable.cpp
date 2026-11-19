@@ -921,6 +921,18 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("OutputSharding"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_split_schema_for_cache,
+    py::module::import("torch.distributed.tensor")
+        .attr("_op_schema")
+        .attr("_split_schema_for_cache"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_rebuild_schema_from_cache,
+    py::module::import("torch.distributed.tensor")
+        .attr("_op_schema")
+        .attr("_rebuild_schema_from_cache"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_op_strategy_class,
     py::module::import("torch.distributed.tensor")
         .attr("_op_schema")
@@ -983,6 +995,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(op_to_schema_info_for_single_dim_strategy)                \
   _(output_sharding)                                          \
   _(output_spec)                                              \
+  _(redistribute_schema)                                      \
   _(schema_info)                                              \
   _(shape)                                                    \
   _(sharding_propagator)                                      \
@@ -990,7 +1003,8 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(static_argnum)                                            \
   _(static_kwargkey)                                          \
   _(stride)                                                   \
-  _(tensor_meta)
+  _(tensor_meta)                                              \
+  _(use_val_from_redistribute_schema)
 
 struct DTensorInternedStrings {
 #define DECLARE_INTERNED_STRING_VARIABLE(s) PyObject* s;
@@ -1265,6 +1279,12 @@ struct CachedSharding {
   enum class Shape { None, Single, Tuple, List };
   Shape shape = Shape::None;
   std::vector<std::optional<CachedSpec>> specs;
+  // Set only when needs_redistribute. Every consumer reachable from this
+  // cache checks that flag before reading redistribute_schema.
+  py::object redistribute_skeleton;
+  std::vector<CachedSpec> redistribute_specs;
+  bool needs_redistribute = false;
+  bool use_val_from_redistribute_schema = false;
 };
 
 struct NativeOpSchemaAndMeshes {
@@ -1312,10 +1332,11 @@ class NativeShardingPropagatorCache {
   mutable std::size_t misses_ = 0;
 };
 
+template <typename SpecVec>
 static bool append_cached_spec(
     py::handle spec,
     c10::ArrayRef<py::object> meshes,
-    std::vector<std::optional<CachedSpec>>& out) {
+    SpecVec& out) {
   py::object mesh = spec.attr("mesh");
   for (const auto i : c10::irange(meshes.size())) {
     if (meshes[i].is(mesh)) {
@@ -1335,12 +1356,38 @@ static std::optional<CachedSharding> make_cached_sharding(
     py::handle sharding,
     c10::ArrayRef<py::object> meshes,
     const NativeOpSchema& schema) {
+  CachedSharding result;
   if (checked_istrue(
           sharding.attr(dtensor_interned_strings.needs_redistribute).ptr())) {
-    log_sharding_prop_cache_insert_refused(schema, "needs_redistribute");
-    return std::nullopt;
+    py::object rs = sharding.attr(dtensor_interned_strings.redistribute_schema);
+    if (rs.is_none()) {
+      log_sharding_prop_cache_insert_refused(
+          schema, "redistribute schema nonexistent");
+      return std::nullopt;
+    }
+    py::object split =
+        checked_vectorcall(get_split_schema_for_cache().ptr(), rs.ptr());
+    if (split.is_none()) {
+      log_sharding_prop_cache_insert_refused(
+          schema, "redistribute schema holds unreachable specs");
+      return std::nullopt;
+    }
+    py::tuple split_tup = py::reinterpret_borrow<py::tuple>(split);
+    py::object spec_list = split_tup[1];
+    result.redistribute_skeleton = split_tup[0];
+    for (const auto spec : py::reinterpret_borrow<py::sequence>(spec_list)) {
+      if (append_cached_spec(spec, meshes, result.redistribute_specs)) {
+        log_sharding_prop_cache_insert_refused(
+            schema, "redistribute spec mesh is not an input mesh");
+        return std::nullopt;
+      }
+    }
+    result.needs_redistribute = true;
+    result.use_val_from_redistribute_schema = checked_istrue(
+        sharding.attr(dtensor_interned_strings.use_val_from_redistribute_schema)
+            .ptr());
   }
-  CachedSharding result;
+
   const auto output_spec = sharding.attr(dtensor_interned_strings.output_spec);
   if (output_spec.is_none()) {
     result.shape = CachedSharding::Shape::None;
@@ -1417,7 +1464,23 @@ static py::object make_output_sharding(
       break;
     }
   }
-  return checked_vectorcall(get_output_sharding_class().ptr(), spec.ptr());
+  py::object redistribute_schema = py::none();
+  if (cached.needs_redistribute) {
+    py::list rebuilt;
+    for (const auto& s : cached.redistribute_specs) {
+      rebuilt.append(make_spec(s, meshes));
+    }
+    redistribute_schema = checked_vectorcall(
+        get_rebuild_schema_from_cache().ptr(),
+        cached.redistribute_skeleton.ptr(),
+        rebuilt.ptr());
+  }
+  return checked_vectorcall(
+      get_output_sharding_class().ptr(),
+      spec.ptr(),
+      redistribute_schema.ptr(),
+      cached.needs_redistribute ? Py_True : Py_False,
+      cached.use_val_from_redistribute_schema ? Py_True : Py_False);
 }
 
 static std::optional<NativeOpSchemaAndMeshes> create_native_op_schema(
