@@ -4832,6 +4832,23 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
+    @onlyOn(("cpu", "cuda"))
+    @dtypes(torch.float64)
+    def test_igamma_igammac_asymptotic_series_precision(self, device, dtype):
+        # a > 20 with x near a takes the uniform asymptotic expansion branch.
+        # Rows are (a, x, igamma, igammac); references computed with mpmath.
+        cases = [
+            (25.0, 25.0, 0.52660153144365064, 0.47339846855634936),
+            (150.0, 150.0, 0.51085822974935968, 0.48914177025064032),
+            (20.5, 14.555, 0.082060083042801457, 0.91793991695719854),
+            (20.5, 26.445, 0.89903964361056320, 0.10096035638943680),
+            (50.0, 45.0, 0.24680203440017027, 0.75319796559982973),
+            (1000.0, 1010.0, 0.62767894473699473, 0.37232105526300527),
+        ]
+        a, x, p, q = torch.tensor(cases, dtype=dtype, device=device).unbind(1)
+        self.assertEqual(torch.igamma(a, x), p, rtol=1e-13, atol=0)
+        self.assertEqual(torch.igammac(a, x), q, rtol=1e-13, atol=0)
+
     @onlyOn(("cuda", "xpu"))
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
