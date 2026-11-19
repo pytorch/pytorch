@@ -1,4 +1,5 @@
 #include <fmt/format.h>
+#include <algorithm>
 #include <cstring>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/autograd/profiler_kineto.h>
@@ -96,6 +97,13 @@ inline bool isValidDisableState(ProfilerState state) {
 inline bool isExternalTracerState(ProfilerState state) {
   return state == ProfilerState::NVTX || state == ProfilerState::ITT ||
       state == ProfilerState::PRIVATEUSE1;
+}
+
+// Devices whose collection toggleCollectionDynamic can turn on and off. Kineto
+// toggles them all together.
+inline bool isDynamicToggleDevice(ActivityType act) {
+  return act == ActivityType::CUDA || act == ActivityType::XPU ||
+      act == ActivityType::MTIA;
 }
 
 struct KinetoThreadLocalState : public ProfilerStateBase {
@@ -780,21 +788,19 @@ static void toggleCPUCollectionDynamic(bool enable) {
 void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  if (activities.contains(torch::autograd::profiler::ActivityType::CPU) &&
-      (!activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
-       !activities.contains(torch::autograd::profiler::ActivityType::XPU))) {
+  using torch::autograd::profiler::ActivityType;
+  const bool togglesCpu = activities.contains(ActivityType::CPU);
+  const bool togglesDevice =
+      std::any_of(activities.begin(), activities.end(), isDynamicToggleDevice);
+  if (togglesCpu && !togglesDevice) {
     LOG(WARNING)
         << "Toggling CPU activity with GPU activity on may result in traces with GPU events on arbitrary tracks";
-  } else if (
-      (activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
-       activities.contains(torch::autograd::profiler::ActivityType::XPU)) &&
-      !activities.contains(torch::autograd::profiler::ActivityType::CPU)) {
+  } else if (togglesDevice && !togglesCpu) {
     LOG(WARNING)
         << "Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events";
   }
   for (auto act : activities) {
-    if (act == torch::autograd::profiler::ActivityType::CUDA ||
-        act == torch::autograd::profiler::ActivityType::XPU) {
+    if (isDynamicToggleDevice(act)) {
       torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
     } else if (act == torch::autograd::profiler::ActivityType::CPU) {
       toggleCPUCollectionDynamic(enable);
