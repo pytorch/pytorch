@@ -397,7 +397,7 @@ class UniformQuantizationObserverBase(ObserverBase):
                 zero_point = zero_point.new_full(zero_point.size(), 2**15)
         elif self.qscheme == torch.per_channel_affine_float_qparams:
             scale = (max_val - min_val) / float(quant_max - quant_min)
-            scale = torch.where(scale > self.eps, scale, torch.ones_like(scale))
+            scale = torch.where(scale > self.eps, scale, 1)
             # We use the quantize function
             # xq = Round(Xf * inv_scale + zero_point),
             # setting zero_point to (-1 * min *inv_scale) we get
