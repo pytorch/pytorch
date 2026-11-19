@@ -1435,6 +1435,9 @@ class TestMatmulCuda(InductorTestCase):
         other_env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK_TILE", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK"}[backend]
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        ck_tile_gpus = ("MI300A", "MI300X", "MI350X", "MI355X")  # ck_tile_group_gemm/device_info.h
+        if backend == "ck_tile" and not any(gpu in torch.cuda.get_device_name() for gpu in ck_tile_gpus):
+            raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on the GPUs in device_info.h")
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
 
         def has_ck_kernel(kernels: set[str], hint: str) -> bool:
