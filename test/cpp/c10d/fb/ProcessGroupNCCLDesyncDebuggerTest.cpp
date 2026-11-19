@@ -7,8 +7,8 @@
 
 #include <gtest/gtest.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/fb/ProcessGroupNCCL.hpp>
 
 namespace {
 
