@@ -1221,8 +1221,8 @@ class FSDPTestMixin:
         return run_subtests(self, *args, **kwargs)
 
     @classmethod
-    def backend_str(cls, device_type) -> str:
-        return dist.get_default_backend_for_device(device_type)
+    def backend_str(cls, device) -> str:
+        return dist.get_default_backend_for_device(device)
 
     @property
     def device_type(self) -> str:
