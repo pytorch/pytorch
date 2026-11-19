@@ -528,14 +528,19 @@ class TestFlyDSLTopK(TestCase):
         with DeterministicGuard(deterministic):
             for rows, n in ((m, n0), (m + 1, n1)):
                 x = _tied_input((rows, n), dtype)
-                with pn.flydsl.disabled():
-                    ref_v, ref_i = torch.topk(x, k, dim=-1, largest=largest)
-                got_v, got_i = torch.topk(x, k, dim=-1, largest=largest)
-                self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+                # The longer row's last column is its scalar tail. A unique
+                # extreme there has to be selected, so a reused kernel that
+                # still scans only the first length fails.
+                if n == n1:
+                    x[:, -1] = 4 if largest else -1
                 if deterministic:
+                    with pn.flydsl.disabled():
+                        ref_v, ref_i = torch.topk(x, k, dim=-1, largest=largest)
+                    got_v, got_i = torch.topk(x, k, dim=-1, largest=largest)
+                    self.assertEqual(got_v, ref_v, atol=0, rtol=0)
                     self.assertEqual(got_i, ref_i)
                 else:
-                    self.assertEqual(torch.gather(x, -1, got_i), got_v, atol=0, rtol=0)
+                    self._assert_topk_matches_aten(x, k, largest=largest)
 
         info = topk_cache_info("radix")
         self.assertEqual(info.misses, 1)
