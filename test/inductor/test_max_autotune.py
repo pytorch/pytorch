@@ -3288,7 +3288,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(filter_decompose_k_splits([], 16, 16, 64, 8, 0), [])
 
     def test_decompose_k_split_bounds(self):
-        def bounds_for(device_type, major, num_sms):
+        def bounds_for(device_type, major, num_sms, gfx_arch=""):
             props = mock.Mock(type=device_type, major=major)
             with (
                 mock.patch.object(DeviceProperties, "create", return_value=props),
@@ -3296,12 +3296,18 @@ class TestMaxAutotune(TestCase):
                     "torch._inductor.heuristics.template.decompose_k.get_num_sms",
                     return_value=num_sms,
                 ),
+                mock.patch(
+                    "torch._inductor.heuristics.template.decompose_k.rocm_gfx_arch",
+                    return_value=gfx_arch,
+                ),
             ):
                 return decompose_k_split_bounds(torch.device(GPU_TYPE))
 
         self.assertEqual(bounds_for("cuda", 10, 148), (74, 0))
         self.assertEqual(bounds_for("cuda", 9, 132), (8, 8 * 1024 * 1024))
         self.assertEqual(bounds_for("hip", 9, 304), (0, 0))
+        self.assertEqual(bounds_for("hip", 9, 304, "gfx942"), (0, 0))
+        self.assertEqual(bounds_for("hip", 9, 256, "gfx950"), (32, 64 * 1024 * 1024))
         self.assertEqual(bounds_for("xpu", None, 64), (0, 0))
 
     @unittest.skipIf(not is_datacenter_blackwell_arch(), "requires SM100")
