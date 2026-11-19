@@ -71,6 +71,7 @@ from torch._C._dynamo.guards import (
     GuardAccessor,
     GuardDebugInfo,
     GuardManager,
+    ID_MATCH,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
     install_storage_overlap_partition_guard,
@@ -82,6 +83,7 @@ from torch._C._dynamo.guards import (
     RelationalGuard,
     RootGuardManager,
     TupleGetItemGuardAccessor,
+    TYPE_MATCH,
     TypeDictGuardAccessor,
     TypeGuardAccessor,
     TypeMROGuardAccessor,
@@ -631,6 +633,14 @@ class GuardManagerWrapper:
                 )
             )
 
+        def has_only_leaf_guards(
+            node: GuardManager, accepted_leaf_guards: tuple[type[LeafGuard], ...]
+        ) -> bool:
+            return all(
+                isinstance(guard, accepted_leaf_guards)
+                for guard in node.get_leaf_guards()
+            )
+
         def visit_dict_manager(
             node: DictGuardManager,
         ) -> tuple[list[GuardManager], bool]:
@@ -728,8 +738,11 @@ class GuardManagerWrapper:
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
-                is_subtree_tag_safe = check_tag_safety(
-                    node, (GetGenericDictGuardAccessor, TypeGuardAccessor)
+                is_subtree_tag_safe = has_only_leaf_guards(
+                    node, (ID_MATCH, TYPE_MATCH)
+                ) and check_tag_safety(
+                    node,
+                    (GetGenericDictGuardAccessor, TypeGuardAccessor),
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
@@ -792,7 +805,9 @@ class GuardManagerWrapper:
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), type):
-                is_subtree_tag_safe = check_tag_safety(
+                is_subtree_tag_safe = has_only_leaf_guards(
+                    node, (ID_MATCH, TYPE_MATCH)
+                ) and check_tag_safety(
                     node, (TypeDictGuardAccessor, TypeMROGuardAccessor)
                 )
                 if is_subtree_tag_safe:
