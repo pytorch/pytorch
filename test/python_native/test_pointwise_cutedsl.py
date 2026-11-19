@@ -17,7 +17,7 @@ import unittest
 import warnings
 
 import torch
-from torch._native.cutedsl_utils import POINTWISE_ARCH_MAJORS
+from torch._native.cutedsl.config import POINTWISE_ARCH_MAJORS
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
