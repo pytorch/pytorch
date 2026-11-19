@@ -29,9 +29,10 @@ from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
+from torch._inductor.runtime.hints import DeviceProperties, get_warp_size
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
@@ -236,6 +237,11 @@ def expected_not_implemented_on_mps(test_func):
         self.fail("expected NotImplementedError on MPS but test passed")
 
     return wrapper
+
+
+def _assert_xcc_remapped(code, num_xccs):
+    checker = FileCheck().check(f"NUM_XCCS : tl.constexpr = {num_xccs}")
+    checker.check("tl.program_id(0) % NUM_XCCS").run(code)
 
 
 def rmse(ref, res):
@@ -5569,7 +5575,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_mps
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
     def test_xcc_remap(self, device):
         # 2 * 5 * cdiv(448, BLOCK_M) programs is not a multiple of 3 for any
         # power-of-two BLOCK_M in 16..128, so some XCCs get one program fewer.
@@ -5586,7 +5592,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
         out, code = run(3)
-        FileCheck().check("NUM_XCCS : tl.constexpr = 3").run(code[0])
+        _assert_xcc_remapped(code[0], 3)
         ref, code = run(0)
         FileCheck().check_not("NUM_XCCS : tl.constexpr").run(code[0])
         self.assertEqual(out, ref)
@@ -5599,7 +5605,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_mps  # MPS backward raises NotImplementedError
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
     def test_xcc_remap_backward(self, device):
         # With batch 5, 2 kv heads and GQA 2, 5 * 2 * (2 * cdiv(400, BLOCK_M2) +
         # cdiv(272, BLOCK_N1)) programs is not a multiple of 3 for any
@@ -5627,14 +5633,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         grads, code = run(3)
         self.assertEqual(len(code), 2)
-        FileCheck().check("NUM_XCCS : tl.constexpr = 3").run(code[-1])
+        for c in code:
+            _assert_xcc_remapped(c, 3)
         ref, code = run(0)
         FileCheck().check_not("NUM_XCCS : tl.constexpr").run("\n".join(code))
         self.assertEqual(grads, ref)
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_mps  # MPS backward raises NotImplementedError
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
     def test_xcc_remap_dynamic_batch(self, device):
         block_mask = create_block_mask(
             lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
@@ -5659,7 +5666,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         res_small, code = run_and_get_code(fwd_bwd, remapped, 3, *small)
         self.assertEqual(len(code), 2)
         for c in code:
-            FileCheck().check("NUM_XCCS : tl.constexpr = 3").run(c)
+            _assert_xcc_remapped(c, 3)
         # Batch 5 reuses the batch-2 graphs: the grid-size guard does not force
         # a recompile on the batch.
         with torch._dynamo.config.patch(error_on_recompile=True):
@@ -5671,8 +5678,43 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_mps  # MPS backward raises NotImplementedError
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_grid_limit_guard(self, device):
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+        options = {"NUM_XCCS": 3, "BLOCK_M": 64, "BLOCK_N": 64, "num_warps": 4}
+
+        def make_inputs(batch):
+            inputs = [torch.randn(batch, 4, 448, 64, device=device) for _ in range(3)]
+            for t in inputs:
+                torch._dynamo.mark_dynamic(t, 0)
+            return inputs
+
+        def run(fn, batch):
+            inputs = make_inputs(batch)
+            return fn(*inputs, block_mask=block_mask, kernel_options=options)
+
+        # cdiv(448, 64) * 4 heads programs of 4 warps per batch element. A limit
+        # between batch 2 and batch 5 remaps batch 2, and the guard on the
+        # flattened grid must then recompile batch 5 rather than reuse it.
+        limit = 3 * 7 * 4 * 4 * get_warp_size(torch.device(device))
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        with mock.patch.object(flex_lowering, "_MAX_GRID_WORK_ITEMS", limit):
+            _, code = run_and_get_code(run, compiled, 2)
+            _assert_xcc_remapped(code[0], 3)
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                with self.assertRaises(torch._dynamo.exc.RecompileError):
+                    run(compiled, 5)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
     def test_xcc_remap_default(self, device):
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+
         q, k, v = (
             torch.randn(2, 4, 256, 64, device=device, requires_grad=True)
             for _ in range(3)
@@ -5682,22 +5724,33 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out = torch.compile(flex_attention, fullgraph=True)(q, k, v)
             return torch.autograd.grad(out.sum(), (q, k, v))
 
-        _, code = run_and_get_code(fwd_bwd)
-        self.assertEqual(len(code), 2)
-        expected = None
+        remap_by_default = False
+        xcc_count = None
         if torch.version.hip is not None and torch.device(device).type == "cuda":
             props = torch.cuda.get_device_properties(device)
-            if props.gcnArchName.split(":")[0] in ("gfx942", "gfx950"):
-                expected = props.xcc_count
-        for c in code:
-            if expected is not None and expected > 1:
-                FileCheck().check(f"NUM_XCCS : tl.constexpr = {expected}").run(c)
-            else:
-                FileCheck().check_not("NUM_XCCS : tl.constexpr").run(c)
+            remap_by_default = props.gcnArchName.split(":")[0] in ("gfx942", "gfx950")
+            xcc_count = props.xcc_count
+
+        # A stubbed count shows the default is read from the device, not assumed.
+        class ThreeXccs:
+            @staticmethod
+            def create(device):
+                return DeviceProperties.create(device)._replace(xcc_count=3)
+
+        for count, props_cls in ((xcc_count, DeviceProperties), (3, ThreeXccs)):
+            patched = mock.patch.object(flex_lowering, "DeviceProperties", props_cls)
+            with fresh_cache(), patched:
+                _, code = run_and_get_code(fwd_bwd)
+            self.assertEqual(len(code), 2)
+            for c in code:
+                if remap_by_default and count is not None and count > 1:
+                    _assert_xcc_remapped(c, count)
+                else:
+                    FileCheck().check_not("NUM_XCCS : tl.constexpr").run(c)
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_mps  # MPS backward raises NotImplementedError
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
     def test_xcc_remap_fewer_programs_than_xccs(self, device):
         # 2 forward and 2 + 2 backward programs, fewer than NUM_XCCS=8.
         q, k, v = (
@@ -5720,7 +5773,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         grads, code = run(8)
         self.assertEqual(len(code), 2)
         for c in code:
-            FileCheck().check("NUM_XCCS : tl.constexpr = 8").run(c)
+            _assert_xcc_remapped(c, 8)
         ref, _ = run(0)
         self.assertEqual(grads, ref)
         # One XCC needs no remap.

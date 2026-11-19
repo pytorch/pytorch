@@ -305,10 +305,12 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     NUM_XCCS: NotRequired[int]
-    """ROCm-specific number of XCCs to remap Triton kernel programs across, so
-    the blocks of one (batch, head) share an XCC's L2. Defaults to the device's
-    XCC count on gfx942 and gfx950 and off elsewhere; 0 or 1 disables it. May
-    add a size guard with dynamic shapes."""
+    """Number of XCCs to remap the Triton forward and backward kernels' programs
+    across, so the blocks of one (batch, head) share an XCC's L2. Defaults to
+    the device's XCC count on gfx942 and gfx950 with ROCm 7.0+ and off
+    elsewhere; 0 or 1 disables it. Not used by the decode, FLASH or FLYDSL
+    kernels, and skipped when the flattened grid would not fit; may add a size
+    guard with dynamic shapes."""
 
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
