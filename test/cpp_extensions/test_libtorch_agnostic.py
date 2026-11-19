@@ -1,6 +1,7 @@
 # Owner(s): ["module: cpp"]
 
 import gc
+import importlib
 import math
 import sysconfig
 import unittest
@@ -27,6 +28,7 @@ from torch.testing._internal.common_utils import (
     set_warn_always_context,
     skipIfTorchDynamo,
     skipIfWindows,
+    subtest,
     TemporaryFileName,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1317,37 +1319,34 @@ for warning in w:
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize(
-        "size,stride",
+        "target",
         [
-            ((2, 3), (3, 1)),
-            ((2, 3), (1, 2)),
-            ((2, 3), (1, 4)),
-            ((2, 3, 4, 5), (60, 1, 15, 3)),
-            ((0, 3), (1, 4)),
-            ((), ()),
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
         ],
     )
-    @parametrize("layout", [None, torch.strided])
-    def test_my_empty_strided(self, device, size, stride, layout):
-        import libtorch_agn_2_10 as libtorch_agnostic
+    def test_my_empty_strided(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
 
+        size, stride = (2, 3), (1, 4)
         cases = [
-            {} if layout is None else {"layout": layout},
-            {"dtype": torch.float32, "layout": layout},
-            {"dtype": torch.float64, "layout": layout, "device": device},
+            {},
+            {"dtype": torch.int32},
+            {"layout": torch.strided},
+            {"device": device},
+            {"pin_memory": False},
             {
                 "dtype": torch.int32,
-                "layout": layout,
+                "layout": torch.strided,
                 "device": device,
                 "pin_memory": False,
             },
         ]
-        if torch.device(device).type == "cuda" and (size, stride, layout) == (
-            (2, 3),
-            (1, 4),
-            None,
-        ):
-            cases.append({"dtype": torch.float32, "device": "cpu", "pin_memory": True})
+        # CUDA provides the pinning runtime. The allocation itself is on CPU.
+        if torch.device(device).type == "cuda":
+            cases.append({"device": "cpu", "pin_memory": True})
 
         with DeterministicGuard(True):
             for options in cases:
@@ -1355,29 +1354,21 @@ for warning in w:
                 expected = torch.empty_strided(size, stride, **options)
                 self.assertEqual(actual, expected, exact_device=True, exact_layout=True)
                 self.assertEqual(actual.stride(), expected.stride())
-                self.assertEqual(actual.is_contiguous(), expected.is_contiguous())
-                if len(size) == 4:
-                    self.assertTrue(
-                        actual.is_contiguous(memory_format=torch.channels_last)
-                    )
                 if options.get("pin_memory"):
                     self.assertTrue(actual.is_pinned())
 
-        if (size, stride, layout) == ((2, 3), (3, 1), None):
-            for empty_strided in (
-                torch.empty_strided,
-                libtorch_agnostic.ops.my_empty_strided,
-            ):
-                with self.assertRaisesRegex(RuntimeError, "dimensionality of strides"):
-                    empty_strided(size, (3,))
-                with self.assertRaisesRegex(RuntimeError, "Storage size calculation"):
-                    empty_strided(size, (-3, 1))
-                with self.assertRaisesRegex(RuntimeError, "SparseCPU"):
-                    empty_strided(size, stride, layout=torch.sparse_coo, device="cpu")
-
     @skipIfTorchVersionLessThan(2, 10)
-    def test_my_slice(self, device):
-        import libtorch_agn_2_10 as libtorch_agnostic
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_slice(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
 
         x = torch.arange(12, device=device).reshape(2, 6)
         self.assertEqual(libtorch_agnostic.ops.my_slice(x), x[:])

@@ -545,6 +545,17 @@ inline torch::stable::Tensor slice(
     std::optional<int64_t> start = std::nullopt,
     std::optional<int64_t> end = std::nullopt,
     int64_t step = 1) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_slice_Tensor(
+      self.get(),
+      dim,
+      start ? &*start : nullptr,
+      end ? &*end : nullptr,
+      step,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 5> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
@@ -554,6 +565,7 @@ inline torch::stable::Tensor slice(
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::slice", "Tensor", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 #endif
@@ -689,6 +701,32 @@ inline torch::stable::Tensor empty_strided(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_empty_strided(
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      stride.data(),
+      static_cast<int64_t>(stride.size()),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 6> stack{
       torch::stable::detail::from(size),
       torch::stable::detail::from(stride),
@@ -699,6 +737,7 @@ inline torch::stable::Tensor empty_strided(
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::empty_strided", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the reshape op.
