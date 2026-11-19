@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Lstm.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <torch/library.h>
@@ -442,7 +443,7 @@ static std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
         dnnl::memory::format_tag::ldgoi});
 
   auto [packed_desc_ih, packed_desc_hh] =
-      ideep::lstm_forward_inference::expected_weights_desc(
+      mkldnn::lstm_forward_inference_expected_weights_desc(
           output_sizes,
           src_layer,
           src_iter,
