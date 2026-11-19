@@ -601,6 +601,22 @@ def _activation_intervals(
 class ScheduleTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_loss_graph_released_when_retrieved_for_backward(self):
+        stage = MockPipelineStage(num_stages=1, group_size=1, group_rank=0)
+        stage.stage_index = 0
+        schedule = ScheduleGPipe(stage, n_microbatches=2, loss_fn=torch.nn.MSELoss())
+        inputs = [torch.ones(2, requires_grad=True) for _ in range(2)]
+        losses = [input.square().sum() for input in inputs]
+        schedule._internal_losses.extend(losses)
+
+        backward_loss = schedule._maybe_get_loss(stage, 0)
+
+        self.assertIs(backward_loss, losses[0])
+        self.assertIsNone(schedule._internal_losses[0].grad_fn)
+        self.assertIs(schedule._internal_losses[1], losses[1])
+        backward_loss.backward()
+        self.assertEqual(inputs[0].grad, 2 * inputs[0])
+
     def test_stage_recv_buffer_allocation_and_consumption(self):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         stage.stage_index = 1

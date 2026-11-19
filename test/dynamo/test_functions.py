@@ -228,10 +228,6 @@ def deque_length_hints():
     return tuple(hints)
 
 
-def _hash_remainder(value):
-    return value % 997
-
-
 def _repr_hash_with_local_id(value: int) -> str:
     token_id = id(object())
     # Cancel the temporary ID so eager repetitions remain comparable.
@@ -277,19 +273,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             write(mapping, setter)
             return x + 1, list(dict.items(mapping)), list(mapping)
 
-        x = torch.ones(1)
-
-        def call(fn, cls):
+        def call(run, cls):
             mapping = cls(a=1)
-            return fn(x, mapping, dict.__setitem__.__get__(mapping))
+            return run(torch.ones(1), mapping, dict.__setitem__.__get__(mapping))
 
         compiled = torch.compile(fn, backend="eager")
         for cls in (dict, collections.OrderedDict):
             self.assertEqual(call(compiled, cls), call(fn, cls))
         torch._dynamo.reset()
-        fullgraph = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Unsupported, "storage mutation on OrderedDict"):
-            call(fullgraph, collections.OrderedDict)
+            call(
+                torch.compile(fn, backend="eager", fullgraph=True),
+                collections.OrderedDict,
+            )
 
     def test_prebound_base_slot_override_fallback(self):
         class Override(list):
@@ -315,10 +311,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             for methods in cases:
                 self.assertEqual(compiled(x, methods), fn(x, methods))
         self.assertEqual(counter.frame_count, 2)
-
-    def test_prebound_wrapper_mutable_hash_escape(self):
-        fn = lambda x, method: (x + 1, hash(method))
-        self._check_key_fallback(fn, (dict.__setitem__.__get__({}),), _HASH_ESCAPE)
 
     @parametrize("observe", [lambda a, b: len({a: 1, b: 2}), operator.eq])
     @parametrize("capture", ["aot", "cache"])
@@ -4627,7 +4619,7 @@ partial_fn = functools.partial(fn, scale=2)
     def test_filter(self):
         def fn(inputs):
             out = inputs[0]
-            for inp in filter(lambda x: (x.requires_grad), inputs):
+            for inp in filter(lambda x: x.requires_grad, inputs):
                 out = out * inp
             return out
 
@@ -7544,12 +7536,11 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch(debug_force_nested_calls=False)
     def test_precompile_refuses_method_hash(self):
-        method = dict.fromkeys
         fn = lambda x, m: (x + 1, hash(m))
-        x = torch.ones(1)
+        args = torch.ones(1), dict.fromkeys
         session = precompile_package.precompile_capture(fn, backend="eager")
         with session as call:
-            self.assertEqual(call(x, method), fn(x, method))
+            self.assertEqual(call(*args), fn(*args))
         with self.assertRaisesRegex(PackageError, "no dispatchable graph"):
             session.snapshot_artifact()
 
@@ -7564,9 +7555,7 @@ class GraphModule(torch.nn.Module):
                 keys = {method} if capture == "set" else {method: 17}
                 metadata = (hash(method), method == dict.fromkeys, method is None)
                 return x + len(keys), metadata, keys
-            if instance:
-                return x + 1, method.__name__, hash(method), method
-            return x + 1, method.__name__, method
+            return x + 1, method.__name__, hash(method) if instance else None, method
 
         receiver = [] if instance else dict
         names = ("count", "index") if instance else ("fromkeys", "__class_getitem__")
@@ -7586,9 +7575,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exported(x), module(x))
 
     def test_prebound_method_avoids_portability_callbacks(self):
-        read_module = unittest.mock.Mock(
-            side_effect=ValueError("module descriptor fired")
-        )
+        read_module = unittest.mock.Mock(side_effect=AssertionError)
         meta = type("Meta", (type,), {"__module__": property(read_module)})
         D = meta("D", (dict,), {})
         self._check_key_reuse(lambda x, m: (x + 1, m.__name__), (D.fromkeys,), frames=1)
@@ -7607,8 +7594,8 @@ class GraphModule(torch.nn.Module):
     def test_prebound_method_wrapper_identity(self, observe, capture):
         fn = lambda x, pair: (x + 1, observe(*pair))
         receiver = [] if capture == "ordinary_instance" else dict
-        name = "count" if capture == "ordinary_instance" else "fromkeys"
-        saved, fresh = getattr(receiver, name), getattr(receiver, name)
+        name = "fromkeys" if receiver is dict else "count"
+        saved, fresh = (getattr(receiver, name) for _ in range(2))
         self.assertIsNot(saved, fresh)
         if capture == "saved":
             self._check_capture_refusal(
@@ -7619,7 +7606,7 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("inline", [False, True])
     @parametrize("as_key", [False, True])
-    def test_literal_tuple_method_receiver_fallback(self, inline, as_key):
+    def test_literal_tuple_method_receiver(self, inline, as_key):
         bind = tuple.__dict__["count"].__get__
 
         def fn(x, receiver):
@@ -7628,7 +7615,10 @@ class GraphModule(torch.nn.Module):
 
         literal = next(value for value in fn.__code__.co_consts if type(value) is tuple)
         receivers = (None,) if inline else (literal, tuple(range(1, 3)), literal)
-        self._check_key_fallback(fn, receivers, "unstable receiver")
+        if inline and not as_key:
+            self._check_key_reuse(fn, receivers, frames=1)
+        else:
+            self._check_key_fallback(fn, receivers, "unstable receiver")
 
     @parametrize(
         "operation", [hash, lambda m: m.__name__, lambda m: m(1), lambda m: len({m})]
@@ -7653,8 +7643,7 @@ class GraphModule(torch.nn.Module):
         mapping = {Keys([first.count]): 7}
         self._check_key_reuse(fn, (second, third, first, second), mapping, frames=3)
 
-    @parametrize("direct", [False, True])
-    def test_bound_builtin_method_hash(self, direct):
+    def test_bound_builtin_method_hash(self):
         receiver = [1, 1]
         source_backed = receiver.count
 
@@ -7667,9 +7656,7 @@ class GraphModule(torch.nn.Module):
         )
 
         def newly_bound(x):
-            return x + hash(
-                receiver.count if direct else list.count.__get__(receiver, list)
-            )
+            return x + hash(list.count.__get__(receiver, list))
 
         with self.assertRaises(Unsupported):
             torch.compile(newly_bound, backend="eager", fullgraph=True)(x)
@@ -7677,12 +7664,18 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(torch.compile(newly_bound, backend="eager")(x), newly_bound(x))
 
         def as_key(x):
-            method = receiver.count if direct else list.count.__get__(receiver, list)
-            return x + len({method: 1})
+            return x + len({list.count.__get__(receiver, list): 1})
 
         self.assertEqual(
             torch.compile(as_key, backend="eager", fullgraph=True)(x), as_key(x)
         )
+
+    def test_bound_builtin_method_hash_attribute(self):
+        receiver = [1, 1]
+        self._check_key_fallback(
+            lambda x, _: x + hash(receiver.count), (None,), "FakeIdVariable"
+        )
+        self._check_key_reuse(lambda x, _: x + len({receiver.count}), (None,), frames=1)
 
     @parametrize("binding", ["wrapper", "attribute", "descriptor"])
     def test_bound_method_constant_receiver_hash(self, binding):
@@ -7717,16 +7710,23 @@ class GraphModule(torch.nn.Module):
         )
         self._check_capture_refusal(fn, receiver, capture, _HASH_ESCAPE)
 
-    @parametrize("hash_first", [False, True])
-    def test_bound_builtin_method_symbolic_receiver(self, hash_first):
-        def fn(x, n):
+    @parametrize("mode", ["hash", "literal", "alias"])
+    def test_bound_builtin_method_integer_receiver(self, mode):
+        def fn(x, n, other=None):
             descriptor = int.__dict__["conjugate"]
             method = descriptor.__get__(n, int)
-            if hash_first:
+            if mode == "alias":
+                return x + 1, hash(descriptor.__get__(other, int)) == hash(method)
+            if mode == "hash":
                 mapping = {method: 1}
                 return x + method.__self__, x + method(), len(mapping)
             return x + 1, descriptor.__get__(10001, int) == method
 
+        if mode == "alias":
+            first, other = (int("1000000000001") for _ in range(2))
+            self.assertIsNot(first, other)
+            self._check_key_reuse(fn, (other, first), first)
+            return
         code = fn.__code__
         cleaned_instructions(code)
         literal, other = int("10001"), int("10001")
@@ -7734,68 +7734,54 @@ class GraphModule(torch.nn.Module):
             co_consts=tuple(literal if v == 10001 else v for v in code.co_consts)
         )
         self.assertIsNot(literal, other)
-        values = (literal, 10002) if hash_first else (literal, other, literal)
+        values = (literal, 10002) if mode == "hash" else (literal, other, literal)
         self._check_key_reuse(fn, values, frames=2, dynamic=True)
 
     def test_prebound_method_key_ignores_receiver_contents(self):
         fn = lambda x, method: (x + len({method}), method.__name__)
-        payload = MyCls()
-        receiver = {"payload": payload}
-        refs = [weakref.ref(payload)]
+        receiver = {"payload": MyCls()}
+        refs = [weakref.ref(receiver["payload"])]
 
         def inputs():
             for key in range(3):
                 receiver[key] = key
-                method = receiver.get
-                refs.append(weakref.ref(method))
+                refs.append(weakref.ref(method := receiver.get))
                 yield method
 
         self._check_key_reuse(fn, inputs(), frames=1)
-        payload = receiver = None
+        receiver = None
         gc.collect()
         self.assertTrue(all(ref() is None for ref in refs))
 
     @parametrize("constructed", [False, True])
     def test_builtin_method_inherited_builtin_key_equality(self, constructed):
-        Record = collections.namedtuple("Record", "item")
-
-        class Text(str):
-            __slots__ = ()
-
-        class Pair(tuple):
-            __slots__ = ()
+        record = collections.namedtuple("Record", "item")
+        text = type("Text", (str,), {"__slots__": ()})
+        pair = type("Pair", (tuple,), {"__slots__": ()})
+        member = enum.IntEnum("MethodKeyEnum", {"value": 1}).value
 
         def fn(x, key):
             receiver = []
             method = list.append.__get__(receiver, list)
             original = key
             if constructed and isinstance(key, (str, tuple, frozenset)):
-                if type(key) is Record:
-                    key = type(key)(*key)
+                if type(key) is record:
+                    key = record(*key)
                 else:
                     key = type(key)(list(key) if isinstance(key, frozenset) else key)
             return x + len({key: 1, method: 2}), type(key), key == original
 
-        for candidate in (
-            torch.ones(1),
-            torch.Size([1]),
-            frozenset((1,)),
-            NoHint(),
-            enum.IntEnum("MethodKeyEnum", {"value": 1}).value,
-            Text("a"),
-            Pair((1,)),
-            Record(1),
-        ):
-            self.assertEqual(fn(torch.ones(1), candidate)[1:], (type(candidate), True))
-            self._check_key_reuse(fn, (candidate,), frames=1)
+        keys = (torch.ones(1), torch.Size([1]), frozenset({1}), NoHint(), member)
+        for key in (*keys, text("a"), pair((1,)), record(1)):
+            self.assertEqual(fn(torch.ones(1), key)[1:], (type(key), True))
+            self._check_key_reuse(fn, (key,), frames=1)
             torch._dynamo.reset()
 
     def test_builtin_method_subtype(self):
         method = re.compile("a").match
-        method_type = type(method)
 
         class Spoof:
-            __class__ = method_type
+            __class__ = type(method)
 
         self.assertTrue(utils.is_function(method))
         self.assertFalse(utils.is_function(Spoof()))
@@ -7804,8 +7790,8 @@ class GraphModule(torch.nn.Module):
         self.assertIs(builder.bound_builtin_method_descriptor(method), re.Pattern.match)
 
         def fn(x, bound):
-            result = x + (1 if isinstance(bound, method_type) else -1)
-            return result, bound.__self__ is method.__self__, type(bound)
+            same = bound.__self__ is method.__self__
+            return x + isinstance(bound, type(method)), same, type(bound)
 
         self._check_key_reuse(fn, (method,), frames=1)
 
@@ -7834,12 +7820,10 @@ class GraphModule(torch.nn.Module):
             other = descriptor.__get__(factory(), type(receiver))
             return x + len({method, alias}), len({method, other})
 
-        x = torch.ones(1)
-        receiver = factory()
+        x, receiver = torch.ones(1), factory()
         self.assertEqual(fn(x, receiver), (x + 1, size))
-        self._check_key_reuse(
-            fn, (receiver, factory()), frames=2 if sourced and size == 2 else 1
-        )
+        frames = 2 if sourced and size == 2 else 1
+        self._check_key_reuse(fn, (receiver, factory()), frames=frames)
 
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
         class L(list):
@@ -8206,8 +8190,7 @@ class GraphModule(torch.nn.Module):
         receiver = []
 
         def fn(x, mapping, key):
-            marker = {list.count.__get__(receiver, list)}
-            return x + mapping[key] + len(marker)
+            return x + mapping[key] + len({list.count.__get__(receiver, list)})
 
         key = Key()
         mappings = ({key: torch.full((1,), value)} for value in (7, 8))
@@ -8239,10 +8222,10 @@ class GraphModule(torch.nn.Module):
             for method, count in zip(methods, frames):
                 actual = compiled(x, method)
                 self.assertEqual(actual, fn(x, method))
-                last = actual[-1]
-                self.assertIs(
-                    next(iter(last)) if capture in ("dict", "set") else last, method
-                )
+                result = actual[-1]
+                if capture in ("dict", "set"):
+                    result = next(iter(result))
+                self.assertIs(result, method)
                 if capture != "aot":
                     self.assertEqual(counter.frame_count, count)
 
@@ -8277,35 +8260,55 @@ class GraphModule(torch.nn.Module):
 
     @parametrize(
         "convert",
-        [_hash_remainder, repr, str, bool, hex, bin, oct, format]
-        + [_repr_hash_with_local_id, lambda h: repr(h % 997), lambda h: repr(-h)],
+        [None, repr, str, bool, hex, bin, oct, format]
+        + [_repr_hash_with_local_id, lambda h: repr(h % 997), lambda h: repr(-h)]
+        + [operator.setitem, list.insert, lambda h: range(2)[h % 2]]
+        + [lambda h: [1, 2][: h % 2], lambda h: [1] * (h % 2)],
     )
     def test_skipped_builtin_hash_guard(self, convert):
         method = random.Random().random
 
         def fn(x, method):
-            return x + 1, convert(hash(method))
+            h = hash(method)
+            if convert in (operator.setitem, list.insert):
+                values = [1, 2]
+                convert(values, h % 2, 3)
+                return x + 1, values
+            return x + 1, h % 997 if convert is None else convert(h)
 
         conversion_error = "Conversion of compile-time-only hash value"
-        error = _HASH_ESCAPE if convert is _hash_remainder else conversion_error
+        error = _HASH_ESCAPE if convert is None else conversion_error
         self._check_key_fallback(fn, (method,), error)
         torch._dynamo.reset()
         self._check_capture_refusal(fn, method, "aot", error)
 
-    @parametrize("base", [object, int, enum.Enum])
-    @parametrize("render", [lambda v: format(v, "X"), lambda v: str.format("{:X}", v)])
-    def test_format_sourced_object(self, base, render):
+    @parametrize("base", [object, int, float, str, enum.Enum, enum.IntEnum])
+    def test_format_sourced_object(self, base):
         class Label(base):
             member = 1
 
-            def __format__(self, spec):
-                return self.tag + spec
+        def replacement(self, spec):
+            return self.tag + spec
 
-        fn = lambda x, label: (x + 1, render(label))
+        def fn(x, label, replace=False):
+            if replace:
+                Label.__format__ = replacement
+            return (
+                x + 1,
+                format(label, ">8"),
+                str.format("{}", label),
+                f"{label:>8}",
+                str.format("value={0:>8} / {name} {0}", label, name=label),
+            )
+
+        x = torch.ones(1)
+        label = Label.member if issubclass(base, enum.Enum) else Label()
         compiled = torch.compile(fn, backend="eager")
-        label, x = Label.member if base is enum.Enum else Label(), torch.ones(1)
-        for label.tag in ("a", "b"):
+        if base is not object:
+            self._check_key_reuse(fn, (label,), frames=1)
             self.assertEqual(compiled(x, label), fn(x, label))
+        for replace, label.tag in ((True, "a"), (False, "b")):
+            self.assertEqual(compiled(x, label, replace), fn(x, label, replace))
 
     def test_skipped_builtin_hash_keys(self):
         def fn(x, method):
@@ -8327,26 +8330,22 @@ class GraphModule(torch.nn.Module):
 
         self._check_key_fallback(fn, (None,), "unstable receiver")
 
-    @parametrize("wrap", [None, tuple, frozenset, lambda _: frozenset([time.time])])
+    @parametrize(
+        "wrap",
+        [None, tuple, frozenset, lambda _: frozenset([time.time]), dict.__setitem__],
+    )
     def test_bound_builtin_method_hash_cannot_escape(self, wrap):
         def fn(x, obj):
+            if wrap is dict.__setitem__:
+                return x + 1, hash(obj)
             value = time.time if wrap is None else wrap((obj.get,))
             return x + 1, hash(value)
 
-        receivers = (MethodKeyDict(a=1), MethodKeyDict(a=1))
-        self._check_key_fallback(fn, receivers, _HASH_ESCAPE)
-
-    def test_bound_builtin_method_hash_receiver_alias(self):
-        def fn(x, b, a):
-            descriptor = int.__dict__["conjugate"]
-            left = descriptor.__get__(a, int)
-            right = descriptor.__get__(b, int)
-            return x + 1, hash(left) == hash(right)
-
-        a = int("1000000000001")
-        b = int("1000000000001")
-        self.assertIsNot(a, b)
-        self._check_key_reuse(fn, (b, a), a)
+        if wrap is dict.__setitem__:
+            inputs = (wrap.__get__({}),)
+        else:
+            inputs = (MethodKeyDict(a=1), MethodKeyDict(a=1))
+        self._check_key_fallback(fn, inputs, _HASH_ESCAPE)
 
 
 class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
