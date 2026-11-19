@@ -8586,6 +8586,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @slowTest
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @skipIfRocmVersionInRange([10, 2], [10, 3], "rocSOLVER gesvdj fails for batch > 65536, fixed by rocm-libraries#14170")
     @dtypes(*floating_and_complex_types())
     def test_lu_solve_batched_many_batches(self, device, dtype):
         def run_test(A_dims, b_dims):
