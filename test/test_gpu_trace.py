@@ -112,35 +112,25 @@ class TestGpuTraceDevice(TestCase):
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
     def test_stream_creation_callback(self, device):
-        if self.device_type == "xpu":
-            script = """
-import torch
+        script = """
+import importlib
 import sys
+import torch
 from unittest.mock import MagicMock
 
 torch._C._activate_gpu_trace()
-from torch.xpu import _gpu_trace
-
+device = torch.device(sys.argv[1])
+gpu_trace = importlib.import_module(f"torch.{device.type}._gpu_trace")
 mock = MagicMock()
-_gpu_trace.register_callback_for_stream_creation(mock)
-torch.xpu.Stream(device=torch.device(sys.argv[1]))
+gpu_trace.register_callback_for_stream_creation(mock)
+device_module = torch.get_device_module(device)
+stream = device_module.Stream(device=device)
+if torch.version.hip:
+    with device_module.stream(stream):
+        torch.ones(5, device=device)
 mock.assert_called()
 """
-            subprocess.run([sys.executable, "-c", script, str(device)], check=True)
-            return
-
-        self.gpu_trace.register_callback_for_stream_creation(self.mock)
-
-        # see Note [HIP Lazy Streams]
-        device_module = torch.get_device_module(device)
-        if self.device_type == "cuda" and torch.version.hip:
-            user_stream = device_module.Stream()
-            with device_module.stream(user_stream):
-                torch.ones(5, device=device)
-        else:
-            device_module.Stream()
-
-        self.mock.assert_called()
+        subprocess.run([sys.executable, "-c", script, str(device)], check=True)
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5238")
     def test_memcpy_synchronization(self, device):
