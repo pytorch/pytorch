@@ -9,8 +9,17 @@ extern "C" {
     // Adds a traceback entry for code that has no Python frame.
     pub fn _PyTraceback_Add(funcname: *const c_char, filename: *const c_char, lineno: c_int);
     pub fn PyMethod_New(func: Obj, self_: Obj) -> Obj;
+    pub static mut PyMethod_Type: ffi::PyTypeObject;
+    // Borrowed references to the two halves of a bound method.
+    pub fn PyMethod_Function(method: Obj) -> Obj;
+    pub fn PyMethod_Self(method: Obj) -> Obj;
     // New reference, or null (without an error) for an empty cell.
     pub fn PyCell_Get(cell: Obj) -> Obj;
+    // Borrowed reference to what the type's MRO holds for name, or null.
+    pub fn _PyType_Lookup(ty: *mut ffi::PyTypeObject, name: Obj) -> Obj;
+    // Like getattr, but a method comes back unbound: returns 1 with the
+    // function in *method, to be called with obj as its first argument.
+    pub fn _PyObject_GetMethod(obj: Obj, name: Obj, method: *mut Obj) -> std::os::raw::c_int;
 }
 
 /// An owned reference to a Python object.

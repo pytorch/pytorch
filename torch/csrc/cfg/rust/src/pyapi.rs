@@ -3,13 +3,10 @@
 
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
-use crate::frontend;
-use crate::inline;
 use crate::ir::*;
 use crate::pyffi::PyObj;
 use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
-use crate::unroll;
-use crate::vm::{Compiled, Options};
+use crate::vm::{self, Callees, Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyCapsule, PyDict, PyList, PyTuple};
@@ -53,7 +50,7 @@ pub fn builtin_passes() -> Vec<&'static str> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -65,15 +62,21 @@ pub fn compile(
     max_respecializations: u32,
     inline: bool,
     unroll: bool,
+    callees: bool,
 ) -> PyResult<CfgFunction> {
     let table = OpcodeTable::load(py)?;
-    let mut function = frontend::build(py, &table, func)?;
-    if inline {
-        inline::inline_calls(py, &table, &mut function, &func.getattr("__code__")?);
-    }
-    if unroll {
-        function.unrolled = unroll::unroll_loops(&mut function);
-    }
+    let options = Options {
+        specialize,
+        skip_autograd,
+        unboxed,
+        max_versions: max_versions.max(1),
+        max_respecializations,
+        inline,
+        unroll,
+        callees,
+        ..Options::default()
+    };
+    let function = vm::lower(py, &table, func, &options)?;
     let mut pipeline: Vec<Box<dyn CfgPass>> = Vec::new();
     for pass in passes {
         if let Ok(name) = pass.extract::<String>() {
@@ -100,16 +103,13 @@ pub fn compile(
             return Err(PyValueError::new_err("a pass is a built-in pass name or a callable"));
         }
     }
-    let options = Options {
-        specialize,
-        skip_autograd,
-        unboxed,
-        max_versions: max_versions.max(1),
-        max_respecializations,
-        ..Options::default()
-    };
     Ok(CfgFunction {
-        inner: Arc::new(Compiled::new(function, options, Pipeline { passes: pipeline })),
+        inner: Arc::new(Compiled::new(
+            function,
+            options,
+            Arc::new(Pipeline { passes: pipeline }),
+            Arc::new(Callees::new(table)),
+        )),
         wrapped: func.clone().unbind(),
     })
 }
@@ -120,6 +120,13 @@ pub fn compile(
 pub struct CfgFunction {
     inner: Arc<Compiled>,
     wrapped: PyObject,
+}
+
+impl Drop for CfgFunction {
+    fn drop(&mut self) {
+        // What was compiled under this function refers back to the table.
+        self.inner.callees.clear();
+    }
 }
 
 #[pymethods]
@@ -267,6 +274,9 @@ impl CfgFunction {
         let inlined: Vec<String> = cf.func.origins[1..].iter().map(|o| o.name.clone()).collect();
         out.set_item("inlined", inlined)?;
         out.set_item("unrolled_loops", cf.func.unrolled)?;
+        let (compiled, interpreted) = cf.callees.summary();
+        out.set_item("compiled_callees", compiled)?;
+        out.set_item("interpreted_callees", interpreted)?;
         out.set_item("log", state.log.clone())?;
         Ok(out.into_any().unbind())
     }
