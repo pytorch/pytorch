@@ -47,7 +47,9 @@ def make_prim(
     doc: str = "",
     tags: Sequence[torch.Tag] | None = None,
 ):
-    if isinstance(return_type, tuple):
+    if return_type is _prims.RETURN_TYPE.INPLACE:
+        meta = impl_aten
+    elif isinstance(return_type, tuple):
 
         def meta(*args, **kwargs):
             return tuple(_prims.TensorMeta(o) for o in impl_aten(*args, **kwargs))
@@ -161,6 +163,11 @@ def _reserve_rng_state(device: torch.device, used_offset):
     return seed_t, base
 
 
+def rand_eager_vec(dtype: torch.dtype | None) -> int:
+    """Vector width of eager CUDA dropout (fused_dropout_kernel_vec) for an aligned tensor."""
+    return 8 if dtype in (torch.float16, torch.bfloat16) else 4
+
+
 def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:
     """
     Reserve `offset` 32-bit Philox samples and return a 1-element int64 tensor
@@ -231,6 +238,7 @@ _unsafe_index_put_ = make_prim(
     lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(
         self, indices, values, accumulate
     ),
+    return_type=_prims.RETURN_TYPE.INPLACE,
     doc="Unsafe index_put_ (doesn't issue device asserts)",
 )
 fma = make_prim(
