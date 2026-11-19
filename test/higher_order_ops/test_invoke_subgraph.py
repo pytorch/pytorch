@@ -58,7 +58,6 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -2842,7 +2841,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_clone.grad)
 
         if not TEST_WITH_CROSSREF:
-            cpp_expected = """\
+            fw_expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[s77, 16]", primals_2: "Sym(s77)"):
         partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_1
@@ -2881,12 +2880,10 @@ class GraphModule(torch.nn.Module):
             return (cos, primals_1, primals_0)"""
             self.assertExpectedInline(
                 normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-                expectedIfCppFakeTensor(
-                    cpp_expected, cpp_expected.replace("add_15", "add")
-                ),
+                fw_expected,
                 ignore_empty_lines=True,
             )
-            bw_cpp_expected = """\
+            bw_expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "Sym(s77)", getitem_17: "Sym(s77)", getitem_19: "Sym(s77)", getitem_21: "Sym(s77)", getitem_23: "Sym(s77)", getitem_16: "f32[s77, 16]", getitem_18: "f32[s77, 16]", getitem_20: "f32[s77, 16]", getitem_22: "f32[s77, 16]", cos: "f32[s77, 16]", tangents_1: "f32[]"):
         expand: "f32[s77, 16]" = torch.ops.aten.expand.default(tangents_1, [primals_2, 16]);  tangents_1 = primals_2 = None
@@ -2915,16 +2912,11 @@ class GraphModule(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
             sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
             neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul_10)"""
-            python_expected = (
-                bw_cpp_expected.replace("add_16", "add_1")
-                .replace("mul_10", "mul")
-                .replace("mul_9", "mul")
-            )
+            mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul)"""
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                expectedIfCppFakeTensor(bw_cpp_expected, python_expected),
+                bw_expected,
                 ignore_empty_lines=True,
             )
 
@@ -3324,6 +3316,27 @@ _reuse_test_global = None
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("tracing_mode", ["fake", "symbolic"])
+    @parametrize("noncontiguous_grad", [False, True])
+    def test_make_fx_backward(self, device, tracing_mode, noncontiguous_grad):
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        subgraph = torch.fx.symbolic_trace(lambda x: (x.sin(),))
+
+        def f(x, grad):
+            (y,) = invoke_subgraph(subgraph, "sin", x)
+            return torch.autograd.grad(y, x, grad)[0]
+
+        x = torch.randn(3, 4, device=device, requires_grad=True)
+        grad = (
+            torch.randn(4, 3, device=device).t()
+            if noncontiguous_grad
+            else torch.randn_like(x)
+        )
+        gm = make_fx(f, tracing_mode=tracing_mode)(x, grad)
+        self.assertEqual(gm(x, grad), x.cos() * grad)
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4819")
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
@@ -3768,9 +3781,10 @@ class TestInvokeSubgraphReuse(TestCase):
 
         def spy(name):
             cls = torch._guards.Guard
-            method = getattr(cls, name)
-            spy = mock.create_autospec(method, side_effect=method)
-            return self.enterContext(mock.patch.object(cls, name, spy))
+            patch = mock.patch.object(
+                cls, name, autospec=True, side_effect=getattr(cls, name)
+            )
+            return self.enterContext(patch)
 
         walks, remap = spy("source_dependencies"), spy("remap_sources")
         holders = [WithDefaults(tensor=torch.ones(2)) for _ in range(9)]
@@ -3781,7 +3795,7 @@ class TestInvokeSubgraphReuse(TestCase):
             holders[1].unread = 9
             run(x, holders, frames=1)
             remapped = [c.args[0].create_fn_name() for c in remap.call_args_list]
-            self.assertTrue(remapped)
+            self.assertIn("TYPE_MATCH", remapped)
             self.assertNotIn("TENSOR_MATCH", remapped)
             walked = [id(c.args[0]) for c in walks.call_args_list]
             self.assertTrue(walked)
@@ -3790,11 +3804,15 @@ class TestInvokeSubgraphReuse(TestCase):
                 guards = [g for g in exported if g.name == f"L['holders'][{i}]"]
                 names = [g.create_fn_name() for g in guards]
                 missing = "NOT_PRESENT_IN_GENERIC_DICT"
-                absent = (g for g in guards if g.create_fn_name() == missing)
-                attrs = [g.create_fn.keywords["attr"] for g in absent]
+                absent = [
+                    g.create_fn.keywords["attr"]
+                    for g in guards
+                    if g.create_fn_name() == missing
+                ]
                 self.assertEqual(names.count("TYPE_MATCH"), 1)
-                self.assertEqual(attrs.count("scale"), 1)
-                self.assertEqual(attrs.count("other"), int(i == 1))
+                self.assertEqual(
+                    sorted(absent), ["other", "scale"] if i == 1 else ["scale"]
+                )
             holders[-1].tensor = holders[-1].tensor.clone()
             run(x, holders, frames=2)
             holders[-1].scale += 1
@@ -3806,17 +3824,13 @@ class TestInvokeSubgraphReuse(TestCase):
         + [("in_trace", "scale"), ("cond", "scale"), ("direct", "hook_order")],
     )
     def test_reused_region_runtime_guard(self, target, kind):
-        inner = nested_compile_region(_GUARD_OBSERVATIONS.get(kind, lambda x, m: m(x)))
+        def conditional(x, h):
+            return torch.cond(pred, lambda x: x * h.scale, lambda x: x - h.scale, (x,))
+
+        pred = torch.tensor(True)
+        body = _GUARD_OBSERVATIONS.get(kind, lambda x, m: m(x))
+        inner = nested_compile_region(conditional if target == "cond" else body)
         outer = nested_compile_region(lambda x, p: inner(x, p[0]) + inner(x, p[1]))
-
-        if target == "cond":
-            pred = torch.tensor(True)
-
-            @nested_compile_region
-            def inner(x, h):
-                return torch.cond(
-                    pred, lambda x: x * h.scale, lambda x: x - h.scale, (x,)
-                )
 
         def fn(x, pairs):
             if target in ("direct", "cond"):
@@ -3933,8 +3947,9 @@ class TestInvokeSubgraphReuse(TestCase):
 
         x, fixed = torch.ones(1), Holder(tensor=layout())
         first = _dynamic_capture(5) if kind == "prebuilt" else torch.ones(5)
-        inputs = (first, _dynamic_capture(5))
-        holders = [Holder(tensor=t, layout=layout()) for t in inputs]
+        holders = [
+            Holder(tensor=t, layout=layout()) for t in (first, _dynamic_capture(5))
+        ]
         with self._trace_reuse(fn, dynamic=True) as run:
             for size in (5, 7, 9):
                 holders[1].tensor = _dynamic_capture(size)
@@ -4208,10 +4223,14 @@ class TestInvokeSubgraphReuse(TestCase):
 
     @parametrize("first", [False, True])
     @parametrize("candidate", [False, True])
-    @parametrize("kind", ["captures", "explicit", "mixed", "views", "mixed_views"])
+    @parametrize(
+        "kind", ["captures", "explicit", "mixed", "views", "mixed_views", "objects"]
+    )
     def test_reused_region_captured_tensor_aliases(self, first, candidate, kind):
         @nested_compile_region
         def region(a, b):
+            if kind == "objects":
+                return a.tensor + 3 * b.tensor + (10 if a is b else 20)
             if kind == "captures":
                 return a + b[0].tensor + b[1].tensor
             if kind == "explicit":
@@ -4220,6 +4239,7 @@ class TestInvokeSubgraphReuse(TestCase):
             return a + (10 if other is a else 20)
 
         args = {
+            "objects": lambda x, l, r: (l, r),
             "captures": lambda x, l, r: (x, (l, r)),
             "explicit": lambda x, l, r: (l.tensor, r.tensor),
             "views": lambda x, l, r: (x.contiguous(), r.tensor.contiguous()),
@@ -4229,37 +4249,34 @@ class TestInvokeSubgraphReuse(TestCase):
         fn = lambda x, pairs: tuple(region(*args(x, *p)) for p in pairs)
 
         x = torch.ones(1)
-        pairs = [
-            (Holder(tensor=x), Holder(tensor=x if alias else x * 3))
-            for alias in (first, candidate)
-        ]
+        left = Holder(tensor=x)
+        pairs = []
+        for alias in (first, candidate):
+            same = left if kind == "objects" else Holder(tensor=x)
+            pairs.append((left, same if alias else Holder(tensor=x * 3)))
         with self._trace_reuse(fn) as run:
             run(x, pairs, traces=1 if first == candidate else 2)
-            pairs[1][1].tensor = torch.full_like(x, 3)
+            pairs[1] = (left, Holder(tensor=torch.full_like(x, 3)))
             run(x, pairs, frames=2 if candidate else 1)
 
-    @parametrize("reverse", [False, True])
-    def test_reused_region_ambiguous_sources(self, reverse):
-        @nested_compile_region
-        def region(a, b):
-            return a.tensor + 3 * b.tensor + (10 if a is b else 20)
-
-        a, b, c = [Holder(tensor=torch.full((1,), n)) for n in (1, 2, 5)]
-        pairs = ((b, c), (a, a)) if reverse else ((a, a), (b, c))
-        with self._trace_reuse(lambda pairs: tuple(region(*p) for p in pairs)) as run:
-            run(pairs, traces=2)
-
-    def test_reused_region_captured_object_alias(self):
+    @parametrize("preload", [False, True])
+    def test_reused_region_captured_object_alias(self, preload):
         region = _map_nested_region(lambda x, h: x + h.a.value + h.b.value)
-        a, b, c = [Holder(value=n) for n in (2, 2, 7)]
+        a, b, c = [Holder(value=n) for n in (2, 5 if preload else 2, 7)]
         holders = [Holder(a=l, b=r) for l, r in ((a, a), (b, b), (b, c))]
+        self.enterContext(mock.patch.object(_lexical, "tensor", holders[0]))
+
+        def preloaded(x, holders):
+            return _lexical.tensor.a.value, region(x, holders)
+
         x = torch.ones(1)
-        with self._trace_reuse(region, dynamic=False) as run:
-            run(x, holders, traces=2, frames=1)
+        with self._trace_reuse(preloaded if preload else region, dynamic=False) as run:
+            run(x, holders, traces=3 if preload else 2, frames=1)
             holders[1].b = c
             run(x, holders, frames=2)
             c.value += 4
             run(x, holders, frames=3)
+            run(x, holders[::-1])
 
     @parametrize("scope", ["closure", "global", "preloaded"])
     def test_reused_region_lexical_tensor_alias(self, scope):
@@ -5959,17 +5976,16 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8)
         ref = fn(x)
 
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
         with self._count_speculate_calls() as count:
-            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            res = compiled(x)
 
         self.assertEqual(ref, res)
-        mod2.c = 7
-        self.assertEqual(
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x), fn(x)
-        )
         # Both modules have the same code and same c=5, so the second call
         # should reuse the first trace despite having different function ids.
         self.assertEqual(count(), 1)
+        mod2.c = 7
+        self.assertEqual(compiled(x), fn(x))
 
     def test_subgraph_reuse_module_apply(self):
         """Using module.apply to wrap transformer layers with nested_compile_region."""
@@ -6056,17 +6072,16 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8)
         ref = fn(x)
 
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
         with self._count_speculate_calls() as count:
-            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            res = compiled(x)
 
         self.assertEqual(ref, res)
-        mod2.c = 7
-        self.assertEqual(
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x), fn(x)
-        )
         # Both modules have the same forward code and same c=5, so the
         # second call should reuse the first trace.
         self.assertEqual(count(), 1)
+        mod2.c = 7
+        self.assertEqual(compiled(x), fn(x))
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -6696,7 +6711,9 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x4, x8a, x8b)
 
         with precompile_capture(fn, backend="eager") as call:
-            self.assertEqual(call(x4, x8a, x8b), ref)
+            with self._count_speculate_calls() as captured:
+                self.assertEqual(call(x4, x8a, x8b), ref)
+        self.assertEqual(captured(), 2)
 
         # shape[0]=4 and shape[0]=8 → 2 traces, third call reuses shape=8
         self.assertEqual(count(), 2)
