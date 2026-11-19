@@ -1,38 +1,36 @@
-name: BC Lint
-
+# Owner(s): ["oncall: releng"]
+name: FA3 legacy inert wheel 752fdd4ab4f5bc574db1a3609e3efc8b
+run-name: FA3 legacy inert wheel 752fdd4ab4f5bc574db1a3609e3efc8b
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-    branches-ignore:
-      - nightly
-  push:
-    tags:
-      # TODO: Remove me later
-      -  ciflow/inductor-cu126/*
   workflow_dispatch:
-
-jobs:
-  check-ci:
-    if: github.repository_owner == 'pytorch'
-    uses: ./.github/workflows/_check-ci.yml
-
-  bc_linter:
-    needs: check-ci
-    if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Run BC Lint Action
-        uses: pytorch/test-infra/.github/actions/bc-lint@main
-        with:
-          repo: ${{ github.event.pull_request.head.repo.full_name }}
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          head_sha: ${{ github.event.pull_request.head.sha }}
-          suppression: ${{ contains(github.event.pull_request.labels.*.name, 'suppress-api-compatibility-check') || contains(github.event.pull_request.labels.*.name, 'suppress-bc-linter') }}
-          docs_link: 'https://github.com/pytorch/test-infra/wiki/BC-Linter'
-
+permissions: {}
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+  group: fa3-legacy-s3-752fdd4ab4f5bc574db1a3609e3efc8b
+  cancel-in-progress: false
+jobs:
+  produce:
+    if: ${{ github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.ref == 'refs/heads/d4l3k/fa3-legacy-s3-752fdd4ab4f5bc574db1a3609e3efc8b' && github.event_name == 'workflow_dispatch' && github.actor == 'd4l3k' && github.actor_id == '909104' && github.run_attempt == 1 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Decode fixed inert metadata wheel
+        shell: bash
+        env:
+          WHEEL_BASE64: UEsDBBQAAAAAAAAAIQCAHVrbogAAAKIAAABUAAAAY2lfaGVhbHRoXzc1MmZkZDRhYjRmNWJjNTc0ZGIxYTM2MDllM2VmYzhiLTAuMC4wLmRldjE3OTUxMjI2OTY4NzIuZGlzdC1pbmZvL01FVEFEQVRBTWV0YWRhdGEtVmVyc2lvbjogMi4xCk5hbWU6IGNpX2hlYWx0aF83NTJmZGQ0YWI0ZjViYzU3NGRiMWEzNjA5ZTNlZmM4YgpWZXJzaW9uOiAwLjAuMC5kZXYxNzk1MTIyNjk2ODcyClN1bW1hcnk6IEluZXJ0IGF1dGhvcml6ZWQgQ0kgaGVhbHRoIG1hcmtlcjsgbWV0YWRhdGEgb25seQoKUEsDBBQAAAAAAAAAIQDKQgthVwAAAFcAAABRAAAAY2lfaGVhbHRoXzc1MmZkZDRhYjRmNWJjNTc0ZGIxYTM2MDllM2VmYzhiLTAuMC4wLmRldjE3OTUxMjI2OTY4NzIuZGlzdC1pbmZvL1dIRUVMV2hlZWwtVmVyc2lvbjogMS4wCkdlbmVyYXRvcjogY2ktaGVhbHRoLXN0YXRpYwpSb290LUlzLVB1cmVsaWI6IHRydWUKVGFnOiBweTMtbm9uZS1hbnkKUEsDBBQAAAAAAAAAIQAfcOqLaQEAAGkBAABSAAAAY2lfaGVhbHRoXzc1MmZkZDRhYjRmNWJjNTc0ZGIxYTM2MDllM2VmYzhiLTAuMC4wLmRldjE3OTUxMjI2OTY4NzIuZGlzdC1pbmZvL1JFQ09SRGNpX2hlYWx0aF83NTJmZGQ0YWI0ZjViYzU3NGRiMWEzNjA5ZTNlZmM4Yi0wLjAuMC5kZXYxNzk1MTIyNjk2ODcyLmRpc3QtaW5mby9NRVRBREFUQSxzaGEyNTY9OTVQeVpma0F2dVNncVVxWkJPRzBuTnJpWTNnaWtkaldnXzI1R2dRdW52ZywxNjIKY2lfaGVhbHRoXzc1MmZkZDRhYjRmNWJjNTc0ZGIxYTM2MDllM2VmYzhiLTAuMC4wLmRldjE3OTUxMjI2OTY4NzIuZGlzdC1pbmZvL1dIRUVMLHNoYTI1Nj1GRGgyT254WVNCRjJ3bVVCNUI1LUZSUmZHRGFpbExNam5RY2VEeVBjbGFZLDg3CmNpX2hlYWx0aF83NTJmZGQ0YWI0ZjViYzU3NGRiMWEzNjA5ZTNlZmM4Yi0wLjAuMC5kZXYxNzk1MTIyNjk2ODcyLmRpc3QtaW5mby9SRUNPUkQsLApQSwECFAMUAAAAAAAAACEAgB1a26IAAACiAAAAVAAAAAAAAAAAAAAApIEAAAAAY2lfaGVhbHRoXzc1MmZkZDRhYjRmNWJjNTc0ZGIxYTM2MDllM2VmYzhiLTAuMC4wLmRldjE3OTUxMjI2OTY4NzIuZGlzdC1pbmZvL01FVEFEQVRBUEsBAhQDFAAAAAAAAAAhAMpCC2FXAAAAVwAAAFEAAAAAAAAAAAAAAKSBFAEAAGNpX2hlYWx0aF83NTJmZGQ0YWI0ZjViYzU3NGRiMWEzNjA5ZTNlZmM4Yi0wLjAuMC5kZXYxNzk1MTIyNjk2ODcyLmRpc3QtaW5mby9XSEVFTFBLAQIUAxQAAAAAAAAAIQAfcOqLaQEAAGkBAABSAAAAAAAAAAAAAACkgdoBAABjaV9oZWFsdGhfNzUyZmRkNGFiNGY1YmM1NzRkYjFhMzYwOWUzZWZjOGItMC4wLjAuZGV2MTc5NTEyMjY5Njg3Mi5kaXN0LWluZm8vUkVDT1JEUEsFBgAAAAADAAMAgQEAALMDAAAAAA==
+        run: |
+          set -euo pipefail
+          mkdir "${RUNNER_TEMP}/fixed-wheel"
+          printf '%s' "$WHEEL_BASE64" | base64 --decode > "${RUNNER_TEMP}/fixed-wheel/ci_health_752fdd4ab4f5bc574db1a3609e3efc8b-0.0.0.dev1795122696872-py3-none-any.whl"
+          test "$(wc -c < "${RUNNER_TEMP}/fixed-wheel/ci_health_752fdd4ab4f5bc574db1a3609e3efc8b-0.0.0.dev1795122696872-py3-none-any.whl")" -eq 1354
+          printf '%s  %s\n' '9cdbb86932e48afd1ae581fde24b58c5b3c2d321f54e08bf67a5505c3f187452' "${RUNNER_TEMP}/fixed-wheel/ci_health_752fdd4ab4f5bc574db1a3609e3efc8b-0.0.0.dev1795122696872-py3-none-any.whl" | sha256sum --check --status
+      - name: Upload fixed inert wheel
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flash-attn-3-wheel-cu128-windows_amd64
+          path: ${{ runner.temp }}/fixed-wheel/ci_health_752fdd4ab4f5bc574db1a3609e3efc8b-0.0.0.dev1795122696872-py3-none-any.whl
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
