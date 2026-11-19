@@ -6435,6 +6435,24 @@ class TestVmRegions(TestCase):
                     self.assertEqual(compiled(model, x), region_infer(model, x))
                 self.assertEqual(walks, [model])
 
+    def test_a_snapshot_holds_in_place(self):
+        torch.vm._load_runtime()
+        model = torch.nn.Linear(3, 2)
+        places = [(model._parameters, "weight"), (model._parameters, "bias")]
+        tensors = [model.weight, model.bias]
+        snapshot = cfg_rs.snapshot(places, tensors)
+        # What holds says, for tensors that are known to be at their places.
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (2, 2))
+        with torch.no_grad():
+            model.weight.mul_(2)
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (1, 1))
+        model.bias.requires_grad_(False)
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (0, 0))
+        # That a place holds another tensor is what only a look at it finds.
+        snapshot = cfg_rs.snapshot(places, tensors)
+        model.bias = torch.nn.Parameter(torch.zeros(2))
+        self.assertEqual((snapshot.holds(places), snapshot.holds_in_place()), (0, 2))
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.vm(region_infer, passes=with_graphs("nope"))
