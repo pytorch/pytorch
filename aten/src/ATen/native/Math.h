@@ -229,7 +229,7 @@ Date:  February 1996
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 template <typename scalar_t, bool is_cuda=false>
-C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
+C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) {
   using acc_t = at::acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
@@ -328,7 +328,7 @@ C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
   return result;
 }
 
-inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
+inline double trigamma(double x) {
   double sign = +1;
   double result = 0;
   if (x < 0.5) {
@@ -346,7 +346,7 @@ inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   return sign * result;
 }
 
-inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
+inline float trigamma(float x) {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {
@@ -2300,7 +2300,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             afn = afn * (z * z) + AFN[index];
         }
 
-        T afd = 0.0;
+        T afd = 1.0;
 
         for (uint8_t index = 0; index <= 8; index++) {
             afd = afd * (z * z) + AFD[index];
@@ -2312,7 +2312,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             agn = agn * (z * z) + AGN[index];
         }
 
-        T agd = 0.0;
+        T agd = 1.0;
 
         for (uint8_t index = 0; index <= 10 - 1; index++) {
             agd = agd * (z * z) + AGD[index];
@@ -2455,7 +2455,7 @@ inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
             rp = rp * (x * x) + RP[index];
         }
 
-        T rq = 0.0;
+        T rq = 1.0;
 
         for (uint8_t index = 0; index <= 7; index++) {
             rq = rq * (x * x) + RQ[index];
@@ -2482,7 +2482,7 @@ inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
         qp = qp * (T(25.0) / (x * x)) + QP[index];
     }
 
-    T qq = 0.0;
+    T qq = 1.0;
 
     for (uint8_t index = 0; index <= 6; index++) {
         qq = qq * (T(25.0) / (x * x)) + QQ[index];
@@ -2563,7 +2563,7 @@ inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
             rp = rp * (x * x) + RP[index];
         }
 
-        T rq = 0.0;
+        T rq = 1.0;
 
         for (uint8_t index = 0; index <= 7; index++) {
             rq = rq * (x * x) + RQ[index];
@@ -2590,7 +2590,7 @@ inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
         qp = qp * (T(5.0) / x * (T(5.0) / x)) + QP[index];
     }
 
-    T qq = 0.0;
+    T qq = 1.0;
 
     for (uint8_t index = 0; index <= 6; index++) {
         qq = qq * (T(5.0) / x * (T(5.0) / x)) + QQ[index];
@@ -2678,7 +2678,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             yp = yp * (x * x) + YP[index];
         }
 
-        T yq = 0.0;
+        T yq = 1.0;
 
         for (uint8_t index = 0; index <= 6; index++) {
             yq = yq * (x * x) + YQ[index];
@@ -2705,7 +2705,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
         qp = qp * (T(25.0) / (x * x)) + QP[index];
     }
 
-    T qq = 0.0;
+    T qq = 1.0;
 
     for (uint8_t index = 0; index <= 6; index++) {
         qq = qq * (T(25.0) / (x * x)) + QQ[index];
@@ -2792,7 +2792,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
             yp = yp * (x * x) + YP[index];
         }
 
-        T yq = 0.0;
+        T yq = 1.0;
 
         for (uint8_t index = 0; index <= 7; index++) {
             yq = yq * (x * x) + YQ[index];
@@ -2819,7 +2819,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
         qp = qp * (T(5.0) / x * (T(5.0) / x)) + QP[index];
     }
 
-    T qq = 0.0;
+    T qq = 1.0;
 
     for (uint8_t index = 0; index <= 6; index++) {
         qq = qq * (T(5.0) / x * (T(5.0) / x)) + QQ[index];

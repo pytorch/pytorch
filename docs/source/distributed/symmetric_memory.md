@@ -348,6 +348,26 @@ result tensor will be created from symmetric memory too.
 As of torch 2.11, the `CUDA` and `NVSHMEM` backends support MemPool. MemPool
 support of the `NCCL` backend is in progress.
 
+:::{warning}
+Allocations from a CUDA symmetric memory pool must remain symmetric across
+ranks. Do not call {meth}`torch.Tensor.record_stream` on tensors allocated
+from this pool. A freed block with recorded stream uses becomes reusable only
+when those uses complete. Completion can differ across ranks, causing different
+cache hit/miss decisions. With NVSHMEM, a cache miss on only one rank can enter
+a collective allocation without its peers.
+
+Instead of using `record_stream`, retain a reference to the tensor until all
+consuming streams have finished, or use {meth}`torch.cuda.Stream.wait_stream`
+to make the original allocation stream wait for all consuming streams before
+releasing the tensor.
+
+This restriction also applies to operations that record stream uses internally.
+The current NCCL point-to-point implementation does so for send/receive
+operations, including asynchronous and batched forms. Do not pass these pool
+tensors to NCCL `send`, `recv`, `isend`, `irecv`, or `batch_isend_irecv` when
+identical allocation decisions across ranks are required.
+:::
+
 :::{note}
 The pool returned by `get_mem_pool` feeds `torch.ops.symm_mem.*`
 kernels, though it does not register the allocation with NCCL. To drive
