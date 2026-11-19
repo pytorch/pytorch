@@ -133,12 +133,14 @@ C10D_BACKENDS = (
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
     ),
     BackendConfig(
         "python-gloo",
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
     ),
     BackendConfig(
         "nccl-legacy",
@@ -245,7 +247,7 @@ class C10dBackendTestContinuous:
     timeout = timedelta(seconds=60)
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return cls.backend_name
 
     @property

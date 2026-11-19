@@ -77,18 +77,27 @@ def deterministic_algorithms(enabled=True):
 
 class TestZeroRedundancyOptimizerContinuous(MultiProcContinuousTest):
     @property
+    def device_type(self) -> str:
+        # Use the module-level derivation, which falls back to "cpu" when
+        # the accelerator is built but has no usable device.
+        return device_type
+
+    @property
     def device(self):
         return device_type
 
     @classmethod
-    def backend_str(cls):
-        return {"cuda": "nccl", "hpu": "hccl", "xpu": "xccl"}.get(device_type, "gloo")
+    def backend_str(cls, device):
+        return {"cuda": "nccl", "hpu": "hccl", "xpu": "xccl"}.get(device, "gloo")
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         # Read by skip_if_no_gpu.
         os.environ["WORLD_SIZE"] = str(world_size)
-        if cls.backend_str() in ("nccl", "xccl"):
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
+        if cls.backend_str(device) in ("nccl", "xccl"):
             if torch.accelerator.device_count() < world_size:
                 sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             device = torch.device(f"{device_type}:{rank}")
