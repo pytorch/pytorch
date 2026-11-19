@@ -976,7 +976,7 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
     # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
-    val = specialize_symnode(obj).as_python_constant()
+    val = specialize_symnode(obj).guard_as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
@@ -1008,7 +1008,7 @@ def pynumber_as_ssize_t(
     if isinstance(value, SymNodeVariable):
         val = value.evaluate_expr(tx.output)
     else:
-        val = value.as_python_constant()
+        val = value.guard_as_python_constant()
 
     if not isinstance(val, int):
         raise AssertionError("pynumber_index did not return an int-like value")

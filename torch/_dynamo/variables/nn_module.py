@@ -1690,7 +1690,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    lazy_ids = hooks_source is not None and name.startswith("_forward_")
+                    lazy_ids = hooks_source is not None
                     if hooks_source is not None and (
                         not torch._dynamo.config.skip_nnmodule_hook_guards
                         or hooks_type is not dict

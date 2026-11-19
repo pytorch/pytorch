@@ -1670,7 +1670,7 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # A missing OrderedDict-only attribute raises before call_method runs.
-        if not hasattr(dict, name):
+        if mro_lookup(dict, name) is NO_SUCH_SUBOBJ:
             self._guard_type()
         return super().tp_getattro_impl(tx, name)
 
