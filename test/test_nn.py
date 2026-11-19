@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    MI300_ARCH, MI350_ARCH, runOnRocmArch, \
+    MI300_ARCH, MI350_ARCH, MI450_ARCH, runOnRocmArch, \
     TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
@@ -9650,7 +9650,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("input_hw, output_hw, scales, channels", [
         subtest(((6, 8), (24, 32), (None, None), 16), name="upsample"),  # ratio 64
         # 5.06: on ROCm channels_last, scatter on gfx950 (cut 6), gather on
-        # gfx1250 (2) and for fp16 on gfx942 (4; bf16/fp32 cut is 16).
+        # gfx1250 (2) and for fp16 on gfx942 (4; the bf16/fp32/double cut is 16).
         subtest(((8, 8), (9, 9), (None, None), 16), name="near_cut"),
         subtest(((24, 32), (12, 16), (None, None), 16), name="downsample"),  # ratio 1.0
         subtest(((13, 11), (7, 5), (None, None), 16), name="mild_downsample"),  # ratio 0.98
@@ -9695,18 +9695,57 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH + MI350_ARCH + ("gfx1250",))
+    @runOnRocmArch(MI300_ARCH + MI350_ARCH + MI450_ARCH)
     @dtypes(torch.half)
     @toleranceOverride({torch.half: tol(atol=1e-2, rtol=1e-2)})
     @parametrize_test("align_corners", [True, False])
     def test_upsamplingBilinear2d_backward_nhwc_gather_high_ratio(self, device, dtype, align_corners):
         # 2x2 -> 64x64 is 4096 contributions per grad_input address. fp16 has
         # no upper ratio cap, so on these archs channels_last takes the NHWC
-        # gather with a 4096-element window per thread and accumulates in fp32.
+        # gather and accumulates in fp32. 4096 is the average number of
+        # contributions per address; each thread's window is smaller (49 per
+        # axis, 2401 elements, with align_corners=False).
         # The fp16 atomic scatter used elsewhere does not meet this tolerance.
         n, c = 2, 16
         input_size = [n, c, 2, 2]
         output_size = [64, 64]
+        go = make_tensor((n, c, *output_size), device=device, dtype=dtype, low=-1, high=1)
+        go = go.contiguous(memory_format=torch.channels_last)
+        gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+        gi = gi.contiguous(memory_format=torch.channels_last)
+
+        torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+            go, output_size, input_size, align_corners, None, None, grad_input=gi,
+        )
+
+        self.assertTrue(gi.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(gi.isnan().any())
+        ref = torch.ops.aten.upsample_bilinear2d_backward(
+            go.cpu().double(), output_size, input_size, align_corners, None, None,
+        ).to(dtype=dtype)
+        self.assertEqual(gi, ref)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH + MI350_ARCH + MI450_ARCH)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @toleranceOverride({
+        torch.float: tol(atol=1e-5, rtol=1e-5),
+        torch.double: tol(atol=1e-7, rtol=1e-7),
+        torch.half: tol(atol=1e-2, rtol=1e-2),
+        torch.bfloat16: tol(atol=5e-2, rtol=5e-2),
+    })
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_backward_nhwc_gather_below_cap(self, device, dtype, align_corners):
+        # 4x4 -> 32x32 is 256 contributions per grad_input address, below the
+        # 512 cap for bf16, fp32 and double and above every lower cut (gfx950 6,
+        # gfx942 4 for fp16 and 16 otherwise, gfx1250 2). All four dtypes take
+        # the NHWC gather here. The test is limited to those archs because CUDA
+        # and other ROCm archs run the atomic scatter, which this test does
+        # not target and whose fp16 error grows with the ratio.
+        n, c = 2, 16
+        input_size = [n, c, 4, 4]
+        output_size = [32, 32]
         go = make_tensor((n, c, *output_size), device=device, dtype=dtype, low=-1, high=1)
         go = go.contiguous(memory_format=torch.channels_last)
         gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)

@@ -919,15 +919,23 @@ static void upsample_bilinear2d_out_cuda_template(
 //
 // Lower bound: below it the scatter is barely contended and launches fewer
 // threads. 0 means the architecture has no perf sweep and keeps the scatter.
-// On gfx942, bf16/fp32 gather loses at ratios 4.5-6.25 and wins from 16, while
-// fp16 wins from 4, because its packed 16-bit atomics are slow under contention.
+// Only gfx942 splits the lower bound by dtype. There, bf16/fp32 gather loses at
+// ratios 4.5-6.25 and wins from 16, while fp16 wins from 4, because its packed
+// 16-bit atomics are slow under contention. On gfx950 and gfx1250 the
+// campaigns showed bf16/fp32 at 0.93x of the scatter or better at the cut, so
+// one cut serves every dtype; no per-dtype sweep was run to place a separate
+// fp16 cut there. double is not benchmarked on gfx950 and gfx1250 and uses the
+// fp32 bounds; on gfx942 it was swept and wins wherever fp32 does.
 //
 // Upper bound: each gather thread loops over its whole grad_output window, so
 // with a tiny input plane the window is large and the grid small. A gfx950
 // sweep of pyramid-pooling shapes put the bf16/fp32 cut between the last
 // winning ratio (~455) and the first losing one (~1820). fp16 gather won at
 // every ratio measured, so it has no cap (0). Architectures without a
-// high-ratio sweep use the gfx950 cap.
+// high-ratio sweep use the gfx950 cap. On gfx942 the ratio alone does not
+// separate winners from losers for bf16/fp32/double: inputs of about 200k
+// elements or fewer lose at every ratio from 16 up, larger ones win through
+// ratio 16384. A grid-size check would be the better gate.
 struct NhwcGatherBounds {
   int64_t min_contributions;
   int64_t max_contributions;
@@ -1234,11 +1242,6 @@ static void upsample_bilinear2d_backward_out_cuda_template_deterministic(
       grad_output_.scalar_type(), "upsample_bilinear2d_backward_gather", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
 
-    const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-        input_height, output_height, align_corners, scales_h);
-    const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-        input_width, output_width, align_corners, scales_w);
-
     if (grad_input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
       upsample_bilinear2d_backward_gather_nhwc_launch<scalar_t>(
           grad_input,
@@ -1254,6 +1257,11 @@ static void upsample_bilinear2d_backward_out_cuda_template_deterministic(
           scales_w);
       return;
     }
+
+    const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+        input_height, output_height, align_corners, scales_h);
+    const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+        input_width, output_width, align_corners, scales_w);
 
     Tensor grad_input_c = grad_input.is_contiguous()
         ? grad_input
