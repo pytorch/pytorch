@@ -220,7 +220,13 @@ class B2BGEMMTest(TestCase):
         def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
             return torch.mm(torch.mm(m1, m2), m3)
 
-        for M, N, O, P in ((100, 100, 100, 100), (64, 64, 64, 64)):
+        for M, N, O, P in (
+            (100, 100, 100, 100),
+            (64, 64, 64, 64),
+            # Gate/scoring consistency case from review: rejected by the
+            # load-ratio gate and by autotune with the shared config set.
+            (64, 16, 32, 64),
+        ):
             with self.subTest(shape=(M, N, O, P)):
                 torch._dynamo.reset()
                 counters.clear()
