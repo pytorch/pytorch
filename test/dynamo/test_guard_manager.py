@@ -688,6 +688,16 @@ user_stack=None)
         self.assertFalse(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({}))
 
+    @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
+    @mock.patch("torch._dynamo.guards._is_free_threaded", True)
+    def test_recursive_dict_tags_disabled_on_free_threaded_python(self):
+        with mock.patch.object(
+            GuardManagerWrapper, "find_tag_safe_roots"
+        ) as find_tag_safe_roots:
+            opt_fn = torch.compile(lambda x: x + 1, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(torch.ones(1)), torch.full((1,), 2.0))
+        find_tag_safe_roots.assert_not_called()
+
     def test_dynamic_indices_guard(self):
         root = RootGuardManager()
 
@@ -1636,28 +1646,22 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(4, 4))
 
 
+@unittest.skipIf(
+    torch._dynamo.guards._is_free_threaded,
+    "recursive dict tags are disabled on free-threaded Python",
+)
 class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
-        self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
+        config_patch = torch._dynamo.config.patch(
+            use_recursive_dict_tags_for_guards=True
+        )
+        config_patch.__enter__()
+        self.addCleanup(config_patch.__exit__, None, None, None)
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
     hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
     def test_immutable_tag_safe(self):
         class Bar:
