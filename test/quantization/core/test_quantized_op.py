@@ -55,11 +55,13 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
     IS_MACOS,
     IS_PPC,
     IS_SANDCASTLE,
+    parametrize,
     raise_on_run_directly,
     TestCase,
 )
@@ -6008,6 +6010,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
 
 
+@instantiate_parametrized_tests
 class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
                                 strides, i_pads, o_pads, channelwise):
@@ -6428,6 +6431,87 @@ class TestQuantizedConv(TestCase):
                 output_channels_per_group, groups, kernels, strides, pads, None,
                 dilations, X_scale, X_zero_point, W_scale, W_zero_point,
                 Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False, input_dtype=X_qdtype, output_dtype=X_qdtype)
+
+    @skipIfNoONEDNN
+    @parametrize("relu", [False, True])
+    @parametrize("batch_size", [0, 2])
+    @parametrize("bad_shape", [
+        "undersized", "oversized", "same_numel", "wrong_batch", "wrong_channels",
+        "empty", "rank3", "rank5", "scalar",
+    ])
+    def test_qconv2d_add_rejects_invalid_accum_shape(self, relu, batch_size, bad_shape):
+        with override_quantized_engine("onednn"):
+            act = torch.quantize_per_tensor(torch.ones(batch_size, 2, 7, 6), 0.5, 3, torch.quint8)
+            weight = torch.quantize_per_tensor(torch.ones(3, 2, 3, 3), 0.5, 0, torch.qint8)
+            packed = torch.ops.quantized.conv2d_prepack(weight, torch.zeros(3), (1, 1), (0, 0), (1, 1), 1)
+            shapes = {
+                "undersized": (batch_size, 1, 1, 1),
+                "oversized": (batch_size, 3, 6, 4),
+                "same_numel": (batch_size, 3, 4, 5),
+                "wrong_batch": (1, 3, 5, 4),
+                "wrong_channels": (batch_size, 2, 5, 4),
+                "empty": (batch_size, 3, 0, 4),
+                "rank3": (batch_size, 3, 20),
+                "rank5": (batch_size, 3, 5, 4, 1),
+                "scalar": (),
+            }
+            accum = torch.quantize_per_tensor(torch.zeros(shapes[bad_shape]), 0.5, 4, torch.quint8)
+            before = accum.int_repr().clone()
+            op = torch.ops.quantized.conv2d_add_relu if relu else torch.ops.quantized.conv2d_add
+            with self.assertRaisesRegex(RuntimeError, "accum tensor shape must match convolution output shape"):
+                op(act, accum, packed, 0.25, 20)
+            self.assertEqual(accum.int_repr(), before)
+            self.assertEqual(accum.q_scale(), 0.5)
+            self.assertEqual(accum.q_zero_point(), 4)
+
+    @skipIfNoONEDNN
+    @parametrize("relu", [False, True])
+    @parametrize("batch_size", [0, 2])
+    @parametrize("dilated", [False, True])
+    @parametrize("layout", ["contiguous", "channels_last", "strided", "offset"])
+    def test_qconv2d_add_valid_accum_shape(self, relu, batch_size, dilated, layout):
+        with override_quantized_engine("onednn"):
+            stride, padding, dilation = (2, 1, 2) if dilated else (1, 0, 1)
+            act_float = torch.arange(batch_size * 2 * 7 * 6).reshape(batch_size, 2, 7, 6).float().remainder(5) * 0.5
+            weight_float = (torch.arange(3 * 2 * 3 * 3).reshape(3, 2, 3, 3).float().remainder(5) - 2) * 0.5
+            act = torch.quantize_per_tensor(act_float, 0.5, 3, torch.quint8)
+            weight = torch.quantize_per_tensor(weight_float, 0.5, 0, torch.qint8)
+            bias = torch.tensor([-0.5, 0.0, 0.5])
+            packed = torch.ops.quantized.conv2d_prepack(
+                weight, bias, (stride, stride), (padding, padding), (dilation, dilation), 1
+            )
+            height = (7 + 2 * padding - 2 * dilation - 1) // stride + 1
+            width = (6 + 2 * padding - 2 * dilation - 1) // stride + 1
+            shape = (batch_size, 3, height, width)
+            accum_float = (torch.arange(batch_size * 3 * height * width).reshape(shape).float().remainder(3) - 1) * 0.5
+            if layout == "strided":
+                storage = torch.zeros(batch_size, 3, height, width * 2)
+                storage[..., ::2] = accum_float
+                accum = torch.quantize_per_tensor(storage, 0.5, 4, torch.quint8)[..., ::2]
+            elif layout == "offset":
+                storage = torch.cat((torch.zeros(1, 3, height, width), accum_float))
+                storage = torch.quantize_per_tensor(storage, 0.5, 4, torch.quint8).contiguous(memory_format=torch.channels_last)
+                prefix = storage[0].int_repr().clone()
+                accum = storage[1:]
+            else:
+                accum = torch.quantize_per_tensor(accum_float, 0.5, 4, torch.quint8)
+                if layout == "channels_last":
+                    accum = accum.contiguous(memory_format=torch.channels_last)
+            reference = F.conv2d(act.dequantize(), weight.dequantize(), bias, stride, padding, dilation)
+            reference = reference + accum.dequantize()
+            if relu:
+                reference = reference.relu()
+            expected = torch.quantize_per_tensor(reference, 0.25, 20, torch.quint8)
+            op = torch.ops.quantized.conv2d_add_relu if relu else torch.ops.quantized.conv2d_add
+            actual = op(act, accum, packed, 0.25, 20)
+            self.assertEqual(actual.shape, expected.shape)
+            self.assertEqual(actual.dtype, expected.dtype)
+            self.assertEqual(actual.q_scale(), 0.25)
+            self.assertEqual(actual.q_zero_point(), 20)
+            self.assertEqual(actual.int_repr(), expected.int_repr())
+            self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+            if layout == "offset":
+                self.assertEqual(storage[0].int_repr(), prefix)
 
     @skipIfNoONEDNN
     def test_qconv2d_add(self):

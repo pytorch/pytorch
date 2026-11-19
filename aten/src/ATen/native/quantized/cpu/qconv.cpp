@@ -1231,6 +1231,15 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   } else {
     output_sizes = at::native::conv_output_size(input_size, kernel_size, padding().vec(), stride().vec(), dilation().vec());
   }
+  if (has_accum) {
+    TORCH_CHECK(
+        accum.value().sizes().equals(output_sizes),
+        func_name,
+        " (ONEDNN): accum tensor shape must match convolution output shape ",
+        c10::IntArrayRef(output_sizes),
+        ", but got ",
+        accum.value().sizes());
+  }
   ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
   at::Tensor output = at::_empty_affine_quantized(
       dst_dims,
