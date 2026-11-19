@@ -290,18 +290,27 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
-
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
 
-    def as_python_constant(self) -> types.MethodWrapperType:
-        obj_value = self.obj.as_python_constant()
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return False, None
+        try:
+            return True, self._bind_python_constant(obj)
+        except NotImplementedError:
+            return False, None
+
+    def _bind_python_constant(self, obj_value: Any) -> types.MethodWrapperType:
         try:
             return self.descriptor.__get__(obj_value, type(obj_value))
         except TypeError:
             raise AsPythonConstantNotImplementedError(self) from None
+
+    def as_python_constant(self) -> types.MethodWrapperType:
+        obj_value = self.obj.as_python_constant()
+        return self._bind_python_constant(obj_value)
 
     def call_function(
         self,
@@ -340,10 +349,18 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        is_constant, obj = self.obj.try_as_python_constant()
         try:
+            if not is_constant:
+                from .script_object import CustomClassVariable
+
+                receiver = self.obj.realize()
+                if not isinstance(receiver, CustomClassVariable):
+                    return super().tp_hash_impl(tx)
+                obj = receiver.as_python_constant()
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
-            return hash(self.as_python_constant()), False
+            return hash(self._bind_python_constant(obj)), False
         except NotImplementedError:
             return super().tp_hash_impl(tx)
 
@@ -622,11 +639,22 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             )
         return ConstantVariable.create(eq if op == "__eq__" else not eq)
 
-    def as_python_constant(self) -> Any:
-        obj = self.obj.as_python_constant()
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        is_constant, obj = self.obj.try_as_python_constant()
+        if not is_constant:
+            return False, None
+        try:
+            return True, self._bind_python_constant(obj)
+        except NotImplementedError:
+            return False, None
+
+    def _bind_python_constant(self, obj: Any) -> Any:
         if hasattr(self.descriptor, "__get__"):
             return _bind_builtin_method(self.descriptor, obj)
         return getattr(obj, self.descriptor.__name__)
+
+    def as_python_constant(self) -> Any:
+        return self._bind_python_constant(self.obj.as_python_constant())
 
     def call_function(
         self,

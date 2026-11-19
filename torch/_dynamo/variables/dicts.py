@@ -258,6 +258,30 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         finally:
             self._checking_python_constant = False
 
+    def _try_as_python_constant_dict(self) -> tuple[bool, Any]:
+        self.install_dict_keys_match_guard()
+        items = []
+        for k, v in self.items.items():
+            is_constant, key = k.vt.try_as_python_constant()
+            if not is_constant:
+                return False, None
+            is_constant, value = v.try_as_python_constant()
+            if not is_constant:
+                return False, None
+            items.append((key, value))
+        return True, dict(items)
+
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        if self._checking_python_constant:
+            return False, None
+        self._checking_python_constant = True
+        try:
+            return self._try_as_python_constant_dict()
+        except NotImplementedError:
+            return False, None
+        finally:
+            self._checking_python_constant = False
+
     def as_python_constant(self) -> dict[Any, Any]:
         # Keys may still be lazy, and an empty input is constant: guard before materializing.
         self.install_dict_keys_match_guard()
@@ -1093,6 +1117,15 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
+
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        try:
+            is_constant, value = super().try_as_python_constant()
+            if not is_constant:
+                return False, None
+            return True, collections.OrderedDict(value)
+        except NotImplementedError:
+            return False, None
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
