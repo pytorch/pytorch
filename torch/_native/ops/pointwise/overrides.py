@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import inspect
 import math
-import warnings
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -315,17 +313,11 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
                 return False
             if any(_has_partial_overlap(tgt, t) for t in ins):
                 return False
-            # Aliased output resizing changes overlap before TensorIterator checks it.
-            if tuple(tgt.shape) != tuple(bshape) and any(
-                torch._C._is_alias_of(tgt, t) for t in ins
-            ):
+            if tuple(tgt.shape) != tuple(bshape):
                 return False
             if tgt.dtype not in _CONV_SRC_DTYPES:
                 return False
             if not torch.can_cast(result, tgt.dtype):
-                return False
-        if variant == "inplace":
-            if tuple(bshape) != tuple(tgt.shape):
                 return False
         if not basic_layout:
             dtype = tgt.dtype if isinstance(tgt, torch.Tensor) else result
@@ -337,7 +329,11 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
                     dtype,
                     tgt,
                     out_strides=output_strides(
-                        tuple((t.dtype, tuple(t.shape), t.stride()) for t in ins), dtype
+                        tuple(
+                            (t.dtype, tuple(t.shape), t.stride())
+                            for t in (ins[::-1] if row.aten == "rsub.Tensor" else ins)
+                        ),
+                        dtype,
                     )
                     if variant == "functional"
                     else None,
@@ -406,7 +402,10 @@ def _make_impl(
         if ref is None:
             raise AssertionError("pointwise impl reached with no device operand")
         if variant == "functional":
-            operands = tuple((t.dtype, tuple(t.shape), t.stride()) for t in ins)
+            operands = tuple(
+                (t.dtype, tuple(t.shape), t.stride())
+                for t in (ins[::-1] if row.aten == "rsub.Tensor" else ins)
+            )
             return [
                 torch.empty_strided(
                     bshape, output_strides(operands, d), device=ref.device, dtype=d
@@ -415,33 +414,7 @@ def _make_impl(
             ]
         if variant == "out":
             out = kwargs["out"]
-            tgts = list(out) if isinstance(out, (tuple, list)) else [out]
-            for t in tgts:
-                if tuple(t.shape) != tuple(bshape):
-                    # ATen warns only when resizing a nonempty output.
-                    if t.numel() != 0:
-                        frame = inspect.currentframe()
-                        stacklevel = 1
-                        while frame is not None:
-                            module = frame.f_globals.get("__name__", "")
-                            if module != "torch" and not module.startswith("torch."):
-                                break
-                            stacklevel += 1
-                            frame = frame.f_back
-                        del frame
-                        warnings.warn(
-                            "An output with one or more elements was resized since it "
-                            f"had shape {list(t.shape)}, which does not match the "
-                            f"required output shape {list(bshape)}. This behavior is "
-                            "deprecated, and in a future PyTorch release outputs will "
-                            "not be resized unless they have zero elements. You can "
-                            "explicitly reuse an out tensor t by resizing it, inplace, "
-                            "to zero elements with t.resize_(0).",
-                            UserWarning,
-                            stacklevel=stacklevel,
-                        )
-                    t.resize_(bshape)
-            return tgts
+            return list(out) if isinstance(out, (tuple, list)) else [out]
         return [args[0]]
 
     def impl(*args: Any, **kwargs: Any) -> OperatorResult:
