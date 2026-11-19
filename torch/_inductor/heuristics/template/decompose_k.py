@@ -169,6 +169,13 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     math.ceil(math.ceil(k_hint / k_split) / partial_config.block_k)
                     * partial_config.block_k
                 )
+                # A 2CTA autoWS partial with a single K tile can hang on the GPU;
+                # see BlackwellTMATemplateConfigMixin._single_k_tile.
+                if (
+                    effective_two_ctas(partial_config)
+                    and k_part <= partial_config.block_k
+                ):
+                    continue
                 workspace_bytes = (
                     k_split * m_tiles * partial_config.block_m * n_hint * 4
                 )

@@ -139,6 +139,10 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             if flatten_output and m % candidate.block_m != 0:
                 continue
             two_ctas = use_meta_ws and candidate.two_ctas and has_two_ctas()
+            # A 2CTA autoWS kernel with a single K tile can hang on the GPU; see
+            # BlackwellTMATemplateConfigMixin._single_k_tile.
+            if two_ctas and k <= candidate.block_k:
+                continue
             if two_ctas and not is_blackwell_bmm_2cta_compatible(
                 output_batch_rows=m,
                 block_m=candidate.block_m,
