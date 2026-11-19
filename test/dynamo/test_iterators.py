@@ -254,6 +254,20 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             next(iterator)
         self.assertEqual(actual.exception.args, expected.exception.args)
 
+    def test_escape_instance_dict_iterator_after_attribute_write(self):
+        class Box:
+            pass
+
+        def fn(x, obj):
+            obj.second = 2
+            return x + 1, iter(obj.__dict__)
+
+        obj = Box()
+        obj.first = 1
+        result, keys = torch.compile(fn, backend="eager")(torch.zeros(1), obj)
+        self.assertEqual(result, torch.ones(1))
+        self.assertEqual(list(keys), list(vars(obj)))
+
     @parametrize("factory", [dict, OrderedDict, set])
     def test_escape_iterator_after_owner_mutation(self, factory):
         def fn(x, owner):
