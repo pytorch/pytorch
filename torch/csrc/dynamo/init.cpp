@@ -230,6 +230,7 @@ enum class PyTypeSlotBit : int64_t {
   TP_DESCR_SET = 9,
   TP_STR = 10,
   TP_INIT = 11,
+  TP_NEW = 12,
 };
 
 int64_t get_pysequence_slots(PyTypeObject* type) {
@@ -382,6 +383,8 @@ int64_t get_pytype_slots(PyTypeObject* type) {
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_STR));
   if (PyType_GetSlot(type, Py_tp_init) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_INIT));
+  if (PyType_GetSlot(type, Py_tp_new) != nullptr)
+    slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_NEW));
   return slots;
 }
 
@@ -492,19 +495,11 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("backend", &CacheEntry::backend)
       .def_readonly(
           "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
-      .def(
-          "update_diff_guard_root_manager",
-          &CacheEntry::update_diff_guard_root_manager)
-      // Python is handed copies, so compare the entries they were taken from.
-      // compile_id rules out a later entry reusing a freed one's address.
       .def("__eq__", &CacheEntry::py_equal, py::is_operator())
       .def("__hash__", &CacheEntry::py_hash);
 
   py::class_<PrecompileEntry>(m, "_PrecompileEntry")
       .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
-
-  py::class_<ExtraState>(m, "_ExtraState")
-      .def("invalidate", &ExtraState::invalidate);
 
   py::enum_<FrameAction>(m, "_FrameAction")
       .value("DEFAULT", FrameAction::DEFAULT)
@@ -553,6 +548,8 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_set_lru_cache", &_set_lru_cache);
+  m.def("_invalidate_cache_entry", &_invalidate_cache_entry);
+  m.def("_update_diff_guard_root_manager", &_update_diff_guard_root_manager);
   m.def(
       "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);
   m.def("set_bytecode_debugger_callback", &set_bytecode_debugger_callback);
@@ -650,7 +647,8 @@ void initDynamoBindings(PyObject* torch) {
       .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
       .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET)
       .value("TP_STR", PyTypeSlotBit::TP_STR)
-      .value("TP_INIT", PyTypeSlotBit::TP_INIT);
+      .value("TP_INIT", PyTypeSlotBit::TP_INIT)
+      .value("TP_NEW", PyTypeSlotBit::TP_NEW);
 }
 
 } // namespace torch::dynamo

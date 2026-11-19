@@ -844,8 +844,10 @@ def _launch_itree(
     compact: bool = True,
     strided_outs: Sequence[bool] = (),
 ) -> None:
-    """Launch one stage on `device`, which must be current, keying descriptor layouts
-    and baked alignment."""
+    """Launch one stage, keying descriptor layouts and baked alignment.
+
+    `device` must be current.
+    """
     op = tile.TileReduce(
         trait,
         dt,
@@ -886,8 +888,10 @@ def _run_itree(
     *,
     arch: _ItreeArch | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Launch each stage on x's device, which callers check is current; split buffers
-    are per field."""
+    """Launch each stage on x's device; split buffers are per field.
+
+    Callers check that the device is current.
+    """
     M, N = x.shape
     device = x.get_device()
 
