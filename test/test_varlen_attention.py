@@ -3,6 +3,7 @@ import math
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
+from itertools import pairwise
 from unittest.mock import patch
 
 import torch
@@ -1666,6 +1667,74 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             enable_gqa=False,
             _should_use_cudnn=_should_use_cudnn,
         )
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("is_causal", [False, True])
+    @parametrize("enable_gqa", [False, True])
+    @parametrize("layout", ["fused_qkv", "padded_head_major"])
+    @_skip_cudnn_varlen_unsupported
+    def test_cudnn_varlen_backward_query_layout(
+        self, device, dtype, is_causal, enable_gqa, layout
+    ):
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim = 512, 8, 128
+        num_kv_heads = 2 if enable_gqa else num_heads
+        if layout == "fused_qkv":
+            head_sizes = (num_heads, num_kv_heads, num_kv_heads)
+            qkv = torch.randn(
+                total, sum(head_sizes), head_dim, device=device, dtype=dtype
+            )
+            q, k, v = qkv.split(head_sizes, dim=1)
+        else:
+            # Padding changes Q's token stride; dQ stays dense and head-major.
+            q = torch.randn(num_heads, total, 2 * head_dim, device=device, dtype=dtype)
+            q = q[..., :head_dim].transpose(0, 1)
+            k, v = (
+                torch.randn(total, num_kv_heads, head_dim, device=device, dtype=dtype)
+                for _ in range(2)
+            )
+        q, k, v = (t.requires_grad_() for t in (q, k, v))
+        boundaries = [0, 193, 352, total]
+        cu_seq = torch.tensor(boundaries, device=device, dtype=torch.int32)
+        max_len = max(b - a for a, b in pairwise(boundaries))
+        grad_out = torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                window_size=(-1, 0) if is_causal else (-1, -1),
+                enable_gqa=enable_gqa,
+            )
+            grads = torch.autograd.grad(out, (q, k, v), grad_out)
+
+        q_ref, k_ref, v_ref = (t.detach().float().requires_grad_() for t in (q, k, v))
+        with sdpa_kernel(SDPBackend.MATH):
+            out_ref = torch.cat(
+                [
+                    F.scaled_dot_product_attention(
+                        q_ref[start:end].transpose(0, 1),
+                        k_ref[start:end].transpose(0, 1),
+                        v_ref[start:end].transpose(0, 1),
+                        is_causal=is_causal,
+                        enable_gqa=enable_gqa,
+                    ).transpose(0, 1)
+                    for start, end in pairwise(boundaries)
+                ]
+            )
+        grads_ref = torch.autograd.grad(
+            out_ref, (q_ref, k_ref, v_ref), grad_out.float()
+        )
+        self.assertEqual(out.float(), out_ref, atol=2e-2, rtol=2e-2)
+        for actual, expected in zip(grads, grads_ref):
+            self.assertEqual(actual.float(), expected, atol=3e-2, rtol=3e-2)
 
     @skipIfRocm
     @unittest.skipIf(
