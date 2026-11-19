@@ -101,6 +101,7 @@ ideep::tensor::desc convolution_forward_expected_weights_desc(
     bool is_channels_last = false);
 
 // Ported from ideep::convolution_backward_data::compute_v2.
+// Signature matches ideep's (op_attr is taken by value and modified).
 void convolution_backward_data_compute_v2(
     const ideep::tensor& diff_dst,
     const ideep::tensor& weights,

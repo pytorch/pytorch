@@ -8,6 +8,7 @@
 namespace at::native::mkldnn {
 
 // Ported from ideep::pooling_forward::compute.
+// Training max pooling stores the indices in dst's workspace.
 void pooling_forward(
     const ideep::tensor& src,
     const dnnl::memory::dims& output_sizes,
@@ -20,6 +21,7 @@ void pooling_forward(
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::pooling_backward::compute.
+// Max pooling reads the indices from the forward dst's workspace.
 void pooling_backward(
     const ideep::tensor& diff_dst,
     const ideep::tensor& dst,
