@@ -644,10 +644,11 @@ class AbstractFaultToleranceTest:
 
 def _make_fault_tolerance_test_class(backend):
     class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
-        pass
+        @property
+        def device_type(self) -> str:
+            return backend.device_type
 
     FaultToleranceTest.backend_name = backend.name
-    FaultToleranceTest.device_type = backend.device_type
     FaultToleranceTest.supports_work_result = backend.supports_work_result
     FaultToleranceTest.env = dict(backend.env)
     FaultToleranceTest.__name__ = (
