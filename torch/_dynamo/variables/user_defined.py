@@ -140,6 +140,7 @@ from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _can_guard_lookup_hooks,
+    _guard_getattribute,
     _resolve_descriptor_get,
     generic_is_true,
     guard_mro_absent,
@@ -4044,10 +4045,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> None:
         cls = type(self.value)
         guard_mro = _can_guard_lookup_hooks(cls)
-        # A sourceless instance has no HASATTR fallback for custom metadata access.
         if self.cls_source and (guard_mro or not self.source):
-            mro_attr_source(tx, cls, self.cls_source, name)
-            mro_attr_source(tx, cls, self.cls_source, "__getattr__")
+            # A new instance has only a class source to guard changes to its lookup hooks.
+            if not self.source:
+                _guard_getattribute(tx, cls, self.cls_source)
+            mro_attr_source(tx, cls, self.cls_source, name, raw_metadata=True)
+            mro_attr_source(tx, cls, self.cls_source, "__getattr__", raw_metadata=True)
         effects = tx.output.side_effects
         if (
             not self.source
@@ -4466,7 +4469,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if can_use_mro_source:
             source = self.get_source_by_walking_mro(tx, name)
         elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
+            source = mro_attr_source(
+                tx, type(self.value), self.cls_source, name, raw_metadata=True
+            )
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
