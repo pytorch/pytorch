@@ -1,0 +1,70 @@
+# Owner(s): ["module: ci"]
+# Temporary authorized audit. Never merge. Fixed S3 metadata reads only; no cloud writes or credential output.
+# Keep [no-ci] until the complete final-tree/source/fanout review.
+# Launch only via the normal exact-label/bot-tag path; never push after launch.
+name: CI security HF-cache metadata tail read canary
+on:
+  push:
+    tags: [ciflow/inductor-cu126/205614]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+jobs:
+  check-ci:
+    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205614' && github.actor == 'pytorch-bot[bot]' && github.actor_id == '54816060' && github.triggering_actor == 'pytorch-bot[bot]' && github.event.sender.id == 54816060 && github.run_attempt == 1 && 205614 != 0
+    uses: ./.github/workflows/_check-ci.yml
+  exact-read:
+    needs: check-ci
+    if: github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.event_name == 'push' && github.ref == 'refs/tags/ciflow/inductor-cu126/205614' && github.actor == 'pytorch-bot[bot]' && github.actor_id == '54816060' && github.triggering_actor == 'pytorch-bot[bot]' && github.event.sender.id == 54816060 && github.run_attempt == 1 && 205614 != 0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CANARY_ROLE_NAME: gha_workflow_hf-cache-write
+      CANARY_SENDER_ID: ${{ github.event.sender.id }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_MAX_ATTEMPTS: '1'
+      AWS_CONFIG_FILE: /dev/null
+      AWS_SHARED_CREDENTIALS_FILE: /dev/null
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Offline exact-request controls
+        run: python3 -I .github/scripts/test_ci_hf_cache_metadata_tail_probe.py
+      - name: Reject alternate providers and detect ordinary OIDC
+        id: provider
+        env:
+          CANARY_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I .github/scripts/ci_hf_cache_metadata_tail_probe.py --preflight
+          for name in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do
+            printf '%s=\n' "$name" >> "$GITHUB_ENV"
+          done
+      - name: Assume exact HF-cache role with read-only session
+        id: credentials
+        if: steps.provider.outputs.oidc_requestable == 'true'
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_hf-cache-write
+          role-session-name: hf-cache-metadata-tail-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          unset-current-credentials: true
+          disable-retry: true
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[{"Effect":"Deny","NotAction":["sts:GetCallerIdentity","s3:GetBucketLocation","s3:GetBucketOwnershipControls","s3:GetBucketPolicy","s3:GetBucketPolicyStatus","s3:GetBucketPublicAccessBlock","s3:GetEncryptionConfiguration","s3:GetObject","s3:ListBucket","s3:ListBucketVersions"],"Resource":"*"},{"Effect":"Deny","Action":"s3:*","NotResource":["arn:aws:s3:::pytorch-hf-model-cache-meta-prod-aws-ue1","arn:aws:s3:::pytorch-hf-model-cache-meta-prod-aws-ue1/release-audit-hf-cache-20261117-c1e8e9b4"]},{"Effect":"Allow","Action":"sts:GetCallerIdentity","Resource":"*"},{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:GetBucketOwnershipControls","s3:GetBucketPolicy","s3:GetBucketPolicyStatus","s3:GetBucketPublicAccessBlock","s3:GetEncryptionConfiguration","s3:ListBucket","s3:ListBucketVersions"],"Resource":"arn:aws:s3:::pytorch-hf-model-cache-meta-prod-aws-ue1"},{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::pytorch-hf-model-cache-meta-prod-aws-ue1/release-audit-hf-cache-20261117-c1e8e9b4"}]}
+      - name: Read exact-owned bucket metadata
+        if: steps.provider.outputs.oidc_requestable == 'true' && steps.credentials.outcome == 'success'
+        run: python3 -I .github/scripts/ci_hf_cache_metadata_tail_probe.py
+      - name: Record unavailable role
+        if: steps.credentials.outcome != 'success'
+        run: printf 'role=%s role_assumed=false\n' "$CANARY_ROLE_NAME"
