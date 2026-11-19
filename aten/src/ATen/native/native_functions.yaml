@@ -7133,6 +7133,18 @@
     XPU: _scaled_mm_out_xpu
   tags: needs_exact_strides
 
+- func: _quantize_tensor(Tensor input, *, int[] dim, int scaling_type, ScalarType qdata_dtype, int scaling_algorithm, int swizzle_type, bool scaling_type_use_square_block_size=False) -> Tensor[]
+  variants: function
+  dispatch:
+    CUDA: _quantize_tensor_cuda
+  tags: needs_exact_strides
+
+- func: _quantize_tensor_dual(Tensor input, *, int[] dim, int scaling_type, ScalarType qdata_dtype, int scaling_algorithm, int swizzle_type, bool scaling_type_use_square_block_size=False) -> Tensor[]
+  variants: function
+  dispatch:
+    CUDA: _quantize_tensor_dual_cuda
+  tags: needs_exact_strides
+
 - func: _scaled_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
   structured_delegate: _scaled_mm_v2.out
   variants: function
@@ -7179,6 +7191,7 @@
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda_v2_out
+    XPU: _scaled_grouped_mm_xpu_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -7187,6 +7200,13 @@
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
     MPS: _grouped_mm_mps
+    XPU: _grouped_mm_xpu
+
+- func: _grouped_mm.out(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _grouped_mm_out
+    CUDA: _grouped_mm_out_cuda
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -9454,7 +9474,7 @@
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
   dispatch:
-    CPU, CUDA: triangular_solve_out
+    CPU, CUDA, XPU: triangular_solve_out
     MPS: triangular_solve_mps_out
     SparseCsrCPU: triangular_solve_out_sparse_csr_cpu
     SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
@@ -15299,6 +15319,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable_backward
+    XPU: _scaled_dot_product_fused_attention_overrideable_backward_xpu
 
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
@@ -15330,6 +15351,7 @@
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
+    XPU: _flash_attention_forward_xpu
   tags: nondeterministic_seeded
 
 - func: _flash_attention_forward_no_dropout_inplace(Tensor(a!) out, Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None, Tensor? block_table=None, int? num_splits=None) -> Tensor softmax_logsumexp
@@ -15349,6 +15371,7 @@
   variants: function
   dispatch:
     CUDA: _flash_attention_backward
+    XPU: _flash_attention_backward_xpu
 
 # Returns output, logsumexp if compute_logsumexp
 - func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt? max_seqlen_q, SymInt? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
