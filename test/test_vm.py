@@ -3363,6 +3363,12 @@ def demote_caller(n, x):
     return demote_python(n), x + 1
 
 
+def demote_tensor_caller(n, x):
+    for _ in range(100):
+        x = x + 1
+    return demote_python(n), x
+
+
 def demote_chain_1(n):
     return demote_python(n)
 
@@ -3429,6 +3435,23 @@ class TestVmDemotion(TestCase):
         # The loop is with the interpreter: on its own, or along with
         # callers of it, which cost the same either way once it is.
         self.assertTrue(stats["demoted"] or stats["demoted_callees"])
+
+    def test_measuring_covers_what_the_function_calls(self):
+        # The tensor operations make the function faster compiled whatever
+        # its callee is run as, so it is settled first. Its calls are only
+        # as fast as they will be once the callee, a good part of each of
+        # them, is with the interpreter.
+        compiled = torch.vm(
+            demote_tensor_caller, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        x = torch.ones(2)
+        for _ in range(600):
+            compiled(300, x)
+            if not compiled.stats()["measuring"]:
+                break
+        stats = compiled.stats()
+        self.assertFalse(stats["measuring"])
+        self.assertEqual(stats["demoted_callees"], ["demote_python"])
 
     @slowTest
     def test_slow_function_is_measured_with_fewer_calls(self):
