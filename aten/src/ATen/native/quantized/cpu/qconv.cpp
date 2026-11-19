@@ -2109,7 +2109,7 @@ namespace at::native {
     );
 }
 
-  at::Tensor& QConvoneDNN::run_pointwise_binary_tensor_(
+  void QConvoneDNN::run_pointwise_binary_tensor_(
       at::Tensor& accum, // contains quantized values but not QTensor
       at::Tensor act, // contains quantized values but not QTensor
       at::Tensor act_scale,
@@ -2134,7 +2134,7 @@ namespace at::native {
       std::optional<std::string_view> unary_algorithm) {
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 conv: act scale/zp size should be 1");
-    return qconv2d_pointwise_binary_onednn_(
+    qconv2d_pointwise_binary_onednn_(
       accum, act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
       weight, weight_scales, weight_zero_points, bias,
       stride, padding, dilation, groups,

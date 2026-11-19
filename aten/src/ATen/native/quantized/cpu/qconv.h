@@ -94,7 +94,7 @@ class QConvoneDNN final {
       torch::List<std::optional<at::Scalar>> unary_scalars,
       std::optional<std::string_view> unary_algorithm);
 
-  TORCH_API static at::Tensor& run_pointwise_binary_tensor_(
+  TORCH_API static void run_pointwise_binary_tensor_(
       at::Tensor& accum, // contains quantized values but not QTensor
       at::Tensor act, // contains quantized values but not QTensor
       at::Tensor act_scale,

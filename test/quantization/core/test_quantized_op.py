@@ -8628,8 +8628,8 @@ class TestQuantizedConv(TestCase):
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qconv2d_binary_tensor_inplace(self):
-        # qconv2d_pointwise_.binary_tensor writes into qaccum and returns it,
-        # matching the result of the functional .binary_tensor overload.
+        # qconv2d_pointwise_.binary_tensor writes into qaccum and returns None;
+        # qaccum must match the result of the functional .binary_tensor overload.
         groups = 1
         in_ch, out_ch = 4, 4
         x = torch.randint(0, 8, (1, in_ch, 5, 5), dtype=torch.uint8)
@@ -8655,7 +8655,7 @@ class TestQuantizedConv(TestCase):
                 qaccum_inplace, x, x_scale, x_zp, packed_w, w_scale, w_zp, None,
                 *conv_args, unary_attr, [], None,
             )
-            self.assertEqual(result.data_ptr(), qaccum_inplace.data_ptr())
+            self.assertIsNone(result)
             self.assertEqual(qaccum_inplace, expected)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")

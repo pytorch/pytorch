@@ -527,7 +527,7 @@ AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor_(
     for (const auto i : c10::irange(unary_scalars_len_)) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
     }
-    auto tmp_result = at::native::QConvoneDNN::run_pointwise_binary_tensor_(
+    at::native::QConvoneDNN::run_pointwise_binary_tensor_(
         *tensor_handle_to_tensor_pointer(accum),
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(act_scale),
@@ -550,7 +550,8 @@ AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor_(
         pointer_to_optional<std::string_view>(unary_attr),
         unary_scalars_list,
         pointer_to_optional<std::string_view>(unary_algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
+    // The op returns (), but Inductor's cpp wrapper always passes an output handle.
+    *ret0 = new_tensor_handle(at::Tensor(*tensor_handle_to_tensor_pointer(accum)));
   });
 }
 
