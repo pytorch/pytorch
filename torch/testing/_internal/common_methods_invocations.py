@@ -23407,10 +23407,10 @@ if "flydsl" in dsl_ops_by_dsl:
                 skipCUDAIf(
                     not (
                         torch.cuda.is_available()
-                        and _flydsl_utils._is_supported_arch(
-                            torch.cuda.current_device(),
-                            _flydsl_scatter_add_supported_arches,
+                        and _flydsl_utils._get_flydsl_device_arch(
+                            torch.cuda.current_device()
                         )
+                        in _flydsl_scatter_add_supported_arches
                     ),
                     "flydsl scatter_add override requires gfx942/gfx950",
                 )

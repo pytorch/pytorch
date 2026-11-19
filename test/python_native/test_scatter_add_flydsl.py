@@ -1,5 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -69,10 +70,10 @@ def _row_index(idx_1d: torch.Tensor, src: torch.Tensor) -> torch.Tensor:
 @skipIfNoFlyDSL
 @unittest.skipIf(
     torch.version.hip is None
-    or not fu._is_supported_arch(
-        torch.cuda.current_device() if torch.cuda.is_available() else 0,
-        _SUPPORTED_ARCHES,
-    ),
+    or fu._get_flydsl_device_arch(
+        torch.cuda.current_device() if torch.cuda.is_available() else 0
+    )
+    not in _SUPPORTED_ARCHES,
     "FlyDSL scatter_add override requires gfx942/gfx950",
 )
 class TestFlyDSLRowScatterAdd(TestCase):
@@ -250,6 +251,76 @@ class TestFlyDSLRowScatterAdd(TestCase):
             dst.index_add_(0, idx, src)
         self._assert_not_dispatched()
         self.assertEqual(dst, ref)
+
+    def test_arch_overrides_do_not_widen_support(self):
+        # The device reports an unsupported arch (gfx90a), FlyDSL is told to
+        # compile for it (ARCH), and FLYDSL_GPU_ARCH/HSA_OVERRIDE_GFX_VERSION
+        # name a supported one, which makes fu._is_supported_arch true. The
+        # override must decline: gfx90a has no buffer packed-bf16 atomic.
+        from torch._native.ops.scatter_add.flydsl_impl import (
+            _aten_sorted_index_add_would_run,
+        )
+
+        src = _int_valued((64, 256), torch.bfloat16, seed=44)
+        dst = _int_valued((32, 256), torch.bfloat16, seed=45)
+        idx = _indices("uniform", 64, 32)
+        with pn.flydsl.disabled():
+            ref = dst.clone().index_add_(0, idx, src)
+        sorted_self = torch.empty((10, 128), device="cuda")
+        sorted_index = torch.empty(1_000_000, dtype=torch.long, device="meta")
+        sorted_source = torch.empty((1_000_000, 128), device="meta")
+        with (
+            mock.patch.object(fu, "_get_flydsl_device_arch", return_value="gfx90a"),
+            mock.patch.object(fu, "_is_supported_arch", return_value=True),
+            mock.patch(
+                "torch._native.ops.scatter_add.flydsl_kernels.compile_target_arch",
+                return_value="gfx90a",
+            ),
+        ):
+            self.assertFalse(flydsl_impl._index_add_inplace_cond(dst, 0, idx, src))
+            self.assertFalse(
+                flydsl_impl._scatter_add_inplace_cond(dst, 0, _row_index(idx, src), src)
+            )
+            # ATen's sorted path checks the device's arch (isGPUArch), too.
+            self.assertFalse(
+                _aten_sorted_index_add_would_run(
+                    True, sorted_self, sorted_index, sorted_source
+                )
+            )
+            dst.index_add_(0, idx, src)
+        self._assert_not_dispatched()
+        self.assertEqual(dst, ref, atol=0, rtol=0)
+
+    @parametrize("rank", (24, 25, 26))
+    def test_index_add_rank_outcome_matches_aten(self, rank):
+        # Singleton dims between rows and features leave the work unchanged.
+        # ATen rejects rank 26 at entry and rank 25 in TensorInfo (unsorted
+        # input); from rank 25 up the override leaves the call to ATen.
+        shape = (64,) + (1,) * (rank - 2) + (256,)
+        src = _int_valued((64, 256), torch.float32, seed=46).view(shape)
+        dst = _int_valued((32, 256), torch.float32, seed=47).view((32,) + shape[1:])
+        idx = _indices("uniform", 64, 32)
+
+        def outcome(enabled):
+            d = dst.clone()
+            context = contextlib.nullcontext() if enabled else pn.flydsl.disabled()
+            try:
+                with context:
+                    d.index_add_(0, idx, src)
+                torch.cuda.synchronize()
+            except RuntimeError as error:
+                return type(error), str(error).splitlines()[0]
+            return d
+
+        ref = outcome(enabled=False)
+        got = outcome(enabled=True)
+        if rank < 25:
+            self._assert_dispatched()
+            self.assertEqual(got, ref, atol=0, rtol=0)
+        else:
+            self._assert_not_dispatched()
+            self.assertIsInstance(ref, tuple)
+            self.assertEqual(got, ref)
 
     @parametrize("op", ("index_add", "index_add_", "scatter_add_", "scatter_out"))
     def test_impl_reuses_cond_layout(self, op):
@@ -662,7 +733,7 @@ class TestFlyDSLRowScatterAdd(TestCase):
             row_scatter_add_,
         )
 
-        arch = fu._resolve_rocm_arch(torch.cuda.current_device())
+        arch = fu._get_flydsl_device_arch(torch.cuda.current_device())
         if not atomic_mode_supported(mode, dtype, arch):
             self.skipTest(f"{mode} atomics unsupported for {dtype} on {arch}")
         n, m_src, m_dst = 2048, 1000, 300
@@ -690,7 +761,7 @@ class TestFlyDSLRowScatterAdd(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "requires two GPUs")
     def test_non_current_device(self):
-        if not fu._is_supported_arch(1, _SUPPORTED_ARCHES):
+        if fu._get_flydsl_device_arch(1) not in _SUPPORTED_ARCHES:
             self.skipTest("second GPU arch unsupported")
         if not flydsl_impl._compile_target_matches(1):
             self.skipTest("FlyDSL compile target differs from the second GPU")

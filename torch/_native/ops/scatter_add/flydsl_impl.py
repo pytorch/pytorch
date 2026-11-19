@@ -89,6 +89,12 @@ _MIN_SRC_BYTES: dict[torch.dtype, int | None] = {
     torch.float32: None,
 }
 
+# ATen's index_add rejects more than MAX_TENSORINFO_DIMS (25) dims at entry,
+# and its generic kernels' TensorInfo needs fewer than 25 (TensorInfo.cuh).
+# Ranks from 25 up are left to ATen, so its outcome (an error, or its sorted
+# path) does not change when this override is enabled.
+_ATEN_MAX_TENSORINFO_DIMS = 25
+
 # Mirrors of the Indexing.cu constants that gate index_add_sorted_rocm.
 _ATEN_SORTED_INDEX_ADD_ARCHES = ("gfx942", "gfx950")
 _ATEN_SORTED_INDEX_ADD_MIN_INDICES = 1_000_000
@@ -146,7 +152,10 @@ def _common_ok(*tensors: torch.Tensor) -> bool:
     device_index = first.device.index
     if device_index is None:
         return False
-    return fu._is_supported_arch(device_index, _SUPPORTED_ARCHES)
+    # The device's own arch, not fu._is_supported_arch: that honors
+    # FLYDSL_GPU_ARCH/HSA_OVERRIDE_GFX_VERSION, which can name a supported
+    # arch for an unsupported device. The atomics must exist on the device.
+    return fu._get_flydsl_device_arch(device_index) in _SUPPORTED_ARCHES
 
 
 def _alias_ok(dst: torch.Tensor, plan: _RowPlan, *inputs: torch.Tensor) -> bool:
@@ -243,10 +252,11 @@ def _geometry(
     dst: torch.Tensor, d: int, index_for_layout: torch.Tensor, src: torch.Tensor
 ) -> _RowPlan | None:
     """General layout analysis (TensorIterator coalescing, as ATen does)."""
-    it = _scatter_add_eligibility(dst, d, index_for_layout, src)
-    if it is None or it.numel == 0:
+    geometry = _scatter_add_eligibility(dst, d, index_for_layout, src)
+    if geometry is None:
         return None
-    n, m_src = it.shape[0], it.shape[1]
+    # _plan_rows rejects empty geometry (n below the slice floor, m_src == 0).
+    n, m_src = geometry
     return _plan_rows(dst, src, dst.shape[d], m_src, n, dst.stride(d), src.stride(d))
 
 
@@ -516,7 +526,9 @@ def _aten_sorted_index_add_would_run(
         return False
     if not 0 < self.size(0) <= _INT32_MAX:
         return False
-    return fu._is_supported_arch(self.device.index, _ATEN_SORTED_INDEX_ADD_ARCHES)
+    # ATen checks the device's reported arch (isGPUArch), not FlyDSL overrides.
+    arch = fu._get_flydsl_device_arch(self.device.index)
+    return arch in _ATEN_SORTED_INDEX_ADD_ARCHES
 
 
 def _expanded_index(index: torch.Tensor, source: torch.Tensor) -> torch.Tensor:
@@ -546,6 +558,8 @@ def _index_add_ok(
     if index.dtype not in (torch.int32, torch.int64):
         return None
     if self.ndim == 0 or source.ndim != self.ndim:
+        return None
+    if self.ndim >= _ATEN_MAX_TENSORINFO_DIMS:
         return None
     if not -self.ndim <= dim < self.ndim or _normalize_dim(dim, self.ndim) != 0:
         return None
