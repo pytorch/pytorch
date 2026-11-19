@@ -22,41 +22,97 @@
 
 namespace {
 
-// Both passes compute, per output value, (sum(pixel * w) + (1 << (precision - 1))) >> precision
-// clamped to [0, 255], with int16 weights w and int32 sums, like the AVX2 kernels.
+// This is the NEON counterpart of UpSampleKernelAVXAntialias.h. It also
+// separates the horizontal and vertical passes, and it's conceptually fairly
+// similar, with differences outlined below.
 //
-// The horizontal pass processes 4 output pixels (of 2 rows) at a time. Each pixel's taps are taken
-// in groups of 4: a 16-byte load covers 4 RGB input pixels, regrouped by a table lookup into one
-// 32-bit lane per channel. Weights are zero-padded to a multiple of 4 taps, so loads can extend
-// past a pixel's taps (contributing 0) but never past the end of the input.
+// Both passes compute, for each output value, sum(pixel * w) over the K input pixels that contribute
+// to it (K = ids_size), entirely in integers: the weights are fixed-point int16 values, w = round(weight
+// * 2^precision) (compute_index_ranges_int16_weights, see NOTE [ Weights computation for uint8_t and
+// multiplication trick ] in UpSampleKernel.cpp), the sum is an int32, and
+// (sum + (1 << (precision - 1))) >> precision converts it back with rounding to nearest, clamped to
+// [0, 255] (bicubic and lanczos can overshoot). That is the same arithmetic as the AVX2 kernels, so the
+// results are identical across these implementations.
 //
-// With dotprod, each weight is split exactly as w = 256 * hi + lo (hi signed, lo unsigned), so that
-// sum(p * w) = 256 * sum(p * hi) + sum(p * lo) takes two dot products per group of 4 taps: UDOT,
-// or USDOT for the signed high bytes of bicubic and lanczos weights (requires i8mm). Without it,
-// the same sums use widening multiply-accumulates.
+// Horizontal pass (neon_horizontal_udot / neon_horizontal_usdot):
+//
+// An output pixel's K input pixels are processed in groups of 4 (weights zero-padded to a multiple
+// of 4). For each group:
+//
+//   LD1 (vld1q_u8), 16-byte load:  R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 . . . .
+//   TBL (vqtbl1q_u8), regroup:     [R0 R1 R2 R3] [G0 G1 G2 G3] [B0 B1 B2 B3] [ 0  0  0  0]
+//   UDOT (vdotq_u32) with weights: [w0 w1 w2 w3] [w0 w1 w2 w3] [w0 w1 w2 w3] [w0 w1 w2 w3]
+//                                   '- lane 0 -'  '- lane 1 -'  '- lane 2 -'  '- lane 3 -'
+//
+// A 128-bit register holds 16 bytes, seen by UDOT as 4 lanes of 4 bytes. In each lane, UDOT multiplies
+// the 4 pixel bytes by the 4 weight bytes, sums the 4 products and adds the sum to that lane of a
+// 4 x int32 accumulator:
+//
+//   acc lane 0 += R0*w0 + R1*w1 + R2*w2 + R3*w3
+//   acc lane 1 += G0*w0 + G1*w1 + G2*w2 + G3*w3
+//   acc lane 2 += B0*w0 + B1*w1 + B2*w2 + B3*w3
+//   acc lane 3 += 0
+//
+// So a single UDOT computes the 3 channels' dot products of the group at once (the 4th lane is
+// padding). The groups of an output pixel accumulate into the same register, so after its last group
+// each lane holds the sum over all K inputs. Weights are int16, so each is split into bytes,
+// w = 256 * hi + lo: each group takes two UDOTs, accumulating into a hi and a lo register, which are
+// combined as 256 * hi + lo once per output pixel, after its last group. Bicubic and lanczos weights
+// can be negative, so the hi bytes are signed and use USDOT (vusdotq_s32, i8mm extension) instead.
+//
+// Each loop iteration computes 16 output pixels: 4 consecutive ones in each of kNeonRows = 4 rows. All
+// rows share the same weights and input offsets, the 16 sums are independent so the CPU can overlap
+// them, and the results of 4 pixels are narrowed to bytes and stored together (12 bytes).
+//
+// Memory accesses. Loads are 16 bytes and may extend past a pixel's last input (the zero-padded
+// weights make those bytes contribute 0), but never past the end of the input image: an iteration
+// only runs if the farthest load of its 16 output pixels ends within the input (neon_block_fits).
+// Output pixels that don't pass that check are computed one at a time, with the same check for each
+// 16-byte load and scalar code for the remaining inputs.
+//
+// The AVX2 kernel (ImagingResampleHorizontalConvolution8u4x) follows the same load / shuffle /
+// multiply-add steps, but computes 1 output pixel (instead of 4) in each of 4 rows per iteration and multiplies
+// 16-bit values with _mm256_madd_epi16. NEON has no equivalent 16-bit multiply-add instruction; its
+// 8-bit dot product (UDOT) is why the weights are split into bytes.
+//
+// Without dot products (CPUs without dotprod, or without i8mm when some weights are negative), one of
+// two multiply-accumulate kernels is used instead (see choose_neon_horizontal_kernel):
+// - K <= 8: neon_horizontal_mla, the same grouping of inputs by 4 and 16 output pixels per iteration,
+//   with widening multiply-accumulates (MLAL, one product per 32-bit lane) instead of dot products;
+// - K > 8: neon_horizontal_by_pixel, one output pixel at a time with an 8-wide vector loop over its
+//   K inputs, scalar for the remainder, which is faster there.
+//
+// Vertical pass: 16 output bytes at a time, summing K input rows, with the per-row weights hoisted
+// out of the loop and the loop specialized for K = 1 to 4.
 
-#if defined(__clang__)
-#define NEON_RESAMPLE_TARGET_DOTPROD __attribute__((target("dotprod")))
-#define NEON_RESAMPLE_TARGET_I8MM __attribute__((target("dotprod,i8mm")))
-#else
-// GCC 11 only accepts these extensions with an explicit base architecture.
-#define NEON_RESAMPLE_TARGET_DOTPROD __attribute__((target("arch=armv8.2-a+dotprod")))
-#define NEON_RESAMPLE_TARGET_I8MM __attribute__((target("arch=armv8.2-a+dotprod+i8mm")))
-#endif
+// dotprod and i8mm are not enabled for the whole translation unit (aarch64 builds target a baseline
+// without them), so only the functions using them are compiled with them, and they are only called
+// after checking cpuinfo_has_arm_neon_dot() / cpuinfo_has_arm_i8mm() at runtime.
+// ReducedPrecisionFloatGemvFastPathKernel.cpp does the same for bf16 (target("+bf16") with
+// cpuinfo_has_arm_bf16()).
+#define NEON_RESAMPLE_TARGET_DOTPROD __attribute__((target("+dotprod")))
+#define NEON_RESAMPLE_TARGET_I8MM __attribute__((target("+dotprod+i8mm")))
 
 // Lane c of the result holds channel c of 4 consecutive RGB pixels: {p0[c], p1[c], p2[c], p3[c]}.
-inline uint8x16_t neon_rgb_taps_by_channel(const uint8_t* p) {
+inline uint8x16_t neon_rgb_group_by_channel(const uint8_t* p) {
+  // Byte i of the result is byte idx[i] of the load; 255 (out of range) gives 0.
   const uint8x16_t idx = {0, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11, 255, 255, 255, 255};
+  // vld1q_u8: R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 . . . .
+  // vqtbl1q_u8: [R0 R1 R2 R3] [G0 G1 G2 G3] [B0 B1 B2 B3] [0 0 0 0]
   return vqtbl1q_u8(vld1q_u8(p), idx);
 }
 
-// sum over 4 taps of pixel * weight, one int32 lane per channel.
-inline int32x4_t neon_mla_rgb_4taps(int32x4_t acc, const uint8_t* p, const int16_t* k) {
+// acc + sum over 4 input pixels of pixel * weight, one int32 lane per channel (the 4th lane is 0).
+inline int32x4_t neon_mla_rgb_group(int32x4_t acc, const uint8_t* p, const int16_t* k) {
+  // vqtbl1q_u8: pad each RGB pixel to 4 bytes: [R0 G0 B0 0] [R1 G1 B1 0] [R2 G2 B2 0] [R3 G3 B3 0]
   const uint8x16_t idx = {0, 1, 2, 255, 3, 4, 5, 255, 6, 7, 8, 255, 9, 10, 11, 255};
   const uint8x16_t v = vqtbl1q_u8(vld1q_u8(p), idx);
+  // vmovl_u8 / vmovl_high_u8: widen to int16, pixels 0-1 in lo and pixels 2-3 in hi.
   const int16x8_t lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(v)));
   const int16x8_t hi = vreinterpretq_s16_u16(vmovl_high_u8(v));
   const int16x4_t w = vld1_s16(k);
+  // vmlal_lane_s16(a, pixel_j, w, j): a += pixel_j * w[j], widening to int32 (4 lanes = R, G, B, 0).
+  // Two independent accumulators (a: pixels 0 and 1, b: pixels 2 and 3), added at the end.
   int32x4_t a = vmlal_lane_s16(acc, vget_low_s16(lo), w, 0);
   int32x4_t b = vmull_lane_s16(vget_low_s16(hi), w, 2);
   a = vmlal_lane_s16(a, vget_high_s16(lo), w, 1);
@@ -64,31 +120,45 @@ inline int32x4_t neon_mla_rgb_4taps(int32x4_t acc, const uint8_t* p, const int16
   return vaddq_s32(a, b);
 }
 
+// Converts the sums of 4 output pixels ({R, G, B, unused} lanes each) to uint8 and stores their 12 bytes.
 inline void neon_store_rgb_4px(uint8_t* out, const int32x4_t* acc, int32x4_t shift) {
-  const uint8x16_t pack = {0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 255, 255, 255, 255};
+  // vrshlq_s32 by -precision: (sum + (1 << (precision - 1))) >> precision, i.e. rounding shift.
+  // vqmovun_s32 / vqmovn_u16: narrow to uint16 then uint8 with saturation, i.e. clamp to [0, 255].
   const uint16x8_t u01 = vcombine_u16(vqmovun_s32(vrshlq_s32(acc[0], shift)), vqmovun_s32(vrshlq_s32(acc[1], shift)));
   const uint16x8_t u23 = vcombine_u16(vqmovun_s32(vrshlq_s32(acc[2], shift)), vqmovun_s32(vrshlq_s32(acc[3], shift)));
+  // vqtbl1q_u8: drop the unused 4th byte of each pixel: R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 0 0 0 0
+  const uint8x16_t pack = {0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 255, 255, 255, 255};
   const uint8x16_t px = vqtbl1q_u8(vcombine_u8(vqmovn_u16(u01), vqmovn_u16(u23)), pack);
+  // Store exactly 12 bytes: 8 (vst1_u8) + 4 (vst1q_lane_u32, bytes 8-11).
   vst1_u8(out, vget_low_u8(px));
   vst1q_lane_u32(reinterpret_cast<uint32_t*>(out + 8), vreinterpretq_u32_u8(px), 2);
 }
 
+// Number of rows computed together by the horizontal kernels.
+constexpr int kNeonRows = 4;
+
 struct NeonHorizontalArgs {
-  const uint8_t* lines[2];  // input rows
-  uint8_t* outs[2];  // output rows
-  int rows;  // 1 or 2
+  const uint8_t* lines[kNeonRows];  // input rows
+  uint8_t* outs[kNeonRows];  // output rows
+  int rows;  // 1 to kNeonRows
   int64_t xout;
   const int64_t* xmin;  // byte offsets into a row
   const uint8_t* end;  // end of the input buffer
-  int groups;  // padded taps / 4
+  int groups;  // number of groups of 4 inputs per output pixel (padded K / 4)
   int32x4_t shift;
 };
 
-// 4 output pixels per step using widening multiply-accumulates on the zero-padded weights `kp`.
-// Returns the first output pixel not computed.
+// Whether all 16-byte loads of output pixels x to x + 3, in all rows, end within the input.
+inline bool neon_block_fits(const NeonHorizontalArgs& a, int64_t x) {
+  const int64_t xmin = std::max(std::max(a.xmin[x], a.xmin[x + 1]), std::max(a.xmin[x + 2], a.xmin[x + 3]));
+  return a.lines[a.rows - 1] + xmin + 12 * (a.groups - 1) + 16 <= a.end;
+}
+
+// 4 output pixels per step, inputs in groups of 4, using widening multiply-accumulates on the
+// zero-padded weights `kp`. Returns the first output pixel not computed.
 inline int64_t neon_horizontal_mla(const NeonHorizontalArgs& a, const int16_t* kp) {
   int64_t x = 0;
-  for (; x + 4 <= a.xout && a.lines[a.rows - 1] + a.xmin[x + 3] + 12 * (a.groups - 1) + 16 <= a.end; x += 4) {
+  for (; x + 4 <= a.xout && neon_block_fits(a, x); x += 4) {
     for (int r = 0; r < a.rows; r++) {
       int32x4_t acc[4];
       for (int q = 0; q < 4; q++) {
@@ -96,7 +166,7 @@ inline int64_t neon_horizontal_mla(const NeonHorizontalArgs& a, const int16_t* k
         const int16_t* k = kp + (x + q) * 4 * a.groups;
         acc[q] = vdupq_n_s32(0);
         for (int g = 0; g < a.groups; g++) {
-          acc[q] = neon_mla_rgb_4taps(acc[q], p + 12 * g, k + 4 * g);
+          acc[q] = neon_mla_rgb_group(acc[q], p + 12 * g, k + 4 * g);
         }
       }
       neon_store_rgb_4px(a.outs[r] + 3 * x, acc, a.shift);
@@ -106,11 +176,11 @@ inline int64_t neon_horizontal_mla(const NeonHorizontalArgs& a, const int16_t* k
 }
 
 // Same as neon_horizontal_mla with dot products, for non-negative weights. `w` holds, per output
-// pixel and group of 4 taps, {hi bytes, lo bytes} of the weights, each replicated across the 4 lanes.
+// pixel and group of 4 inputs, {hi bytes, lo bytes} of the weights, each replicated across the 4 lanes.
 NEON_RESAMPLE_TARGET_DOTPROD inline int64_t neon_horizontal_udot(const NeonHorizontalArgs& a, const uint8x16_t* w) {
   int64_t x = 0;
-  for (; x + 4 <= a.xout && a.lines[a.rows - 1] + a.xmin[x + 3] + 12 * (a.groups - 1) + 16 <= a.end; x += 4) {
-    int32x4_t acc[2][4];
+  for (; x + 4 <= a.xout && neon_block_fits(a, x); x += 4) {
+    int32x4_t acc[kNeonRows][4];
     for (int q = 0; q < 4; q++) {
       const int64_t off = a.xmin[x + q];
       const uint8x16_t* wq = w + (x + q) * 2 * a.groups;
@@ -118,10 +188,12 @@ NEON_RESAMPLE_TARGET_DOTPROD inline int64_t neon_horizontal_udot(const NeonHoriz
         uint32x4_t hi = vdupq_n_u32(0);
         uint32x4_t lo = vdupq_n_u32(0);
         for (int g = 0; g < a.groups; g++) {
-          const uint8x16_t v = neon_rgb_taps_by_channel(a.lines[r] + off + 12 * g);
+          const uint8x16_t v = neon_rgb_group_by_channel(a.lines[r] + off + 12 * g);
+          // vdotq_u32(acc, v, w): per 32-bit lane, acc += v0*w0 + v1*w1 + v2*w2 + v3*w3 (bytes).
           hi = vdotq_u32(hi, v, wq[2 * g]);
           lo = vdotq_u32(lo, v, wq[2 * g + 1]);
         }
+        // vmlaq_n_u32: lo + hi * 256, the sum with the full int16 weights.
         acc[r][q] = vreinterpretq_s32_u32(vmlaq_n_u32(lo, hi, 256));
       }
     }
@@ -135,8 +207,8 @@ NEON_RESAMPLE_TARGET_DOTPROD inline int64_t neon_horizontal_udot(const NeonHoriz
 // Same as neon_horizontal_udot for weights of any sign: the high bytes are signed.
 NEON_RESAMPLE_TARGET_I8MM inline int64_t neon_horizontal_usdot(const NeonHorizontalArgs& a, const uint8x16_t* w) {
   int64_t x = 0;
-  for (; x + 4 <= a.xout && a.lines[a.rows - 1] + a.xmin[x + 3] + 12 * (a.groups - 1) + 16 <= a.end; x += 4) {
-    int32x4_t acc[2][4];
+  for (; x + 4 <= a.xout && neon_block_fits(a, x); x += 4) {
+    int32x4_t acc[kNeonRows][4];
     for (int q = 0; q < 4; q++) {
       const int64_t off = a.xmin[x + q];
       const uint8x16_t* wq = w + (x + q) * 2 * a.groups;
@@ -144,10 +216,12 @@ NEON_RESAMPLE_TARGET_I8MM inline int64_t neon_horizontal_usdot(const NeonHorizon
         int32x4_t hi = vdupq_n_s32(0);
         uint32x4_t lo = vdupq_n_u32(0);
         for (int g = 0; g < a.groups; g++) {
-          const uint8x16_t v = neon_rgb_taps_by_channel(a.lines[r] + off + 12 * g);
+          const uint8x16_t v = neon_rgb_group_by_channel(a.lines[r] + off + 12 * g);
+          // vusdotq_s32: same as vdotq_u32 with signed weight bytes (unsigned pixels, int32 result).
           hi = vusdotq_s32(hi, v, vreinterpretq_s8_u8(wq[2 * g]));
           lo = vdotq_u32(lo, v, wq[2 * g + 1]);
         }
+        // vmlaq_n_s32: lo + hi * 256, the sum with the full int16 weights.
         acc[r][q] = vmlaq_n_s32(vreinterpretq_s32_u32(lo), hi, 256);
       }
     }
@@ -158,8 +232,8 @@ NEON_RESAMPLE_TARGET_I8MM inline int64_t neon_horizontal_usdot(const NeonHorizon
   return x;
 }
 
-// One output pixel at a time, with 8 taps per step. Without dot products this is faster than
-// neon_horizontal_mla for more than 8 taps.
+// One output pixel at a time, with an 8-wide vector loop over its inputs. Without dot products it is
+// faster than neon_horizontal_mla for more than 8 inputs per output pixel.
 inline void neon_horizontal_by_pixel(const at::Tensor& unpacked_output,
                             const at::Tensor& unpacked_input,
                             int ksize,
@@ -275,6 +349,23 @@ inline void neon_horizontal_by_pixel(const at::Tensor& unpacked_output,
   }
 }
 
+enum class NeonHorizontalKernel { Udot, Usdot, Mla, ByPixel };
+
+// Which horizontal kernel to use, from the CPU's features and the weights:
+// - with dotprod: UDOT, or USDOT if some weights are negative (bicubic, lanczos) and i8mm is available;
+// - otherwise, multiply-accumulates: neon_horizontal_mla, or neon_horizontal_by_pixel for more than 8
+//   inputs per output pixel, where it is faster.
+inline NeonHorizontalKernel choose_neon_horizontal_kernel(int ksize, bool negative_weights) {
+  const bool has_dot = cpuinfo_initialize() && cpuinfo_has_arm_neon_dot();
+  if (has_dot && !negative_weights) {
+    return NeonHorizontalKernel::Udot;
+  }
+  if (has_dot && cpuinfo_has_arm_i8mm()) {
+    return NeonHorizontalKernel::Usdot;
+  }
+  return ksize > 8 ? NeonHorizontalKernel::ByPixel : NeonHorizontalKernel::Mla;
+}
+
 // Interpolation horizontal pass on interleaved RGB rows, one output row per input row.
 void NeonResampleHorizontal(const at::Tensor& unpacked_output,
                             const at::Tensor& unpacked_input,
@@ -294,31 +385,28 @@ void NeonResampleHorizontal(const at::Tensor& unpacked_output,
   const int64_t xout_stride = xout * num_channels;
   const int64_t xin_stride = xin * num_channels;
 
-  bool use_dot = cpuinfo_initialize() && cpuinfo_has_arm_neon_dot();
-  if (!use_dot && ksize > 8) {
-    return neon_horizontal_by_pixel(unpacked_output, unpacked_input, ksize, horiz_indices_weights, horiz_weights_precision);
+  const bool negative_weights = std::any_of(kk, kk + xout * ksize, [](int16_t w) { return w < 0; });
+  const NeonHorizontalKernel kernel = choose_neon_horizontal_kernel(ksize, negative_weights);
+  if (kernel == NeonHorizontalKernel::ByPixel) {
+    neon_horizontal_by_pixel(unpacked_output, unpacked_input, ksize, horiz_indices_weights, horiz_weights_precision);
+    return;
   }
+
+  // Weights zero-padded to groups of 4 per output pixel, and for the dot-product kernels, split into
+  // {hi bytes, lo bytes} with each group replicated across the 4 lanes.
   const int groups = (ksize + 3) / 4;
   std::vector<int16_t> kp(xout * 4 * groups, 0);
-  bool negative_weights = false;
   for (const auto i : c10::irange(xout)) {
-    for (const auto j : c10::irange(ksize)) {
-      kp[i * 4 * groups + j] = kk[i * ksize + j];
-      negative_weights |= kk[i * ksize + j] < 0;
-    }
-  }
-  if (use_dot && negative_weights && !cpuinfo_has_arm_i8mm()) {
-    if (ksize > 8) {
-      return neon_horizontal_by_pixel(unpacked_output, unpacked_input, ksize, horiz_indices_weights, horiz_weights_precision);
-    }
-    use_dot = false;
+    std::copy(kk + i * ksize, kk + (i + 1) * ksize, kp.begin() + i * 4 * groups);
   }
   std::vector<uint8x16_t> wdot;
-  if (use_dot) {
+  if (kernel != NeonHorizontalKernel::Mla) {
     wdot.resize(xout * 2 * groups);
     for (const auto i : c10::irange(xout * groups)) {
       uint8_t hi[16], lo[16];
       for (const auto t : c10::irange(4)) {
+        // w == 256 * hi + lo exactly, with hi = w >> 8 (arithmetic shift, so signed) and lo = w & 255.
+        // Byte t of each 32-bit lane multiplies input t of the group, in every channel lane.
         const int16_t w = kp[i * 4 + t];
         for (const auto lane : c10::irange(4)) {
           hi[4 * lane + t] = static_cast<uint8_t>(static_cast<int8_t>(w >> 8));
@@ -336,20 +424,18 @@ void NeonResampleHorizontal(const at::Tensor& unpacked_output,
   args.end = input_p + yin * xin_stride;
   args.groups = groups;
   args.shift = vdupq_n_s32(-static_cast<int32_t>(horiz_weights_precision));
-  for (int64_t y0 = 0; y0 < yin; y0 += 2) {
-    args.rows = static_cast<int>(std::min<int64_t>(2, yin - y0));
-    for (const auto r : c10::irange(2)) {
+  for (int64_t y0 = 0; y0 < yin; y0 += kNeonRows) {
+    args.rows = static_cast<int>(std::min<int64_t>(kNeonRows, yin - y0));
+    for (const auto r : c10::irange(kNeonRows)) {
       const int64_t y = y0 + std::min<int64_t>(r, args.rows - 1);
       args.lines[r] = input_p + y * xin_stride;
       args.outs[r] = output_p + y * xout_stride;
     }
     int64_t x_done = 0;
-    if (!use_dot) {
-      x_done = neon_horizontal_mla(args, kp.data());
-    } else if (negative_weights) {
-      x_done = neon_horizontal_usdot(args, wdot.data());
-    } else {
-      x_done = neon_horizontal_udot(args, wdot.data());
+    switch (kernel) {
+      case NeonHorizontalKernel::Udot: x_done = neon_horizontal_udot(args, wdot.data()); break;
+      case NeonHorizontalKernel::Usdot: x_done = neon_horizontal_usdot(args, wdot.data()); break;
+      default: x_done = neon_horizontal_mla(args, kp.data());
     }
     // Remaining output pixels of these rows, one at a time.
     for (const auto r : c10::irange(args.rows)) {
@@ -359,8 +445,9 @@ void NeonResampleHorizontal(const at::Tensor& unpacked_output,
         int32x4_t acc = vdupq_n_s32(0);
         int g = 0;
         for (; g < groups && p + 12 * g + 16 <= args.end; g++) {
-          acc = neon_mla_rgb_4taps(acc, p + 12 * g, k + 4 * g);
+          acc = neon_mla_rgb_group(acc, p + 12 * g, k + 4 * g);
         }
+        // Inputs whose 16-byte load would go past the end of the input, in scalar code.
         int32_t sums[4];
         vst1q_s32(sums, acc);
         for (int64_t t = 4 * g; t < idx_ptr_size[x]; t++) {
@@ -377,8 +464,8 @@ void NeonResampleHorizontal(const at::Tensor& unpacked_output,
   }
 }
 
-// One output row of the vertical pass: a weighted sum of `n` input rows `row_bytes` apart.
-// N is the number of taps when known at compile time (0 otherwise).
+// One output row of the vertical pass: a weighted sum of n input rows `row_bytes` apart. N is n when
+// known at compile time (1 to 4), else 0.
 template <int N>
 inline void neon_vertical_row(const uint8_t* base, uint8_t* out, int64_t row_bytes, const int16_t* k, int n_rt,
                               int32x4_t shift, unsigned int precision) {
@@ -391,17 +478,21 @@ inline void neon_vertical_row(const uint8_t* base, uint8_t* out, int64_t row_byt
   }
   int64_t j = 0;
   for (; j + 16 <= row_bytes; j += 16) {
+    // 16 output bytes as 4 int32x4 accumulators (bytes 0-3, 4-7, 8-11, 12-15).
     int32x4_t a0 = vdupq_n_s32(0), a1 = a0, a2 = a0, a3 = a0;
     for (int i = 0; i < n; i++) {
+      // vld1q_u8: 16 bytes of input row i; vmovl_u8 / vmovl_high_u8: widen to int16 (bytes 0-7, 8-15).
       const uint8x16_t v = vld1q_u8(base + i * row_bytes + j);
       const int16x8_t lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(v)));
       const int16x8_t hi = vreinterpretq_s16_u16(vmovl_high_u8(v));
       const int16x8_t wi = N ? w[N ? i : 0] : vdupq_n_s16(k[i]);
+      // vmlal_s16 / vmlal_high_s16: a += pixel * w, widening to int32, 4 lanes each.
       a0 = vmlal_s16(a0, vget_low_s16(lo), vget_low_s16(wi));
       a1 = vmlal_high_s16(a1, lo, wi);
       a2 = vmlal_s16(a2, vget_low_s16(hi), vget_low_s16(wi));
       a3 = vmlal_high_s16(a3, hi, wi);
     }
+    // Rounding shift by precision (vrshlq_s32), then saturating narrow to uint8 (vqmovun_s32, vqmovn_u16).
     const uint16x8_t u0 = vcombine_u16(vqmovun_s32(vrshlq_s32(a0, shift)), vqmovun_s32(vrshlq_s32(a1, shift)));
     const uint16x8_t u1 = vcombine_u16(vqmovun_s32(vrshlq_s32(a2, shift)), vqmovun_s32(vrshlq_s32(a3, shift)));
     vst1q_u8(out + j, vcombine_u8(vqmovn_u16(u0), vqmovn_u16(u1)));
@@ -447,15 +538,15 @@ void NeonResampleVertical(const at::Tensor& unpacked_output,
   }
 }
 
-// Main entry point for NEON-accelerated uint8 bilinear resize.
+// Main entry point for NEON-accelerated uint8 bilinear, bicubic and lanczos resize.
 //
 // Only supports num_channels == 3 with channels-last memory format.
 // Mirrors upsample_avx_bilinear_bicubic_uint8 but uses NEON intrinsics and
 // works directly on interleaved RGB data (no unpack/pack step needed).
 //
 // Weights are computed as int16 values by compute_index_ranges_int16_weights
-// with align_i32=false (no int32 alignment padding needed, unlike AVX2 which
-// processes pixels as 4-byte RGBA units).
+// with align_i32=false; NeonResampleHorizontal copies them into its own
+// zero-padded layout (see the overview at the top of this file).
 template <typename scale_type, class F>
 void upsample_neon_bilinear_bicubic_uint8(const at::Tensor& input_,
                                           const at::Tensor& output,
