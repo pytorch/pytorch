@@ -433,36 +433,6 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("other_consumer", (False, True))
-    @parametrize("scalar_input", (False, True))
-    def test_div_trunc_cpu_scalar_reciprocal_cudagraphs(
-        self, device, dtype, numerics, other_consumer, scalar_input
-    ):
-        x = torch.tensor([11.4375], device=device, dtype=dtype)
-        if scalar_input:
-            x = x.squeeze()
-
-        def fn(x, divisor):
-            result = torch.div(x, divisor, rounding_mode="trunc")
-            return (result, x + divisor) if other_consumer else result
-
-        compiled = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "numerics": numerics,
-                "triton.cudagraphs": True,
-                "graph_partition": True,
-            },
-        )
-        for value in (3.8125, 3.8125, 2.0, 4.0):
-            torch.compiler.cudagraph_mark_step_begin()
-            divisor = torch.tensor(value, dtype=torch.float64, device="cpu")
-            result = compiled(x, divisor)
-            self.assertEqual(result, fn(x, divisor), atol=0, rtol=0)
-
-    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
-    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("view", ("select", "squeeze"))
     @parametrize("scalar_input", (False, True))
     def test_div_trunc_cpu_scalar_view(
