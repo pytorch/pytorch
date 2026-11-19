@@ -24,6 +24,7 @@ from typing import NoReturn, TYPE_CHECKING
 import torch
 from torch._C._dynamo import (
     get_type_slots,
+    get_type_tp_name,
     has_slot,
     PyMappingSlots,
     PyNumberSlots,
@@ -563,6 +564,27 @@ def generic_str(
             err_str = f"__str__ returned non-string (type {result_type.__name__})"
         raise_type_error(tx, err_str)
     return result
+
+
+def object_format(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    format_spec: VariableTracker,
+) -> VariableTracker:
+    """Mirrors object.__format__: str(obj) for an empty spec, TypeError otherwise.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L7143-L7157
+    """
+    if not issubclass(format_spec.python_type(), str):
+        raise_type_error(
+            tx,
+            f"__format__() argument must be str, not {format_spec.python_type_name()}",
+        )
+    if format_spec.as_python_constant():
+        tp_name = get_type_tp_name(obj.python_type())
+        msg = f"unsupported format string passed to {tp_name}.__format__"
+        raise_type_error(tx, msg)
+    return generic_str(tx, obj)
 
 
 def generic_getitem(
