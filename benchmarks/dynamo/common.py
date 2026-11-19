@@ -2478,8 +2478,10 @@ class BenchmarkRunner:
                     )
 
                 force_max_multiplier = False
+                # torch.vm builds the weights of inference into its graphs,
+                # as freezing does.
                 if (
-                    self.args.freezing
+                    (self.args.freezing or self.args.vm)
                     and self.args.bfloat16
                     and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"]
                     > 0
