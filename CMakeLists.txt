@@ -353,9 +353,6 @@ option(
   BUILD_MOBILE_TEST
   "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)"
   OFF)
-option(BUILD_JNI "Build JNI bindings" OFF)
-option(BUILD_MOBILE_AUTOGRAD
-       "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
                        ON "BUILD_TEST" OFF)
 option(USE_RELATIVE_PATHS "Use relative paths in generated files for ccache friendliness" OFF)
@@ -415,7 +412,6 @@ option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
-option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_MAGMA "Use MAGMA" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
@@ -496,10 +492,10 @@ cmake_dependent_option(
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
   USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
-    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+    "USE_GLOO AND LINUX" OFF)
 cmake_dependent_option(
   USE_GLOO_IBVERBS "Use Gloo with ibverbs backend. Only available if USE_GLOO is on." OFF
-    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+    "USE_GLOO AND LINUX" OFF)
 cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
@@ -525,10 +521,7 @@ option(
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
 option(USE_PER_OPERATOR_HEADERS
        "Whether ATen should generate separate headers for each operator" ON)
-cmake_dependent_option(
-  BUILD_LAZY_TS_BACKEND
-  "Build the lazy Torchscript backend, not compatible with mobile builds" ON
-  "NOT INTERN_BUILD_MOBILE" OFF)
+option(BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend" ON)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(
@@ -745,8 +738,6 @@ if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
     FATAL_ERROR
       "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
 endif()
-option(TRACING_BASED
-       "Master flag to build Lite Interpreter with tracing build option" OFF)
 # This is a fix for a rare build issue on Ubuntu: symbol lookup error:
 # miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol:
 # mkl_blas_dsyrk
@@ -889,50 +880,6 @@ if(LINUX AND CPU_AARCH64)
   add_link_options_if_supported("--stub-group-size=0x2000000")
 endif()
 
-# Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
-# applicable to mobile are disabled by this variable. Setting
-# `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can force it
-# to do mobile build with host toolchain - which is useful for testing purpose.
-if(ANDROID
-   OR IOS
-   OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
-  set(INTERN_BUILD_MOBILE ON)
-  message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
-  set(BUILD_LAZY_TS_BACKEND OFF)
-
-  set(USE_KLEIDIAI OFF)
-  message(WARNING "KleidiAI cannot be used on Mobile builds. Set it to OFF")
-
-  # Set -ffunction-sections and -fdata-sections so that each method has its own
-  # text section. This allows the linker to remove unused section when the flag
-  # -Wl,-gc-sections is provided at link time.
-  string(APPEND CMAKE_CXX_FLAGS " -ffunction-sections")
-  string(APPEND CMAKE_C_FLAGS " -ffunction-sections")
-  string(APPEND CMAKE_CXX_FLAGS " -fdata-sections")
-  string(APPEND CMAKE_C_FLAGS " -fdata-sections")
-
-  # Please note that the use of the following flags is required when linking
-  # against libtorch_cpu.a for mobile builds. -Wl,--whole-archive -ltorch_cpu
-  # -Wl,--no-whole-archive
-  #
-  # This allows global constructors to be included and run. Global constructors
-  # are used for operator/kernel registration with the PyTorch Dispatcher.
-
-  if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
-    # C10_MOBILE is derived from Android/iOS toolchain macros in
-    # c10/macros/Macros.h, so it needs to be explicitly set here.
-    string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE")
-  endif()
-
-  if(DEFINED ENV{PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET})
-    # If PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET is defined (env var), then define
-    # C10_MOBILE_TRIM_DISPATCH_KEYS, which limits the number of dispatch keys in
-    # OperatorEntry::dispatchTable_ to reduce peak memory during library
-    # initialization.
-    string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE_TRIM_DISPATCH_KEYS")
-  endif()
-endif()
-
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 set(INTERN_BUILD_ATEN_OPS ON)
 
@@ -1000,32 +947,6 @@ if(USE_LLVM_BOLT)
     USES_TERMINAL
     COMMAND_EXPAND_LISTS
   )
-endif()
-
-# Build libtorch mobile library, which contains ATen/TH ops and native support
-# for TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
-if(INTERN_BUILD_MOBILE)
-  if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
-    string(APPEND CMAKE_CXX_FLAGS " -DNO_EXPORT")
-  endif()
-  if(BUILD_MOBILE_AUTOGRAD)
-    set(INTERN_DISABLE_AUTOGRAD OFF)
-  else()
-    set(INTERN_DISABLE_AUTOGRAD ON)
-  endif()
-  set(BUILD_PYTHON OFF)
-  set(USE_DISTRIBUTED OFF)
-  set(NO_API ON)
-  set(USE_FBGEMM OFF)
-  set(INTERN_DISABLE_ONNX ON)
-  if(USE_BLAS)
-    set(INTERN_USE_EIGEN_BLAS ON)
-  else()
-    set(INTERN_USE_EIGEN_BLAS OFF)
-  endif()
-  # Disable developing mobile interpreter for actual mobile build. Enable it
-  # elsewhere to capture build error.
-  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # ---[ Version numbers for generated libraries
@@ -1265,10 +1186,6 @@ endif()
 
 if(BUILD_LITE_INTERPRETER)
   string(APPEND CMAKE_CXX_FLAGS " -DBUILD_LITE_INTERPRETER")
-endif()
-
-if(TRACING_BASED)
-  string(APPEND CMAKE_CXX_FLAGS " -DTRACING_BASED")
 endif()
 
 if(USE_PYTORCH_METAL)
@@ -1622,16 +1539,6 @@ endif()
 # built in the previous Modules section above).
 if(BUILD_BINARY)
   add_subdirectory(binaries)
-endif()
-
-# ---[ JNI
-if(BUILD_JNI)
-  if(NOT MSVC)
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
-  endif()
-  set(BUILD_LIBTORCH_WITH_JNI 1)
-  set(FBJNI_SKIP_TESTS 1)
-  add_subdirectory(android/pytorch_android)
 endif()
 
 # Parse custom debug info
