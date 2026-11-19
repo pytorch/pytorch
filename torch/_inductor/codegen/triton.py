@@ -929,23 +929,24 @@ def triton_reshape(
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
-    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+    def _print_rounding_to_int(self, expr: sympy.Expr, rounding: str) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        # pyrefly: ignore [missing-attribute]
+        value = self._print(expr.args[0])
+        return f"triton_helpers.rounding_to_int({value}, {V.kernel.index_dtype}, '{rounding}')"
+
+    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+        return self._print_rounding_to_int(expr, "trunc")
 
     def _print_TruncToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
         value = self._print(expr.args[0])
-        # Adding +0.0 preserves large floating results while canonicalizing
-        # libdevice.trunc(-0.0) back to Python's +0.0 materialization behavior.
-        # pyrefly: ignore [missing-attribute]
-        return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
+        return (
+            f"triton_helpers.trunc_to_float({value}, {self._get_scalar_float_type()})"
+        )
 
     @staticmethod
     def _get_scalar_float_type() -> str:
@@ -1013,32 +1014,16 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
     # NB: sympy.floor/ceiling produce integers, so we have to do the
     # conversion to index dtype
     def _print_floor(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_ceiling(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _print_CeilToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
         # pyrefly: ignore [missing-attribute]
@@ -8391,10 +8376,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     V.graph.get_current_device_or_throw()
                 ),
                 "constants": {},
-                "native_matmul": (
-                    torch._inductor.config.triton.native_matmul
-                    and ("tl.dot" in str(self.body) or "tl.dot" in str(self.compute))
-                ),
+                "native_matmul": self.is_native_matmul,
                 **self.triton_meta_common(),
             },
         )
