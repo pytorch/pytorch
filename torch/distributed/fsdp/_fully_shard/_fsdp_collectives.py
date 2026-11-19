@@ -946,21 +946,39 @@ def _reduce_single_rank(
     Accumulates the gradients of a single-rank group into the sharded gradients
     without the reduce-scatter buffers. Each gradient takes the casts and
     divisions of the buffered path, so the results match it bitwise. Returns the
-    reduce-dtype copies of the gradients, which the reduce-scatter stream reads,
-    in place of the reduce-scatter input.
+    gradients that the reduce-scatter stream reads, reduce-dtype copies or the
+    unsharded gradients added directly, in place of the reduce-scatter input.
     """
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
     # Like the copy-in of the buffered path, this copy runs on the current
-    # stream, so the gradients are freed here
+    # stream, so the gradients are freed here. A gradient that adds into a
+    # reduce-dtype sharded gradient skips the copy when nothing divides it and
+    # its cast to the reduce dtype is exact, since the add does the same math.
+    # It is then held, like a copy, until the post-reduce event.
+    adds_directly = [
+        not div_factors
+        and (sharded_grad := fsdp_param.sharded_param.grad) is not None
+        and sharded_grad.dtype == reduce_dtype
+        and grad.shape == fsdp_param.sharded_size
+        and torch.promote_types(grad.dtype, reduce_dtype) == reduce_dtype
+        for fsdp_param, grad in zip(fsdp_params, unsharded_grads)
+    ]
     reduce_grads = [
-        grad.to(reduce_dtype, copy=True, memory_format=torch.contiguous_format)
-        for grad in unsharded_grads
+        grad
+        if add_directly
+        else grad.to(reduce_dtype, copy=True, memory_format=torch.contiguous_format)
+        for grad, add_directly in zip(unsharded_grads, adds_directly)
     ]
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     with device_handle.stream(reduce_scatter_stream):
-        for fsdp_param, reduce_grad in zip(fsdp_params, reduce_grads):
+        for fsdp_param, reduce_grad, add_directly in zip(
+            fsdp_params, reduce_grads, adds_directly
+        ):
+            if add_directly:
+                _accumulate_sharded_grad(fsdp_param, reduce_grad)
+                continue
             # With one rank, the sharded size is the gradient size except for
             # zero-numel gradients: a (3, 0) gradient on Shard(0) has sharded
             # size (0, 0)
@@ -1000,7 +1018,8 @@ def _accumulate_sharded_grad(fsdp_param: FSDPParam, grad: torch.Tensor) -> None:
             raise AssertionError(
                 f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(sharded_param.grad)}"
             )
-        sharded_param.grad._local_tensor += grad
+        # Unlike +=, the foreach add vectorizes a lower-precision grad's cast
+        torch._foreach_add_([sharded_param.grad._local_tensor], [grad])
     else:
         sharded_param.grad = fsdp_param.to_sharded_dtensor(grad)
     for hook in (
