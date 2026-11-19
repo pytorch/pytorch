@@ -108,6 +108,8 @@ from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
 from torch.utils import _pytree as pytree
 from torch.utils._device import DeviceContext
 
+from . import _types
+
 
 Backend = Callable[[torch.fx.GraphModule, list[torch.Tensor]], Callable[..., Any]]
 
@@ -2530,6 +2532,7 @@ class _Variant:
         "unwritten",
         "watch",
         "written",
+        "checks",
     )
 
     def __init__(
@@ -2542,6 +2545,10 @@ class _Variant:
         self.direct = all(r[0] == "result" and r[2] == i for i, r in enumerate(recipes))
         self.ops = ops
         self.keep = keep
+        # The guards that passes over the graph brought: which tensor of a
+        # call, and what is asked of it. A call that fails one runs the
+        # instructions of the region.
+        self.checks: list[tuple[int, Any]] = []
         # Whether it has run once without an error.
         self.proven = False
         # For a region that goes on into other blocks: where the VM goes on
@@ -2766,6 +2773,10 @@ class _Region:
             variant = self.specialize(key, args, inputs)
         if variant is None:
             return self.decline(args)
+        if variant.checks:  # type: ignore[union-attr]
+            flat = inputs.flat
+            if not all(check.holds(flat[i]) for i, check in variant.checks):  # type: ignore[union-attr]
+                return self.decline(args)
         if variant.proven:  # type: ignore[union-attr]
             return variant.run(inputs)  # type: ignore[union-attr]
         return self.first_run(key, variant, args, inputs)  # type: ignore[arg-type]
@@ -3189,11 +3200,13 @@ class _Region:
             return tuple(recipes.results)
 
         graph = _trace(region, opening.example() if opening else list(flat), opening)
+        graph, checks = self.rewritten(graph, len(flat))
         ops = self.ops_of(graph)
         frozen = self.freezable(inputs, modules, found["written"])
         compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
         _on_device(flat)
         variant = _Variant(compiled, found["recipes"], ops, keep)
+        variant.checks = checks
         variant.affects(*found["effects"])
         variant.written = sorted(found["written"])
         if built is not None:
@@ -3203,6 +3216,39 @@ class _Region:
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return variant
+
+    def rewritten(
+        self, graph: torch.fx.GraphModule, tensors: int
+    ) -> tuple[torch.fx.GraphModule, list[tuple[int, Any]]]:
+        """The graph after the passes over it that the function was given, in
+        their order, and the guards they brought. A pass that raises leaves
+        the region to the VM."""
+        for pass_ in self.plan.options.passes:
+            name = getattr(pass_, "__name__", type(pass_).__name__)
+            placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
+            types = [_types.type_of_value(n.meta.get("val")) for n in placeholders]
+            brought = graph.meta.get(_types._GUARDS, [])
+            try:
+                made = pass_(graph, types)
+            except Exception as e:
+                reason = f"the pass {name} raised {type(e).__name__}: {e}"
+                raise _Failed(None, reason.split("\n")[0][:200]) from None
+            if not isinstance(made, torch.fx.GraphModule):
+                kind = type(made).__name__
+                raise _Failed(None, f"the pass {name} returned a {kind}, not the graph")
+            if made is not graph and brought:
+                made.meta.setdefault(_types._GUARDS, [])[:0] = brought
+            made.recompile()
+            graph = made
+        try:
+            checks = _types.guards_of(graph)
+        except ValueError as e:
+            raise _Failed(None, str(e)[:200]) from None
+        if any(position >= tensors for position, _ in checks):
+            raise _Failed(
+                None, "a pass guards an integer of the region: guards are on tensors"
+            )
+        return graph, checks
 
     def freezable(
         self, inputs: _Inputs, modules: dict[int, nn.Module], written: set[int]
@@ -3740,10 +3786,12 @@ class _Path(_Region):
         final = _Inputs()
         key = self.key(args, final)
         self.sizes.setdefault(_kind(key), _Sizes(key[2]))
+        graph, checks = self.rewritten(graph, len(inputs.flat))
         frozen = self.freezable(inputs, found["modules"], found["written"])
         compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
         _on_device(inputs.flat)
         variant = _Variant(compiled, found["recipes"], self.ops_of(graph), keep)
+        variant.checks = checks
         variant.direct = False
         variant.leap = found["leap"]
         variant.guards = found["guards"]
@@ -3981,12 +4029,16 @@ class Regions:
         max_variants: int,
         warmup: int,
         freeze: bool = True,
+        passes: tuple[Callable[..., Any], ...] = (),
     ) -> None:
         self.backend = backend
         self.min_ops = min_ops
         self.max_variants = max_variants
         self.warmup = warmup
         self.freeze = freeze
+        # The passes of the user's over the graph of a region
+        # (``(gm, input_types) -> gm``), applied before the backend gets it.
+        self.passes = passes
         self.plans: list[_Plan] = []
         # What the backend made of each graph, by the code of the graph and
         # what its inputs are like.
@@ -4311,6 +4363,7 @@ def make_pass(
     max_variants: int,
     warmup: int,
     freeze: bool = True,
+    passes: tuple[Callable[..., Any], ...] = (),
 ) -> Regions:
     global _runtime
     if isinstance(backend, str):
@@ -4318,4 +4371,4 @@ def make_pass(
             raise ValueError(f"unknown backend {backend!r}; known: {sorted(_BACKENDS)}")
         backend = _BACKENDS[backend]
     _runtime = runtime
-    return Regions(backend, min_ops, max_variants, warmup, freeze)
+    return Regions(backend, min_ops, max_variants, warmup, freeze, passes)
