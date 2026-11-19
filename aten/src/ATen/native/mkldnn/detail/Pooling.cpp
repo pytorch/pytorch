@@ -30,6 +30,7 @@ void pooling_forward(
   dnnl::primitive_attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
+  // oneDNN dilation is zero-based: 0 means no dilation.
   const dnnl::memory::dims dilation(strides.size(), 0);
 
   auto pd = dnnl::pooling_forward::primitive_desc(
@@ -89,6 +90,7 @@ void pooling_backward(
   auto src_desc = src.get_desc();
   auto dst_desc = dst.get_desc();
 
+  // oneDNN dilation is zero-based: 0 means no dilation.
   const dnnl::memory::dims dilation(strides.size(), 0);
 
   auto forward_hints = dnnl::pooling_forward::primitive_desc(

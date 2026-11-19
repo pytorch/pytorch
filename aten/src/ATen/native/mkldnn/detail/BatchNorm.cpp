@@ -146,8 +146,8 @@ void batch_normalization_backward(
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
   auto expected_mean = mean.reorder_if_differ_in(pd.mean_desc());
   auto expected_variance = variance.reorder_if_differ_in(pd.variance_desc());
-  // May replace the buffers and layouts of diff_src, diff_scale and diff_shift
-  // when they differ from the descs the primitive expects.
+  // May replace diff_src (to pd.diff_src_desc()) and diff_scale/diff_shift
+  // (to scale's desc) when their buffers and layouts differ.
   diff_src.reinit_if_possible(pd.diff_src_desc());
   diff_scale.reinit_if_possible(scale.get_desc());
   diff_shift.reinit_if_possible(scale.get_desc());
