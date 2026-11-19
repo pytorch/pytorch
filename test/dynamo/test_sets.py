@@ -293,18 +293,14 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, (x + 1, (int,)))
 
-    @parametrize("operation", ("set", "frozenset", "update", "union"))
+    @parametrize("operation", [set, frozenset, set.update, lambda m: set().union(m)])
     def test_ordered_dict_collision_order(self, operation):
         def fn(x, mapping):
-            if operation == "set":
-                result = set(mapping)
-            elif operation == "frozenset":
-                result = frozenset(mapping)
-            elif operation == "update":
+            if operation is set.update:
                 result = set()
                 result.update(mapping)
             else:
-                result = set().union(mapping)
+                result = operation(mapping)
             return x + 1, list(result)
 
         # OrderedDict takes CPython's iterable path, not its exact-dict fast path.
@@ -313,9 +309,9 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        self.assertEqual(compiled(x, mapping), fn(x, mapping))
-        mapping.move_to_end(0)
-        self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
         self.assertEqual(counter.frame_count, 2)
 
     @parametrize("mapping_type", (dict, OrderedDict))

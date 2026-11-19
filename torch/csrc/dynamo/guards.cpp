@@ -13,7 +13,6 @@
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
-#include <pybind11/critical_section.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -3227,7 +3226,13 @@ class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
     if (!_state->hooks || !_state->flags) {
       return true;
     }
-    py::scoped_critical_section critical_section(_state->hooks, _state->flags);
+#ifdef Py_GIL_DISABLED
+    PyCriticalSection2 section;
+    PyCriticalSection2_Begin(
+        &section, _state->hooks.ptr(), _state->flags.ptr());
+    auto unlock =
+        c10::make_scope_exit([&] { PyCriticalSection2_End(&section); });
+#endif
     return _state->check();
   }
 

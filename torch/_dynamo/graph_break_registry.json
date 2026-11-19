@@ -5739,6 +5739,32 @@
       ]
     }
   ],
+  "GB4655": [
+    {
+      "Gb_type": "Legacy deepcopy memo requires identity guards",
+      "Context": "copy.deepcopy",
+      "Explanation": "A seeded deepcopy memo can override a mapping key by its process-local ID.",
+      "Hints": [
+        "Copy the mapping outside the captured region."
+      ]
+    }
+  ],
+  "GB9996": [
+    {
+      "Gb_type": "Input OrderedDict linked-order mutation",
+      "Context": "{self.source.name}.move_to_end",
+      "Explanation": "Dynamo does not yet replay linked order for input OrderedDicts.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Input OrderedDict linked-order mutation",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo does not yet replay linked order for input OrderedDicts.",
+      "Hints": []
+    }
+  ],
   "GB0297": [
     {
       "Gb_type": "random.Random() with improper arguments",
