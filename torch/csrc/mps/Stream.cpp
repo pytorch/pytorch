@@ -59,32 +59,6 @@ static void THPMPSStream_dealloc(THPMPSStream* self) {
   THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
-static PyObject* THPMPSStream_synchronize(PyObject* _self, PyObject* noargs) {
-  HANDLE_TH_ERRORS {
-    pybind11::gil_scoped_release no_gil;
-    auto self = (THPMPSStream*)_self;
-    // Synchronize on the stream's serial queue to avoid racing with other
-    // threads that are encoding on it.
-    struct Context {
-      at::mps::MPSStream* stream;
-      std::exception_ptr exception;
-    } ctx{self->mps_stream, nullptr};
-    dispatch_sync_f(self->mps_stream->queue(), &ctx, [](void* arg) {
-      auto ctx = static_cast<Context*>(arg);
-      try {
-        ctx->stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
-      } catch (...) {
-        ctx->exception = std::current_exception();
-      }
-    });
-    if (ctx.exception) {
-      std::rethrow_exception(ctx.exception);
-    }
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMemberDef THPMPSStream_members[] = {{nullptr}};
 
@@ -92,9 +66,7 @@ static struct PyMemberDef THPMPSStream_members[] = {{nullptr}};
 static struct PyGetSetDef THPMPSStream_properties[] = {{nullptr}};
 
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
-static PyMethodDef THPMPSStream_methods[] = {
-    {"synchronize", THPMPSStream_synchronize, METH_NOARGS, nullptr},
-    {nullptr}};
+static PyMethodDef THPMPSStream_methods[] = {{nullptr}};
 
 PyTypeObject THPMPSStreamType = {
     PyVarObject_HEAD_INIT(nullptr, 0)

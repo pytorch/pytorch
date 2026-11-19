@@ -8,6 +8,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <memory>
@@ -254,15 +255,34 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
 }
 
 #ifdef USE_MPS
-static PyObject* MPSModule_setStream(PyObject* _unused, PyObject* stream) {
+static PyObject* MPSModule_setStream_wrap(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  at::mps::MPSStream* mps_stream = nullptr;
-  if (stream != Py_None) {
-    TORCH_CHECK(
-        THPMPSStream_Check(stream), "invalid stream argument to setStream");
-    mps_stream = reinterpret_cast<THPMPSStream*>(stream)->mps_stream;
+  int64_t stream_id = 0;
+  int64_t device_index = 0;
+  int64_t device_type = 0;
+
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+  constexpr const char* kwlist[] = {
+      "stream_id", "device_index", "device_type", nullptr};
+  if (!PyArg_ParseTupleAndKeywords(
+          args,
+          kwargs,
+          "|LLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<char**>(kwlist),
+          &stream_id,
+          &device_index,
+          &device_type)) {
   }
-  at::mps::setCurrentMPSStream(mps_stream);
+  TORCH_CHECK(
+      static_cast<c10::DeviceType>(device_type) == c10::kMPS,
+      "expected an MPS stream but got ",
+      static_cast<c10::DeviceType>(device_type));
+  TORCH_CHECK(device_index <= 0, "unrecognized MPS device index ", device_index)
+  at::mps::setCurrentMPSStream(at::mps::getStreamByID(stream_id));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -339,7 +359,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
      METH_VARARGS,
      nullptr},
 #ifdef USE_MPS
-    {"_mps_setStream", MPSModule_setStream, METH_O, nullptr},
+    {"_mps_setStream",
+     castPyCFunctionWithKeywords(MPSModule_setStream_wrap),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_mps_getCurrentStream", MPSModule_getCurrentStream, METH_NOARGS, nullptr},
 #endif /* USE_MPS */
     {nullptr}};
