@@ -500,7 +500,7 @@ class ConstantVariable(VariableTracker):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
-                except (OverflowError, ValueError) as exc:
+                except Exception as exc:
                     raise_observed_exception(
                         type(exc),
                         tx,

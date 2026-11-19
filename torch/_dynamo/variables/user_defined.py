@@ -5689,8 +5689,7 @@ class DefaultDictVariable(ConstDictVariable):
         from .constant import ConstantVariable
 
         if name == "__setattr__":
-            if len(args) != 2:
-                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
+            check_positional(tx, "", len(args), 2, 2)
             if (
                 istype(args[0], ConstantVariable) and args[0].value == "default_factory"
             ) and self.is_supported_factory(args[1]):
