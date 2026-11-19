@@ -398,7 +398,79 @@ class GraphTreeBackendTests(TestCase):
             )
             empty_storage.assert_not_called()
 
-    def test_graph_tree_backend_registration(self):
+    def test_graph_tree_backend_import_is_lazy(self):
+        from torch._inductor import graph_tree_backend as backend
+
+        spec = importlib.util.spec_from_file_location(
+            "_test_graph_tree_backend", backend.__file__
+        )
+        module = importlib.util.module_from_spec(spec)
+        with (
+            mock.patch.dict(sys.modules, {spec.name: module}),
+            mock.patch.object(torch.accelerator, "current_accelerator") as query,
+        ):
+            spec.loader.exec_module(module)
+        query.assert_not_called()
+        self.assertIsNone(module._graph_interface)
+        self.assertIsNone(module._allocator_interface)
+        self.assertIsNone(module._registered_device_type)
+        self.assertFalse(module._initialized)
+
+    @parametrize("device_type", ("cuda", "xpu"))
+    def test_graph_tree_backend_lazy_default(self, device_type):
+        with (
+            fresh_graph_tree_backend() as backend,
+            mock.patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device(device_type),
+            ),
+        ):
+            self.assertTrue(backend.is_graph_tree_backend_available())
+            self.assertIsNone(backend._graph_interface)
+            self.assertIsNone(backend._allocator_interface)
+            self.assertFalse(backend._initialized)
+
+            graph_cls, allocator_cls = (
+                (
+                    backend.CUDAGraphTreeGraphInterface,
+                    backend.CUDAGraphTreeAllocatorInterface,
+                )
+                if device_type == "cuda"
+                else (
+                    backend.XPUGraphTreeGraphInterface,
+                    backend.XPUGraphTreeAllocatorInterface,
+                )
+            )
+            graph = backend.get_graph_interface()
+            allocator = backend.get_allocator_interface()
+            self.assertIsInstance(graph, graph_cls)
+            self.assertIsInstance(allocator, allocator_cls)
+            self.assertEqual(backend.get_device_type(), device_type)
+            self.assertIs(backend.get_graph_interface(), graph)
+            self.assertIs(backend.get_allocator_interface(), allocator)
+            with self.assertRaisesRegex(RuntimeError, "already been initialized"):
+                backend.register_graph_tree_backend(device_type, graph, allocator)
+
+    @parametrize("device_type", (None, "privateuseone"))
+    def test_graph_tree_backend_without_default(self, device_type):
+        with (
+            fresh_graph_tree_backend() as backend,
+            mock.patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=None if device_type is None else torch.device(device_type),
+            ),
+        ):
+            self.assertFalse(backend.is_graph_tree_backend_available())
+            with self.assertRaisesRegex(
+                RuntimeError, "No Graph Trees backend registered"
+            ):
+                backend.get_graph_interface()
+            self.assertFalse(backend._initialized)
+
+    @parametrize("device_type", ("cuda", "xpu", "privateuseone"))
+    def test_graph_tree_backend_registration(self, device_type):
         with fresh_graph_tree_backend() as backend:
             graph_interface = backend.CUDAGraphTreeGraphInterface()
             allocator_interface = backend.CUDAGraphTreeAllocatorInterface()
@@ -406,17 +478,17 @@ class GraphTreeBackendTests(TestCase):
             with unittest.mock.patch.object(
                 torch.accelerator,
                 "current_accelerator",
-                return_value=torch.device("privateuseone"),
+                return_value=torch.device(device_type),
             ):
                 backend.register_graph_tree_backend(
-                    "privateuseone",
+                    device_type,
                     graph_interface,
                     allocator_interface,
                 )
 
                 with self.assertRaisesRegex(RuntimeError, "already registered"):
                     backend.register_graph_tree_backend(
-                        "privateuseone",
+                        device_type,
                         graph_interface,
                         allocator_interface,
                     )
@@ -424,11 +496,11 @@ class GraphTreeBackendTests(TestCase):
                 self.assertTrue(backend.is_graph_tree_backend_available())
                 self.assertIs(backend.get_graph_interface(), graph_interface)
                 self.assertIs(backend.get_allocator_interface(), allocator_interface)
-                self.assertEqual(backend.get_device_type(), "privateuseone")
+                self.assertEqual(backend.get_device_type(), device_type)
 
                 with self.assertRaisesRegex(RuntimeError, "already been initialized"):
                     backend.register_graph_tree_backend(
-                        "privateuseone",
+                        device_type,
                         graph_interface,
                         allocator_interface,
                     )
@@ -1096,7 +1168,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
             }
         )
         def test_graph_lowering_partition_decision_overrides_config(
-            self, customized_wrapper
+            self, device, customized_wrapper
         ):
             # An unsplit graph gets whole-graph handling under graph_partition:
             # the input asserts stay in call(), the whole graph is captured and
@@ -1111,7 +1183,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                 return x.sin() + 1
 
             compiled = torch.compile(f)
-            x = torch.randn(8, device="cuda")
+            x = torch.randn(8, device=device)
             with (
                 _force_partition_plan(GraphPartitionPlan.no_partition()),
                 mock.patch.object(
@@ -1143,7 +1215,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
             }
         )
         def test_graph_lowering_cudagraphs_per_partition_overrides_config(
-            self, cudagraphs_per_partition
+            self, device, cudagraphs_per_partition
         ):
             # The scheduler splits per op only when the partitions are for CUDA
             # Graphs, whatever triton.cudagraphs says. Otherwise everything,
@@ -1152,7 +1224,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
             def f(x):
                 return x.sin() + 1
 
-            x = torch.randn(8, device="cuda")
+            x = torch.randn(8, device=device)
             with (
                 config.patch("triton.cudagraphs", not cudagraphs_per_partition),
                 _force_partition_plan(
@@ -1198,6 +1270,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
         )
         def test_partition_reorder_follows_graph_lowering(
             self,
+            device,
             uses_graph_partition,
             cudagraphs_per_partition,
             cudagraphs,
@@ -1211,7 +1284,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                 return (x + 1).sin(), y.cos()
 
             reorder = Scheduler.reorder_for_partition_with_simple_dependency
-            x, y = torch.randn(8, device="cuda"), torch.randn(8, device="cuda")
+            x, y = torch.randn(8, device=device), torch.randn(8, device=device)
             with (
                 config.patch(
                     {
@@ -5481,14 +5554,14 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
             {"triton.cudagraphs": False, "graph_partition": True, "freezing": True}
         )
         @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
-        def test_cudagraph_annotation_enable_freezing_nonzero(self):
+        def test_cudagraph_annotation_enable_freezing_nonzero(self, device):
             """override_cudagraphs(fwd=True) applies to a frozen inference graph
             as to any other: the nonzero is split off into call() and the
             linear's partition is captured."""
 
             import torch._inductor.compile_fx as compile_fx
 
-            mod = nn.Linear(8, 8).cuda().eval()
+            mod = nn.Linear(8, 8).to(device).eval()
 
             @torch._dynamo.override_cudagraphs(fwd=True)
             def fn(x):
@@ -5504,11 +5577,11 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                     wraps=compile_fx.fw_compiler_freezing,
                 ) as freezing_spy,
             ):
-                inp = torch.randn(4, 8, device="cuda")
+                inp = torch.randn(4, 8, device=device)
                 out, (code,) = run_and_get_code(fn_compiled, inp)
                 self.assertEqual(out, fn(inp))
                 for _ in range(2):
-                    inp = torch.randn(4, 8, device="cuda")
+                    inp = torch.randn(4, 8, device=device)
                     self.assertEqual(fn_compiled(inp), fn(inp))
 
             self.assertEqual(freezing_spy.call_count, 1)
@@ -6080,7 +6153,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cross_device_custom_op_fallback(self, device):
-            device = torch.device(device, self.device_idx)
+            device = torch.device(device)
 
             @torch.library.custom_op("mylib::cpu_to_cuda", mutates_args=())
             def cpu_to_cuda(x: torch.Tensor) -> torch.Tensor:

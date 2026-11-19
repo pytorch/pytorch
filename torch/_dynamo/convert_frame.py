@@ -928,7 +928,8 @@ def trace_frame(
             torch._C, f"_{device_type}_isCurrentStreamCapturing", None
         )
         if (
-            device_module.is_available()
+            device_module.is_initialized()
+            and device_module.is_available()
             and capture_query is not None
             and not isinstance(capture_query, type)
             and device_module.is_current_stream_capturing()
