@@ -5,6 +5,7 @@
 #include <ATen/native/mkldnn/ConvPrepack.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/OpContext.h>
+#include <ATen/native/mkldnn/detail/Conv.h>
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
@@ -61,7 +62,7 @@ ContextConv create(
   bool is_channels_last =
       weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   ideep::tensor::desc expected_weight_desc =
-      ideep::convolution_forward::expected_weights_desc(
+      mkldnn::convolution_forward_expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
           {stride_expanded.begin(), stride_expanded.end()},
@@ -69,8 +70,8 @@ ContextConv create(
           {padding_expanded.begin(), padding_expanded.end()},
           {dilation_expanded.begin(), dilation_expanded.end()},
           groups,
-          ideep::algorithm::convolution_direct,
-          ideep::prop_kind::forward,
+          dnnl::algorithm::convolution_direct,
+          dnnl::prop_kind::forward,
           /*x_dtype*/ w.get_data_type(),
           {input_size_expanded.begin(), input_size_expanded.end()},
           attr,
@@ -102,7 +103,7 @@ static void _mkldnn_convolution_out(
     int64_t groups,
     const ideep::attr_t& attr = ideep::attr_t()) {
   if (b.has_value()) {
-    ideep::convolution_forward::compute_v2(
+    mkldnn::convolution_forward_compute_v2(
         x,
         w,
         b.value(),
@@ -113,14 +114,14 @@ static void _mkldnn_convolution_out(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::zero_point_t(),
-        ideep::zero_point_t(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<int32_t>(),
+        std::vector<int32_t>(),
         attr);
   } else {
-    ideep::convolution_forward::compute_v2(
+    mkldnn::convolution_forward_compute_v2(
         x,
         w,
         {output_sizes.cbegin(), output_sizes.cend()},
@@ -130,11 +131,11 @@ static void _mkldnn_convolution_out(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::zero_point_t(),
-        ideep::zero_point_t(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<int32_t>(),
+        std::vector<int32_t>(),
         attr);
   }
 }
@@ -237,7 +238,7 @@ void run(ContextConv& context, const Tensor& input, void* output) {
       input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   ideep::tensor y;
 
-  ideep::tag o_tag = is_channels_last ? ideep::tag::nhwc : ideep::tag::nchw;
+  dnnl::memory::format_tag o_tag = is_channels_last ? dnnl::memory::format_tag::nhwc : dnnl::memory::format_tag::nchw;
   ideep::tensor::desc o_desc = {
       output_sizes, get_mkldnn_dtype(input.scalar_type()), o_tag};
   ideep::tensor mkldnn_output = {o_desc, output};
