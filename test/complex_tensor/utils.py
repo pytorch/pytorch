@@ -12,6 +12,7 @@ from torch._subclasses.complex_tensor._ops.common import (
     _get_op_name,
     COMPLEX_OPS_TABLE,
     COMPLEX_TO_REAL,
+    DECOMPOSITIONS,
     FORCE_TEST_LIST,
     is_binary_nonlinear_op,
     OpOverloadPacket,
@@ -265,10 +266,16 @@ force_test_names = set(map(_get_op_name, FORCE_TEST_LIST))
 implemented_op_names = (
     set(map(_get_op_name, COMPLEX_OPS_TABLE.keys())) - force_test_names
 )
+decomposed_op_names = set(map(_get_op_name, DECOMPOSITIONS.keys())) - (
+    implemented_op_names | force_test_names
+)
 implemented_op_db = tuple(
     filter(lambda op: op.name in implemented_op_names, complex_op_db)
 )
 force_test_op_db = tuple(filter(lambda op: op.name in force_test_names, op_db))
+decomposed_op_db = tuple(
+    filter(lambda op: op.aten_name in decomposed_op_names, complex_op_db)
+)
 
 tested_op_names = {op.name for op in implemented_op_db} | {
     op.name for op in force_test_op_db
