@@ -13,7 +13,12 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import config
 from .ir import MultiOutputLayout, NoneLayout
-from .utils import get_dtype_size, is_nonfreeable_buffers
+from .utils import (
+    contains_collective,
+    contains_wait,
+    get_dtype_size,
+    is_nonfreeable_buffers,
+)
 from .virtualized import V
 
 
@@ -1043,6 +1048,10 @@ def prepare_planning_info(
     return estimated_peak_memory, name_to_freeable_input_buf
 
 
+def comm_order(nodes: list[BaseSchedulerNode]) -> list[str]:
+    return [n.get_name() for n in nodes if contains_collective(n) or contains_wait(n)]
+
+
 def reorder_for_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
@@ -1109,6 +1118,11 @@ def reorder_for_peak_memory(
                 raise AssertionError(
                     f"expected order length {len(nodes)}, got {len(order)}"
                 )
+            if config.reorder_for_peak_memory_preserve_collective_order and comm_order(
+                order
+            ) != comm_order(nodes):
+                torch_log.info("%s rejected: changes collective order", method.__name__)
+                continue
             peak_memory, _ = estimate_peak_memory(
                 order, name_to_freeable_input_buf, graph_outputs
             )
