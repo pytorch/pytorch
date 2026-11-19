@@ -180,14 +180,16 @@ headeronly_get_cpu_capabilities() {
 #if defined(_SC_LEVEL1_DCACHE_SIZE)
   {
     auto value = sysconf(_SC_LEVEL1_DCACHE_SIZE);
-    capabilities["l1d_cache_size"] = static_cast<int64_t>((value > 0) ? value : 0);
+    capabilities["l1d_cache_size"] =
+        static_cast<int64_t>((value > 0) ? value : 0);
   }
 #endif // !defined(_SC_LEVEL1_DCACHE_SIZE)
 
 #if defined(_SC_LEVEL2_CACHE_SIZE)
   {
     auto value = sysconf(_SC_LEVEL2_CACHE_SIZE);
-    capabilities["l2_cache_size"] = static_cast<int64_t>((value > 0) ? value : 0);
+    capabilities["l2_cache_size"] =
+        static_cast<int64_t>((value > 0) ? value : 0);
   }
 #endif // !defined(_SC_LEVEL2_CACHE_SIZE)
 #endif // !defined(__powerpc__)

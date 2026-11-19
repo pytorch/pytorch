@@ -13,6 +13,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/broadcast_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_capabilities_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
