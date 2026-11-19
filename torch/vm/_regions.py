@@ -38,10 +38,11 @@ tracer of PyTorch programs makes, with the usual offenders turned into errors
 while the trace runs (``_traps``).
 
 The inputs of a region are tensors, modules, plain values, functions and
-classes, and tuples, lists and dicts of those. An instruction that takes
-anything else from before the region, say a cache object, stays with the VM:
-a trace could change such an object without anyone noticing. What a region
-gives back is made of the same, with the tensors from the graph.
+classes, and tuples, lists, dicts and pytree nodes of those. An instruction
+that takes anything else from before the region, say a cache object, stays
+with the VM: a trace could change such an object without anyone noticing. What
+a region gives back may also be an object it made itself, which every call
+then makes again from the results of the graph (``_Recipes``).
 
 A compiled region is valid for the inputs it was traced with. Every call
 compares the tensors (shape, dtype, device, ``requires_grad``, which of them
@@ -68,6 +69,7 @@ from typing import Any
 import torch
 from torch import nn
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.utils import _pytree as pytree
 
 
 Backend = Callable[[torch.fx.GraphModule, list[torch.Tensor]], Callable[..., Any]]
@@ -100,6 +102,9 @@ class _State(threading.local):
     pending = 0
     # Ids of the modules whose tensors the trace in progress replaced.
     traced: set[int] | None = None
+    # Attributes of those modules that the trace set and that are put back:
+    # (the module's dict, the name, the value before or this object for none).
+    derived: list[tuple[dict[str, Any], str, Any]] = []
 
 
 _state = _State()
@@ -143,6 +148,7 @@ _PLAIN = frozenset(
     }
 )
 _TENSORS = frozenset({torch.Tensor, nn.Parameter})
+_HEAPTYPE = 1 << 9
 
 
 _CONTAINERS = frozenset(
@@ -248,6 +254,18 @@ def _involves_tensor(obj: Any, depth: int = 3) -> bool:
         return any(_involves_tensor(item, depth - 1) for item in obj.values())
     receiver = getattr(obj, "__self__", None)
     return receiver is not None and isinstance(receiver, (torch.Tensor, nn.Module))
+
+
+def _is_outside_tensor(value: Any, depth: int = 2) -> bool:
+    """Whether a value a trace came by is, or holds, a tensor that is not of
+    the trace: one that existed before it and was not handed to it."""
+    if type(value) in _TENSORS:
+        return True
+    if depth and type(value) in (tuple, list):
+        return any(_is_outside_tensor(item, depth - 1) for item in value)
+    if depth and type(value) is dict:
+        return any(_is_outside_tensor(item, depth - 1) for item in value.values())
+    return False
 
 
 def _receiver_problem(receiver: Any, name: str, local: dict[int, Any]) -> str | None:
@@ -364,6 +382,10 @@ _HOOK_REGISTRATIONS = (
 _GLOBAL_HOOK_DICTS = tuple(
     getattr(torch.nn.modules.module, "_global" + name) for name in _HOOK_DICTS
 )
+# What an RNN computes from its parameters and keeps: its weights in a list,
+# with weak references to notice when one is replaced. It rebuilds both when
+# that happens, as it does in a trace.
+_DERIVED = frozenset({"_flat_weights", "_flat_weight_refs"})
 
 
 def _install_module_hooks() -> None:
@@ -381,7 +403,14 @@ def _install_module_hooks() -> None:
             global _epoch
             traced = _state.traced
             if traced is not None and id(self) in traced:
-                raise Untraceable(f"{name} on a module the region was given")
+                derived = isinstance(self, nn.RNNBase) and args[0] in _DERIVED
+                if name != "__setattr__" or not derived:
+                    raise Untraceable(f"{name} on a module the region was given")
+                # Derived from the parameters, which the trace replaced: put
+                # back when the trace is over.
+                _state.derived.append(
+                    (vars(self), args[0], vars(self).get(args[0], _state))
+                )
             if structural(*args, **kwargs):
                 _epoch += 1
             return original(self, *args, **kwargs)
@@ -395,7 +424,7 @@ def _install_module_hooks() -> None:
         return (
             name == "training"
             or value is None
-            or isinstance(value, (torch.Tensor, nn.Module))
+            or isinstance(value, (torch.Tensor, nn.Module, list))
         )
 
     reporting("__setattr__", setattr_is_structural)
@@ -435,6 +464,16 @@ class _ModuleState:
                 for name, tensor in store.items():
                     if tensor is not None:
                         self.accessors.append((store, name))
+            # Tensors kept as plain attributes, or in a list that is one (as
+            # the weights of an RNN are, next to being its parameters).
+            attributes = vars(m)
+            for name, value in attributes.items():
+                if type(value) in _TENSORS:
+                    self.accessors.append((attributes, name))
+                elif type(value) is list:
+                    for i, item in enumerate(value):
+                        if type(item) in _TENSORS:
+                            self.accessors.append((value, i))
         self.ids = frozenset(ids)
         shape = (tuple(ids), tuple(training), tuple(n for _, n in self.accessors))
         # A small number that stands for the shape in the key of a variant.
@@ -488,6 +527,10 @@ def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
                 raise _Opaque(0, "a dict with keys that are not plain values")
         values = tuple([_describe(item, flat, seen) for item in obj.values()])
         return (cls, tuple(obj), values)
+    if cls is set or cls is frozenset:
+        if all(type(item) in _VALUES for item in obj):
+            return (cls, frozenset(obj))
+        raise _Opaque(0, "a set of things that are not plain values")
     if isinstance(obj, nn.Module):
         state = _module_state(obj)
         if state.hooked or any(_GLOBAL_HOOK_DICTS):
@@ -521,6 +564,14 @@ def _describe(obj: Any, flat: list[torch.Tensor], seen: dict[int, int]) -> Any:
     if isinstance(obj, tuple):
         # Named tuples and the like.
         return (cls, tuple([_describe(item, flat, seen) for item in obj]))
+    node = pytree.SUPPORTED_NODES.get(cls)
+    if node is not None:
+        children, context = node.flatten_fn(obj)
+        return (
+            cls,
+            repr(context),
+            tuple([_describe(item, flat, seen) for item in children]),
+        )
     if isinstance(
         obj, (type, enum.Enum, torch._ops.OpOverload, torch._ops.OpOverloadPacket)
     ):
@@ -557,6 +608,10 @@ def _rebuild(obj: Any, fakes: dict[int, torch.Tensor], copies: list[Any]) -> Any
         copy = cls((k, _rebuild(v, fakes, copies)) for k, v in obj.items())
         copies.append((copy, dict(copy)))
         return copy
+    if cls is set:
+        copy = set(obj)
+        copies.append((copy, set(copy)))
+        return copy
     if cls is types.MethodType:
         receiver = _rebuild(obj.__self__, fakes, copies)
         return (
@@ -570,16 +625,29 @@ def _rebuild(obj: Any, fakes: dict[int, torch.Tensor], copies: list[Any]) -> Any
     if isinstance(obj, tuple) and not isinstance(obj, torch.Size):
         items = [_rebuild(item, fakes, copies) for item in obj]
         return cls(*items) if hasattr(cls, "_fields") else cls(items)
+    node = pytree.SUPPORTED_NODES.get(cls)
+    if node is not None and not isinstance(obj, nn.Module):
+        children, context = node.flatten_fn(obj)
+        children = [_rebuild(item, fakes, copies) for item in children]
+        copy = node.unflatten_fn(children, context)
+        copies.append((copy, children))
+        return copy
     return obj
 
 
 def _unchanged(copy: Any, before: Any) -> bool:
     """Whether a copy a trace ran on still holds what it started with."""
-    if isinstance(copy, dict):
+    if isinstance(copy, set):
+        return copy == before
+    if isinstance(copy, list):
+        now = copy
+    elif isinstance(copy, dict) and isinstance(before, dict):
         if list(copy) != list(before):
             return False
-        copy, before = list(copy.values()), list(before.values())
-    return len(copy) == len(before) and all(a is b for a, b in zip(copy, before))
+        now, before = list(copy.values()), list(before.values())
+    else:
+        now = pytree.SUPPORTED_NODES[type(copy)].flatten_fn(copy)[0]
+    return len(now) == len(before) and all(a is b for a, b in zip(now, before))
 
 
 def _identities(obj: Any, modules: dict[int, nn.Module], others: list[Any]) -> None:
@@ -596,6 +664,9 @@ def _identities(obj: Any, modules: dict[int, nn.Module], others: list[Any]) -> N
     elif type(obj) in (types.MethodType, types.BuiltinFunctionType):
         others.append(obj)
         _identities(obj.__self__, modules, others)
+    elif type(obj) in pytree.SUPPORTED_NODES:
+        for item in pytree.SUPPORTED_NODES[type(obj)].flatten_fn(obj)[0]:
+            _identities(item, modules, others)
     elif not isinstance(obj, torch.Tensor) and type(obj) not in _VALUES:
         others.append(obj)
 
@@ -678,6 +749,12 @@ def _traps(modules: dict[int, nn.Module]) -> Any:
             yield
     finally:
         _state.traced = None
+        for attributes, name, before in reversed(_state.derived):
+            if before is _state:
+                attributes.pop(name, None)
+            else:
+                attributes[name] = before
+        _state.derived = []
         del torch.Tensor.grad
         for owner, name, original in saved:
             if original is None:
@@ -731,12 +808,33 @@ def _static_output(leaf: Any, reachable: set[int]) -> bool:
     return isinstance(leaf, (type, enum.Enum))
 
 
+def _is_plain_instance(obj: Any) -> bool:
+    """Whether ``obj`` is its class and its ``__dict__`` and nothing more, as
+    ``copy.copy`` assumes of an object that does not say otherwise."""
+    cls = type(obj)
+    if isinstance(obj, (nn.Module, BaseException, type)) or not hasattr(
+        obj, "__dict__"
+    ):
+        return False
+    for base in cls.__mro__[:-1]:
+        if not base.__flags__ & _HEAPTYPE or vars(base).get("__slots__"):
+            return False
+    return (
+        cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and cls.__getstate__ is object.__getstate__
+        and not hasattr(cls, "__setstate__")
+    )
+
+
 class _Recipes:
     """How to make the outputs of a trace again from the results of its graph.
 
     A recipe is a list ``[kind, dynamic, ...]``: ``result`` (a tensor the
-    graph returns), ``same`` (the object itself, on every call), ``sequence``
-    or ``dict``. ``dynamic`` says whether a result is somewhere inside.
+    graph returns), ``same`` (the object itself, on every call), ``sequence``,
+    ``dict``, ``node`` (a pytree node) or ``instance`` (an object the region
+    made: a new one of its class with the same attributes). ``dynamic`` says
+    whether a result is somewhere inside.
     """
 
     def __init__(self, reachable: set[int], given: set[int]) -> None:
@@ -762,19 +860,32 @@ class _Recipes:
             self.results.append(obj)
         elif _static_output(obj, self.reachable):
             recipe = ["same", False, obj]
-        elif cls is tuple or cls is list:
+        elif cls in (tuple, list, set, frozenset):
             recipe = ["sequence", False, cls]
             children = list(obj)
         elif cls is dict or cls is collections.OrderedDict:
             recipe = ["dict", False, cls, list(obj)]
             children = list(obj.values())
+        elif cls in pytree.SUPPORTED_NODES:
+            children, context = pytree.SUPPORTED_NODES[cls].flatten_fn(obj)
+            recipe = ["node", False, pytree.SUPPORTED_NODES[cls].unflatten_fn, context]
+        elif isinstance(obj, tuple) and hasattr(cls, "_fields"):
+            recipe = ["sequence", False, cls._make]
+            children = list(obj)
+        elif _is_plain_instance(obj):
+            recipe = ["instance", False, cls, list(vars(obj))]
+            children = list(vars(obj).values())
         else:
             raise Untraceable(f"gives a {cls.__name__}, which a graph cannot return")
+        # Before its parts, so that an object that refers to itself ends.
         self.memo[id(obj)] = recipe
         if children is not None:
             parts = [self.of(child, depth + 1) for child in children]
             recipe.append(parts)
             recipe[1] = any(part[1] for part in parts)
+            if recipe[0] == "instance" and not recipe[1]:
+                # Nothing of the graph in it: an object from before.
+                recipe[:] = ["same", False, obj]
         return recipe
 
 
@@ -787,8 +898,18 @@ def _build(recipe: list[Any], results: Any, built: dict[int, Any]) -> Any:
     value = built.get(id(recipe))
     if value is not None:
         return value
+    if kind == "instance":
+        value = built[id(recipe)] = object.__new__(recipe[2])
+        for name, part in zip(recipe[3], recipe[4]):
+            value.__dict__[name] = _build(part, results, built)
+        return value
     parts = [_build(part, results, built) for part in recipe[-1]]
-    value = recipe[2](parts) if kind == "sequence" else recipe[2](zip(recipe[3], parts))
+    if kind == "sequence":
+        value = recipe[2](parts)
+    elif kind == "dict":
+        value = recipe[2](zip(recipe[3], parts))
+    else:
+        value = recipe[2](parts, recipe[3])
     built[id(recipe)] = value
     return value
 
@@ -1025,6 +1146,10 @@ class _Region:
                         raise _Failed(i, reason)
                     replay.run(i, i + 1, env, True)
                     _note_local(insts[i], env, local)
+                    if _is_outside_tensor(env.get(insts[i]["dst"])):
+                        # Read from a global, a closure or a plain object. Left
+                        # to the VM, it is an input of the next region.
+                        raise _Failed(i, "gives a tensor from outside the region")
             if not all(_unchanged(copy, before) for copy, before in copies):
                 raise _Failed(None, "changes a list or dict it was given")
             if grads != [f.requires_grad for f in fake]:
