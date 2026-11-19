@@ -3,10 +3,8 @@ if(NOT INTERN_BUILD_ATEN_OPS)
 endif()
 
 # Find modules
-if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND CMAKE_MODULE_PATH /usr/lib/x86_64-linux-gnu/)
-  list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
-endif()
+list(APPEND CMAKE_MODULE_PATH /usr/lib/x86_64-linux-gnu/)
+list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
 
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
@@ -78,11 +76,8 @@ else()
   message("disabling CUDA because USE_CUDA is set false")
 endif()
 
-if(NOT USE_NNPACK)
-  set(AT_NNPACK_ENABLED 0)
-else()
-  set(AT_NNPACK_ENABLED 1)
-endif()
+# NNPACK has been removed
+set(AT_NNPACK_ENABLED 0)
 
 list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
