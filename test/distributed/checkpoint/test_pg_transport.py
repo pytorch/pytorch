@@ -164,8 +164,7 @@ def _test_pg_transport_with_mixed_content(self, device) -> None:
 
 
 def _test_pg_transport_with_sharded_tensor(self, device) -> None:
-    # Set current accelerator device for NCCL/XCCL
-    if device.type == "cuda" or device.type == "xpu":
+    if device.type != "cpu":
         torch.accelerator.set_device_index(device)
 
     state_dict = _create_sharded_tensor_state_dict(self.rank, self.world_size, device)
@@ -210,16 +209,16 @@ class PgTransportCPU(MultiProcContinuousTest):
     timeout: timedelta = timedelta(seconds=20)
 
     @classmethod
-    def backend_str(cls) -> str | None:
+    def backend_str(cls, device) -> str | None:
         return "gloo"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cpu"
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self.device_type())
+        return torch.device(self.device_type)
 
     def test_pg_transport(self) -> None:
         _test_pg_transport(self, self.device)
@@ -237,12 +236,12 @@ class PgTransportGPU(MultiProcContinuousTest):
     timeout: timedelta = timedelta(seconds=20)
 
     @classmethod
-    def backend_str(cls) -> str | None:
-        return dist.get_default_backend_for_device(cls.device_type())
+    def backend_str(cls, device) -> str | None:
+        return dist.get_default_backend_for_device(device)
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"{self.device_type()}:{self.rank}")
+        return torch.device(f"{self.device_type}:{self.rank}")
 
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(

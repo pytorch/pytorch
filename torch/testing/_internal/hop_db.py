@@ -116,6 +116,8 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "call_torchbind",
     "triton_kernel_wrapper_mutation",
     "triton_kernel_wrapper_functional",
+    "cutedsl_kernel_wrapper_mutation",  # Runs a host function: needs cutlass and CUDA
+    "cutedsl_kernel_wrapper_functional",  # Runs a host function: needs cutlass and CUDA
     "hints_wrapper",
     "dynamo_bypassing_wrapper",  # TODO(soulitzer)
     "foreach_map",
@@ -123,6 +125,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "print",
     "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
     "invoke_leaf_function",  # Needs torch.compile, tested separately in test_leaf_function*
+    "control_deps",  # Inductor-internal ordering HOP
 ]
 
 torch.library.define(

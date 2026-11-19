@@ -13,7 +13,8 @@ class TORCH_API AOTIModelPackageLoader {
       const std::string& model_name = "model",
       const bool run_single_threaded = false,
       const size_t num_runners = 1,
-      const c10::DeviceIndex device_index = -1);
+      const c10::DeviceIndex device_index = -1,
+      const bool use_stream_affinity = false);
   ~AOTIModelPackageLoader();
 
   AOTIModelContainerRunner* get_runner();
@@ -26,6 +27,12 @@ class TORCH_API AOTIModelPackageLoader {
   // boxed_run will steal the ownership of the input tensors
   std::vector<at::Tensor> boxed_run(
       std::vector<at::Tensor>&& inputs,
+      void* stream_handle = nullptr);
+
+  // Runs the model as CUDA graphs; see
+  // AOTInductorModelContainerRunWithLazyCudaGraphs.
+  std::vector<at::Tensor> run_with_lazy_cuda_graphs(
+      const std::vector<at::Tensor>& inputs,
       void* stream_handle = nullptr);
 
   std::vector<std::string> get_call_spec();

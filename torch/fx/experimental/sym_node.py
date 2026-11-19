@@ -95,6 +95,14 @@ class SymNode:
     # Note [optimized_summation]: indicates that SymNode is an Add expression of the form
     # a + b + c + d... etc where all terms are unique symbols. This allows us to do some optimizations
     # for common patterns see _optimized_add.
+    #
+    # The flag describes the unresolved _expr. A replacement can turn expr into something
+    # that is no longer such a sum (s0 + s1 becomes 2*s1 after s0 -> s1), so only trust the
+    # flag together with expr when expr is _expr.
+    #
+    # The symbolic op memo replays a result's flag to every node whose operands resolve to
+    # the same expressions. That is sound only because _optimized_add is the sole place that
+    # sets the flag to True, and only for a result that is such a sum; keep it that way.
 
     # The unfortunate reason we have this here is because sympy sets  __slots__ = () for add expression,
     # so we cannot add the attribute directly to the sympy expression. Furthermore, we cannot use it as
@@ -115,7 +123,14 @@ class SymNode:
         self.shape_env = shape_env
         self.pytype = pytype
         self._optimized_summation = optimized_summation
+        # Memo for the `expr` property, i.e. shape_env.replace(self._expr).
+        # replace() depends only on shape_env.replacements and
+        # shape_env.var_to_range, so _expr_cache is valid iff both
+        # _replacements_version_counter == _expr_ver and
+        # _var_to_range_version_counter == _expr_range_ver. -1 means
+        # "never computed".
         self._expr_ver = -1
+        self._expr_range_ver = -1
         self._expr_cache: object | None = None
 
         # What's the difference between hint and constant?
@@ -211,9 +226,21 @@ class SymNode:
 
     @property
     def expr(self) -> sympy.Basic:
+        # Fast path for a constant, where replace() cannot do anything and is
+        # expensive: a SymBool that has settled on one asks for its expr 25k
+        # times in one inductor compile. These are class attributes, so no
+        # sympy import is needed - importing it here would pull sympy into
+        # `import torch` and cost ~0.3s of startup, which is also why this is
+        # is_Boolean and is_Atom (exactly sympy.true / sympy.false) rather than
+        # an identity check, and is_Number rather than is_number, which walks
+        # the tree uncached.
         if (
             isinstance(self._expr, int)
-            or self._expr.is_number  # pyrefly: ignore[missing-attribute]
+            or self._expr.is_Number  # pyrefly: ignore[missing-attribute]
+            or (
+                self._expr.is_Boolean  # pyrefly: ignore[missing-attribute]
+                and self._expr.is_Atom  # pyrefly: ignore[missing-attribute]
+            )
         ):
             return self._expr
         if self.shape_env is None:
@@ -221,10 +248,17 @@ class SymNode:
         ver = self.shape_env._replacements_version_counter
         if ver == 0:
             return self._expr
-        if self._expr_cache is not None and ver == self._expr_ver:
+        # replace() also depends on value ranges; see ShapeEnv._find.
+        range_ver = self.shape_env._var_to_range_version_counter
+        if (
+            self._expr_cache is not None
+            and ver == self._expr_ver
+            and range_ver == self._expr_range_ver
+        ):
             return self._expr_cache
         result = self.shape_env.replace(self._expr)
         self._expr_ver = ver
+        self._expr_range_ver = range_ver
         self._expr_cache = result
         return result
 
@@ -809,7 +843,7 @@ unary_nonmagic_methods = {
 unary_methods = unary_magic_methods | unary_nonmagic_methods
 
 # Most methods are only registered on SymInt and SymFloat
-# Some methods are only be registered on SymBool
+# Some methods are only registered on SymBool
 only_bool_magic_methods = {"and", "or", "xor", "sym_not", "sym_ite"}
 # Methods that implicitly convert SymBool into SymInt
 bool_becomes_int_magic_methods = {"add", "sub", "mul"}
@@ -872,8 +906,20 @@ def _sympy_floordiv(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
     return FloorDiv(a, b)
 
 
-def _sympy_mod(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
+def _sympy_mod(
+    a: sympy.Basic | int | float | bool, b: sympy.Basic | int | float | bool
+) -> sympy.Basic:
+    import sympy
+
     from torch.utils._sympy.functions import Mod, PythonMod
+
+    # Callers (e.g. the inductor lowering for operator.mod) may pass plain
+    # Python scalars instead of sympy objects when neither operand is
+    # symbolic; sympify them so the assumption checks below don't crash.
+    if isinstance(a, (int, float, bool)):
+        a = sympy.sympify(a)
+    if isinstance(b, (int, float, bool)):
+        b = sympy.sympify(b)
 
     if a.is_nonnegative and b.is_nonnegative:
         return Mod(a, b)
@@ -1398,6 +1444,18 @@ def method_to_operator(method: str) -> Callable[..., object]:
     return METHOD_TO_OPERATOR[method]
 
 
+def _coerce_hint(pytype: type | None, out_hint: object) -> object:
+    """Narrow a hint computed from the operands to the result's python type."""
+    if (
+        pytype is not None
+        and out_hint is not _NO_HINT
+        and out_hint is not None
+        and not isinstance(out_hint, SymTypes)
+    ):
+        return pytype(out_hint)  # type: ignore[arg-type]
+    return out_hint
+
+
 def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
     func = lru_cache(256)(func)
 
@@ -1488,6 +1546,42 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             )
         if not isinstance(other, SymNode):
             raise AssertionError(f"Expected SymNode, got {type(other)}")
+
+        # See Note [symbolic op memo] in symbolic_shapes.py. The cache holds the
+        # result expression, never the SymNode. Given
+        #   s1: a = x.size()[0] + 1
+        #   s2: b = x.size()[0] + 1
+        # a and b must wrap different SymNodes, so that the two sites refer to
+        # different graph nodes as their producers. While tracing, the tracer
+        # keeps a table mapping each SymNode object to the graph node that
+        # produced it, and two SymNodes with the same expression are told apart
+        # only by object identity, so handing the same one to both sites makes
+        # s2 refer to the node created at s1 as its producer.
+        shape_env = self.shape_env
+        cache = None
+        cache_key = None
+        # mod picks Mod or PythonMod from value ranges, so it isn't memoized.
+        if shape_env is not None and method != "mod":
+            cache_key = (method, self.expr, other.expr)
+            # Resolving the operands can bump the replacement version, which
+            # clears the memo, so fetch it afterwards.
+            cache = shape_env._get_symop_cache()
+            cached = cache.get(cache_key)
+            if cached is not None:
+                out, pytype, optimized_summation = cached
+                out_hint = _coerce_hint(pytype, out_hint)
+                fx_node, _ = shape_env._create_fx_call_function(
+                    op, (self.fx_node, other.fx_node)
+                )
+                return SymNode(
+                    out,
+                    shape_env,
+                    pytype,
+                    out_hint,  # type: ignore[arg-type]
+                    fx_node=fx_node,
+                    optimized_summation=optimized_summation,
+                )
+
         optimized_summation = False
         try:
             if method == "mod":
@@ -1513,8 +1607,8 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
                 (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
-                    self._optimized_summation,
-                    other._optimized_summation,
+                    self._optimized_summation and self.expr is self._expr,
+                    other._optimized_summation and other.expr is other._expr,
                 )
             elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
                 import sympy
@@ -1571,13 +1665,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         else:
             pytype = self.pytype
 
-        if (
-            pytype is not None
-            and out_hint is not _NO_HINT
-            and out_hint is not None
-            and not isinstance(out_hint, SymTypes)
-        ):
-            out_hint = pytype(out_hint)  # type: ignore[arg-type]
+        out_hint = _coerce_hint(pytype, out_hint)
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
@@ -1595,6 +1683,8 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )
+        if cache is not None:
+            cache[cache_key] = (out, pytype, optimized_summation)
         return result
 
     @capture_provenance

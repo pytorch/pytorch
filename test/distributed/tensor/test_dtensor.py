@@ -1,9 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import copy
+import io
 import pathlib
+import pickle
 import tempfile
 import unittest
+from multiprocessing.reduction import ForkingPickler
 
 from numpy.testing import assert_array_equal
 
@@ -39,15 +43,20 @@ from torch.distributed.tensor.parallel import (
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_FBCODE,
+    parametrize,
     run_tests,
     skipIfHpu,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    LocalDTensorContinuousTestBase,
     map_local_tensor_for_rank,
+    NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -74,7 +83,9 @@ class DummyMLP(torch.nn.Module):
             self.net2.bias.fill_(1.2)
 
 
-class DTensorTest(DTensorTestBase):
+class DTensorTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_dtensor_constructor(self):
         device_mesh = self.build_device_mesh()
@@ -996,6 +1007,7 @@ class DTensorTest(DTensorTestBase):
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
+    base_class=LocalDTensorContinuousTestBase,
     skipped_tests=[
         # Async output in local mode is not supported
         "test_dtensor_async_output",
@@ -1007,7 +1019,9 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class DTensorSubclassTest(DTensorTestBase):
+class DTensorSubclassTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     def _make_dtensor(self, cls, mesh):
         base = DTensor.from_local(
             torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
@@ -1425,7 +1439,7 @@ class DTensorMeshTest(DTensorTestBase):
                 placements=None,
             )
 
-        x = make_dtensor(1, 1, dtype=torch.bfloat16, device="cuda")
+        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=self.device_type)
 
         # Fails with AssertionError: P1972527564
         torch.cond(
@@ -1502,6 +1516,36 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(result.size(), dtensor.size())
         self.assertEqual(result.stride(), dtensor.stride())
         self.assertEqual(result.to_local(), dtensor.to_local())
+
+    @with_comms
+    def test_as_strided_permutation(self):
+        # AOTAutograd regenerates an output aliasing an input with as_strided,
+        # so a compiled function returning a transposed view lands here.
+        device_mesh = self.build_device_mesh()
+        dtensor = distribute_tensor(
+            torch.randn(4, 6, 8, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        for dims in ((1, 0, 2), (2, 1, 0), (0, 2, 1)):
+            expected = dtensor.permute(dims)
+            result = dtensor.as_strided(
+                expected.size(), expected.stride(), expected.storage_offset()
+            )
+            self.assertEqual(result.placements, expected.placements)
+            self.assertEqual(result.full_tensor(), expected.full_tensor())
+
+    @with_comms
+    def test_as_strided_non_permutation_errors(self):
+        device_mesh = self.build_device_mesh()
+        dtensor = distribute_tensor(
+            torch.randn(4, 6, device=self.device_type), device_mesh, [Shard(0)]
+        )
+
+        # Not reachable by permuting the base dims.
+        with self.assertRaisesRegex(RuntimeError, "as_strided not supported"):
+            dtensor.as_strided((4, 3), (6, 1), 0)
+        with self.assertRaisesRegex(RuntimeError, "as_strided not supported"):
+            dtensor.as_strided((4, 6), (6, 1), 1)
 
 
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
@@ -1871,8 +1915,8 @@ class TestMixedPartialTypes(TestCase):
             api()
 
         # Test redistribute_local_tensor separately (different call pattern)
-        # Note: public DTensor.redistribute() doesn't allow Partial targets at all,
-        # so we test the internal redistribute_local_tensor directly
+        # Public DTensor.redistribute() only allows Shard -> Partial(sum), so
+        # test mixed Partial targets through redistribute_local_tensor directly.
         current_spec = DTensorSpec(
             mesh,
             (Replicate(), Replicate()),
@@ -1893,6 +1937,52 @@ class TestMixedPartialTypes(TestCase):
         )
         # no error
         redistribute_local_tensor(tensor, current_spec, target_spec)
+
+
+class DTensorStorageOffsetTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def _make_offset_dtensor(self):
+        mesh = init_device_mesh("cpu", (1,))
+        base = torch.arange(12.0)
+        return DTensor.from_local(base[2:6], mesh, [Shard(0)], run_check=False)
+
+    def test_has_storage_data(self):
+        dt = self._make_offset_dtensor()
+        self.assertEqual(dt.storage_offset(), 2)
+        self.assertFalse(torch._C._has_storage_data(dt))
+        self.assertTrue(torch._C._has_storage_data(dt.to_local()))
+
+    @parametrize("roundtrip", ["deepcopy", "torch_save", "pickle", "forking_pickler"])
+    def test_roundtrip_with_storage_offset(self, roundtrip):
+        dt = self._make_offset_dtensor()
+        if roundtrip == "deepcopy":
+            new = copy.deepcopy(dt)
+        elif roundtrip == "torch_save":
+            buffer = io.BytesIO()
+            torch.save(dt, buffer)
+            buffer.seek(0)
+            new = torch.load(buffer, weights_only=True)
+        elif roundtrip == "pickle":
+            new = pickle.loads(pickle.dumps(dt))
+        else:
+            new = ForkingPickler.loads(ForkingPickler.dumps(dt))
+        self.assertIs(type(new), DTensor)
+        self.assertFalse(torch._C._has_storage_data(new))
+        # deepcopy clones, which resets the offset of the local tensor.
+        if roundtrip != "deepcopy":
+            self.assertEqual(new.storage_offset(), dt.storage_offset())
+        self.assertEqual(new.placements, dt.placements)
+        self.assertEqual(new.to_local(), dt.to_local())
+
+
+instantiate_parametrized_tests(DTensorStorageOffsetTest)
 
 
 if __name__ == "__main__":

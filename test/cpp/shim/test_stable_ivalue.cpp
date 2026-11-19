@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 #include <torch/csrc/stable/c/shim.h>
+#include <torch/csrc/stable/stableivalue_conversions.h>
 #include <limits>
 
 TEST(TorchStableIValue, TestStableIValueUse) {
@@ -41,4 +42,15 @@ TEST(TorchStableIValue, TestStableIValueLargeAmount) {
     ASSERT_EQ(torch_delete_stable_ivalue(v), AOTI_TORCH_SUCCESS);
     v = nullptr;
   }
+}
+
+TEST(TorchStableIValue, TestStringRoundtrip) {
+  // This performs a simple roundtrip from std::string -> StableIValue ->
+  // std::string
+  const std::string our_string = "Hello World!";
+  const StableIValue as_stable_ivalue = torch::stable::detail::from(our_string);
+  const std::string string_back =
+      torch::stable::detail::to<std::string>(as_stable_ivalue);
+
+  ASSERT_EQ(string_back, our_string);
 }

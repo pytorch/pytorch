@@ -11,6 +11,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.testing
+import torch.compiler.config
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
@@ -219,6 +220,7 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
     return sharded_mod
 
 
+@instantiate_parametrized_tests
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
@@ -267,6 +269,77 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         fn(x).backward()
         self.assertEqual(local.grad, torch.full_like(local, 2))
+
+    @parametrize("style", ["colwise", "rowwise"])
+    def test_tp_linear_3d_input_dynamic_backward(self, style):
+        # https://github.com/pytorch/pytorch/issues/201624: tracing the backward
+        # of a TP linear on a 3D input used to recurse forever while resolving
+        # the untracked global sizes that sharding propagation creates.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        if style == "colwise":
+            parallel_style, in_dim = ColwiseParallel(), 8
+        else:
+            parallel_style, in_dim = RowwiseParallel(), 8 // self.world_size
+        linear = nn.Linear(8, 8, bias=False, device=self.device_type)
+        parallelize_module(linear, mesh, parallel_style)
+        compiled = torch.compile(linear, backend="aot_eager", dynamic=True)
+        for seq_len in (4, 6):
+            x = torch.randn(2, seq_len, in_dim, device=self.device_type)
+            x_ref = x.clone().requires_grad_()
+            x.requires_grad_()
+            linear(x_ref).sum().backward()
+            compiled(x).sum().backward()
+            self.assertEqual(x.grad, x_ref.grad)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_global_size_no_tangent_dependency(self):
+        # The unbacked size u0 of a forward output is first seen on its tangent.
+        # The untracked global size DTensor computes for z must still resolve
+        # to the forward value, or the forward graph depends on a tangent.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x, w):
+            dt = DTensor.from_local(x[x > 0], mesh, [Replicate()], run_check=False)
+            z = dt.view(-1, 1)
+            return z.to_local() * w.sum(), torch.zeros(z.shape)
+
+        x = torch.randn(16, device=self.device_type, requires_grad=True)
+        w = torch.randn(3, device=self.device_type, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_()
+        w_ref = w.detach().clone().requires_grad_()
+        out, zeros = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, w)
+        out_ref, zeros_ref = fn(x_ref, w_ref)
+        self.assertEqual(out, out_ref)
+        self.assertEqual(zeros, zeros_ref)
+        out.sum().backward()
+        out_ref.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_unbacked_rebuilt_sym_max_inductor(self):
+        # Sharding propagation computes global strides like Max(1, u0) with
+        # proxy tracing disabled, so make_fx rebuilds them from their sympy
+        # expression; the rebuilt node must be one Inductor can lower.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        local = torch.randn(8, 4, device=self.device_type, requires_grad=True)
+        local_ref = local.detach().clone().requires_grad_()
+
+        def fn(x):
+            return (x @ x.t()).to_local()
+
+        def make_input(t):
+            x = DTensor.from_local(t, mesh, [Shard(1)], run_check=False)
+            torch._dynamo.decorators.mark_unbacked(x, 0, hint_override=x.shape[0])
+            torch._dynamo.decorators.mark_unbacked(x, 1, hint_override=x.shape[1])
+            return x
+
+        ref = fn(make_input(local_ref))
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(make_input(local))
+        self.assertEqual(res, ref)
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(local.grad, local_ref.grad)
 
     def test_compile_waits_act_nested_in_dtensor_local_tensor(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180614.
@@ -318,6 +391,44 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             "DTensor._local_tensor",
         )
         self.assertTrue(dt._local_tensor.completed)
+
+    def test_async_collective_tensor_nested_in_dtensor_reuses(self):
+        # FSDP+TP motivating case for the ACT guard relaxation: a DTensor whose
+        # _local_tensor alternates between an AsyncCollectiveTensor (async
+        # all-gather output) and the resolved plain Tensor must reuse the
+        # compiled graph. The recursion into _local_tensor re-enters
+        # VariableBuilder.wrap_tensor, hits is_polymorphic_act, and relaxes the
+        # inner guard via UnwrapCollectiveTensorSource, while the outer DTensor
+        # guards (TYPE_MATCH, DTENSOR_SPEC_MATCH, requires_grad) do not
+        # discriminate on the local's class -- so no recompile on the change.
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        def make_dt(act_local):
+            dt = DTensor.from_local(
+                torch.ones(4, 4, device=self.device_type),
+                mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            if act_local:
+                dt._local_tensor = AsyncCollectiveTensor(dt._local_tensor.clone())
+            return dt
+
+        expected = torch.full((4, 4), 2.0, device=self.device_type)
+        for i in range(4):
+            # Step 0 traces with the ACT local; odd steps resolve to a plain
+            # Tensor local before the compiled region.
+            out = fn(make_dt(act_local=(i % 2 == 0)))
+            self.assertEqual(out.to_local(), expected)
+        # ACT and plain-Tensor locals share one compiled graph.
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_direct_aot_dtensor_local_tensor_act_to_plain_no_crash(self):
         # Companion to the wait test above: the crash half of
@@ -2145,11 +2256,6 @@ class outer_fn(torch.nn.Module):
         # Test backward pass
         result.sum().backward()
 
-    @unittest.skip(
-        "compile_on_one_rank device-as-parameter is not yet supported with the inductor "
-        "backend (the coor::current_device node cannot be lowered); re-enabled when the "
-        "post-grad strip pass lands"
-    )
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_flattened_submesh_no_getattr_compile_on_one_rank(self):
         """When compile_on_one_rank=True, the flattened submesh should appear as a
@@ -2190,7 +2296,7 @@ class outer_fn(torch.nn.Module):
         )
         try:
             torch._dynamo.reset()
-            with dist.config.patch(compile_on_one_rank=True):
+            with torch.compiler.config.patch(compile_on_one_rank=True):
 
                 def fn(x, mesh):
                     dt = DTensor.from_local(
@@ -2251,7 +2357,7 @@ class outer_fn(torch.nn.Module):
             # Concatenate like SimpleFSDP's _distribute_dtensor does
             concat_mesh = DeviceMesh._concatenate([fsdp_mesh, tp_mesh])
 
-            with dist.config.patch(compile_on_one_rank=True):
+            with torch.compiler.config.patch(compile_on_one_rank=True):
 
                 def fn(local_tensor, concat_mesh_input):
                     # concat_mesh_input is a graph input (placeholder).
@@ -2419,7 +2525,6 @@ class outer_fn(torch.nn.Module):
         when compile_on_one_rank is enabled, for both 1D mesh and (mesh, dim)
         tuple inputs. Also tests that _group_or_group_name passes through the
         ProcessGroup instead of extracting .group_name."""
-        import torch.distributed.config as dist_config
         from torch.distributed._functional_collectives import (
             _group_or_group_name,
             _resolve_group,
@@ -2431,7 +2536,7 @@ class outer_fn(torch.nn.Module):
         dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
         mesh_2d = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
 
-        with dist_config.patch(compile_on_one_rank=True):
+        with torch.compiler.config.patch(compile_on_one_rank=True):
             # 1D mesh
             result = _resolve_group(mesh_1d)
             self.assertIsInstance(result, dist.ProcessGroup)
@@ -2457,7 +2562,6 @@ class outer_fn(torch.nn.Module):
         """Backward closures of DTensor ops should not capture DeviceMesh as
         get_attr constants in the joint graph (they break AOTAutograd cache
         serialization because ProcessGroups are unpicklable)."""
-        import torch.distributed.config as dist_config
         from torch._library.fake_class_registry import FakeScriptObject
 
         # Need world_size=4 for a 2x2 mesh; re-init the fake PG.
@@ -2542,7 +2646,7 @@ class outer_fn(torch.nn.Module):
             def forward(self, x):
                 return self.linear2(torch.relu(self.linear1(x))).sum()
 
-        with dist_config.patch("compile_on_one_rank", True):
+        with torch.compiler.config.patch("compile_on_one_rank", True):
             device = torch.device(f"{self.device_type}:0")
             torch.accelerator.set_device_index(0)
             mesh_2d = init_device_mesh(
@@ -2588,7 +2692,10 @@ class outer_fn(torch.nn.Module):
                 sys.modules[cls.__module__].__dict__[cls.__name__] = cls
 
             model.to_empty(device=device)
-            with dist_config.patch("compile_on_one_rank", False), torch.no_grad():
+            with (
+                torch.compiler.config.patch("compile_on_one_rank", False),
+                torch.no_grad(),
+            ):
                 for p in model.parameters():
                     p.fill_(0.01)
             model.train()
@@ -2752,14 +2859,16 @@ class outer_fn(torch.nn.Module):
         h1 = dt._stable_hash_for_caching()
         self.assertNotEqual(h0, h1)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    @unittest.skipIf(
+        torch.accelerator.device_count() < 2, "requires 2 accelerator devices"
+    )
     def test_stable_hash_for_caching_cuda_ranks(self):
         # Exercise the exact scenario from #188390: two DTensors with identical
-        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # global specs but local tensors on device 0 vs device 1 must produce
         # different AOTAutograd cache keys.
-        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
-        local0 = torch.empty(2, 4, device="cuda:0")
-        local1 = torch.empty(2, 4, device="cuda:1")
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device=f"{device_type}:0")
+        local1 = torch.empty(2, 4, device=f"{device_type}:1")
         dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
         dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
         h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
@@ -3073,11 +3182,64 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
     @with_comms
+    @parametrize(
+        "input_placement,expected_output_placement",
+        [
+            (Replicate(), Replicate()),
+            (Shard(0), None),
+            (Shard(1), Shard(0)),
+        ],
+    )
+    def test_unbind_with_symint_size(self, input_placement, expected_output_placement):
+        mesh = self.build_device_mesh()
+        global_tensor = torch.randn(8, 8, device=self.device_type)
+        input_dt = distribute_tensor(global_tensor, mesh, [input_placement])
+
+        def unbind_fn(x):
+            return torch.unbind(x, dim=0)
+
+        compiled_unbind_fn = torch.compile(unbind_fn, dynamic=True)
+        if expected_output_placement is None:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Attempted to unbind along the sharded dimension 0. "
+                "Please redistribute the input explicitly before unbinding.",
+            ):
+                compiled_unbind_fn(input_dt)
+            return
+
+        expected = unbind_fn(global_tensor)
+        result = compiled_unbind_fn(input_dt)
+
+        self.assertEqual(len(result), len(expected))
+        for dt_slice, tensor_slice in zip(result, expected):
+            self.assertEqual(dt_slice.placements, (expected_output_placement,))
+            self.assertEqual(dt_slice.full_tensor(), tensor_slice)
+
+    @with_comms
+    def test_unbind_with_unbacked_sharded_size(self):
+        mesh = self.build_device_mesh()
+        global_tensor = torch.randn(8, 8, device=self.device_type)
+        input_dt = distribute_tensor(global_tensor, mesh, [Shard(1)])
+        torch._dynamo.decorators.mark_unbacked(input_dt, 1)
+
+        def unbind_fn(x):
+            return torch.unbind(x, dim=0)
+
+        expected = unbind_fn(global_tensor)
+        result = torch.compile(unbind_fn, backend="eager", fullgraph=True)(input_dt)
+
+        self.assertEqual(len(result), len(expected))
+        for dt_slice, tensor_slice in zip(result, expected):
+            self.assertEqual(dt_slice.placements, (Shard(0),))
+            self.assertEqual(dt_slice.full_tensor(), tensor_slice)
+
+    @with_comms
     def test_dtensor_processgroup_backward(self):
         """Test that ProcessGroups are correctly handled in backward graph."""
         from torch._functorch.aot_autograd import aot_function
 
-        with patch("torch.distributed.config.compile_on_one_rank", True):
+        with patch("torch.compiler.config.compile_on_one_rank", True):
             mesh = self.build_device_mesh()
 
             def fn(dt):
@@ -3135,7 +3297,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         and ProcessGroups are extracted in-graph as placeholders."""
         from torch._functorch.aot_autograd import aot_function
 
-        with patch("torch.distributed.config.compile_on_one_rank", True):
+        with patch("torch.compiler.config.compile_on_one_rank", True):
             mesh = self.build_device_mesh()
 
             def fn(dt):
@@ -3184,7 +3346,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         it once as a graph placeholder."""
         from torch._functorch.aot_autograd import aot_function
 
-        with patch("torch.distributed.config.compile_on_one_rank", True):
+        with patch("torch.compiler.config.compile_on_one_rank", True):
             mesh = self.build_device_mesh()
 
             def fn(dt1, dt2):

@@ -146,6 +146,7 @@ dtensor_fails = {
     xfail("nn.functional.ctc_loss"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
     xfail("transpose"),
+    xfail("polar"),
     # conv stride+padding: TP convolution rejects stride != 1 with padding
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
@@ -212,7 +213,9 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
     skip("nn.functional.multi_head_attention_forward"),
-    xfail("multinomial"),
+    # Nondeterministic: DTensor vs reference sample from the shared RNG at
+    # different points, so an xfail is flaky (occasional "unexpected success").
+    skip("multinomial"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/167252
     skip("full_like"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/179779
@@ -232,8 +235,11 @@ dtensor_compiled_fails = {
     xfail("reshape_as"),
     xfail("view"),
     xfail("view_as"),
+    # No sharding strategy for aten.transpose_copy.int on 0-d inputs.
+    xfail("transpose_copy"),
     # View-type ops that decompose into as_strided (at autograd level).
-    # DTensor doesn't have a sharding strategy for as_strided.
+    # DTensor only answers as_strided when it is a permutation of the base
+    # dims, which these are not.
     xfail("atleast_1d"),
     xfail("atleast_2d"),
     xfail("atleast_3d"),
@@ -245,15 +251,11 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
-    xfail("movedim"),
     xfail("narrow"),
-    xfail("permute"),
     xfail("select"),
     xfail("slice"),
     xfail("squeeze"),
     xfail("squeeze", "multiple"),
-    xfail("t"),
-    xfail("transpose_copy"),
     xfail("unsqueeze"),
     xfail("vsplit"),
     # Decompositions that use plain tensor constructors (e.g. arange),
@@ -276,13 +278,8 @@ dtensor_compiled_fails = {
     xfail("nonzero_static"),
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.logsigmoid"),
     xfail("scatter"),
-    # False positives: these have no sharding strategy and their
-    # eager DTensor failure is registered elsewhere.
-    xfail("nn.functional.multilabel_soft_margin_loss"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/181204
     skip("norm", "nuc"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
@@ -290,6 +287,17 @@ dtensor_compiled_fails = {
     xfail("nn.functional.linear_cross_entropy", "chunked"),
     xfail("nn.functional.linear_cross_entropy", "chunked_none"),
 }
+
+if not torch._dynamo.config.use_cpp_fake_tensor:
+    dtensor_compiled_fails |= {
+        # The log_sigmoid_forward decomp checks self.is_cuda, which on a Python
+        # FakeTensor dispatches prim::device into PlacementTrackingMode, where
+        # sharding propagation fails. C++ FakeTensor answers it from the
+        # TensorImpl without dispatching.
+        xfail("nn.functional.binary_cross_entropy_with_logits"),
+        xfail("nn.functional.logsigmoid"),
+        xfail("nn.functional.multilabel_soft_margin_loss"),
+    }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
 # These are excluded from TestCompiledDTensorOps skip list since we don't check numerics.
@@ -373,7 +381,6 @@ dtensor_fails_no_strategy = {
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.unfold"),
     xfail("nonzero"),
-    xfail("polar"),
     xfail("put"),
     xfail("renorm"),
     xfail("scatter_reduce", "amax"),
@@ -409,13 +416,7 @@ OP_DB_WORLD_SIZE = 4
 DEVICE_TYPE = "cpu"
 
 
-class TestDTensorOps(TestCase):
-    __test__ = False
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        cls.__test__ = True
-
+class DTensorOpsMixin:
     @property
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
@@ -683,7 +684,7 @@ class TestDTensorOps(TestCase):
             _ = torch.ops.aten.embedding.default(weight_dtensor, input_dtensor)
 
 
-class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
+class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
@@ -702,7 +703,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
         self.run_one_hot()
 
 
-class TestLocalDTensorOps(TestDTensorOps):
+class TestLocalDTensorOps(DTensorOpsMixin, TestCase):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestLocalDTensorOps")
 
     def setUp(self) -> None:
@@ -864,7 +865,7 @@ ops_unbacked_dtensor_dde = {
 }
 
 
-class TestUnbackedDTensorOps(TestDTensorOps):
+class TestUnbackedDTensorOps(DTensorOpsMixin, TestCase):
     """
     Test suite for DTensor ops with unbacked symints.
 
@@ -1120,7 +1121,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                 )
 
 
-class TestCompiledDTensorOps(TestDTensorOps):
+class TestCompiledDTensorOps(DTensorOpsMixin, TestCase):
     """
     Test DTensor ops compile successfully with aot_eager backend.
     Uses fake PG for speed - focuses on compilation, not output correctness.

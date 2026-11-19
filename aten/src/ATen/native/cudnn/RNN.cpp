@@ -1,10 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/RNN.h>
 #include <c10/util/Exception.h>
@@ -107,6 +105,8 @@ Tensor _cudnn_init_dropout_state(
   TORCH_CHECK(
       false, "_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
+
+void _cudnn_clear_dropout_state() {}
 
 } // namespace native
 } // namespace at
@@ -515,6 +515,9 @@ struct RNNDescriptors {
       Tensor hx,
       Tensor cx) {
     rnn_desc = fn.rnn.descriptor(handle, fn.dropout.descriptor(handle));
+    TORCH_INTERNAL_ASSERT(
+        x.is_contiguous() && y.is_contiguous(),
+        "rnn: RNN descriptors assume packed x/y");
     x_descs = fn.tensors.descriptors(x);
     y_descs = fn.tensors.descriptors(y);
     hx_desc.set(hx, 5);
@@ -1817,7 +1820,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   auto x = input.contiguous();
   auto dy = grad_output.contiguous();
-  auto y = output;
+  auto y = output.contiguous();
   auto w = weight_buf;
   auto dx = at::empty(
       input.sizes(), input.options()); // TODO: more compact way of saying this
@@ -2060,7 +2063,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
-  const auto& y = output;
+  auto y = output.contiguous();
   auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
 
   cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input, false);
@@ -2404,21 +2407,29 @@ struct DropoutState {
   }
 };
 
+// Each state is slightly over 2MB and initialized lazily, so it's fine to
+// cache them. The cache is process-lifetime state; it can be released via
+// clear_dropout_state() (exposed as torch._C._cudnn_clear_dropout_state()).
+std::vector<DropoutState>& dropout_state_cache() {
+  static std::vector<DropoutState> cache{
+      static_cast<size_t>(cuda::getNumGPUs())};
+  return cache;
+}
+
+std::mutex& dropout_state_cache_mutex() {
+  static std::mutex mut;
+  return mut;
+}
+
 DropoutState& get_dropout_state(
     double dropout_p,
     bool train,
     TensorOptions options) {
-  // Each state is slightly over 2MB and initialized lazily, so it's fine to
-  // cache them.
-  static std::vector<DropoutState> dropout_state_cache{
-      static_cast<size_t>(cuda::getNumGPUs())};
-  static std::mutex state_cache_mut;
-
   AT_ASSERT(options.device().is_cuda());
   auto device = options.device().index();
 
-  std::unique_lock<std::mutex> lock{state_cache_mut};
-  auto& state = dropout_state_cache.at(device);
+  std::unique_lock<std::mutex> lock{dropout_state_cache_mutex()};
+  auto& state = dropout_state_cache().at(device);
   if (train && dropout_p > 0) {
     const auto& gen = at::detail::getCUDAHooks().getDefaultGenerator(device);
     auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
@@ -2588,11 +2599,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       num_layers,
       bidirectional);
 
-  TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  TORCH_CHECK(
-      _batch_sizes.device().is_cpu(),
-      "batch_sizes tensor should be on CPU, but got ",
-      _batch_sizes.device());
   IntArrayRef batch_sizes{
       _batch_sizes.data_ptr<int64_t>(),
       static_cast<size_t>(_batch_sizes.size(0))};
@@ -2816,6 +2822,15 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
 }
 
 } // namespace
+
+void _cudnn_clear_dropout_state() {
+  std::lock_guard<std::mutex> lock{dropout_state_cache_mutex()};
+  for (auto& state : dropout_state_cache()) {
+    std::lock_guard<std::mutex> state_lock{state.mutex};
+    state.buffer = Tensor();
+    state.event.reset();
+  }
+}
 
 } // namespace at::native
 

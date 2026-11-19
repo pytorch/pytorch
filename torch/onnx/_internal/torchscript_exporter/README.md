@@ -59,7 +59,7 @@ the original node. An example of a symbolic function needing context is
 
 It would be better for us to export inplace annotations,
 than to not export them, since it is useful information that can
-help the target of an ONNX export export more efficiently. However,
+help the target of an ONNX export more efficiently. However,
 ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
 inplace annotations, but we are losing information this way.
 

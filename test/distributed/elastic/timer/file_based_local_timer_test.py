@@ -15,6 +15,7 @@ import uuid
 
 import torch.distributed.elastic.timer as timer
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
@@ -36,6 +37,8 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
                 time.sleep(0.2)
 
     class FileTimerTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self.max_interval = 0.01
@@ -196,6 +199,8 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
             time.sleep(interval)
 
     class FileTimerClientTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def test_send_request_without_server(self):
             client = timer.FileTimerClient("test_file")
             timer.configure(client)
@@ -204,6 +209,8 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
                     time.sleep(0.1)
 
     class FileTimerServerTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"

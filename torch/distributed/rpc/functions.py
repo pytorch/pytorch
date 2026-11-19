@@ -24,7 +24,7 @@ def async_execution(fn):
         However, this does not mean this decorator has to be outmost one when
         defining a function. For example, when combined with ``@staticmethod``
         or ``@classmethod``, ``@rpc.functions.async_execution`` needs to be the
-        inner decorator to allow the target function be recognized as a static
+        inner decorator to allow the target function to be recognized as a static
         or class function. This target function can still execute asynchronously
         because, when accessed, the static or class method preserves attributes
         installed by ``@rpc.functions.async_execution``.
@@ -64,33 +64,6 @@ def async_execution(fn):
         >>>     args=("worker2", torch.ones(2), 1, 1)
         >>> )
         >>> print(ret)  # prints tensor([3., 3.])
-
-        When combined with TorchScript decorators, this decorator must be the
-        outmost one.
-
-        >>> from torch import Tensor
-        >>> from torch.futures import Future
-        >>> from torch.distributed import rpc
-        >>>
-        >>> # omitting setup and shutdown RPC
-        >>>
-        >>> # On all workers
-        >>> @torch.jit.script
-        >>> def script_add(x: Tensor, y: Tensor) -> Tensor:
-        >>>     return x + y
-        >>>
-        >>> @rpc.functions.async_execution
-        >>> @torch.jit.script
-        >>> def async_add(to: str, x: Tensor, y: Tensor) -> Future[Tensor]:
-        >>>     return rpc.rpc_async(to, script_add, (x, y))
-        >>>
-        >>> # On worker0
-        >>> ret = rpc.rpc_sync(
-        >>>     "worker1",
-        >>>     async_add,
-        >>>     args=("worker2", torch.ones(2), 1)
-        >>> )
-        >>> print(ret)  # prints tensor([2., 2.])
 
         When combined with static or class method, this decorator must be the
         inner one.

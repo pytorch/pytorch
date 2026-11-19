@@ -10,6 +10,8 @@ from cutlass.cutlass_dsl import Numeric, dsl_user_op
 from cutlass import Float32, Int32, Boolean, const_expr
 from cutlass.utils import LayoutEnum
 
+from torch._vendor.quack import copy_utils
+
 
 @dsl_user_op
 def make_smem_layout(
@@ -40,6 +42,58 @@ def make_smem_layout(
 
 # For compatibility with blackwell_helpers.py
 make_smem_layout_epi = make_smem_layout
+
+
+def choose_sm90_wgmma_layout_mn(
+    tile_m: int,
+    tile_n: int,
+    num_wg: int,
+    *,
+    allow_swap_ab: bool = True,
+) -> tuple[bool, int]:
+    """Return ``(swap_AB, AtomLayoutM)`` minimizing Hopper SS WGMMA SMEM traffic.
+
+    The logical MMA is ``(tile_m, tile_n)``.  Hopper's physical WGMMA M mode is
+    64, and for ``num_wg`` in {1, 2, 3} the only useful warp-group layouts are
+    all WGs along physical M or all WGs along physical N.  The returned
+    ``AtomLayoutM`` is in the caller's logical coordinate system.  Callers that
+    pass a physical ``atom_layout_mnk`` directly to a lower-level MMA builder
+    should swap the first two atom-layout modes when ``swap_AB`` is true.
+    """
+    if num_wg not in (1, 2, 3):
+        raise ValueError(f"SM90 WGMMA layout chooser expects num_wg in {{1, 2, 3}}, got {num_wg}")
+    if tile_m <= 0 or tile_n <= 0:
+        raise ValueError(f"tile_m and tile_n must be positive, got {(tile_m, tile_n)}")
+
+    def best_physical_layout(x: int, y: int) -> tuple[int, int] | None:
+        # Prefer split-M when valid: it has wg_n=1, strictly lower traffic than
+        # split-N for the same orientation when num_wg > 1.
+        if x % (64 * num_wg) == 0 and y % 8 == 0:
+            return (num_wg, 1)
+        if x % 64 == 0 and y % (8 * num_wg) == 0:
+            return (1, num_wg)
+        return None
+
+    best: tuple[int, bool, int] | None = None
+    for swap_ab in (False, True) if allow_swap_ab else (False,):
+        physical_m, physical_n = (tile_n, tile_m) if swap_ab else (tile_m, tile_n)
+        layout = best_physical_layout(physical_m, physical_n)
+        if layout is None:
+            continue
+        physical_atom_m, physical_atom_n = layout
+        score = physical_m * physical_atom_n
+        atom_layout_m = physical_atom_n if swap_ab else physical_atom_m
+        candidate = (score, swap_ab, atom_layout_m)
+        if best is None or candidate < best:
+            best = candidate
+    if best is None:
+        raise ValueError(
+            "no valid SM90 WGMMA layout for "
+            f"tile_m={tile_m}, tile_n={tile_n}, num_wg={num_wg}, "
+            f"allow_swap_ab={allow_swap_ab}"
+        )
+    _, swap_ab, atom_layout_m = best
+    return swap_ab, atom_layout_m
 
 
 def make_tiled_mma(
@@ -191,3 +245,43 @@ def partition_fragment_ABC(
         assert sA is not None
         tCrA = thr_mma.make_fragment_B(thr_mma.partition_B(sA))
     return acc, tCrA, tCrB
+
+
+def canonical_a_load_s2r(
+    tiled_mma, sA, tidx, tCrA, position_independent=False, transpose=None, atom=None
+):
+    """The canonical A-operand produce for the RS mainloop: an ldmatrix tiled
+    copy derived from the MMA (LDSM for k-major A, LDSM.T for m-major — one
+    code path, 16-bit only). Returns ``copy_block(stage_idx, b, k_tile)``,
+    which s2r loads k16 block b (a static Python int) of pipeline stage
+    stage_idx into the fragment (``k_tile``, the global k-tile index the
+    mainloop threads through the seam for coordinate-dependent transforms,
+    is unused here). This is the produce seam: transforms substitute their own
+    copy_block (e.g. LDS + dequant) while the mainloop keeps owning the WGMMA
+    issue and commit-group discipline. Also serves the SM120 warp-MMA mainloop
+    (fragment atoms are LDSM-identical); its MmaF16BF16Op carries no major mode
+    (operand layout fixed K-major, the smem major only picks LDSM vs LDSM.T),
+    so ``transpose`` must be passed explicitly there."""
+    if transpose is None:
+        transpose = tiled_mma.op.a_major_mode == cute.nvgpu.OperandMajorMode.MN
+    if const_expr(atom is None):
+        atom = copy_utils.get_smem_load_atom(sA.element_type, transpose)
+    smem_tiled_copy_A = cute.make_tiled_copy_A(atom, tiled_mma)
+    thr_copy_A = smem_tiled_copy_A.get_slice(tidx)
+    # (CPY, CPY_M, CPY_K, STAGE); position-independent partition absorbs the
+    # swizzle into the pointer, so per-block addresses are linear (plain IMAD
+    # chains ptxas can hoist) instead of a SHF+LOP3 XOR per LDSM
+    if const_expr(position_independent):
+        tCsA_copy_view = copy_utils.partition_S_position_independent(thr_copy_A, sA)
+    else:
+        tCsA_copy_view = thr_copy_A.partition_S(sA)
+    tCrA_copy_view = thr_copy_A.retile(tCrA)
+
+    def copy_block(stage_idx, b, k_tile=None):
+        cute.copy(
+            smem_tiled_copy_A,
+            tCsA_copy_view[None, None, b, stage_idx],
+            tCrA_copy_view[None, None, b],
+        )
+
+    return copy_block
