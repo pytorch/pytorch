@@ -61,6 +61,16 @@ default list::
     @torch.vm(passes=torch.vm.DEFAULT_PASSES)
     def forward(model, x): ...
 
+A list of one's own is the default one with more passes; the pass that hands
+tensor work to Inductor is the one to ask for when the last bits of a result
+may differ::
+
+    passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+
+
+    @torch.vm(passes=passes)
+    def forward(model, x): ...
+
 A pass of one's own goes in the list as well: a Python callable taking a
 ``Region``, the instructions of one basic block.
 """
@@ -71,16 +81,17 @@ import os
 import sys
 import types
 import warnings
+import weakref
 from collections.abc import Iterable
 from typing import Any
 
 import torch
 
-from . import _shortcuts, passes
-from .passes import BuiltinPass, Inline, Unroll
+from . import _regions, _shortcuts, passes
+from .passes import BuiltinPass, Graphs, Inline, Unroll
 
 
-__all__ = ["DEFAULT_PASSES", "Unsupported", "is_available", "passes", "vm"]
+__all__ = ["DEFAULT_PASSES", "Unsupported", "is_available", "passes", "regions", "vm"]
 
 
 class Unsupported(RuntimeError):
@@ -132,11 +143,12 @@ def is_available() -> bool:
     return True
 
 
-def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool]]:
+def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool], Graphs | None]:
     """Checks a list of passes, and sorts it into what the engine is given.
 
     Returns the passes over a block in their order (the engine's own by name),
-    and which of the passes over the control-flow graph are asked for.
+    which of the passes over the control-flow graph are asked for, and the
+    graph pass if there is one.
     """
     listed = tuple(given)
     for one in listed:
@@ -159,13 +171,21 @@ def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool]]:
     for one in listed:
         if isinstance(one, BuiltinPass) and one.kind == "cfg":
             whole[one.engine] = True
+    found = next((one for one in listed if isinstance(one, Graphs)), None)
     block = [
         one
         for one in listed
         if not (isinstance(one, BuiltinPass) and one.kind == "cfg")
     ]
-    engine = [one.engine if isinstance(one, BuiltinPass) else one for one in block]
-    return engine, whole
+    # The graph pass sees a block as the function wrote it: it is the first.
+    block = [one for one in block if one is found] + [
+        one for one in block if one is not found
+    ]
+    engine = [
+        one.engine if isinstance(one, BuiltinPass) and one is not found else one
+        for one in block
+    ]
+    return engine, whole, found
 
 
 def vm(
@@ -250,10 +270,16 @@ def vm(
         return types.MethodType(vm(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
         raise TypeError(f"torch.vm expects a function, not {type(fn).__name__}")
-    block, whole = _plan(passes)
+    block, whole, found = _plan(passes)
     runtime = _load_runtime()
+    regions = None
+    if found is not None:
+        regions = _regions.make_pass(
+            runtime, found.backend, found.min_ops, found.max_variants, 0
+        )
+        block[0] = regions
     try:
-        return runtime.compile(
+        compiled = runtime.compile(
             fn,
             block,
             specialize=bool(block),
@@ -267,11 +293,34 @@ def vm(
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
+        if regions is not None:
+            _region_passes[compiled] = regions
+        return compiled
     except NotImplementedError as e:
         if not fallback:
             raise Unsupported(f"{fn.__qualname__}: {e}") from None
         warnings.warn(f"torch.vm left {fn.__qualname__} as it is: {e}", stacklevel=2)
         return fn
+
+
+# The region pass of each compiled function that has a backend.
+_region_passes: "weakref.WeakKeyDictionary[Any, _regions.Regions]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def regions(fn: Any) -> list[dict[str, Any]]:
+    """What :class:`passes.Graphs` made of a rewritten function and of what it calls.
+
+    One dict per region, with ``where`` (function, block and instructions),
+    ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
+    tried yet), ``variants``, ``ops`` and ``seconds`` spent tracing and
+    compiling; and one per instruction or run of instructions that was left to
+    the VM, with ``state`` ``"vm"`` and the ``reason``.
+    """
+    fn = getattr(fn, "__func__", fn)
+    found = _region_passes.get(fn)
+    return found.report() if found is not None else []
 
 
 class _CallableModule(types.ModuleType):

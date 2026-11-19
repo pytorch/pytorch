@@ -8,13 +8,15 @@ the order of the list, and again until no pass changes the block anymore.
 """
 
 import dataclasses
-from typing import ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 
 __all__ = [
     "BuiltinPass",
     "DCE",
     "Fold",
+    "Graphs",
     "Inline",
     "MethodCalls",
     "ModuleShortcuts",
@@ -35,7 +37,10 @@ class BuiltinPass:
     kind: ClassVar[str] = "block"
 
     def __repr__(self) -> str:
-        return f"torch.vm.passes.{type(self).__name__}()"
+        fields = dataclasses.fields(self)  # type: ignore[arg-type]
+        made = [f for f in fields if getattr(self, f.name) != f.default]
+        inner = ", ".join(f"{f.name}={getattr(self, f.name)!r}" for f in made)
+        return f"torch.vm.passes.{type(self).__name__}({inner})"
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
@@ -70,6 +75,48 @@ class ModuleShortcuts(BuiltinPass):
 
     engine: ClassVar[str] = "shortcuts"
     kind: ClassVar[str] = "cfg"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Graphs(BuiltinPass):
+    """Hands the tensor work of each basic block to a graph compiler.
+
+    ``"inductor"`` traces every run of instructions of a block that a trace can
+    capture, together with what those instructions call, into one ATen graph,
+    and compiles it with AOTAutograd and Inductor: with gradients enabled, the
+    tensors such a region returns have one compiled autograd function as their
+    ``grad_fn``. The outermost region that traces is the one that is compiled;
+    where an instruction does not trace, the VM runs it and the blocks of what
+    it calls are tried in turn. ``"aot_eager"`` builds the same graphs and runs
+    them with the eager kernels. A callable
+    ``backend(graph_module, example_inputs)`` returning a callable is used as
+    given. ``torch.vm.regions(fn)`` reports what was compiled and what was left
+    to the VM, with the reason. See ``torch/vm/_regions.py`` for what a
+    compiled region checks on every call and what it does not.
+
+    This is the pass that makes a function faster than its kernels allow, and
+    the one that may change its numerics: what a graph compiler makes of the
+    operations is not what eager runs. It is not in
+    :data:`torch.vm.DEFAULT_PASSES`: it is asked for by putting it in the list.
+    Wherever it stands there, it sees the instructions of a block as the
+    function wrote them, and the other passes over a block get what it leaves
+    to the VM.
+
+    Args:
+        backend: see above.
+        min_ops: a region with fewer tensor operations than this is left to the
+            VM, whose direct kernel calls are cheaper than entering a compiled
+            graph.
+        max_variants: how many combinations of inputs (shapes, dtypes, modules,
+            modes) a region is compiled for before further ones run its
+            instructions as they are.
+    """
+
+    engine: ClassVar[str] = "graphs"
+
+    backend: str | Callable[..., Any] = "inductor"
+    min_ops: int = 4
+    max_variants: int = 8
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
