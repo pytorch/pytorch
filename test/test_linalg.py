@@ -37,10 +37,10 @@ from torch.testing._internal.common_utils import \
      MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision, DeterministicGuard)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      expectedFailure, expectedFailureXPU, skipCUDAIf,
      skipCUDAIfNoCusolver, onlyNativeDeviceTypes, dtypesIfCPU, dtypesIfCUDA,
-     onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
+     onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type, largeMPSBufferTest, preserves_device_selection)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -13331,7 +13331,7 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalgDevice, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
+instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestLinalgCpuOnly, globals(), only_for=("cpu",))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True, allow_xpu=True)
