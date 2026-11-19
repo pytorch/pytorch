@@ -415,6 +415,27 @@ impl<'a> Builder<'a> {
                     let v = pop_value!();
                     effect!(off, Op::StoreGlobal(self.names_base + arg, v));
                 }
+                // A delete is a store of the undefined value.
+                Bc::DeleteGlobal => {
+                    effect!(off, Op::StoreGlobal(self.names_base + arg, UNDEF));
+                }
+                Bc::DeleteAttr => {
+                    let obj = pop_value!();
+                    effect!(off, Op::StoreAttr { obj, name: self.names_base + arg, val: UNDEF });
+                }
+                Bc::DeleteDeref => {
+                    // Reading the cell first raises what deleting an unbound
+                    // variable raises.
+                    if arg < self.nfree_base {
+                        let cell = self.read_var(arg, b);
+                        let name = self.varname_const(arg)?;
+                        emit!(off, Op::CellGet(cell, name));
+                        effect!(off, Op::CellSet(cell, UNDEF));
+                    } else {
+                        emit!(off, Op::LoadDeref(arg - self.nfree_base));
+                        effect!(off, Op::StoreDeref(arg - self.nfree_base, UNDEF));
+                    }
+                }
                 Bc::LoadAttr => {
                     let obj = pop_value!();
                     if arg & 1 != 0 {
