@@ -134,24 +134,24 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
     """How is this kernel parallelized?
     We create a grid of (ceil_div(n_queries, query_block_size), batch_size, num_heads)
     Each block is responsible for iterating over blocks of keys and values calculating
-    the final attention output. With NUM_XCDS the grid is flattened so the kernel
-    can remap programs across XCDs.
+    the final attention output. With NUM_XCCS the grid is flattened so the kernel
+    can remap programs across XCCs.
     """
-    if "NUM_XCDS" in meta:
+    if "NUM_XCCS" in meta:
         return (cdiv(num_queries, meta["BLOCK_M"]) * batch_size * q_heads, 1, 1)
     return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
 # Archs the remap is enabled on by default, where it has been benchmarked. The
-# XCD count comes from the device, as it depends on the compute partition mode.
+# XCC count comes from the device, as it depends on the compute partition mode.
 # TODO: add gfx1250 (MI450) once the remap is benchmarked there.
-_XCD_REMAP_ARCHS = ("gfx942", "gfx950")
+_XCC_REMAP_ARCHS = ("gfx942", "gfx950")
 
 
-def _default_num_xcds(device: torch.device) -> int | None:
+def _default_num_xccs(device: torch.device) -> int | None:
     if torch.version.hip is None or device.type != "cuda":
         return None
-    if _rocm_native_device_arch_name(str(device)).split(":")[0] not in _XCD_REMAP_ARCHS:
+    if _rocm_native_device_arch_name(str(device)).split(":")[0] not in _XCC_REMAP_ARCHS:
         return None
     return DeviceProperties.create(device).xcc_count
 
@@ -160,20 +160,20 @@ def _default_num_xcds(device: torch.device) -> int | None:
 _MAX_GRID_WORK_ITEMS = 2**31 - 1
 
 
-def _set_num_xcds(
+def _set_num_xccs(
     kernel_options: dict[str, Any],
-    default_num_xcds: int | None,
+    default_num_xccs: int | None,
     num_programs: sympy.Expr,
     device: torch.device,
 ) -> sympy.Expr | None:
-    """Set NUM_XCDS when the flattened grid fits. Returns the grid's work-item
-    count when that was decided from the size hint, for _guard_num_xcds."""
-    num_xcds = kernel_options.pop("NUM_XCDS", default_num_xcds)
-    if num_xcds is None:
+    """Set NUM_XCCS when the flattened grid fits. Returns the grid's work-item
+    count when that was decided from the size hint, for _guard_num_xccs."""
+    num_xccs = kernel_options.pop("NUM_XCCS", default_num_xccs)
+    if num_xccs is None:
         return None
-    if type(num_xcds) is not int or num_xcds < 0:
-        raise ValueError(f"NUM_XCDS must be a non-negative int, got {num_xcds!r}")
-    if num_xcds <= 1:
+    if type(num_xccs) is not int or num_xccs < 0:
+        raise ValueError(f"NUM_XCCS must be a non-negative int, got {num_xccs!r}")
+    if num_xccs <= 1:
         return None
     sizevars = V.graph.sizevars
     work_items = num_programs * kernel_options["num_warps"] * get_warp_size(device)
@@ -189,11 +189,11 @@ def _set_num_xcds(
         if sizevars.guarding_hint_or_throw(work_items) > _MAX_GRID_WORK_ITEMS:
             return None
         hinted = work_items
-    kernel_options["NUM_XCDS"] = num_xcds
+    kernel_options["NUM_XCCS"] = num_xccs
     return hinted
 
 
-def _guard_num_xcds(hinted_work_items: list[sympy.Expr]) -> None:
+def _guard_num_xccs(hinted_work_items: list[sympy.Expr]) -> None:
     # One guard on the largest remapped grid among the added choices, instead of
     # one per config, so a cached graph is only reused for inputs it fits.
     if hinted_work_items:
@@ -590,7 +590,7 @@ def flex_attention(
 
     original_kernel_options = kernel_options.copy()
     device = query.get_device()
-    default_num_xcds = _default_num_xcds(device)
+    default_num_xccs = _default_num_xccs(device)
     hinted_work_items: list[sympy.Expr] = []
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -692,8 +692,8 @@ def flex_attention(
                 cur_kernel_options[attrib] = getattr(conf, attrib)
 
         num_programs = CeilDiv(seq_len_q, cur_kernel_options["BLOCK_M"]) * Bq * Hq
-        hinted = _set_num_xcds(
-            cur_kernel_options, default_num_xcds, num_programs, device
+        hinted = _set_num_xccs(
+            cur_kernel_options, default_num_xccs, num_programs, device
         )
 
         error = flex_attention_template.maybe_append_choice(
@@ -725,7 +725,7 @@ def flex_attention(
             raise error
         if error is None and hinted is not None:
             hinted_work_items.append(hinted)
-    _guard_num_xcds(hinted_work_items)
+    _guard_num_xccs(hinted_work_items)
 
     # Let the active choices handler append any backend-specific flex-attention
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
@@ -798,11 +798,11 @@ def flex_attention_backward_grid(
     Currently this is only parallelizing over batch* kv_heads, but we can, and want to
     parallelize over ceil_div(q_heads//kv_heads * num_key_value, key_value_block_size).
     To do this will either require atomic updates to some grad values or to have a two pass kernel design.
-    With NUM_XCDS the grid is flattened so the kernel can remap programs across XCDs.
+    With NUM_XCCS the grid is flattened so the kernel can remap programs across XCCs.
     """
     q_pids = cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
     num_pids = q_pids + cdiv(num_key_value, meta["BLOCK_N1"])
-    if "NUM_XCDS" in meta:
+    if "NUM_XCCS" in meta:
         return (num_pids * batch_size * kv_heads, 1, 1)
     return (num_pids, batch_size, kv_heads)
 
@@ -1276,7 +1276,7 @@ def flex_attention_backward(*args, **kwargs):
     invalid_block_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
-    default_num_xcds = _default_num_xcds(device)
+    default_num_xccs = _default_num_xccs(device)
     hinted_work_items: list[sympy.Expr] = []
     bwd_input_nodes = [
         query,
@@ -1393,8 +1393,8 @@ def flex_attention_backward(*args, **kwargs):
         q_pids = CeilDiv(seq_len_q, cur_kernel_options["BLOCK_M2"]) * gqa_shared_heads
         num_pids = q_pids + CeilDiv(seq_len_kv, cur_kernel_options["BLOCK_N1"])
         num_programs = num_pids * Bq * Hkv
-        hinted = _set_num_xcds(
-            cur_kernel_options, default_num_xcds, num_programs, device
+        hinted = _set_num_xccs(
+            cur_kernel_options, default_num_xccs, num_programs, device
         )
 
         error = flex_attention_backward_template.maybe_append_choice(
@@ -1408,7 +1408,7 @@ def flex_attention_backward(*args, **kwargs):
         )
         if error is None and hinted is not None:
             hinted_work_items.append(hinted)
-    _guard_num_xcds(hinted_work_items)
+    _guard_num_xccs(hinted_work_items)
 
     choices = V.choices.append_flex_attention_backward_choices(
         choices,

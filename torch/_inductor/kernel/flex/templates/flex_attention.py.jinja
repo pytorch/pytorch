@@ -45,16 +45,16 @@
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
-{%- if NUM_XCDS is defined %}
-    # Workgroups are dispatched round-robin across XCDs. Remap the flattened
+{%- if NUM_XCCS is defined %}
+    # Workgroups are dispatched round-robin across XCCs. Remap the flattened
     # grid so consecutive programs, i.e. the query blocks of one (batch, head),
-    # share an XCD and its L2. When the grid is not a multiple of NUM_XCDS, the
-    # first tall_xcds XCDs get one extra program.
+    # share an XCC and its L2. When the grid is not a multiple of NUM_XCCS, the
+    # first tall_xccs XCCs get one extra program.
     num_q_blocks = tl.cdiv(Q_LEN, BLOCK_M)
-    pids_per_xcd = tl.cdiv(num_q_blocks * ZQ * HQ, NUM_XCDS)
-    tall_xcds = num_q_blocks * ZQ * HQ - (pids_per_xcd - 1) * NUM_XCDS
-    xcd = tl.program_id(0) % NUM_XCDS
-    pid = tl.where(xcd < tall_xcds, xcd * pids_per_xcd, tall_xcds + xcd * (pids_per_xcd - 1)) + tl.program_id(0) // NUM_XCDS
+    pids_per_xcc = tl.cdiv(num_q_blocks * ZQ * HQ, NUM_XCCS)
+    tall_xccs = num_q_blocks * ZQ * HQ - (pids_per_xcc - 1) * NUM_XCCS
+    xcc = tl.program_id(0) % NUM_XCCS
+    pid = tl.where(xcc < tall_xccs, xcc * pids_per_xcc, tall_xccs + xcc * (pids_per_xcc - 1)) + tl.program_id(0) // NUM_XCCS
     q_start = (pid % num_q_blocks).to(INDEX_DTYPE)
     off_hq = (pid // num_q_blocks % HQ).to(INDEX_DTYPE)
     off_zq = (pid // num_q_blocks // HQ).to(INDEX_DTYPE)

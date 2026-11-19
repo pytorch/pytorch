@@ -5570,37 +5570,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
-    def test_xcd_remap(self, device):
+    def test_xcc_remap(self, device):
         # 2 * 5 * cdiv(448, BLOCK_M) programs is not a multiple of 3 for any
-        # power-of-two BLOCK_M in 16..128, so some XCDs get one program fewer.
+        # power-of-two BLOCK_M in 16..128, so some XCCs get one program fewer.
         q, k, v = (torch.randn(2, 5, 448, 64, device=device) for _ in range(3))
         block_mask = create_block_mask(
             lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
         )
 
-        def run(num_xcds):
+        def run(num_xccs):
             compiled = torch.compile(flex_attention, fullgraph=True)
-            options = {"NUM_XCDS": num_xcds}
+            options = {"NUM_XCCS": num_xccs}
             return run_and_get_code(
                 compiled, q, k, v, block_mask=block_mask, kernel_options=options
             )
 
         out, code = run(3)
-        FileCheck().check("NUM_XCDS : tl.constexpr = 3").run(code[0])
+        FileCheck().check("NUM_XCCS : tl.constexpr = 3").run(code[0])
         ref, code = run(0)
-        FileCheck().check_not("NUM_XCDS : tl.constexpr").run(code[0])
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run(code[0])
         self.assertEqual(out, ref)
-        # The decode kernel has no remap and must not receive NUM_XCDS.
+        # The decode kernel has no remap and must not receive NUM_XCCS.
         compiled = torch.compile(flex_attention, fullgraph=True)
-        options = {"NUM_XCDS": 3}
+        options = {"NUM_XCCS": 3}
         _, code = run_and_get_code(compiled, q[:, :, :1], k, v, kernel_options=options)
         FileCheck().check("SPLIT_KV : tl.constexpr").run(code[0])
-        FileCheck().check_not("NUM_XCDS : tl.constexpr").run(code[0])
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run(code[0])
 
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # MPS backward raises NotImplementedError
-    def test_xcd_remap_backward(self, device):
+    def test_xcc_remap_backward(self, device):
         # With batch 5, 2 kv heads and GQA 2, 5 * 2 * (2 * cdiv(400, BLOCK_M2) +
         # cdiv(272, BLOCK_N1)) programs is not a multiple of 3 for any
         # power-of-two block sizes in 16..128. Batch != kv heads, so a decode
@@ -5614,9 +5614,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             lambda b, h, q, kv: q >= kv, None, None, 400, 272, device=device
         )
 
-        def run(num_xcds):
+        def run(num_xccs):
             compiled = torch.compile(flex_attention, fullgraph=True)
-            options = {"NUM_XCDS": num_xcds}
+            options = {"NUM_XCCS": num_xccs}
 
             def fwd_bwd():
                 kwargs = {"enable_gqa": True, "kernel_options": options}
@@ -5627,15 +5627,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         grads, code = run(3)
         self.assertEqual(len(code), 2)
-        FileCheck().check("NUM_XCDS : tl.constexpr = 3").run(code[-1])
+        FileCheck().check("NUM_XCCS : tl.constexpr = 3").run(code[-1])
         ref, code = run(0)
-        FileCheck().check_not("NUM_XCDS : tl.constexpr").run("\n".join(code))
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run("\n".join(code))
         self.assertEqual(grads, ref)
 
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # MPS backward raises NotImplementedError
-    def test_xcd_remap_dynamic_batch(self, device):
+    def test_xcc_remap_dynamic_batch(self, device):
         block_mask = create_block_mask(
             lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
         )
@@ -5649,8 +5649,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 torch._dynamo.mark_dynamic(t, 0)
             return inputs
 
-        def fwd_bwd(fn, num_xcds, q, k, v):
-            options = {"NUM_XCDS": num_xcds}
+        def fwd_bwd(fn, num_xccs, q, k, v):
+            options = {"NUM_XCCS": num_xccs}
             out = fn(q, k, v, block_mask=block_mask, kernel_options=options)
             return out, torch.autograd.grad(out.sum(), (q, k, v))
 
@@ -5659,7 +5659,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         res_small, code = run_and_get_code(fwd_bwd, remapped, 3, *small)
         self.assertEqual(len(code), 2)
         for c in code:
-            FileCheck().check("NUM_XCDS : tl.constexpr = 3").run(c)
+            FileCheck().check("NUM_XCCS : tl.constexpr = 3").run(c)
         # Batch 5 reuses the batch-2 graphs: the grid-size guard does not force
         # a recompile on the batch.
         with torch._dynamo.config.patch(error_on_recompile=True):
@@ -5672,7 +5672,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # MPS backward raises NotImplementedError
-    def test_xcd_remap_default(self, device):
+    def test_xcc_remap_default(self, device):
         q, k, v = (
             torch.randn(2, 4, 256, 64, device=device, requires_grad=True)
             for _ in range(3)
@@ -5691,15 +5691,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 expected = props.xcc_count
         for c in code:
             if expected is not None and expected > 1:
-                FileCheck().check(f"NUM_XCDS : tl.constexpr = {expected}").run(c)
+                FileCheck().check(f"NUM_XCCS : tl.constexpr = {expected}").run(c)
             else:
-                FileCheck().check_not("NUM_XCDS : tl.constexpr").run(c)
+                FileCheck().check_not("NUM_XCCS : tl.constexpr").run(c)
 
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # MPS backward raises NotImplementedError
-    def test_xcd_remap_fewer_programs_than_xcds(self, device):
-        # 2 forward and 2 + 2 backward programs, fewer than NUM_XCDS=8.
+    def test_xcc_remap_fewer_programs_than_xccs(self, device):
+        # 2 forward and 2 + 2 backward programs, fewer than NUM_XCCS=8.
         q, k, v = (
             torch.randn(1, 1, 128, 64, device=device, requires_grad=True)
             for _ in range(3)
@@ -5707,11 +5707,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         blocks = {"fwd_BLOCK_M": 64, "fwd_BLOCK_N": 64, "bwd_BLOCK_M1": 32}
         blocks |= {"bwd_BLOCK_N1": 64, "bwd_BLOCK_M2": 64, "bwd_BLOCK_N2": 32}
 
-        def run(num_xcds):
+        def run(num_xccs):
             compiled = torch.compile(flex_attention, fullgraph=True)
 
             def fwd_bwd():
-                options = {**blocks, "NUM_XCDS": num_xcds}
+                options = {**blocks, "NUM_XCCS": num_xccs}
                 out = compiled(q, k, v, kernel_options=options)
                 return torch.autograd.grad(out.sum(), (q, k, v))
 
@@ -5720,12 +5720,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         grads, code = run(8)
         self.assertEqual(len(code), 2)
         for c in code:
-            FileCheck().check("NUM_XCDS : tl.constexpr = 8").run(c)
+            FileCheck().check("NUM_XCCS : tl.constexpr = 8").run(c)
         ref, _ = run(0)
         self.assertEqual(grads, ref)
-        # One XCD needs no remap.
+        # One XCC needs no remap.
         _, code = run(1)
-        FileCheck().check_not("NUM_XCDS : tl.constexpr").run("\n".join(code))
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run("\n".join(code))
 
     @supported_platform
     @skip_on_cpu
@@ -6343,19 +6343,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
     @supported_platform
-    def test_num_xcds_rejects_invalid(self, device):
+    def test_num_xccs_rejects_invalid(self, device):
         q, k, v = (torch.randn(1, 1, 4, 8, device=device) for _ in range(3))
-        for name in ("NUM_XCDS", "fwd_NUM_XCDS", "bwd_NUM_XCDS"):
+        for name in ("NUM_XCCS", "fwd_NUM_XCCS", "bwd_NUM_XCCS"):
             _apply_kernel_options(q, k, v, False, {name: 8})
             for value in (-1, True, 2.0, "8"):
                 with self.assertRaisesRegex(
                     ValueError, f"^{name} must be a non-negative int"
                 ):
                     _apply_kernel_options(q, k, v, False, {name: value})
-        # Rejected before lowering, also on paths that don't use NUM_XCDS.
+        # Rejected before lowering, also on paths that don't use NUM_XCCS.
         compiled = torch.compile(flex_attention)
-        with self.assertRaisesRegex(ValueError, "^bwd_NUM_XCDS must be"):
-            compiled(q, k, v, kernel_options={"bwd_NUM_XCDS": -1})
+        with self.assertRaisesRegex(ValueError, "^bwd_NUM_XCCS must be"):
+            compiled(q, k, v, kernel_options={"bwd_NUM_XCCS": -1})
 
     @supported_platform
     @skip_on_cpu

@@ -169,7 +169,7 @@ T = TypeVar("T")
 
 class SystemDeviceInfo(TypedDict):
     name: str | None
-    # The XCD count depends on the compute partition mode, not on the arch.
+    # The XCC count depends on the compute partition mode, not on the arch.
     xcc_count: NotRequired[int | None]
 
 

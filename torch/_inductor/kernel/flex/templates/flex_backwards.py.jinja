@@ -54,16 +54,16 @@
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
-{%- if NUM_XCDS is defined %}
-    # Workgroups are dispatched round-robin across XCDs. Remap the flattened
+{%- if NUM_XCCS is defined %}
+    # Workgroups are dispatched round-robin across XCCs. Remap the flattened
     # grid so consecutive programs, i.e. the dK/dV and dQ blocks of one
-    # (batch, kv head), share an XCD and its L2. When the grid is not a
-    # multiple of NUM_XCDS, the first tall_xcds XCDs get one extra program.
+    # (batch, kv head), share an XCC and its L2. When the grid is not a
+    # multiple of NUM_XCCS, the first tall_xccs XCCs get one extra program.
     num_pids = NUM_KV_BLOCKS + NUM_Q_BLOCKS * GQA_SHARED_HEADS
-    pids_per_xcd = tl.cdiv(num_pids * ZQ * HKV, NUM_XCDS)
-    tall_xcds = num_pids * ZQ * HKV - (pids_per_xcd - 1) * NUM_XCDS
-    xcd = tl.program_id(0) % NUM_XCDS
-    flat_pid = tl.where(xcd < tall_xcds, xcd * pids_per_xcd, tall_xcds + xcd * (pids_per_xcd - 1)) + tl.program_id(0) // NUM_XCDS
+    pids_per_xcc = tl.cdiv(num_pids * ZQ * HKV, NUM_XCCS)
+    tall_xccs = num_pids * ZQ * HKV - (pids_per_xcc - 1) * NUM_XCCS
+    xcc = tl.program_id(0) % NUM_XCCS
+    flat_pid = tl.where(xcc < tall_xccs, xcc * pids_per_xcc, tall_xccs + xcc * (pids_per_xcc - 1)) + tl.program_id(0) // NUM_XCCS
     pid = (flat_pid % num_pids).to(INDEX_DTYPE)
     off_hkv = (flat_pid // num_pids % HKV).to(INDEX_DTYPE) # kv head idx
     off_zq = (flat_pid // num_pids // HKV).to(INDEX_DTYPE) # q batch idx
