@@ -106,6 +106,7 @@ import torch
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
 from torch.utils import _pytree as pytree
+from torch.utils._device import DeviceContext
 
 
 Backend = Callable[[torch.fx.GraphModule, list[torch.Tensor]], Callable[..., Any]]
@@ -1249,7 +1250,37 @@ def _modes() -> tuple[Any, ...]:
         torch.is_autocast_enabled("cuda"),
         torch.is_autocast_enabled("cpu"),
         torch.get_default_dtype(),
+        _function_modes() if _function_stack() else (),
     )
+
+
+_function_stack = torch._C._len_torch_function_stack
+
+
+def _function_modes() -> tuple[Any, ...]:
+    """The torch function modes that are active, bottom first: the device of
+    a default device (``torch.set_default_device``, ``with torch.device``),
+    which a graph made under it has built in, and any other mode as the
+    object it is."""
+    modes = [torch._C._get_function_stack_at(i) for i in range(_function_stack())]
+    return tuple([str(m.device) if type(m) is DeviceContext else id(m) for m in modes])
+
+
+def _below_modes(compiled: Callable[..., Any], args: list[Any]) -> Any:
+    """Calls a graph that was made under a default device without the mode
+    that is the default device: what the mode does is in the graph, and it
+    would otherwise be called, in Python, for every operation of the code
+    the backend made."""
+    modes = [torch._C._get_function_stack_at(i) for i in range(_function_stack())]
+    if any(type(mode) is not DeviceContext for mode in modes):
+        return compiled(*args)
+    for _ in modes:
+        torch._C._pop_torch_function_stack()
+    try:
+        return compiled(*args)
+    finally:
+        for mode in modes:
+            torch._C._push_on_torch_function_stack(mode)
 
 
 # ----------------------------------------------------------------------
@@ -2099,7 +2130,9 @@ class _Variant:
         taken = flat if self.rest is None else self.rest(flat)
         if self.numbers:
             ints = inputs.ints
-            results = self.compiled(*taken, *[ints[k] for k in self.numbers])
+            taken = [*taken, *[ints[k] for k in self.numbers]]
+        if _function_stack():
+            results = _below_modes(self.compiled, taken)
         else:
             results = self.compiled(*taken)
         if self.direct:
