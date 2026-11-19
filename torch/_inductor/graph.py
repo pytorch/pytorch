@@ -120,6 +120,7 @@ from .utils import (
     get_donated_idxs,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
+    GraphPartitionPlan,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
@@ -423,6 +424,7 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        partition_plan: GraphPartitionPlan | None = None,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -608,6 +610,14 @@ class GraphLowering(torch.fx.Interpreter):
         # aot_inductor.cudagraphs rejects such graphs.
         self.input_as_strided_node: torch.fx.Node | None = None
         self.kernel_free_cudagraph: bool = False
+        # How this compile is split into partitions, and what for. Without a
+        # plan it follows config.graph_partition, which is patched off during
+        # cpp_wrapper/fx_wrapper/AOT lowering (maybe_disable_graph_partition).
+        self.partition_plan = (
+            GraphPartitionPlan.from_config()
+            if partition_plan is None
+            else partition_plan
+        )
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -1015,6 +1025,7 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
+            partition_plan=GraphPartitionPlan.no_partition(),
         )
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
