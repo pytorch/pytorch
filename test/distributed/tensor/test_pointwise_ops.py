@@ -21,6 +21,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -30,6 +31,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
+    DTensorTestBase,
     LocalDTensorOpTestBase,
     map_local_for_rank,
     skip_unless_torch_gpu,
@@ -700,6 +702,17 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         for op in (torch.fmax, torch.fmin):
             self.assertEqual(op(d_input, d_other).full_tensor(), op(full_input, other))
             self.assertEqual(op(d_other, d_input).full_tensor(), op(other, full_input))
+
+        # fmax of two pending Partial("max") (fmin of two Partial("min")):
+        # rank 0's NaN is replaced by its local value of the other input.
+        rows2 = torch.full((self.world_size, 2), 2.0, device=self.device_type)
+        rows2[0] = 1.0
+        sharded2 = distribute_tensor(rows2, device_mesh, [Shard(0)])
+        d_input2 = sharded2.amax(0) if reduce_op == "max" else sharded2.amin(0)
+        op = torch.fmax if reduce_op == "max" else torch.fmin
+        self.assertEqual(
+            op(d_input, d_input2).full_tensor(), op(full_input, d_input2.full_tensor())
+        )
 
     @with_comms
     def test_neg_partial(self):
@@ -1467,6 +1480,141 @@ class TestPointwiseRuleValidation(TestCase):
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
 )
+
+
+class DistPartialNaNInfTest(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_partial_input_matches_reducing_first(self):
+        # Each case is an input that a removed Partial pass-through rule gets
+        # wrong on NCCL: applying the op to each rank's local value and reducing
+        # afterwards must match reducing first. Rank 0 holds NaN, inf or an int
+        # at the dtype limit; the other ranks hold ordinary values. NCCL's
+        # all_reduce MAX/MIN ignores NaN (the result is NaN only if every rank
+        # holds NaN). Rules that break only when NaN propagates are covered by
+        # test_partial_max_min_with_nan and test_bucketize_partial_input.
+        nan, inf = float("nan"), float("inf")
+        mesh = self.build_device_mesh()
+
+        def pending(reduce_op, rank0, other_ranks, dtype=torch.float32):
+            # Pending Partial(reduce_op) whose local value is rank0 on rank 0
+            # and other_ranks on every other rank.
+            rows = torch.tensor(
+                [rank0] + [other_ranks] * (self.world_size - 1),
+                dtype=dtype,
+                device=self.device_type,
+            )
+            sharded = distribute_tensor(rows, mesh, [Shard(0)])
+            reduce = {"sum": torch.sum, "max": torch.amax, "min": torch.amin}
+            out = reduce[reduce_op](sharded, 0)
+            self.assertEqual(out.placements, (Partial(reduce_op),))
+            return out
+
+        def replicate(values, dtype=torch.float32):
+            t = torch.tensor(values, dtype=dtype, device=self.device_type)
+            return distribute_tensor(t, mesh, [Replicate()])
+
+        # The op maps rank 0's NaN to a number. The reduction drops the NaN
+        # from the input, but applied first, the number competes.
+        nan_max = pending("max", [nan, nan], [5.0, -3.0])
+        nan_min = pending("min", [nan, nan], [5.0, -3.0])
+        two = replicate([2.0, 2.0])
+        cases = {}
+        for name, x in (("P(max)", nan_max), ("P(min)", nan_min)):
+            cases |= {
+                f"sign {name}": (torch.sign, x),
+                f"sgn {name}": (torch.sgn, x),
+                f"nan_to_num {name}": (torch.nan_to_num, x),
+            }
+        cases |= {
+            "fmin P(max), R": (torch.fmin, nan_max, two),
+            "fmin R, P(max)": (torch.fmin, two, nan_max),
+            "fmax P(min), R": (torch.fmax, nan_min, two),
+            "fmax R, P(min)": (torch.fmax, two, nan_min),
+            "bucketize P(max), R": (
+                torch.bucketize,
+                nan_max,
+                replicate([1.0, 3.0, 5.0, 7.0]),
+            ),
+            "nansum P(sum)": (
+                torch.nansum,
+                pending("sum", [nan, nan], [5.0, -3.0]),
+            ),
+        }
+
+        # The op combines several values per rank, so rank 0's local result
+        # is NaN, and the reduction drops it together with the value that
+        # should win (9 or -9).
+        hidden_max = pending("max", [nan, 9.0], [1.0, 2.0])
+        hidden_min = pending("min", [nan, -9.0], [-1.0, -2.0])
+        win_max = pending("max", [9.0, 9.0], [2.0, 2.0])
+        win_min = pending("min", [-9.0, -9.0], [2.0, 2.0])
+        cases |= {
+            "maximum P(max), P(max)": (torch.maximum, nan_max, win_max),
+            "clamp_min P(max), P(max)": (torch.clamp_min, nan_max, win_max),
+            "minimum P(min), P(min)": (torch.minimum, nan_min, win_min),
+            "clamp_max P(min), P(min)": (torch.clamp_max, nan_min, win_min),
+            "amax P(max)": (torch.amax, hidden_max),
+            "max P(max)": (torch.max, hidden_max),
+            "_foreach_max P(max)": (
+                lambda x: torch._foreach_max([x])[0],
+                hidden_max,
+            ),
+            "amin P(min)": (torch.amin, hidden_min),
+            "min P(min)": (torch.min, hidden_min),
+        }
+
+        # abs is not monotone: rank 0's -9 does not win the reduction, but
+        # |-9| does. No NaN needed, so this breaks on every backend.
+        neg_max = pending("max", [-9.0, 1.0], [1.0, 2.0])
+        cases |= {
+            "vector_norm(inf) P(max)": (
+                lambda x: torch.linalg.vector_norm(x, inf),
+                neg_max,
+            ),
+            "_foreach_norm(inf) P(max)": (
+                lambda x: torch._foreach_norm([x], inf)[0],
+                neg_max,
+            ),
+            "vector_norm(-inf) P(min)": (
+                lambda x: torch.linalg.vector_norm(x, -inf),
+                pending("min", [-9.0, 4.0], [1.0, 2.0]),
+            ),
+        }
+
+        # inf - inf makes NaN on rank 0 only. Column 1 breaks when the
+        # reduction ignores NaN, column 0 when it propagates NaN.
+        inf_max = pending("max", [-inf, inf], [1.0, 1.0])
+        inf_min = pending("min", [inf, -inf], [1.0, 1.0])
+        int_max = torch.iinfo(torch.int32).max
+        cases |= {
+            "add P(max), R": (torch.add, inf_max, replicate([inf, -inf])),
+            "sub P(max), R": (torch.sub, inf_max, replicate([-inf, inf])),
+            "add P(min), R": (torch.add, inf_min, replicate([-inf, inf])),
+            "sub P(min), R": (torch.sub, inf_min, replicate([inf, -inf])),
+            # Integer overflow wraps around, so the rank holding the max ends
+            # up holding the min. Breaks on every backend.
+            "add P(max), R int32 overflow": (
+                torch.add,
+                pending("max", [int_max], [0], torch.int32),
+                replicate([1], torch.int32),
+            ),
+        }
+
+        # Collect every mismatch instead of using subTest: the multi-process
+        # runner stops at the first failing subTest.
+        mismatches = []
+        for name, (op, *args) in cases.items():
+            expected = op(*(a.full_tensor() for a in args))
+            actual = op(*args).full_tensor()
+            same = (actual == expected) | (actual.isnan() & expected.isnan())
+            if not same.all():
+                mismatches.append(
+                    f"{name}: got {actual.tolist()}, "
+                    f"reducing first gives {expected.tolist()}"
+                )
+        if mismatches:
+            self.fail("\n".join(mismatches))
 
 
 if __name__ == "__main__":
