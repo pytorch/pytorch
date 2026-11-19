@@ -374,6 +374,14 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 
+sparse_compressed_ctors = (
+    torch.sparse_bsc_tensor,
+    torch.sparse_bsr_tensor,
+    torch.sparse_csc_tensor,
+    torch.sparse_csr_tensor,
+    torch.sparse_compressed_tensor,
+)
+
 dispatch_key_set_functions = {
     torch._C._dispatch_keys,
     torch._C._dispatch_tls_local_include_set,
@@ -1504,13 +1512,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return input.call_method(tx, "numel", [], {})
             return None
 
-        @register(
-            torch.sparse_bsc_tensor,
-            torch.sparse_bsr_tensor,
-            torch.sparse_csc_tensor,
-            torch.sparse_csr_tensor,
-            torch.sparse_compressed_tensor,
-        )
+        @register(*sparse_compressed_ctors)
         def handle_sparse_compressed_ctor(
             self,
             tx: "InstructionTranslatorBase",
