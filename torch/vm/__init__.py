@@ -32,15 +32,13 @@ under a guard on the function; any other Python function, method or
 ``nn.Module`` is rewritten the first time rewritten code calls it; and
 ``for i in range(k)`` with a small constant ``k`` is unrolled. Closures,
 ``try``/``except``/``finally``, ``with``, imports and class statements are
-handled, and so are ``locals()``, ``vars()`` and ``dir()``, which get the
-variables from where rewritten code keeps them; a callee that looks at the
-frame of its caller, a traceback and a debugger find them in the frame.
-Generators, coroutines and functions that read their own frame some other way
-(``eval``, ``exec``, ``super()`` without arguments) run in the interpreter, and
-so does what they call. A Python side effect does not split the function: it is
-one more instruction of the graph, between the specialized ones. A whole
-training step can therefore be one rewritten function, with the same results
-bit for bit as the interpreter::
+handled. A rewritten function runs under a frame of the interpreter that has
+its variables, so what looks for them there finds them: ``locals()``, ``eval``,
+``exec``, ``super()`` without arguments, a traceback, a debugger. Generators
+and coroutines run in the interpreter, and so does what they call. A Python
+side effect does not split the function: it is one more instruction of the
+graph, between the specialized ones. A whole training step can therefore be one
+rewritten function, with the same results bit for bit as the interpreter::
 
     @torch.vm
     def step(model, opt, x, y):
