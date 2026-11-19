@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <utility>
 
 #include <ATen/Config.h>
