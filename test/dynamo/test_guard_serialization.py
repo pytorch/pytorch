@@ -990,11 +990,8 @@ class _RegisteredPayloadConsumer(_PayloadConsumer):
 class _DynamicStateConsumer(_RegisteredPayloadConsumer):
     def __getattr__(self, name):
         if name == "__setstate__":
-            return self.restore
+            return lambda state: self.__init__(state["token"])
         raise AttributeError(name)
-
-    def restore(self, state):
-        self.__init__(state["token"])
 
 
 class _PayloadToken(DictionaryToken):
@@ -1143,13 +1140,11 @@ class _SetStateModule(torch.nn.Module):
         super().__setstate__(state)
 
 
-class _ReducedModule(torch.nn.Module):
+class _ReducedModule(torch.nn.Module, _MappingCallable):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
         self.loss = _MappingCallable(cfg)
-
-    __reduce__ = _MappingCallable.__reduce__
 
 
 class _StateHolder(_ABCHolder):
@@ -1933,14 +1928,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIs(item.loss.cfg, saved["cfgs"][i])
             self.assertEqual(item.loss(), i)
 
-    def test_mapping_proxy_snapshot_prunes_unrelated_token(self):
-        token = DictionaryToken()
-        cfg = {"token": token}
-        proxy = types.MappingProxyType({"consumer": TokenConsumer(token)})
-        saved = self._roundtrip_pruned({"cfg": cfg, "proxy": proxy}, [cfg])
-        self.assertIsInstance(saved["cfg"]["token"], _Missing)
-        self.assertIsInstance(saved["proxy"]["consumer"].token, DictionaryToken)
-
     @parametrize("token_live", [False, True])
     def test_mapping_proxy_keeps_only_its_copied_state(self, token_live):
         token = DictionaryToken(value=3, payload=["required"])
@@ -1996,15 +1983,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIn(id(plain), pickler._pruned_dictionary_ids)
 
     def test_pruned_dictionary_preserves_recursive_and_repeated_references(self):
-        value = {"bystander": threading.Lock()}
+        token = DictionaryToken()
+        proxy = types.MappingProxyType({"consumer": TokenConsumer(token)})
+        value = {"bystander": threading.Lock(), "token": token}
         value["self"] = value
         helper = ReducedHolder(2, {})
         helper.cfg = value
         # A registered globals dict omitted from the saved scopes is not a pickle root.
-        saved = self._roundtrip_pruned(
-            {"left": value, "right": value}, [value], {"helper": helper}
-        )
-        left, right = saved.values()
+        scope = {"left": value, "right": value, "proxy": proxy}
+        saved = self._roundtrip_pruned(scope, [value], {"helper": helper})
+        left, right = saved["left"], saved["right"]
+        self.assertIsInstance(left["token"], _Missing)
+        self.assertIsInstance(saved["proxy"]["consumer"].token, DictionaryToken)
         self.assertIs(left, right)
         self.assertIs(left["self"], left)
         self.assertIsInstance(left["bystander"], _Missing)
@@ -3655,18 +3645,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
     @parametrize(
         "kind",
         ["object", "slots", "namespace", "module", "reduce", "bound", "builtin"]
-        + ["child", "closure"],
+        + ["child", "closure", "tensor", "parameter"],
     )
     def test_callable_attribute_keeps_constructor_mapping(self, kind):
         def child(holder):
-            if kind == "child":
+            if kind == "parameter":
+                return holder.weight.child
+            if kind in ("child", "tensor"):
                 return holder.child
             return holder.opts() if kind == "closure" else holder
 
-        def fn(x, holder):
-            return x + len(tuple(child(holder).cfg))
+        def fn(x, holder, other):
+            return x + len(tuple(child(holder).cfg)) + len(tuple(other))
 
         cfg = {"token": DictionaryToken(value=3)}
+        other = {"token": DictionaryToken(value=4)}
         if kind == "reduce":
             holder = _ReducedModule(cfg)
         else:
@@ -3682,11 +3675,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
             if kind == "child":
                 holder = _SetStateModule()
                 holder.child = obj
+            elif kind in ("tensor", "parameter"):
+                if kind == "parameter":
+                    holder = torch.nn.Module()
+                    tensor = holder.weight = torch.nn.Parameter(torch.ones(1))
+                else:
+                    tensor = holder = torch.ones(1)
+                tensor.child, tensor.unused = obj, _MappingCallable(other)
             else:
                 holder = _StateHolder(lambda: obj) if kind == "closure" else obj
-        inputs = {"x": torch.ones(1), "holder": holder}
+        inputs = {"x": torch.ones(1), "holder": holder, "other": other}
         check = self._roundtrip_checks("DICT_KEYS_MATCH", fn, inputs)
-        saved = child(self._saved_scope["holder"])
+        scope = self._saved_scope
+        self.assertIsInstance(scope["other"]["token"], _Missing)
+        saved = child(scope["holder"])
         loss = saved.loss.__self__ if kind == "bound" else saved.loss
         if kind == "builtin":
             loss = loss()
@@ -3696,9 +3698,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(inputs, False)
 
     def test_local_dictionary_prunes_nested_bystanders(self):
-        def fn(x, cfg, keyed, items):
+        def fn(x, cfg, keyed, items, parent):
             offset = cfg["inner"]["guarded"] + cfg["opts"][0]
-            return x + offset + len(tuple(keyed)) + items[1]
+            return x + offset + len(tuple(keyed)) + items[1] + len(tuple(parent.cfg))
 
         cfg = {
             "inner": {"guarded": 3, "lock": threading.Lock()},
@@ -3709,15 +3711,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # the shared mapping in full. Its presence must not retain either lock.
         helper = ReducedHolder(2, {})
         helper.cfg = cfg
+        parent = _SetStateModule()
+        parent.cfg = {"cb": global_func}
+        parent.cb = global_func
         inputs = {
             "x": torch.ones(1),
             "cfg": cfg,
             "keyed": {_Mode.FAST: 0},
-            "items": [helper, 5],
+            "items": [helper, 5, global_func, global_add],
+            "parent": parent,
         }
         kinds = ("DICT_KEYS_MATCH", "CONSTANT_MATCH")
         check = self._roundtrip_checks(kinds, fn, inputs)
         scope = self._saved_scope
+        self.assertIs(scope["parent"].cb, global_func)
+        self.assertIs(scope["parent"].cfg["cb"], global_func)
+        self.assertIsInstance(scope["items"][3], _Missing)
         saved = scope["cfg"]
         self.assertIs(saved["alias"], next(iter(scope["keyed"])))
         check({**inputs, "keyed": {_Mode.SLOW: 0}}, False)
@@ -5251,13 +5260,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             mapping.unused = threading.Lock()
         inputs = {"x": torch.ones(1), "cfg": mapping}
 
-        kinds = (
-            "TYPE_MATCH",
-            "SEQUENCE_LENGTH",
-            "DICT_KEYS_MATCH",
-            "ORDERED_DICT_ORDER_MATCH",
-        )
-        check = self._roundtrip_checks(kinds, fn, inputs)
+        structure = ("TYPE_MATCH", "SEQUENCE_LENGTH")
+        order = ("DICT_KEYS_MATCH", "ORDERED_DICT_ORDER_MATCH")
+        check = self._roundtrip_checks(structure + order, fn, inputs)
         check({**inputs, "cfg": mapping_type(a=1, b=2)}, True)
         saved = self._saved_scope["cfg"]
         self.assertEqual(list(saved), ["a", "b"])
@@ -5284,12 +5289,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return x + len(cfg)
 
         cfg = mapping_type(DictionaryToken())
-        instance_reducers = (
-            InstanceReducedDict,
-            NamespaceReducedDict,
-            InheritedNamespaceReducedDict,
-        )
-        if mapping_type in instance_reducers:
+        if mapping_type is InstanceReducedDict or isinstance(cfg, NamespaceReducedDict):
             cfg.__reduce_ex__ = functools.partial(ClassReducedDict.__reduce_ex__, cfg)
         inputs = {"x": torch.ones(1), "cfg": cfg}
         check = self._roundtrip_checks(("TYPE_MATCH", "SEQUENCE_LENGTH"), fn, inputs)

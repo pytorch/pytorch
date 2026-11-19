@@ -848,12 +848,15 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def skip_guard_install(
         self, *, reuse_hash: bool = False
     ) -> Generator[None, None, None]:
-        old = self.skip_install, self.tracing_reuse_hash
-        self.skip_install, self.tracing_reuse_hash = True, reuse_hash
+        old = self.skip_install
+        previous_reuse_hash = self.tracing_reuse_hash
+        self.skip_install = True
+        self.tracing_reuse_hash = reuse_hash
         try:
             yield
         finally:
-            self.skip_install, self.tracing_reuse_hash = old
+            self.skip_install = old
+            self.tracing_reuse_hash = previous_reuse_hash
 
     def copy_graphstate(self) -> GuardsCheckpointState:
         return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))
@@ -1271,7 +1274,7 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode: FakeTensorMode | None) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -1279,7 +1282,7 @@ class TracingContext:
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
         # Combined cache for inlined code data (instructions, indexof, code_options)
         self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
-        self.fake_mode: FakeTensorMode | None = fake_mode
+        self.fake_mode: FakeTensorMode | CppFakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
