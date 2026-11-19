@@ -2121,6 +2121,46 @@ class TagSafetyChecks(RecursiveDictTagTests):
 class RecursiveDictGuardTests(RecursiveDictTagTests):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_closure_cell_reassignment_invalidates(self):
+        class A(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class B(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        def make_module():
+            helper = A()
+
+            class Outer(torch.nn.Module):
+                def forward(self, x):
+                    return helper(x)
+
+            index = Outer.forward.__code__.co_freevars.index("helper")
+            return Outer(), Outer.forward.__closure__[index]
+
+        from torch._dynamo.testing import CompileCounter
+
+        mod, cell = make_module()
+        old_helper = cell.cell_contents
+        counter = CompileCounter()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(opt_fn(x), torch.tensor(11))
+        self.assertEqual(counter.frame_count, 1)
+
+        cell.cell_contents = B()
+        self.assertEqual(opt_fn(x), torch.tensor(12))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertIsInstance(old_helper, A)
+
     def test_disabling(self):
         class Mod(torch.nn.Module):
             def __init__(self):
