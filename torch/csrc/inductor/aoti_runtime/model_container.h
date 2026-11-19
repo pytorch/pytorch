@@ -1074,9 +1074,9 @@ class AOTInductorModelContainer {
   // fn on a model instance checked out of the pool, holding model_exec_mutex_
   // shared. fn must record the instance's run_finished_ event after the work
   // it enqueues, as AOTInductorModel::run() does: the pool reclaims an
-  // in-flight instance only through that event. fn receives
-  // the instance's lease as const, so it can't end or move it; if fn throws,
-  // the instance goes back to the pool without waiting for that work.
+  // in-flight instance only through that event. fn receives the instance's
+  // lease as const, so it can't end or move it; if fn throws, the instance
+  // goes back to the pool without waiting for that work.
   template <typename Fn>
   void run_on_available_model(
       DeviceStreamType stream,

@@ -177,7 +177,8 @@ class ModelPool {
     // The stream bound to this model when stream affinity is enabled, or
     // nullptr. A binding persists across states; borrowing a bound model keeps
     // it, while a failed run clears it so the next call may choose another
-    // model.
+    // model. A stream's first call may also take a model over from another
+    // stream when no unbound model is available.
     Stream stream;
     // When the entry entered its current state: the newest available model is
     // checked out first, and the oldest in-flight one is waited on first.
@@ -279,9 +280,12 @@ class ModelPool {
   // The newest available model, preferring one no stream is bound to when
   // prefer_unbound, so existing bindings survive. nullptr if none is available.
   ModelEntry* newest_available(bool prefer_unbound) {
-    ModelEntry* entry =
-        prefer_unbound ? newest(ModelState::kAvailable, true) : nullptr;
-    return entry != nullptr ? entry : newest(ModelState::kAvailable);
+    if (prefer_unbound) {
+      if (auto* entry = newest(ModelState::kAvailable, /*unbound_only=*/true)) {
+        return entry;
+      }
+    }
+    return newest(ModelState::kAvailable);
   }
 
   ModelEntry& take_available_entry(std::unique_lock<std::mutex>& lk) {
@@ -372,6 +376,10 @@ class ModelPool {
     return reclaimed;
   }
 
+  // Blocks until a model is available, for a checkout without a stream:
+  // reclaims finished runs if any; else waits for a holder to return a model,
+  // or claims the oldest in-flight model and waits for its run with the lock
+  // released. Throws if that run failed.
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
     if (reclaim_finished_runs()) {
       return;
