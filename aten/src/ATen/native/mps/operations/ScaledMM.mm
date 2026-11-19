@@ -71,8 +71,24 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
       .has_bias = bias.has_value(),
       .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
   };
-  const auto kernel_name =
-      fmt::format("scaled_mm_{}_{}", nvfp4 ? "nvfp4" : "mxfp8", scalarToMetalTypeString(out.scalar_type()));
+  // Metal 4.1 MPP applies MX block scales natively; it needs whole blocks along K and int32 strides
+  const bool native = !nvfp4 && has_metal_4_1() && k % 32 == 0 && std::in_range<int32_t>(mat_a.stride(0)) &&
+      std::in_range<int32_t>(mat_b.stride(1));
+  // The few rows kernel reads whole chunks of K with 16-byte vector loads
+  const auto aligned16 = [](const Tensor& mat, int64_t leading_stride) {
+    return mat.storage_offset() % 16 == 0 && leading_stride % 16 == 0;
+  };
+  const bool few_rows = params.m <= scaled_mm_few_rows_max && k % scaled_mm_blockwise_chunk == 0 &&
+      aligned16(mat_a, mat_a.stride(0)) && aligned16(mat_b, mat_b.stride(1));
+  const auto type_str = scalarToMetalTypeString(out.scalar_type());
+  const auto format = nvfp4 ? "nvfp4" : "mxfp8";
+  const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}_{}", format, params.m, type_str)
+      : native                      ? fmt::format("scaled_mm_native_mxfp8_{}", type_str)
+                                    : fmt::format("scaled_mm_{}{}_{}", has_mpp() ? "mpp_" : "", format, type_str);
+  const auto tile = native ? scaled_mm_native_tile : scaled_mm_tile;
+  const auto groups = few_rows
+      ? MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, scaled_mm_simdgroups), 1, 1)
+      : MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, tile), c10::metal::ceil_div<int64_t>(params.m, tile), 1);
   auto pso = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -90,10 +106,7 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
                   tensor_scale(scale_b),
                   bias,
                   params);
-      [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, scaled_mm_tile),
-                                                c10::metal::ceil_div<int64_t>(params.m, scaled_mm_tile),
-                                                1)
-              threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
+      [encoder dispatchThreadgroups:groups threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
