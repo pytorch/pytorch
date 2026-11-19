@@ -2062,6 +2062,19 @@ def _depends_on_data(graph: torch.fx.GraphModule) -> bool:
     return any(symbolic(node.meta.get("val")) for node in graph.graph.nodes)
 
 
+_settles = False
+
+
+def _on_device(tensors: list[torch.Tensor]) -> None:
+    """After a graph was made for tensors: if they are on a GPU, the
+    measurement of a function against the interpreter waits for the device
+    from now on (``trial_settles`` of the runtime)."""
+    global _settles
+    if not _settles and any(tensor.is_cuda for tensor in tensors):
+        _settles = True
+        _runtime.trial_settles(torch._C._cuda_synchronize)
+
+
 def _unopened(key: Any, inputs: "_Inputs") -> "_Open":
     """The inputs for a trace that leaves nothing open and is made in a
     ``ShapeEnv`` all the same (see ``_Dependent``)."""
@@ -3092,6 +3105,7 @@ class _Region:
         ops = self.ops_of(graph)
         frozen = self.freezable(inputs, modules, found["written"])
         compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
+        _on_device(flat)
         variant = _Variant(compiled, found["recipes"], ops, keep)
         variant.affects(*found["effects"])
         variant.written = sorted(found["written"])
@@ -3638,6 +3652,7 @@ class _Path(_Region):
         self.sizes.setdefault(_kind(key), _Sizes(key[2]))
         frozen = self.freezable(inputs, found["modules"], found["written"])
         compiled, conditions, built = self.finish(graph, inputs, key, opening, frozen)
+        _on_device(inputs.flat)
         variant = _Variant(compiled, found["recipes"], self.ops_of(graph), keep)
         variant.direct = False
         variant.leap = found["leap"]
