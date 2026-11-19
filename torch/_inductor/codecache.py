@@ -41,7 +41,17 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NoReturn,
+    NotRequired,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import override, TypedDict
 
 import torch
@@ -159,6 +169,8 @@ T = TypeVar("T")
 
 class SystemDeviceInfo(TypedDict):
     name: str | None
+    # The XCD count depends on the compute partition mode, not on the arch.
+    xcc_count: NotRequired[int | None]
 
 
 class SystemVersionInfo(TypedDict, total=False):
@@ -357,6 +369,7 @@ class CacheBase:
                 version_info["cuda"] = torch.version.cuda
             else:
                 device_info["name"] = device_properties.gcnArchName
+                device_info["xcc_count"] = device_properties.xcc_count
                 version_info["hip"] = torch.version.hip
             hash_input["device"] = device_info
         except (AssertionError, RuntimeError):

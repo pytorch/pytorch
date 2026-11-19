@@ -27,7 +27,7 @@ from ...ir import (
     TensorBox,
 )
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
-from ...runtime.hints import get_warp_size
+from ...runtime.hints import DeviceProperties, get_warp_size
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
     autotune_select_algorithm,
@@ -142,17 +142,18 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
     return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
-# XCDs that workgroups are dispatched round-robin across, by base arch.
-# TODO: add gfx1250 (MI450) once its XCD count and dispatch order are confirmed
-# and the remap is benchmarked there.
-_NUM_XCDS = {"gfx942": 8, "gfx950": 8}
+# Archs the remap is enabled on by default, where it has been benchmarked. The
+# XCD count comes from the device, as it depends on the compute partition mode.
+# TODO: add gfx1250 (MI450) once the remap is benchmarked there.
+_XCD_REMAP_ARCHS = ("gfx942", "gfx950")
 
 
 def _default_num_xcds(device: torch.device) -> int | None:
     if torch.version.hip is None or device.type != "cuda":
         return None
-    arch = _rocm_native_device_arch_name(str(device)).split(":")[0]
-    return _NUM_XCDS.get(arch)
+    if _rocm_native_device_arch_name(str(device)).split(":")[0] not in _XCD_REMAP_ARCHS:
+        return None
+    return DeviceProperties.create(device).xcc_count
 
 
 # HIP's limit on total threads along a grid dimension, as in _check_max_grid_x.
@@ -172,7 +173,7 @@ def _set_num_xcds(
         return None
     if type(num_xcds) is not int or num_xcds < 0:
         raise ValueError(f"NUM_XCDS must be a non-negative int, got {num_xcds!r}")
-    if num_xcds == 0:
+    if num_xcds <= 1:
         return None
     sizevars = V.graph.sizevars
     work_items = num_programs * kernel_options["num_warps"] * get_warp_size(device)

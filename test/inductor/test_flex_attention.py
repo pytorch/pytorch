@@ -5671,6 +5671,64 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_mps  # MPS backward raises NotImplementedError
+    def test_xcd_remap_default(self, device):
+        q, k, v = (
+            torch.randn(2, 4, 256, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+
+        def fwd_bwd():
+            out = torch.compile(flex_attention, fullgraph=True)(q, k, v)
+            return torch.autograd.grad(out.sum(), (q, k, v))
+
+        _, code = run_and_get_code(fwd_bwd)
+        self.assertEqual(len(code), 2)
+        expected = None
+        if torch.version.hip is not None and torch.device(device).type == "cuda":
+            props = torch.cuda.get_device_properties(device)
+            if props.gcnArchName.split(":")[0] in ("gfx942", "gfx950"):
+                expected = props.xcc_count
+        for c in code:
+            if expected is not None and expected > 1:
+                FileCheck().check(f"NUM_XCDS : tl.constexpr = {expected}").run(c)
+            else:
+                FileCheck().check_not("NUM_XCDS : tl.constexpr").run(c)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # MPS backward raises NotImplementedError
+    def test_xcd_remap_fewer_programs_than_xcds(self, device):
+        # 2 forward and 2 + 2 backward programs, fewer than NUM_XCDS=8.
+        q, k, v = (
+            torch.randn(1, 1, 128, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+        blocks = {"fwd_BLOCK_M": 64, "fwd_BLOCK_N": 64, "bwd_BLOCK_M1": 32}
+        blocks |= {"bwd_BLOCK_N1": 64, "bwd_BLOCK_M2": 64, "bwd_BLOCK_N2": 32}
+
+        def run(num_xcds):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+
+            def fwd_bwd():
+                options = {**blocks, "NUM_XCDS": num_xcds}
+                out = compiled(q, k, v, kernel_options=options)
+                return torch.autograd.grad(out.sum(), (q, k, v))
+
+            return run_and_get_code(fwd_bwd)
+
+        grads, code = run(8)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            FileCheck().check("NUM_XCDS : tl.constexpr = 8").run(c)
+        ref, _ = run(0)
+        self.assertEqual(grads, ref)
+        # One XCD needs no remap.
+        _, code = run(1)
+        FileCheck().check_not("NUM_XCDS : tl.constexpr").run("\n".join(code))
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
     def test_backward_kernel_options_filtering(self, device):
