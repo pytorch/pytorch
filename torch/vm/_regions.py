@@ -690,10 +690,41 @@ class _Watch:
                 held.update(saved)
 
 
+class _Known:
+    """What one look at the tensors of a module found, kept for the calls
+    that come with the same tensors: the tensors, where each is among them,
+    and their part of a key (see ``_key``). ``snapshot`` says whether a call
+    is one of those, in one pass over the places the tensors are kept at
+    instead of three over the tensors."""
+
+    __slots__ = ("kinds", "numbers", "offsets", "seen", "shared", "snapshot", "tensors")
+
+    def __init__(
+        self, snapshot: Any, tensors: list[torch.Tensor], shared: list[torch.Tensor]
+    ) -> None:
+        self.snapshot = snapshot
+        self.tensors = tensors
+        # The tensors of the module that the call had before it came to the
+        # module: something else it was handed holds them too.
+        self.shared = frozenset(id(tensor) for tensor in shared)
+        # Where each tensor is, by how many tensors a call had before them.
+        self.seen: dict[int, dict[int, int]] = {}
+        self.kinds, self.numbers, self.offsets = _runtime.tensor_key(tensors, [])
+
+    def places(self, first: int) -> dict[int, int]:
+        found = self.seen.get(first)
+        if found is None:
+            if len(self.seen) > 8:
+                self.seen.clear()
+            tensors = self.tensors
+            found = self.seen[first] = {id(t): first + i for i, t in enumerate(tensors)}
+        return found
+
+
 class _ModuleState:
     """The tensors of a module and of its submodules, for one stamp."""
 
-    __slots__ = ("accessors", "hooked", "ids", "module", "stamp", "token")
+    __slots__ = ("accessors", "hooked", "ids", "known", "module", "stamp", "token")
 
     def __init__(self, module: nn.Module, stamp: int) -> None:
         self.module = weakref.ref(module)
@@ -701,6 +732,9 @@ class _ModuleState:
 
     def refresh(self, module: nn.Module, stamp: int) -> None:
         self.stamp = stamp
+        # What a call found the tensors to be (see ``_Known``), for the calls
+        # after it that find nothing changed.
+        self.known: _Known | None = None
         # Where each tensor is kept: the dicts are read again on every call,
         # so a parameter that was replaced by another tensor is picked up.
         self.accessors: list[tuple[Any, Any]] = []
@@ -761,7 +795,16 @@ def _module_state(module: nn.Module) -> _ModuleState:
 class _Inputs:
     """What one call hands a region, as ``_describe`` finds it."""
 
-    __slots__ = ("flat", "held", "ints", "offsets", "seen")
+    __slots__ = (
+        "flat",
+        "held",
+        "inside",
+        "ints",
+        "known",
+        "offsets",
+        "seen",
+        "unwritten",
+    )
 
     def __init__(self) -> None:
         # The tensors, each object once.
@@ -774,9 +817,25 @@ class _Inputs:
         self.ints: list[int] = []
         # The storage offsets of the tensors (see ``_key``).
         self.offsets = b""
+        # Where tensors are those of a module, as an earlier call found
+        # them: where they begin and what it found; and whether every module
+        # was found so, with none of its tensors written to since.
+        self.known: list[tuple[int, _Known]] = []
+        self.unwritten = True
+        # The modules that were looked at, each with those inside it: by id.
+        self.inside: list[frozenset[int]] = []
         # Where a tensor is in ``flat``, or, counted down from -1, an object
         # in ``held``; by id.
         self.seen: dict[int, int] = {}
+
+
+def _module_part(obj: nn.Module, cls: type, state: "_ModuleState") -> tuple[Any, ...]:
+    """What a module is in the key of a variant, apart from its tensors."""
+    if not state.accessors and len(state.ids) == 1:
+        # A loss or an activation: nothing but its class and its mode says
+        # what it is like (see ``_fresh``).
+        return ("bare module", cls, obj.training, id(obj))
+    return ("module", id(obj), state.token)
 
 
 def _hold(obj: Any, inputs: _Inputs) -> int | None:
@@ -845,29 +904,62 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         if "_modules" not in vars(obj):
             # Handed to a region of its own __init__, or of what that calls.
             raise _Opaque(0, "a module that is being made")
+        if any(id(obj) in ids for ids in inputs.inside):
+            # Inside a module the call has looked at: so were its tensors,
+            # and the stamp of that module is the stamp of this one too.
+            state = _module_states.get(id(obj))  # type: ignore[assignment]
+            if state is not None and state.module() is obj:
+                return _module_part(obj, cls, state)
         state = _module_state(obj)
         if state.hooked or any(_GLOBAL_HOOK_DICTS):
             raise _Opaque(
                 0, "a module with hooks, which run code a graph does not hold"
             )
         flat, seen = inputs.flat, inputs.seen
-        try:
-            for store, name in state.accessors:
-                tensor = store[name]
-                if id(tensor) not in seen:
-                    if type(tensor) not in _TENSORS:
-                        raise _Opaque(0, "a module that holds a tensor subclass")
-                    seen[id(tensor)] = len(flat)
-                    flat.append(tensor)
-        except LookupError:
-            # Changed since the stamp was taken.
-            state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
-            return _describe(obj, inputs)
-        if not state.accessors and len(state.ids) == 1:
-            # A loss or an activation: nothing but its class and its mode
-            # says what it is like (see ``_fresh``).
-            return ("bare module", cls, obj.training, id(obj))
-        return ("module", id(obj), state.token)
+        if any(id(obj) in ids for ids in inputs.inside):
+            return _module_part(obj, cls, state)
+        inputs.inside.append(state.ids)
+        known = state.known
+        same = 0
+        if known is not None:
+            places = known.places(len(flat))
+            # The call has the tensors it had before this module that the
+            # look had, and no others of the module's.
+            if seen.keys() >= known.shared and seen.keys().isdisjoint(places):
+                same = known.snapshot.holds(state.accessors)
+        if same:
+            # The tensors it had when they were last looked at.
+            inputs.known.append((len(flat), known))  # type: ignore[arg-type]
+            inputs.unwritten = inputs.unwritten and same == 2
+            flat.extend(known.tensors)  # type: ignore[union-attr]
+            seen.update(places)
+        else:
+            inputs.unwritten = False
+            first = len(flat)
+            shared: list[torch.Tensor] = []
+            try:
+                for store, name in state.accessors:
+                    tensor = store[name]
+                    position = seen.get(id(tensor))
+                    if position is None:
+                        if type(tensor) not in _TENSORS:
+                            raise _Opaque(0, "a module that holds a tensor subclass")
+                        seen[id(tensor)] = len(flat)
+                        flat.append(tensor)
+                    elif position < first:
+                        shared.append(tensor)
+            except LookupError:
+                # Changed since the stamp was taken.
+                state.refresh(obj, _runtime.module_stamp(obj, _TENSOR_TYPES))
+                return _describe(obj, inputs)
+            if len(flat) > first:
+                tensors = flat[first:]
+                snapshot = _runtime.snapshot(state.accessors, tensors + shared)
+                if snapshot is None:
+                    state.known = None
+                else:
+                    state.known = _Known(snapshot, tensors, shared)
+        return _module_part(obj, cls, state)
     if cls is types.MethodType:
         return (
             "method",
@@ -932,8 +1024,22 @@ def _key(parts: list[Any], inputs: _Inputs) -> Any:
     the call (the sizes and strides of the tensors, then the integers), and
     the modes it runs in. A variant with open sizes is for many keys that
     differ in their numbers only (``_Sizes``)."""
+    known, flat = inputs.known, inputs.flat
     try:
-        kinds, numbers, inputs.offsets = _runtime.tensor_key(inputs.flat, inputs.ints)
+        if not known:
+            kinds, numbers, inputs.offsets = _runtime.tensor_key(flat, inputs.ints)
+        else:
+            # The parts that are known as they are, and the tensors between
+            # them; the integers come last.
+            columns: list[tuple[bytes, bytes, bytes]] = []
+            at = 0
+            for first, found in known:
+                if first > at:
+                    columns.append(_runtime.tensor_key(flat[at:first], []))
+                columns.append((found.kinds, found.numbers, found.offsets))
+                at = first + len(found.tensors)
+            columns.append(_runtime.tensor_key(flat[at:], inputs.ints))
+            kinds, numbers, inputs.offsets = (b"".join(c) for c in zip(*columns))
     except TypeError:
         raise _Opaque(0, "a tensor without sizes of its own") from None
     return (tuple(parts), kinds, numbers, _modes())
@@ -2078,6 +2184,7 @@ class _Variant:
         "shape",
         "stamp",
         "state",
+        "unwritten",
         "watch",
         "written",
     )
@@ -2124,6 +2231,9 @@ class _Variant:
         self.moves = 0
         # Which tensors of a call the graph writes to in place.
         self.written: list[int] = []
+        # What the tensors of the modules were (``_Inputs.known``) when those
+        # the graph has built in were last found to be what it was built with.
+        self.unwritten: list[tuple[int, _Known]] | None = None
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
@@ -2176,9 +2286,19 @@ class _Variant:
         counts as changed."""
         if self.state is None:
             return None
+        known = inputs.known if inputs.unwritten else None
+        if known and known == self.unwritten:
+            # Checked for these very tensors, none of which was touched since.
+            return None
         tensors = self.state(inputs.flat)
         if _runtime.tensor_stamp(tensors) == self.stamp:
+            if known and all(
+                any(first <= at < first + len(found.tensors) for first, found in known)
+                for at in self.positions
+            ):
+                self.unwritten = known
             return None
+        self.unwritten = None
         address = torch._C._data_address
         changed, moved = [], []
         for k, (tensor, (who, version, clone)) in enumerate(zip(tensors, self.watch)):

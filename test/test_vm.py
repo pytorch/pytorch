@@ -6042,6 +6042,85 @@ class TestVmRegions(TestCase):
         # The mode is not called for what the backend's code does.
         self.assertEqual(seen, [])
 
+    def looks(self, compiled, *args):
+        """How many tensors three calls each make their key of, and check
+        against what a graph has built in."""
+        keyed, stamped = [], []
+        real_key, real_stamp = cfg_rs.tensor_key, cfg_rs.tensor_stamp
+
+        def tensor_key(tensors, ints):
+            keyed.append(len(tensors))
+            return real_key(tensors, ints)
+
+        def tensor_stamp(tensors):
+            stamped.append(len(tensors))
+            return real_stamp(tensors)
+
+        counted = unittest.mock.patch.multiple(
+            cfg_rs, tensor_key=tensor_key, tensor_stamp=tensor_stamp
+        )
+        with counted:
+            for _ in range(3):
+                compiled(*args)
+        return keyed, stamped
+
+    def test_the_tensors_of_a_module_are_looked_at_once_a_call(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        passes = with_graphs("aot_eager")
+        compiled = torch.vm(region_infer, passes=passes, fallback=False)
+        x = torch.randn(2, 3, 6, 6)
+        with torch.no_grad():
+            for _ in range(10):
+                compiled(model, x)
+            # The key of a call is made of its input: what the module holds
+            # is what an earlier call found, and so is what the graph has
+            # built in.
+            self.assertEqual(self.looks(compiled, model, x), ([1, 1, 1], []))
+            # A weight that is written to, replaced, or of another size is
+            # found out all the same.
+            model.fc.weight.mul_(2)
+            self.assertEqual(compiled(model, x), region_infer(model, x))
+            model.fc.bias = torch.nn.Parameter(torch.ones(5))
+            self.assertEqual(compiled(model, x), region_infer(model, x))
+            model.fc = torch.nn.Linear(4 * 6 * 6, 7)
+            for _ in range(3):
+                self.assertEqual(compiled(model, x), region_infer(model, x))
+            model.bn.train()
+            for _ in range(3):
+                self.assertEqual(compiled(model, x), region_infer(model, x))
+
+    def test_modules_that_share_tensors_or_lie_inside_one_another(self):
+        torch.manual_seed(0)
+        first, second = torch.nn.Linear(4, 4), torch.nn.Linear(4, 4)
+        second.weight = first.weight
+        both = torch.nn.Sequential(first, second).eval()
+
+        def outside_in(both, second, x):
+            return both(x) + second(x) * 2 - x
+
+        def inside_out(second, both, x):
+            return both(x) + second(x) * 2 - x
+
+        passes = with_graphs("aot_eager")
+        x = torch.randn(3, 4)
+        with torch.no_grad():
+            for f, args in (
+                (outside_in, (both, second, x)),
+                (inside_out, (second, both, x)),
+            ):
+                compiled = torch.vm(f, passes=passes, fallback=False)
+                for _ in range(10):
+                    self.assertEqual(compiled(*args), f(*args))
+                self.assertEqual(len(self.compiled_regions(compiled)), 1)
+                # One module inside the other, and a weight that both layers
+                # have: every tensor is still looked at once.
+                self.assertEqual(self.looks(compiled, *args), ([1, 1, 1], []))
+                first.weight.add_(1)
+                self.assertEqual(compiled(*args), f(*args))
+                second.bias = torch.nn.Parameter(torch.ones(4))
+                self.assertEqual(compiled(*args), f(*args))
+
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.vm(region_infer, passes=with_graphs("nope"))
