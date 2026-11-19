@@ -2745,6 +2745,144 @@ class TestSchedulePlan(TestCase):
 instantiate_parametrized_tests(TestSchedulePlan)
 
 
+class _RecordingShardedModule(torch.nn.Module):
+    """Has the methods of a sharded data parallel stage module, as FSDP2's
+    ``FSDPModule`` does, without being an ``FSDPModule``. Records its calls."""
+
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(2, 2)
+        self.calls = []
+        self.handles = []
+
+    def _handle(self):
+        handle = MagicMock()
+        self.handles.append(handle)
+        return handle
+
+    def set_manual_backward_finalization(self, enabled):
+        self.calls.append(("set_manual_backward_finalization", enabled))
+
+    def set_requires_gradient_sync(self, requires_gradient_sync):
+        self.calls.append(("set_requires_gradient_sync", requires_gradient_sync))
+
+    def set_reshard_after_backward(self, reshard_after_backward):
+        self.calls.append(("set_reshard_after_backward", reshard_after_backward))
+
+    def finalize_backward(self, *, async_op=False):
+        self.calls.append(("finalize_backward", async_op))
+        return self._handle() if async_op else None
+
+    def unshard(self, *, async_op=False):
+        self.calls.append(("unshard", async_op))
+        return self._handle() if async_op else None
+
+    def reshard(self):
+        self.calls.append(("reshard",))
+
+
+class _PartlyShardedModule(torch.nn.Module):
+    """Has only some of the methods of a sharded data parallel stage module."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def unshard(self, *, async_op=False):
+        self.calls.append(("unshard", async_op))
+
+    def reshard(self):
+        self.calls.append(("reshard",))
+
+
+# The calls with which a stage reduces its sharded gradients at the end of a step.
+_REDUCE_GRAD_CALLS = [
+    ("set_requires_gradient_sync", True),
+    ("set_reshard_after_backward", True),
+    ("finalize_backward", True),
+    ("set_manual_backward_finalization", False),
+]
+
+
+class TestShardedDataParallelStageModule(TestCase):
+    """Stages and schedules drive any stage module with FSDP2's methods as they
+    drive an ``FSDPModule``."""
+
+    @staticmethod
+    def _run(schedule, stages):
+        def compute(action, ctx):
+            # As the runtime's own compute actions do.
+            ctx.schedule_ref._assert_unsharded(stages[action.stage_index])
+
+        for computation_type in (F, B, I, W):
+            schedule.register_custom_function(computation_type, compute)
+        with patch.object(schedule, "_initialize_stages"):
+            schedule._step_microbatches()
+
+    @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleZBVZeroBubble])
+    def test_runtime_unshards_and_reduces(self, ScheduleClass):
+        stages = [MockPipelineStage(group_size=1, num_stages=2) for _ in range(2)]
+        modules = [_RecordingShardedModule() for _ in stages]
+        for stage_index, (stage, module) in enumerate(zip(stages, modules)):
+            stage.stage_index = stage_index
+            stage.submod = module
+            stage._gradient_reduction_handle = None
+        schedule = ScheduleClass(
+            stages, n_microbatches=2, loss_fn=MagicMock(), scale_grads=False
+        )
+
+        self._run(schedule, stages)
+
+        for module in modules:
+            self.assertEqual(module.calls, [("unshard", True)] + _REDUCE_GRAD_CALLS)
+            for handle in module.handles:
+                handle.wait.assert_called_once_with()
+
+    def test_runtime_reshards(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.submod = module = _RecordingShardedModule()
+        schedule = _PipelineScheduleRuntime([stage], n_microbatches=1)
+        schedule.pipeline_order_with_comms = {
+            0: [_Action(0, UNSHARD, None), _Action(0, F, 0), _Action(0, RESHARD, None)]
+        }
+
+        self._run(schedule, [stage])
+
+        self.assertEqual(module.calls, [("unshard", True), ("reshard",)])
+
+    def test_runtime_ignores_modules_without_every_method(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.submod = partial_module = _PartlyShardedModule()
+        schedule = _PipelineScheduleRuntime([stage], n_microbatches=1)
+        schedule.pipeline_order_with_comms = {
+            0: [_Action(0, UNSHARD, None), _Action(0, F, 0), _Action(0, RESHARD, None)]
+        }
+
+        self._run(schedule, [stage])
+
+        self.assertEqual(partial_module.calls, [])
+
+    def test_stage_reduces_grads(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.submod = module = _RecordingShardedModule()
+        stage.has_backward = True
+        stage._gradient_reduction_handle = None
+
+        stage.perform_reduce_grad(1)
+
+        self.assertEqual(module.calls, _REDUCE_GRAD_CALLS)
+        module.handles[0].wait.assert_called_once_with()
+
+        stage.submod = _PartlyShardedModule()
+        with self.assertRaisesRegex(RuntimeError, "requires FSDP"):
+            stage.start_gradient_reduction()
+
+
+instantiate_parametrized_tests(TestShardedDataParallelStageModule)
+
+
 class TestScheduleCsv(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
