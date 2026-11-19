@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -84,8 +85,12 @@ class ModelPool {
     entries_.reserve(num_models);
   }
 
-  // Takes ownership of a model. The pool is filled before it is shared.
+  // Takes ownership of a model. The pool is filled before it is shared, within
+  // the capacity reserve() set, so pointers to entries stay valid.
   Model& add_model(std::unique_ptr<Model> model) {
+    AOTI_RUNTIME_CHECK(
+        entries_.size() < entries_.capacity(),
+        "ModelPool::add_model() needs reserve() to cover every model");
     entries_.push_back(ModelEntry{
         std::move(model), ModelState::kAvailable, nullptr, next_seq_++});
     return *entries_.back().model;
@@ -248,8 +253,24 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
+  static const char* state_name(ModelState state) {
+    switch (state) {
+      case ModelState::kAvailable:
+        return "AVAILABLE";
+      case ModelState::kHeld:
+        return "HELD";
+      case ModelState::kInFlight:
+        return "IN_FLIGHT";
+    }
+    return "UNKNOWN";
+  }
+
   void transition(ModelEntry& entry, ModelState from, ModelState to) {
-    AOTI_RUNTIME_CHECK(entry.state == from, "Invalid model pool transition");
+    AOTI_RUNTIME_CHECK(
+        entry.state == from,
+        std::string("Invalid model pool transition from ") + state_name(from) +
+            " to " + state_name(to) + ": the model is " +
+            state_name(entry.state));
     entry.state = to;
     entry.seq = next_seq_++;
   }
@@ -408,8 +429,8 @@ class ModelPool {
   }
 
   // One entry per model instance, which it owns, in the container's index
-  // order. The vector is filled before the pool is shared, so entry pointers
-  // stay valid.
+  // order. add_model() never grows it past reserve()'s capacity, so entry
+  // pointers stay valid.
   std::vector<ModelEntry> entries_;
   uint64_t next_seq_{0};
 
