@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Lstm.h>
-#include <ATen/native/mkldnn/detail/Utils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -199,6 +199,8 @@ void lstm_forward_training(
   auto expected_weights_iter =
       weights_iter.reorder_if_differ_in(pd.weights_iter_desc());
 
+  // May replace the buffers and layouts of dst_layer, dst_iter and dst_iter_c
+  // when they differ from the descs the primitive expects.
   dst_layer.reinit_if_possible(pd.dst_layer_desc());
   dst_iter.reinit_if_possible(pd.dst_iter_desc());
   dst_iter_c.reinit_if_possible(pd.dst_iter_c_desc());
@@ -313,6 +315,8 @@ void lstm_backward(
   auto expected_weights_iter =
       weights_iter.reorder_if_differ_in(pd.weights_iter_desc());
 
+  // May replace the buffers and layouts of diff_src_layer, diff_src_iter and diff_src_iter_c
+  // when they differ from the descs the primitive expects.
   diff_src_layer.reinit_if_possible(pd.diff_src_layer_desc());
   diff_src_iter.reinit_if_possible(pd.diff_src_iter_desc());
   diff_src_iter_c.reinit_if_possible(pd.diff_src_iter_c_desc());
