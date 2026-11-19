@@ -946,9 +946,8 @@ class Optimizer:
         .. note::
             The ``step`` tensor keeps its saved dtype and device unless the parameter
             group is fused or capturable, which moves it to the parameter's device as
-            ``torch.float32``. With both options disabled, Adam and AdamW restore
-            non-meta ``step`` tensors to CPU. This behavior is independent of the
-            dtype preservation setting.
+            ``torch.float32``. This behavior is independent of the dtype preservation
+            setting.
 
         .. note::
             The names of the parameters (if they exist under the "param_names" key of each param group

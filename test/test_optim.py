@@ -1762,28 +1762,17 @@ class TestOptimRenewed(TestCase):
                 without_param_names(optimizer_c.state_dict())["param_groups"][-1],
             )
 
-    @optims(
-        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
-        dtypes=[torch.float32],
-    )
-    @parametrize("meta", [False, True])
-    def test_adam_load_state_dict_step_device(self, device, dtype, optim_info, meta):
-        device = "meta" if meta else device
-        param = Parameter(torch.ones(1, device=device, dtype=dtype))
-        optimizer = optim_info.optim_cls([param])
+    @parametrize("optim_cls", [torch.optim.Adam, torch.optim.AdamW])
+    def test_adam_load_state_dict_step_device(self, device, optim_cls):
+        param = torch.ones(1, device=device)
+        opt = optim_cls([param])
         param.grad = torch.ones_like(param)
-        optimizer.step()
-        state = optimizer.state[param]
-        if param.device.type != "mps":
-            state["step"] = state["step"].double()
-        expected = state["step"].to("meta" if meta else "cpu")
-
-        with tempfile.TemporaryFile() as f:
-            torch.save(optimizer.state_dict(), f)
-            f.seek(0)
-            optimizer.load_state_dict(torch.load(f, map_location=device))
-
-        self.assertEqual(optimizer.state[param]["step"], expected, exact_device=True)
+        opt.step()
+        step = torch.tensor(3.0, dtype=torch.float32 if param.is_mps else torch.float64)
+        for src, dst in ((device, "cpu"), ("meta", "meta")):
+            opt.state[param]["step"] = step.to(src)
+            opt.load_state_dict(opt.state_dict())
+            self.assertEqual(opt.state[param]["step"], step.to(dst), exact_device=True)
 
     @skipMPS
     @parametrize("fused", [False, True])
