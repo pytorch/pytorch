@@ -223,8 +223,8 @@ static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, Swizzle
   if (is_gfx1250_mx_swizzle()) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         swizzle_a == SwizzleType::SWIZZLE_128,
-        "gfx1250 MX block scaling requires SWIZZLE_128 scales. "
-        "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
+        "gfx1250/gfx1250-strict MX block scaling requires SWIZZLE_128 scales. "
+        "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250/gfx1250-strict order.");
     return;
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -892,7 +892,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     // order, which v1 cannot name.
     TORCH_CHECK_NOT_IMPLEMENTED(
         !is_gfx1250_mx_swizzle(),
-        "gfx1250 MX block scaling requires SWIZZLE_128 scales. "
+        "gfx1250/gfx1250-strict MX block scaling requires SWIZZLE_128 scales. "
         "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
 
     int packed_factor = 1;
@@ -1572,14 +1572,14 @@ _scaled_nvfp4_nvfp4(
 #ifdef USE_ROCM
   TORCH_CHECK_NOT_IMPLEMENTED(
       is_gfx1250_nvfp4(),
-      "NVFP4 scaling is only supported on gfx1250 with ROCm 10.0 or above");
+      "NVFP4 scaling is only supported on gfx1250/gfx1250-strict with ROCm 10.0 or above");
   TORCH_CHECK_VALUE(
       out_dtype == at::kBFloat16 || out_dtype == at::kHalf,
       "NVFP4 scaled_mm only supports bf16 or fp16 output, got ", out_dtype);
   TORCH_CHECK_NOT_IMPLEMENTED(
       swizzle_a == SwizzleType::SWIZZLE_128 && swizzle_b == SwizzleType::SWIZZLE_128,
-      "gfx1250 NVFP4 block scaling requires SWIZZLE_128 scales. "
-      "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
+      "gfx1250/gfx1250-strict NVFP4 block scaling requires SWIZZLE_128 scales. "
+      "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250/gfx1250-strict order.");
   const int64_t k_unpacked_a = mat_a.size(1) * 2;
   const int64_t k_unpacked_b = mat_b.size(0) * 2;
   // gfx1250 NVFP4 requires even M and N and K % 16.
@@ -1651,8 +1651,8 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
       // Same rejection as the v2 validator, for callers that skip meta.
       TORCH_CHECK_NOT_IMPLEMENTED(
           swizzle_a[0] == SwizzleType::SWIZZLE_128 && swizzle_b[0] == SwizzleType::SWIZZLE_128,
-          "NVFP4 block scaling on ROCm requires gfx1250 with ROCm 10.0 and SWIZZLE_128 scales. "
-          "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
+          "NVFP4 block scaling on ROCm requires gfx1250/gfx1250-strict with ROCm 10.0 and SWIZZLE_128 scales. "
+          "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250/gfx1250-strict order.");
       if (two_level) {
         TORCH_CHECK_VALUE(
             swizzle_a[1] == SwizzleType::NO_SWIZZLE && swizzle_b[1] == SwizzleType::NO_SWIZZLE,

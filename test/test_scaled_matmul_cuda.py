@@ -3454,7 +3454,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
                 with self.assertRaisesRegex(
                     NotImplementedError,
-                    "gfx1250 MX block scaling requires SWIZZLE_128",
+                    "gfx1250/gfx1250-strict MX block scaling requires SWIZZLE_128",
                 ):
                     ones_mm(16, 128, 16, SwizzleType.NO_SWIZZLE)
         else:
@@ -3639,7 +3639,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             # v1 hard-wires NO_SWIZZLE. gfx1250 cannot read that order.
             with self.assertRaisesRegex(
                 NotImplementedError,
-                "gfx1250 MX block scaling requires SWIZZLE_128",
+                "gfx1250/gfx1250-strict MX block scaling requires SWIZZLE_128",
             ):
                 scaled_mm_wrap(A, B.t(), A_scale.flatten(), B_scale.flatten(),
                                out_dtype=torch.bfloat16, wrap_v2=False)
@@ -5415,7 +5415,7 @@ print("tunableop_keys_ok")
         if torch.version.hip:
             with self.assertRaisesRegex(
                 NotImplementedError,
-                r"NVFP4 block scaling on ROCm requires gfx1250 with ROCm 10\.0 and SWIZZLE_128",
+                r"NVFP4 block scaling on ROCm requires gfx1250/gfx1250-strict with ROCm 10\.0 and SWIZZLE_128",  # noqa: B950
             ):
                 _ = torch.nn.functional.scaled_mm(
                     x,
