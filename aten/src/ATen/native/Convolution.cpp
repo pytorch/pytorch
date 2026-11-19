@@ -27,10 +27,6 @@
 #include <ATen/ops/permute.h>
 #endif
 
-#if AT_NNPACK_ENABLED()
-#include <nnpack.h>
-#endif
-
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
 #endif
@@ -47,8 +43,6 @@
 #include <ATen/ops/_convolution_native.h>
 #include <ATen/ops/_mps_convolution.h>
 #include <ATen/ops/_mps_convolution_transpose.h>
-#include <ATen/ops/_nnpack_available.h>
-#include <ATen/ops/_nnpack_spatial_convolution.h>
 #include <ATen/ops/_slow_conv2d_backward.h>
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/cat.h>
@@ -544,6 +538,10 @@ struct ConvParams {
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
+    // Without ACL, oneDNN runs dense and transposed convolutions via gemm, which is slower than Slow2d
+    if (mkldnn_lacks_aarch64_kernels() && !input.is_mkldnn() && (groups == 1 || transposed)) {
+      return false;
+    }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
       (input.device().is_cpu() &&
        input.scalar_type() == kFloat && // only on CPU Float Tensors
@@ -580,25 +578,6 @@ struct ConvParams {
        }() // for some case, native is faster
         );
 
-#endif
-    return false;
-  }
-  bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const  {
-#if AT_NNPACK_ENABLED()
-    return at::globalContext().userEnabledNNPACK() &&
-           at::_nnpack_available() &&
-           input.device().is_cpu() &&
-           input.scalar_type() == kFloat && // only on CPU Float Tensors
-           !is_dilated() && // or dilation
-           !transposed &&   // or transposed tensors
-           input.ndimension() == 4 && // must be in NCHW format
-           weight.ndimension() == 4 &&
-           (at::symint::size<T>(weight, 2) < 17) && (at::symint::size<T>(weight, 3) < 17) && // NNPACK only supports kernels up to 16x16
-           (padding[0] < at::symint::size<T>(weight, 2)) && (padding[1] < at::symint::size<T>(weight, 3)) // NNPACK only supports padding < kernel_size. See https://github.com/pytorch/pytorch/issues/90142.
-#if !defined(C10_MOBILE)
-           && at::symint::size<T>(input, 0) >= 16 // ensure large enough batch size to ensure perf, tuneable
-#endif
-       ;
 #endif
     return false;
   }
@@ -884,6 +863,18 @@ static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight) {
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
+}
+
+static void check_input_same_device_as_parameters(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias) {
+  TORCH_CHECK(input.device() == weight.device(),
+      "Expected all tensors to be on the same device, but got weight is on ", weight.device(),
+      ", different from other tensors on ", input.device());
+  TORCH_CHECK(!bias.defined() || input.device() == bias.device(),
+      "Expected all tensors to be on the same device, but got bias is on ", bias.device(),
+      ", different from other tensors on ", input.device());
 }
 
 #if AT_MKLDNN_ENABLED()
@@ -1344,6 +1335,12 @@ static ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
+#if AT_MKLDNN_ENABLED()
+  } else if (mkldnn_lacks_aarch64_kernels() && !need_backward && !input.is_mkldnn() &&
+             params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
+    // Faster than oneDNN's gemm-based convolution when oneDNN lacks optimized kernels
+    return ConvBackend::Winograd3x3Depthwise;
+#endif
   } else if (params.use_mkldnn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
@@ -1378,13 +1375,9 @@ static ConvBackend _select_conv_backend(
         if (params.is_dilated()) {
           return ConvBackend::SlowDilated2d;
         } else {  /* dim == 4, non-dilated */
-          if (params.use_nnpack(input, weight)) {
-            return ConvBackend::NnpackSpatial;
-          } else {
-            /* CPU implementation has specialized MM kernels
-               for non-dilated case here */
-            return ConvBackend::Slow2d;
-          }
+          /* CPU implementation has specialized MM kernels
+             for non-dilated case here */
+          return ConvBackend::Slow2d;
         }
       } else if (input.ndimension() == 5 && (input.is_cuda() || params.is_dilated())) {
         return ConvBackend::SlowDilated3d;
@@ -1473,11 +1466,7 @@ static at::Tensor _convolution_nogroup_backend(
   auto kernel_size = weight.sizes().slice(2);
   switch(backend) {
     case ConvBackend::NnpackSpatial:
-#if AT_NNPACK_ENABLED()
-      return at::_nnpack_spatial_convolution(input, weight, bias, params.padding, params.stride);
-#else
-      TORCH_INTERNAL_ASSERT(false, "NnpackSpatial backend was selected in PyTorch compiled without nnpack support");
-#endif
+      TORCH_CHECK(false, "NnpackSpatial backend has been removed from PyTorch");
     case ConvBackend::Slow2d:
       return at::thnn_conv2d(input, weight, kernel_size, bias, params.stride, params.padding);
     case ConvBackend::SlowDilated2d:
@@ -1591,6 +1580,8 @@ at::Tensor _convolution(
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
   TORCH_CHECK(groups_ > 0, "non-positive groups is not supported");
+
+  check_input_same_device_as_parameters(input, weight, bias);
 
   ConvParams<int64_t> params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);

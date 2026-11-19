@@ -112,9 +112,10 @@ class TestKernelGeneral(TestCase):
     def test_wide_geometry_runs_kernel(self):
         trait = T.SumOps(acc=cutlass.Float32)
 
-        # Exercise Int64 count arithmetic without allocating or reducing 2**31 elements.
-        x = torch.tensor([3.0], device="cuda")
-        out = torch.empty_like(x)
+        # Exercise Int64 count arithmetic without allocating or reducing 2**31 elements;
+        # the limit gives every lane several grid-stride steps.
+        x = torch.arange(65536, dtype=torch.float32, device="cuda")
+        out = torch.empty(1, device="cuda")
         wide_count = kg.ReduceBlock(
             trait,
             count=2**31,
@@ -122,27 +123,25 @@ class TestKernelGeneral(TestCase):
             red_pairs=((65536, 1), (32768, 65536)),
             kept_pairs=(),
             flat_tail=True,
-            limit=1,
+            limit=4096,
         )
         kg._launch(wide_count, ("wide", "wide_count"), [x], [out])
-        self.assertEqual(out, x)
+        self.assertEqual(out, x[:4096].sum().reshape(1), atol=0, rtol=0)
 
         # Lower only the selection and grid limits to run the real wide-output split.
-        x = torch.arange(6, dtype=torch.float32, device="cuda")
-        out = torch.empty_like(x)
+        # 7 outputs on a 3-wide grid leave two dead slots, which must not store.
+        x = torch.arange(7, dtype=torch.float32, device="cuda")
+        out = torch.full((9,), -1.0, device="cuda")
         with (
             mock.patch.object(kg, "_INT32_LIMIT", 4),
             mock.patch.object(kg, "_GRID_X_MAX", 3),
         ):
             wide_output = kg.ReduceBlock(
-                trait,
-                count=1,
-                num_o=6,
-                red_pairs=(),
-                kept_pairs=((3, 1), (2, 3)),
+                trait, count=1, num_o=7, red_pairs=(), kept_pairs=((7, 1),)
             )
-            kg._launch(wide_output, ("wide", "wide_output"), [x], [out])
-        self.assertEqual(out, x)
+            kg._launch(wide_output, ("wide", "wide_output"), [x], [out[:7]])
+        self.assertEqual(out[:7], x)
+        self.assertEqual(out[7:], torch.full((2,), -1.0, device="cuda"))
 
     @largeTensorTest("24GB", device="cuda")
     def test_wide_outputs_store_every_output(self):
