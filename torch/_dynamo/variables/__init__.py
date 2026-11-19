@@ -21,6 +21,7 @@ from .builtin import (
     BoolBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    BytesBuiltinVariable,
     ComplexBuiltinVariable,
     DictBuiltinVariable,
     FloatBuiltinVariable,
@@ -30,6 +31,7 @@ from .builtin import (
     IterBuiltinVariable,
     ListBuiltinVariable,
     SetAttrBuiltinVariable,
+    StrBuiltinVariable,
     TypeVariable,
 )
 from .constant import ConstantVariable
@@ -245,6 +247,8 @@ __all__ = [
     "FloatBuiltinVariable",
     "ComplexBuiltinVariable",
     "BoolBuiltinVariable",
+    "StrBuiltinVariable",
+    "BytesBuiltinVariable",
     "BuiltinVariable",
     "ByteArrayBuiltinVariable",
     "ByteArrayIteratorVariable",
