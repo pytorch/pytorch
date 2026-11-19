@@ -697,7 +697,7 @@ def _is_rocm_device(device_type: str | torch.device | None) -> bool:
 @functools.cache
 def _rocm_mall_size(device: int) -> int:
     """Infinity Cache (MALL) bytes of ROCm device `device`: queried from HSA, else
-    looked up by gfx target, else 0."""
+    (including when HSA reports none) looked up by gfx target, else 0."""
     props = torch.cuda.get_device_properties(device)
     try:
         # torch's stub types uuid as str, but on ROCm it is a _CUuuid with .bytes
@@ -705,7 +705,7 @@ def _rocm_mall_size(device: int) -> int:
     except Exception:
         log.debug("HSA cache-size query failed", exc_info=True)
         size = None
-    if size is not None:
+    if size:
         return size
     arch = get_interface_for_device("cuda").get_compute_capability(device)
     return _ROCM_MALL_SIZE_FALLBACK.get(arch, 0)
@@ -837,8 +837,8 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         - estimation_iters: Optionally, the number of iterations to run `_callable`
         during runtime estimation.
         - memory_warmup_iters: Optionally, the number of iterations to flush the L2
-        cache before starting benchmarking. On ROCm each flush reads the buffer
-        twice, so half as many (rounded up) flushes run.
+        cache before starting benchmarking. On ROCm with Triton each flush reads
+        the buffer twice, so half as many (rounded up) flushes run.
         - benchmark_iters: Optionally, the number of iterations to run `_callable`
         during the benchmarking.
         - max_benchmark_duration: Optionally, the maximum duration of the benchmarking,
@@ -896,11 +896,17 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         _callable()
         device_interface.synchronize()
 
+        read_flush = _is_rocm_device(device_type) and has_triton()
+        # Only the read flush covers the Infinity Cache; zero_() flushes just the L2.
+        buffer_size_bytes = (
+            self.get_flush_size(device_type)
+            if read_flush
+            else self.get_device_cache_size(device_type)
+        )
         # On XPU, zeroing a last-level-cache-sized buffer can finish before the
         # host has launched `_callable`, leaking launch latency into the event
         # timing. A larger flush buffer keeps the device busy longer.
         # See https://github.com/pytorch/pytorch/issues/189144
-        buffer_size_bytes = self.get_flush_size(device_type)
         if device_type == "xpu":
             buffer_size_bytes = max(buffer_size_bytes, 64 * 1024 * 1024)
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
@@ -910,7 +916,6 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # Infinity Cache on MI300 (see _rocm_read_flush). Read it twice: one pass
         # does not evict operands the callable has just reused from the Infinity
         # Cache. Without Triton, fall back to zero_().
-        read_flush = _is_rocm_device(device_type) and has_triton()
         buffer = torch.empty(
             buffer_size_bytes // 4,
             dtype=torch.float32 if read_flush else torch.int,
