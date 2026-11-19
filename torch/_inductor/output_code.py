@@ -1019,7 +1019,7 @@ class CompiledFxGraph(OutputCode):
         )
 
         if self._original_gm is None and self._serialized_original_gm is not None:
-            from torch._subclasses.fake_tensor import FakeTensorMode
+            from torch._subclasses import FakeTensorMode
             from torch.fx._graph_pickler import GraphPickler
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -1378,9 +1378,9 @@ class RegionalOutputCode(OutputCode):
         if self._serialized_graph_module is None:
             raise AssertionError("self._serialized_graph_module must not be None")
         # Get fake mode from example inputs
-        from torch._guards import detect_fake_mode
+        from torch._guards import detect_fake_mode, require_python_fake_mode
 
-        fake_mode = detect_fake_mode(example_inputs)
+        fake_mode = require_python_fake_mode(detect_fake_mode(example_inputs))
         if fake_mode is None:
             raise RuntimeError(
                 "Could not detect fake mode from example inputs. "

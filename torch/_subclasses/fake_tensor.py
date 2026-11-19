@@ -366,7 +366,14 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 # Note [Fake mode lookups and CppFakeTensorMode]
 # maybe_get_fake_mode returns a CppFakeTensorMode for a C++ fake or a wrapper of
 # one, active_fake_mode while a C++ mode is installed, and detect_fake_mode in
-# either case. CppFakeTensorMode is not a FakeTensorMode subclass.
+# either case. CppFakeTensorMode is not a FakeTensorMode subclass and has little of
+# its interface yet. Its from_tensor does not support tensors with nested ints.
+# Its converter's from_real_tensor rejects constants that are fakes or not plain
+# tensors, and its converter's from_meta_and_device raises NotImplementedError
+# for a pytype other than Tensor. So a caller that needs a Python
+# FakeTensorMode narrows the result with
+# torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
+# mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
     wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and

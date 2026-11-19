@@ -321,7 +321,7 @@ if TYPE_CHECKING:
 
     from torch._dynamo.precompile_package import PrecompileSession
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.compiler._precompile_types import PrecompileSummary
 
 
@@ -1160,7 +1160,7 @@ def _detect_memory_format(t: torch.Tensor) -> torch.memory_format:
 
 def _fakeify_with_unbacked(
     pb_flat: list[Tensor], user_flat: list[object], marks: list[dict[int, _MarkSpec]]
-) -> tuple[list[object], FakeTensorMode | CppFakeTensorMode]:
+) -> tuple[list[object], FakeTensorMode]:
     """Fakeify the flat capture inputs for an unbacked dynamic-shape capture.
 
     Params/buffers and unmarked dims become static fakes; each mark_unbacked dim becomes
@@ -1677,7 +1677,7 @@ class _Capture:
         user_input_dtypes: list[str | None],
         user_input_devices: list[str | None],
         user_input_bounds: list[_LeafBounds],
-        fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
+        fake_mode: FakeTensorMode | None = None,
     ) -> None:
         self.gm = gm
         self.flat_args = flat_args
