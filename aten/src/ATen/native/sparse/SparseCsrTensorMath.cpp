@@ -525,7 +525,7 @@ CREATE_UNARY_UFUNC_FUNCTIONAL(isnan)
 CREATE_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 template <typename scalar_t>
-static void addmm_out_sparse_csr_native_cpu(
+[[maybe_unused]] static void addmm_out_sparse_csr_native_cpu(
     const Tensor& sparse,
     const Tensor& dense,
     const Tensor& r,
