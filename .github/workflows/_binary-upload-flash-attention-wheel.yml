@@ -12,6 +12,11 @@ on:
         description: 'Run ID from the Windows build workflow (leave empty to skip Windows uploads)'
         required: false
         type: string
+      preview_only:
+        description: 'Only show what would be uploaded in the run summary: no upload job runs, so no approval is asked'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   # Runs before the approval gate of the upload jobs: the environment approval screen
@@ -26,7 +31,6 @@ jobs:
       actions: read
       contents: read
     env:
-      GH_TOKEN: ${{ github.token }}
       LINUX_RUN_ID: ${{ inputs.linux_run_id }}
       WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
     steps:
@@ -61,6 +65,9 @@ jobs:
 
       - name: Show what approval will upload
         shell: bash
+        env:
+          # read by the `gh api` calls below
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -153,7 +160,7 @@ jobs:
   upload-wheel-linux:
     name: "Upload FA3 ${{ matrix.build_cuda_short }} ${{ matrix.arch }}"
     needs: preview
-    if: ${{ inputs.linux_run_id != '' }}
+    if: ${{ inputs.linux_run_id != '' && !inputs.preview_only }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -236,7 +243,7 @@ jobs:
   upload-wheel-windows:
     name: "Upload FA3 ${{ matrix.build_cuda_short }} windows_amd64"
     needs: preview
-    if: ${{ inputs.windows_run_id != '' }}
+    if: ${{ inputs.windows_run_id != '' && !inputs.preview_only }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
