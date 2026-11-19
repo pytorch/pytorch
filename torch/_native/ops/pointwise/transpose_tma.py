@@ -9,19 +9,13 @@ from cutlass.cute.nvgpu import cpasync
 from cutlass.tensor_utils import LayoutEnum
 
 from ...cutedsl import launch as _L
+from ...cutedsl.compat import block_copy, SmemAllocator
 from ...cutedsl.types import NumericType
 from ._transpose import matrix_view
 
 
 if TYPE_CHECKING:
     from tvm_ffi import Function  # pyrefly: ignore[missing-import]
-
-
-try:
-    from cutlass.block import block_copy
-    from cutlass.memory import SmemAllocator
-except ImportError:
-    from cutlass.utils import block_copy, SmemAllocator
 
 
 class _TmaTranspose:

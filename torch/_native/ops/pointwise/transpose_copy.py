@@ -10,6 +10,7 @@ import cutlass.cute as cute
 import torch
 
 from ...cutedsl import launch as _L
+from ...cutedsl.compat import SmemAllocator
 from ...cutedsl.config import (
     TRANSPOSE_TMA_MIN_ELEMS as _TMA_MIN_ELEMS,
     TRANSPOSE_VECTOR_MIN_BYTES as _VECTOR_MIN_BYTES,
@@ -39,12 +40,6 @@ if TYPE_CHECKING:
     from tvm_ffi import Function  # pyrefly: ignore[missing-import]
 
     from .transpose_tma import _TmaTranspose
-
-
-try:
-    from cutlass.memory import SmemAllocator
-except ImportError:
-    from cutlass.utils import SmemAllocator
 
 
 _PAYLOAD_THREADS = 128
