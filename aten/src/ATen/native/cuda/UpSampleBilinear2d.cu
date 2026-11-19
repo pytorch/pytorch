@@ -914,37 +914,48 @@ static void upsample_bilinear2d_out_cuda_template(
 }
 
 #ifdef USE_ROCM
-// The NHWC gather writes every grad_input element and beats zero-fill plus
-// atomic scatter once enough grad_output values land on each grad_input
-// address (4 * o_numel / i_numel). Architectures without a perf sweep keep
-// the scatter. A return of 0 means no gather.
-int64_t nhwc_gather_min_contributions() {
+// Contributions per grad_input address, 4 * o_numel / i_numel, between which
+// the NHWC gather beats zero-fill plus atomic scatter on channels_last.
+//
+// Lower bound: below it the scatter is barely contended and launches fewer
+// threads. 0 means the architecture has no perf sweep and keeps the scatter.
+// On gfx942, bf16/fp32 gather loses at ratios 4.5-6.25 and wins from 16, while
+// fp16 wins from 4, because its packed 16-bit atomics are slow under contention.
+//
+// Upper bound: each gather thread loops over its whole grad_output window, so
+// with a tiny input plane the window is large and the grid small. A gfx950
+// sweep of pyramid-pooling shapes put the bf16/fp32 cut between the last
+// winning ratio (~455) and the first losing one (~1820). fp16 gather won at
+// every ratio measured, so it has no cap (0). Architectures without a
+// high-ratio sweep use the gfx950 cap.
+struct NhwcGatherBounds {
+  int64_t min_contributions;
+  int64_t max_contributions;
+};
+
+NhwcGatherBounds nhwc_gather_bounds(at::ScalarType dtype) {
+  const bool is_half = dtype == at::ScalarType::Half;
+  const int64_t max_contributions = is_half ? 0 : 512;
   const auto& hooks = at::detail::getCUDAHooks();
   if (hooks.isGPUArch({"gfx950"})) {
-    return 6;
+    return {6, max_contributions};
   }
   if (hooks.isGPUArch({"gfx942"})) {
-    return 4;
+    return {is_half ? 4 : 16, max_contributions};
   }
   if (hooks.isGPUArch({"gfx1250"})) {
-    return 2;
+    return {2, max_contributions};
   }
-  return 0;
+  return {0, 0};
 }
 
-// Each gather thread loops over its whole grad_output window. Above this many
-// contributions per grad_input address the window is large and the grid small,
-// and the bf16/fp32 scatter is faster. fp16 scatter is slow enough that gather
-// wins at every measured ratio. A return of 0 means no cap. 512 is from the
-// gfx950 sweep in perf/ratio_sweep_high_mi355x.md: it sits above the last
-// winning pyramid shape (ratio ~455) and below the first losing one (~1820).
-// No higher or lower ratio kept every bf16/fp32 plane above 0.95x. The same
-// value applies to every architecture that reaches this gate.
-int64_t nhwc_gather_max_contributions(at::ScalarType dtype) {
-  if (dtype == at::ScalarType::Half) {
-    return 0;
-  }
-  return 512;
+bool use_nhwc_gather(const Tensor& grad_output, const Tensor& grad_input) {
+  const NhwcGatherBounds bounds = nhwc_gather_bounds(grad_output.scalar_type());
+  const int64_t contributions_x_input = 4 * grad_output.numel();
+  return bounds.min_contributions > 0 &&
+      contributions_x_input >= bounds.min_contributions * grad_input.numel() &&
+      (bounds.max_contributions == 0 ||
+       contributions_x_input < bounds.max_contributions * grad_input.numel());
 }
 
 // Writes every grad_input element, so the caller skips zero-fill.
@@ -985,9 +996,14 @@ void upsample_bilinear2d_backward_gather_nhwc_launch(
       ? num_input_elements / vector_size
       : num_input_elements;
   const auto* properties = at::cuda::getCurrentDeviceProperties();
+  // HIP rejects or silently drops a launch of 2^32 or more work-items. The
+  // kernel is grid-stride, and a dropped launch would leave grad_input unset.
+  constexpr size_t kHipMaxGlobalWorkSize = 4294967295ULL;  // UINT32_MAX
+  const size_t max_blocks = std::min(
+      static_cast<size_t>(properties->maxGridSize[0]),
+      kHipMaxGlobalWorkSize / static_cast<size_t>(num_threads));
   const size_t num_blocks = std::min(
-      ceil_div(work_items, static_cast<size_t>(num_threads)),
-      static_cast<size_t>(properties->maxGridSize[0]));
+      ceil_div(work_items, static_cast<size_t>(num_threads)), max_blocks);
   if (vectorized) {
     upsample_bilinear2d_backward_gather_nhwc_out_frame<
         scalar_t, accscalar_t, vector_size><<<num_blocks, num_threads, 0, stream>>>(
@@ -1048,21 +1064,11 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   const auto memory_format = grad_output_.suggest_memory_format();
 
 #ifdef USE_ROCM
-  // Contended atomics: once enough contributions land on each grad_input
-  // address, the gather, which writes every element, beats zero-fill plus
-  // atomic scatter. A cut of 0 keeps the scatter.
-  const int64_t min_contributions = nhwc_gather_min_contributions();
-  const int64_t max_contributions =
-      nhwc_gather_max_contributions(grad_output_.scalar_type());
-  if (min_contributions > 0 &&
-      grad_output_.sizes() != grad_input.sizes() &&
+  // The memory-format condition must match the channels_last heuristic below.
+  if (grad_output_.sizes() != grad_input.sizes() &&
       memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 &&
       grad_input.is_contiguous(memory_format) &&
-      4 * grad_output_.numel() >=
-          min_contributions * grad_input.numel() &&
-      (max_contributions == 0 ||
-       4 * grad_output_.numel() <
-           max_contributions * grad_input.numel())) {
+      use_nhwc_gather(grad_output_, grad_input)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16,
         grad_output_.scalar_type(), "upsample_bilinear2d_backward_gather_nhwc",
