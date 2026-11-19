@@ -93,11 +93,14 @@ struct TcfgTensorInfo {
   // does not count that (one made under inference mode).
   const void* data;
   uint64_t version;
+  // Whether the storage of the tensor is waiting to tell of the next request
+  // for a writable pointer to its memory (tensor_watch).
+  int32_t watched;
 };
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 12
+#define TCFG_API_VERSION 13
 
 // What frame_hook registers. It is offered the frame the interpreter made
 // for a call of func, with the arguments bound and nothing run. It returns 0
@@ -233,6 +236,18 @@ struct TcfgApi {
   // (2) and for the CPU (3), the default dtype (bits 8 to 15) and, from bit
   // 16, how many torch function modes are active.
   uint64_t (*call_modes)();
+
+  // Writes to the memory of a tensor that its version counter does not count
+  // (through `p.data`, say). With arm, has the storage of the tensor tell of
+  // the next request for a writable pointer to its memory, unless it is
+  // doing so already, and returns the number it was given when it was asked
+  // to, which no storage was given before; without, only returns that
+  // number. 0 if the storage is not waiting to tell: it was written to
+  // since, was never asked, or cannot be (it shares its memory with a lazy
+  // clone, which tells in its own way). watch_serial is the last number
+  // given.
+  uint64_t (*tensor_watch)(PyObject* tensor, int32_t arm);
+  uint64_t (*watch_serial)();
 };
 
 } // extern "C"

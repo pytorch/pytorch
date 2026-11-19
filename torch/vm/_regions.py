@@ -81,8 +81,10 @@ checks on every call that they are the tensors it was made with and that
 nothing wrote to them: ``tensor_stamp`` hashes, per tensor, the object, the
 address of its memory and its version counter, and each tensor has a lazy
 clone that is never read, so that a write by anything but an in-place
-operation on the tensor itself still moves it to other memory (``_watched``).
-A variant whose tensors changed is made again with those as inputs.
+operation on the tensor itself still moves it to other memory; on a GPU,
+where a tensor that shares its memory is slower to read, its storage is
+asked to tell of such a write instead (``_watched``). A variant whose tensors
+changed is made again with those as inputs.
 """
 
 import ast
@@ -2575,9 +2577,10 @@ class _Variant:
         self.state: Callable[[list[Any]], list[Any]] | None = None
         self.stamp: int | None = None
         self.positions: list[int] = []
-        # Per built-in tensor: which object it was, its version, and the
-        # clone that keeps its memory shared (see ``_watched``).
-        self.watch: list[tuple[int, int, torch.Tensor]] = []
+        # Per built-in tensor: which object it was, its version, the clone
+        # that keeps its memory shared, and 0; or, on a GPU, the tensor
+        # itself and the number it is watched under (see ``_watched``).
+        self.watch: list[tuple[int, int, torch.Tensor, int]] = []
         self.moves = 0
         # Which tensors of a call the graph writes to in place.
         self.written: list[int] = []
@@ -2621,7 +2624,11 @@ class _Variant:
         self.state = _picker(positions)
         self.positions = positions
         tensors = [flat[i] for i in positions]
-        self.watch = [(id(t), t._version, clone) for t, clone in zip(tensors, clones)]
+        number = _runtime.tensor_watch
+        self.watch = [
+            (id(t), t._version, clone, number(t, False) if clone is t else 0)
+            for t, clone in zip(tensors, clones)
+        ]
         self.stamp = _runtime.tensor_stamp(tensors)
 
     def stale(self, inputs: _Inputs) -> list[int] | None:
@@ -2633,7 +2640,9 @@ class _Variant:
         it, ``.numpy()`` and other compiled code ask for a pointer they
         could write through, which is all that the clone sees. Such a tensor
         is compared with what it was and watched anew; one that keeps moving
-        counts as changed."""
+        counts as changed. On a GPU there is nothing to compare with: a
+        tensor that is no longer watched under its number counts as
+        changed."""
         if self.state is None:
             return None
         known = inputs.known if inputs.unwritten else None
@@ -2649,11 +2658,15 @@ class _Variant:
                 self.unwritten = known
             return None
         self.unwritten = None
-        address = torch._C._data_address
+        address, watched = torch._C._data_address, _runtime.tensor_watch
         changed, moved = [], []
-        for k, (tensor, (who, version, clone)) in enumerate(zip(tensors, self.watch)):
+        for k, (tensor, watch) in enumerate(zip(tensors, self.watch)):
+            who, version, clone, number = watch
             if id(tensor) != who or tensor.is_inference() or tensor._version != version:
                 changed.append(k)
+            elif number:
+                if watched(tensor, False) != number:
+                    changed.append(k)
             elif address(tensor) != address(clone):
                 moved.append(k)
         with torch.no_grad():
@@ -2665,8 +2678,8 @@ class _Variant:
             if changed:
                 return [self.positions[k] for k in changed]
             for k in moved:
-                who, version, _ = self.watch[k]
-                self.watch[k] = (who, version, tensors[k]._lazy_clone())
+                who, version = self.watch[k][:2]
+                self.watch[k] = (who, version, tensors[k]._lazy_clone(), 0)
         self.stamp = _runtime.tensor_stamp(tensors)
         return None
 
@@ -4252,17 +4265,30 @@ def _watched(
     looks at. Returns the positions this can be done for (not for memory
     that is shared with another process or belongs to a NumPy array, where
     writes cannot be seen, nor for tensors without a version counter), and
-    the clones."""
+    the clones.
+
+    Not on a GPU: there a tensor that shares its memory is asked, by whatever
+    reads it, which stream it is read on, and every eager call of the model
+    would pay that for every weight from then on. The storage of such a
+    tensor is asked to tell of the next request for a writable pointer
+    instead (``tensor_watch``), which costs a read nothing and a write no
+    copy, and in the place of a clone there is the tensor itself: nothing
+    else keeps its memory from being given to another."""
     kept, watch = [], []
     with torch.no_grad():
         for position in positions:
             tensor = flat[position]
             if tensor.is_inference() or tensor.layout is not torch.strided:
                 continue
-            try:
-                watch.append(tensor._lazy_clone())
-            except RuntimeError:
-                continue
+            if tensor.is_cuda:
+                if not _runtime.tensor_watch(tensor, True):
+                    continue
+                watch.append(tensor)
+            else:
+                try:
+                    watch.append(tensor._lazy_clone())
+                except RuntimeError:
+                    continue
             kept.append(position)
     return kept, watch
 
@@ -4318,13 +4344,17 @@ def _built_in(
     its own where the graph has inputs. The buffers are lazy clones: what
     the backend makes reads some through pointers it could write through,
     which gives those memory of their own, and would do the same, call
-    after call, to the tensors of the module (see ``_watched``)."""
+    after call, to the tensors of the module (see ``_watched``). On a GPU
+    they are copies from the start: there such a read of a tensor of the
+    module would look like a write to it."""
     graph = deepcopy(graph)
     placeholders = [node for node in graph.graph.nodes if node.op == "placeholder"]
     for position in positions:
         node, name = placeholders[position], f"_state_{position}"
+        tensor = flat[position]
         with torch.no_grad():
-            graph.register_buffer(name, flat[position]._lazy_clone())
+            own = tensor.detach().clone() if tensor.is_cuda else tensor._lazy_clone()
+        graph.register_buffer(name, own)
         with graph.graph.inserting_before(node):
             constant = graph.graph.get_attr(name)
         node.replace_all_uses_with(constant)
