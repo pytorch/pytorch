@@ -61,7 +61,7 @@ from torch.testing._internal.common_device_type import (
     preserves_device_selection,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
-    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
+    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf, skipXPUIf)
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -570,16 +570,20 @@ class TestTorchDeviceType(TestCase):
             fake.data_ptr()
         self.assertFalse(torch._C._has_storage_data(fake))
 
-    @onlyCUDA
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    @onlyAccelerator
+    @unittest.skipIf(
+        not (TEST_CUDA_GRAPH or (torch.xpu.is_available() and hasattr(torch.xpu, "XPUGraph"))),
+        "CUDA >= 11.0 or ROCm >= 5.3 or XPU graph support required for graphs",
+    )
     @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6320")
     def test_has_storage_data_ignores_cow_read_check_in_cuda_graph_capture(self, device):
         # Reading a COW storage made before a capture raises inside the capture.
         cow = torch._lazy_clone(torch.arange(4.0, device=device))
         self.assertTrue(torch._C._is_cow_tensor(cow))
         out = torch.zeros(4, device=device)
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+        g = torch.accelerator.Graph()
+        with torch.get_device_module(device).graph(g):
             with self.assertRaisesRegex(RuntimeError, "Materialize COW graph inputs"):
                 cow.const_data_ptr()
             self.assertTrue(torch._C._has_storage_data(cow))
@@ -1600,7 +1604,8 @@ class TestTorchDeviceType(TestCase):
     # The generic NN test covers contiguous and channels-last double precision,
     # including the scalar channels-last fallback. Keep dtype-specific vector
     # paths and scale-factor recomputation here.
-    @onlyCUDA
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6319")
     @skipIfRocm
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @parametrize("case", [
@@ -2214,7 +2219,8 @@ class TestTorchDeviceType(TestCase):
         x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
         self.assertTrue(x.min() > 0)
 
-    @onlyCUDA
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5955")
     @dtypes(torch.float, torch.bfloat16)
     def test_exponential_tails(self, device, dtype):
         # n_small catches q = -log(u) with u rounded near 1 to fp32's 2^-24 grid, which never produces q < 2^-24
@@ -7228,7 +7234,7 @@ class TestTorchDeviceType(TestCase):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
             self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
-    @skipIfXpu(msg="XPU split_with_sizes_copy.out still uses stride(dim) as the chunk size")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6321")
     def test_split_with_sizes_copy_out_non_canonical_layouts(self, device):
         def check(x, split_sizes, dim, out):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
