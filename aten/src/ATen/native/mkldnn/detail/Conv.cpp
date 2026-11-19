@@ -901,7 +901,8 @@ void backward_weights_compute_impl(
   // diff_weights not init in FW or has same desc with expected desc.
   if (diff_weights.is_empty() ||
       diff_weights.get_desc() == expected_diff_weights_desc) {
-    // May replace diff_weights's buffer and layout when they differ from expected_diff_weights_desc.
+    // May replace diff_weights's buffer and layout when they differ from
+    // expected_diff_weights_desc.
     diff_weights.reinit_if_possible(expected_diff_weights_desc);
     expected_diff_weights = diff_weights;
   } else {
@@ -911,7 +912,8 @@ void backward_weights_compute_impl(
   ideep::tensor scratchpad(pd.scratchpad_desc());
 
   if (with_diff_bias) {
-    // May replace diff_bias's buffer and layout when they differ from pd.diff_bias_desc().
+    // May replace diff_bias's buffer and layout when they differ from
+    // pd.diff_bias_desc().
     diff_bias.reinit_if_possible(pd.diff_bias_desc());
     dnnl::convolution_backward_weights(pd).execute(
         ideep::stream::default_stream(),
@@ -933,7 +935,8 @@ void backward_weights_compute_impl(
   if (diff_weights.get_desc() != expected_diff_weights_desc) {
     if (!diff_weights.get_desc().has_same_shape_as(
             expected_diff_weights_desc)) {
-      // May replace diff_weights's buffer and layout when they differ from expected_diff_weights_desc.
+      // May replace diff_weights's buffer and layout when they differ from
+      // expected_diff_weights_desc.
       diff_weights.reinit_if_possible(expected_diff_weights_desc);
     }
     diff_weights.feed_from(expected_diff_weights);
@@ -1251,7 +1254,8 @@ void convolution_backward_data_compute_v2(
 
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
   auto expected_weights = weights_.reorder_if_differ_in(pd.weights_desc());
-  // May replace diff_src's buffer and layout when they differ from pd.diff_src_desc().
+  // May replace diff_src's buffer and layout when they differ from
+  // pd.diff_src_desc().
   diff_src.reinit_if_possible(pd.diff_src_desc());
 
   ideep::tensor scratchpad(pd.scratchpad_desc());

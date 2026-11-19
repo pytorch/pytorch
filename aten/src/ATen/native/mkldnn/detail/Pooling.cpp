@@ -120,7 +120,8 @@ void pooling_backward(
       op_attr);
 
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
-  // May replace diff_src's buffer and layout when they differ from pd.diff_src_desc().
+  // May replace diff_src's buffer and layout when they differ from
+  // pd.diff_src_desc().
   diff_src.reinit_if_possible(pd.diff_src_desc());
 
   ideep::tensor scratchpad(pd.scratchpad_desc());
