@@ -642,6 +642,18 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
   }
 }
 
+MPSScalar getMPSScalar(const TensorBase& cpu_scalar) {
+  TORCH_CHECK(cpu_scalar.dim() == 0, "Passed CPU tensor to MPS op");
+  const auto type = cpu_scalar.scalar_type();
+  if (type == kDouble || type == kComplexDouble) [[unlikely]] {
+    return getMPSScalar(Tensor(cpu_scalar).item(), type);
+  }
+  MPSScalar s{.size = static_cast<size_t>(cpu_scalar.element_size()), .type = type};
+  TORCH_CHECK(s.size <= sizeof(s.value), "Unsupported CPU scalar type ", type);
+  std::memcpy(&s.value, cpu_scalar.const_data_ptr(), s.size);
+  return s;
+}
+
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
   scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
   return [[[MPSGraphTensorData alloc] initWithMTLBuffer:scalar.getMTLBuffer()
@@ -1826,25 +1838,7 @@ void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
 }
 
 void MetalKernelFunction::setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors) {
-  std::vector<uint64_t> arguments;
-  arguments.reserve(tensors.size());
-  for (const auto& t : tensors) {
-    if (t.device().is_cpu()) {
-      TORCH_CHECK_VALUE(t.dim() == 0 && t.element_size() <= sizeof(uint64_t), "Expected MPS tensors or CPU scalars");
-      std::memcpy(&arguments.emplace_back(0), t.const_data_ptr(), t.element_size());
-      if (t.scalar_type() == kDouble) {
-        arguments.back() = c10::bit_cast<uint32_t>(static_cast<float>(*t.const_data_ptr<double>()));
-      }
-      continue;
-    }
-    arguments.push_back(reinterpret_cast<uint64_t>(get_tensor_gpu_address(t)));
-    // Buffers reached only through an argument buffer must be declared, or Metal neither orders the
-    // kernel after pending writes to them nor retains them, which the allocator uses to track buffers in use
-    if (const auto buffer = getMTLBufferStorage(t)) {
-      [encoder useResource:buffer usage:MTLResourceUsageRead | MTLResourceUsageWrite];
-    }
-  }
-  setArg(idx, arguments);
+  mtl_setTensorList(encoder, tensors, idx);
 }
 
 void MetalKernelFunction::setErrorBufferIndex(unsigned idx) {
