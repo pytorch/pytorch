@@ -5605,18 +5605,22 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             torch.tensordot(a, b, dims=([1], [0]), out=c)
             self.assertEqual(len(w), 1)
 
-    # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @largeTensorTest('16GB', device='cuda')
+    # Uses ~1.55GB peak memory; 4GB gives ample headroom and @serialTest
+    # prevents memory contention with parallel CI workers.
+    @largeTensorTest('4GB')
+    @serialTest()
     def test_large_bmm_mm_backward(self, device):
-        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
-        B = torch.randn([1024, 65536], device="cuda", requires_grad=True)
-        G = torch.randn([1024, 2, 65536], device="cuda")
+        A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
+        B = torch.randn([1024, 65536], device=device, requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device=device)
 
         # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
         (A @ B).backward(G)
 
-    # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @largeTensorTest('16GB', device='cuda')
+    # Uses ~1.55GB peak memory; 4GB gives ample headroom and @serialTest
+    # prevents memory contention with parallel CI workers.
+    @largeTensorTest('4GB')
+    @serialTest()
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
         B = torch.randn([1, 1024, 65536], device=device, requires_grad=True)
