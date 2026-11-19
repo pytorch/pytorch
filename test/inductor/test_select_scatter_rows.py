@@ -9,13 +9,15 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 
 
 aten = torch.ops.aten
 
 
 class TestSelectScatterRows(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @config.patch(force_disable_caches=True)
     @parametrize("indices", [(2, 0, 3), (-1, 1, 0), (3, 1, 0, 2)])
     @parametrize("computed", [False, True])
