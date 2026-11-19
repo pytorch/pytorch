@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -191,8 +192,9 @@ class TestGetCoverage(TestCase):
             self.assertIs(aot_manifest.get_coverage("fakeop.values", "CUDA"), base)
             self.assertIs(aot_manifest.get_coverage("fakeop_", "CUDA"), base)
 
+    @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
     def test_router_declines_covered_calls_once(self) -> None:
-        from test.python_native.test_registry import TestRegistryRuntime
+        from test_registry import TestRegistryRuntime
 
         runtime = TestRegistryRuntime("runTest")
         runtime.setUp()
