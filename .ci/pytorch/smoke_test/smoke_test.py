@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import json
+import math
 import os
 import platform
 import re
@@ -241,6 +243,90 @@ def find_torch_cuda_toolkit_metadata_version() -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def get_matrix_python_versions() -> set[str] | None:
+    """Python versions in FULL_PYTHON_VERSIONS of generate_binary_build_matrix.py.
+
+    The free-threaded "t" suffix is dropped since "3.14t" shares the "3.14" classifier.
+    Returns None if the script is not available (e.g. wheel tested outside a checkout).
+    """
+    matrix_script = (
+        PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+    )
+    if not matrix_script.exists():
+        return None
+    for node in ast.parse(matrix_script.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "FULL_PYTHON_VERSIONS"
+            for t in node.targets
+        ):
+            return {v.removesuffix("t") for v in ast.literal_eval(node.value)}
+    raise RuntimeError(f"FULL_PYTHON_VERSIONS not found in {matrix_script}")
+
+
+def check_python_metadata() -> None:
+    """Validate Requires-Python and Python version Classifiers in torch wheel METADATA.
+
+    They must agree with each other, include the running interpreter and, when
+    generate_binary_build_matrix.py is available, match its FULL_PYTHON_VERSIONS 1:1.
+    """
+    from importlib import metadata
+
+    try:
+        torch_metadata = metadata.metadata("torch")
+    except metadata.PackageNotFoundError:
+        print("torch distribution metadata not found, skipping Python metadata check")
+        return
+
+    requires_python = torch_metadata.get("Requires-Python", "")
+    match = re.fullmatch(r">=\s*3\.(\d+)", requires_python.strip())
+    if match is None:
+        raise RuntimeError(
+            f"Unexpected Requires-Python in torch wheel metadata: {requires_python!r}, "
+            "expected '>=3.X'"
+        )
+    min_version = f"3.{match.group(1)}"
+
+    classifier_versions = {
+        c.rsplit("::", 1)[1].strip()
+        for c in torch_metadata.get_all("Classifier", [])
+        if re.fullmatch(r"Programming Language :: Python :: 3\.\d+", c)
+    }
+    if not classifier_versions:
+        raise RuntimeError("No Python version Classifier in torch wheel metadata")
+
+    def sort_key(version: str) -> int:
+        return int(version.split(".")[1])
+
+    errors = []
+    if min(classifier_versions, key=sort_key) != min_version:
+        errors.append(
+            f"Requires-Python is {requires_python!r} but the lowest Python Classifier "
+            f"is {min(classifier_versions, key=sort_key)}"
+        )
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if current not in classifier_versions:
+        errors.append(f"Running Python {current} has no matching Classifier")
+    matrix_versions = get_matrix_python_versions()
+    if matrix_versions is None:
+        print("generate_binary_build_matrix.py not found, skipping build matrix check")
+    elif classifier_versions != matrix_versions:
+        not_in_metadata = sorted(matrix_versions - classifier_versions, key=sort_key)
+        not_in_matrix = sorted(classifier_versions - matrix_versions, key=sort_key)
+        errors.append(
+            "Python Classifiers do not match FULL_PYTHON_VERSIONS in "
+            f"generate_binary_build_matrix.py: missing from metadata {not_in_metadata}, "
+            f"missing from matrix {not_in_matrix}"
+        )
+    if errors:
+        raise RuntimeError(
+            "torch wheel Python metadata check failed:\n  " + "\n  ".join(errors)
+        )
+    print(
+        f"Python metadata check passed: Requires-Python {requires_python}, "
+        f"Classifiers {sorted(classifier_versions, key=sort_key)}"
+    )
 
 
 def get_expected_cuda_toolkit_version_windows(cuda_version: str) -> str | None:
@@ -580,6 +666,102 @@ def test_linalg(device="cpu") -> None:
             torch.linalg.svd(A)
 
 
+def _inv_eps(r: float, a: float = 600.0, e_in: float = 12.25, n: int = 15):
+    """Fourier (Toeplitz) matrix of 1/epsilon for a circular inclusion of radius r.
+
+    A 961x961 Hermitian matrix with condition number 12.25.
+    """
+    m = torch.arange(-n, n + 1, dtype=torch.float64)
+    mx, my = (v.reshape(-1) for v in torch.meshgrid(m, m, indexing="ij"))
+    dx = mx[:, None] - mx[None, :]
+    dy = my[:, None] - my[None, :]
+    g = 2 * math.pi / a * torch.hypot(dx, dy)
+    f = math.pi * r**2 / a**2
+    # g == 0 gives 0/0 = nan, which torch.where discards in favor of f.
+    s = torch.where(
+        g == 0,
+        torch.full_like(g, f),
+        2 * f * torch.special.bessel_j1(g * r) / (g * r),
+    )
+    return ((-1.0) ** (dx + dy) * (1 / e_in - 1) * s + (g == 0)).to(torch.complex128)
+
+
+def _mkl_version() -> tuple[int, int] | None:
+    """(year, minor) of the MKL PyTorch is linked with, e.g. (2026, 2).
+
+    Parsed from the line torch.__config__.show() prints under AT_MKL_ENABLED
+    (aten/src/ATen/Version.cpp), which comes from mkl_get_version_string: "Intel(R)
+    oneAPI Math Kernel Library Version 2026.2-Product Build ...".
+    """
+    match = re.search(
+        r"Math Kernel Library Version (\d+)\.(\d+)", torch.__config__.show()
+    )
+    return (int(match[1]), int(match[2])) if match else None
+
+
+def check_mkl_version() -> tuple[int, int] | None:
+    """Fail if PyTorch is linked with an MKL older than 2026.2, which has the LAPACK
+    DLASD2 bug (https://github.com/pytorch/pytorch/issues/202596).
+
+    Returns the version, or None for a build without MKL (nothing to check).
+    """
+    if not torch.backends.mkl.is_available():
+        return None
+    mkl_version = _mkl_version()
+    if mkl_version is None:
+        # Every build with MKL prints it, so a missing line means the format changed.
+        raise RuntimeError(
+            "PyTorch is built with MKL but torch.__config__.show() has no MKL "
+            "version line to check"
+        )
+    if mkl_version < (2026, 2):
+        raise RuntimeError(
+            f"PyTorch is linked with MKL {mkl_version[0]}.{mkl_version[1]}, which has "
+            "the LAPACK DLASD2 bug (fixed in MKL 2026.2): torch.linalg.svd can fail "
+            "on well-conditioned matrices"
+        )
+    print(f"MKL {mkl_version[0]}.{mkl_version[1]}: has the LAPACK DLASD2 fix")
+    return mkl_version
+
+
+def test_linalg_svd_dlasd2() -> None:
+    """Regression test for https://github.com/pytorch/pytorch/issues/202596
+
+    MKL before 2026.2 (like Reference-LAPACK before PR #1140) has a DLASD2
+    deflation bug: ?gesdd with jobz='A'/'S' returns info=1 for tightly clustered
+    singular values, so torch.linalg.svd raises LinAlgError on a well-conditioned
+    matrix. Whether a dense matrix hits it depends on last-bit rounding, which
+    changes with the ISA and the thread count; with the affected MKL, one thread
+    and r=158.05 fail on an AVX-512 machine.
+    """
+    if not torch.backends.mkl.is_available():
+        # Other builds (OpenBLAS, Accelerate) bring their own LAPACK, which is
+        # not what this checks.
+        print("Skipping smoke_test_linalg_svd_dlasd2: PyTorch is not built with MKL")
+        return
+    print("Testing smoke_test_linalg_svd_dlasd2")
+    # The numeric reproducer below can pass with an affected MKL, because it
+    # depends on rounding, so check the version directly as well.
+    mkl_version = check_mkl_version()
+    A = _inv_eps(158.05)
+    num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        try:
+            U, S, Vh = torch.linalg.svd(A)
+        except torch.linalg.LinAlgError as e:
+            raise RuntimeError(
+                "torch.linalg.svd failed on a well-conditioned matrix with MKL "
+                f"{mkl_version[0]}.{mkl_version[1]}, which should have the DLASD2 fix: "
+                f"the bug is still there or has come back. {e}"
+            ) from e
+    finally:
+        torch.set_num_threads(num_threads)
+    recon_err = (A - U @ torch.diag(S).to(U.dtype) @ Vh).abs().max().item()
+    if not math.isfinite(recon_err) or recon_err > 1e-9:
+        raise AssertionError(f"SVD reconstruction error too large: {recon_err}")
+
+
 def test_sdpa(device="cpu", dtype=torch.float16) -> None:
     """Regression test for https://github.com/pytorch/pytorch/issues/167602
     Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
@@ -740,6 +922,11 @@ def smoke_test_modules(package: str):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--mkl-version-only",
+        help="Only check that the MKL PyTorch is linked with has the LAPACK DLASD2 fix",
+        action="store_true",
+    )
+    parser.add_argument(
         "--package",
         help="Package to include in smoke testing",
         type=str,
@@ -773,6 +960,12 @@ def parse_args():
 def main() -> None:
     options = parse_args()
     print(f"torch: {torch.__version__}")
+    if options.mkl_version_only:
+        # For wheel types whose tests skip the rest of this file (Linux XPU and
+        # ROCm) and for every Windows wheel, run before the no-GPU early exit in
+        # smoke_test.bat.
+        check_mkl_version()
+        return
     print(torch.__config__.parallel_info())
     # All PyTorch binary builds should be built with OpenMP
     if not torch.backends.openmp.is_available():
@@ -781,6 +974,7 @@ def main() -> None:
     check_version(options.package)
     smoke_test_conv2d()
     test_linalg()
+    test_linalg_svd_dlasd2()
     test_numpy()
     test_sdpa()
 
@@ -803,6 +997,7 @@ def main() -> None:
 
     check_wheel_platform_tag()
     check_mac_wheel_minos()
+    check_python_metadata()
 
 
 if __name__ == "__main__":
