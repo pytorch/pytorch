@@ -9,7 +9,14 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS, xfailIf
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+    xfailIf,
+)
+from torch.testing._internal.inductor_utils import RUN_CPU
 
 
 # TORCHINDUCTOR_LITE_MODE=1 (the inductor_aoti_fallback CI config) falls back to
@@ -24,6 +31,16 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+if not RUN_CPU:
+    # Every test in this file is a CPU test.
+    _reason = (
+        "CPU tests not selected: no C++ compiler, or the device filter excludes cpu"
+    )
+    if __name__ == "__main__":
+        sys.stderr.write(_reason + "\n")
+        sys.exit(0)
+    raise unittest.SkipTest(_reason)
 
 try:
     try:
@@ -421,6 +438,7 @@ if LITE_MODE:
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -441,6 +459,7 @@ copy_tests(
 class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
     TestCase
 ):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -470,6 +489,8 @@ if IS_FBCODE:
 
 
 class TestCppWrapperCpuSelection(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     # https://github.com/pytorch/pytorch/issues/199205
     @xfailIf(LITE_MODE)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
