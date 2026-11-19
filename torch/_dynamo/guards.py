@@ -389,11 +389,11 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
 def _method_identity_guards_filtered(
     tx: InstructionTranslatorBase, *, binding_only: bool = False
 ) -> bool:
-    if tx.output.package is not None:
-        return True
     guards = tx.output.tracing_context.guards_context
     if guards.skip_install:
         return not (binding_only and guards.tracing_reuse_hash)
+    if tx.output.package is not None:
+        return True
     if tx.export or torch.compiler.is_exporting():
         # Export can call a bound method on the captured module. Its graph
         # still cannot preserve observations of process-local wrapper identities.
