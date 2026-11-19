@@ -329,20 +329,13 @@ inline torch::stable::Tensor transpose(
 /// tensor method version (t.zero_()), this is called as a function: zero_(t).
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.9.
 ///
 /// @param self The tensor to fill with zeros.
 /// @return The input tensor, now filled with zeros.
 inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
-  const auto num_args = 1;
-  std::array<StableIValue, num_args> stack{torch::stable::detail::from(self)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::zero_", "", stack.data(), TORCH_ABI_VERSION));
-#else
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
-#endif
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(self.get()));
+  return self;
 }
 
 /// Stable version of the copy_ op.
@@ -352,6 +345,7 @@ inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
 /// broadcastable.
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The destination tensor (modified in-place).
 /// @param src The source tensor to copy from.
@@ -362,19 +356,9 @@ inline torch::stable::Tensor copy_(
     torch::stable::Tensor& self,
     const torch::stable::Tensor& src,
     std::optional<bool> non_blocking = std::nullopt) {
-  const auto num_args = 3;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(src),
-      torch::stable::detail::from(non_blocking.value_or(false))};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::copy_", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
-#endif
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+      aoti_torch_copy_(self.get(), src.get(), non_blocking.value_or(false)));
+  return self;
 }
 
 /// Stable version of the clone op.
@@ -383,24 +367,16 @@ inline torch::stable::Tensor copy_(
 /// and type as the input, but is stored in a new memory location.
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @note Optional memory_format kwarg support
 ///
 /// @param self The input tensor to clone.
 /// @return A new tensor with copied data.
 inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
-  const auto num_args = 2;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(std::nullopt)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::clone", "", stack.data(), TORCH_ABI_VERSION));
-#else
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::clone", "", stack.data()));
-#endif
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
 }
 
 /// Stable version of the flatten.using_ints op.
@@ -935,6 +911,7 @@ inline torch::stable::Tensor contiguous(
 /// a simpler overload that only takes dtype is available.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -951,17 +928,29 @@ inline torch::stable::Tensor new_empty(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  const auto num_args = 6;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(size),
-      torch::stable::detail::from(dtype),
-      torch::stable::detail::from(layout),
-      torch::stable::detail::from(device),
-      torch::stable::detail::from(pin_memory)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::new_empty", "", stack.data(), TORCH_ABI_VERSION));
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type_val = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_empty(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type_val : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
 }
 
 /// Stable version of the new_zeros op (2.10 version with full kwargs).
@@ -971,6 +960,7 @@ inline torch::stable::Tensor new_empty(
 /// a simpler overload that only takes dtype is available.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -987,17 +977,29 @@ inline torch::stable::Tensor new_zeros(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  const auto num_args = 6;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(size),
-      torch::stable::detail::from(dtype),
-      torch::stable::detail::from(layout),
-      torch::stable::detail::from(device),
-      torch::stable::detail::from(pin_memory)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::new_zeros", "", stack.data(), TORCH_ABI_VERSION));
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type_val = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_zeros(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type_val : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
 }
 
 /// Stable version of the sum.dim_IntList op.

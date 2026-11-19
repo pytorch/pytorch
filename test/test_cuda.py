@@ -83,6 +83,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
@@ -871,6 +872,16 @@ print(t.is_pinned())
         self.assertGreaterEqual(
             props.shared_memory_per_block_optin, props.shared_memory_per_block
         )
+
+    def test_cuda_xcc_count(self):
+        reported = TEST_WITH_ROCM and getRocmVersion() >= (7, 0)
+        for device in range(torch.cuda.device_count()):
+            xcc_count = torch.cuda.get_device_properties(device).xcc_count
+            if not reported:
+                self.assertIsNone(xcc_count)
+            else:
+                self.assertIsInstance(xcc_count, int)
+                self.assertGreaterEqual(xcc_count, 1)
 
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
