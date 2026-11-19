@@ -3434,9 +3434,10 @@ class GuardBuilder(GuardBuilderBase):
 
         def check_fn(x: object) -> bool:
             # Mirrors _constant_subclass_base_value: base_type is a union of
-            # int/float/str, none of which typecheck against an opaque arg,
+            # int/float/str/complex, none of which typecheck against an opaque arg,
             # but x is an instance of base_type by construction.
-            return base_type(x) == base_value  # pyrefly: ignore[bad-argument-type]
+            # pyrefly: ignore[bad-argument-type, no-matching-overload]
+            return base_type(x) == base_value
 
         self.get_guard_manager(guard).add_lambda_guard(
             check_fn,
