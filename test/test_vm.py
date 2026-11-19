@@ -4815,6 +4815,32 @@ class RegionItems(collections.OrderedDict):
         super().__setattr__(key, value)
 
 
+class RegionOptions:
+    """What a script was told on its command line."""
+
+    def __init__(self):
+        self.repeat = 3
+        self.only = "model"
+        self.devices = ["cpu"]
+        self.threads = None
+
+
+class RegionRunner:
+    """What calls a model for a benchmark: an object with attributes, one of
+    them a method of its own."""
+
+    def __init__(self):
+        self.options = RegionOptions()
+        self.step = self.forward
+        self.scale = 2.0
+
+    def forward(self, model, x):
+        return model(x) * self.scale
+
+    def twice(self, model, x):
+        return model(x) * (2 * self.scale)
+
+
 def region_infer(model, x):
     return model(x)
 
@@ -6679,6 +6705,82 @@ class TestVmRegions(TestCase):
             for _ in range(6):
                 self.assertEqual(compiled(*usual), mixed(*usual))
             self.assertEqual(self.looks(compiled, *usual), ([], []))
+
+    def test_usual_takes_a_method_and_an_object_with_attributes(self):
+        torch.vm._load_runtime()
+        types = (torch.Tensor, torch.nn.Parameter)
+        runner = RegionRunner()
+        names = ("repeat", "only", "devices", "threads")
+        devices = ("list", [("value", "cpu")])
+        values = [("int",), ("value", "model"), devices, ("value", None)]
+        # The method the object has as an attribute is bound to the object
+        # itself: the first thing the call holds, met again.
+        attributes = [
+            ("instance", RegionOptions, names, values),
+            ("method", RegionRunner.forward, ("again", 0)),
+            ("value", 2.0),
+        ]
+        whole = ("instance", RegionRunner, ("options", "step", "scale"), attributes)
+        spec = [("method", RegionRunner.forward, whole)]
+        with torch.no_grad():
+            usual = cfg_rs.Usual([0], spec, ("parts",), (), [], types, 1 << 62, ())
+            _, flat, held, ints, _, _, _ = usual.look((runner.forward,))
+            self.assertEqual((flat, ints, len(held)), ([], [3], 3))
+            self.assertTrue(held[0] is runner and held[1] is runner.options)
+            self.assertTrue(held[2] is runner.options.devices)
+            # Another object that is built the same way is like it,
+            other = RegionRunner()
+            other.options.repeat = 5
+            self.assertEqual(usual.look((other.forward,))[3], [5])
+            # but not another method of it, the function on its own or an
+            # object of another class,
+            self.assertIsNone(usual.look((other.twice,)))
+            self.assertIsNone(usual.look((RegionRunner.forward,)))
+            other_class = type("Other", (RegionRunner,), {})
+            self.assertIsNone(usual.look((other_class().forward,)))
+            # one that holds a method of another object,
+            other.step = runner.forward
+            self.assertIsNone(usual.look((other.forward,)))
+            other.step = other.forward
+            self.assertIsNotNone(usual.look((other.forward,)))
+            # another value, one attribute more, or the same in another order.
+            other.scale = 3.0
+            self.assertIsNone(usual.look((other.forward,)))
+            other.scale = 2.0
+            other.more = 1
+            self.assertIsNone(usual.look((other.forward,)))
+            del other.more
+            self.assertIsNotNone(usual.look((other.forward,)))
+            del other.options
+            other.options = RegionOptions()
+            self.assertIsNone(usual.look((other.forward,)))
+
+    def test_a_call_through_a_method_of_an_object_is_told_in_the_runtime(self):
+        def measured(step, model, x):
+            return step(model, x)
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        runner = RegionRunner()
+        passes = with_graphs("aot_eager")
+        compiled = torch.vm(measured, passes=passes, fallback=False)
+        with torch.no_grad():
+            for _ in range(10):
+                expected = measured(runner.forward, model, x)
+                self.assertEqual(compiled(runner.forward, model, x), expected)
+            self.assertEqual(self.looks(compiled, runner.forward, model, x), ([], []))
+            # What the object holds is what a call depends on, as before.
+            runner.scale = 3.0
+            expected = measured(runner.forward, model, x)
+            self.assertEqual(compiled(runner.forward, model, x), expected)
+            runner.options.only = "another"
+            self.assertEqual(compiled(runner.step, model, x), expected)
+            expected = measured(runner.twice, model, x)
+            self.assertEqual(compiled(runner.twice, model, x), expected)
+            for _ in range(6):
+                compiled(runner.forward, model, x)
+            self.assertEqual(self.looks(compiled, runner.forward, model, x), ([], []))
 
     def test_weights_that_moved_are_looked_at_anew(self):
         torch.manual_seed(0)
