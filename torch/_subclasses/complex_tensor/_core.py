@@ -76,6 +76,13 @@ class ComplexTensor(Tensor):
             imag = imag.clone()
             storage_offset = real.storage_offset()
 
+        neg = real.is_neg()
+        conj = neg != imag.is_neg()
+        if neg:
+            real = torch.ops.aten._neg_view(real)
+        if imag.is_neg():
+            imag = torch.ops.aten._neg_view(imag)
+
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             real.shape,
@@ -89,6 +96,8 @@ class ComplexTensor(Tensor):
         )
         res._re = real.detach()
         res._im = imag.detach()
+        torch._C._set_neg(res, neg)
+        torch._C._set_conj(res, conj)
 
         return res
 
@@ -97,10 +106,16 @@ class ComplexTensor(Tensor):
 
     @property
     def re(self) -> Tensor:
+        if self.is_neg():
+            return torch._neg_view(self._re)
+
         return self._re
 
     @property
     def im(self) -> Tensor:
+        if self.is_neg() != self.is_conj():
+            return torch._neg_view(self._im)
+
         return self._im
 
     @property
@@ -159,10 +174,13 @@ class ComplexTensor(Tensor):
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
         re, im = inner_tensors["_re"], inner_tensors["_im"]
-        return ComplexTensor(re, im)
+        out = ComplexTensor(re, im)
+        torch._C._set_conj(out, meta["conj"])
+        torch._C._set_neg(out, meta["neg"])
+        return out
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["_re", "_im"], None
+        return ["_re", "_im"], {"conj": self.is_conj(), "neg": self.is_neg()}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"ComplexTensor({self._re!r}, {self._im!r})"
@@ -186,10 +204,18 @@ class InterleavedComplexTensor(Tensor):
             raise TypeError(
                 f"Unsupported dtype {t.dtype}. Supported dtypes are: {set(COMPLEX_TO_REAL.keys())!r}."
             )
+        t = torch.ops.aten.alias(t)
+
+        neg = False
+        conj = False
+
+        if t.is_neg():
+            neg = True
+            t = torch.ops.aten._neg_view(t)
+
         if t.is_conj():
-            raise RuntimeError(
-                "Cannot view a conjugated tensor; call `resolve_conj()` first."
-            )
+            conj = True
+            t = torch.ops.aten._conj(t)
 
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
@@ -203,6 +229,8 @@ class InterleavedComplexTensor(Tensor):
             requires_grad=False,
         )
         res._data = torch.view_as_real(t.detach())
+        torch._C._set_neg(res, neg)
+        torch._C._set_conj(res, conj)
         return res
 
     def __init__(self, *a: Any, **kw: Any) -> None:
@@ -210,10 +238,16 @@ class InterleavedComplexTensor(Tensor):
 
     @property
     def re(self) -> Tensor:
+        if self.is_neg():
+            return torch._neg_view(self._data[..., 0])
+
         return self._data[..., 0]
 
     @property
     def im(self) -> Tensor:
+        if self.is_neg() != self.is_conj():
+            return torch._neg_view(self._data[..., 1])
+
         return self._data[..., 1]
 
     @property
@@ -233,7 +267,12 @@ class InterleavedComplexTensor(Tensor):
         self.im[...] = value
 
     def as_interleaved(self) -> Tensor:
-        return torch.view_as_complex(self._data)
+        out = torch.view_as_complex(self._data)
+        if self.is_neg():
+            out = torch.ops.aten._neg_view(out)
+        if self.is_conj():
+            out = torch.ops.aten._conj(out)
+        return out
 
     def to_complex_tensor(self) -> ComplexTensor:
         return ComplexTensor(self.re, self.im)
@@ -247,7 +286,7 @@ class InterleavedComplexTensor(Tensor):
         args: tuple = (),
         kwargs: dict[str, Any] | None = None,
     ) -> Any:
-        from torch.utils._pytree import tree_flatten, tree_map
+        from torch.utils._pytree import tree_map
 
         from ._ops.common import lookup_complex
 
@@ -255,13 +294,10 @@ class InterleavedComplexTensor(Tensor):
 
         if func.is_view and isinstance(args[0], InterleavedComplexTensor):
             out = func(args[0].as_interleaved(), *args[1:], **kwargs)
-            flat_out = tree_flatten(out)[0]
-            # Conj/neg views can't be represented interleaved; fall back to ComplexTensor.
-            if not any(t.is_conj() or t.is_neg() for t in flat_out):
-                return tree_map(
-                    lambda t: InterleavedComplexTensor(t) if t.dtype.is_complex else t,
-                    out,
-                )
+            return tree_map(
+                lambda t: InterleavedComplexTensor(t) if t.dtype.is_complex else t,
+                out,
+            )
 
         impl = lookup_complex(func, *args, **kwargs)
         if impl is None:
@@ -282,10 +318,13 @@ class InterleavedComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> InterleavedComplexTensor:
-        return InterleavedComplexTensor(torch.view_as_complex(inner_tensors["_data"]))
+        out = InterleavedComplexTensor(torch.view_as_complex(inner_tensors["_data"]))
+        torch._C._set_conj(out, meta["conj"])
+        torch._C._set_neg(out, meta["neg"])
+        return out
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["_data"], None
+        return ["_data"], {"conj": self.is_conj(), "neg": self.is_neg()}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"InterleavedComplexTensor({self.as_interleaved()!r})"
