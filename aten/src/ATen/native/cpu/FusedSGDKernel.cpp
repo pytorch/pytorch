@@ -250,7 +250,6 @@ void fused_sgd_kernel(
     const bool is_first_step,
     const float* grad_scale_ptr
   ) {
-  Tensor grad_contiguous = grad.contiguous();
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, param.scalar_type(), "fused_sgd_kernel", [&] {
     sgd_fused_step_impl<scalar_t>(
       param,
