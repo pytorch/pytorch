@@ -813,7 +813,11 @@ class InvokeSubgraphReuseEntry:
     subgraph_input_mapping: list[
         Any
     ]  # list[LiftedArgOrigin] - defined in invoke_subgraph.py
-    single_tensor_output: bool
+    # Structure of the function's return value: nested tuples/lists/dicts whose
+    # leaves are constants or OutputLeaf(i), the i-th subgraph output (see
+    # build_output_template in invoke_subgraph.py). Extra graph outputs from
+    # side-effect intermediates are never referenced.
+    output_template: Any
     # Per-output tensor metadata (shape, stride, dtype, device, requires_grad)
     # cached from the first trace so we can construct fresh FakeTensors on
     # cache hit without re-running body_gmod.
@@ -825,10 +829,6 @@ class InvokeSubgraphReuseEntry:
     # (old arg sources → new arg sources) to rewrite captured variable sources
     # for the current invocation.
     arg_sources: list[Source | None]
-    # Number of user-visible outputs (from the function return value).
-    # The graph may have additional outputs from side-effect intermediates;
-    # stamp_out_subgraph uses this to return only the user-visible slice.
-    num_user_outputs: int = 0
 
 
 @dataclass

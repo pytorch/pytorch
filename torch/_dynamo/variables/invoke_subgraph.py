@@ -15,6 +15,7 @@ from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 import torch
 import torch._higher_order_ops
 from torch._dynamo import graph_break_hints
+from torch._dynamo.current_scope_id import current_scope_id
 from torch._dynamo.exc import unimplemented
 from torch._dynamo.guards import (
     extract_tensor_metadata,
@@ -24,15 +25,24 @@ from torch._dynamo.guards import (
     UnsupportedGuardCheckSpec,
 )
 from torch._dynamo.source import SyntheticLocalSource
-from torch._dynamo.utils import _make_inlined, constants_identical, unpack_iterable
+from torch._dynamo.utils import (
+    _make_inlined,
+    constants_identical,
+    is_namedtuple_cls,
+    unpack_iterable,
+)
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.dicts import ConstDictVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.higher_order_ops import WrapHigherOrderVariable
 from torch._dynamo.variables.lists import ListVariable, TupleVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
-from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+from torch._dynamo.variables.user_defined import (
+    UserDefinedObjectVariable,
+    UserDefinedTupleVariable,
+)
 from torch._guards import (
     Guard,
     InvokeSubgraphReuseCondition,
@@ -253,6 +263,10 @@ def build_fingerprint_fast(fn_args_vt: Any) -> InputFingerprint:
     flat_vts: list[tuple[InputTag, VariableTracker]] = []
     arg_sources: list[Source | None] = []
     for vt in fn_args_vt:
+        # Use the realized VT's source: realizing a lazy VT can return an
+        # existing VT for the same object under a different (canonical) source,
+        # and the subgraph's captured sources are rooted at that one.
+        vt = vt.realize()
         tag = classify_vt(vt)
         if tag is None:
             raise AssertionError(
@@ -296,6 +310,8 @@ def build_fingerprint_with_pytree(
 
     def add_leaf(vt: VariableTracker) -> None:
         nonlocal has_unknown
+        # See build_fingerprint_fast for why the realized VT is used.
+        vt = vt.realize()
         tag = classify_vt(vt)
         if tag is None:
             has_unknown = True
@@ -448,9 +464,115 @@ def has_mutated_vars(
     return False
 
 
+@dataclass(frozen=True)
+class OutputLeaf:
+    """Placeholder in an output template for the index-th subgraph output."""
+
+    index: int
+
+
+@dataclass(frozen=True)
+class NamedTupleTemplate:
+    cls: type
+    items: tuple[Any, ...]
+
+
+class _UnsupportedOutput(Exception):
+    pass
+
+
+def build_output_template(
+    body_r: VariableTracker, graph_output_vts: list[VariableTracker]
+) -> Any:
+    """Describe the function's return value so a cache hit can rebuild it.
+
+    Tensors become OutputLeaf(i), where i is the position of that VT among the
+    subgraph outputs. Sourceless constants are kept by value; sourceful ones
+    (e.g. a per-instance attribute) are rejected because nothing guards them
+    on reuse. Tuples, namedtuples, lists and dicts with constant keys are
+    recursed into, but only if they were created inside the subgraph: a cache
+    hit rebuilds them as new objects, so containers whose identity is visible
+    outside (sourceful, created in the caller, or returned more than once)
+    are rejected. Raises _UnsupportedOutput otherwise.
+    """
+    # Index among tensor outputs only: a cache hit materializes just the tensor
+    # outputs (from output_metadata), in graph-output order.
+    output_index: dict[int, int] = {}
+    tensor_pos = 0
+    for vt in graph_output_vts:
+        if vt.is_tensor():
+            output_index.setdefault(id(vt), tensor_pos)
+            tensor_pos += 1
+
+    outer_scope = current_scope_id()
+    seen: set[int] = set()
+
+    def check_fresh_container(vt: VariableTracker, mutable: bool) -> None:
+        name = type(vt).__name__
+        if vt.source is not None or id(vt) in seen:
+            raise _UnsupportedOutput(f"non-fresh {name}")
+        mt = vt.mutation_type
+        if mutable and (mt is None or mt.scope <= outer_scope):
+            raise _UnsupportedOutput(f"{name} created outside the subgraph")
+        seen.add(id(vt))
+
+    def build(vt: VariableTracker) -> Any:
+        vt = vt.realize()
+        if isinstance(vt, TensorVariable):
+            if id(vt) not in output_index:
+                raise _UnsupportedOutput("tensor that is not a subgraph output")
+            return OutputLeaf(output_index[id(vt)])
+        if is_constant_like(vt):
+            if vt.source is not None:
+                raise _UnsupportedOutput("sourceful constant")
+            return vt.value
+        if type(vt) is TupleVariable:
+            check_fresh_container(vt, mutable=False)
+            return tuple(build(item) for item in vt.items)
+        if isinstance(vt, UserDefinedTupleVariable) and is_namedtuple_cls(vt.tuple_cls):
+            check_fresh_container(vt, mutable=False)
+            items = tuple(build(item) for item in vt.items)
+            return NamedTupleTemplate(vt.tuple_cls, items)
+        if type(vt) is ListVariable:
+            check_fresh_container(vt, mutable=True)
+            return [build(item) for item in vt.items]
+        if type(vt) is ConstDictVariable and vt.python_type() is dict:
+            check_fresh_container(vt, mutable=True)
+            out = {}
+            for k, v in vt.items.items():
+                if not is_constant_like(k.vt):
+                    raise _UnsupportedOutput(f"dict key {type(k.vt).__name__}")
+                out[k.vt.value] = build(v)
+            return out
+        raise _UnsupportedOutput(type(vt).__name__)
+
+    return build(body_r)
+
+
+def rebuild_output(
+    tx: "InstructionTranslatorBase", template: Any, outputs: list[VariableTracker]
+) -> VariableTracker:
+    from torch._dynamo.variables.builder import SourcelessBuilder
+
+    def build(t: Any) -> Any:
+        if isinstance(t, OutputLeaf):
+            return outputs[t.index]
+        if isinstance(t, NamedTupleTemplate):
+            items = [build(x) for x in t.items]
+            return t.cls(items) if pytree.is_structseq_class(t.cls) else t.cls(*items)
+        if type(t) in (tuple, list):
+            return type(t)(build(x) for x in t)
+        if type(t) is dict:
+            return {k: build(v) for k, v in t.items()}
+        return t
+
+    return SourcelessBuilder.create(tx, build(template))
+
+
 def is_reuse_eligible(
     tx: "InstructionTranslatorBase",
     body_r: Any,
+    graph_output_vts: list[VariableTracker],
     fingerprint: InputFingerprint,
     tracing_info: "SubgraphTracingInfo",
     traced_sources: OrderedSet[Source] | None = None,
@@ -465,7 +587,9 @@ def is_reuse_eligible(
         mutated, because guards are snapshotted on source values at trace
         time — if the underlying object changed since then, the cached
         guards would silently evaluate against stale values.
-      - Output must be a single tensor, or a tuple/list of plain tensors.
+      - Output must be built from tensors (that are subgraph outputs),
+        constants, and fresh tuples/lists/dicts of those (see
+        build_output_template).
       - All flattened inputs must be one of: tensor, symnode, constant
         (including enum members), or a sourceful user-defined object
         (nn.Modules included) — for sourceless or other input types we
@@ -490,25 +614,10 @@ def is_reuse_eligible(
         if traced_sources and has_mutated_vars(tx, traced_sources):
             return False
 
-    if isinstance(body_r, TensorVariable):
-        pass
-    elif isinstance(body_r, (TupleVariable, ListVariable)):
-        non_tensor = [
-            type(item).__name__
-            for item in body_r.items
-            if not isinstance(item, TensorVariable)
-        ]
-        if non_tensor:
-            hc_log.debug(
-                "subgraph_reuse: not eligible -- output contains non-tensor types: %s",
-                non_tensor,
-            )
-            return False
-    else:
-        hc_log.debug(
-            "subgraph_reuse: not eligible -- output type %s is not tensor or tuple/list",
-            type(body_r).__name__,
-        )
+    try:
+        build_output_template(body_r, graph_output_vts)
+    except _UnsupportedOutput as e:
+        hc_log.debug("subgraph_reuse: not eligible -- unsupported output: %s", e)
         return False
 
     if fingerprint.has_unknown:
@@ -917,6 +1026,7 @@ def save_reuse_entry(
     config: NestedCompileRegionOptions | None,
     p_args: tuple[Any, ...],
     body_r: VariableTracker,
+    graph_output_vts: list[VariableTracker],
     example_value: Any,
     max_reuse_entries: int = 8,
     condition: "InvokeSubgraphReuseCondition | None" = None,
@@ -951,19 +1061,7 @@ def save_reuse_entry(
     subgraph_input_mapping = build_subgraph_input_mapping(
         tx, p_args, fingerprint.flat_vts
     )
-    single_tensor_output = isinstance(body_r, TensorVariable)
-
-    # Count user-visible outputs from body_r. The graph may have additional
-    # outputs from side-effect intermediates that stamp_out_subgraph must
-    # not include when reconstructing the user-visible return value.
-    user_output_vts: list[VariableTracker] = []
-    VariableTracker.visit(
-        lambda vt: user_output_vts.append(vt)
-        if vt.is_tensor() or isinstance(vt, SymNodeVariable)
-        else None,
-        body_r,
-    )
-    num_user_outputs = len(user_output_vts)
+    output_template = build_output_template(body_r, graph_output_vts)
 
     # Cache output tensor metadata so we can construct fresh FakeTensors on
     # cache hit without re-running the subgraph. This is safe because
@@ -982,13 +1080,12 @@ def save_reuse_entry(
         body_gmod=body_gmod,
         config=config,
         subgraph_input_mapping=subgraph_input_mapping,
-        single_tensor_output=single_tensor_output,
+        output_template=output_template,
         output_metadata=output_metadata,
         # Record arg sources so that on cache hit we can build a
         # source replacement mapping (old sources → new sources) to
         # rewrite captured variable sources for the current invocation.
         arg_sources=fingerprint.arg_sources,
-        num_user_outputs=num_user_outputs,
     )
     if condition is not None:
         invoke_subgraph_cache.add_reuse_entry(
@@ -1149,24 +1246,8 @@ def stamp_out_subgraph(
         cached.config,
     )
 
-    # Return only the user-visible outputs. The graph may have extra
-    # intermediate outputs from side effects (allow_side_effects=True)
-    # that should not be part of the user-facing return value.
-    if cached.single_tensor_output:
-        items = flat_variable.items  # pyrefly: ignore[missing-attribute]
-        if not isinstance(items[0], TensorVariable):
-            raise AssertionError(
-                f"Expected tensor output but got {type(items[0]).__name__}"
-            )
-        return items[0]
-
-    items = flat_variable.items  # pyrefly: ignore[missing-attribute]
-    n = cached.num_user_outputs
-    if n > 0 and n < len(items):
-        from .builder import SourcelessBuilder
-
-        return SourcelessBuilder.create(tx, tuple(items[:n]))
-    return flat_variable
+    # pyrefly: ignore[missing-attribute]
+    return rebuild_output(tx, cached.output_template, flat_variable.items)
 
 
 def build_subgraph_input_mapping(
@@ -1419,6 +1500,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 body_graph_output_vts,
                 tracing_info,
             ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
+        # Speculation always collects the graph output VTs into a list.
+        graph_output_vts = cast(list[VariableTracker], body_graph_output_vts)
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -1448,6 +1531,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 if not is_reuse_eligible(
                     tx,
                     body_r,
+                    graph_output_vts,
                     fingerprint,
                     tracing_info,
                     traced_sources,
@@ -1467,6 +1551,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     config,
                     p_args,
                     body_r,
+                    graph_output_vts,
                     example_value,
                     max_reuse_entries,
                     hash_key=hash_key,  # type: ignore[possibly-undefined]
@@ -1474,7 +1559,12 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             else:
                 traced_sources = tracing_info.traced_sources
                 if is_reuse_eligible(
-                    tx, body_r, fingerprint, tracing_info, traced_sources
+                    tx,
+                    body_r,
+                    graph_output_vts,
+                    fingerprint,
+                    tracing_info,
+                    traced_sources,
                 ):
                     condition = build_reuse_condition(
                         tx,
@@ -1491,6 +1581,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                             config,
                             p_args,
                             body_r,
+                            graph_output_vts,
                             example_value,
                             max_reuse_entries,
                             condition=condition,
