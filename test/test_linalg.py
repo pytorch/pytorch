@@ -6714,6 +6714,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @skipIfTorchDynamo("Device check tests interact poorly with Dynamo's tracing")
     def test__int_mm_errors(self, device):
 
         def genf_int(x, y):
