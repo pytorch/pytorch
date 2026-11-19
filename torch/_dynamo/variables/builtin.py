@@ -100,7 +100,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
+from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
@@ -1951,6 +1951,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (self.fn is format or self.fn is str.format) and any(
+            isinstance(value, UserDefinedObjectVariable) and value.is_python_constant()
+            for value in itertools.chain(args, kwargs.values())
+        ):
+            # A constant-backed object's __format__ can still read or mutate its state.
+            return super().call_function(tx, args, kwargs)
+
         if self.fn is type and len(args) == 3:
             unimplemented(
                 gb_type="Dynamic class creation with type",
@@ -3268,8 +3275,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         _format_string: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        format_string = _format_string.guard_as_python_constant()
+    ) -> VariableTracker | None:
+        if self.fn is format:
+            # format(value, spec) dispatches to type(value).__format__, unlike str.format.
+            if isinstance(_format_string, FakeIdVariable):
+                _format_string.guard_as_python_constant()
+            return None
+        format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(tx, format_string, list(args), kwargs)
 
@@ -3290,11 +3302,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                 guard_type = arg.get_id_guard_type()
                 if guard_type is not None:
                     install_guard(arg.source.make_guard(guard_type))
-            return VariableTracker.build(tx, real_id)
+            result = VariableTracker.build(tx, real_id)
+        else:
+            from .builder import SourcelessBuilder
 
-        from .builder import SourcelessBuilder
-
-        return SourcelessBuilder.create_internal_fake_id(id(arg))
+            result = SourcelessBuilder.create_internal_fake_id(id(arg))
+        if isinstance(arg, (variables.ConstDictVariable, variables.ListVariable)):
+            tx.output.container_id_tokens.add(result)
+        return result
 
     def call_deepcopy(
         self, tx: "InstructionTranslatorBase", x: VariableTracker

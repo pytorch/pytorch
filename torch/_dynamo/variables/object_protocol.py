@@ -979,7 +979,7 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
     # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
-    val = specialize_symnode(obj).as_python_constant()
+    val = specialize_symnode(obj).guard_as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
@@ -1011,7 +1011,7 @@ def pynumber_as_ssize_t(
     if isinstance(value, SymNodeVariable):
         val = value.evaluate_expr(tx.output)
     else:
-        val = value.as_python_constant()
+        val = value.guard_as_python_constant()
 
     if not isinstance(val, int):
         raise AssertionError("pynumber_index did not return an int-like value")
@@ -2346,6 +2346,8 @@ def mro_attr_source(
     klass: type,
     klass_source: Source,
     name: str,
+    *,
+    raw_metadata: bool = False,
 ) -> "DictGetItemSource | None":
     r"""Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
@@ -2356,6 +2358,8 @@ def mro_attr_source(
 
     Guards absence in every skipped class, including a complete MRO miss.
     Returns None on a complete miss; callers decide whether that is an error.
+    Use raw_metadata for instance lookup that reads type dictionaries directly,
+    even if the metaclass customizes ordinary class attribute access.
     """
     mro = get_type_mro_no_user_code(klass)
     klass_source = guardable_mro_source(klass_source)
@@ -2383,7 +2387,7 @@ def mro_attr_source(
             attr = "__dict__"
         elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
             attr = "__mro__"
-        if attr is not None:
+        if attr is not None and not raw_metadata:
             unimplemented(
                 gb_type="Custom metaclass metadata access",
                 context=f"metadata={attr}, name={name}",
@@ -2432,7 +2436,7 @@ def _can_guard_lookup_hooks(cls: type) -> bool:
 def _guard_getattribute(
     tx: "InstructionTranslatorBase", cls: type, source: Source
 ) -> None:
-    hook = mro_attr_source(tx, cls, source, "__getattribute__")
+    hook = mro_attr_source(tx, cls, source, "__getattribute__", raw_metadata=True)
     if hook is not None:
         owner = next(
             base for base, ns in iter_mro_static_dicts(cls) if "__getattribute__" in ns
@@ -2668,8 +2672,7 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # A tracker may model a base type. Prefer the runtime object when its source
-    # can be resolved, including for a user subclass with a custom lookup hook.
+    # A tracker can model a base type whose subclass overrides attribute lookup.
     if (
         not type.__dict__["__dictoffset__"].__get__(py_type)
         and is_generic_getattr(py_type)
@@ -2681,12 +2684,11 @@ def object_generic_getattr(
             if isinstance(modeled, tuple)
             else py_type is modeled
         )
-        if obj.source:
-            try:
-                exact_type = type(tx.output.resolve_source_value(obj.source)) is py_type
-            except Exception:
-                # Some sources are available only to the guard manager.
-                pass
+        if (
+            obj.source
+            and (actual_type := tx.output.source_types.get(obj.source)) is not None
+        ):
+            exact_type = actual_type is py_type
         if exact_type:
             if not type_is_immutable(py_type):
                 cls_source = _modeled_class_source(tx, obj, py_type)
@@ -2737,7 +2739,7 @@ def generic_getattr(
         and isinstance(obj, variables.UserDefinedObjectVariable)
         and obj.cls_source is not None
     ):
-        if _can_guard_lookup_hooks(obj.python_type()):
+        if not obj.source or _can_guard_lookup_hooks(obj.python_type()):
             _guard_getattribute(tx, obj.python_type(), obj.cls_source)
 
     # Side effects: check for pending attribute mutations.
@@ -2825,6 +2827,14 @@ def generic_getattr(
                     partial(GuardBuilder.DICT_CONTAINS, key=name)
                 )
             )
+        elif (
+            not result.is_realized()
+            and isinstance(result.source, DictGetItemSource)
+            and isinstance(result.source.base, TypeDictSource)
+            and result.source.index == name
+        ):
+            # The owner must still have a plain attribute, even when the value stays lazy.
+            install_guard(result.source.make_guard(GuardBuilder.TYPE_MATCH))
         return result
 
     # Handle default for getattr(obj, name, default).
