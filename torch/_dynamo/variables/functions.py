@@ -67,7 +67,7 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import _method_identity_guards_filtered, GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CellContentsSource,
@@ -77,6 +77,7 @@ from ..source import (
     DefaultsSource,
     GetItemSource,
     ImportSource,
+    is_from_skip_guard_source,
     TypeSource,
 )
 from ..utils import (
@@ -119,7 +120,6 @@ from .user_defined import (
 
 
 _legacy_deepcopy = copy.deepcopy if hasattr(copy, "_deepcopy_atomic") else None
-_copy_reconstruct_code = getattr(vars(copy).get("_reconstruct"), "__code__", None)
 
 
 try:
@@ -977,23 +977,49 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     ) -> VariableTracker:
         if (
             self.fn is _legacy_deepcopy
-            and tx.f_code is _copy_reconstruct_code
             and len(args) == 2
             and not kwargs
-            and isinstance(args[0].source, ConstDictKeySource)
-            and type(args[0].realize()) is ConstantVariable
-            and type(owner := tx.symbolic_locals["x"].realize())
-            is variables.OrderedDictVariable
-            and owner.source is not None
+            and isinstance(source := args[0].source, ConstDictKeySource)
+            and type(item := args[0].realize()) is ConstantVariable
+            and type(memo := args[1].realize()) is variables.ConstDictVariable
         ):
-            from ..polyfills.copy import is_unmemoized_atomic_key
+            from ..polyfills.copy import is_deepcopy_atomic
             from .builder import SourcelessBuilder
 
-            check = SourcelessBuilder.create_internal_user_function(
-                is_unmemoized_atomic_key
-            )
-            if check.call_function(tx, [*args, owner], {}).as_python_constant():
-                return args[0]
+            # IDs of live lists and dicts cannot match an atomic mapping key.
+            # A caller's other memo entries take precedence over atomic dispatch.
+            containers = tx.output.container_id_tokens
+            keys = [key.vt for key in memo.items if key.vt not in containers]
+            if keys and (
+                not tx.output.is_root_tracer()
+                or _method_identity_guards_filtered(tx)
+                or is_from_skip_guard_source(source)
+            ):
+                unimplemented(
+                    gb_type="Legacy deepcopy memo requires identity guards",
+                    context="copy.deepcopy",
+                    explanation="A seeded deepcopy memo can override a mapping key by its process-local ID.",
+                    hints=["Copy the mapping outside the captured region."],
+                )
+            if all(
+                type(key) is ConstantVariable and type(key.value) is int for key in keys
+            ):
+                memo.install_dict_keys_match_guard()
+                tokens = tuple(key.value for key in keys)
+                present = id(item.value) in tokens
+                if tokens:
+                    guard = functools.partial(
+                        GuardBuilder.DEEPCOPY_MEMO_CONTAINS_ID,
+                        tokens=tokens,
+                        present=present,
+                    )
+                    install_guard(source.make_guard(guard))
+                if not present:
+                    check = SourcelessBuilder.create_internal_user_function(
+                        is_deepcopy_atomic
+                    )
+                    if check.call_function(tx, [item], {}).as_python_constant():
+                        return item
 
         # Handle patch_dynamo_config call
         if self.fn is torch._dynamo.patch_dynamo_config:
