@@ -1146,6 +1146,10 @@ static bool isRDNA3(int index) {
   return at::detail::getCUDAHooks().isGPUArch({"gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"}, index);
 }
 
+static bool isGfx117x(int index) {
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1170", "gfx1171"}, index);
+}
+
 static bool isRDNA4(int index) {
   return at::detail::getCUDAHooks().isGPUArch({"gfx1200", "gfx1201"}, index);
 }
@@ -1248,8 +1252,8 @@ struct RocmMmaCdna {
   }
 };
 
-// RDNA4 (gfx12) wave32: wmma_f32_16x16x16_bf16. 8 A/B values and 8 C values per
-// lane; one int32 of packed int4 per k-tile.
+// gfx11.7 and RDNA4 (gfx12) wave32: wmma_f32_16x16x16_bf16. 8 A/B values and
+// 8 C values per lane; one int32 of packed int4 per k-tile.
 struct RocmMmaGfx12 {
   static constexpr int32_t kWarpSize = 32;
   static constexpr int32_t kTileLanes = 32;
@@ -1302,15 +1306,11 @@ struct RocmMmaGfx12 {
   }
 };
 
-// CDNA5 (gfx1250 / gfx1250-strict) wave32: the gfx12 layout. There is no
-// 16x16x16 bf16 WMMA; the 16x16x32 WMMA takes a lane's operands of two
-// consecutive k-tiles as values 0-7 and 8-15, so one instruction covers the
-// pair and cTmp[1] stays zero.
-// Defined only for those processors: older compilers (ROCm 7.0) do not declare
-// the WMMA builtin, and a non-template body is parsed for every offload arch.
-// gfx1250-strict is its own processor, so clang defines __gfx1250_strict__ and
-// __GFX12__ rather than __gfx1250__. Selecting RocmMmaGfx12 for it would emit
-// the 16x16x16 WMMA this part does not have.
+// CDNA5 (gfx1250) wave32: the gfx12 layout. There is no 16x16x16 bf16 WMMA; the
+// 16x16x32 WMMA takes a lane's operands of two consecutive k-tiles as values
+// 0-7 and 8-15, so one instruction covers the pair and cTmp[1] stays zero.
+// Defined only for gfx1250: older compilers (ROCm 7.0) do not declare its WMMA
+// builtin, and a non-template body is parsed for every offload arch.
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
 struct RocmMmaGfx1250 : RocmMmaGfx12 {
   // gfx1250 has a packed bf16 FMA and no v_dot2_f32_bf16, so dequantizing each
@@ -1389,6 +1389,8 @@ struct RocmMmaGfx11 {
 
 #if defined(__GFX9__)
 using RocmMma = RocmMmaCdna;
+#elif defined(__gfx1170__) || defined(__gfx1171__)
+using RocmMma = RocmMmaGfx12;
 #elif defined(__GFX11__)
 using RocmMma = RocmMmaGfx11;
 #elif defined(__gfx1250__) || defined(__gfx1250_strict__)
@@ -2013,7 +2015,7 @@ at::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(
       A.device() == B.device() && A.device() == qScaleAndZeros.device());
 
-  if (!isCDNA2orLater(A.device().index()) && !isRDNA3(A.device().index()) && !isRDNA4(A.device().index())) {
+  if (!isCDNA2orLater(A.device().index()) && !isRDNA3(A.device().index()) && !isGfx117x(A.device().index()) && !isRDNA4(A.device().index())) {
     TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
   }
 
@@ -2197,7 +2199,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   // which is the maximum vectorized load/store size
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
 
-  if (!isCDNA2orLater(in.device().index()) && !isRDNA3(in.device().index()) && !isRDNA4(in.device().index())) {
+  if (!isCDNA2orLater(in.device().index()) && !isRDNA3(in.device().index()) && !isGfx117x(in.device().index()) && !isRDNA4(in.device().index())) {
     TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2, or RDNA3 or later");
   }
   constexpr int32_t kNTileSize = 16;

@@ -234,6 +234,7 @@ class DeviceProperties(typing.NamedTuple):
     max_threads_per_multi_processor: int | None = None
     max_threads_per_block: int | None = None
     warp_size: int | None = None
+    xcc_count: int | None = None
 
     @property
     def warp_size_or_default(self) -> int:
@@ -269,6 +270,7 @@ class DeviceProperties(typing.NamedTuple):
             ),
             max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
             warp_size=getattr(props, "warp_size", None),
+            xcc_count=getattr(props, "xcc_count", None),
         )
 
 
@@ -352,6 +354,7 @@ class InductorMeta(typing.TypedDict, total=False):
     dynamic_disable_pipelining: bool
     are_deterministic_algorithms_enabled: bool
     is_hip: bool | None
+    sm100_outer_reduction_r0_block_8: bool
     is_fbcode: bool
     profile_bandwidth: bool
     profile_bandwidth_regex: str
