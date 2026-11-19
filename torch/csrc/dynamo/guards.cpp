@@ -4124,9 +4124,9 @@ class GuardManager {
         _disable_dict_tag_matching = true;
         return false;
       }
+      py::object tensor = py::reinterpret_steal<py::object>(tensor_ptr);
       bool ok = recorded_tensor.manager
-                    ->check_non_relational_leaf_guards_nopybind(tensor_ptr);
-      Py_DECREF(tensor_ptr);
+                    ->check_non_relational_leaf_guards_nopybind(tensor.ptr());
       if (!ok) {
         return false;
       }
@@ -4152,8 +4152,8 @@ class GuardManager {
         _disable_dict_tag_matching = true;
         return false;
       }
-      bool ok = no_tensor_aliasing_guard->check_nopybind(tensor_ptr);
-      Py_DECREF(tensor_ptr);
+      py::object tensor = py::reinterpret_steal<py::object>(tensor_ptr);
+      bool ok = no_tensor_aliasing_guard->check_nopybind(tensor.ptr());
       if (!ok) {
         return false;
       }
