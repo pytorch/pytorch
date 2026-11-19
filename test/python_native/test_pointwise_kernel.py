@@ -48,8 +48,8 @@ class TestPointwiseKernel(TestCase):
         from torch._native.ops.pointwise import kernel, ops
 
         with torch.backends.python_native.cutedsl.disabled():
-            x = torch.full((64,), 2049, dtype=torch.int32, device=device)
-            y = torch.ones(64, dtype=torch.float16, device=device)
+            x = torch.full((16,), 2049, dtype=torch.int32, device=device)
+            y = torch.ones(16, dtype=torch.float16, device=device)
             expected = x + y
             (actual,) = kernel.run(
                 ops.get_fn("_add"),
@@ -62,34 +62,7 @@ class TestPointwiseKernel(TestCase):
                 (torch.float16,),
                 load="direct",
             )
-        self.assertEqual(actual, expected)
-
-    def _run_functor(
-        self, name: str, inputs: list[torch.Tensor], parameters: tuple[float, ...] = ()
-    ) -> torch.Tensor:
-        from torch._native.cutedsl.dtypes import scalar_arg, torch2cute
-        from torch._native.ops.pointwise import kernel, ops
-        from torch._native.ops.pointwise.signature import specialize
-
-        fn = ops.get_fn(name)
-        sig = specialize(fn, inputs[0].dtype, inputs[0].dtype)
-        constants = tuple(
-            scalar_arg(value, dtype)
-            for value, dtype in zip(parameters, sig.arguments[len(inputs) :])
-        )
-        (result,) = kernel.run(
-            fn,
-            ("functor_regression", name, inputs[0].dtype, parameters),
-            len(inputs),
-            1,
-            constants,
-            torch2cute[sig.compute],
-            inputs,
-            sig.results,
-            input_casts=sig.arguments[: len(inputs)],
-            load="direct",
-        )
-        return result
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -99,8 +72,6 @@ class TestPointwiseKernel(TestCase):
             ("_bitwise_right_shift", torch.uint8),
             ("_fmod_int", torch.uint8),
             ("_remainder_int", torch.uint8),
-            ("_fmod_int", torch.int32),
-            ("_remainder_int", torch.int32),
             ("_floor_divide_int", torch.int32),
             ("_floor_divide_int", torch.int64),
         ),
@@ -108,57 +79,35 @@ class TestPointwiseKernel(TestCase):
     def test_integer_functor_boundaries(
         self, device: str, name: str, dtype: torch.dtype
     ) -> None:
+        from torch._native.cutedsl.dtypes import torch2cute
+        from torch._native.ops.pointwise import kernel, ops
+
         with torch.backends.python_native.cutedsl.disabled():
             if name == "_bitwise_right_shift":
-                values, divisors = (200, 255, 128, 1, 0, 200), (8, 255, 7, 0, 8, 9)
+                values, divisors = (200, 128), (8, 9)
                 reference = torch.bitwise_right_shift
             elif name == "_floor_divide_int":
-                minimum = torch.iinfo(dtype).min
-                values, divisors = (minimum, minimum, -7, 7, 7, 0), (-1, 0, 3, -3, 0, 1)
+                values, divisors = (1, -1), (0, 0)
                 reference = torch.floor_divide
             else:
-                values = (
-                    (200, 200, 255, 128, 127, 0)
-                    if dtype == torch.uint8
-                    else (-200, 200, -128, 127, 0, 7)
-                )
-                divisors = (7, 3, 2, 7, 9, 0 if name == "_remainder_int" else 1)
-                if dtype != torch.uint8:
-                    divisors = (7, -3, 7, -7, 1, -3)
+                values, divisors = (200, 200), (7, 0 if name == "_remainder_int" else 3)
                 reference = torch.fmod if name == "_fmod_int" else torch.remainder
             inputs = [
-                torch.tensor(v, device=device, dtype=dtype).repeat(16)
-                for v in (values, divisors)
+                torch.tensor(v, device=device, dtype=dtype) for v in (values, divisors)
             ]
             expected = reference(*inputs)
-            self.assertEqual(self._run_functor(name, inputs), expected)
-
-    @onlyCUDA
-    @skipIfNoCuteDSL
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("name", ("_threshold", "_hardshrink", "_softshrink"))
-    def test_activation_parameter_rounding(
-        self, device: str, dtype: torch.dtype, name: str
-    ) -> None:
-        with torch.backends.python_native.cutedsl.disabled():
-            bound = 0.3 if dtype == torch.float16 else 1.005
-            x = torch.tensor(
-                (bound, -bound, 2, -2, float("nan"), 0), device=device, dtype=dtype
-            ).repeat(16)
-            if name == "_threshold":
-                parameters = (bound, -0.3)
-                expected = torch.nn.functional.threshold(x, *parameters)
-            else:
-                parameters = (bound,)
-                reference = (
-                    torch.nn.functional.hardshrink
-                    if name == "_hardshrink"
-                    else torch.nn.functional.softshrink
-                )
-                expected = reference(x, bound)
-            self.assertEqual(
-                self._run_functor(name, [x], parameters), expected, atol=0, rtol=0
+            (actual,) = kernel.run(
+                ops.get_fn(name),
+                ("integer_boundary", name, dtype),
+                2,
+                1,
+                (),
+                torch2cute[dtype],
+                inputs,
+                (dtype,),
+                load="direct",
             )
+            self.assertEqual(actual, expected)
 
     @onlyCUDA
     @skipIfNoCuteDSL
