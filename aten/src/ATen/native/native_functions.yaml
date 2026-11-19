@@ -7191,6 +7191,7 @@
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda_v2_out
+    XPU: _scaled_grouped_mm_xpu_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -7199,6 +7200,13 @@
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
     MPS: _grouped_mm_mps
+    XPU: _grouped_mm_xpu
+
+- func: _grouped_mm.out(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _grouped_mm_out
+    CUDA: _grouped_mm_out_cuda
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -15311,6 +15319,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable_backward
+    XPU: _scaled_dot_product_fused_attention_overrideable_backward_xpu
 
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:

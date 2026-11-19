@@ -34,7 +34,7 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _use_autotune_backend, get_current_backend
+from .utils import _use_autotune_backend, get_current_backend, ModularIndexingUse
 from .virtualized import V
 
 
@@ -569,6 +569,34 @@ class InductorChoices:
     def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
         """Hook to transform fused kernel names during codegen"""
         return fused_name
+
+    def use_modular_indexing(
+        self,
+        device: torch.device | str | None,
+        *,
+        numel: int | sympy.Expr | None = None,
+        reduction_numel: int | sympy.Expr | None = None,
+        kind: ModularIndexingUse,
+    ) -> bool:
+        """
+        Decide whether a load/store index may contain ModularIndexing/FloorDiv
+        of loop variables (True) or must use the affine alternative: realizing
+        a dim-merging view, splitting a reduction at a dim boundary, lowering
+        repeat/roll/strided slice_scatter without modular arithmetic, keeping
+        %, // index arithmetic behind an indirect variable, or undoing a loop
+        reindexing during fusion that leaves a non-affine index. kind names
+        the construct and device is the device of the affected kernel. Every
+        call site passes numel, the number of elements that kernel touches
+        (an int or an expression of the graph's size variables); a reduction
+        also passes reduction_numel, the number of elements reduced into each
+        output, so that an override can tell 64 sums of 4097 elements from
+        4097 sums of 64.
+
+        The default follows config.avoid_modular_indexing for every device
+        and construct. Override it through V.set_choices_handler to decide
+        per backend, construct or size.
+        """
+        return not config.avoid_modular_indexing
 
     @staticmethod
     def should_use_cooperative_reduction(

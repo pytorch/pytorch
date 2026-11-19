@@ -2885,6 +2885,11 @@ Call this whenever a new thread is created in order to propagate values from
     return t.is_fake();
   });
 
+  py_module.def("_enable_fake_tensor_custom_op_profiles", []() {
+    torch::fake_tensor::custom_op_profiles_ever_enabled.store(
+        true, std::memory_order_relaxed);
+  });
+
   py_module.def("_fake_device", [](const at::Tensor& t) -> c10::Device {
     auto fd = t.unsafeGetTensorImpl()->fake_device();
     TORCH_CHECK(fd.has_value(), "Tensor does not have a fake device");
@@ -3060,6 +3065,17 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("fake"),
       py::arg("constant"));
 
+  py_module.def(
+      "_invalidate_fake_constant_aliases",
+      [](py::object mode, const at::Tensor& tensor) {
+        TORCH_CHECK(tensor.defined(), "Expected a defined tensor");
+        auto fake_mode = torch::fake_tensor::getCppFakeTensorMode(mode.ptr());
+        fake_mode->invalidate_constant_aliases(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("mode"),
+      py::arg("tensor"));
+
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
@@ -3128,8 +3144,8 @@ Call this whenever a new thread is created in order to propagate values from
           // dispatcher too.
           torch::DisableTorchDispatch no_dispatch;
           c10::impl::DisablePythonDispatcher no_python_dispatcher;
-          out_impl = impl->shallow_copy_and_detach(
-              impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+          out_impl = meta.detach().getIntrusivePtr();
+          out_impl->set_allow_tensor_metadata_change(true);
         }
         // Before marking the shared storage, as this can throw
         out_impl->set_requires_grad(meta.requires_grad());
