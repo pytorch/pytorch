@@ -14,7 +14,7 @@ from torch.utils._triton import has_triton
 
 
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, f"requires multiple accelerators"
+    unittest.skipIf, not HAS_MULTIGPU, "requires multiple accelerators"
 )
 
 
@@ -144,7 +144,6 @@ class TestMoveConstructorsToGpu(TestCase):
         inp = torch.rand([100], device=device)
         _check_fn(self, foo, True, inp)
 
-
     def test_random_constructor_not_moved(self, device):
         from torch._inductor import config
 
@@ -225,7 +224,6 @@ class TestMoveConstructorsGeneric(TestCase):
                 expected,
                 msg=str(dtype),
             )
-
 
 
 instantiate_device_type_tests(
