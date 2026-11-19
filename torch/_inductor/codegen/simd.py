@@ -5956,14 +5956,13 @@ class SIMDScheduling(BaseScheduling):
         def collapse_dims(
             dims: Sequence[sympy.Expr],
             fallback_numel: sympy.Expr,
-            max_tiles: int | None = None,
         ) -> tuple[sympy.Expr, ...]:
             """
             Collapse dimensions to the maximum allowed number of tiles.
             """
             if not dims:
                 return (fallback_numel,)
-            max_tiles = max_tiles if max_tiles is not None else get_max_tiles(2)
+            max_tiles = get_max_tiles(2)
             num_leading_dims = max(0, len(dims) - max_tiles)
             first_trailing_dim = num_leading_dims + 1
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])
