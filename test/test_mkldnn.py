@@ -1028,6 +1028,10 @@ class TestMkldnn(TestCase):
         mod = torch.nn.Sequential(
             torch.nn.Conv2d(8, 8, 1), torch.nn.LayerNorm(8), torch.nn.Conv2d(8, 8, 1)
         ).eval()
+        # Non-default scale and shift, so dropping either changes the output.
+        with torch.no_grad():
+            mod[1].weight.uniform_(0.5, 1.5)
+            mod[1].bias.uniform_(-0.5, 0.5)
         scripted_mod = torch.jit._freeze.freeze(torch.jit._script.script(mod))
         torch._C._jit_pass_convert_frozen_ops_to_mkldnn(scripted_mod.graph)
         FileCheck().check("prim::MKLDNNLayerNorm").run(scripted_mod.graph)

@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/BatchNorm.h>
-#include <ATen/native/mkldnn/detail/Utils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -78,6 +78,8 @@ void batch_normalization_forward_training(
       op_attr);
 
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
+  // May replace the buffers and layouts of mean, variance and dst
+  // when they differ from the descs the primitive expects.
   mean.reinit_if_possible(pd.mean_desc());
   variance.reinit_if_possible(pd.variance_desc());
   dst.reinit_if_possible(pd.dst_desc());
@@ -144,6 +146,8 @@ void batch_normalization_backward(
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
   auto expected_mean = mean.reorder_if_differ_in(pd.mean_desc());
   auto expected_variance = variance.reorder_if_differ_in(pd.variance_desc());
+  // May replace the buffers and layouts of diff_src, diff_scale and diff_shift
+  // when they differ from the descs the primitive expects.
   diff_src.reinit_if_possible(pd.diff_src_desc());
   diff_scale.reinit_if_possible(scale.get_desc());
   diff_shift.reinit_if_possible(scale.get_desc());

@@ -28,6 +28,8 @@ void layer_normalization_forward(
       op_attr);
 
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
+  // May replace the buffers and layouts of mean, variance and dst
+  // when they differ from the descs the primitive expects.
   mean.reinit_if_possible(pd.mean_desc());
   variance.reinit_if_possible(pd.variance_desc());
   dst.reinit_if_possible(pd.dst_desc());
