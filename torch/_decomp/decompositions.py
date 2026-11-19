@@ -3879,6 +3879,27 @@ def _upsample_nearest_exact3d(
     )
 
 
+def _upsample_output_memory_format(input: Tensor) -> torch.memory_format:
+    # Mirrors at::native::upsample::output_memory_format: suggest_memory_format() also requires
+    # the stride of a size-1 batch dimension to fit the layout, so e.g. `hwc.permute(2, 0, 1)[None]`
+    # is reported as contiguous; retry with a batch stride that fits any layout.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    memory_format = utils.suggest_memory_format(input)
+    if (
+        memory_format != torch.contiguous_format
+        or input.ndim not in (4, 5)
+        or not guard_or_false(input.shape[0] == 1)
+    ):
+        return memory_format
+    strides = list(input.stride())
+    extents = [s * n for s, n in zip(strides[1:], input.shape[1:])]
+    strides[0] = reduce(torch.sym_max, extents, 1)
+    if utils.are_strides_like_channels_last_or_false(input.shape, strides):
+        return torch.channels_last if input.ndim == 4 else torch.channels_last_3d
+    return memory_format
+
+
 @pw_cast_for_opmath
 def _upsample_nearest(
     input: Tensor,
@@ -3895,7 +3916,7 @@ def _upsample_nearest(
 
     if result.ndim in (4, 5):
         # convert output to correct memory format, if necessary
-        memory_format = utils.suggest_memory_format(input)
+        memory_format = _upsample_output_memory_format(input)
 
         # following "heuristic: only use channels_last path when it's faster than the contiguous path"
         n_channels = input.shape[1]
@@ -4820,7 +4841,7 @@ def _upsample_linear(
     result = vs[0]
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = _upsample_output_memory_format(input)
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     if input.device.type == "cuda" and n_channels < 16:
@@ -5611,7 +5632,7 @@ def upsample_bicubic2d_default(
         result = _sum_tensors(c1 * c2 for (c1, c2) in zip(src_y, weights_y))
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = _upsample_output_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
     return result
 

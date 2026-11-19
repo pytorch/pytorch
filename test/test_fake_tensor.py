@@ -2854,7 +2854,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                     )
                 )
 
-        self.assertTrue(out[1].is_contiguous())
+        self.assertTrue(out[1].is_contiguous(memory_format=torch.channels_last))
         self.checkMetaProps(out[0], out[1])
 
     @onlyAccelerator
