@@ -147,10 +147,10 @@ def register_inplace_view(op: OpType) -> Callable[..., Any]:
     def impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
         # Run on aliases first so that an error leaves both components untouched.
         re = op(aten.alias(self.re), *args, **kwargs)
-        op(aten.alias(self.im), *args, **kwargs)
-        op(self.re, *args, **kwargs)
-        op(self.im, *args, **kwargs)
+        im = op(aten.alias(self.im), *args, **kwargs)
         _set_wrapper_metadata(self, re)
+        self._re = re
+        self._im = im
         return self
 
     func_name = _get_func_name(op)
