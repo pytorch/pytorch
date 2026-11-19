@@ -573,14 +573,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Info to enable multiple store_output calls for epilogue subtiling
         self.store_output_ctr = itertools.count()
         self.is_native_matmul = False
-        for node in self.features.node_schedule:
-            if (
-                isinstance(node, scheduler.SchedulerNode)
-                and isinstance(node.node, ir.ComputedBuffer)
-                and node.node.get_reduction_type() == "dot"
-            ):
-                self.is_native_matmul = True
-                break
+        if config.triton.native_matmul:
+            for node in self.features.node_schedule:
+                if (
+                    isinstance(node, scheduler.SchedulerNode)
+                    and isinstance(node.node, ir.ComputedBuffer)
+                    and node.node.get_reduction_type() == "dot"
+                ):
+                    self.is_native_matmul = True
+                    break
 
         # define this in a closure to make cache local to object
         @functools.cache
@@ -3129,18 +3130,6 @@ class SIMDScheduling(BaseScheduling):
                     for n2 in node2.get_nodes()
                 ):
                     why("invalid loop order and tiling for native matmul")
-                    return False
-
-                # The dots of a kernel share its (z, y, x) tiles, so they need equal
-                # [B, M, N] ranges. An mm [40, 136] and a bmm [2, 20, 136] have
-                # compatible loops, but the bmm's mat2 index then depends on y // 20.
-                dot_ranges = OrderedSet(
-                    tuple(map(tuple, n.get_ranges()))
-                    for n in (*node1.get_nodes(), *node2.get_nodes())
-                    if n.is_native_matmul()
-                )
-                if len(dot_ranges) > 1:
-                    why("native matmuls with different ranges")
                     return False
 
             if reduction_can_fuse and any(
@@ -6447,7 +6436,10 @@ class SIMDScheduling(BaseScheduling):
         # when natively generating matmul without template calls.
         for node in EnableReduction.filter(node_schedule):
             if isinstance(node.node, ir.ComputedBuffer):
-                if node.node.get_reduction_type() == "dot":
+                if (
+                    node.node.get_reduction_type() == "dot"
+                    and config.triton.native_matmul
+                ):
                     # A[M,K] @ B[K,N]
                     # force tiling to be {'y':M, 'x':N, 'r0_':K}
                     node_ranges = node.get_ranges()

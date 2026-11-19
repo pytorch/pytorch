@@ -15,7 +15,6 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .codegen.triton_utils import use_block_ptr_enabled
 from .heuristics.template import get_template_heuristic
 from .heuristics.template.triton import (
     _origami_enabled,
@@ -34,7 +33,7 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _use_autotune_backend, get_current_backend
+from .utils import _use_autotune_backend
 from .virtualized import V
 
 
@@ -482,51 +481,6 @@ class InductorChoices:
                     caller.tunable_dyn_dims_mask = mask
 
         return callers
-
-    def use_native_matmul(self, mat1: ir.IRNode, mat2: ir.IRNode) -> bool:
-        """Lower mat1 @ mat2 to Inductor's ops.dot, which generates a fused matmul
-        natively, instead of an extern kernel or a template. For relu(a @ b) on the
-        Triton backend:
-
-            False: extern_kernels.mm(arg0_1, arg1_1, out=buf0)
-                   triton_poi_fused_relu_0.run(buf1, ...)
-            True:  triton_red_fused_mm_relu_0.run(buf1, arg0_1, arg1_1, ...)
-
-        use_native_matmul() in kernel/mm_common.py asks this while lowering mm,
-        bmm, addmm, baddbmm and mm_plus_mm, after the checks that hold for any
-        backend (BF16x9, unbacked sizes). A dot cannot go back to the extern
-        kernel: the device's scheduling emits it. This default holds the checks
-        of Triton's native matmul codegen. An override replaces them: it returns
-        True only for matmuls its backend's scheduling emits (another
-        config.cuda_backend's), and calls super() for the rest.
-        """
-        if not config.triton.native_matmul:
-            return False
-        # If tma matmul is on, don't do native matmul
-        if (
-            config.triton.enable_persistent_tma_matmul
-            and torch.utils._triton.has_triton_tma_device()
-        ):
-            raise AssertionError("native matmul doesn't support tma codegen yet")
-        # Currently only enable native matmul for default indexing.
-        # TODO: support block ptr
-        if use_block_ptr_enabled():
-            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-        device_type = mat1.get_device_or_error().type
-        # Currently, tl.dot only supports following dtypes
-        dtypes = (torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
-        # (..., M, K) @ (..., K, N)
-        m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
-        sizevars = V.graph.sizevars
-        return (
-            device_type in ("cuda", "xpu")
-            and get_current_backend(device_type) == "triton"
-            and mat1.get_dtype() in dtypes
-            and mat2.get_dtype() in dtypes
-            # Consider the shape (m,k,n) > 1
-            # TODO : support when size = 1
-            and not any(sizevars.statically_known_leq(s, 1) for s in (m, k, n))
-        )
 
     def triton_kernel_kwargs(
         self,

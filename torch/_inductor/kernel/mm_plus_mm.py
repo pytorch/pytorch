@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from .. import config as inductor_config
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings
 from ..select_algorithm import (
@@ -14,7 +15,7 @@ from ..select_algorithm import (
 )
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
-from .mm_common import load_kernel_template, mm_args, mm_grid, use_native_matmul
+from .mm_common import load_kernel_template, mm_args, mm_grid
 
 
 if TYPE_CHECKING:
@@ -58,7 +59,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         or not V.graph.sizevars.statically_known_list_equals(
             mat2.get_size(), mat4.get_size()
         )
-        or use_native_matmul(mat1, mat2)
+        or inductor_config.triton.native_matmul
     ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/triton-lang/triton/issues/967

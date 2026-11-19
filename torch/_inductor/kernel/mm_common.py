@@ -7,11 +7,12 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import is_bf16x9_matmul, sympy_product
+from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
+from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import load_template, triton_type
@@ -174,8 +175,42 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
+    if (
+        is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+        or not config.triton.native_matmul
+    ):
+        return False
+
+    # If tma matmul is on, don't do native matmul
+    if (
+        config.triton.enable_persistent_tma_matmul
+        and torch.utils._triton.has_triton_tma_device()
+    ):
+        raise AssertionError("native matmul doesn't support tma codegen yet")
+
+    # Currently only enable native matmul for default indexing.
+    # TODO: support block ptr
+    if use_block_ptr_enabled():
+        raise AssertionError("native matmul doesn't support block_ptr codegen yet")
+
+    # Currently only enable native matmul for triton on GPU.
     device_type = mat1.get_device().type
-    if is_bf16x9_matmul(device_type, mat1.get_dtype()):
+    if not (
+        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
+    ):
+        return False
+
+    # Currently, tl.dot only supports following dtypes
+    triton_supported_dtype = [
+        torch.int8,
+        torch.uint8,
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+    ]
+    if mat1.dtype not in triton_supported_dtype:
+        return False
+    if mat2.dtype not in triton_supported_dtype:
         return False
 
     # (..., M, K) @ (..., K, N)
@@ -190,7 +225,16 @@ def use_native_matmul(mat1, mat2):
     if any(map(has_free_unbacked_symbols, [m, k, n])):
         return False
 
-    return V.choices.use_native_matmul(mat1, mat2)
+    # Consider the shape (m,k,n) > 1
+    # TODO : support when size = 1
+    if (
+        V.graph.sizevars.statically_known_leq(m, 1)
+        or V.graph.sizevars.statically_known_leq(k, 1)
+        or V.graph.sizevars.statically_known_leq(n, 1)
+    ):
+        return False
+
+    return True
 
 
 def _use_small_mm_pointwise(
