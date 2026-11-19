@@ -31,6 +31,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__fused_rms_norm(AtenTensorHandle
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__grouped_mm(AtenTensorHandle self, AtenTensorHandle mat2, AtenTensorHandle* offs, AtenTensorHandle* bias, int32_t* out_dtype, AtenTensorHandle* ret0);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__histogramdd_from_bin_cts(AtenTensorHandle self, const int64_t* bins, int64_t bins_len_, const double** range, int64_t range_len_, AtenTensorHandle* weight, int32_t density, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__int_mm_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle mat2);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__pdist_backward(AtenTensorHandle grad_output, AtenTensorHandle self, double p, AtenTensorHandle pdist, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__pdist_forward(AtenTensorHandle self, double p, AtenTensorHandle* ret0);
