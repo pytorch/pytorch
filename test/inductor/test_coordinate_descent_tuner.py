@@ -134,6 +134,25 @@ class TestCoordinateDescentTuner(TestCase):
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
 
+    @parametrize("invalid_timing", (0.0, -1.0))
+    @parametrize("invalid_xblock", (4, 2))
+    def test_non_positive_timing_does_not_win(self, invalid_timing, invalid_xblock):
+        """
+        HIP on Windows can report non-positive kernel timings (#193658). Such a
+        timing on the baseline (XBLOCK=4) or on a candidate (XBLOCK=2) must
+        neither win nor end up as a divisor.
+        """
+        tuner = CoordescTuner()
+        baseline_config = triton.Config({"XBLOCK": 4}, num_warps=8, num_stages=1)
+
+        def func(config):
+            if config.kwargs["XBLOCK"] == invalid_xblock and config.num_warps == 8:
+                return invalid_timing
+            return abs(config.kwargs["XBLOCK"] - 15)
+
+        best_config = tuner.autotune(func, baseline_config)
+        self.assertEqual(best_config.kwargs["XBLOCK"], 16)
+
     def test_reduction_blocks(self):
         tuner = CoordescTuner()
         for reduction_dim in range(3):

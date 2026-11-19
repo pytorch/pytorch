@@ -275,7 +275,7 @@ class CoordescTuner:
     @staticmethod
     def has_improvement(baseline, test):
         threshold = 0.001  # 0.1%
-        return test is not None and test < baseline * (1 - threshold)
+        return test is not None and 0 < test < baseline * (1 - threshold)
 
     def is_valid_config(self, config) -> bool:
         if self.is_mix_order_reduction:
@@ -434,6 +434,9 @@ class CoordescTuner:
         """
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
+        if baseline_timing <= 0:
+            # Invalid measurement (#193658); any valid candidate timing beats it.
+            baseline_timing = float("inf")
 
         log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
