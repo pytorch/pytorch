@@ -47,6 +47,7 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(shapes::tensor_stamp, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::snapshot, m)?)?;
     m.add_class::<shapes::Snapshot>()?;
+    m.add_class::<shapes::Usual>()?;
     m.add_class::<pyapi::CfgFunction>()?;
     m.add_class::<pyapi::Region>()?;
     m.add_class::<pyapi::Replay>()?;
