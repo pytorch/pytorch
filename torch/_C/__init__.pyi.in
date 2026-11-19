@@ -2326,6 +2326,7 @@ class _CppFakeTensorMode:
     allow_scalar_outputs: _bool
     propagate_real_tensors: _bool
     epoch: _int
+    def clear_non_cpu_constants(self) -> None: ...
     @property
     def avoid_device_init(self) -> _bool: ...
     @property
@@ -2469,6 +2470,8 @@ class _CudaDeviceProperties:
     # platform-conditional.
     shared_memory_per_block_optin: _int
     regs_per_multiprocessor: _int
+    # None on CUDA and on ROCm before 7.0.
+    xcc_count: _int | None
 
 # Functions related to SDPA
 class _SDPAParams:

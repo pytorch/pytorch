@@ -2895,6 +2895,22 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "__reduce__")
 
+    def bytearray_zfill(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "zfill")
+
+    def bytearray_expandtabs(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "expandtabs")
+
     tp_methods = {
         "__reduce__": Method(bytearray_reduce),
         "index": Method(bytearray_index),
@@ -2922,6 +2938,8 @@ class ByteArrayVariable(VariableTracker):
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),
         "rjust": Method(bytearray_rjust),
+        "zfill": Method(bytearray_zfill),
+        "expandtabs": Method(bytearray_expandtabs),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
