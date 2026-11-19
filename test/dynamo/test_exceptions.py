@@ -80,25 +80,73 @@ def comparable(value):
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_base_exception_keyword_arguments(self):
+    @parametrize(
+        "exc_type",
+        [BaseException, Exception, ValueError, RuntimeError, StopIteration, OSError],
+        name_fn=lambda exc_type: exc_type.__name__,
+    )
+    def test_builtin_exception_keyword_arguments(self, exc_type):
         def fn():
-            empty = BaseException().args
-            positional = BaseException("hello", 42).args
+            empty = exc_type().args
+            positional = exc_type("hello", 42).args
 
             try:
-                _ = BaseException(a=1)
+                exc_type(a=1)
             except TypeError as error:
                 keyword_error = str(error)
 
             try:
-                _ = BaseException("hello", a=1)
+                exc_type("hello", a=1)
             except TypeError as error:
                 mixed_error = str(error)
 
             return empty, positional, keyword_error, mixed_error
 
+        expected = (
+            (),
+            ("hello", 42),
+            f"{exc_type.__name__}() takes no keyword arguments",
+            f"{exc_type.__name__}() takes no keyword arguments",
+        )
+        self.assertEqual(fn(), expected)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(), fn())
+        self.assertEqual(compiled(), expected)
+
+    @parametrize(
+        "exc_type",
+        [BaseExceptionGroup, ExceptionGroup],
+        name_fn=lambda exc_type: exc_type.__name__,
+    )
+    def test_exception_group_keyword_validation_order(self, exc_type):
+        def fn(x):
+            try:
+                exc_type("message", [], a=1)
+            except ValueError:
+                return x + 1
+            except TypeError:
+                return x + 2
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), x + 1)
+        self.assertEqual(compiled(x), x + 1)
+
+    def test_exception_supported_keyword_arguments(self):
+        def fn(x):
+            attribute_error = AttributeError("missing", name="field", obj=x)
+            name_error = NameError("missing", name="variable")
+            return (
+                x.sin(),
+                attribute_error.args,
+                attribute_error.name,
+                attribute_error.obj,
+                name_error.args,
+                name_error.name,
+            )
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
 
     def test_exception(self):
         def fn(x):
