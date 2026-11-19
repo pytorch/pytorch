@@ -369,11 +369,9 @@ class CacheBase:
                 version_info["cuda"] = torch.version.cuda
             else:
                 device_info["name"] = device_properties.gcnArchName
+                device_info["xcc_count"] = getattr(device_properties, "xcc_count", None)
                 version_info["hip"] = torch.version.hip
             hash_input["device"] = device_info
-            if torch.version.hip is not None:
-                # Last, so that if the query fails the arch name stays in the key.
-                device_info["xcc_count"] = getattr(device_properties, "xcc_count", None)
         except (AssertionError, RuntimeError):
             # If CUDA is not installed, omit CUDA/HIP-specific device information.
             pass
