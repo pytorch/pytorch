@@ -3207,11 +3207,21 @@ class _Path(_Region):
         """Traces the path these inputs take and compiles its graph."""
         start = time.perf_counter()
         undefined = _runtime.UNDEFINED
-        refused = {
-            self.inputs[p]
+        reasons = {
+            self.inputs[p]: _acceptable(arg)
             for p, arg in enumerate(args)
-            if arg is not undefined and _acceptable(arg) is not None
+            if arg is not undefined
         }
+        refused = {value for value, reason in reasons.items() if reason is not None}
+        # The trace runs the instructions of the region itself whatever they
+        # are, and what it cannot be handed it has as it is: an iterator
+        # would be used up by the trace, and empty for the call.
+        for i in range(self.lo, self.hi):
+            inst = self.plan.insts[i]
+            if inst["op"] not in _KEEPS:
+                taken = next((v for v in inst["uses"] if v in refused), None)
+                if taken is not None:
+                    raise _Failed(i, f"takes {reasons[taken]}")
         positions = [
             p
             for p, arg in enumerate(args)
