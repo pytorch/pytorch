@@ -19,6 +19,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..pattern_matcher import (
+    _common_custom_context,
     CallFunctionVarArgs,
     CallMethodVarArgs,
     get_arg_value,
@@ -557,6 +558,38 @@ class BatchLinearLHSFusion(BatchFusion):
         return symbols <= bound
 
     @staticmethod
+    def _is_quantized_weight_conversion(node: torch.fx.Node) -> bool:
+        # Keep int8 weight-only quantization patterns for the WOQ matcher.
+        pending = [node]
+        seen = OrderedSet()
+        while pending:
+            cur = pending.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            target = cur.target
+            if not isinstance(target, torch._ops.OpOverload):
+                continue
+            if target.overloadpacket.__name__ in (
+                "convert_element_type",
+                "_to_copy",
+                "to",
+                "type_as",
+            ):
+                src = cur.args[0]
+                if isinstance(src, torch.fx.Node):
+                    value = src.meta.get("val")
+                    if isinstance(value, torch.Tensor) and not (
+                        value.dtype.is_floating_point or value.dtype.is_complex
+                    ):
+                        return True
+            if _is_view_op(target):
+                src = cur.args[0]
+                if isinstance(src, torch.fx.Node):
+                    pending.append(src)
+        return False
+
+    @staticmethod
     def _reaches_user_visible_output(
         node: torch.fx.Node, graph: torch.fx.Graph
     ) -> bool:
@@ -678,6 +711,9 @@ class BatchLinearLHSFusion(BatchFusion):
             return None
         if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):  # type: ignore[arg-type]
             return None
+        # Leave int8 weight-only quantization patterns for the WOQ matcher.
+        if self._is_quantized_weight_conversion(weight_m):  # type: ignore[arg-type]
+            return None
         # Replacing a mutated mm output with a split view can break autograd.
         if any(_is_mutable_node(user.target) for user in node.users):
             return None
@@ -712,6 +748,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 and statically_known_true(bias_val.shape[0] == weight_val.shape[1])
             ):
                 return None
+        custom = node.meta.get("custom", {})
         group_key = (
             "batch_linear_lhs",
             input_m,
@@ -719,6 +756,9 @@ class BatchLinearLHSFusion(BatchFusion):
             str(weight_val.dtype),
             str(weight_val.device),
             str(weight_val.shape[0]),
+            custom.get("stream", 0),
+            custom.get("mempool"),
+            custom.get("mempool_device"),
         )
         return group_key
 
@@ -746,10 +786,17 @@ class BatchLinearLHSFusion(BatchFusion):
             batch_biases.append(bias)
             split_sections.append(weight.meta["val"].shape[1])  # type: ignore[union-attr]
 
+        custom_context = _common_custom_context(batch_nodes)
+
+        def _copy_custom(new_node: torch.fx.Node) -> None:
+            if custom_context:
+                new_node.meta["custom"] = dict(custom_context)
+
         with graph.inserting_before(max(subset)):  # type: ignore[operator]
             cat_weights = graph.call_function(  # type: ignore[operator]
                 aten.cat.default, args=(batch_weights,), kwargs={"dim": 1}
             )
+            _copy_custom(cat_weights)
             cat_weights.meta["val"] = aten.cat(
                 [weight.meta["val"] for weight in batch_weights], dim=1
             )
@@ -757,6 +804,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 cat_biases = graph.call_function(  # type: ignore[operator]
                     aten.cat.default, args=(batch_biases,), kwargs={"dim": 0}
                 )
+                _copy_custom(cat_biases)
                 cat_biases.meta["val"] = aten.cat(
                     [bias.meta["val"] for bias in batch_biases], dim=0
                 )
@@ -764,6 +812,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     aten.addmm.default,
                     args=(cat_biases, batch_input, cat_weights),
                 )
+                _copy_custom(fused_lhs)
                 fused_lhs.meta["val"] = aten.addmm(
                     cat_biases.meta["val"],
                     batch_input.meta["val"],  # type: ignore[union-attr]
@@ -774,6 +823,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     aten.mm.default,
                     args=(batch_input, cat_weights),
                 )
+                _copy_custom(fused_lhs)
                 fused_lhs.meta["val"] = aten.mm(
                     batch_input.meta["val"],  # type: ignore[union-attr]
                     cat_weights.meta["val"],
@@ -782,6 +832,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 aten.split_with_sizes.default,
                 args=(fused_lhs, split_sections, 1),
             )
+            _copy_custom(fused_lhs_list)
             split_values = aten.split_with_sizes(
                 fused_lhs.meta["val"], split_sections, 1
             )
