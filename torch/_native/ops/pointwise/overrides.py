@@ -10,6 +10,7 @@ from torch._prims_common import (
 )
 
 from ... import cutedsl_utils as cu
+from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
 from ...utils.scalar import round_float
@@ -42,8 +43,6 @@ else:
     K = LazyModule("torch._native.ops.pointwise.kernel")
     ops = LazyModule("torch._native.ops.pointwise.ops")
 
-
-_ARCH_MAJORS = cu.POINTWISE_ARCH_MAJORS
 
 _SUPPORTED = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 
