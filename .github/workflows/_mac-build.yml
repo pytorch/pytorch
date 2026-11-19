@@ -63,6 +63,7 @@ jobs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner-type }}
+    timeout-minutes: 120
     env:
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
       SCCACHE_USE_GHA: ${{ inputs.sccache-use-gha }}  # this is placed here instead of the sccache step to appease actionlint
@@ -155,6 +156,10 @@ jobs:
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         id: build
+        # Well above normal build times; fails a hung build (e.g. stuck on
+        # `sccache --stop-server`) instead of holding the runner until
+        # GitHub's 6-hour default.
+        timeout-minutes: 90
         env:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
