@@ -247,7 +247,7 @@ class C10dBackendTestContinuous:
     timeout = timedelta(seconds=60)
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return cls.backend_name
 
     @property
