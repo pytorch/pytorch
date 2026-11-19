@@ -186,6 +186,7 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(manager.check(inputs))
             self.assertTrue(manager.check_verbose(inputs).result)
             self.assertFalse(manager.check({"hooks": hooks}))
+            self.assertFalse(manager.check_verbose({"hooks": hooks}).result)
             self.assertTrue(manager.check(inputs))  # reset after a partial traversal
             changed = {"hooks": hooks, "flags": {1: True}}
             self.assertFalse(manager.check(changed))
@@ -303,7 +304,8 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(root.check(mapping))
 
     @parametrize("side", ["hooks", "flags"])
-    def test_hook_membership_guard_rejects_noninteger_keys(self, side):
+    @parametrize("size", [1, 2])
+    def test_hook_membership_guard_rejects_noninteger_keys(self, side, size):
         calls = []
 
         class Key:
@@ -315,9 +317,12 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
                 calls.append("eq")
                 return True
 
-        inputs = {"hooks": {1: None}, "flags": {1: True}}
-        inputs[side] = {Key(): None}
-        root = self._membership_root(inputs, (True,), dict_mgr_enum)
+        inputs = {
+            name: dict.fromkeys(range(1, size + 1)) for name in ("hooks", "flags")
+        }
+        del inputs[side][1]
+        inputs[side][Key()] = None
+        root = self._membership_root(inputs, (True,) * size, dict_mgr_enum)
         calls.clear()
         self.assertFalse(root.check(inputs))
         self.assertEqual(calls, [])
