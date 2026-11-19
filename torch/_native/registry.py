@@ -219,7 +219,7 @@ class _DispatchKeyRouter:
         }
         self.keys: torch._C.DispatchKeySet = torch._C._dispatch_keyset_full_after(
             torch._C.DispatchKey.BackendSelect
-        )
+        ).remove(torch._C.DispatchKey.PythonDispatcher)
         for key in self.routers:
             self.keys = self.keys.add(key)
 
@@ -424,7 +424,14 @@ def _install_override(
         existing._destroy()
 
     lib = torch.library.Library(lib_symbol, "IMPL", dispatch_key)
-    lib.impl(op_symbol, torch._disable_dynamo(kernel), dispatch_key, with_keyset=True)
+    disabled_kernel = torch._disable_dynamo(kernel)
+
+    def eager_kernel(*args: Any, **kwargs: Any) -> Any:
+        if torch.compiler.is_dynamo_compiling():
+            return disabled_kernel(*args, **kwargs)
+        return kernel(*args, **kwargs)
+
+    lib.impl(op_symbol, eager_kernel, dispatch_key, with_keyset=True)
     _override_libs[key] = lib
 
 
