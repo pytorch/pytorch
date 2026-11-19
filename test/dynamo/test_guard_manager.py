@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     set_default_dtype,
+    skipIfCppFakeTensor,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
@@ -338,6 +339,20 @@ def less_match_verbose_code_parts(expected):
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_empty_dict_identity_guard(self):
+        mapping = {}
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager(
+            "mapping",
+            "mapping",
+            mapping,
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        manager.add_id_match_guard(id(mapping), ["mapping identity"], None)
+        self.assertTrue(root.check({"mapping": mapping}))
+        self.assertFalse(root.check({"mapping": {}}))
+        self.assertFalse(root.check_verbose({"mapping": {}}).result)
 
     def test_cpp_shape_guard_missing_windows_compiler_falls_back(self):
         from torch._inductor.codecache import CppCodeCache
@@ -801,6 +816,7 @@ user_stack=None)
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_tensor_match_guard_throw_restores_torch_function(self):
         # The root disables the TorchFunction TLS while its accessors run and
         # restores it on scope exit, so a C++ throw out of an accessor leaves
@@ -2480,6 +2496,22 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn([4, 5, 6], expected))
         self.assertTrue(handler.eval_fn((7, 8, 9), expected))
         self.assertFalse(handler.eval_fn([1], expected))
+
+    def test_dictionary_storage_length(self):
+        class Mapping(dict):
+            def __len__(self):
+                return 99
+
+        guard = self._make_guard(GuardBuilder.SEQUENCE_LENGTH)
+        handler = self._get_handler("SEQUENCE_LENGTH")
+        value = Mapping(a=1, b=2)
+        expected = handler.get_metadata_fn(guard, value)
+        root = RootGuardManager()
+        root.add_dict_length_check_guard(expected, [], None)
+        self.assertTrue(root.check(value))
+        self.assertTrue(handler.eval_fn(value, expected))
+        self.assertFalse(root.check(Mapping(a=1)))
+        self.assertFalse(handler.eval_fn(Mapping(a=1), expected))
 
     def test_dict_contains(self):
         from torch._dynamo.guards import GuardBuilder

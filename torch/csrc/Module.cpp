@@ -21,6 +21,7 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -2003,6 +2004,15 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_ensureXPUDeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureXPUDeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 struct TorchModuleState {
   PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
 };
@@ -2408,6 +2418,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THCPModule_ensureCUDADeviceGuardSet,
      METH_NOARGS,
      nullptr},
+    {"_ensureXPUDeviceGuardSet",
+     THPModule_ensureXPUDeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}
 
 };
@@ -2780,8 +2794,43 @@ PyObject* initModule() {
         "_fake_dispatch_register_python_cia",
         add_for(FakeDispatchCategory::PythonCIA));
     py_module.def(
+        "_fake_dispatch_deregister_python_cia",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::PythonCIA,
+              c10::OperatorName(name, overload));
+        });
+    py_module.def(
         "_fake_dispatch_register_custom_op_impl",
         add_for(FakeDispatchCategory::CustomOpImpl));
+    py_module.def(
+        "_fake_dispatch_register_static_shape_decomp",
+        add_for(FakeDispatchCategory::StaticShapeDecomp));
+    py_module.def(
+        "_fake_dispatch_register_cpp_meta_supports_symint",
+        add_for(FakeDispatchCategory::CppMetaSupportsSymint));
+    py_module.def(
+        "_fake_dispatch_deregister_decomp",
+        [](const std::string& name, const std::string& overload) {
+          const c10::OperatorName op_name(name, overload);
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::Decomp, op_name);
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::StaticShapeDecomp, op_name);
+        });
+    py_module.def(
+        "_fake_dispatch_deregister_meta",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::Meta, c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_fake_dispatch_contains_static_shape_decomp",
+        [](const std::string& name, const std::string& overload) {
+          return at::impl::fakeDispatchTableContains(
+              FakeDispatchCategory::StaticShapeDecomp,
+              c10::OperatorName(name, overload));
+        });
     py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
@@ -2847,6 +2896,11 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
     return t.is_fake();
+  });
+
+  py_module.def("_enable_fake_tensor_custom_op_profiles", []() {
+    torch::fake_tensor::custom_op_profiles_ever_enabled.store(
+        true, std::memory_order_relaxed);
   });
 
   py_module.def("_fake_device", [](const at::Tensor& t) -> c10::Device {
@@ -3024,6 +3078,17 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("fake"),
       py::arg("constant"));
 
+  py_module.def(
+      "_invalidate_fake_constant_aliases",
+      [](py::object mode, const at::Tensor& tensor) {
+        TORCH_CHECK(tensor.defined(), "Expected a defined tensor");
+        auto fake_mode = torch::fake_tensor::getCppFakeTensorMode(mode.ptr());
+        fake_mode->invalidate_constant_aliases(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      py::arg("mode"),
+      py::arg("tensor"));
+
   py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
@@ -3077,8 +3142,12 @@ Call this whenever a new thread is created in order to propagate values from
         // _make_subclass: a new detached fake sharing meta's storage (or, for a
         // sparse meta, its indices and values). meta keeps its own device and
         // autograd state. As in Python, the shared storage is marked as a
-        // fake's; a sparse meta has no storage to mark, and the indices and
-        // values it shares stay non-fake.
+        // fake's; a sparse meta has no storage to mark. This call marks only
+        // the outer sparse TensorImpl fake. The C++ fake fallback later marks
+        // retained COO _indices/_values outputs fake in place. The
+        // caller's shared components then acquire that mode/device too; reusing
+        // the outer meta tensor with another mode/device can fail on access.
+        // See Note [In-place conversion of Meta outputs].
         c10::intrusive_ptr<c10::TensorImpl> out_impl;
         {
           // As in no_dispatch(). Otherwise an active dispatch mode would run
@@ -3088,8 +3157,8 @@ Call this whenever a new thread is created in order to propagate values from
           // dispatcher too.
           torch::DisableTorchDispatch no_dispatch;
           c10::impl::DisablePythonDispatcher no_python_dispatcher;
-          out_impl = impl->shallow_copy_and_detach(
-              impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+          out_impl = meta.detach().getIntrusivePtr();
+          out_impl->set_allow_tensor_metadata_change(true);
         }
         // Before marking the shared storage, as this can throw
         out_impl->set_requires_grad(meta.requires_grad());
@@ -3135,6 +3204,12 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
       "_set_storage_data_ptr_access_error_msg",
       [](size_t storage_impl_ptr, std::string s) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -3147,6 +3222,19 @@ Call this whenever a new thread is created in order to propagate values from
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->clear_data_ptr_access_error_msg_();
+      });
+
+  py_module.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }
+        }
+        return true;
       });
 
   ASSERT_TRUE(
@@ -3513,11 +3601,15 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_8",
           at::blas::SwizzleType::SWIZZLE_32_8,
-          "gfx950-style 32x8 swizzle (hipBLASLt BLK32_UE8M0_32_8)")
+          "gfx950 32x8 tile")
       .value(
           "SWIZZLE_MN_K4",
           at::blas::SwizzleType::SWIZZLE_MN_K4,
-          "MN-major scales with four values packed along K");
+          "MN-major scales with four values packed along K")
+      .value(
+          "SWIZZLE_128",
+          at::blas::SwizzleType::SWIZZLE_128,
+          "gfx1250 scales grouped by 128 along K");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)

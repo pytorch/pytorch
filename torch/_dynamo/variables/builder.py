@@ -73,12 +73,14 @@ from torch._library.opaque_object import (
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
     maybe_get_item_memo,
+    unset_fake_temporarily,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch.fx.experimental._backward_state import BackwardState
@@ -200,6 +202,7 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -952,6 +955,80 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
         )
 
 
+def _safe_ordered_dict_key(key: object) -> bool:
+    kind = type(key)
+    if type(key) is tuple or type(key) is frozenset or type(key) is torch.Size:
+        return all(_safe_ordered_dict_key(item) for item in key)
+    if any(
+        kind is t
+        for t in (
+            str,
+            int,
+            bool,
+            bytes,
+            float,
+            complex,
+            type(None),
+            type,
+            types.BuiltinMethodType,
+            torch.dtype,
+            torch.device,
+        )
+    ):
+        return True
+    return kind is torch.Tensor or (
+        type(kind) is type
+        and next(iter_mro_static_attrs(kind, "__hash__"), None) is object.__hash__
+        and next(iter_mro_static_attrs(kind, "__eq__"), None) is object.__eq__
+    )
+
+
+def _dict_items_and_order(
+    value: dict[Any, Any], source: Source
+) -> tuple[list[tuple[int, Any, Any]], bool]:
+    snapshot = _dict_input_snapshot(value)
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
+        return snapshot, False
+    reordered = any(i != position for i, (position, _, _) in enumerate(snapshot))
+    if not all(_safe_ordered_dict_key(key) for _, key, _ in snapshot):
+        if reordered:
+            # Rebuilding storage can change the order and number of key callbacks.
+            # Leave the entire frame eager before any keys are wrapped or hashed.
+            unimplemented(
+                gb_type="Reordered OrderedDict input with callback-sensitive keys",
+                context="OrderedDict input snapshot",
+                explanation="Dynamo cannot restore an OrderedDict's storage order without potentially invoking user key hashing or equality.",
+                hints=["Construct the OrderedDict inside the compiled function."],
+                skip_frame=True,
+                apply_to_code=False,
+            )
+        if not is_constant_source(source):
+            install_guard(source.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+    return snapshot, reordered
+
+
+def _build_dict_items(
+    snapshot: list[tuple[int, Any, Any]],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+    *,
+    reordered: bool,
+) -> dict[T, VariableTracker]:
+    if not reordered:
+        return dict(build_key_value(i, key, item) for i, key, item in snapshot)
+    entries = [
+        (position, *build_key_value(position, key, item))
+        for position, key, item in snapshot
+    ]
+    # Preserve both dict storage order and OrderedDict iteration order.
+    items = collections.OrderedDict(
+        (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
+    )
+    for _, key, _ in entries:
+        items.move_to_end(key)
+    return items
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1493,7 +1570,8 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            snapshot, reordered = _dict_items_and_order(value, self.get_source())
+            all_const = all(ConstantVariable.is_literal(k) for _, k, _ in snapshot)
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1535,9 +1613,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            result = _build_dict_items(snapshot, build_key_value, reordered=reordered)
 
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
@@ -1557,6 +1633,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
+                # A lazy VT for a globals dict realized after a delete in the
+                # trace hands out a stale model.
+                self.tx.output.check_deleted_global_access(value, None)
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
                     source=self.source,
@@ -2536,11 +2615,7 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif (
-            isinstance(value, (dict, collections.OrderedDict))
-            and type(value).__new__ is dict.__new__
-        ):
-            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
+        elif issubclass(type(value), dict) and type(value).__new__ is dict.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -2561,11 +2636,10 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = dict(
-                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
-            )
+            snapshot, reordered = _dict_items_and_order(value, self.get_source())
+            kv_items = _build_dict_items(snapshot, build_key_value, reordered=reordered)
 
-            if isinstance(value, collections.defaultdict):
+            if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = UserDefinedDefaultDictVariable(
                     value,
@@ -2578,7 +2652,7 @@ class VariableBuilder:
             else:
                 udf_cls = (
                     UserDefinedOrderedDictVariable
-                    if isinstance(value, collections.OrderedDict)
+                    if issubclass(type(value), collections.OrderedDict)
                     else UserDefinedDictVariable
                 )
                 result = udf_cls(value, items=kv_items, source=self.source)
@@ -4203,7 +4277,9 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
     return TupleVariable(items)
 
 
-def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
+def _clone_input(
+    value: Any, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
@@ -4216,7 +4292,8 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             or value.is_nested
         ):
             # NB: ensure strides are preserved
-            value = clone_input(value)
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 

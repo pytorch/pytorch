@@ -154,13 +154,6 @@ else()
       "Cannot find threading library. PyTorch requires Threads to compile.")
 endif()
 
-# ---[ protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if(USE_LITE_PROTO)
-    set(CAFFE2_USE_LITE_PROTO 1)
-  endif()
-endif()
-
 # ---[ BLAS
 
 set(AT_MKLDNN_ACL_ENABLED 0)
@@ -753,7 +746,6 @@ if(USE_ITT)
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ITT_LIBRARIES})
   else()
     message(WARNING "Not compiling with ITT. Suppress this warning with -DUSE_ITT=OFF")
-    set(USE_ITT OFF CACHE BOOL "" FORCE)
     caffe2_update_option(USE_ITT OFF)
   endif()
 endif()
@@ -1480,7 +1472,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
   # patches as Caffe2 and Caffe proto. This forces some functions to
   # not be inline and instead route back to the statically-linked protobuf.
