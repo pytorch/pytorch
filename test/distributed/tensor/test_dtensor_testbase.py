@@ -34,8 +34,7 @@ class DTensorContinuousTestBaseTest(TestCase):
                     expected = "cpu" if count < Fixture.world_size else "cuda"
                     self.assertEqual(Fixture().device_type, expected)
                     self.assertEqual(
-                        Fixture.backend_str(Fixture().device_type),
-                        "gloo" if expected == "cpu" else "nccl",
+                        Fixture.backend_str(), "gloo" if expected == "cpu" else "nccl"
                     )
 
     def test_cpu_fallback_backend(self):
@@ -43,8 +42,7 @@ class DTensorContinuousTestBaseTest(TestCase):
             world_size = 4
 
         with patch.object(common_dtensor, "DEVICE_COUNT", 1, create=True):
-            device = FallbackTest().device_type
-            self.assertEqual(FallbackTest.backend_str(device), "gloo")
+            self.assertEqual(FallbackTest.backend_str(), "gloo")
 
     def test_cpu_fallback_does_not_bind_accelerator(self):
         class FallbackTest(DTensorContinuousTestBase):
@@ -68,8 +66,8 @@ class DTensorTestBaseUtilCPUTest(DTensorTestBase):
     working as expected on CPU, regardless of the presence of CUDA devices.
     """
 
-    @classmethod
-    def backend_str(cls, device) -> str:
+    @property
+    def backend(self):
         return "gloo"
 
     @property

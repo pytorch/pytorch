@@ -77,7 +77,7 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
 
     @classmethod
-    def backend_str(cls, device):
+    def backend_str(cls):
         device_type = _get_device_type(cls.world_size)
         if device_type == "cpu":
             return "gloo"

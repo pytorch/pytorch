@@ -1255,11 +1255,10 @@ class AbstractFlightRecorderHookTest:
 
 def _make_fr_hook_test_class(backend_name, device_type):
     class FlightRecorderHookTest(AbstractFlightRecorderHookTest, MultiProcessTestCase):
-        @property
-        def device_type(self) -> str:
-            return device_type
+        pass
 
     FlightRecorderHookTest.backend_name = backend_name
+    FlightRecorderHookTest.device_type = device_type
     FlightRecorderHookTest.__name__ = (
         f"{backend_name.capitalize()}FlightRecorderHookTest"
     )

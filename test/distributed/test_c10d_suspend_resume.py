@@ -130,13 +130,12 @@ class AbstractSuspendResumeTest:
 
 def _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel):
     class SuspendResumeTest(AbstractSuspendResumeTest, MultiProcessTestCase):
-        @property
-        def device_type(self) -> str:
-            return device_type
+        pass
 
     class_name = backend_name.replace("-", " ").title().replace(" ", "")
     class_name = f"{class_name}SuspendResumeTest"
     SuspendResumeTest.backend_name = backend_name
+    SuspendResumeTest.device_type = device_type
     SuspendResumeTest.create_pair_channel = create_pair_channel
     SuspendResumeTest.__name__ = class_name
     SuspendResumeTest.__qualname__ = SuspendResumeTest.__name__

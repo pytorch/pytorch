@@ -98,7 +98,7 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
     timeout = dist.default_pg_timeout
 
     @classmethod
-    def backend_str(cls, device):
+    def backend_str(cls):
         dist.Backend.register_backend(
             "nccl4py",
             _create_nccl4py_backend,

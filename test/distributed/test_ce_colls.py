@@ -32,7 +32,7 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
     @classmethod
-    def backend_str(cls, device) -> str | None:
+    def backend_str(cls) -> str | None:
         return "nccl"
 
     @classmethod

@@ -259,11 +259,11 @@ class MultiProcContinuousSkipTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return "gloo"
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return "cpu"
 
     def test_1_worker_skip(self) -> None:

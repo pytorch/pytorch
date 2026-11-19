@@ -70,17 +70,14 @@ def _nccl_version_at_least(version):
 
 class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return dist.get_default_backend_for_device(device_type)
 
     @classmethod
     def opts(cls, high_priority_stream=False):
-        device = cls.device_type
-        if isinstance(device, property):
-            device = device.fget(cls)
         pg_cls = (
             c10d.ProcessGroupXCCL
-            if cls.backend_str(device) == "xccl"
+            if cls.backend_str() == "xccl"
             else c10d.ProcessGroupNCCL
         )
         opts = pg_cls.Options()
@@ -90,7 +87,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, self.backend_str(self.device_type))
+        return init_multigpu_helper(self.world_size, self.backend_str())
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -286,7 +283,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
             ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
         ):
-            with self.assertRaisesRegex(ValueError, f"Cannot use {err} with [NX]CCL"):
+            with self.assertRaisesRegex(ValueError, f"Cannot use {err} with X?CCL"):
                 allreduce(tensors, op)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/157879")
@@ -480,9 +477,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                 (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
                 ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
             ):
-                with self.assertRaisesRegex(
-                    ValueError, f"Cannot use {err} with [NX]CCL"
-                ):
+                with self.assertRaisesRegex(ValueError, f"Cannot use {err} with X?CCL"):
                     reduce(tensors, self.rank, rt, op)
 
             # Premul sum (XCCL reduce lacks it: https://github.com/intel/torch-xpu-ops/issues/5777)

@@ -1639,11 +1639,11 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
     world_size: int = DEVICE_COUNT
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return DISTRIBUTED_BACKEND
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return DEVICE_TYPE
 
     @classmethod

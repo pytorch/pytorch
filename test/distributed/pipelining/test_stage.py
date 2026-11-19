@@ -572,12 +572,12 @@ class OutputSlotReleaseTest(TestCase):
 
 class StageTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         # Testing with NCCL backend
         return backend
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return device_type
 
     @property
@@ -931,11 +931,11 @@ instantiate_parametrized_tests(StageTest)
 
 class StageNegativeTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return backend
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return device_type
 
     @property

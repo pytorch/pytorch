@@ -398,7 +398,7 @@ class ScheduleTest(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         # Testing with NCCL backend
         return backend
 
@@ -1708,7 +1708,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         # Testing with NCCL backend
         return backend
 
@@ -1947,7 +1947,7 @@ class PerEdgeScheduleTest(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return backend
 
     @classmethod
@@ -1957,11 +1957,8 @@ class PerEdgeScheduleTest(MultiProcContinuousTest):
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
         store = dist.FileStore(rdvz_file, world_size)
-        device = cls.device_type
-        if isinstance(device, property):
-            device = device.fget(cls)
         dist.init_process_group(
-            backend=cls.backend_str(device),
+            backend=cls.backend_str(),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -2233,11 +2230,11 @@ class NCCLLazyP2PInitializationTest(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return "nccl-lazy"
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return "cuda"
 
     @property

@@ -55,7 +55,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
         return model
 
     @classmethod
-    def backend_str(cls, device):
+    def backend_str(cls):
         device_type = _get_device_type(cls.world_size)
         if device_type == "cpu":
             return "gloo"
