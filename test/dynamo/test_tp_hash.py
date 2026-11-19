@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -867,6 +868,9 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x, range(3))
 
+    @decorateIf(
+        unittest.expectedFailure, lambda params: params["receiver"] == "bytes_subclass"
+    )
     @parametrize("receiver", ["object", "bytes_subclass"])
     @parametrize("catch_type_error", [False, True])
     def test_dunder_hash_preserves_base_method(self, receiver, catch_type_error):

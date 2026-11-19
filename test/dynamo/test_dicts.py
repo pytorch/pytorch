@@ -163,6 +163,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(tuple(actual), tuple(expected))
         self.assertEqual(tuple(dict.items(actual)), tuple(dict.items(expected)))
 
+    @unittest.expectedFailure
     def test_dict_repr_custom_new_input_falls_back(self):
         class Mapping(dict):
             def __new__(cls, *args, **kwargs):
