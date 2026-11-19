@@ -93,6 +93,8 @@ pub struct BlockState {
     pub capture_attempts: Vec<u32>,
     pub respec_left: u32,
     pub profile_runs: u32,
+    /// How many profiling runs in a row ended in a raise.
+    pub raised: u32,
     pub next_version_id: u32,
     pub execs: u64,
     pub spec_execs: u64,
@@ -1129,6 +1131,10 @@ pub fn undefined() -> Obj {
         .as_ptr()
 }
 
+/// How many profiling runs of a block in a row may end in a raise before it
+/// is specialized from what they saw.
+const PROFILE_RAISES: u32 = 2;
+
 /// How many blocks on this thread are in their profiling run: code that
 /// decides when to compile something uses it to let the outermost block go
 /// first.
@@ -1531,6 +1537,7 @@ impl Compiled {
                 capture_attempts: vec![0; block.insts.len()],
                 respec_left: options.max_respecializations,
                 profile_runs: 0,
+                raised: 0,
                 next_version_id: 1,
                 execs: 0,
                 spec_execs: 0,
@@ -4021,6 +4028,7 @@ impl Compiled {
             }
             bs.respec_left -= 1;
             bs.profile_runs += 1;
+            bs.raised = 0;
             let id = bs.next_version_id;
             bs.next_version_id += 1;
             // The last attempt must hold for every input.
@@ -4060,6 +4068,26 @@ impl Compiled {
                 st.blocks[b].rejected = Some(msg.clone());
                 st.log.push(format!("b{}: {}", b, msg));
             }
+        }
+    }
+
+    /// Called when an instruction raised in a profiling run of a block. A
+    /// block that raises every time it runs (a lookup that fails, and is
+    /// caught) would profile forever, and so would hold back all that waits
+    /// for the profiling above it to be over: the second such run in a row
+    /// is specialized from as one that got to the end is.
+    unsafe fn raised_profiling(&self, b: usize) {
+        let enough = {
+            let mut st = self.state.borrow_mut();
+            let bs = &mut st.blocks[b];
+            bs.raised += 1;
+            bs.raised >= PROFILE_RAISES
+        };
+        if enough {
+            // The passes run with no error set.
+            let raised = ffi::PyErr_GetRaisedException();
+            self.specialize(b);
+            ffi::PyErr_SetRaisedException(raised);
         }
     }
 
@@ -4253,6 +4281,9 @@ impl Compiled {
                             }
                             Err(()) => {
                                 self.fail(frames, inst.bc);
+                                if mode == Mode::Profile {
+                                    self.raised_profiling(cur);
+                                }
                                 raised!('blocks, cur);
                             }
                         }
