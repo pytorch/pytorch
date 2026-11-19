@@ -520,9 +520,12 @@ class ProbeTests(unittest.TestCase):
                 "NotResource": [bucket, bucket + "/" + probe.OBJECT_NAME],
             },
         )
-        self.assertEqual(probe.PR_NUMBER, "0")
-        self.assertIn("tags: [ciflow/inductor-cu126/0]", text)
-        self.assertEqual(text.count("&& 0 != 0"), 2)
+        self.assertEqual(probe.PR_NUMBER, "205614")
+        self.assertEqual(probe.HEAD_REF, "gh/d4l3k/352/head")
+        self.assertEqual(probe.BASE_REF, "gh/d4l3k/352/base")
+        self.assertEqual(probe.TAG, "refs/tags/ciflow/inductor-cu126/205614")
+        self.assertIn("tags: [ciflow/inductor-cu126/205614]", text)
+        self.assertEqual(text.count("&& 205614 != 0"), 2)
         self.assertIn("runs-on: ubuntu-24.04", text)
         self.assertIn("disable-retry: true", text)
         self.assertNotIn("workflow_dispatch:", text)
@@ -1194,7 +1197,19 @@ class ProbeTests(unittest.TestCase):
                 probe.validate_output(value)
 
     def test_source_environment_and_no_credentials(self):
-        self.assertFalse(probe.scope_valid(environment()))
+        self.assertTrue(probe.scope_valid(environment()))
+        self.assertTrue(probe.source_matches(source(), "a" * 40))
+        self.assertFalse(
+            probe.scope_valid(
+                environment() | {"GITHUB_REF": "refs/tags/ciflow/inductor-cu126/205615"}
+            )
+        )
+        for part in ("head", "base"):
+            invalid = source()
+            invalid[part]["ref"] = f"gh/d4l3k/351/{part}"
+            self.assertFalse(probe.source_matches(invalid, "a" * 40))
+        with mock.patch.object(probe, "PR_NUMBER", "0"):
+            self.assertFalse(probe.scope_valid(environment()))
         with activated_scope():
             env = environment()
             self.assertTrue(probe.scope_valid(env))
