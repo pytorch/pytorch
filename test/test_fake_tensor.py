@@ -2241,6 +2241,68 @@ def forward(self, x_1):
             prims.utils.compare_tensor_meta(y, dispatched, check_strides=True)
             self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
+    @parametrize("op", [torch.ops.aten.eq.Tensor, torch.ops.aten.ne.Tensor])
+    @parametrize("symbolic", [False, True])
+    @parametrize(
+        "layout",
+        [
+            "contiguous",
+            "channels_last",
+            "transposed",
+            "broadcast",
+            "both_broadcast",
+            "empty",
+            "scalar",
+        ],
+    )
+    @parametrize(
+        "dtypes",
+        [
+            (torch.bool, torch.bool),
+            (torch.int64, torch.int64),
+            (torch.float32, torch.float32),
+            (torch.int64, torch.float32),
+            (torch.complex64, torch.complex64),
+            (torch.complex64, torch.float32),
+        ],
+    )
+    def test_fast_comparison(self, op, symbolic, layout, dtypes):
+        from torch._subclasses.fake_impls import get_fast_op_impls
+
+        shape_env = ShapeEnv() if symbolic else None
+        mode = FakeTensorMode(shape_env=shape_env)
+        size = shape_env.create_unbacked_symint() if symbolic else 2
+        with mode:
+            x = torch.empty(size, 3, 4, 5, dtype=dtypes[0])
+            y = torch.empty(size, 3, 4, 5, dtype=dtypes[1])
+            if layout == "channels_last":
+                x = x.to(memory_format=torch.channels_last)
+                y = y.to(memory_format=torch.channels_last)
+            elif layout == "transposed":
+                x, y = x.transpose(1, 2), y.transpose(1, 2)
+            elif layout == "broadcast":
+                y = torch.empty(1, 3, 1, 5, dtype=dtypes[1])
+            elif layout == "both_broadcast":
+                x = torch.empty(size, 1, 4, 5, dtype=dtypes[0])
+                y = torch.empty(1, 3, 1, 5, dtype=dtypes[1])
+            elif layout == "empty":
+                x = torch.empty(size, 0, dtype=dtypes[0])
+                y = torch.empty(size, 0, dtype=dtypes[1])
+            elif layout == "scalar":
+                y = torch.empty((), dtype=dtypes[1])
+
+        fast_impls = get_fast_op_impls()
+        fast = fast_impls[op]
+        result = fast(mode, x, y)
+        with mode:
+            expected = getattr(torch._refs, op._opname)(x, y)
+            dispatched = op(x, y)
+        self.assertEqual(result.dtype, torch.bool)
+        prims.utils.compare_tensor_meta(result, expected, check_strides=True)
+        prims.utils.compare_tensor_meta(dispatched, expected, check_strides=True)
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertIs(maybe_get_fake_mode(dispatched), mode)
+
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
         with torch._subclasses.fake_tensor.FakeTensorMode() as mode:

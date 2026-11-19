@@ -2711,6 +2711,18 @@ def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
             type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         )
     )
+    register_fast_op_impl(torch.ops.aten.eq.Tensor)(
+        make_fast_binary_impl(
+            torch._refs.eq,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+        )
+    )
+    register_fast_op_impl(torch.ops.aten.ne.Tensor)(
+        make_fast_binary_impl(
+            torch._refs.ne,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+        )
+    )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     register_fast_op_impl(torch.ops.aten.alias.default)(fast_alias)
     return FAST_OP_IMPLEMENTATIONS
