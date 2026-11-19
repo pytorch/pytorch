@@ -64,9 +64,9 @@ pub fn tensor_key<'py>(
         std::slice::from_raw_parts(row.as_ptr() as *const u8, std::mem::size_of_val(row))
     };
     Ok((
-        PyBytes::new_bound(py, &kinds),
-        PyBytes::new_bound(py, bytes(&numbers)),
-        PyBytes::new_bound(py, bytes(&offsets)),
+        PyBytes::new(py, &kinds),
+        PyBytes::new(py, bytes(&numbers)),
+        PyBytes::new(py, bytes(&offsets)),
     ))
 }
 
@@ -288,7 +288,7 @@ impl Expr {
     /// `("neg" | "not", a)`, `("and" | "or", [a, ...])`, or the name of a
     /// binary operation with its two operands.
     fn parse(obj: &Bound<'_, PyAny>, slots: usize) -> PyResult<Expr> {
-        let parts = obj.downcast::<PyTuple>()?;
+        let parts = obj.cast::<PyTuple>()?;
         let bad = || PyValueError::new_err(format!("not a size expression: {}", obj));
         if parts.len() < 2 {
             return Err(bad());
@@ -298,7 +298,7 @@ impl Expr {
             Ok(Box::new(Expr::parse(&parts.get_item(i)?, slots)?))
         };
         let several = || -> PyResult<Vec<Expr>> {
-            parts.get_item(1)?.iter()?.map(|part| Expr::parse(&part?, slots)).collect()
+            parts.get_item(1)?.try_iter()?.map(|part| Expr::parse(&part?, slots)).collect()
         };
         let binary = match name.as_str() {
             "const" => return Ok(Expr::Const(parts.get_item(1)?.extract()?)),
