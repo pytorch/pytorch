@@ -66,7 +66,7 @@ inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>
 
 // Memory format for the output of a forward upsampling op. suggest_memory_format() also requires
 // the stride of a size-1 batch dimension to fit the layout, so e.g. `hwc_image.permute(2, 0, 1)[None]`
-// is reported as contiguous; retry with a batch stride that fits any layout.
+// would be reported as contiguous when really it's channels-last.
 inline c10::MemoryFormat output_memory_format(const Tensor& input) {
   auto memory_format = input.suggest_memory_format();
   if (memory_format != c10::MemoryFormat::Contiguous || input.dim() < 4 || input.size(0) != 1) {
