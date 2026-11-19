@@ -56,14 +56,24 @@ class B2BGEMMTest(TestCase):
             m3 = m3.to(torch.float32)
             return f(m1, m2, m3).to(torch.float16)
 
-        f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        res, codes = run_and_get_code(f_opt, A, B, C)
-        self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
-        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
-        self.assertIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", "\n".join(codes))
+        for M, N, O, P in (
+            (256, 32, 256, 32),
+            (128, 16, 128, 16),
+            (128, 16, 256, 16),
+            (128, 32, 128, 16),
+            (128, 16, 128, 32),
+        ):
+            with self.subTest(shape=(M, N, O, P)):
+                torch._dynamo.reset()
+                counters.clear()
+                f_opt = torch.compile(f)
+                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                res, codes = run_and_get_code(f_opt, A, B, C)
+                self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
+                self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+                self.assertIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", "\n".join(codes))
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
@@ -109,14 +119,24 @@ class B2BGEMMTest(TestCase):
             m3 = m3.to(torch.float32)
             return f(m1, m2, m3).to(torch.float16)
 
-        f_opt = torch.compile(f)
-        A = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
-        res, codes = run_and_get_code(f_opt, A, B, C)
-        self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
-        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
-        self.assertIn("B2B_GEMM_RIGHT_TRITON_ENTRANCE", "\n".join(codes))
+        for M, N, O, P in (
+            (32, 256, 32, 256),
+            (16, 128, 16, 128),
+            (16, 256, 16, 128),
+            (16, 128, 32, 128),
+            (32, 128, 16, 128),
+        ):
+            with self.subTest(shape=(M, N, O, P)):
+                torch._dynamo.reset()
+                counters.clear()
+                f_opt = torch.compile(f)
+                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                res, codes = run_and_get_code(f_opt, A, B, C)
+                self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
+                self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+                self.assertIn("B2B_GEMM_RIGHT_TRITON_ENTRANCE", "\n".join(codes))
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
@@ -200,15 +220,19 @@ class B2BGEMMTest(TestCase):
         def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
             return torch.mm(torch.mm(m1, m2), m3)
 
-        f_opt = torch.compile(f)
-        A = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        B = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        C = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
-        res, codes = run_and_get_code(f_opt, A, B, C)
-        code = "\n".join(codes)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
-        self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
-        self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
+        for M, N, O, P in ((100, 100, 100, 100), (64, 64, 64, 64)):
+            with self.subTest(shape=(M, N, O, P)):
+                torch._dynamo.reset()
+                counters.clear()
+                f_opt = torch.compile(f)
+                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                res, codes = run_and_get_code(f_opt, A, B, C)
+                code = "\n".join(codes)
+                self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
+                self.assertNotIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", code)
+                self.assertNotIn("B2B_GEMM_RIGHT_TRITON_ENTRANCE", code)
 
     @torch._inductor.config.patch(
         b2b_gemm_pass=True,
@@ -240,9 +264,16 @@ class B2BGEMMTest(TestCase):
 
                 backend = CompileCounterWithBackend("inductor")
                 f_opt = torch.compile(f, backend=backend, dynamic=True)
-                for i, (M, N, O, P) in enumerate(
-                    ((256, 32, 256, 32), (128, 16, 128, 16))
-                ):
+                shapes = (
+                    ((256, 32, 256, 32), (128, 16, 128, 16), (256, 16, 256, 16))
+                    if is_left_assoc
+                    else (
+                        (32, 256, 32, 256),
+                        (16, 128, 16, 128),
+                        (16, 256, 16, 256),
+                    )
+                )
+                for i, (M, N, O, P) in enumerate(shapes):
                     A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
                     B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
                     C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
