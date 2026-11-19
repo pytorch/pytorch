@@ -28,8 +28,8 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import torch
-import torch.fx
 import torch._inductor.graph_tree_backend as tree_backend
+import torch.fx
 from torch._dynamo import config
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.backends.debugging import boxed_nop

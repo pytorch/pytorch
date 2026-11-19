@@ -426,6 +426,11 @@ class XPUGraphTreeAllocatorInterface(GraphTreeAllocatorInterface):
             torch.xpu.memory._record_memory_history(None)
 
 
+_builtin_backends = {
+    "cuda": (CUDAGraphTreeGraphInterface, CUDAGraphTreeAllocatorInterface),
+    "xpu": (XPUGraphTreeGraphInterface, XPUGraphTreeAllocatorInterface),
+}
+
 _registry_lock = threading.Lock()
 _registered_device_type: str | None = None
 _graph_interface: GraphTreeGraphInterface | None = None
@@ -466,7 +471,7 @@ def register_graph_tree_backend(
 def is_graph_tree_backend_available() -> bool:
     """Return whether Graph Trees supports the current accelerator.
 
-    CUDA uses the built-in lazy default. Other accelerators must explicitly
+    CUDA and XPU use built-in lazy defaults. Other accelerators must explicitly
     register a backend before Graph Trees is selected.
     """
     accelerator = torch.accelerator.current_accelerator()
@@ -476,7 +481,7 @@ def is_graph_tree_backend_available() -> bool:
     with _registry_lock:
         if _graph_interface is not None:
             return _registered_device_type == accelerator.type
-        return accelerator.type == "cuda"
+        return accelerator.type in _builtin_backends
 
 
 def _initialize_graph_tree_backend() -> None:
@@ -487,10 +492,16 @@ def _initialize_graph_tree_backend() -> None:
     with _registry_lock:
         if _initialized:
             return
+        accelerator = torch.accelerator.current_accelerator()
         if _graph_interface is None:
-            device_type = "cuda"
-            graph_interface = CUDAGraphTreeGraphInterface()
-            allocator_interface = CUDAGraphTreeAllocatorInterface()
+            device_type = None if accelerator is None else accelerator.type
+            if device_type not in _builtin_backends:
+                raise RuntimeError(
+                    f"No Graph Trees backend registered for accelerator {device_type!r}"
+                )
+            graph_cls, allocator_cls = _builtin_backends[device_type]
+            graph_interface = graph_cls()
+            allocator_interface = allocator_cls()
         else:
             device_type = _registered_device_type
             graph_interface = _graph_interface
@@ -499,7 +510,6 @@ def _initialize_graph_tree_backend() -> None:
         if device_type is None or allocator_interface is None:
             raise AssertionError("Graph Trees backend registration is incomplete")
 
-        accelerator = torch.accelerator.current_accelerator()
         if accelerator is None or accelerator.type != device_type:
             actual_device_type = None if accelerator is None else accelerator.type
             raise RuntimeError(
@@ -547,12 +557,3 @@ __all__ = [
     "is_graph_tree_backend_available",
     "register_graph_tree_backend",
 ]
-
-_accelerator = torch.accelerator.current_accelerator()
-if _accelerator is not None and _accelerator.type == "xpu":
-    register_graph_tree_backend(
-        "xpu",
-        XPUGraphTreeGraphInterface(),
-        XPUGraphTreeAllocatorInterface(),
-    )
-del _accelerator
