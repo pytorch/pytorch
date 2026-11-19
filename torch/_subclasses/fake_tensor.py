@@ -554,6 +554,8 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
 def maybe_get_fake_pytype(x: object) -> type[Tensor] | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.pytype
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return getattr(x, "_fake_pytype", None)
     return None
 
 
@@ -1147,11 +1149,11 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         pytype: type[Tensor] | None = None,
         dispatch_keys: torch.DispatchKeySet | None = None,
     ) -> Tensor:
-        if pytype not in (None, Tensor):
-            raise NotImplementedError(
-                f"C++ fake tensors of type {pytype} are not supported yet"
-            )
         out = torch._C._from_meta_and_device(t, torch.device(device), self)
+        # Guard metadata belongs to this Python object, like FakeTensor.pytype;
+        # new tensors produced by detach/clone do not inherit it.
+        if pytype is not None:
+            out._fake_pytype = pytype
         if dispatch_keys is not None:
             torch._C._set_fake_dispatch_keys(out, dispatch_keys)
         return out
