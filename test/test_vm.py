@@ -123,6 +123,19 @@ class TestCallSite(TestCase):
         site = self.check("method", lambda: x.mul(y), x, y, callee=x.mul)
         self.assertEqual(site.call(a, b), a * b)
 
+    def test_common_signatures_are_called_unboxed(self):
+        x, y = torch.randn(3), torch.randn(3)
+        result, site = self.site("binary", lambda: x + y, x, y)
+        self.assertEqual(site.info()["calling_convention"], "unboxed")
+        self.assertEqual(site.call(x, y), result)
+        # clamp takes two optional scalars, which is not one of the signatures.
+        clamp = torch.clamp
+        result, site = self.site(
+            "call", lambda: clamp(x, 0.0, 1.0), clamp, x, 0.0, 1.0, callee=clamp
+        )
+        self.assertEqual(site.info()["calling_convention"], "boxed")
+        self.assertEqual(site.call(clamp, x, 0.0, 1.0), result)
+
     def test_info_of_a_call(self):
         x, y = torch.randn(3), torch.randn(3)
         site = self.check(
