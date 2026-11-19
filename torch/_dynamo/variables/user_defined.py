@@ -3891,15 +3891,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             for name, kind in se.attr_mutation_kinds.get(self, {}).items()
             if kind is AttrMutationKind.INSTANCE_DICT
         ]
-        # Callers may still hold the old dict, so its pending writes and live
-        # views cannot be dropped.
-        if names or self.dict_vt is not None:
+        # Pending per-key writes target the old dict; replay would apply them
+        # to the new one.
+        if names:
             unimplemented(
-                gb_type="Replacing an instance dictionary with pending mutations or views",
-                context=f"pending mutations={len(names)}, dict view={self.dict_vt is not None}",
-                explanation="Dynamo cannot preserve mutations and live views of the previous instance dictionary.",
+                gb_type="Replacing an instance dictionary with pending mutations",
+                context=f"pending mutations={names}",
+                explanation="Dynamo cannot preserve mutations of the previous instance dictionary.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+        self.dict_vt = None
         store_attr_mutation(tx, self, "__dict__", value)
         return ConstantVariable.create(None)
 

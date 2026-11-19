@@ -4177,9 +4177,9 @@
   ],
   "GB8553": [
     {
-      "Gb_type": "Replacing an instance dictionary with pending mutations or views",
-      "Context": "pending mutations={len(names)}, dict view={self.dict_vt is not None}",
-      "Explanation": "Dynamo cannot preserve mutations and live views of the previous instance dictionary.",
+      "Gb_type": "Replacing an instance dictionary with pending mutations",
+      "Context": "pending mutations={names}",
+      "Explanation": "Dynamo cannot preserve mutations of the previous instance dictionary.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
