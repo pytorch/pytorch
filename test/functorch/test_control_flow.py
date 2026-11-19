@@ -45,7 +45,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
-    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -3053,25 +3052,31 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(result, result_exp)
 
     @parametrize("output", ["tensor", "none"])
-    def test_scan_xs_none_length_zero(self, output):
+    @parametrize("tracing_mode", [None, "fake", "symbolic"])
+    def test_scan_xs_none_length_zero(self, output, tracing_mode):
         if output == "tensor":
 
             def body(c, x):
                 return c, (c * 2).clone()
 
             init = torch.tensor([1.0, 2.0, 3.0])
-            carry, ys = scan(body, init, None, length=0)
-            self.assertEqual(carry, init)
-            self.assertEqual(ys.shape, torch.Size([0, 3]))
-            self.assertEqual(ys.dtype, init.dtype)
         else:
 
             def body(c, x):  # noqa: E306
                 return c + 1.0, None
 
             init = torch.tensor(0.0)
-            carry, ys = scan(body, init, None, length=0)
-            self.assertEqual(carry, init)
+
+        def fn(init):
+            return scan(body, init, None, length=0)
+
+        traced = make_fx(fn, tracing_mode=tracing_mode)(init) if tracing_mode else fn
+        carry, ys = traced(init)
+        self.assertEqual(carry, init)
+        if output == "tensor":
+            self.assertEqual(ys.shape, torch.Size([0, 3]))
+            self.assertEqual(ys.dtype, init.dtype)
+        else:
             self.assertIsNone(ys)
         expected = _fake_scan(body, init, None, length=0)
         self.assertEqual((carry, ys), expected)
@@ -7558,6 +7563,58 @@ class TestControlFlowTraced(TestCase):
 
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
+
+    @parametrize(
+        "hop",
+        ["cond", "while_loop", "switch", "scan", "associative_scan", "flex_attention"],
+    )
+    def test_graph_module_pickle_roundtrip(self, hop):
+        # Unpickling a GraphModule re-traces it symbolically, replaying each
+        # HOP call with Proxy operands. scan, associative_scan and
+        # flex_attention check only the tensors they lift (w, keep).
+        import pickle
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        def f_cond(x, pred):
+            return cond(pred, torch.sin, torch.cos, [x])
+
+        def f_while_loop(i, x):
+            return while_loop(lambda i, x: i < 3, lambda i, x: (i + 1, x.sin()), (i, x))
+
+        def f_switch(index, x):
+            return switch(index, (torch.sin, torch.cos), (x,))
+
+        def f_scan(xs, w):
+            return scan(lambda c, x: (c + x * w, c.clone()), torch.zeros(4), xs)
+
+        def f_associative_scan(xs, w):
+            # The raw HOP: the frontend's generic mode doesn't trace one.
+            return associative_scan_op(lambda a, b, w: [a + b * w], [xs], (w,))
+
+        def f_flex_attention(q, keep):
+            def mask_mod(b, h, q_idx, kv_idx):
+                return keep[kv_idx]
+
+            mask = create_block_mask(mask_mod, 1, 1, 16, 16, "cpu", BLOCK_SIZE=8)
+            return flex_attention(q, q, q, block_mask=mask)
+
+        x, w, xs = torch.randn(4), torch.randn(4), torch.randn(3, 4)
+        f, args = {
+            "cond": (f_cond, (x, torch.tensor(True))),
+            "while_loop": (f_while_loop, (torch.tensor(0), x)),
+            "switch": (f_switch, (torch.tensor(1), x)),
+            "scan": (f_scan, (xs, w)),
+            "associative_scan": (f_associative_scan, (xs, w)),
+            "flex_attention": (
+                f_flex_attention,
+                (torch.randn(1, 1, 16, 8), torch.arange(16) < 8),
+            ),
+        }[hop]
+        gm = pickle.loads(pickle.dumps(make_fx(f)(*args)))
+        target = getattr(torch.ops.higher_order, hop)
+        self.assertEqual(len(gm.graph.find_nodes(op="call_function", target=target)), 1)
+        self.assertEqual(gm(*args), f(*args))
 
     def test_switch_traced_mismatched_output_structure(self):
         from torch._higher_order_ops.switch import switch_op
@@ -12106,56 +12163,7 @@ class GraphModule(torch.nn.Module):
 
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                expectedIfCppFakeTensor(
-                    """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
-        clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
-        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
-        zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
-        while_loop_cond_graph_1 = self.while_loop_cond_graph_1
-        while_loop_body_graph_1 = self.while_loop_body_graph_1
-        zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
-        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, clone, zeros_like, zeros_like_1), (cat, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = clone = zeros_like = zeros_like_1 = cat = primals_3 = primals_2 = None
-        getitem_2: "f32[3, 3]" = while_loop[1]
-        getitem_3: "f32[3]" = while_loop[2]
-        getitem_4: "f32[3, 3]" = while_loop[3];  while_loop = None
-        return (getitem_2, getitem_4, getitem_3)
-
-    class while_loop_cond_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
-
-            lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, sym_size_int_1);  arg0_1 = sym_size_int_1 = None
-            return lt
-
-    class while_loop_body_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
-
-            rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
-            sub: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
-            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub);  sub = None
-            select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
-            t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
-            t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
-            mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg1_1, t_1);  t_1 = None
-            t_2: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1)
-            mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, select);  t_2 = None
-            t_3: "f32[3, 3]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
-            sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
-            view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
-            t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            mul_3: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
-            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_4);  mm = mul_4 = None
-            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_6, mul_3);  add_6 = mul_3 = None
-            add_8: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_9: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
-            add_10: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
-            return (add_8, add_7, add_9, add_10)
-""",
-                    """\
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
@@ -12203,7 +12211,6 @@ class GraphModule(torch.nn.Module):
             add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
             return (add_4, add_3, add_5, add_6)
 """,
-                ),
             )
 
     def test_input_output_alias(self):

@@ -441,8 +441,7 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        # Dynamic dims fall back to device-side descriptors.
-        if host_side_tma and not dynamic:
+        if host_side_tma:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -514,8 +513,7 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        # Dynamic dims fall back to device-side descriptors.
-        if host_side_tma and not dynamic:
+        if host_side_tma:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -609,8 +607,7 @@ class TestMaxAutotuneBlackwell(TestCase):
 
         # Verify that we are using a TMA implementation
         fc = FileCheck().check("triton_tem_fused_addmm")
-        # Dynamic dims fall back to device-side descriptors.
-        if host_side_tma and not dynamic:
+        if host_side_tma:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not(make_desc_api)
@@ -1054,6 +1051,39 @@ class TestBlackwellExhaustiveConfigs(TestCase):
     VALID_EPILOGUE_SUBTILE = {1, 2, 4}
 
     @parametrize(
+        "dtype,allow_tf32,a_row_major,b_row_major,block_m,expected",
+        (
+            (torch.float32, True, False, True, 64, False),
+            (torch.float32, True, False, False, 128, False),
+            (torch.float32, True, False, True, 256, False),
+            (torch.float32, True, False, True, 32, True),
+            (torch.float32, False, False, True, 128, True),
+            (torch.float32, True, True, False, 128, True),
+            (torch.bfloat16, True, False, True, 128, True),
+        ),
+    )
+    def test_fp32_mma_layout_filter(
+        self,
+        dtype,
+        allow_tf32,
+        a_row_major,
+        b_row_major,
+        block_m,
+        expected,
+    ):
+        kwargs = {
+            "A_ROW_MAJOR": a_row_major,
+            "B_ROW_MAJOR": b_row_major,
+            "BLOCK_M": block_m,
+        }
+        self.assertEqual(
+            CUDABlackwellPersistentTMATemplateConfigHeuristic._supports_mma_layout(
+                dtype, allow_tf32, kwargs
+            ),
+            expected,
+        )
+
+    @parametrize(
         "heuristic_cls",
         (
             CUDABlackwellPersistentTMATemplateConfigHeuristic,
@@ -1306,9 +1336,11 @@ class TestBlackwellAutoWSConfigs(TestCase):
         # Triton's Meta WS knob rewrites every WS kernel, so configs with
         # use_meta_ws=False must not be flattened either.
         mat1, mat2 = mock.Mock(), mock.Mock()
+        mat1.get_dtype.return_value = torch.bfloat16
         mat2.get_dtype.return_value = torch.bfloat16
         kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
         base = {
+            "A_ROW_MAJOR": True,
             "BLOCK_M": 128,
             "BLOCK_N": 128,
             "BLOCK_K": 64,
@@ -1328,6 +1360,11 @@ class TestBlackwellAutoWSConfigs(TestCase):
                 TMATemplateConfigMixin,
                 "_get_template_configs_impl",
                 return_value=iter([base]),
+            ),
+            mock.patch.object(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                "_allow_tf32",
+                return_value=False,
             ),
         ):
             heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
