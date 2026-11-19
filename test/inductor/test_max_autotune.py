@@ -6526,7 +6526,6 @@ class TestPrologueFusion(TestCase):
             self.assertIn("other=", line)
 
 
-
 def autotune_select_algorithm_wrapper_return_multi():
     def wrapper(*args, **kwargs):
         kwargs["return_multi_template"] = True
