@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
@@ -5221,6 +5222,7 @@ from user code:
         self.assertNotIn("SystemError", warned)
         self.assertEqual(len(logs.output), 2, warned)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # RootGuardManager disables TorchFunction while its accessors run and
         # restores it on scope exit, so a tree that THROWS out of C++ leaves the
@@ -5294,6 +5296,7 @@ from user code:
         )
         self.assertEqual(torch._C._get_torch_function_state(), state)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
         # load_compiled_function returns an AOTCompiledFunction, whose guard
         # check evaluates the same kind of tree, so a C++ throw without the
@@ -5375,6 +5378,7 @@ from user code:
         self.assertTrue(advice.endswith(caveat), advice)
         self.assertNotIn("Every guard tree raised", message)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_no_match_message_qualifies_a_rejection_that_followed_a_cpp_throw(self):
         # The stub above raises from Python; this is the raise the caveat's clause
         # is about, out of a real tree. TENSOR_MATCH on a strided nested tensor

@@ -1066,6 +1066,127 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(subsets, [3])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 
+    @parametrize("view", ["split", "unbind"])
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_post_grad_getitem_as_strided(self, view):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                if view == "split":
+                    piece = large.split(16, dim=0)[0]
+                    out = piece.as_strided((16, 48), (48, 1))
+                else:
+                    piece = large.unbind(1)[0]
+                    out = piece.as_strided((32,), (1,))
+                return torch.sin(out), torch.cos(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # as_strided behind a multi-output view still observes raw storage.
+        self.assertEqual(subsets, [])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @parametrize("view", ["split", "unbind"])
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_post_grad_multi_output_view_fuses(self, view):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                piece = (
+                    large.split(16, dim=0)[0] if view == "split" else large.unbind(1)[0]
+                )
+                return torch.sin(piece), torch.cos(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(subsets, [2])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @parametrize(
+        "consumer",
+        [
+            "unsafe_view",
+            "unsafe_view_pointwise",
+            "channels_last",
+            "broadcast",
+            "setitem",
+            "transpose_mutation",
+        ],
+    )
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_batch_linear_lhs_alias_consumers_keep_numerics(self, consumer):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 48, bias=False)
+                self.b = torch.nn.Linear(64, 48, bias=False)
+
+            def forward(self, x):
+                large = self.a(x)
+                if consumer == "unsafe_view":
+                    out = torch.ops.aten._unsafe_view.default(large, [4, 384])
+                elif consumer == "unsafe_view_pointwise":
+                    out = torch.sin(
+                        torch.ops.aten._unsafe_view.default(large, [4, 384])
+                    )
+                elif consumer == "channels_last":
+                    out = large.view(32, 4, 1, 12).to(memory_format=torch.channels_last)
+                elif consumer == "broadcast":
+                    out = torch.broadcast_to(large, (4, 32, 48))
+                elif consumer == "setitem":
+                    large[0] = 0
+                    out = large
+                else:
+                    large.t().mul_(2)
+                    out = large
+                return out, torch.cos(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            with _record_fusion_subsets() as subsets:
+                actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual([t.stride() for t in actual], [t.stride() for t in expected])
+        self.assertEqual(subsets, [2])
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
     def test_batch_linear_lhs_match_ignores_mm_dtype(self):
         from torch._inductor.fx_passes.group_batch_fusion import BatchLinearLHSFusion
 

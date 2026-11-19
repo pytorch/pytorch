@@ -358,16 +358,56 @@ def in_namespace(
     return False
 
 
+def _get_pointwise_device(
+    inputs: Sequence[IRNode], override_device: torch.device | None = None
+) -> torch.device:
+    if override_device is not None:
+        return override_device
+    for arg in inputs:
+        device = arg.get_device()
+        if device is not None and is_gpu(device.type):
+            return device
+    device = inputs[0].get_device()
+    if device is None:
+        raise AssertionError("Pointwise inputs must have a device")
+    return device
+
+
 def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """Prepare CPU scalar operands for pointwise codegen on another device.
+
+    Inlining an expression over non-scalar CPU storage would pass a CPU pointer
+    to Triton. Realized zero-dimensional CPU buffers can instead be registered
+    by the scheduler and unwrapped by `should_unwrap_unspec_arg`. Immutable
+    tensor constants are already safe: codegen loads a copy on the kernel's device.
     """
-    Copy cpu scalar if doesn't not match with given `device`
-    """
-    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
-        x.get_size()
-    ):
+    cur_device = x.get_device()
+    if not isinstance(x.data, ir.ReinterpretView):
+        if (
+            cur_device is not None
+            and cur_device.type == "cpu"
+            and device.type != "cpu"
+            and len(x.get_size()) == 0
+            and not ir.is_storage_and_layout(x)
+            and any(
+                (
+                    name not in V.graph.constants
+                    or V.graph.allocated_constant_name.get(name, name)
+                    in V.graph.mutated_named_buffers
+                )
+                and not V.graph.is_zero_dim_cpu_buffer(name)
+                for name in x.get_read_names()
+            )
+        ):
+            if isinstance(x.data, ir.StorageBox):
+                x.realize()
+            else:
+                # Preserve the scalar view's shape, not its backing buffer's.
+                return ir.ExternKernel.copy_input(x)
+        return x
+    if has_free_unbacked_symbols(x.get_size()):
         return x
     size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
-    cur_device = x.get_device()
     if (
         cur_device is not None
         and cur_device.type == "cpu"
@@ -412,9 +452,9 @@ def transform_args(
                 type_promotion_kind=type_promotion_kind,  # type: ignore[arg-type]
             )
 
-        device = (
-            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
-        ).get_device()
+        device = _get_pointwise_device(
+            [args[i] for i in args_indices] + [kwargs[k] for k in kwargs_indices]
+        )
 
         for i in args_indices:
             args[i] = maybe_copy_cpu_scalar(args[i], device)
@@ -923,18 +963,7 @@ def make_pointwise(
                     return ops.to_dtype(downcast, dtype)
                 return out
 
-        if not override_device:
-            device = None
-            for i in inputs:
-                # pyrefly: ignore [missing-attribute]
-                if is_gpu(i.get_device().type):
-                    device = i.get_device()
-                    break
-            if not device:
-                device = inputs[0].get_device()
-
-        # pyrefly: ignore [unbound-name]
-        device = override_device or device
+        device = _get_pointwise_device(inputs, override_device)
 
         return Pointwise.create(
             device=device,  # type: ignore[arg-type]
@@ -1902,6 +1931,7 @@ def as_strided(
     *,
     storage_offset_relative_to_input_storage=True,
 ):
+    """Lower aten.as_strided to a ReinterpretView of ``x``'s underlying storage."""
     explicit_storage_offset = (
         storage_offset is not None and storage_offset_relative_to_input_storage
     )
@@ -1935,6 +1965,12 @@ def as_strided(
             storage_offset
             - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
         )
+        if torch.version.hip is not None and not V.graph.sizevars.statically_known_geq(
+            storage_offset, 0
+        ):
+            # Unlike padding's masked negative indices, this rebase can access
+            # storage before the incoming pointer, even inside a masked load.
+            V.graph.inputs_with_negative_as_strided_offset.add(storage_data.get_name())
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,
@@ -4044,9 +4080,6 @@ if torch.mtia._is_compiled():
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
-# 2) Medium
-make_fallback(aten._trilinear)
-
 
 # 3) Difficult
 # Scans
@@ -5219,10 +5252,10 @@ def index_put_fallback(self, indices, values, accumulate):
 
     # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
     # because boolean indices trigger .nonzero() during CUDA graph capture
-    # When graph_partition is enabled, skip - partitioning handles this
+    # Skip when partitioning splits off cudagraph-unsafe ops: it handles this.
     fx_node = V.graph.current_node
     if (
-        not config.graph_partition
+        not V.graph.partition_plan.cudagraphs_per_partition
         and fx_node is not None
         and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
     ):
@@ -9609,9 +9642,9 @@ def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantB
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
-    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
-    # we run into memory cleanup issue
-    if not config.graph_partition and any(
+    # Skip when partitioning splits off cudagraph-unsafe ops: it handles control
+    # flow.
+    if not V.graph.partition_plan.cudagraphs_per_partition and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):

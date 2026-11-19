@@ -291,6 +291,10 @@ pick_loop_orders = True
 # reuse a kernel input as the output
 inplace_buffers = True
 
+# Ignore fusion profitability for view scatters in the post-grad FX reinplace pass.
+# All-reduce retains its layout and symmetric-memory guards.
+reinplace_whenever_possible = False
+
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = lite_mode_default(False, True)
 
@@ -496,6 +500,8 @@ reorder_prefetch_limit: int | None = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = lite_mode_default(False, True)
 reorder_for_peak_memory_debug = False
+# reject a reorder_for_peak_memory candidate that changes the input order of collectives and waits
+reorder_for_peak_memory_preserve_collective_order = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
 # it is beneficial to switch the scheduling strategy. So instead of using

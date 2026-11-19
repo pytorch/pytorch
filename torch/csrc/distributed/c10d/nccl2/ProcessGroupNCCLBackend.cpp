@@ -695,6 +695,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   for (int r = 0; r < getSize(); ++r) {
     outputList.at(r).copy_(rows[r].view_as(outputList.at(r)));
   }
+  work->setOutputsStream(at::cuda::getCurrentCUDAStream(device_.index()));
   return work;
 }
 
@@ -822,6 +823,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
   // empty placeholder and gatherImpl ignores the (empty) output list.
   std::vector<at::Tensor> outputList;
   if (getRank() == opts.rootRank) {
+    ensureTensorContiguous(inputBuffer);
     ensureTensorContiguous(outputBuffer);
     TORCH_CHECK(
         inputBuffer.dtype() == outputBuffer.dtype(),
@@ -830,10 +832,13 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
     TORCH_CHECK(
         outputBuffer.numel() == count * getSize(),
         "output tensor size must be equal to world_size times input tensor size");
-    auto flat = outputBuffer.view(-1);
     outputList.reserve(getSize());
     for (const auto r : c10::irange(getSize())) {
-      outputList.push_back(flat.narrow(0, r * count, count));
+      // The root's copy_ must match the layout of the peers' raw receives.
+      outputList.push_back(outputBuffer.as_strided(
+          inputBuffer.sizes(),
+          inputBuffer.strides(),
+          outputBuffer.storage_offset() + r * count));
     }
   }
   ++sequence_number_;
