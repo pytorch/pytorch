@@ -302,12 +302,23 @@ static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
 // The ILP threshold matches the floating-point default (256K) -- benchmark
 // shows float inputs gain ~4x at 1M; int inputs are neutral.
 static constexpr uint32_t kCmpILPThreshold = 1u << 18;
+// float4_e2m1fn_x2 has no Metal type; like CPU, eq/ne compare its packed bytes.
+static void exec_equality_kernel(TensorIteratorBase& iter, const std::string& name) {
+  if (iter.common_dtype() == kFloat4_e2m1fn_x2) {
+    Tensor out = iter.output();
+    auto byte_iter = TensorIterator::comparison_op(out, iter.input(0).view(kByte), iter.input(1).view(kByte));
+    lib.exec_binary_kernel(byte_iter, name, std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+    return;
+  }
+  lib.exec_binary_kernel(iter, name, std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
 static void eq_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "eq", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+  exec_equality_kernel(iter, "eq");
 }
 
 static void ne_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "ne", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+  exec_equality_kernel(iter, "ne");
 }
 
 static void lt_mps_kernel(TensorIteratorBase& iter) {

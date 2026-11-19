@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     onlyCPU,
-    skipMPS,
+    onlyMPS,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -44,7 +44,7 @@ CUDA_FLOAT8_DTYPES = [
     torch.float8_e8m0fnu,
     torch.float8_e5m3fnu,
 ]
-MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn]
+MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn, torch.float8_e8m0fnu]
 # torch-xpu-ops has no copy kernel for float8_e5m3fnu yet
 XPU_FLOAT8_DTYPES = [d for d in FLOAT8_DTYPES if d is not torch.float8_e5m3fnu]
 
@@ -305,7 +305,6 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
-    @skipMPS
     def test_float8_e8m0fnu_rne_rounding(self, device):
         """
         For every possible e8m0 exponent (256 options) and for every possible
@@ -442,6 +441,29 @@ class TestFloat8Dtype(TestCase):
         x2 = torch.empty(4, 4, device=device, dtype=dtype)
         torch.cat([x1, x2])
 
+    @onlyMPS
+    @dtypes(*MPS_FLOAT8_DTYPES)
+    def test_data_movement_mps(self, dtype, device):
+        """Data movement ops move the bits, so they match the same op on uint8 codes."""
+        codes = torch.randint(0, 256, (6, 8), dtype=torch.uint8)
+        x = codes.to(device).view(dtype)
+        idx = torch.tensor([[1, 0], [7, 3], [2, 4], [0, 5], [6, 7], [4, 1]])
+
+        def check(fn):
+            self.assertEqual(fn(x).view(torch.uint8).cpu(), fn(codes), atol=0, rtol=0)
+
+        check(lambda t: torch.cat([t.t(), t.t()], dim=1))
+        check(lambda t: t.gather(1, idx.to(t.device)))
+        check(lambda t: t.clone().scatter_(1, idx.to(t.device), t[:, :2]))
+        one = torch.tensor(1.0).to(dtype).view(torch.uint8).item()
+        self.assertEqual(
+            torch.nn.functional.pad(x, (1, 2), value=1.0).view(torch.uint8).cpu(),
+            torch.nn.functional.pad(codes, (1, 2), value=one),
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual(x[2, 3].item(), codes.view(dtype)[2, 3].item())
+
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
@@ -477,6 +499,27 @@ class TestFloat4Dtype(TestCase):
 
         # can call contiguous on a dim1 slice (calls `copy_` under the hood)
         x1[:, 0:2048].contiguous()
+
+    def test_float4_e2m1fn_x2_bytes(self, device):
+        # Comparisons and copies run on the device and act on the packed bytes
+        codes = torch.randint(0, 256, (64, 32), dtype=torch.uint8)
+        other = codes.clone()
+        other[3, 5] ^= 0x10
+        x = codes.to(device).view(torch.float4_e2m1fn_x2)
+        y = other.to(device).view(torch.float4_e2m1fn_x2)
+        self.assertEqual((x == y).cpu(), codes == other)
+        self.assertEqual((x != y).cpu(), codes != other)
+        self.assertEqual((x.t() == x.t().contiguous()).cpu().all(), True)
+
+        def bits(t):
+            return t.view(torch.uint8).cpu()
+
+        self.assertEqual(bits(x[:, 0:16].contiguous()), codes[:, 0:16])
+        self.assertEqual(bits(x.t().contiguous()), codes.t())
+        self.assertEqual(bits(x[::2, 1::3].cpu()), codes[::2, 1::3])
+        self.assertEqual(
+            bits(torch.cat([x.t(), x.t()], dim=1)), torch.cat([codes.t(), codes.t()], 1)
+        )
 
     def test_cast_raises_on_host(self, device):
         # Casting to or from fp4x2 used to device-assert on CUDA, poisoning the
@@ -724,7 +767,9 @@ instantiate_device_type_tests(
     TestFloat8Dtype, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_device_type_tests(TestFloat8E5M3FNU, globals(), except_for="mps")
-instantiate_device_type_tests(TestFloat4Dtype, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestFloat4Dtype, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
