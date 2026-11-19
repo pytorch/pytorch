@@ -141,7 +141,9 @@ class Adam(Optimizer):
                         )
                     )
                 elif (
-                    not group["capturable"] and not fused and not p_state["step"].is_meta
+                    not group["capturable"]
+                    and not fused
+                    and p_state["step"].device.type not in ("cpu", "meta")
                 ):
                     # Match initialization to avoid a host sync on every step.
                     p_state["step"] = p_state["step"].cpu()
