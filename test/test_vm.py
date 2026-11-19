@@ -7306,6 +7306,39 @@ class TestVmRegions(TestCase):
             (region,) = self.compiled_regions(off)
             self.assertEqual((region["variants"], region["frozen"]), (1, 0))
 
+    def test_a_module_in_training_keeps_only_its_own_weights_as_inputs(self):
+        def scored(model, loss, x, y):
+            return loss(model(x), y)
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        # Nobody takes a loss out of training, and it has no weights.
+        loss = torch.nn.CrossEntropyLoss()
+        x, y = torch.randn(2, 3, 6, 6), torch.tensor([1, 3])
+        passes = with_graphs("aot_eager")
+        compiled = torch.vm(scored, passes=passes, fallback=False)
+        with self.building_in(), torch.no_grad():
+            for _ in range(6):
+                expected = scored(model, loss, x, y)
+                self.assertEqual(compiled(model, loss, x, y), expected, atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+            # A layer in training keeps its weights as inputs of a graph
+            # that has the others built in: written to, it is the same graph.
+            model.fc.train()
+            for i in range(6):
+                if i >= 3:
+                    model.fc.weight.mul_(2)
+                expected = scored(model, loss, x, y)
+                self.assertEqual(compiled(model, loss, x, y), expected, atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["compiles"], region["frozen"]), (2, 2))
+            model.conv.weight.mul_(2)
+            expected = scored(model, loss, x, y)
+            self.assertEqual(compiled(model, loss, x, y), expected, atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual(region["compiles"], 3)
+
     @parametrize("write", ("in_place", "data", "data_swap", "optimizer", "load"))
     def test_write_to_a_built_in_weight_is_seen(self, write):
         torch.manual_seed(0)

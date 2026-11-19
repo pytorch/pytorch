@@ -3172,10 +3172,12 @@ class _Region:
         self, inputs: _Inputs, modules: dict[int, nn.Module], written: set[int]
     ) -> list[int]:
         """The tensors of a call that its graph may have built in instead of
-        taking them: the parameters and buffers of the modules, when the
-        call is one of inference (no gradients recorded, no module in
-        training). Not the ones the region itself writes to or replaces, nor
-        the ones a graph of the region had built in when they changed. A
+        taking them: the parameters and buffers of the modules that are not
+        in training, when the call records no gradients. A module in
+        training has other weights soon, and they stay inputs; one without
+        weights that nobody took out of training (a loss) says nothing about
+        the others. Not the ones the region itself writes to or replaces,
+        nor the ones a graph of the region had built in when they changed. A
         tensor a module keeps in a plain attribute is a cache more often
         than a weight, and stays an input."""
         options = self.plan.options
@@ -3188,10 +3190,9 @@ class _Region:
         state: set[int] = set()
         for module in modules.values():
             for part in module.modules():
-                if part.training:
-                    return []
-                state.update(map(id, part._parameters.values()))
-                state.update(map(id, part._buffers.values()))
+                if not part.training:
+                    state.update(map(id, part._parameters.values()))
+                    state.update(map(id, part._buffers.values()))
         flat, left = inputs.flat, written | self.unstable
         return [i for i, t in enumerate(flat) if id(t) in state and i not in left]
 
