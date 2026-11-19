@@ -588,6 +588,8 @@ Vectorized<c10::Half> inline fmadd(
 #endif
 }
 
+// Without FP16 vector arithmetic, the generic fnmadd, fmsub and fnmsub call
+// fmadd above.
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
 template <>
 Vectorized<c10::Half> inline fnmadd(

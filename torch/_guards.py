@@ -1149,7 +1149,7 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode: FakeTensorMode | None) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -1157,7 +1157,7 @@ class TracingContext:
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
         # Combined cache for inlined code data (instructions, indexof, code_options)
         self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
-        self.fake_mode: FakeTensorMode | None = fake_mode
+        self.fake_mode: FakeTensorMode | CppFakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
