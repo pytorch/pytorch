@@ -11,6 +11,7 @@ import dataclasses
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import json
 import logging
@@ -1033,6 +1034,101 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     return msg
 
 
+_IN_VM: dict[Any, Any] = {}
+
+
+def in_vm(model_iter_fn):
+    """What ``torch.vm`` makes of a function of the runner, with Inductor
+    behind it. The same function every time it is asked for: the calls that
+    are timed must be of the one that was warmed up, and where
+    ``torch.compile`` finds its code in Dynamo's cache, ``torch.vm``
+    would start over."""
+    key = (
+        id(getattr(model_iter_fn, "__self__", None)),
+        getattr(model_iter_fn, "__func__", model_iter_fn),
+    )
+    found = _IN_VM.get(key)
+    if found is None:
+        # As Dynamo does for its process the first time it compiles: the eager
+        # calls and the compiled ones are then timed as they are for it.
+        torch.distributions.Distribution.set_default_validate_args(False)
+
+        def iterate(model, example_inputs, collect_outputs=True):
+            return model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
+
+        passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+        found = _IN_VM[key] = torch.vm(iterate, passes=passes)
+    return found
+
+
+class _VmForward:
+    """What a model that is timed through its ``generate`` has in the place
+    of its forward under ``--vm``: what ``torch.vm`` makes of the forward,
+    and the forward itself under ``torch.compiler.set_stance("force_eager")``,
+    which is how the runner has eager calls timed (the function that
+    ``torch.compile`` returns does the same there)."""
+
+    def __init__(self, forward):
+        self.forward = forward
+        # ``generate`` asks the forward it finds what arguments it takes.
+        self.__signature__ = inspect.signature(forward)
+        torch.distributions.Distribution.set_default_validate_args(False)
+
+        def call(*args, **kwargs):
+            return forward(*args, **kwargs)
+
+        passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+        self.compiled = torch.vm(call, passes=passes)
+
+    def __call__(self, *args, **kwargs):
+        if torch._dynamo.eval_frame._stance.stance == "force_eager":
+            return self.forward(*args, **kwargs)
+        return self.compiled(*args, **kwargs)
+
+
+def _vm_of(fn, model):
+    """The function of ``torch.vm`` behind what the runner calls: ``fn``
+    itself, or the forward of a model that is called through ``generate``."""
+    forward = vars(model).get("forward")
+    return forward.compiled if isinstance(forward, _VmForward) else fn
+
+
+def settle_vm(fn, model, example_inputs, most=1000, seconds=600.0, calm=16, **kwargs):
+    """Calls what ``in_vm`` returned until it has stopped compiling and
+    measuring: ``torch.vm`` compiles a region after some calls of it, and
+    then times the function and what it calls against the interpreter for a
+    while, one level of calls after the other: a training step, which goes
+    through an optimizer, takes some hundred calls where a model's forward
+    takes twenty. Over when ``calm`` calls in a row changed nothing; a call
+    that is slow is given fewer. ``kwargs`` are what the calls that will be
+    timed pass: an argument is part of what a region is compiled for. Returns
+    the number of calls that took, and the time of one of the calm ones (0 if
+    there was none)."""
+    quiet, before, start, calls = 0, None, time.perf_counter(), 0
+    calm_start = start
+    watched = _vm_of(fn, model)
+    while calls < most:
+        fn(model, example_inputs, **kwargs)
+        calls += 1
+        regions = torch.vm.regions(watched)
+        now = (len(regions), sum(r.get("variants", 0) for r in regions))
+        if watched.stats()["measuring"] or now != before:
+            synchronize()
+            quiet, calm_start = 0, time.perf_counter()
+        else:
+            quiet += 1
+        before = now
+        elapsed = time.perf_counter() - start
+        enough = calls >= 12 or (calls >= 6 and elapsed > 60)
+        # At a second a call, three calm ones are what there is time for.
+        needed = max(3, min(calm, int(calm * calls / max(elapsed, 1e-9) / 16)))
+        if enough and (quiet >= needed or elapsed > seconds):
+            break
+    synchronize()
+    steady = (time.perf_counter() - calm_start) / quiet if quiet else 0.0
+    return calls, steady
+
+
 def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
@@ -1072,6 +1168,12 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         frozen_model_iter_fn = export_nativert(model, example_inputs)
     elif args.aot_precompile:
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
+    elif args.vm:
+        # A model that is called through ``generate`` has what torch.vm made
+        # of its forward in the place of it (``_VmForward``).
+        frozen_model_iter_fn = model_iter_fn
+        if not kwargs["hf_llm"]:
+            frozen_model_iter_fn = in_vm(model_iter_fn)
     else:
         if kwargs["hf_llm"]:
             # If it's an llm, we want to optimize model.forward, and use
@@ -2383,6 +2485,23 @@ class BenchmarkRunner:
                             )
                     else:
                         optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        if self.args.vm and not self.args.training:
+                            # Its first calls run before any graph is made:
+                            # what is compared is a call once it has settled.
+                            # A model whose forward changes it (moco moves an
+                            # encoder and fills a queue on every call) gets
+                            # back what those calls changed, and the
+                            # generators start where they started for eager.
+                            held = copy.deepcopy(model_copy.state_dict())
+                            settle_vm(
+                                optimized_model_iter_fn, model_copy, example_inputs
+                            )
+                            with torch.no_grad():
+                                for key, now in model_copy.state_dict().items():
+                                    if not torch.equal(now, held[key]):
+                                        now.copy_(held[key])
+                            del held
+                            reset_rng_state()
                         new_result = self.run_n_iterations(
                             model_copy, example_inputs, optimized_model_iter_fn
                         )
@@ -2408,8 +2527,10 @@ class BenchmarkRunner:
                     )
 
                 force_max_multiplier = False
+                # torch.vm builds the weights of inference into its graphs,
+                # as freezing does.
                 if (
-                    self.args.freezing
+                    (self.args.freezing or self.args.vm)
                     and self.args.bfloat16
                     and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"]
                     > 0
@@ -2918,6 +3039,11 @@ class BenchmarkRunner:
                     self.model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
+        # How many calls the compiled function's warmup was, how many an eager
+        # one is, and what a call costs once torch.vm has settled: what
+        # the compile time is taken from.
+        settled = {"calls": measure_iters, "eager": measure_iters, "steady": 0.0}
+
         def warmup(
             fn, model, example_inputs, mode, measure_iters=5, stabilization_iters=0
         ):
@@ -2931,8 +3057,20 @@ class BenchmarkRunner:
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
-                for _ in range(measure_iters):
-                    fn(model, example_inputs)
+                if self.args.vm and mode == "dynamo":
+                    # Its compile time is spread over the calls it takes to
+                    # settle, not all in the first one. They are made as the
+                    # timed ones will be: with another collect_outputs the
+                    # first timed call would compile its graph once more.
+                    settled["calls"], settled["steady"] = settle_vm(
+                        fn,
+                        model,
+                        example_inputs,
+                        collect_outputs=self.args.collect_outputs,
+                    )
+                else:
+                    for _ in range(measure_iters):
+                        fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
                 for _ in range(stabilization_iters):
@@ -3021,7 +3159,10 @@ class BenchmarkRunner:
                 if getattr(self, "hf_llm", False):
                     # If it's an llm, we want to optimize model.forward, and use
                     # the generate function
-                    model.forward = optimize_ctx(model.forward)
+                    if self.args.vm:
+                        model.forward = _VmForward(model.forward)
+                    else:
+                        model.forward = optimize_ctx(model.forward)
                     optimized_model_iter_fn = self.model_iter_fn
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -3065,7 +3206,26 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency
+            compilation_time = (
+                dynamo_latency - eager_latency * settled["calls"] / settled["eager"]
+            )
+            if settled["steady"]:
+                # Some hundred calls of a training step went by: what they
+                # took beyond calls of the function as it ended up, which is
+                # the compiling, the measuring, and the calls that ran before
+                # there was a graph.
+                compilation_time = dynamo_latency - settled["steady"] * settled["calls"]
+            if self.args.vm:
+                watched = _vm_of(optimized_model_iter_fn, model)
+                found = [
+                    r for r in torch.vm.regions(watched) if r["state"] == "compiled"
+                ]
+                print(
+                    f"torch.vm: {sum(r['variants'] for r in found)} graphs of "
+                    f"{sum(r['ops'] for r in found)} operations after "
+                    f"{settled['calls']} calls, "
+                    f"demoted: {watched.stats()['demoted']}"
+                )
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3801,6 +3961,12 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--vm",
+        action="store_true",
+        help="Measure speedup with torch.vm and TorchInductor behind it "
+        "(--performance, and --accuracy for inference)",
+    )
+    group.add_argument(
         "--optimus",
         choices=["vertical_opt", "horizontal_opt", "all"],
         default=None,
@@ -4486,6 +4652,10 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
+    elif args.vm:
+        optimize_ctx = in_vm
+        experiment = speedup_experiment
+        output_filename = "vm.csv"
     elif args.export:
         optimize_ctx = export
         experiment = speedup_experiment
@@ -4607,6 +4777,7 @@ def run(runner, args, original_dir=None):
 
     if (
         args.inductor
+        or args.vm
         or args.backend == "inductor"
         or args.export_aot_inductor
         or args.backend == "optimus"
