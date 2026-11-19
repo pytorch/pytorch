@@ -1264,7 +1264,7 @@ def create_equality_constraints_for_broadcasting(
         d1: Variables that store dimensions for e1
         d2: Variables that store dimensions for e2
         d11: Variables that store dimensions for e11
-        d12: Variables that store dimensions for e22
+        d12: Variables that store dimensions for e12
 
     Returns: Four equality constraints
 

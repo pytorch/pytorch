@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
+import logging
 import typing
 from typing import Any, TYPE_CHECKING
 
@@ -19,6 +21,7 @@ from .heuristics.template.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    FlexAttentionConfigContext,
     IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
@@ -30,16 +33,17 @@ from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
-from .utils import _use_autotune_backend
+from .utils import _use_autotune_backend, ModularIndexingUse
 from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Sequence
     from functools import partial
 
     from triton import Config as TritonConfig
 
+    from . import ir
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
@@ -47,6 +51,9 @@ if TYPE_CHECKING:
     from .kernel_template_choice import KernelTemplateChoice
 
     from torch.utils._ordered_set import OrderedSet  # isort: skip
+
+
+log: logging.Logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING or not config.is_fbcode():
@@ -68,6 +75,21 @@ class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
     def __lt__(self, other: typing.Self) -> bool: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiTemplateFusionDecision:
+    """A backend's decision for fusing a MultiTemplateBuffer with a candidate.
+
+    ``fuse=False`` declines the fusion. ``fuse=True`` accepts it with ``choice``,
+    one of the buffer's Triton template choices, which the buffer is finalized to
+    when the scheduler commits the fusion. ``choice`` may be omitted only if the
+    buffer is already finalized to a Triton template. The scheduler declines an
+    accepted fusion that has no valid template or fails a legality check.
+    """
+
+    fuse: bool
+    choice: ChoiceCaller | None = None
 
 
 @dataclasses.dataclass
@@ -124,8 +146,9 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
 
-    Subclasses used with inductor_choices_class must implement uuid() for
-    cache key computation.
+    Subclasses used with inductor_choices_class or register_inductor_choices
+    must implement uuid() for cache key computation. When multiple handlers
+    are configured, the first handler that overrides each method is used.
     """
 
     def get_config_heuristics(
@@ -164,15 +187,45 @@ class InductorChoices:
         seq_len: sympy.Expr,
         dtype: torch.dtype,
         device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(
+            head_dim, seq_len, dtype, v_head_dim
+        )
+
+    def refine_flex_attention_fwd_configs(
+        self, configs: list[Any], context: FlexAttentionConfigContext
+    ) -> list[Any]:
+        """Return the forward configs to autotune, given the full attention context.
+
+        The result may replace ``configs`` rather than subset it and must be
+        non-empty unless ``configs`` is; a single config takes the lowering's
+        one-config path.
+        ``append_flex_attention_choices`` still receives the unrefined pool.
+        Only the stock pool is refined: when the active handler overrides
+        ``get_flex_attention_fwd_configs``, this base implementation returns the
+        pool unchanged, including when an override of this method delegates here.
+        """
+        # The pool comes from the active handler. With composed choices that is
+        # not necessarily the contributor this hook is bound to.
+        handler = V.choices
+        lookup = getattr(handler.get_flex_attention_fwd_configs, "__func__", None)
+        if lookup is not _STOCK_FLEX_ATTENTION_FWD_CONFIGS:
+            return configs
+        flex_heuristics = handler.get_config_heuristics(context.device.type)
+        refine = getattr(flex_heuristics, "refine_flex_attn_fwd_configs", None)
+        return configs if refine is None else refine(configs, context)
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self,
+        head_dim: int,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype, v_head_dim)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
@@ -191,10 +244,32 @@ class InductorChoices:
         sparse_q_block_size: int,
         sparse_kv_block_size: int,
     ) -> list[Any]:
-        """Append backend-specific flex-attention template choices.
+        """Append backend-specific forward flex-attention template choices.
 
         Default is a no-op. Subclasses may override to inject additional
-        autotuning candidates (e.g. TLX templates in fbcode).
+        autotuning candidates (e.g. TLX templates in fbcode). ``configs`` is the
+        unrefined pool; the Triton ``choices`` were built from the refined one.
+        """
+        return choices
+
+    def append_flex_attention_backward_choices(
+        self,
+        choices: list[Any],
+        configs: list[Any],
+        input_nodes: list[Any],
+        subgraphs: list[Any],
+        layout: Any,
+        kernel_options: dict[str, Any],
+        sparse_q_block_size: int,
+        sparse_kv_block_size: int,
+        *,
+        mutated_inputs: list[Any],
+    ) -> list[Any]:
+        """Append backend-specific backward flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates. Backward calls provide sixteen input nodes, four
+        subgraphs, and the output buffers in ``mutated_inputs``.
         """
         return choices
 
@@ -298,9 +373,9 @@ class InductorChoices:
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
         # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
-        # origami only contributes Triton GEMM configs under autotuning, so with it
-        # off there is nothing that needs fixed strides and flexible layouts should
-        # be preserved (matches non-origami behavior).
+        # origami only contributes configs under autotuning, so with it off there is
+        # nothing that needs fixed strides and flexible layouts should be preserved
+        # (matches non-origami behavior).
         if (
             _origami_enabled()
             and IS_ROCM
@@ -392,7 +467,20 @@ class InductorChoices:
                 if hasattr(ktc, "_choice"):
                     del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
-        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+        callers = [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
+
+        if config.cuda.autotune_tunableop_dynamic_dims_wildcard:
+            # Only ExternKernelCaller (aten) reads this mask to drive TunableOp
+            # wildcard persistence; Triton/CUTLASS callers ignore it. Imported
+            # here rather than at module scope to avoid an import cycle.
+            from torch._inductor.select_algorithm import ExternKernelCaller
+
+            mask = kernel_inputs.dynamic_dim_mask(op_name)
+            for caller in callers:
+                if isinstance(caller, ExternKernelCaller):
+                    caller.tunable_dyn_dims_mask = mask
+
+        return callers
 
     def triton_kernel_kwargs(
         self,
@@ -412,9 +500,57 @@ class InductorChoices:
         """Hook to override the autotuning best choice after benchmarking."""
         return best_choice
 
+    def multi_template_fusion_decision(
+        self,
+        scheduler: Scheduler,
+        multi_node: ir.MultiTemplateBuffer,
+        other_nodes: Sequence[BaseSchedulerNode],
+        epilogue: bool,
+    ) -> MultiTemplateFusionDecision | None:
+        """Hook to decide a MultiTemplateBuffer fusion instead of benchmarking it.
+
+        Called from ``Scheduler.speedup_by_fusion`` for a pair where one side's
+        template node is a MultiTemplateBuffer; ``other_nodes`` are the nodes of
+        the other side, an epilogue if ``epilogue`` else a prologue. Returning
+        None keeps the default benchmark-based decision. Decisions are immediate
+        (they do not compete as pending template fusions); an accepted one is
+        committed right away if it passes the scheduler's legality checks. Not
+        consulted when ``config.multi_kernel_hints`` is set. The hook should not
+        mutate state.
+        """
+        return None
+
     def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
         """Hook to transform fused kernel names during codegen"""
         return fused_name
+
+    def use_modular_indexing(
+        self,
+        device: torch.device | str | None,
+        *,
+        numel: int | sympy.Expr | None = None,
+        reduction_numel: int | sympy.Expr | None = None,
+        kind: ModularIndexingUse,
+    ) -> bool:
+        """
+        Decide whether a load/store index may contain ModularIndexing/FloorDiv
+        of loop variables (True) or must use the affine alternative: realizing
+        a dim-merging view, splitting a reduction at a dim boundary, lowering
+        repeat/roll/strided slice_scatter without modular arithmetic, keeping
+        %, // index arithmetic behind an indirect variable, or undoing a loop
+        reindexing during fusion that leaves a non-affine index. kind names
+        the construct and device is the device of the affected kernel. Every
+        call site passes numel, the number of elements that kernel touches
+        (an int or an expression of the graph's size variables); a reduction
+        also passes reduction_numel, the number of elements reduced into each
+        output, so that an override can tell 64 sums of 4097 elements from
+        4097 sums of 64.
+
+        The default follows config.avoid_modular_indexing for every device
+        and construct. Override it through V.set_choices_handler to decide
+        per backend, construct or size.
+        """
+        return not config.avoid_modular_indexing
 
     @staticmethod
     def should_use_cooperative_reduction(
@@ -449,6 +585,12 @@ class InductorChoices:
         if not config.triton.persistent_reductions:
             return False
         reduction_hint = features.get_reduction_hint()
+        rblock = features.strict_reduction_rblock()
+        if rblock is not None and not features.has_strict_multirow_reduction():
+            if not (
+                V.graph.sizevars.statically_known_geq(rblock, features.reduction_numel)
+            ):
+                return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(reduction_hint, 64)
@@ -517,7 +659,8 @@ class InductorChoices:
         # Chosen GB200 thresholds: 32768 for xnumel < num_sm, otherwise 40960.
         # Reducing these thresholds further did not improve scenario (2), but
         # hurts scenario (1).
-        if props.major is not None and props.major >= 10:
+        # On ROCm major is the gfx major, not an NVIDIA SM version.
+        if props.type == "cuda" and props.major is not None and props.major >= 10:
             if xnumel < num_sm:
                 return 32768
             return 40960
@@ -779,3 +922,161 @@ class InductorChoices:
             buffer_overlap_score,
             proximity_score,
         )
+
+
+_STOCK_FLEX_ATTENTION_FWD_CONFIGS = InductorChoices.get_flex_attention_fwd_configs
+
+InductorChoicesFactory: typing.TypeAlias = typing.Callable[[], InductorChoices]
+InductorChoicesFactoryConfig: typing.TypeAlias = InductorChoicesFactory | None
+
+_registered_inductor_choices: dict[str, InductorChoicesFactory] = {}
+
+
+def _validate_choice_uuid(
+    key: str, choice: InductorChoices
+) -> typing.Callable[[], Any]:
+    uuid = getattr(choice, "uuid", None)
+    if not callable(uuid):
+        raise RuntimeError(
+            f"InductorChoices contributor {key!r} does not implement uuid(). "
+            "Implement uuid() for cache key participation."
+        )
+    return uuid
+
+
+class _ComposedInductorChoices(InductorChoices):
+    """Use the first contributor that overrides each InductorChoices hook."""
+
+    def __init__(self, choices: list[InductorChoices]) -> None:
+        super().__init__()
+        self._choices = tuple(choices)
+        self._dispatchers: dict[str, typing.Callable[..., Any] | None] = {}
+
+    def __getattribute__(self, name: str) -> Any:
+        try:
+            attributes = object.__getattribute__(self, "__dict__")
+        except AttributeError:
+            return object.__getattribute__(self, name)
+        if name in attributes:
+            return attributes[name]
+
+        dispatchers = attributes.get("_dispatchers")
+        if dispatchers is None:
+            return object.__getattribute__(self, name)
+        if name in dispatchers:
+            dispatcher = dispatchers[name]
+            if dispatcher is None:
+                return object.__getattribute__(self, name)
+            return dispatcher
+
+        default = inspect.getattr_static(InductorChoices, name, None)
+        if name == "uuid" or not (
+            callable(default) or isinstance(default, (classmethod, staticmethod))
+        ):
+            dispatchers[name] = None
+            return object.__getattribute__(self, name)
+
+        dispatcher = None
+        owner = ""
+        choices = object.__getattribute__(self, "_choices")
+        for choice in choices:
+            if inspect.getattr_static(choice, name) is default:
+                continue
+            if dispatcher is not None:
+                log.warning(
+                    "InductorChoices hook %r is overridden by both %s and %s; "
+                    "list order selects %s",
+                    name,
+                    owner,
+                    type(choice).__name__,
+                    owner,
+                )
+                continue
+            dispatcher = getattr(choice, name)
+            owner = type(choice).__name__
+
+        dispatchers[name] = dispatcher
+        if dispatcher is None:
+            return object.__getattribute__(self, name)
+        return dispatcher
+
+    def uuid(self) -> tuple[str, tuple[Any, ...]]:
+        return (
+            "composed_inductor_choices",
+            tuple(
+                _validate_choice_uuid(f"config:{index}", choice)()
+                for index, choice in enumerate(self._choices)
+            ),
+        )
+
+
+def create_inductor_choices(
+    factory: InductorChoicesFactoryConfig,
+) -> InductorChoices:
+    return _create_inductor_choices(factory, registered_inductor_choices())
+
+
+def _create_inductor_choices(
+    factory: InductorChoicesFactoryConfig,
+    registrations: tuple[tuple[str, InductorChoicesFactory], ...],
+) -> InductorChoices:
+    if not registrations:
+        return InductorChoices() if factory is None else factory()
+
+    factories = list(registrations)
+    if factory is not None:
+        factories.insert(0, ("config", factory))
+
+    choices = []
+    for key, choice_factory in factories:
+        choice = choice_factory()
+        if not isinstance(choice, InductorChoices):
+            raise TypeError(
+                "Inductor choices factories must return InductorChoices instances, "
+                f"got {type(choice).__qualname__} from {key!r}"
+            )
+        _validate_choice_uuid(key, choice)
+        choices.append(choice)
+
+    if len(choices) == 1:
+        return choices[0]
+    return _ComposedInductorChoices(choices)
+
+
+def registered_inductor_choices() -> tuple[tuple[str, InductorChoicesFactory], ...]:
+    return tuple(_registered_inductor_choices.items())
+
+
+def register_inductor_choices(key: str, factory: InductorChoicesFactory) -> None:
+    global _registered_inductor_choices
+    registrations = dict(_registered_inductor_choices)
+    registrations[key] = factory
+    handler = _create_inductor_choices(
+        config.inductor_choices_class, tuple(registrations.items())
+    )
+    _registered_inductor_choices = registrations
+    V.set_choices_handler(handler)
+
+
+def unregister_inductor_choices(key: str) -> None:
+    global _registered_inductor_choices
+    registrations = dict(_registered_inductor_choices)
+    registrations.pop(key, None)
+    handler = _create_inductor_choices(
+        config.inductor_choices_class, tuple(registrations.items())
+    )
+    _registered_inductor_choices = registrations
+    V.set_choices_handler(handler)
+
+
+def inductor_choices_cache_key(factory: InductorChoicesFactoryConfig) -> Any:
+    if factory is None and not _registered_inductor_choices:
+        return None
+    choice = create_inductor_choices(factory)
+    uuid = getattr(choice, "uuid", None)
+    if not callable(uuid):
+        raise RuntimeError(
+            f"Config 'inductor_choices_class' is set to {factory} which does not "
+            "implement uuid(). Implement uuid() for cache key participation."
+        )
+    return uuid()

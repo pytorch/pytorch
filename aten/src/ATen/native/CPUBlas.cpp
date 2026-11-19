@@ -370,7 +370,7 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * m_;
+      int64_t c_size = static_cast<int64_t>(n_) * m_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c_size, 0.0f);
       for (const auto j : c10::irange(n)) {
@@ -431,7 +431,7 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * m_;
+      int64_t c_size = static_cast<int64_t>(n_) * m_;
       // C matrix in OpenBLAS shgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c_size, 0.0f);
       for (const auto j : c10::irange(n)) {

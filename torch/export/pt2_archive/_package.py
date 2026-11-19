@@ -737,12 +737,30 @@ class AOTICompiledModel:
         self.loader = loader
 
     def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return self._run(self.loader.boxed_run, args, kwargs)
+
+    def run_with_lazy_cuda_graphs(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        """
+        Like calling the model, but runs it as CUDA graphs captured lazily,
+        while serving calls; requires a CUDA model compiled with
+        ``aot_inductor.cudagraphs=True``. A new input layout runs eagerly
+        first, is captured on its next call and replayed after that, up to
+        ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` (default 8) graphs per model
+        instance. Replayed outputs are copies; eager calls return the model's
+        own outputs. Once a graph is captured, the model's active constants
+        can't change, so ``load_constants`` fails. Not supported for models
+        loaded with ``run_single_threaded=True``, or on ROCm yet; see
+        https://github.com/ROCm/rocm-systems/issues/12677.
+        """
+        return self._run(self.loader.run_with_lazy_cuda_graphs, args, kwargs)
+
+    def _run(self, run_fn, args, kwargs):  # type: ignore[no-untyped-def]
         call_spec = self.loader.get_call_spec()
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = self.loader.boxed_run(flat_inputs)
+        flat_outputs = run_fn(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     def get_metadata(self) -> dict[str, str]:
@@ -1045,6 +1063,7 @@ def _load_aoti(
     run_single_threaded: bool,
     num_runners: int,
     device_idx: int,
+    use_stream_affinity: bool = False,
 ) -> AOTICompiledModel:
     loaded_metadata = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(  # type: ignore[attr-defined]
         file, model_name
@@ -1057,6 +1076,7 @@ def _load_aoti(
             run_single_threaded,
             num_runners,
             device_idx,
+            use_stream_affinity,
         )
     )
 
@@ -1087,6 +1107,7 @@ def load_pt2(
     num_runners: int = 1,
     device_index: int = -1,
     load_weights_from_disk: bool = False,
+    use_stream_affinity: bool = False,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
     Loads all the artifacts previously saved with ``package_pt2``.
@@ -1108,6 +1129,10 @@ def load_pt2(
             to be loaded. By default, `device_index=-1` is used, which corresponds
             to the device `cuda` when using CUDA. Passing `device_index=1` would
             load the package to `cuda:1`, for example.
+
+        use_stream_affinity (bool): Whether each non-null device stream should
+            retain a stable model instance. This is intended for controlled
+            multi-stream benchmarking and can reduce host-side pipelining.
 
     Returns:
         A ``PT2ArchiveContents`` object which contains all the objects in the PT2.
@@ -1188,6 +1213,7 @@ def load_pt2(
                         run_single_threaded,
                         num_runners,
                         device_index,
+                        use_stream_affinity,
                     )
                     for model_name in aoti_model_names
                 }
@@ -1201,6 +1227,7 @@ def load_pt2(
                 run_single_threaded,
                 num_runners,
                 device_index,
+                use_stream_affinity,
             )
             for model_name in aoti_model_names
         }

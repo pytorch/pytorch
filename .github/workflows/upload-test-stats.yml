@@ -8,11 +8,13 @@ on:
       - trunk
       - trunk-rocm-sandbox
       - periodic
+      - periodic-strict
       - periodic-rocm-mi200
       - periodic-rocm-mi300
       - periodic-rocm-mi350
       - inductor
       - unstable
+      - td-holdout-unstable
       - slow
       - slow-rocm-mi200
       - unstable-periodic
@@ -20,8 +22,8 @@ on:
       - rocm-mi200
       - rocm-mi300
       - rocm-mi350
-      - rocm-navi31
-      - rocm-nightly
+      - rocm-rx7900
+      - rocm-preview
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
@@ -35,25 +37,7 @@ on:
       - completed
 
 jobs:
-  # the conclusion field in the github context is sometimes null
-  # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
-  get_workflow_conclusion:
-    if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
-    outputs:
-      conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
-    steps:
-      - name: Get workflow run conclusion
-        # TODO (huydhn): Pin this once https://github.com/octokit/request-action/issues/315 is resolved
-        uses: octokit/request-action@05a2312de9f8207044c4c9e41fe19703986acc13 # v2.x
-        id: get_conclusion
-        with:
-          route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   upload-test-stats:
-    needs: get_workflow_conclusion
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-stats

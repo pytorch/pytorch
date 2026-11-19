@@ -12,6 +12,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -89,7 +90,7 @@ std::vector<std::optional<Tensor>> batchIndices(
   int64_t maxLogicalRank = get_max_index_logical_dim(indices, indices_bdims);
   bool indices_batched = any_has_value(indices_bdims);
 
-  for (size_t i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto const & index = indices[i];
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
@@ -330,19 +331,21 @@ Tensor index_plumbing(const Tensor & self, const List<std::optional<Tensor>> & i
   }
   auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   std::vector<std::optional<Tensor>> indices_value;
+  indices_value.reserve(indices.size());
   std::vector<std::optional<int64_t>> indices_bdims;
-  for (const auto&& indRef : indices) {
-      std::optional<Tensor> ind = indRef;
-      std::optional<Tensor> index;
-      std::optional<int64_t> index_bdim;
-      if (ind.has_value()) {
-        std::tie(index, index_bdim) = unwrapTensorAtLevel(ind.value(), cur_level);
-      }
-    indices_value.push_back(index);
+  indices_bdims.reserve(indices.size());
+  for (std::optional<Tensor> index : indices) {
+    std::optional<int64_t> index_bdim;
+    if (index.has_value()) {
+      std::tie(index, index_bdim) =
+          unwrapTensorAtLevel(index.value(), cur_level);
+    }
+    indices_value.push_back(std::move(index));
     indices_bdims.push_back(index_bdim);
   }
   auto results = index_batch_rule(self_value, self_bdim, indices_value, indices_bdims);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  return makeBatched(
+      std::move(std::get<0>(results)), std::get<1>(results), cur_level);
 }
 
 namespace {
@@ -353,14 +356,14 @@ namespace {
   {
     int64_t dims_before = 0, dims_indexed = 0;
     SymIntArrayRef replacement_shape;
-    for (const auto dim : c10::irange(indices_list.size())) {
-      if (!indices_list[dim].defined()) {
+    for (const auto& indices_list_elem : indices_list) {
+      if (!indices_list_elem.defined()) {
         if (dims_indexed == 0) {
           dims_before++;
         }
       } else {
         dims_indexed++;
-        replacement_shape = indices_list[dim].sym_sizes();
+        replacement_shape = indices_list_elem.sym_sizes();
       }
     }
 
@@ -629,7 +632,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
     batch_size = get_bdim_size2_symint(self, self_bdim, values, values_bdim);
   } else {
     // one or more of the indices is batched.
-    for (size_t i = 0; i < indices.size(); i++) {
+    for (const auto i : c10::irange(indices.size())) {
       if (indices_bdims[i] && indices[i].has_value()) {
         batch_size = indices[i].value().sym_size(*indices_bdims[i]);
         break;
@@ -676,7 +679,8 @@ Tensor index_put_plumbing(const Tensor & self, const List<std::optional<Tensor>>
   auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
       unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values_, cur_level);
   auto results = index_put_batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  return makeBatched(
+      std::move(std::get<0>(results)), std::get<1>(results), cur_level);
 }
 
 namespace {
