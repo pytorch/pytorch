@@ -2488,9 +2488,20 @@ class BenchmarkRunner:
                         if self.args.vm and not self.args.training:
                             # Its first calls run before any graph is made:
                             # what is compared is a call once it has settled.
+                            # A model whose forward changes it (moco moves an
+                            # encoder and fills a queue on every call) gets
+                            # back what those calls changed, and the
+                            # generators start where they started for eager.
+                            held = copy.deepcopy(model_copy.state_dict())
                             settle_vm(
                                 optimized_model_iter_fn, model_copy, example_inputs
                             )
+                            with torch.no_grad():
+                                for key, now in model_copy.state_dict().items():
+                                    if not torch.equal(now, held[key]):
+                                        now.copy_(held[key])
+                            del held
+                            reset_rng_state()
                         new_result = self.run_n_iterations(
                             model_copy, example_inputs, optimized_model_iter_fn
                         )
