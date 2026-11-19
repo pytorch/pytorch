@@ -202,31 +202,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     @parametrize("op_name", ["addcdiv", "addcmul"])
     @parametrize("inplace", [False, True])
-    @parametrize("scalar_device", ["cpu", f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0"])
-    def test_foreach_pointwise_tensor_privateuse1(
-        self, op_name: str, inplace: bool, scalar_device: str
-    ) -> None:
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("propagate_real_tensors requires real accelerator tensors")
-        with FakeTensorMode():
-            inputs = [
-                torch.empty(shape, device=f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0")
-                for shape in ((2, 3), (4,))
-            ]
-            scalars = torch.empty(2, device=scalar_device)
-            result = getattr(
-                aten, f"_foreach_{op_name}{'_' if inplace else ''}"
-            ).Tensor(self=inputs, tensor1=inputs, tensor2=inputs, scalars=scalars)
-            if inplace:
-                self.assertIsNone(result)
-            else:
-                self.assertEqual(len(result), len(inputs))
-                for actual, expected in zip(result, inputs):
-                    self.assertTrue(is_fake_tensor(actual))
-                    self.checkMetaProps(t1=actual, t2=expected)
-
-    @parametrize("op_name", ["addcdiv", "addcmul"])
-    @parametrize("inplace", [False, True])
     @parametrize(
         "input_devices,scalar_device",
         [
@@ -259,15 +234,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         with FakeTensorMode():
             inputs = [torch.empty(2, 3, device=device) for device in input_devices]
             scalars = torch.empty(len(inputs), device=scalar_device)
-            allowed = "CPU"
-            if scalar_device.startswith(TEST_PRIVATEUSE1_DEVICE_TYPE):
-                allowed += (
-                    f" or on the same {TEST_PRIVATEUSE1_DEVICE_TYPE}"
-                    " device as all inputs"
-                )
-            message = (
-                f"Expected scalars to be on {allowed}, got {scalar_device} instead."
-            )
+            message = f"Expected scalars to be on CPU, got {scalar_device} instead."
             with self.assertRaisesRegex(RuntimeError, re.escape(message)):
                 getattr(aten, f"_foreach_{op_name}{'_' if inplace else ''}").Tensor(
                     self=inputs, tensor1=inputs, tensor2=inputs, scalars=scalars

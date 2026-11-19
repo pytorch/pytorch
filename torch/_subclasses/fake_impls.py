@@ -463,16 +463,9 @@ def foreach_pointwise_tensor(
     tensor2: list[torch.Tensor],
     scalars: torch.Tensor,
 ) -> list[FakeTensor] | None:
-    privateuse1 = torch._C._get_privateuse1_backend_name()
-    if scalars.device.type != "cpu" and (
-        scalars.device.type != privateuse1
-        or any(t.device != scalars.device for t in inputs)
-    ):
-        allowed = "CPU"
-        if scalars.device.type == privateuse1:
-            allowed += f" or on the same {privateuse1} device as all inputs"
+    if scalars.device.type != "cpu":
         raise RuntimeError(
-            f"Expected scalars to be on {allowed}, got {scalars.device} instead."
+            f"Expected scalars to be on CPU, got {scalars.device} instead."
         )
     if not scalars.is_contiguous():
         raise RuntimeError("Expected scalars to be contiguous.")
