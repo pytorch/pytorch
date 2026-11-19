@@ -3305,6 +3305,20 @@ class TestVmFrames(TestCase):
                 traceback.clear_frames(e.__traceback__)
                 self.assertIsNone(probes[-1]())
 
+    @parametrize("inline", (False, True))
+    def test_calls_made_under_a_trace_function_run_in_the_interpreter(self, inline):
+        compiled = torch.vm(
+            frame_sets_a_trace,
+            passes=DEFAULT if inline else without(P.Inline),
+            fallback=False,
+        )
+        for _ in range(4):
+            self.assertEqual(compiled(3), frame_sets_a_trace(3))
+        events = [event for event, _ in compiled(3)[3]]
+        self.assertEqual(events, ["call", "line", "line", "return"])
+        inlined = compiled.stats()["inlined"]
+        self.assertEqual("frame_traced_callee" in inlined, inline)
+
     def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
             return eval("'{}={}'.format(name, value)")
@@ -3319,6 +3333,29 @@ class TestVmFrames(TestCase):
             name.rsplit(".", 1)[-1] for name in compiled.stats()["compiled_callees"]
         ]
         self.assertEqual(sorted(names), ["fmt", "scale", "scale"])
+
+
+def frame_traced_callee(a):
+    b = a + 1
+    return b * 2
+
+
+def frame_sets_a_trace(n):
+    events = []
+
+    def tracer(frame, event, arg):
+        if frame.f_code is frame_traced_callee.__code__:
+            events.append((event, frame.f_lineno - frame.f_code.co_firstlineno))
+        return tracer
+
+    before = frame_traced_callee(n)
+    previous = sys.gettrace()
+    sys.settrace(tracer)
+    try:
+        traced = frame_traced_callee(n)
+    finally:
+        sys.settrace(previous)
+    return before, traced, frame_traced_callee(n), events
 
 
 def breaker_signals_itself(log):
