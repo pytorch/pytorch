@@ -97,7 +97,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 9
+#define TCFG_API_VERSION 10
 
 struct TcfgApi {
   uint32_t version;
@@ -171,6 +171,9 @@ struct TcfgApi {
   // between finds itself called by the function of that frame, whatever
   // frames were pushed since.
   void* (*frame_swap)(void* frame);
+  // Whether the thread has a trace function (sys.settrace): the interpreter
+  // calls it for the frames it enters and the lines it runs in them.
+  int32_t (*frame_traced)();
 
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.
