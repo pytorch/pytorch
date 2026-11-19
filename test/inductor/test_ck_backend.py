@@ -524,6 +524,156 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
+    @contextlib.contextmanager
+    def _offered_ck_conv_ops(self):
+        """Collects every CK conv instance offered to autotuning in the block."""
+        from torch._inductor.codegen.rocm.ck_conv_template import (
+            CKGroupedConvFwdTemplate,
+        )
+
+        offered: list = []
+        original_gen_ops = CKGroupedConvFwdTemplate.gen_ops
+
+        def gen_ops(template):
+            ops = original_gen_ops(template)
+            offered.extend(ops)
+            return ops
+
+        with patch.object(CKGroupedConvFwdTemplate, "gen_ops", gen_ops):
+            yield offered
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ,
+        {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
+    @parametrize(
+        "max_autotune_conv_backends",
+        ("CK", "ATEN,CK"),
+        name_fn=lambda b: "standalone" if b == "CK" else "fallback",
+    )
+    @parametrize(
+        "conv_params",
+        (((3, 3, 3), 1, 0, 1), ((3, 5, 7), 2, 1, 3)),
+        name_fn=lambda p: "default" if p[1:] == (1, 0, 1) else "strided",
+    )
+    def test_max_autotune_conv3d(self, max_autotune_conv_backends, conv_params):
+        """
+        ck4inductor ships only 2D instances; CKGroupedConvFwdTemplate re-stamps
+        the channels-last arm of those for 3D. The strided case uses a
+        non-cubic filter and non-default stride/padding/dilation so the spatial
+        size args cannot be permuted or sourced from the wrong field unnoticed.
+        """
+        kernel_size, stride, padding, dilation = conv_params
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+
+        x = torch.randn(1, 8, 32, 64, 64, **tensor_options).to(
+            memory_format=torch.channels_last_3d
+        )
+        w = torch.randn(64, 8, *kernel_size, **tensor_options).to(
+            memory_format=torch.channels_last_3d
+        )
+
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": max_autotune_conv_backends,
+                    "compile_threads": 4,
+                    # a warm FX graph cache skips the lowering, so nothing is offered
+                    "fx_graph_cache": False,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv3d(x, w):
+                return torch.conv3d(
+                    x, w, stride=stride, padding=padding, dilation=dilation
+                )
+
+            Y_eager = torch.conv3d(
+                x, w, stride=stride, padding=padding, dilation=dilation
+            )
+            with self._offered_ck_conv_ops() as offered:
+                Y_compiled, codes = run_and_get_code(conv3d, x, w)
+
+            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
+
+            # ATen can win the benchmark in fallback mode, so assert CK was
+            # offered rather than that it was selected.
+            self.assertGreater(len(offered), 0)
+            if max_autotune_conv_backends == "CK":
+                FileCheck().check("async_compile.rocm").run(codes[0])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ, {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"}
+    )
+    @parametrize("case", ("contiguous_3d", "grouped_2d", "grouped_3d"))
+    def test_max_autotune_conv_skips_ck(self, case):
+        """
+        Shapes CK must decline: contiguous 3D (only the channels-last arm is
+        re-stamped for 3D) and grouped at either rank (size_args passes total
+        channel counts where CK expects per-group; silently wrong at rank 2).
+
+        Asserts no CK instance was *offered* -- checking the output alone also
+        passes when CK was offered but lost the benchmark. The instance library
+        is checked non-empty and the FX graph cache disabled so the assertion
+        cannot pass vacuously.
+        """
+        from torch._inductor.codegen.rocm.ck_conv_template import gen_conv_ops_library
+
+        self.assertGreater(len(gen_conv_ops_library()), 0)
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+        groups = 2 if case.startswith("grouped") else 1
+        conv = torch.conv2d if case == "grouped_2d" else torch.conv3d
+
+        if case == "grouped_2d":
+            x = torch.randn(1, 64, 32, 32, **tensor_options)
+            w = torch.randn(64, 64 // groups, 3, 3, **tensor_options)
+            x = x.to(memory_format=torch.channels_last)
+            w = w.to(memory_format=torch.channels_last)
+        else:
+            x = torch.randn(1, 8, 32, 64, 64, **tensor_options)
+            w = torch.randn(64, 8 // groups, 3, 3, 3, **tensor_options)
+            if case == "grouped_3d":
+                x = x.to(memory_format=torch.channels_last_3d)
+                w = w.to(memory_format=torch.channels_last_3d)
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": "ATEN,CK",
+                    "compile_threads": 4,
+                    "fx_graph_cache": False,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv_fn(x, w):
+                return conv(x, w, groups=groups)
+
+            Y_eager = conv(x, w, groups=groups)
+            with self._offered_ck_conv_ops() as offered:
+                Y_compiled = conv_fn(x, w)
+
+            self.assertEqual(offered, [])
+            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
+
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(
         os.environ,
