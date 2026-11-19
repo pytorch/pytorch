@@ -439,7 +439,7 @@ void onFunctionExitImpl(
     state.recordQueue.getSubqueue()->disable_perf_profiler(
         *kineto_ctx_ptr->event_->counters_);
   }
-  kineto_ctx_ptr->event_->basic_fields_.end_tid_ =
+  kineto_ctx_ptr->event_->scalar_fields_.end_tid_ =
       at::RecordFunction::currentThreadId();
   if (fn.isNcclMeta()) {
     auto& metadata = *kineto_ctx_ptr->event_->collective_meta_;
