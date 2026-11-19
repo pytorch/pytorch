@@ -20152,7 +20152,6 @@ A.last
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
-    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
@@ -20179,6 +20178,16 @@ A.last
             return out
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_type_subclasscheck_non_class_raises_type_error(self):
+        def fn(x):
+            try:
+                return x + 1, type.__subclasscheck__(int, True)
+            except TypeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.tensor(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)
