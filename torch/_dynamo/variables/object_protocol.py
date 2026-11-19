@@ -752,8 +752,10 @@ def pynumber_int(
     # Fast path for int (sub)class instances — mirrors PyLong_Check at the
     # top of PyNumber_Long (abstract.c:1531). Avoids infinite recursion for
     # int subclasses like IntEnum whose __int__ calls int() again.
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), int):
-        return ConstantVariable.create(int(obj.as_python_constant()))
+    if obj.is_python_constant():
+        value = obj.as_python_constant()
+        if isinstance(value, int) and type(value).__int__ is int.__int__:
+            return ConstantVariable.create(int(value))
 
     if obj.tp_as_number.nb_int is not None:
         res = obj.nb_int_impl(tx)
