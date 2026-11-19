@@ -738,6 +738,16 @@ thread_local! {
     static PROFILING_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// What a leap is called with in place of a value that is not defined.
+pub fn undefined() -> Obj {
+    static UNDEFINED: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+    UNDEFINED
+        .get_or_init(|| unsafe {
+            PyObj::from_owned(ffi::PyObject_CallNoArgs(std::ptr::addr_of_mut!(ffi::PyBaseObject_Type) as Obj))
+        })
+        .as_ptr()
+}
+
 /// How many blocks on this thread are in their profiling run: code that
 /// decides when to compile something uses it to let the outermost block go
 /// first.
@@ -826,6 +836,11 @@ pub struct Compiled {
     /// Per handler block: the registers that survive entering it, which are
     /// what it reads and the frame slots.
     handler_keep: Vec<Option<analysis::BitSet>>,
+    /// The values that are live at the instructions leaps have gone to.
+    live: Shared<HashMap<(usize, usize), Arc<analysis::BitSet>>>,
+    /// The function without what its holds name, and its liveness: made
+    /// when `read_at` is first asked.
+    reads: std::sync::OnceLock<(Function, Analysis)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1071,6 +1086,8 @@ impl Compiled {
         Compiled {
             callees,
             handler_keep,
+            live: Shared::new(HashMap::new()),
+            reads: std::sync::OnceLock::new(),
             global_cache: empty(),
             module_attr_cache: empty(),
             plain_name,
@@ -1567,6 +1584,104 @@ impl Compiled {
         self.func.nvalues - 1
     }
 
+    /// The values that are needed from instruction `index` of a block on.
+    pub fn live_at(&self, block: usize, index: usize) -> Arc<analysis::BitSet> {
+        if let Some(live) = self.live.borrow().get(&(block, index)) {
+            return live.clone();
+        }
+        let live = Arc::new(self.analysis.live_before(&self.func, block, index));
+        self.live.borrow_mut().insert((block, index), live.clone());
+        live
+    }
+
+    /// The values that an instruction from `index` of a block on reads: the
+    /// ones that are needed there less those that are only kept alive (see
+    /// `Op::Hold`), which matters to something that would have to make them.
+    pub fn read_at(&self, block: usize, index: usize) -> analysis::BitSet {
+        let (func, analysis) = self.reads.get_or_init(|| {
+            let mut func = self.func.clone();
+            for found in func.blocks.iter_mut() {
+                for inst in found.insts.iter_mut() {
+                    if let Op::Hold(values) = &mut inst.op {
+                        values.clear();
+                    }
+                }
+            }
+            let analysis = analysis::analyze(&func);
+            (func, analysis)
+        });
+        analysis.live_before(func, block, index)
+    }
+
+    /// Runs a leap: calls `callee` with the values of `args` (the stand-in
+    /// `undefined()` for one that has none). None from it means that nothing
+    /// happened. Otherwise it returns `(block, index, values, cleared)`: the
+    /// work up to instruction `index` of `block` is done, `values` (a dict by
+    /// value number) are the values it defined on the way that are needed
+    /// from there on, and those in `cleared` have none anymore. The registers
+    /// are made what they are at that instruction, and it is returned.
+    unsafe fn leap(&self, regs: &mut [Obj], callee: Obj, args: &[V]) -> Result<Option<(usize, usize)>, ()> {
+        let undefined = undefined();
+        let passed: Vec<Obj> = args
+            .iter()
+            .map(|v| if reg(regs, *v).is_null() { undefined } else { self.obj(regs, *v) })
+            .collect();
+        let result = ffi::PyObject_Vectorcall(callee, passed.as_ptr(), passed.len(), null_mut());
+        if result.is_null() {
+            return Err(());
+        }
+        if result == ffi::Py_None() {
+            ffi::Py_DECREF(result);
+            return Ok(None);
+        }
+        let parts = if ffi::PyTuple_Check(result) != 0 && ffi::PyTuple_GET_SIZE(result) == 4 {
+            let item = |i| ffi::PyTuple_GET_ITEM(result, i);
+            let (block, index) = (ffi::PyLong_AsSsize_t(item(0)), ffi::PyLong_AsSsize_t(item(1)));
+            let valid = block >= 0
+                && (block as usize) < self.func.blocks.len()
+                && index >= 0
+                && index as usize <= self.func.blocks[block as usize].insts.len()
+                && ffi::PyDict_Check(item(2)) != 0
+                && ffi::PyList_Check(item(3)) != 0;
+            valid.then(|| (block as usize, index as usize, item(2), item(3)))
+        } else {
+            None
+        };
+        let Some((block, index, values, cleared)) = parts else {
+            ffi::Py_DECREF(result);
+            ffi::PyErr_Clear();
+            set_error(
+                ffi::PyExc_TypeError,
+                "a leap returns None or (block, index, values, cleared)".to_string(),
+            );
+            return Err(());
+        };
+        let live = self.live_at(block, index);
+        let nvalues = self.func.nvalues as usize;
+        for v in 0..nvalues {
+            if !live.contains(v as V) {
+                capi::release(take(regs, v as V));
+            }
+        }
+        let mut pos: ffi::Py_ssize_t = 0;
+        let (mut key, mut value): (Obj, Obj) = (null_mut(), null_mut());
+        while ffi::PyDict_Next(values, &mut pos, &mut key, &mut value) != 0 {
+            let v = ffi::PyLong_AsSsize_t(key);
+            if v >= 0 && (v as usize) < nvalues && live.contains(v as V) {
+                capi::release(std::mem::replace(&mut regs[v as usize], new_ref(value)));
+            }
+        }
+        for i in 0..ffi::PyList_GET_SIZE(cleared) {
+            let v = ffi::PyLong_AsSsize_t(ffi::PyList_GET_ITEM(cleared, i));
+            if v >= 0 && (v as usize) < nvalues {
+                capi::release(take(regs, v as V));
+            }
+        }
+        ffi::PyErr_Clear();
+        ffi::Py_DECREF(result);
+        Ok(Some((block, index)))
+    }
+
     /// The values a range of the generic instructions of a block takes from
     /// before it, and the ones it defines that are needed after it.
     pub fn range_io(&self, block: usize, lo: usize, hi: usize) -> (Vec<V>, Vec<V>) {
@@ -1610,7 +1725,15 @@ impl Compiled {
     /// the values that are still needed. With `traced`, what the
     /// instructions call is left to the interpreter. On an error returns the
     /// index of the instruction that raised it, with the error set.
-    pub unsafe fn replay(&self, block: usize, lo: usize, hi: usize, env: Obj, traced: bool) -> Result<(), usize> {
+    pub unsafe fn replay(
+        &self,
+        block: usize,
+        lo: usize,
+        hi: usize,
+        env: Obj,
+        traced: bool,
+        steppable: bool,
+    ) -> Result<(), usize> {
         let insts = &self.generic[block].insts;
         let nvalues = self.func.nvalues as usize;
         let mut regs: Vec<Obj> = vec![null_mut(); nvalues + 1];
@@ -1628,7 +1751,7 @@ impl Compiled {
         }
         let mut failed = None;
         for (i, inst) in insts.iter().enumerate().take(hi).skip(lo) {
-            if !inst.op.is_replayable() {
+            if !(inst.op.is_replayable() || (steppable && inst.op.is_steppable())) {
                 set_error(ffi::PyExc_RuntimeError, "the instruction cannot be replayed".to_string());
                 failed = Some(i);
                 break;
@@ -2722,7 +2845,9 @@ impl Compiled {
                 Some(api) => self.exec_dispatch(regs, &d.slot, &d.operands, &d.fallback, api),
                 None => self.exec_op(regs, &d.fallback),
             },
-            Op::Guard(_) => Ok(null_mut()),
+            // Run by the loop over the blocks, which is where a guard that
+            // fails and a leap that is taken go on.
+            Op::Guard(_) | Op::Leap(..) => Ok(null_mut()),
         }
     }
 
@@ -3251,6 +3376,7 @@ impl Compiled {
             let mut pc: usize = 0;
             let next: usize = loop {
                 let mut resume: Option<usize> = None;
+                let mut leap: Option<(usize, usize)> = None;
                 {
                     let code_ref: &BlockCode = &*code;
                     let insts = &code_ref.insts;
@@ -3263,6 +3389,17 @@ impl Compiled {
                                 } else {
                                     resume = Some(g.resume as usize);
                                     break;
+                                }
+                            }
+                            Op::Leap(callee, args) => {
+                                frames.top().at(inst.bc & OFFSET_MASK);
+                                match self.leap(regs, callee.as_ptr(), args) {
+                                    Ok(None) => Ok(null_mut()),
+                                    Ok(target) => {
+                                        leap = target;
+                                        break;
+                                    }
+                                    Err(()) => Err(()),
                                 }
                             }
                             Op::FrameEnter(function) => {
@@ -3313,7 +3450,7 @@ impl Compiled {
                         }
                         pc += 1;
                     }
-                    if resume.is_none() {
+                    if resume.is_none() && leap.is_none() {
                         if mode == Mode::Profile {
                             self.specialize(cur);
                         }
@@ -3382,6 +3519,15 @@ impl Compiled {
                         }
                         break next;
                     }
+                }
+                if let Some((block, index)) = leap {
+                    // The registers are what they are at that instruction:
+                    // the generic tier goes on from there.
+                    cur = block;
+                    mode = Mode::Generic;
+                    code = Arc::as_ptr(self.generic.get_unchecked(cur));
+                    pc = index;
+                    continue;
                 }
                 // A guard failed: this block goes back to the generic tier,
                 // from the instruction the guard names.

@@ -1473,6 +1473,86 @@ class TestVmPasses(TestCase):
         with self.assertRaisesRegex(IndexError, "outside the range"):
             replay.io(lo, hi + 100)
 
+    def test_pass_takes_execution_elsewhere(self):
+        # The pass puts a call in front of the block's instructions that can
+        # do their work and say where to go on.
+        calls = []
+
+        def leaping(region):
+            insts = region.instructions()
+            if insts[0]["op"] == "leap":
+                return False
+            total = [inst for inst in insts if inst["op"] == "binary"][-1]["dst"]
+
+            def hop(x, y):
+                calls.append(1)
+                if len(calls) % 2:
+                    return None
+                # Done up to the end of the block, with the sum in place.
+                return (0, len(insts), {total: (x + y) * 2}, [])
+
+            inputs = region.leap(0, hop)
+            self.assertEqual(len(inputs), 2)
+            return True
+
+        def f(x, y):
+            a = x + y
+            return a * 2
+
+        compiled = torch.vm(f, passes=[*CFG, leaping], fallback=False)
+        for _ in range(7):
+            x, y = torch.randn(3), torch.randn(3)
+            self.assertEqual(compiled(x, y), f(x, y), atol=0, rtol=0)
+        # The first call profiled the block; of the six others, three ran
+        # the instructions and three did not.
+        self.assertEqual(len(calls), 6)
+        self.assertIn("leap", compiled.dump())
+
+    def test_function_as_a_path_sees_it(self):
+        handles = []
+
+        def grab(region):
+            if not handles:
+                handles.append(region.replayer(0, len(region.instructions())))
+            return False
+
+        def f(xs, flag):
+            total = 0
+            for x in xs:
+                total = total + x
+            if flag:
+                total = total * 2
+            return total
+
+        passes = [P.Inline(), P.ModuleShortcuts(), grab]
+        compiled = torch.vm(f, passes=passes, fallback=False)
+        self.assertEqual(compiled([1, 2, 3], True), 12)
+        (replay,) = handles
+        self.assertTrue(replay.leaps)
+        self.assertIs(replay.globals, f.__globals__)
+        # The first block ends in a jump to the head of the loop, which
+        # leaves it when the iterator is exhausted.
+        kind, value, targets = replay.terminator(0)
+        self.assertEqual((kind, value, len(targets)), ("jump", None, 1))
+        head = targets[0]
+        kind, value, targets = replay.terminator(head)
+        self.assertEqual((kind, len(targets)), ("br_null", 2))
+        ops = [inst["op"] for inst in replay.instructions_of(head)]
+        self.assertEqual(ops, ["iter_next"])
+        self.assertTrue(replay.instructions_of(head)[0]["steppable"])
+        self.assertFalse(replay.instructions_of(head)[0]["replayable"])
+        # Into the head from the first block: the phi of `total` takes the
+        # constant, and the loop variable has no value yet.
+        moves, _ = replay.edge(0, head)
+        self.assertIn(None, [source for _, source in moves])
+        # Running the head on its own: the iterator gives its first item.
+        env = dict.fromkeys(replay.live(head, 0), iter([7, 8]))
+        replay.step(head, 0, 1, env)
+        self.assertIn(7, env.values())
+        # What is only kept alive is needed, but not read.
+        last = len(replay.instructions_of(0))
+        self.assertLessEqual(set(replay.live(0, last, True)), set(replay.live(0, last)))
+
     def test_settle_specializes_the_block_again(self):
         seen = []
 
