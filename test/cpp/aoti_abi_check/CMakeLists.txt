@@ -12,7 +12,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_accumulatetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_copysign.cpp
-  ${AOTI_ABI_CHECK_TEST_ROOT}/test_cpu_capabilities.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_cpu_cache_sizes.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch_v2.cpp
