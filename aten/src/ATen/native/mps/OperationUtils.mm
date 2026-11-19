@@ -17,6 +17,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -376,15 +377,14 @@ static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t
 static void check_mps_shape(MPSShape* shape) {
   for (NSNumber* elem in shape) {
     const auto val = [elem longValue];
-    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(),
-                "MPSGraph does not support tensor dims larger than INT_MAX");
+    TORCH_CHECK(std::in_range<int32_t>(val), "MPSGraph does not support tensor dims larger than INT_MAX");
   }
 }
 
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool checkLinearOffset) {
   if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
-    if (storage_numel > std::numeric_limits<int32_t>::max()) {
+    if (!std::in_range<int32_t>(storage_numel)) {
       return true;
     }
   }
@@ -394,14 +394,14 @@ bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool che
   int64_t max_linear_offset = 0;
   for (const auto dim : c10::irange(tensor.dim())) {
     const auto size = tensor.size(dim);
-    if (size > std::numeric_limits<int32_t>::max()) {
+    if (!std::in_range<int32_t>(size)) {
       return true;
     }
     if (check_offset) {
       max_linear_offset += tensor.stride(dim) * (size - 1);
     }
   }
-  if (check_offset && max_linear_offset > std::numeric_limits<int32_t>::max()) {
+  if (check_offset && !std::in_range<int32_t>(max_linear_offset)) {
     return true;
   }
   return false;
@@ -539,8 +539,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     check_mps_shape(mpsShape);
 
     auto storage_numel = src.storage().nbytes() / src.element_size() - src.storage_offset();
-    TORCH_CHECK(storage_numel <= std::numeric_limits<int32_t>::max(),
-                "MPSGraph does not support tensor dims larger than INT_MAX");
+    TORCH_CHECK(std::in_range<int32_t>(storage_numel), "MPSGraph does not support tensor dims larger than INT_MAX");
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
                                                                                  shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;
@@ -781,7 +780,7 @@ MetalShaderLibrary::~MetalShaderLibrary() {
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
   std::lock_guard guard(cache_mutex);
-  if (C10_UNLIKELY(!library)) {
+  if (!library) [[unlikely]] {
     TORCH_INTERNAL_ASSERT(nparams == 0);
     library = compileLibrary(shaderSource);
   }
@@ -888,7 +887,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
   // kernel or fall back to the `_dense_cast_` cast variant.
   {
     std::lock_guard guard(cache_mutex);
-    if (C10_LIKELY(functionNamesPopulated)) {
+    if (functionNamesPopulated) [[likely]] {
       return functionNames.contains(fname);
     }
   }
@@ -957,7 +956,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
  protected:
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(cache_mutex);
-    if (C10_UNLIKELY(!library)) {
+    if (!library) [[unlikely]] {
       // Listed newest first: a kernel defined by several sections resolves to the first one
       const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
 #ifdef CAN_BUILD_METAL_41
@@ -1783,6 +1782,11 @@ void MetalKernelFunction::startEncoding() {
 }
 
 void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> group_size) {
+  // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
+  TORCH_CHECK_VALUE(length <= std::numeric_limits<uint32_t>::max(),
+                    "Dispatch grid ",
+                    length,
+                    " exceeds 2^32 - 1 threads along one axis");
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
   const auto group_size_val = group_size.value_or(std::min(length, max_tg_size));
   TORCH_CHECK_VALUE(group_size_val <= max_tg_size, "Threadgroup size exceeds ", max_tg_size, " limit");
@@ -1793,6 +1797,12 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
   TORCH_CHECK(!length.empty() && length.size() < 4, "Dispatch dimensions must be less than 3 and non-empty");
   TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
               "size and group_size must have same number of dimensions");
+  // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
+  TORCH_CHECK_VALUE(
+      std::all_of(length.begin(), length.end(), [](auto dim) { return dim <= std::numeric_limits<uint32_t>::max(); }),
+      "Dispatch grid ",
+      c10::Join("x", length),
+      " exceeds 2^32 - 1 threads along one axis");
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
   const auto group_size_length = group_size.has_value() ? group_size->size() : 0;
   auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,
