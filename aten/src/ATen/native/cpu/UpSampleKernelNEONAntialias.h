@@ -9,6 +9,10 @@
 #include <ATen/core/Tensor.h>
 #include <arm_neon.h>
 #include <c10/util/irange.h>
+#include <cpuinfo.h>
+
+#include <algorithm>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -18,28 +22,145 @@
 
 namespace {
 
-// Emulate SSE _mm_madd_epi16: multiply 8 int16 pairs element-wise, then add
-// adjacent 32-bit products pairwise, producing 4 int32 results.
-// [a0*b0+a1*b1, a2*b2+a3*b3, a4*b4+a5*b5, a6*b6+a7*b7]
-inline int32x4_t neon_madd_s16(int16x8_t a, int16x8_t b) {
-  int32x4_t prod_low = vmull_s16(vget_low_s16(a), vget_low_s16(b));
-  int32x4_t prod_high = vmull_s16(vget_high_s16(a), vget_high_s16(b));
-  return vpaddq_s32(prod_low, prod_high);
+// Both passes compute, per output value, (sum(pixel * w) + (1 << (precision - 1))) >> precision
+// clamped to [0, 255], with int16 weights w and int32 sums, like the AVX2 kernels.
+//
+// The horizontal pass processes 4 output pixels (of 2 rows) at a time. Each pixel's taps are taken
+// in groups of 4: a 16-byte load covers 4 RGB input pixels, regrouped by a table lookup into one
+// 32-bit lane per channel. Weights are zero-padded to a multiple of 4 taps, so loads can extend
+// past a pixel's taps (contributing 0) but never past the end of the input.
+//
+// With dotprod, each weight is split exactly as w = 256 * hi + lo (hi signed, lo unsigned), so that
+// sum(p * w) = 256 * sum(p * hi) + sum(p * lo) takes two dot products per group of 4 taps: UDOT,
+// or USDOT for the signed high bytes of bicubic and lanczos weights (requires i8mm). Without it,
+// the same sums use widening multiply-accumulates.
+
+#if defined(__clang__)
+#define NEON_RESAMPLE_TARGET_DOTPROD __attribute__((target("dotprod")))
+#define NEON_RESAMPLE_TARGET_I8MM __attribute__((target("dotprod,i8mm")))
+#else
+// GCC 11 only accepts these extensions with an explicit base architecture.
+#define NEON_RESAMPLE_TARGET_DOTPROD __attribute__((target("arch=armv8.2-a+dotprod")))
+#define NEON_RESAMPLE_TARGET_I8MM __attribute__((target("arch=armv8.2-a+dotprod+i8mm")))
+#endif
+
+// Lane c of the result holds channel c of 4 consecutive RGB pixels: {p0[c], p1[c], p2[c], p3[c]}.
+inline uint8x16_t neon_rgb_taps_by_channel(const uint8_t* p) {
+  const uint8x16_t idx = {0, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11, 255, 255, 255, 255};
+  return vqtbl1q_u8(vld1q_u8(p), idx);
 }
 
-// Interpolation horizontal pass: compute x-axis interpolation outputs.
-//
-// Input data is interleaved RGB:
-//   input = [r0, g0, b0, r1, g1, b1, r2, g2, b2, ...]
-// Weights are float values rescaled to int16:
-//   weights[i] = [w[i, 0], w[i, 1], ..., w[i, K-1]]
-// For each output pixel i, we compute:
-//   oR[i] = r[xmin[i]] * w[i,0] + ... + r[xmin[i]+K-1] * w[i,K-1]
-//   oG[i] = g[xmin[i]] * w[i,0] + ... + g[xmin[i]+K-1] * w[i,K-1]
-//   oB[i] = b[xmin[i]] * w[i,0] + ... + b[xmin[i]+K-1] * w[i,K-1]
-//
-// Processes one row at a time.
-void NeonResampleHorizontal(const at::Tensor& unpacked_output,
+// sum over 4 taps of pixel * weight, one int32 lane per channel.
+inline int32x4_t neon_mla_rgb_4taps(int32x4_t acc, const uint8_t* p, const int16_t* k) {
+  const uint8x16_t idx = {0, 1, 2, 255, 3, 4, 5, 255, 6, 7, 8, 255, 9, 10, 11, 255};
+  const uint8x16_t v = vqtbl1q_u8(vld1q_u8(p), idx);
+  const int16x8_t lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(v)));
+  const int16x8_t hi = vreinterpretq_s16_u16(vmovl_high_u8(v));
+  const int16x4_t w = vld1_s16(k);
+  int32x4_t a = vmlal_lane_s16(acc, vget_low_s16(lo), w, 0);
+  int32x4_t b = vmull_lane_s16(vget_low_s16(hi), w, 2);
+  a = vmlal_lane_s16(a, vget_high_s16(lo), w, 1);
+  b = vmlal_lane_s16(b, vget_high_s16(hi), w, 3);
+  return vaddq_s32(a, b);
+}
+
+inline void neon_store_rgb_4px(uint8_t* out, const int32x4_t* acc, int32x4_t shift) {
+  const uint8x16_t pack = {0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 255, 255, 255, 255};
+  const uint16x8_t u01 = vcombine_u16(vqmovun_s32(vrshlq_s32(acc[0], shift)), vqmovun_s32(vrshlq_s32(acc[1], shift)));
+  const uint16x8_t u23 = vcombine_u16(vqmovun_s32(vrshlq_s32(acc[2], shift)), vqmovun_s32(vrshlq_s32(acc[3], shift)));
+  const uint8x16_t px = vqtbl1q_u8(vcombine_u8(vqmovn_u16(u01), vqmovn_u16(u23)), pack);
+  vst1_u8(out, vget_low_u8(px));
+  vst1q_lane_u32(reinterpret_cast<uint32_t*>(out + 8), vreinterpretq_u32_u8(px), 2);
+}
+
+struct NeonHorizontalArgs {
+  const uint8_t* lines[2];  // input rows
+  uint8_t* outs[2];  // output rows
+  int rows;  // 1 or 2
+  int64_t xout;
+  const int64_t* xmin;  // byte offsets into a row
+  const uint8_t* end;  // end of the input buffer
+  int groups;  // padded taps / 4
+  int32x4_t shift;
+};
+
+// 4 output pixels per step using widening multiply-accumulates on the zero-padded weights `kp`.
+// Returns the first output pixel not computed.
+inline int64_t neon_horizontal_mla(const NeonHorizontalArgs& a, const int16_t* kp) {
+  int64_t x = 0;
+  for (; x + 4 <= a.xout && a.lines[a.rows - 1] + a.xmin[x + 3] + 12 * (a.groups - 1) + 16 <= a.end; x += 4) {
+    for (int r = 0; r < a.rows; r++) {
+      int32x4_t acc[4];
+      for (int q = 0; q < 4; q++) {
+        const uint8_t* p = a.lines[r] + a.xmin[x + q];
+        const int16_t* k = kp + (x + q) * 4 * a.groups;
+        acc[q] = vdupq_n_s32(0);
+        for (int g = 0; g < a.groups; g++) {
+          acc[q] = neon_mla_rgb_4taps(acc[q], p + 12 * g, k + 4 * g);
+        }
+      }
+      neon_store_rgb_4px(a.outs[r] + 3 * x, acc, a.shift);
+    }
+  }
+  return x;
+}
+
+// Same as neon_horizontal_mla with dot products, for non-negative weights. `w` holds, per output
+// pixel and group of 4 taps, {hi bytes, lo bytes} of the weights, each replicated across the 4 lanes.
+NEON_RESAMPLE_TARGET_DOTPROD inline int64_t neon_horizontal_udot(const NeonHorizontalArgs& a, const uint8x16_t* w) {
+  int64_t x = 0;
+  for (; x + 4 <= a.xout && a.lines[a.rows - 1] + a.xmin[x + 3] + 12 * (a.groups - 1) + 16 <= a.end; x += 4) {
+    int32x4_t acc[2][4];
+    for (int q = 0; q < 4; q++) {
+      const int64_t off = a.xmin[x + q];
+      const uint8x16_t* wq = w + (x + q) * 2 * a.groups;
+      for (int r = 0; r < a.rows; r++) {
+        uint32x4_t hi = vdupq_n_u32(0);
+        uint32x4_t lo = vdupq_n_u32(0);
+        for (int g = 0; g < a.groups; g++) {
+          const uint8x16_t v = neon_rgb_taps_by_channel(a.lines[r] + off + 12 * g);
+          hi = vdotq_u32(hi, v, wq[2 * g]);
+          lo = vdotq_u32(lo, v, wq[2 * g + 1]);
+        }
+        acc[r][q] = vreinterpretq_s32_u32(vmlaq_n_u32(lo, hi, 256));
+      }
+    }
+    for (int r = 0; r < a.rows; r++) {
+      neon_store_rgb_4px(a.outs[r] + 3 * x, acc[r], a.shift);
+    }
+  }
+  return x;
+}
+
+// Same as neon_horizontal_udot for weights of any sign: the high bytes are signed.
+NEON_RESAMPLE_TARGET_I8MM inline int64_t neon_horizontal_usdot(const NeonHorizontalArgs& a, const uint8x16_t* w) {
+  int64_t x = 0;
+  for (; x + 4 <= a.xout && a.lines[a.rows - 1] + a.xmin[x + 3] + 12 * (a.groups - 1) + 16 <= a.end; x += 4) {
+    int32x4_t acc[2][4];
+    for (int q = 0; q < 4; q++) {
+      const int64_t off = a.xmin[x + q];
+      const uint8x16_t* wq = w + (x + q) * 2 * a.groups;
+      for (int r = 0; r < a.rows; r++) {
+        int32x4_t hi = vdupq_n_s32(0);
+        uint32x4_t lo = vdupq_n_u32(0);
+        for (int g = 0; g < a.groups; g++) {
+          const uint8x16_t v = neon_rgb_taps_by_channel(a.lines[r] + off + 12 * g);
+          hi = vusdotq_s32(hi, v, vreinterpretq_s8_u8(wq[2 * g]));
+          lo = vdotq_u32(lo, v, wq[2 * g + 1]);
+        }
+        acc[r][q] = vmlaq_n_s32(vreinterpretq_s32_u32(lo), hi, 256);
+      }
+    }
+    for (int r = 0; r < a.rows; r++) {
+      neon_store_rgb_4px(a.outs[r] + 3 * x, acc[r], a.shift);
+    }
+  }
+  return x;
+}
+
+// One output pixel at a time, with 8 taps per step. Without dot products this is faster than
+// neon_horizontal_mla for more than 8 taps.
+inline void neon_horizontal_by_pixel(const at::Tensor& unpacked_output,
                             const at::Tensor& unpacked_input,
                             int ksize,
                             const std::vector<at::Tensor>& horiz_indices_weights,
@@ -154,136 +275,174 @@ void NeonResampleHorizontal(const at::Tensor& unpacked_output,
   }
 }
 
-// Interpolation vertical pass: compute y-axis interpolation outputs.
-//
-// Input data is interleaved RGB:
-//   input = [r0, g0, b0, r1, g1, b1, ...]
-// For each output row yy, we compute a weighted sum of ids_size input rows:
-//   oC[x] = C[ymin[yy] * xstride + x] * w[yy,0] + ... + C[(ymin[yy]+K-1) * xstride + x] * w[yy,K-1]
-// for each channel C in {R, G, B} and each horizontal position x.
+// Interpolation horizontal pass on interleaved RGB rows, one output row per input row.
+void NeonResampleHorizontal(const at::Tensor& unpacked_output,
+                            const at::Tensor& unpacked_input,
+                            int ksize,
+                            const std::vector<at::Tensor>& horiz_indices_weights,
+                            unsigned int horiz_weights_precision) {
+  const auto* kk = (const int16_t*)(horiz_indices_weights[3].const_data_ptr<double>());
+  const int64_t xout = unpacked_output.size(2);
+  const int64_t yin = unpacked_output.size(1);
+  const int64_t xin = unpacked_input.size(2);
+  const auto num_channels = unpacked_input.size(0);
+  TORCH_INTERNAL_ASSERT(num_channels == 3);
+  const int64_t* idx_ptr_xmin = horiz_indices_weights[0].const_data_ptr<int64_t>();
+  const int64_t* idx_ptr_size = horiz_indices_weights[1].const_data_ptr<int64_t>();
+  uint8_t* output_p = unpacked_output.data_ptr<uint8_t>();
+  const uint8_t* input_p = unpacked_input.const_data_ptr<uint8_t>();
+  const int64_t xout_stride = xout * num_channels;
+  const int64_t xin_stride = xin * num_channels;
+
+  bool use_dot = cpuinfo_initialize() && cpuinfo_has_arm_neon_dot();
+  if (!use_dot && ksize > 8) {
+    return neon_horizontal_by_pixel(unpacked_output, unpacked_input, ksize, horiz_indices_weights, horiz_weights_precision);
+  }
+  const int groups = (ksize + 3) / 4;
+  std::vector<int16_t> kp(xout * 4 * groups, 0);
+  bool negative_weights = false;
+  for (const auto i : c10::irange(xout)) {
+    for (const auto j : c10::irange(ksize)) {
+      kp[i * 4 * groups + j] = kk[i * ksize + j];
+      negative_weights |= kk[i * ksize + j] < 0;
+    }
+  }
+  if (use_dot && negative_weights && !cpuinfo_has_arm_i8mm()) {
+    if (ksize > 8) {
+      return neon_horizontal_by_pixel(unpacked_output, unpacked_input, ksize, horiz_indices_weights, horiz_weights_precision);
+    }
+    use_dot = false;
+  }
+  std::vector<uint8x16_t> wdot;
+  if (use_dot) {
+    wdot.resize(xout * 2 * groups);
+    for (const auto i : c10::irange(xout * groups)) {
+      uint8_t hi[16], lo[16];
+      for (const auto t : c10::irange(4)) {
+        const int16_t w = kp[i * 4 + t];
+        for (const auto lane : c10::irange(4)) {
+          hi[4 * lane + t] = static_cast<uint8_t>(static_cast<int8_t>(w >> 8));
+          lo[4 * lane + t] = static_cast<uint8_t>(w & 255);
+        }
+      }
+      wdot[2 * i] = vld1q_u8(hi);
+      wdot[2 * i + 1] = vld1q_u8(lo);
+    }
+  }
+
+  NeonHorizontalArgs args;
+  args.xout = xout;
+  args.xmin = idx_ptr_xmin;
+  args.end = input_p + yin * xin_stride;
+  args.groups = groups;
+  args.shift = vdupq_n_s32(-static_cast<int32_t>(horiz_weights_precision));
+  for (int64_t y0 = 0; y0 < yin; y0 += 2) {
+    args.rows = static_cast<int>(std::min<int64_t>(2, yin - y0));
+    for (const auto r : c10::irange(2)) {
+      const int64_t y = y0 + std::min<int64_t>(r, args.rows - 1);
+      args.lines[r] = input_p + y * xin_stride;
+      args.outs[r] = output_p + y * xout_stride;
+    }
+    int64_t x_done = 0;
+    if (!use_dot) {
+      x_done = neon_horizontal_mla(args, kp.data());
+    } else if (negative_weights) {
+      x_done = neon_horizontal_usdot(args, wdot.data());
+    } else {
+      x_done = neon_horizontal_udot(args, wdot.data());
+    }
+    // Remaining output pixels of these rows, one at a time.
+    for (const auto r : c10::irange(args.rows)) {
+      for (int64_t x = x_done; x < xout; x++) {
+        const uint8_t* p = args.lines[r] + idx_ptr_xmin[x];
+        const int16_t* k = kp.data() + x * 4 * groups;
+        int32x4_t acc = vdupq_n_s32(0);
+        int g = 0;
+        for (; g < groups && p + 12 * g + 16 <= args.end; g++) {
+          acc = neon_mla_rgb_4taps(acc, p + 12 * g, k + 4 * g);
+        }
+        int32_t sums[4];
+        vst1q_s32(sums, acc);
+        for (int64_t t = 4 * g; t < idx_ptr_size[x]; t++) {
+          for (const auto c : c10::irange(3)) {
+            sums[c] += k[t] * p[3 * t + c];
+          }
+        }
+        uint8_t* out = args.outs[r] + 3 * x;
+        for (const auto c : c10::irange(3)) {
+          out[c] = static_cast<uint8_t>(std::clamp((sums[c] + (1 << (horiz_weights_precision - 1))) >> horiz_weights_precision, 0, 255));
+        }
+      }
+    }
+  }
+}
+
+// One output row of the vertical pass: a weighted sum of `n` input rows `row_bytes` apart.
+// N is the number of taps when known at compile time (0 otherwise).
+template <int N>
+inline void neon_vertical_row(const uint8_t* base, uint8_t* out, int64_t row_bytes, const int16_t* k, int n_rt,
+                              int32x4_t shift, unsigned int precision) {
+  const int n = N ? N : n_rt;
+  int16x8_t w[N ? N : 1];
+  if constexpr (N > 0) {
+    for (int i = 0; i < N; i++) {
+      w[i] = vdupq_n_s16(k[i]);
+    }
+  }
+  int64_t j = 0;
+  for (; j + 16 <= row_bytes; j += 16) {
+    int32x4_t a0 = vdupq_n_s32(0), a1 = a0, a2 = a0, a3 = a0;
+    for (int i = 0; i < n; i++) {
+      const uint8x16_t v = vld1q_u8(base + i * row_bytes + j);
+      const int16x8_t lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(v)));
+      const int16x8_t hi = vreinterpretq_s16_u16(vmovl_high_u8(v));
+      const int16x8_t wi = N ? w[N ? i : 0] : vdupq_n_s16(k[i]);
+      a0 = vmlal_s16(a0, vget_low_s16(lo), vget_low_s16(wi));
+      a1 = vmlal_high_s16(a1, lo, wi);
+      a2 = vmlal_s16(a2, vget_low_s16(hi), vget_low_s16(wi));
+      a3 = vmlal_high_s16(a3, hi, wi);
+    }
+    const uint16x8_t u0 = vcombine_u16(vqmovun_s32(vrshlq_s32(a0, shift)), vqmovun_s32(vrshlq_s32(a1, shift)));
+    const uint16x8_t u1 = vcombine_u16(vqmovun_s32(vrshlq_s32(a2, shift)), vqmovun_s32(vrshlq_s32(a3, shift)));
+    vst1q_u8(out + j, vcombine_u8(vqmovn_u16(u0), vqmovn_u16(u1)));
+  }
+  for (; j < row_bytes; j++) {
+    int32_t sss = 1 << (precision - 1);
+    for (int i = 0; i < n; i++) {
+      sss += k[i] * static_cast<int32_t>(base[i * row_bytes + j]);
+    }
+    out[j] = static_cast<uint8_t>(std::clamp(sss >> precision, 0, 255));
+  }
+}
+
+// Interpolation vertical pass: each output row is a weighted sum of ids_size input rows.
 void NeonResampleVertical(const at::Tensor& unpacked_output,
                           const at::Tensor& unpacked_input,
                           int ksize,
                           const std::vector<at::Tensor>& vert_indices_weights,
                           unsigned int vert_weights_precision) {
   const auto* kk = (const int16_t*)(vert_indices_weights[3].const_data_ptr<double>());
-
   const int64_t* idx_ptr_xmin = vert_indices_weights[0].const_data_ptr<int64_t>();
   const int64_t* idx_ptr_size = vert_indices_weights[1].const_data_ptr<int64_t>();
-
   uint8_t* output_p = unpacked_output.data_ptr<uint8_t>();
   const uint8_t* input_p = unpacked_input.const_data_ptr<uint8_t>();
-
-  auto xout = unpacked_output.size(2);
-  auto yout = unpacked_output.size(1);
+  const auto xout = unpacked_output.size(2);
+  const auto yout = unpacked_output.size(1);
   const auto num_channels = unpacked_input.size(0);
   TORCH_INTERNAL_ASSERT(num_channels == unpacked_output.size(0));
-
   const int64_t data_size = xout * num_channels;
-
+  const int32x4_t shift = vdupq_n_s32(-static_cast<int32_t>(vert_weights_precision));
   for (const auto yy : c10::irange(yout)) {
-    const auto* k = &kk[yy * ksize];
-    auto ids_min = idx_ptr_xmin[yy];
-    auto ids_size = idx_ptr_size[yy];
-
-    uint8_t* C10_RESTRICT lineOut = output_p + yy * data_size;
-    const int32_t initial_val = 1 << (vert_weights_precision - 1);
-    const int32x4_t initial = vdupq_n_s32(initial_val);
-
-    // Vertical convolution for one output row.
-    // Computes a weighted sum of ids_size input rows for all x positions.
-    //
-    // The data is treated as a flat byte array of size xout * num_channels.
-    // We process 16 bytes at a time in the NEON path, then fall back to scalar
-    // for the remainder. The vertical pass doesn't need channel deinterleaving
-    // because the same weight applies to all channels at a given (x, y) position.
-    //
-    // To process 2 weights at a time, we interleave pixels from two input rows
-    // using vzipq_u8, then use neon_madd_s16 (which pairs adjacent int16 values,
-    // multiplies, and adds) so that each pair [pixel_row_i, pixel_row_i+1] is
-    // multiplied by [w_i, w_i+1] and summed in one operation.
-    int64_t j = 0;
-
-    // Process 16 bytes at a time using 4 accumulators (sss0..sss3),
-    // each holding 4 int32 partial sums.
-    for (; j + 16 <= data_size; j += 16) {
-      int32x4_t sss0 = initial;
-      int32x4_t sss1 = initial;
-      int32x4_t sss2 = initial;
-      int32x4_t sss3 = initial;
-
-      const uint8_t* lineIn_min = input_p + j + ids_min;
-
-      // Process 2 weights at a time by interleaving rows.
-      // For weights w0, w1 and pixel bytes from row_i and row_{i+1}:
-      //   mmk = [w0, w1, w0, w1, w0, w1, w0, w1]
-      //   vzipq interleaves: [r0_0, r1_0, r0_1, r1_1, ...] (from 2 rows)
-      //   neon_madd_s16 computes: r0_0*w0 + r1_0*w1, r0_1*w0 + r1_1*w1, ...
-      int64_t i = 0;
-      for (; i + 1 < ids_size; i += 2) {
-        int16_t w0 = k[i];
-        int16_t w1 = k[i + 1];
-        int16x8_t mmk = {w0, w1, w0, w1, w0, w1, w0, w1};
-
-        uint8x16_t src1 = vld1q_u8(lineIn_min + i * data_size);
-        uint8x16_t src2 = vld1q_u8(lineIn_min + (i + 1) * data_size);
-
-        uint8x16x2_t interleaved = vzipq_u8(src1, src2);
-
-        int16x8_t pix0 = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(interleaved.val[0])));
-        int16x8_t pix1 = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(interleaved.val[0])));
-        int16x8_t pix2 = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(interleaved.val[1])));
-        int16x8_t pix3 = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(interleaved.val[1])));
-
-        sss0 = vaddq_s32(sss0, neon_madd_s16(pix0, mmk));
-        sss1 = vaddq_s32(sss1, neon_madd_s16(pix1, mmk));
-        sss2 = vaddq_s32(sss2, neon_madd_s16(pix2, mmk));
-        sss3 = vaddq_s32(sss3, neon_madd_s16(pix3, mmk));
-      }
-
-      // Handle remaining single weight (when ids_size is odd)
-      for (; i < ids_size; i++) {
-        int16x8_t mmk = vdupq_n_s16(k[i]);
-
-        uint8x16_t src = vld1q_u8(lineIn_min + i * data_size);
-
-        int16x8_t pix_lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(src)));
-        int16x8_t pix_hi = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(src)));
-
-        sss0 = vaddq_s32(sss0, vmull_s16(vget_low_s16(pix_lo), vget_low_s16(mmk)));
-        sss1 = vaddq_s32(sss1, vmull_s16(vget_high_s16(pix_lo), vget_high_s16(mmk)));
-        sss2 = vaddq_s32(sss2, vmull_s16(vget_low_s16(pix_hi), vget_low_s16(mmk)));
-        sss3 = vaddq_s32(sss3, vmull_s16(vget_high_s16(pix_hi), vget_high_s16(mmk)));
-      }
-
-      // Right-shift accumulators by coefs_precision to convert fixed-point -> int
-      int32x4_t shift = vdupq_n_s32(-static_cast<int32_t>(vert_weights_precision));
-      sss0 = vshlq_s32(sss0, shift);
-      sss1 = vshlq_s32(sss1, shift);
-      sss2 = vshlq_s32(sss2, shift);
-      sss3 = vshlq_s32(sss3, shift);
-
-      // Narrow int32 -> int16 (with saturation), then int16 -> uint8 (with
-      // saturation), clamping to [0, 255]
-      int16x8_t narrow_lo = vcombine_s16(vqmovn_s32(sss0), vqmovn_s32(sss1));
-      int16x8_t narrow_hi = vcombine_s16(vqmovn_s32(sss2), vqmovn_s32(sss3));
-
-      // Store 16 output bytes
-      vst1_u8(lineOut + j, vqmovun_s16(narrow_lo));
-      vst1_u8(lineOut + j + 8, vqmovun_s16(narrow_hi));
-    }
-
-    // Scalar fallback for remaining bytes
-    for (; j < data_size; j++) {
-      int32_t sss = initial_val;
-      const uint8_t* lineIn_min = input_p + j + ids_min;
-
-      for (int64_t i = 0; i < ids_size; i++) {
-        sss += k[i] * static_cast<int32_t>(lineIn_min[i * data_size]);
-      }
-
-      sss >>= vert_weights_precision;
-      lineOut[j] = static_cast<uint8_t>(std::clamp(sss, 0, 255));
+    const int16_t* k = &kk[yy * ksize];
+    const uint8_t* base = input_p + idx_ptr_xmin[yy];
+    uint8_t* out = output_p + yy * data_size;
+    const auto n = idx_ptr_size[yy];
+    switch (n) {
+      case 1: neon_vertical_row<1>(base, out, data_size, k, 1, shift, vert_weights_precision); break;
+      case 2: neon_vertical_row<2>(base, out, data_size, k, 2, shift, vert_weights_precision); break;
+      case 3: neon_vertical_row<3>(base, out, data_size, k, 3, shift, vert_weights_precision); break;
+      case 4: neon_vertical_row<4>(base, out, data_size, k, 4, shift, vert_weights_precision); break;
+      default: neon_vertical_row<0>(base, out, data_size, k, static_cast<int>(n), shift, vert_weights_precision);
     }
   }
 }
