@@ -387,6 +387,10 @@ class TuningPoolBase:
         """
         return dict(zip(choices, self.executor.map(self.target, choices)))
 
+    def run(self, job: Callable[[], Any], timeout: float) -> Any:
+        """Run a picklable zero-arg job on one worker and return its result."""
+        return job()
+
 
 class TuningProcessPool(TuningPoolBase):
     """
@@ -458,6 +462,22 @@ class TuningProcessPool(TuningPoolBase):
                 process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
+        finally:
+            self.process_queue.put(process)
+
+    def run(self, job: Callable[[], Any], timeout: float) -> Any:
+        """Run a picklable zero-arg job in a free TuningProcess (crash-isolated)."""
+        process = self.process_queue.get()
+        try:
+            process.put(job, extra_env=_cache_env_for_subprocess())
+            return process.get(timeout)
+        except Exception as e:
+            # sticky CUDA errors corrupt the context; restart as target() does
+            if "cudaErrorLaunchFailure" in str(e) or "cudaErrorIllegalAddress" in str(
+                e
+            ):
+                process.restart()
+            raise
         finally:
             self.process_queue.put(process)
 
@@ -1639,6 +1659,73 @@ class FlyDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             return kernel_func(*input_tensors, out, *self.extra_args, stream=stream)
 
         return run_kernel
+
+
+def tunable_mask_context(mask: Sequence[bool] | None, is_cuda: bool) -> Any:
+    """TunableOp dims mask that ExternKernelCaller.benchmark applies to ATen."""
+    if mask is not None and any(mask) and is_cuda:
+        return torch.cuda.tunable.dynamic_dims_mask(
+            M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+        )
+    return contextlib.nullcontext()
+
+
+def rebench_batch(
+    fns: Sequence[Callable[[], Any]],
+    warmup_s: float,
+    rounds: int,
+    synchronize: Callable[[], Any],
+) -> list[list[float]]:
+    """Time run fns round-robin after a sustained warm-up; one sample list per fn."""
+    deadline = time.time() + warmup_s
+    while time.time() < deadline:
+        for fn in fns:
+            fn()
+        synchronize()
+    samples: list[list[float]] = [[] for _ in fns]
+    for _ in range(rounds):
+        for fn, out in zip(fns, samples):
+            out.append(benchmarker.benchmark_gpu(fn))
+    return samples
+
+
+@dataclasses.dataclass
+class RebenchBatchRequest:
+    """Picklable job: rebench_batch() on the ATen and template requests in one
+    worker, so the pair runs where autotune_in_subproc ran the other choices."""
+
+    requests: list[BenchmarkRequest]  # [ATen, template]
+    warmup_s: float
+    rounds: int
+    aten_tunable_mask: Sequence[bool] | None = None
+
+    def __call__(self) -> list[list[float]]:
+        try:
+            fns = []
+            for req in self.requests:
+                metas = req.input_tensor_meta
+                if isinstance(metas, TensorMeta):
+                    metas = [metas]
+                out_meta = req.output_tensor_meta
+                if not isinstance(out_meta, TensorMeta):
+                    raise AssertionError("single output expected")
+                inputs = tuple(m.to_tensor() for m in metas)
+                fns.append(req.make_run_fn(*inputs, out=out_meta.to_tensor()))
+            device_type = self.requests[0].output_tensor_meta.device.type
+            aten_raw = fns[0]
+
+            def aten_fn() -> Any:
+                with tunable_mask_context(
+                    self.aten_tunable_mask, device_type == "cuda"
+                ):
+                    return aten_raw()
+
+            fns[0] = aten_fn
+            device = get_interface_for_device(device_type)
+            return rebench_batch(fns, self.warmup_s, self.rounds, device.synchronize)
+        finally:
+            for req in self.requests:
+                req.cleanup_run_fn()
 
 
 @functools.cache

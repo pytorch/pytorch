@@ -11,10 +11,11 @@ import math
 import operator
 import os
 import re
+import statistics
 import sys
 import textwrap
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -4222,6 +4223,122 @@ def create_inputs_key(input_nodes) -> str:
     return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
 
 
+class TopkTimings(dict):  # type: ignore[type-arg]
+    """Autotune timings plus the topk-rebench verdict for their near-tie (if any)."""
+
+    def __init__(self, timings: dict[Any, float], verdict: dict[str, Any]) -> None:
+        super().__init__(timings)
+        self.topk_verdict = verdict
+
+
+def _as_list(x: Any) -> list[Any]:
+    return list(x) if isinstance(x, (list, tuple)) else [x]
+
+
+# The verdict lives in the local autotune cache next to the timings it belongs to:
+# cache/<system hash> -> [op][inputs(_hint)][fp32 matmul precision]["__topk_verdict__"][choice-set digest].
+# PersistentCache.check_cache only reads choice hash keys, so this entry is inert there.
+TOPK_VERDICT_KEY = "__topk_verdict__"
+_TOPK_VERDICT_FIELDS = (
+    "template",
+    "aten",
+    "t_single",
+    "a_single",
+    "t_steady",
+    "a_steady",
+    "choices",
+)
+
+
+def _topk_choices_digest(choices: Sequence[Any]) -> str:
+    return hashlib.sha256(
+        "\n".join(sorted(c.hash_key() for c in choices)).encode()
+    ).hexdigest()[:32]
+
+
+def _topk_bucket_keys(
+    name: str, inputs_key: str, hint_override: int | None
+) -> tuple[str, str, str]:
+    cache_key = (
+        f"{inputs_key}_{hint_override}" if hint_override is not None else inputs_key
+    )
+    return name, cache_key, fp32_matmul_precision_key()
+
+
+def _topk_prefers_aten(verdict: dict[str, Any]) -> bool:
+    return (
+        verdict["t_steady"] * (1 + config.autotune_topk_rebench_hysteresis)
+        > verdict["a_steady"]
+    )
+
+
+def topk_rebench_pick(timings: dict[Any, float]) -> tuple[Any, float] | None:
+    """Pick-time use of the topk-rebench verdict attached to ``timings``.
+
+    Applies only when the single-shot winner is still the template that was
+    re-timed. Returns (choice, ms) where ms is in the single-shot regime of
+    ``timings``, so callers that compare it against other single-shot numbers
+    (benchmark fusion: ``min_ms_fused < ms1 + ms2``) stay consistent: when
+    ATen is picked, ms is ATen's steady time translated by the template's
+    measured single-shot/steady ratio (first order: it assumes a fused template
+    has the same ratio as the unfused one). Returns None when no verdict
+    applies. The verdict, not min(timings), is the source of truth for the
+    pick: feedback_saver_fns see the raw single-shot timings, and log_results
+    prints them plus a SELECTED line (topk_autotune_log_line) on an override.
+    In the deferred MultiTemplateBuffer path, benchmark fusion may still finalize
+    a fused template after that line was printed.
+    """
+    verdict = getattr(timings, "topk_verdict", None)
+    if verdict is None:
+        return None
+    finite = {c: t for c, t in timings.items() if math.isfinite(t)}
+    if not finite:
+        return None
+    best = min(finite, key=finite.__getitem__)
+    if best.hash_key() != verdict["template"]:
+        return None
+    aten = next((c for c in finite if c.hash_key() == verdict["aten"]), None)
+    if aten is None or not _topk_prefers_aten(verdict):
+        return best, finite[best]
+    log.debug(
+        "topk rebench verdict picks %s over single-shot winner %s (steady %.4f vs %.4f ms)",
+        getattr(aten, "name", aten),
+        getattr(best, "name", best),
+        verdict["a_steady"],
+        verdict["t_steady"],
+    )
+    return aten, verdict["a_steady"] * verdict["t_single"] / verdict["t_steady"]
+
+
+def topk_autotune_log_line(timings: dict[Any, float]) -> str | None:
+    """Line for the AUTOTUNE table when a topk verdict overrides the single-shot
+    argmin (the table itself prints the raw single-shot timings)."""
+    verdict = getattr(timings, "topk_verdict", None)
+    finite = {c: t for c, t in timings.items() if math.isfinite(t)}
+    if verdict is None or not finite:
+        return None
+    best = min(finite, key=finite.__getitem__)
+    if best.hash_key() != verdict["template"]:
+        return None
+    pick = next((c for c in finite if c.hash_key() == verdict["aten"]), None)
+    if pick is None or not _topk_prefers_aten(verdict):
+        return None
+    return (
+        f"  SELECTED (topk rebench): {getattr(pick, 'name', pick)} over single-shot best "
+        f"{getattr(best, 'name', best)} (steady {verdict['a_steady']:.4f} vs "
+        f"{verdict['t_steady']:.4f} ms)\n"
+    )
+
+
+def topk_apply_at_pick(best_choice: Any, timings: dict[Any, float]) -> Any:
+    """__call__ pick: apply the topk verdict only while ``best_choice`` is still
+    the single-shot argmin, so it never overrides a min_speedup_threshold pick."""
+    if best_choice is not min(timings, key=timings.__getitem__):
+        return best_choice
+    topk = topk_rebench_pick(timings)
+    return best_choice if topk is None else topk[0]
+
+
 def create_benchmark_cache_key(
     inputs_key: str,
     device_type: str,
@@ -4239,6 +4356,13 @@ def create_benchmark_cache_key(
     else:
         policy = "eager"
     cache_key = f"{inputs_key}:benchmark_policy={policy}"
+    if config.autotune_topk_rebench_margin > 0:
+        # keep benchmark results apart from runs with other (or no) rebench settings
+        cache_key += (
+            f":topk_rebench={config.autotune_topk_rebench_margin}"
+            f",{config.autotune_topk_rebench_warmup_s}"
+            f",{config.autotune_topk_rebench_rounds}"
+        )
     if policy != "eager":
         cache_key += (
             f":cudagraph_unroll={max(1, config.autotune_cudagraph_benchmarking_iters)}"
@@ -4672,6 +4796,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         if isinstance(choice, ExternKernelCaller):
                             min_extern_choice = min(min_extern_choice, timing)
 
+                    verdict = getattr(timings, "topk_verdict", None)
                     timings = {
                         choice: time
                         for choice, time in timings.items()
@@ -4680,6 +4805,8 @@ class AlgorithmSelectorCache(PersistentCache):
                             or not isinstance(choice, ExternKernelCaller)
                         )
                     }
+                    if verdict is not None:
+                        timings = TopkTimings(timings, verdict)
 
                     return timings
 
@@ -4788,6 +4915,8 @@ class AlgorithmSelectorCache(PersistentCache):
                         min_speedup_threshold,
                     )
                     best_choice = min(fallback_choices, key=lambda c: timings[c])
+
+        best_choice = topk_apply_at_pick(best_choice, timings)
 
         best_choice = V.choices.override_best_choice(best_choice, timings)
 
@@ -5042,11 +5171,12 @@ class AlgorithmSelectorCache(PersistentCache):
             log.info("Filtered to %d choices based on best_config", len(choices))
 
         has_autotuned: bool = False
+        topk_verdict: dict[str, Any] | None = None
 
         def track_has_autotuned(choices):
-            nonlocal has_autotuned
+            nonlocal has_autotuned, topk_verdict
             has_autotuned = True
-            return self.autotune(
+            timings = self.autotune(
                 name,
                 input_nodes,
                 layout,
@@ -5056,6 +5186,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 is_collective=is_collective,
                 precompile_key=precompile_key,
             )
+            if config.autotune_topk_rebench_margin > 0 and not is_collective:
+                topk_verdict = self.rebench_template_vs_aten(
+                    timings, input_nodes, layout, input_gen_fns, hint_override
+                )
+                if topk_verdict is not None:
+                    topk_verdict["choices"] = _topk_choices_digest(choices)
+            return timings
 
         timings = self.lookup(
             choices,
@@ -5064,6 +5201,16 @@ class AlgorithmSelectorCache(PersistentCache):
             track_has_autotuned,
             hint_override=hint_override,
         )
+        if config.autotune_topk_rebench_margin > 0 and not is_collective:
+            timings = self._topk_sync_verdict(
+                timings,
+                choices,
+                name,
+                inputs_key,
+                hint_override,
+                topk_verdict if has_autotuned else None,
+                has_autotuned,
+            )
 
         autotune_elapse = time.time() - autotune_start_ts
         log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
@@ -5923,6 +6070,241 @@ class AlgorithmSelectorCache(PersistentCache):
 
         return timings
 
+    def _topk_sync_verdict(
+        self,
+        timings: dict[ChoiceCaller, float],
+        choices: Sequence[ChoiceCaller],
+        name: str,
+        inputs_key: str,
+        hint_override: int | None,
+        verdict: dict[str, Any] | None,
+        benchmarked: bool,
+    ) -> dict[ChoiceCaller, float]:
+        """After lookup(): persist a fresh verdict next to the timings lookup just
+        wrote (same system hash, precision, op and inputs key), or read the stored
+        one on a cache hit. Verdicts are keyed by choice-set digest inside the
+        bucket, so choice sets that share a bucket keep their own verdicts."""
+        if config.autotune_local_cache:
+            op, cache_key, precision = _topk_bucket_keys(
+                name, inputs_key, hint_override
+            )
+            digest = _topk_choices_digest(choices)
+            try:
+                local_cache = self.get_local_cache()
+                bucket = local_cache.get(op, {}).get(cache_key, {}).get(precision)
+                stored_all = (bucket or {}).get(TOPK_VERDICT_KEY)
+                if stored_all is not None and not isinstance(stored_all, dict):
+                    raise ValueError(f"malformed verdict store {stored_all!r}")
+                if benchmarked:
+                    if bucket is not None and (
+                        verdict is not None or digest in (stored_all or {})
+                    ):
+                        per_set = bucket.setdefault(TOPK_VERDICT_KEY, {})
+                        if verdict is None:
+                            per_set.pop(digest, None)
+                            if not per_set:
+                                bucket.pop(TOPK_VERDICT_KEY)
+                        else:
+                            per_set[digest] = verdict
+                        self.update_local_cache(local_cache)
+                else:
+                    stored = (stored_all or {}).get(digest)
+                    if stored is not None:
+                        if not (
+                            isinstance(stored, dict)
+                            and all(k in stored for k in _TOPK_VERDICT_FIELDS)
+                            and stored["choices"] == digest
+                        ):
+                            raise ValueError(f"malformed verdict {stored!r}")
+                        verdict = stored
+            except Exception:
+                log.warning("topk rebench verdict store/load failed", exc_info=True)
+                self._topk_rebench_fallback("verdict_io_error")
+                verdict = verdict if benchmarked else None
+        return TopkTimings(timings, verdict) if verdict is not None else timings
+
+    @classmethod
+    def rebench_template_vs_aten(
+        cls,
+        timings: dict[ChoiceCaller, float],
+        input_nodes: list[ir.IRNode],
+        layout: ir.Layout,
+        input_gen_fns: dict[int, Callable[[ir.Buffer], torch.Tensor]] | None,
+        hint_override: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Re-time a near-tie template against the best ATen choice.
+
+        See config.autotune_topk_rebench_margin. When the fastest choice is a
+        Triton template that beats the best ATen choice by less than the
+        margin, the two are re-timed as a pair after a sustained warm-up,
+        interleaved. Returns a verdict record (both steady-state medians and
+        both single-shot timings) that topk_rebench_pick() applies at pick
+        time; ``timings`` is not modified, so the autotune cache, log_results
+        and feedback_saver_fns only ever see measured single-shot timings.
+        Returns None when nothing was re-timed.
+
+        With autotune_in_subproc the pair runs in a TuningProcess (the pool
+        that timed the templates, so it keeps crash isolation). Not applied:
+        non-GPU devices, CUTLASS or CUDA-graph autotuning (timed differently),
+        subproc with a hint override or with offset ATen inputs (the child
+        would build ATen at the default hint / without the storage offset),
+        pipelined AsyncAutotuner results and the prescreening pass.
+        PersistentCache.lookup re-benchmarks every choice on any miss, so the
+        rebench runs again with them; on a full cache hit the verdict stored in
+        the same autotune-cache bucket is reused (_topk_sync_verdict).
+        Hysteresis applies to the template-vs-ATen pick only, not to fusion
+        decisions.
+        """
+        from . import autotune_process
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
+
+        if layout.device.type not in ("cuda", "xpu"):
+            return None
+        finite = {c: t for c, t in timings.items() if math.isfinite(t) and t > 0}
+        atens = [c for c in finite if isinstance(c, ExternKernelCaller)]
+        if not atens or not any(isinstance(c, TritonTemplateCaller) for c in finite):
+            return None
+        aten = min(atens, key=finite.__getitem__)
+        best = min(finite, key=finite.__getitem__)
+        if not isinstance(best, TritonTemplateCaller) or finite[aten] > finite[best] * (
+            1 + config.autotune_topk_rebench_margin
+        ):
+            return None  # ATen already wins, or the template wins clearly
+        in_subproc = config.autotune_in_subproc
+        cudagraph = any(
+            getattr(c, "_benchmark_with_cudagraphs", False) for c in timings
+        ) or (config.autotune_cudagraph_benchmarking and config.max_autotune)
+        aten_req, best_req = aten.bmreq, best.bmreq
+        if aten_req is None or best_req is None:
+            return cls._topk_rebench_fallback("no_benchmark_request")
+        reason = None
+        if cudagraph:
+            reason = "cudagraph"
+        elif any(isinstance(c, CUTLASSTemplateCaller) for c in timings):
+            reason = "cutlass"
+        elif in_subproc and hint_override is not None:
+            reason = "subproc_hint_override"
+        elif in_subproc and any(
+            m.offset for m in _as_list(getattr(aten_req, "input_tensor_meta", []))
+        ):
+            reason = "subproc_input_offset"
+        if reason:
+            return cls._topk_rebench_fallback(reason)
+        warmup_s = config.autotune_topk_rebench_warmup_s
+        rounds = config.autotune_topk_rebench_rounds
+        # TunableOp dims mask, applied to ATen as in ExternKernelCaller.benchmark
+        mask = getattr(aten, "tunable_dyn_dims_mask", None)
+        device = get_interface_for_device(layout.device.type)
+        index = layout.device.index
+        ctx = device.device(index) if index is not None else contextlib.nullcontext()
+        try:
+            with ctx:
+                if in_subproc:
+                    job = autotune_process.RebenchBatchRequest(
+                        [aten_req, best_req], warmup_s, rounds, mask
+                    )
+                    a_s, t_s = autotune_process.get_tuning_pool().run(
+                        job, config.max_autotune_subproc_result_timeout_seconds
+                    )
+                else:
+                    a_s, t_s = cls._rebench_in_current_process(
+                        [aten, best],
+                        mask,
+                        input_nodes,
+                        layout,
+                        input_gen_fns,
+                        hint_override,
+                        warmup_s,
+                        rounds,
+                        device,
+                    )
+        except Exception as e:
+            log.warning("topk rebench failed", exc_info=True)
+            return cls._topk_rebench_fallback(type(e).__name__)
+        a_steady, t_steady = statistics.median(a_s), statistics.median(t_s)
+        if not all(math.isfinite(v) and v > 0 for v in (a_steady, t_steady)):
+            return cls._topk_rebench_fallback("non_finite_retime")
+        verdict = {
+            "template": best.hash_key(),
+            "aten": aten.hash_key(),
+            "t_single": finite[best],
+            "a_single": finite[aten],
+            "t_steady": t_steady,
+            "a_steady": a_steady,
+        }
+        log.debug(
+            "topk rebench: %s",
+            {
+                "retimed": [(best.name, finite[best], t_steady)],
+                "aten": (aten.name, finite[aten], a_steady),
+                "winner_before": best.name,
+                "winner_after": (
+                    aten.name if _topk_prefers_aten(verdict) else best.name
+                ),
+            },
+        )
+        return verdict
+
+    _topk_rebench_fallbacks: Counter[str] = Counter()
+
+    @classmethod
+    def _topk_rebench_fallback(cls, reason: str) -> None:
+        """Log a near-tie that could not be re-timed; its pick stays single-shot."""
+        cls._topk_rebench_fallbacks[reason] += 1
+        counters["inductor"][f"topk_rebench_fallback_{reason}"] += 1
+        log.info(
+            "topk rebench fallback (%s): pick uses the single-shot timings; count=%d (%s)",
+            reason,
+            cls._topk_rebench_fallbacks[reason],
+            dict(cls._topk_rebench_fallbacks),
+        )
+        return None
+
+    @classmethod
+    def _rebench_in_current_process(
+        cls,
+        choices,
+        mask,
+        input_nodes,
+        layout,
+        input_gen_fns,
+        hint_override,
+        warmup_s,
+        rounds,
+        device,
+    ) -> list[list[float]]:
+        from . import autotune_process
+
+        args = cls.get_inputs(
+            list(choices),
+            input_nodes,
+            layout,
+            input_gen_fns,
+            hint_override=hint_override,
+        )
+        try:
+            fns = []
+            for choice in choices:
+                uses_layout = cls._uses_layout_preserving_inputs(choice)
+                inputs, out = args.get_benchmark_tensors(uses_layout).unpack()
+                fns.append(choice.bmreq.make_run_fn(*inputs, out=out))
+
+            def run_aten(fn=fns[0]):
+                with autotune_process.tunable_mask_context(
+                    mask, layout.device.type == "cuda"
+                ):
+                    return fn()
+
+            fns[0] = run_aten
+            return autotune_process.rebench_batch(
+                fns, warmup_s, rounds, device.synchronize
+            )
+        finally:
+            for choice in choices:
+                cleanup = getattr(choice.bmreq, "cleanup_run_fn", None)
+                if cleanup is not None:
+                    cleanup()
+
     @classmethod
     def benchmark_in_current_process(
         cls,
@@ -6499,6 +6881,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 sys.stderr.write(
                     f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>\n"
                 )
+
+        topk_line = topk_autotune_log_line(timings)
+        if topk_line is not None:
+            sys.stderr.write(topk_line)
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"

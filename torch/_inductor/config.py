@@ -621,6 +621,31 @@ inductor_default_autotune_rep = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
 )
 
+# Re-time a near-tie Triton template against the best ATen choice before picking.
+# Each autotune choice gets one short benchmark window; on heavy GEMMs the GPU
+# reaches its power cap within a few hundred ms, so where a window lands can flip a
+# template-vs-ATen verdict by +-25%. When the fastest choice is a template that
+# beats ATen by less than this fractional margin (e.g. 0.25), the two are re-timed
+# back to back after a sustained warm-up, interleaved, and the pick between them
+# uses those steady-state medians. Autotune timings themselves are not changed.
+# GPU only. 0 disables it.
+autotune_topk_rebench_margin: float = float(
+    os.getenv("TORCHINDUCTOR_AUTOTUNE_TOPK_REBENCH", "0")
+)
+# applied at pick time: the re-timed template must beat ATen by this fraction in
+# steady state (offsets the bias of picking the best of many noisy templates)
+autotune_topk_rebench_hysteresis: float = float(
+    os.getenv("TORCHINDUCTOR_AUTOTUNE_TOPK_REBENCH_HYSTERESIS", "0.05")
+)
+# seconds of sustained back-to-back calls before the timed rounds
+autotune_topk_rebench_warmup_s: float = float(
+    os.getenv("TORCHINDUCTOR_AUTOTUNE_TOPK_REBENCH_WARMUP_S", "0.5")
+)
+# interleaved timing rounds of the re-timed pair (median is used)
+autotune_topk_rebench_rounds: int = int(
+    os.getenv("TORCHINDUCTOR_AUTOTUNE_TOPK_REBENCH_ROUNDS", "5")
+)
+
 # When enabled, the autotuner captures each candidate kernel in a CUDA graph
 # and benchmarks graph replay instead of eager kernel launches. This eliminates
 # host-side dispatch overhead from timing measurements, giving results that are
