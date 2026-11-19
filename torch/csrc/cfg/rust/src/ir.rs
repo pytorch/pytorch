@@ -345,6 +345,8 @@ pub struct Function {
     /// (start offset, end offset, line), the offsets tagged like `Inst::bc`.
     pub lines: Vec<(u32, u32, i32)>,
     pub origins: Vec<Origin>,
+    /// How many loops were unrolled.
+    pub unrolled: usize,
 
     pub globals: PyObj,
     pub builtins: PyObj,
