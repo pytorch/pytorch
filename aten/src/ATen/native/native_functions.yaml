@@ -7202,6 +7202,12 @@
     MPS: _grouped_mm_mps
     XPU: _grouped_mm_xpu
 
+- func: _grouped_mm.out(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _grouped_mm_out
+    CUDA: _grouped_mm_out_cuda
+
 # NOTE [ Sparse: autograd and API ]
 #
 #
