@@ -12,6 +12,7 @@ endif()
 # we can hand to ninja.
 file(GLOB METAL_HEADER_DEPS CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/c10/metal/*.h"
+     "${CMAKE_SOURCE_DIR}/c10/util/IntegerDivider.h"
      "${CMAKE_SOURCE_DIR}/aten/src/ATen/native/mps/kernels/*.h")
 
 function(metal_to_air SRC TARGET FLAGS)
@@ -147,7 +148,7 @@ if(NOT USE_PYTORCH_METAL)
     return()
 endif()
 
-if(IOS OR INTERN_BUILD_MOBILE)
+if(IOS)
     return()
 endif()
 

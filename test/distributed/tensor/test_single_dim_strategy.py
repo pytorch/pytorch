@@ -23,6 +23,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._matrix_ops import (
+    _valid_grouped_mm_strides,
     mm_single_dim_strategy,
     scaled_dot_product_efficient_attention_single_dim_strategy,
 )
@@ -2132,6 +2133,23 @@ class TestSingleDimStrategyRegistration(TestCase):
 
         # Verify the result is None (no tensor output)
         self.assertIsNone(result, "No-output op should return None")
+
+    def test_grouped_mm_out_keeps_stride_filter(self):
+        registry = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        )
+        aten = torch.ops.aten
+        self.assertIs(
+            registry[aten._grouped_mm.out].full_mesh_strategy_filter,
+            _valid_grouped_mm_strides,
+        )
+
+        # Only grouped_mm.out gets its base filter. argmax.out has no filter, so x
+        # can be redistributed to Shard(1) to match out.
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = distribute_tensor(torch.randn(8, 16), mesh, [Shard(0)])
+        out = distribute_tensor(torch.empty(16, dtype=torch.long), mesh, [Shard(0)])
+        self.assertIs(torch.argmax(x, 0, out=out), out)
 
 
 if __name__ == "__main__":
