@@ -243,7 +243,7 @@ const TRIAL_CLEAR_SHIFT: u32 = 3;
 fn trial_calls(ns: u64, least: u32, most: u32) -> u32 {
     ((TRIAL_BUDGET_NS / ns.max(1)).min(most as u64) as u32).max(least)
 }
-/// A callee whose measurement never gets quiet enough stays compiled.
+/// A measurement that never gets quiet enough is over after this many calls.
 const TRIAL_MAX_CALLS: u32 = 400;
 /// How many calls there have been of the functions that were given to be
 /// compiled (not of what they call).
@@ -2558,6 +2558,17 @@ impl Compiled {
         result
     }
 
+    /// Calls of a callee that was handed to the interpreter stop finding
+    /// its compiled form.
+    unsafe fn forget_compiled(&self, func: Obj) {
+        if !func.is_null() {
+            let code = ffi::PyFunction_GetCode(func);
+            let globals = ffi::PyFunction_GetGlobals(func);
+            let recent = self.callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
+            recent.set((code as usize, globals as usize, DEMOTED));
+        }
+    }
+
     unsafe fn trial_sample(
         &self,
         compiled: *const Compiled,
@@ -2657,20 +2668,20 @@ impl Compiled {
             trial.phase = TRIAL_COMPILED;
         } else if lost {
             trial.phase = TRIAL_DEMOTED;
-            if !func.is_null() {
-                // Calls stop finding the compiled form.
-                let code = ffi::PyFunction_GetCode(func);
-                let globals = ffi::PyFunction_GetGlobals(func);
-                let recent =
-                    self.callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
-                recent.set((code as usize, globals as usize, DEMOTED));
-            }
+            self.forget_compiled(func);
         } else if trial.calls >= TRIAL_MAX_CALLS {
             // Still open: something below was compiled or measured during
             // every one of its calls.
             let age = (ENTRY_CALLS.load(Ordering::Relaxed) as u32).wrapping_sub(trial.born);
+            let behind = seen(trial.compiled_samples, enough)
+                && trial.interpreted_best + margin < trial.compiled_best;
             if age < TRIAL_YOUNG_ENTRIES {
                 trial = Trial { born: trial.born, ..Trial::start(epoch) };
+            } else if behind {
+                // What it was measured to be is what it is: nothing says
+                // that the calls below get any quieter.
+                trial.phase = TRIAL_DEMOTED;
+                self.forget_compiled(func);
             } else {
                 trial.phase = TRIAL_COMPILED;
             }
