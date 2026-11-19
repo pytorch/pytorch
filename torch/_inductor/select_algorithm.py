@@ -60,6 +60,7 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
+    RemovedArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -1214,6 +1215,35 @@ class TritonTemplateKernel(TritonKernel):
             return texpr(self.rename_indexing(val[index]))
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
+    def smem_operand_ring_first(self) -> str:
+        """autoWS loop-header kwarg for large epilogue staging slots."""
+
+        def hook() -> str:
+            meta = self.meta
+            if meta.get("TWO_CTAS"):
+                return ""
+            buffers = {**self.args.output_buffers, **self.args.inplace_buffers}
+            names = [
+                name for name, arg in buffers.items() if not isinstance(arg, RemovedArg)
+            ] or [self.output_node.get_name()]
+            elem = max(V.graph.get_dtype(name).itemsize for name in names)
+            slot = (meta["BLOCK_M"] // meta.get("DATA_PARTITION_FACTOR", 1)) * (
+                meta["BLOCK_N"] // meta.get("EPILOGUE_SUBTILE", 1)
+            )
+            m, n = (
+                V.graph.sizevars.optimization_hint(s)
+                for s in self.output_node.get_size()[-2:]
+            )
+            tiles = ceildiv(m, meta["BLOCK_M"]) * ceildiv(n, meta["BLOCK_N"])
+            # 16 KB from local testing; 1-CTA only: 2-CTA output staging is
+            # pinned to one copy (fb-triton #3543), so there is nothing to trade.
+            # With at most one tile per SM it measured slower.
+            if slot * elem >= 16384 and tiles > meta["NUM_SMS"]:
+                return "smem_operand_ring_first=True,"
+            return ""
+
+        return self._register_hook("<SMEM_OPERAND_RING_FIRST>", hook)
+
     def tma_descriptor(
         self,
         desc_name: str,
@@ -2105,6 +2135,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.gen_argdefs,
                 self.gen_defines,
                 self.tma_descriptor,
+                self.smem_operand_ring_first,
                 *self.extra_template_env_fns,
             ]
         }

@@ -38,6 +38,7 @@
         warp_specialize=WARP_SPECIALIZE,
         data_partition_factor=DATA_PARTITION_FACTOR,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+        {{smem_operand_ring_first()}}
     ):
     {%- else %}
     for tile_id in tl.range(
