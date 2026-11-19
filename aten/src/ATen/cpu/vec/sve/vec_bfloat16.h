@@ -105,9 +105,9 @@ class Vectorized<BFloat16> {
     return b;
   }
   static Vectorized<BFloat16> loadu(const void* ptr, int64_t count = size()) {
-    // Load BFloat16 values through the type of their only member, uint16_t,
-    // which may access them: bfloat16_t may not (strict aliasing), so GCC
-    // would assume that such loads don't read them, and drop earlier stores.
+    // A BFloat16 may be read through its member's type, uint16_t, but not
+    // through bfloat16_t: GCC assumes that bfloat16_t loads can't read
+    // BFloat16 objects (strict aliasing) and may drop earlier stores to them.
     auto p = reinterpret_cast<const uint16_t*>(ptr);
     if (count == size())
       return svreinterpret_bf16_u16(svld1_u16(ptrue, p));
