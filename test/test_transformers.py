@@ -7324,7 +7324,7 @@ class TestSDPAXpuOnly(NNTestCase):
     hw_classification = HardwareClassification.XPU
 
     @parametrize("type", ["dense"])
-    @parametrize("dropout", [0.0])
+    @parametrize("dropout", [0.0, 0.7])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
     @skipIfTorchDynamo()
     def test_fused_sdp_choice_xpu(self, device, type: str, dropout: float, dtype: torch.dtype):
@@ -7332,7 +7332,7 @@ class TestSDPAXpuOnly(NNTestCase):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
         size = SdpaShape(2, 8, 128, 64)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-        if dropout > 0.0 or dtype not in [torch.float32, torch.bfloat16, torch.float16]:
+        if dtype not in [torch.float32, torch.bfloat16, torch.float16]:
             if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.MATH.value:
                 raise AssertionError("expected MATH backend")
         else:
