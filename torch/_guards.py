@@ -1644,31 +1644,3 @@ def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
     # CppFakeTensorMode when that slot is empty.
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-
-
-def require_python_fake_mode(
-    mode: FakeTensorMode | CppFakeTensorMode | None,
-    /,
-) -> FakeTensorMode | None:
-    """
-    Returns mode unchanged if it is a FakeTensorMode or None.
-
-    Use it on a fake mode that must be a Python FakeTensorMode, for example to
-    get Python FakeTensors from it or to pass it on to code typed for
-    FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
-    maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
-    lookups with it so that they keep getting a Python FakeTensorMode when a
-    lookup finds a C++ mode.
-
-    Raises:
-        RuntimeError: if mode is a CppFakeTensorMode, which does not have all of
-            FakeTensorMode's interface.
-    """
-    from torch._subclasses.fake_tensor import CppFakeTensorMode
-
-    if isinstance(mode, CppFakeTensorMode):
-        raise RuntimeError(
-            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
-            "a CppFakeTensorMode is not supported here yet"
-        )
-    return mode
