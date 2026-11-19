@@ -128,8 +128,8 @@ def _misc_patterns_init(device: str):
     )
 
     # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)
-    if device.startswith(("cuda", "xpu")):
-        device_type = torch.device(device).type
+    device_type = torch.device(device).type
+    if device_type in ("cuda", "xpu"):
 
         def e8m0_extra_check(match):
             inp = match.kwargs.get("inp")
@@ -142,7 +142,7 @@ def _misc_patterns_init(device: str):
                 and inp_val.dtype == torch.float32
             )
 
-        is_sm100_plus = device_type == "cuda" and is_nvidia_sm100_or_later()
+        is_sm100_plus = is_nvidia_sm100_or_later()
 
         if is_sm100_plus:
             from .. import inductor_prims
