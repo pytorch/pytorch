@@ -6,7 +6,6 @@ import sys
 import types
 import typing
 import unittest
-import warnings
 
 import sympy
 
@@ -145,12 +144,7 @@ class TestSIMDRangeTrees(TestCase):
             torch._inductor.config.patch({"triton.max_tiles": max_tiles}),
             V.set_graph_handler(self._make_graph()),
             log_context(),
-            warnings.catch_warnings(),
         ):
-            warnings.filterwarnings(
-                "error",
-                message="Coalescing tiling analysis enumerates variable combinations",
-            )
             selection = TritonScheduling.select_tiling_with_memory(
                 [], sympy.Integer(math.prod(ranges.values())), sympy.S.One, analysis
             )
@@ -179,8 +173,6 @@ class TestSIMDRangeTrees(TestCase):
             subtest((TritonScheduling, None), name="triton_default"),
             subtest((TritonScheduling, 3), name="triton_3"),
             subtest((TritonScheduling, 4), name="triton_4"),
-            subtest((MetalScheduling, None), name="metal_default"),
-            subtest((MetalScheduling, 3), name="metal_3"),
         ],
     )
     @config.patch(

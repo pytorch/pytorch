@@ -158,6 +158,9 @@ def create_bandwidth_info_str(
     return red_text(info_str) if color and slow else info_str
 
 
+MAX_X_GRID = (1 << 31) - 1
+
+
 def get_max_y_grid() -> int:
     return 65535
 

@@ -391,7 +391,7 @@ class InductorMeta(typing.TypedDict, total=False):
 
     # Kernel identity / launch (codegen_kernel literal)
     grid_type: str
-    rank: int
+    rank: int  # Number of pointwise axes, excluding reduction axes.
     kernel_name: str
     mutated_arg_names: typing.Any
     optimize_mem: bool

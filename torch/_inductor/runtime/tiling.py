@@ -80,6 +80,15 @@ def get_z_prefixes(prefixes: Iterable[str]) -> tuple[str, ...]:
     return _get_prefixes(prefixes, _Z_FAMILY)
 
 
+def has_packed_z_grid(prefixes: Iterable[str]) -> bool:
+    """Multiple Z axes pack their grids and require strict hinted limits.
+
+    A single Z axis uses Grid3D, where rounded hints may overestimate a
+    launchable grid. Its filter uses the minimum unrounded size hint.
+    """
+    return len(get_z_prefixes(prefixes)) > 1
+
+
 def pointwise_prefixes(ndim: int) -> tuple[str, ...]:
     """Generate pointwise axes ordered from outermost to innermost."""
     if ndim < 0:
@@ -101,17 +110,26 @@ def get_pointwise_prefixes(prefixes: Iterable[str]) -> tuple[str, ...]:
 
 
 def get_yz_grid_extents(
-    size_hints: Mapping[str, int], block_sizes: Mapping[str, int]
+    size_hints: Mapping[str, int],
+    block_sizes: Mapping[str, int],
+    *,
+    lower_bound: bool = False,
 ) -> dict[tuple[str, ...], int]:
     """Compute Y and packed Z extents for groups with complete block sizes.
 
     Kernels without Z axes use a separate Y-overflow launch layout.
+    With lower_bound, use the smallest numel that rounds up to each hint.
     """
     z_prefixes = get_z_prefixes(size_hints)
     if not z_prefixes:
         return {}
     return {
-        group: math.prod(ceildiv(size_hints[p], block_sizes[p]) for p in group)
+        group: math.prod(
+            ceildiv(
+                size_hints[p] // 2 + 1 if lower_bound else size_hints[p], block_sizes[p]
+            )
+            for p in group
+        )
         for group in (("y",), z_prefixes)
         if all(p in size_hints and p in block_sizes for p in group)
     }

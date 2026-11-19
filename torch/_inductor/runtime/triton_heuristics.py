@@ -86,6 +86,7 @@ from .runtime_utils import (
     get_first_attr,
     get_max_y_grid,
     get_num_bytes,
+    MAX_X_GRID,
     next_power_of_2,
     triton_cache_dir,
     triton_config_to_hashable,
@@ -105,6 +106,7 @@ from .tiling import (
     get_pointwise_prefixes,
     get_yz_grid_extents,
     get_z_prefixes,
+    has_packed_z_grid,
 )
 from .triton_compat import (
     ASTSource,
@@ -4378,7 +4380,7 @@ def _num_warps(
 
 def _check_max_grid_x(size_hints, x, num_warps, *, warp_size: int = 32):
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
-    max_grid_x = 2147483647
+    max_grid_x = MAX_X_GRID
     max_block_x = TRITON_MAX_BLOCK["X"]
     num_blocks = (size_hints["x"] + x - 1) // x
 
@@ -4446,7 +4448,6 @@ def triton_config(
             pointwise_size_hints[p] for p in prefixes[num_budgets - 1 :]
         )
     }
-    maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
     if conditional_product(*size_hints.values()) < target:
@@ -4462,27 +4463,12 @@ def triton_config(
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
     while x < min(size_hints["x"], TRITON_MAX_BLOCK["X"]) and (
-        x * maxGridSize[0] < size_hints["x"] or conditional_product(x, y, z) < target
+        x * MAX_X_GRID < size_hints["x"] or conditional_product(x, y, z) < target
     ):
         x *= 2
-    while (
-        y
-        and y < min(size_hints["y"], TRITON_MAX_BLOCK["Y"])
-        and (
-            y * maxGridSize[1] < size_hints["y"]
-            or conditional_product(x, y, z) < target
-        )
-    ):
-        y *= 2
-    while (
-        z
-        and z < min(size_hints["z0_"], TRITON_MAX_BLOCK["Z0_"])
-        and (
-            z * maxGridSize[2] < size_hints["z0_"]
-            or conditional_product(x, y, z) < target
-        )
-    ):
-        z *= 2
+    numels = {p: n for p, n in (("x", x), ("y", y), ("z0_", z)) if n is not None}
+    _grow_legacy_yz(size_hints, numels, target)
+    x, y, z = numels["x"], numels.get("y"), numels.get("z0_")
 
     # Calculate num_warps if they are not hard passed to config
     if num_warps is None:
@@ -4513,8 +4499,19 @@ def triton_config(
     pointwise_numels = _get_nd_pointwise_numels(
         pointwise_size_hints, [budget for budget in (x, y, z) if budget is not None]
     )
-    if len(get_z_prefixes(pointwise_size_hints)) > 1:
-        _check_max_grid_yz(pointwise_size_hints, pointwise_numels)
+    if has_packed_z_grid(pointwise_size_hints):
+        _check_max_grid_yz(
+            pointwise_size_hints,
+            pointwise_numels,
+            max_numel=TRITON_MAX_TENSOR_NUMEL,
+            min_xblock=next_power_of_2(
+                ceildiv(
+                    pointwise_size_hints["x"]
+                    * (num_warps * warp_size if torch.version.hip else 1),
+                    MAX_X_GRID,
+                )
+            ),
+        )
     cfg = _get_config(pointwise_numels)
     check_max_block(cfg)
     check_config(cfg, size_hints=pointwise_size_hints)
@@ -4531,18 +4528,47 @@ def triton_config(
     return config
 
 
-def _check_max_grid_yz(size_hints: dict[str, int], numels: dict[str, int]) -> None:
+def _grow_legacy_yz(size_hints, numels, target):
+    """Mutate legacy Y/Z blocks toward the target and hinted grid limits."""
+    for prefix in ("y", "z0_"):
+        if prefix not in numels:
+            continue
+        while numels[prefix] < min(
+            size_hints[prefix], get_max_block(prefix, TRITON_MAX_BLOCK)
+        ) and (
+            ceildiv(size_hints[prefix], numels[prefix]) > get_max_y_grid()
+            or math.prod(numels.values()) < target
+        ):
+            numels[prefix] *= 2
+
+
+def _check_max_grid_yz(
+    size_hints: dict[str, int],
+    numels: dict[str, int],
+    *,
+    strict: bool = True,
+    max_numel: int | None = None,
+    min_xblock: int = 1,
+) -> None:
+    """Mutate blocks to fit Y/Z grids, then shrink outer axes toward the budget.
+
+    Strict grids use rounded hints; Grid3D relaxes to minimum unrounded hints
+    only for groups whose rounded grids cannot fit the block limits.
+    Preserve X unless the tensor limit requires shrinking
+    it after all other axes. max_numel is the pointwise share of that limit;
+    min_xblock can also enforce HIP's total-thread launch limit.
+    """
     groups = get_yz_grid_extents(size_hints, numels)
     if not groups:
         return
     target = math.prod(numels.values())
+    if max_numel is not None:
+        target = min(target, max_numel)
     limit = get_max_y_grid()
-
-    def grid(group: Sequence[str]) -> int:
-        return get_yz_grid_extents(size_hints, numels)[tuple(group)]
+    min_xblock = max(min_xblock, next_power_of_2(ceildiv(size_hints["x"], MAX_X_GRID)))
 
     for group in groups:
-        while grid(group) > limit:
+        while get_yz_grid_extents(size_hints, numels)[group] > limit:
             prefix = next(
                 (
                     p
@@ -4553,21 +4579,52 @@ def _check_max_grid_yz(size_hints: dict[str, int], numels: dict[str, int]) -> No
                 None,
             )
             if prefix is None:
-                axis = "Y" if group == ("y",) else "Z"
-                raise AssertionError(
-                    f"Tiling configuration exceeds the {axis} launch-grid limit: "
-                    f"extent={grid(group)}, limit={limit}, axes={group}, "
-                    f"size_hints={size_hints}, block_sizes={numels}. "
-                    "Reduce torch._inductor.config.triton.max_tiles to use fewer tiling axes."
-                )
+                break
             numels[prefix] *= 2
 
-    for prefix in reversed(get_pointwise_prefixes(numels)):
-        while numels[prefix] > 1 and math.prod(numels.values()) > target:
+    relaxed_groups = tuple(
+        group
+        for group, extent in get_yz_grid_extents(size_hints, numels).items()
+        if not strict and extent > limit
+    )
+
+    def grid_extents():
+        extents = get_yz_grid_extents(size_hints, numels)
+        lower_extents = get_yz_grid_extents(size_hints, numels, lower_bound=True)
+        return {
+            g: lower_extents[g] if g in relaxed_groups else n
+            for g, n in extents.items()
+        }
+
+    extents = grid_extents()
+    if any(extent > limit for extent in extents.values()):
+        group, extent = next((g, n) for g, n in extents.items() if n > limit)
+        axis = "Y" if group == ("y",) else "Z"
+        raise RuntimeError(
+            f"Tiling configuration exceeds the {axis} launch-grid limit: "
+            f"extent={extent}, limit={limit}, axes={group}, "
+            f"size_hints={size_hints}, block_sizes={numels}. "
+            "Reduce torch._inductor.config.triton.max_tiles to use fewer tiling axes."
+        )
+
+    for prefix in get_pointwise_prefixes(numels):
+        budget = max_numel if prefix == "x" else target
+        if budget is None:
+            continue
+        while numels[prefix] > 1 and math.prod(numels.values()) > budget:
             numels[prefix] //= 2
-            if any(grid(group) > limit for group in groups):
+            if (prefix == "x" and numels[prefix] < min_xblock) or any(
+                extent > limit for extent in grid_extents().values()
+            ):
                 numels[prefix] *= 2
                 break
+    if max_numel is not None and math.prod(numels.values()) > max_numel:
+        raise RuntimeError(
+            f"Tiling configuration exceeds Triton's tensor limit: "
+            f"pointwise_limit={max_numel}, min_xblock={min_xblock}, "
+            f"size_hints={size_hints}, block_sizes={numels}. "
+            "Reduce torch._inductor.config.triton.max_tiles to use fewer tiling axes."
+        )
 
 
 def _get_nd_pointwise_numels(
@@ -4589,10 +4646,31 @@ def _get_nd_pointwise_numels(
         for prefix, budget in zip(prefixes, budgets[:-1])
     }
     expanded_prefixes = prefixes[len(budgets) - 1 :]
-    remaining = min(budgets[-1], math.prod(size_hints[p] for p in expanded_prefixes))
-    for prefix in expanded_prefixes:
+    numels.update(
+        _expand_nd_budget(
+            size_hints, expanded_prefixes, budgets[-1], cap_outermost=False
+        )
+    )
+    return numels
+
+
+def _expand_nd_budget(
+    size_hints: dict[str, int],
+    prefixes: Sequence[str],
+    budget: int,
+    *,
+    cap_outermost: bool = True,
+) -> dict[str, int]:
+    """Distribute a power-of-two budget over innermost-first prefixes.
+
+    cap_outermost=False lets pointwise expansion defer its outer block limit
+    to the config checks. Reduction expansion caps every axis here.
+    """
+    remaining = min(budget, math.prod(size_hints[p] for p in prefixes))
+    numels = {}
+    for prefix in prefixes:
         dim = min(size_hints[prefix], remaining)
-        if prefix != expanded_prefixes[-1]:
+        if cap_outermost or prefix != prefixes[-1]:
             dim = min(dim, get_max_block(prefix, TRITON_MAX_BLOCK))
         if remaining % dim:
             raise AssertionError(
@@ -4601,7 +4679,10 @@ def _get_nd_pointwise_numels(
         numels[prefix] = dim
         remaining //= dim
     if remaining != 1:
-        raise AssertionError(f"Pointwise budget exceeds size hints: {size_hints}")
+        raise AssertionError(
+            f"Budget {budget} exceeds block limits for axes {tuple(prefixes)}: "
+            f"size_hints={size_hints}, block_sizes={numels}, remaining={remaining}"
+        )
     return numels
 
 
@@ -4619,27 +4700,11 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
         [prefix for prefix in size_hints if prefix_is_reduction(prefix)]
     )
 
-    remaining = r
-    rnumels = {}
-    for idx in range(num_reduction_dims - 1, -1, -1):
-        prefix = f"r{idx}_"
-        max_size = min(size_hints[prefix], get_max_block(prefix, TRITON_MAX_BLOCK))
-        dim = min(max_size, remaining)
-        if remaining % dim != 0:
-            raise AssertionError(
-                f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
-            )
-        rnumels[prefix] = dim
-        remaining //= dim
-
-    # Sanity check the results.
-    final_numel = conditional_product(*rnumels.values())
-    if r != final_numel:
-        raise AssertionError(
-            f"Expected ND reduction size ({rnumels}) to have {r} elements."
-        )
-    if not all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels):
-        raise AssertionError(f"rnumels exceed size_hints. {rnumels} > {size_hints}")
+    rnumels = _expand_nd_budget(
+        size_hints,
+        tuple(f"r{idx}_" for idx in range(num_reduction_dims - 1, -1, -1)),
+        r,
+    )
 
     return rnumels
 
@@ -5084,7 +5149,13 @@ def triton_config_tiled_reduction(
         while pointwise_numels[prefix] < size_hints[prefix] and total_numel() < target:
             pointwise_numels[prefix] *= 2
 
-    _check_max_grid_yz(size_hints, pointwise_numels)
+    if get_z_prefixes(size_hints):
+        _check_max_grid_yz(
+            size_hints,
+            pointwise_numels,
+            strict=has_packed_z_grid(size_hints),
+            max_numel=TRITON_MAX_TENSOR_NUMEL // math.prod(rnumels.values()),
+        )
     cfg = _get_config({**pointwise_numels, **rnumels})
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(
