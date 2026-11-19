@@ -3,8 +3,7 @@ from __future__ import annotations
 import itertools
 import textwrap
 from dataclasses import dataclass, field
-from typing import Literal, TYPE_CHECKING
-from typing_extensions import assert_never
+from typing import assert_never, Literal, TYPE_CHECKING
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -31,6 +30,7 @@ from torchgen.model import (
     BackendIndex,
     DeviceCheckType,
     DispatchKey,
+    gets_generated_inplace_meta_kernel,
     gets_generated_out_inplace_wrapper,
     is_cuda_dispatch_key,
     NativeFunction,
@@ -427,16 +427,7 @@ class RegisterDispatchKey:
             inplace_meta = False
             gets_out_inplace_wrapper = False
             if not self.backend_index.has_kernel(f):
-                if (
-                    self.backend_index.dispatch_key == DispatchKey.Meta
-                    and f.func.kind() is SchemaKind.inplace
-                    and
-                    # Defer to composites for meta implementation
-                    not f.has_composite_kernel
-                    and
-                    # Inplace list operations are not supported
-                    len(f.func.returns) == 1
-                ):
+                if gets_generated_inplace_meta_kernel(f, self.backend_index):
                     inplace_meta = True
                 elif (
                     not self.backend_index.use_out_as_primary

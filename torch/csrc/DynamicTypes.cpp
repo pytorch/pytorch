@@ -47,6 +47,10 @@ PyObject* createPyObject(const at::Storage& storage) {
   // information about storages from python). However, any accesses to the
   // data_ptr is not allowed, through methods like
   // x.untyped_storage().data_ptr()
+  // To ask whether a tensor's storage holds data without raising, use
+  // torch._C._has_storage_data(x). Do not use x.data_ptr() == 0 for this: it
+  // is nonzero for a wrapper subclass with a nonzero storage offset, and zero
+  // for a tensor with numel() == 0 viewing a non-empty storage.
   PyObject* obj = THPStorage_Wrap(storage);
   TORCH_CHECK_PYTHON(obj);
   return obj;
