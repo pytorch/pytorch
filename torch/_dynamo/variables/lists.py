@@ -58,6 +58,7 @@ from ..utils import (
     set_example_value,
     specialize_symnode,
     tracked_repr,
+    try_constant_args,
     unpack_and_apply_fn,
     unpack_iterable,
 )
@@ -430,9 +431,13 @@ class BaseListVariable(VariableTracker):
         for a, b in zip(left, right):
             # CPython uses PyObject_RichCompareBool per element, which has
             # an identity shortcut before the full do_richcompare dispatch.
+            a, b = a.unwrap(), b.unwrap()
             eq_result = generic_richcompare_bool(tx, a, b, "__eq__")
+            is_constant, equal = False, None
             if eq_result.is_python_constant():
-                if not eq_result.as_python_constant():
+                is_constant, equal = eq_result.try_as_python_constant()
+            if is_constant:
+                if not equal:
                     if cmp_op in (operator.eq, operator.ne):
                         return ConstantVariable.create(cmp_op is operator.ne)
                     return generic_richcompare(tx, a, b, op)
@@ -724,7 +729,10 @@ class BaseListVariable(VariableTracker):
                 result = SourcelessBuilder.create_internal_builtin(
                     operator.lt
                 ).call_function(tx, [self.key, other.key], {})
-                if not result.is_python_constant():
+                is_constant, value = False, None
+                if result.is_python_constant():
+                    is_constant, value = result.try_as_python_constant()
+                if not is_constant:
                     unimplemented(
                         gb_type="sort with non-constant keys",
                         context=str(self.key),
@@ -740,7 +748,7 @@ class BaseListVariable(VariableTracker):
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                return bool(result.as_python_constant())
+                return bool(value)
 
         try:
             if key_fn_var.is_constant_none():
@@ -800,11 +808,8 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
             raise AssertionError
 
         def maybe_as_int(x: VariableTracker) -> VariableTracker:
-            return (
-                ConstantVariable.create(int(x.as_python_constant()))
-                if x.is_python_constant()
-                else x
-            )
+            is_constant, value = x.try_as_python_constant()
+            return ConstantVariable.create(int(value)) if is_constant else x
 
         # cast each argument to an integer
         start = maybe_as_int(start)
@@ -817,8 +822,8 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
 
     def debug_repr(self) -> str:
         repr = f"range({self.start()}, {self.stop()}"
-        if self.step() != 1:
-            repr += f", {self.step()}"
+        if (step := self.step()) != 1:
+            repr += f", {step}"
         repr += ")"
         return repr
 
@@ -845,10 +850,10 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
         # ref: range_bool in https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L740-L744
         return ConstantVariable.create(self.range_length() != 0)
 
-    def range_length(self) -> int:
-        lo = self.start()
-        hi = self.stop()
-        step = self.step()
+    def range_length(self, *, bounds: tuple[int, int, int] | None = None) -> int:
+        lo, hi, step = (
+            bounds if bounds is not None else (self.start(), self.stop(), self.step())
+        )
 
         if step == 0:
             raise AssertionError("step must not be zero")
@@ -911,7 +916,8 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
     def apply_index(
         self, tx: "InstructionTranslatorBase", index: int
     ) -> VariableTracker:
-        length = self.range_length()
+        start, stop, step = self.start(), self.stop(), self.step()
+        length = self.range_length(bounds=(start, stop, step))
         if index < 0:
             index = length + index
 
@@ -922,17 +928,18 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
                 args=["range object index out of range"],
             )
 
-        return VariableTracker.build(tx, self.start() + (index * self.step()))
+        return VariableTracker.build(tx, start + (index * step))
 
     def apply_slice(self, slice: slice) -> "RangeVariable":
+        start, stop, step = self.start(), self.stop(), self.step()
         (slice_start, slice_stop, slice_step) = self._get_slice_indices(
-            self.range_length(), slice
+            self.range_length(bounds=(start, stop, step)), slice
         )
 
         def compute_item(index: int) -> int:
-            return self.start() + (index * self.step())
+            return start + (index * step)
 
-        sub_step = self.step() * slice_step
+        sub_step = step * slice_step
         sub_start = compute_item(slice_start)
         sub_stop = compute_item(slice_stop)
 
@@ -996,15 +1003,18 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
         r0, r1 = self, other
         if r0 is r1:
             return True
-        if r0.range_length() != r1.range_length():
+        r0_bounds = r0.start(), r0.stop(), r0.step()
+        length = r0.range_length(bounds=r0_bounds)
+        r1_bounds = r1.start(), r1.stop(), r1.step()
+        if length != r1.range_length(bounds=r1_bounds):
             return False
-        if r0.range_length() == 0:
+        if length == 0:
             return True
-        if r0.start() != r1.start():
+        if r0_bounds[0] != r1_bounds[0]:
             return False
-        if r0.range_length() == 1:
+        if length == 1:
             return True
-        return r0.step() == r1.step()
+        return r0_bounds[2] == r1_bounds[2]
 
     def range_count(self, x: VariableTracker) -> int:
         # `count` and `sq_contains_impl` only send exact ints and bools here;
@@ -1042,13 +1052,15 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
-        if not all(var.is_python_constant() for var in self.items):
+        all_constant, bounds, _ = try_constant_args(self.items, {})
+        if not all_constant:
             # Can't represent a `range_iterator` without well defined bounds
             return variables.misc.DelayGraphBreakVariable(
                 msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
             )
+        start, stop, step = bounds
         return RangeIteratorVariable(
-            self.start(), self.stop(), self.step(), self.range_length()
+            start, stop, step, self.range_length(bounds=(start, stop, step))
         )
 
     def sq_item_impl(
@@ -1145,9 +1157,8 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
     ) -> VariableTracker:
         # range.__reversed__: range_iterator with reversed bounds.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_reverse)
-        length = self.range_length()
-        start = self.start()
-        step = self.step()
+        start, stop, step = self.start(), self.stop(), self.step()
+        length = self.range_length(bounds=(start, stop, step))
         new_start = start + (length - 1) * step
         new_step = -step
         return RangeIteratorVariable(new_start, 0, new_step, length)
@@ -1540,13 +1551,13 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
     ) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        if not maxlen.is_python_constant():
+        is_constant, maxlen_val = maxlen.try_as_python_constant()
+        if not is_constant:
             raise AssertionError(
                 f"maxlen must be a constant, got: {maxlen.debug_repr()}"
             )
         self.maxlen = maxlen
         items = list(items)
-        maxlen_val = self.maxlen.as_python_constant()
         if maxlen_val is not None:
             # maxlen == 0 must empty the deque; items[-0:] would keep everything.
             items = items[-maxlen_val:] if maxlen_val != 0 else items[:0]
@@ -2314,8 +2325,10 @@ class ByteArrayVariable(VariableTracker):
     ) -> bytearray:
         if isinstance(other, ByteArrayVariable):
             return other.data
+        is_constant, const = False, None
         if other.is_python_constant():
-            const = other.as_python_constant()
+            is_constant, const = other.try_as_python_constant()
+        if is_constant:
             if isinstance(const, (bytes, bytearray)):
                 return bytearray(const)
         raise_type_error(

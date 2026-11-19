@@ -1249,9 +1249,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     ) -> tuple[type, ...] | None:
         if not selector.is_python_constant():
             return None
-        try:
-            raw_value = selector.as_python_constant()
-        except NotImplementedError:
+        is_constant, raw_value = selector.try_as_python_constant()
+        if not is_constant:
             return None
 
         flattened = self._flatten_type_spec(raw_value)
@@ -2314,14 +2313,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if kwargs.get("mutation_type") is None:
             kwargs.update(mutation_type=AttributeMutationNew())
         super().__init__(**kwargs)
-        if not isinstance(fn_name.as_python_constant(), str):
-            raise AssertionError(
-                f"fn_name must be a str, got {type(fn_name.as_python_constant())}"
-            )
-        if not isinstance(code.as_python_constant(), types.CodeType):
-            raise AssertionError(
-                f"code must be a CodeType, got {type(code.as_python_constant())}"
-            )
+        if not isinstance(name := fn_name.as_python_constant(), str):
+            raise AssertionError(f"fn_name must be a str, got {type(name)}")
+        if not isinstance(code_value := code.as_python_constant(), types.CodeType):
+            raise AssertionError(f"code must be a CodeType, got {type(code_value)}")
         if not isinstance(f_globals, dict):
             raise AssertionError(f"f_globals must be a dict, got {type(f_globals)}")
         self.fn_name = fn_name
@@ -4214,31 +4209,31 @@ class PolyfilledFunctionVariable(VariableTracker):
             and len(args) == 1
             and not kwargs
             and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
-            and all(
-                (x.is_python_constant() and isinstance(x.as_python_constant(), int))
-                or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
-                for x in args[0].items
-            )
         ):
-            return variables.SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function",
-                    torch.sym_sum,
-                    (tuple(a.as_proxy() for a in args[0].items),),
-                    {},
-                ),
-                sym_num=torch.sym_sum(
-                    [
-                        (
-                            x.as_python_constant()
-                            if x.is_python_constant()
-                            else x.sym_num  # type: ignore[attr-defined]
-                        )
-                        for x in args[0].items
-                    ]
-                ),
-            )
+            values = []
+            for x in args[0].items:
+                is_constant, value = False, None
+                if x.is_python_constant():
+                    is_constant, value = x.try_as_python_constant()
+                if is_constant and isinstance(value, int):
+                    values.append(value)
+                elif (
+                    isinstance(x, variables.SymNodeVariable) and x.python_type() is int
+                ):
+                    values.append(x.sym_num)
+                else:
+                    break
+            else:
+                return variables.SymNodeVariable.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        torch.sym_sum,
+                        (tuple(a.as_proxy() for a in args[0].items),),
+                        {},
+                    ),
+                    sym_num=torch.sym_sum(values),
+                )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
         return tx.inline_user_function_return(
@@ -4488,15 +4483,18 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
-        constant_args = {
-            k: v.as_python_constant()
-            for k, v in combined_args.items()
-            if isinstance(v, VariableTracker) and v.is_python_constant()
-        }
+        constant_args = {}
+        for k, v in combined_args.items():
+            if (
+                isinstance(v, VariableTracker)
+                and v.is_python_constant()
+                and (constant := v.try_as_python_constant())[0]
+            ):
+                constant_args[k] = constant[1]
         non_constant_args = {
-            k: v
-            for k, v in combined_args_vt.items()
-            if not (isinstance(v, VariableTracker) and v.is_python_constant())
+            key_vt: v
+            for (k, v), key_vt in zip(combined_args.items(), combined_args_vt)
+            if k not in constant_args
         }
         # launch_kwargs records the names passed as kwargs at the Triton launch
         # site. A non-kernel launch kwarg can only be a compiler option, so it
@@ -4508,8 +4506,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         for k in launch_kwargs:
             if k in kernel_arg_names:
                 continue
-            v = combined_args[k]
-            if not (isinstance(v, VariableTracker) and v.is_python_constant()):
+            if k not in constant_args:
                 non_const_options.append(k)
         if non_const_options:
             self.raise_unsupported(

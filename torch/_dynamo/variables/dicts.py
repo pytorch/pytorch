@@ -576,9 +576,17 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             key_present = (
                 value is not None and type(value) is not variables.DeletedVariable
             )
-        if _get_literal_key(arg) is not NO_SUCH_SUBOBJ or (
-            arg.source is None and arg.is_python_constant()
+        literal_key = _get_literal_key(arg)
+        if literal_key is not NO_SUCH_SUBOBJ or (
+            arg.source is None
+            and arg.is_python_constant()
+            and (constant := arg.try_as_python_constant())[0]
         ):
+            if not arg.is_realized():
+                arg.realize()
+            key_value = (
+                literal_key if literal_key is not NO_SUCH_SUBOBJ else constant[1]
+            )
             guard_fn = (
                 type(self).CONTAINS_GUARD
                 if key_present
@@ -588,7 +596,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=arg.as_python_constant(),
+                        key=key_value,
                     )
                 )
             )
