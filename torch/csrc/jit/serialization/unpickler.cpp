@@ -1026,7 +1026,7 @@ void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
     const size_t itemsize = result.dtype().itemsize();
     const size_t storage_nbytes = storage_tensor.storage().nbytes();
     const size_t element_per_byte =
-        at::detail::subByteElementPerByte(storage_tensor.dtype());
+        at::detail::subByteElementPerByte(result.dtype());
     // Bound storage_offset independently: computeStorageNbytes returns 0 when
     // any dim is 0, so without this check a zero-numel tensor with a huge
     // offset would slip past the combined check and later operations
@@ -1037,8 +1037,7 @@ void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
     size_t required_nbytes = at::detail::computeStorageNbytes(
         size, stride, itemsize, static_cast<size_t>(storage_offset));
     if (element_per_byte > 1) {
-      offset_nbytes = ceil_div(offset_nbytes, element_per_byte);
-      required_nbytes = ceil_div(required_nbytes, element_per_byte);
+      required_nbytes = at::ceil_div(required_nbytes, element_per_byte);
     }
     TORCH_CHECK(
         !offset_overflow && offset_nbytes <= storage_nbytes,

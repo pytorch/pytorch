@@ -1469,17 +1469,17 @@ class TestQuantizedTensor(TestCase):
                 x.untyped_storage().resize_(storage_nbytes)
                 self.x = torch.nn.Buffer(x)
 
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self):
                 return self.x
 
         def run_test(numel, dtype, storage_nbytes):
             m = QTensor(numel, dtype, storage_nbytes)
             buf = io.BytesIO()
-            torch.jit.save(m, buf)
+            torch.jit._serialization.save(m, buf)
             buf.seek(0)
             # This checks the storage size
-            loaded = torch.jit.load(buf)
+            loaded = torch.jit._serialization.load(buf)
             self.assertEqual(loaded(), m())
 
         for dtype, element_per_byte in [(torch.quint8, 1), (torch.quint4x2, 2), (torch.quint2x4, 4)]:
