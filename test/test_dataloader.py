@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_NUMPY,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils.data import (
@@ -3595,7 +3596,7 @@ class TestDataLoaderCUDA(TestCase):
             del loader1_it
             del loader2_it
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_XPU), "CUDA IPC or XPU not available")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
