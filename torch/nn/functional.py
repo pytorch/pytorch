@@ -5105,7 +5105,8 @@ def interpolate(  # noqa: F811
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `lanczos` (4D-only, CPU only), `area`, `nearest-exact`,
+    `inter-area` (4D-only, CPU only)
 
     Args:
         input (Tensor): the input tensor
@@ -5115,7 +5116,8 @@ def interpolate(  # noqa: F811
             its length has to match the number of spatial dimensions; `input.dim() - 2`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
-            ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'``. Default: ``'nearest'``
+            ``'trilinear'`` | ``'lanczos'`` | ``'area'`` | ``'nearest-exact'`` | ``'inter-area'``.
+            Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to ``True``, the input and output tensors are aligned by the
@@ -5152,6 +5154,11 @@ def interpolate(  # noqa: F811
         and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
 
     .. note::
+        Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``,
+        including how ``scale_factor`` is used. It only supports 4-D input and CPU, and doesn't support
+        ``align_corners``, ``antialias`` or backward. For ``uint8`` inputs, outputs can differ from OpenCV's by 1.
+
+    .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
         algorithms and fixes known issues with ``mode='nearest'``. This mode is introduced to keep
         backward compatibility.
@@ -5179,7 +5186,7 @@ def interpolate(  # noqa: F811
             antialias=antialias,
         )
 
-    if mode in ("nearest", "area", "nearest-exact"):
+    if mode in ("nearest", "area", "nearest-exact", "inter-area"):
         if align_corners is not None:
             raise ValueError(
                 "align_corners option can only be set with the "
@@ -5307,6 +5314,10 @@ def interpolate(  # noqa: F811
     if input.dim() == 5 and mode == "nearest-exact":
         # pyrefly: ignore [bad-argument-type]
         return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
+
+    if input.dim() == 4 and mode == "inter-area":
+        # pyrefly: ignore [bad-argument-type]
+        return torch._C._nn._upsample_inter_area2d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
         if output_size is None:
@@ -5453,6 +5464,7 @@ def interpolate(  # noqa: F811
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
         f" (got {input.dim()}D) for the modes: nearest | linear | bilinear | bicubic | trilinear | lanczos | area | nearest-exact"
+        " | inter-area (4D only)"
         f" (got {mode})"
     )
 
