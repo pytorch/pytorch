@@ -19,6 +19,10 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.vm.memory
+```
+
+```{eval-rst}
 .. autofunction:: torch.vm.is_available
 ```
 
