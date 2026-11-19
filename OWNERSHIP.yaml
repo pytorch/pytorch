@@ -399,6 +399,7 @@ ownership:
     owners: [XuehaiPan]
     section: python_core_api
     paths:
+      - /torch/pytree.py: [XuehaiPan]
       - /torch/utils/pytree/: [XuehaiPan]
       - /torch/utils/_pytree.py: [XuehaiPan]
       - /torch/utils/_cxx_pytree.py: [XuehaiPan]
