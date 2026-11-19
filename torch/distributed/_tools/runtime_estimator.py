@@ -1,11 +1,10 @@
 # Owner(s): ["module: unknown"]
 from collections import defaultdict
-from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Self, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._guards import active_fake_mode
+from torch._guards import active_fake_mode, require_python_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_device
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
@@ -375,7 +374,7 @@ class RuntimeEstimator(TorchDispatchMode):
         return self
 
     def __enter__(self) -> Self:
-        fake_mode = active_fake_mode()
+        fake_mode = require_python_fake_mode(active_fake_mode())
         if fake_mode is None:
             raise AssertionError(
                 "No FakeTensorMode found, designed to be used under FakeTensorMode"

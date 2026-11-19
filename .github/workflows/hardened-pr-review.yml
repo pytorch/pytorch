@@ -5,6 +5,9 @@ name: Hardened PR Review
 # request and hands them to Stage 2 as an artifact. That is all it does.
 # (Seven, pinned by `test_a_well_formed_event_captures_exactly_the_declared_
 # fields`: five read off the event, plus `trigger_event` and `trigger_label`.)
+# `trigger_label` is REVIEW_LABEL, or OPT_OUT_LABEL when adding that label
+# fired the run; Stage 2 then withdraws the automated change requests instead
+# of reviewing.
 #
 # THE TRIGGER IS `pull_request_target`, AND THAT IS THE TRUST BOUNDARY.
 # pytorch/pytorch requires a maintainer to approve CI for contributors without
@@ -35,11 +38,13 @@ name: Hardened PR Review
 #     the property is that nothing reads a path a PULL REQUEST could fill.)
 #   * every `${{ }}` in the file is on a reviewed allowlist of
 #     GitHub-generated scalars - no contributor-authored text, so nothing
-#     needs escaping on its way to a shell. SIX reach the shell as `env:`
+#     needs escaping on its way to a shell. SEVEN reach the shell as `env:`
 #     values, read as quoted variables; four of those are also regex-checked
-#     before use, and the other two (`is_fork`, a GitHub-computed boolean,
-#     and the event action) are carried to jq as data and re-validated by
-#     Stage 2. The rest never leave a concurrency group or a job condition.
+#     before use, two (`is_fork`, a GitHub-computed boolean, and the event
+#     action) are carried to jq as data and re-validated by Stage 2, and one
+#     (whether the opt-out label was just added, a boolean) only picks which
+#     trusted label is recorded. The rest never leave a concurrency group or
+#     a job condition.
 #   * no `secrets.*`, and `permissions: {}` - the write-scoped token this
 #     trigger hands out is refused rather than merely left unused
 #
@@ -126,23 +131,34 @@ permissions: {}
 env:
   # The PR-lifecycle state label that gates automated review.
   REVIEW_LABEL: "in progress"
+  # Opts the PR out of automated review. Stage 2 has the copy that decides.
+  OPT_OUT_LABEL: "no automated review"
 
 jobs:
   capture:
-    # `no automated review` opts the PR out entirely: no review on any trigger,
-    # including a fresh `in progress` label. Stage 2 re-checks it against the
-    # API (OPT_OUT_LABEL there), so a label added after this run still stops
-    # the review.
+    # Two kinds of run:
+    #   1. A review: `in progress` added, or a push etc. while it is on.
+    #      `no automated review` opts the PR out entirely: no review on any
+    #      trigger, including a fresh `in progress` label. Stage 2 re-checks it
+    #      against the API, so a label added after this run still stops the
+    #      review.
+    #   2. A withdrawal: `no automated review` added, on a draft too. Stage 2
+    #      dismisses the automated change requests still standing.
     if: |
       github.repository == 'pytorch/pytorch' &&
-      !github.event.pull_request.draft &&
       (
-        (github.event.action == 'labeled' && github.event.label.name == 'in progress') ||
-        (github.event.action != 'labeled' &&
-         contains(github.event.pull_request.labels.*.name, 'in progress') &&
-         !contains(github.event.pull_request.labels.*.name, 'ready for review'))
-      ) &&
-      !contains(github.event.pull_request.labels.*.name, 'no automated review')
+        (
+          !github.event.pull_request.draft &&
+          (
+            (github.event.action == 'labeled' && github.event.label.name == 'in progress') ||
+            (github.event.action != 'labeled' &&
+             contains(github.event.pull_request.labels.*.name, 'in progress') &&
+             !contains(github.event.pull_request.labels.*.name, 'ready for review'))
+          ) &&
+          !contains(github.event.pull_request.labels.*.name, 'no automated review')
+        ) ||
+        (github.event.action == 'labeled' && github.event.label.name == 'no automated review')
+      )
     # `github.event_name` is a CONSTANT while this file has one trigger, and it
     # is here for the run this file does not produce. `pull_request` reads the
     # workflow from the PULL REQUEST'S OWN REF, so a PR that adds its own copy
@@ -190,6 +206,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
           TRIGGER_EVENT: ${{ github.event.action }}
+          OPT_OUT_ADDED: ${{ github.event.label.name == 'no automated review' }}
         run: |
           set -euo pipefail
 
@@ -198,7 +215,13 @@ jobs:
           [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]     || { echo "::error::bad base_sha: '$BASE_SHA'"; exit 1; }
           [[ "$BASE_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::bad base_ref: '$BASE_REF'"; exit 1; }
 
-          # `--arg review_label`, NOT `--arg label`: `label` is a jq KEYWORD
+          if [ "$OPT_OUT_ADDED" = "true" ]; then
+            TRIGGER_LABEL="$OPT_OUT_LABEL"
+          else
+            TRIGGER_LABEL="$REVIEW_LABEL"
+          fi
+
+          # `--arg trigger_label`, NOT `--arg label`: `label` is a jq KEYWORD
           # (`label $out | ...`), and jq 1.6 refuses `$label` at parse time
           # with "unexpected label, expecting IDENT". jq 1.7 accepts it, so
           # this runs on a 24.04 image and dies on a 22.04 one - and it dies
@@ -212,7 +235,7 @@ jobs:
             --arg base_ref "$BASE_REF" \
             --argjson is_fork "$IS_FORK" \
             --arg trigger_event "$TRIGGER_EVENT" \
-            --arg review_label "$REVIEW_LABEL" \
+            --arg trigger_label "$TRIGGER_LABEL" \
             '{
                pr_number: $pr,
                head_sha: $sha,
@@ -220,7 +243,7 @@ jobs:
                base_ref: $base_ref,
                is_fork: $is_fork,
                trigger_event: $trigger_event,
-               trigger_label: $review_label
+               trigger_label: $trigger_label
              }' > pr-review-request.json
 
           echo "Captured PR #${PR_NUM} @ ${HEAD_SHA} (base ${BASE_REF} @ ${BASE_SHA}, fork=${IS_FORK})"
