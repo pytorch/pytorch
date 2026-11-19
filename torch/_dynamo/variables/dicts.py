@@ -582,6 +582,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             and arg.is_python_constant()
             and (constant := arg.try_as_python_constant())[0]
         ):
+            if not arg.is_realized():
+                arg.realize()
             key_value = (
                 literal_key if literal_key is not NO_SUCH_SUBOBJ else constant[1]
             )

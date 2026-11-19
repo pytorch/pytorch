@@ -350,9 +350,14 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         is_constant, obj = self.obj.try_as_python_constant()
-        if not is_constant:
-            return super().tp_hash_impl(tx)
         try:
+            if not is_constant:
+                from .script_object import CustomClassVariable
+
+                receiver = self.obj.realize()
+                if not isinstance(receiver, CustomClassVariable):
+                    return super().tp_hash_impl(tx)
+                obj = receiver.as_python_constant()
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
             return hash(self._bind_python_constant(obj)), False

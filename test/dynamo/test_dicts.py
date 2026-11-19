@@ -540,6 +540,20 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, 1, mapping), fn(x, 1, mapping))
         self.assertEqual(counter.frame_count, 2)
 
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize("nested_graph_breaks", [False, True])
+    def test_input_dict_empty_tuple_key_guard(self, mapping_type, nested_graph_breaks):
+        def fn(x, mapping, key):
+            return x + (1 if key in mapping else 0)
+
+        x = torch.ones(1)
+        mapping = mapping_type()
+        mapping[(1,)] = 3
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            for key in ((), (1,), ()):
+                self.assertEqual(compiled(x, mapping, key), fn(x, mapping, key))
+
     @parametrize(
         "operation",
         ["getitem", "contains", "get", "setdefault", "pop"],
