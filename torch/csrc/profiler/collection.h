@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -452,12 +455,47 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         extra_fields_{std::move(extra_fields)} {}
 };
 
+// Stores each distinct op name once. A profiled step repeats a few names
+// across thousands of ops.
+class OpNames {
+ public:
+  // The returned pointer stays valid until `clear()`.
+  const std::string* intern(std::string_view name) {
+    auto it = index_.find(name);
+    if (it == index_.end()) [[unlikely]] {
+      const std::string& stored = names_.emplace_back(name);
+      it = index_.emplace(stored, &stored).first;
+    }
+    return it->second;
+  }
+
+  void clear() {
+    index_.clear();
+    names_.clear();
+  }
+
+ private:
+  // A deque never moves its elements, which `index_` and callers point into.
+  std::deque<std::string> names_;
+  ska::flat_hash_map<std::string_view, const std::string*> index_;
+};
+
 struct KinetoObserverContext : public at::ObserverContext {
   struct Event {
-    TorchOpBasicFields basic_fields_;
+    // The fields of TorchOpBasicFields, with the names held in OpNames.
+    int64_t sequence_number_;
+    uint64_t forward_tid_;
+    at::RecordScope scope_;
+    bool is_async_;
+    uint64_t record_function_id_;
+    int64_t debug_handle_;
+    const std::string* name_;
+    const std::string* overload_name_;
+
     c10::approx_time_t start_time_;
 
     // Set in the exit callback.
+    uint64_t end_tid_{0};
     c10::approx_time_t end_time_{
         std::numeric_limits<c10::approx_time_t>::min()};
 
@@ -619,6 +657,7 @@ class TORCH_API ThreadLocalSubqueue {
       std::pair<event_t*, uint64_t> emplace_back(Args&&... args);
       static uint64_t correlationID(const OpList::Iterator& e);
     } op_events_;
+    OpNames op_names_;
 
     // report_input_shapes
     InputOutputEncoder inputs_outputs_;

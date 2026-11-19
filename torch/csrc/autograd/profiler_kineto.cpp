@@ -439,8 +439,7 @@ void onFunctionExitImpl(
     state.recordQueue.getSubqueue()->disable_perf_profiler(
         *kineto_ctx_ptr->event_->counters_);
   }
-  kineto_ctx_ptr->event_->basic_fields_.end_tid_ =
-      at::RecordFunction::currentThreadId();
+  kineto_ctx_ptr->event_->end_tid_ = at::RecordFunction::currentThreadId();
   if (fn.isNcclMeta()) {
     auto& metadata = *kineto_ctx_ptr->event_->collective_meta_;
     torch::profiler::impl::SaveNcclMetaConfig nccl_meta_config{

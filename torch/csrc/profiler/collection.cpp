@@ -375,15 +375,14 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
       ? fn.overload_name()
       : "";
   auto [event, corr_id] = torch_ops_.op_events_.emplace_back(
-      torch::profiler::impl::TorchOpBasicFields{
-          fn.seqNr(),
-          fn.forwardThreadId(),
-          fn.scope(),
-          fn.isAsync(),
-          fn.handle(),
-          fn.debugHandle(),
-          fn.name(),
-          overload_name});
+      fn.seqNr(),
+      fn.forwardThreadId(),
+      fn.scope(),
+      fn.isAsync(),
+      fn.handle(),
+      fn.debugHandle(),
+      torch_ops_.op_names_.intern(fn.name()),
+      torch_ops_.op_names_.intern(overload_name));
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs(), config_.profile_memory);
     auto kwinputs = fn.kwinputs();
@@ -491,11 +490,11 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto it = op_events_.begin();
   for ([[maybe_unused]] const auto _ :
        c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
-    auto& first = it->basic_fields_;
-    auto& second = (++it)->basic_fields_;
+    auto& first = *it;
+    auto& second = *++it;
     if (first.scope_ == at::RecordScope::FUNCTION &&
         second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
-        first.name_.starts_with("autograd::engine::evaluate_function: ")) {
+        first.name_->starts_with("autograd::engine::evaluate_function: ")) {
       first.sequence_number_ = second.sequence_number_;
       first.forward_tid_ = second.forward_tid_;
     }
@@ -506,13 +505,6 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   // particular, Windows will add a "struct " prefix.
   const std::string accumulate_grad = "torch::autograd::AccumulateGrad";
   const std::string windows_pattern = std::string("struct ") + accumulate_grad;
-  for (auto& event : op_events_) {
-    auto& name = event.basic_fields_.name_;
-    auto position = name.find(windows_pattern);
-    if (position != std::string::npos) {
-      name.replace(position, windows_pattern.size(), accumulate_grad);
-    }
-  }
 
   auto input_decoder = inputs_outputs_.getInputDecoder();
 
@@ -522,8 +514,24 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto gpu_fallback = StealOrDefault(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
+    TorchOpBasicFields basic_fields{
+        event->sequence_number_,
+        event->forward_tid_,
+        event->scope_,
+        event->is_async_,
+        event->record_function_id_,
+        event->debug_handle_,
+        *event->name_,
+        *event->overload_name_,
+        event->end_tid_};
+    auto position = basic_fields.name_.find(windows_pattern);
+    if (position != std::string::npos) {
+      basic_fields.name_.replace(
+          position, windows_pattern.size(), accumulate_grad);
+    }
+
     ExtraFields<EventType::TorchOp> e{
-        std::move(event->basic_fields_),
+        std::move(basic_fields),
         ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
         time_converter(event->end_time_),
         input_decoder(),
@@ -542,6 +550,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   }
 
   op_events_.clear();
+  op_names_.clear();
   inputs_outputs_.clear();
 }
 
