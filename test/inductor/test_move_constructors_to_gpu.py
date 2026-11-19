@@ -138,6 +138,43 @@ class TestMoveConstructorsToGpu(TestCase):
         _, code = run_and_get_code(foo, inp)
         FileCheck().check_not("triton.jit").run(code[0])
 
+    def test_index_put_mask_cpu_scalar_not_moved(self):
+        # Eager index_put_ dispatches to masked_fill_ for a bool or uint8 mask
+        # and a cpu scalar value, so moving the value to the gpu would add a
+        # host-to-device sync (and, for uint8, change behavior: masked_fill_
+        # rejects it). The graph is built by hand rather than traced since
+        # eager rejects index_put_ with a uint8 mask and a cpu scalar.
+        from torch._inductor.fx_passes.post_grad import (
+            is_index_put_and_requires_h2d_sync_for_gpu_value,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        for dtype, expected in (
+            (torch.bool, True),
+            (torch.uint8, True),
+            (torch.int32, False),
+            (torch.long, False),
+        ):
+            graph = torch.fx.Graph()
+            args = [graph.placeholder(name) for name in ("x", "index", "value")]
+            with FakeTensorMode() as mode:
+                for arg, val in zip(
+                    args,
+                    (
+                        torch.zeros(4),
+                        torch.tensor([1, 0, 1, 0], dtype=dtype),
+                        torch.tensor(1.0),
+                    ),
+                ):
+                    arg.meta["val"] = mode.from_tensor(val)
+            x, index, value = args
+            node = graph.call_function(aten.index_put_.default, (x, [index], value))
+            self.assertEqual(
+                is_index_put_and_requires_h2d_sync_for_gpu_value(node),
+                expected,
+                msg=str(dtype),
+            )
+
     @requires_multigpu()
     @unittest.skip("https://github.com/pytorch/pytorch/issues/139520")
     def test_multi_gpu(self):
