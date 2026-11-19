@@ -3966,6 +3966,18 @@ def region_partway(model, x, log, note):
     return out * 2, total
 
 
+def region_sized(model, x):
+    out = model(x)
+    return out.sum(0) / x.shape[0], x.shape[0] * 2
+
+
+def region_branching(model, x):
+    out = model(x)
+    if x.shape[0] > 4:
+        out = out * 2
+    return out.sin()
+
+
 def region_clock(model, x):
     start = time.perf_counter_ns()
     out = model(x)
@@ -4145,21 +4157,19 @@ class TestVmRegions(TestCase):
         graphs = []
 
         def backend(graph, inputs):
-            graphs.append([tuple(i.shape) for i in inputs])
+            graphs.append([i.dtype for i in inputs])
             return graph
 
         compiled = torch.vm(
             region_chain, passes=with_graphs(backend, max_variants=3), fallback=False
         )
-        sizes = [2, 2, 2, 2, 3, 2, 3, 4, 5, 6, 5, 2]
-        for n in sizes:
-            x, y = torch.randn(n), torch.randn(n)
+        f32, f64, i64, i32 = torch.float32, torch.float64, torch.int64, torch.int32
+        for dtype in (f32, f32, f32, f32, f64, f32, f64, i64, i32, i64, i32, f32):
+            x, y = torch.ones(2, dtype=dtype), torch.full((2,), 3, dtype=dtype)
             self.assertEqual(compiled(x, y), region_chain(x, y), atol=0, rtol=0)
-        # One graph per shape, up to the limit; the shapes after that ran the
-        # instructions as they are.
-        self.assertEqual(graphs, [[(2,), (2,)], [(3,), (3,)], [(4,), (4,)]])
-        x = torch.randn(2, dtype=torch.float64)
-        self.assertEqual(compiled(x, x), region_chain(x, x), atol=0, rtol=0)
+        # One graph per kind of input, up to the limit; the kinds after that
+        # ran the instructions as they are.
+        self.assertEqual(graphs, [[f32, f32], [f64, f64], [i64, i64]])
         (region,) = self.compiled_regions(compiled)
         self.assertEqual(region["variants"], 3)
 
@@ -4874,6 +4884,48 @@ class TestVmRegions(TestCase):
         # What came before the call is still a graph.
         where = [r["where"] for r in self.compiled_regions(compiled)]
         self.assertTrue(any(w.startswith("region_partway") for w in where), where)
+
+    def test_size_that_varies_is_left_open(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.vm(
+            region_sized, passes=with_graphs(self.counting(graphs)), fallback=False
+        )
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 5, 6, 7, 1, 9, 4, 12, 1, 300):
+                x = torch.randn(n, 6)
+                expected, _ = region_sized(model, x)
+                mean, doubled = compiled(model, x)
+                self.assertEqual(mean, expected, atol=1e-6, rtol=0)
+                # Computed by the graph from the size, and a plain int again.
+                self.assertIs(type(doubled), int)
+                self.assertEqual(doubled, 2 * n)
+        # One graph for the size of the first calls, one for every size from
+        # 2 on, and one for a single row, which is not like the others.
+        self.assertEqual(len(graphs), 3)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 3)
+        (conditions,) = region["open"]
+        self.assertTrue(any(".size()[0]" in c for c in conditions), conditions)
+
+    def test_branch_on_a_size_is_a_condition_of_the_variant(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.vm(
+            region_branching, passes=with_graphs(self.counting(graphs)), fallback=False
+        )
+        with torch.no_grad():
+            for n in (2, 2, 2, 2, 3, 6, 8, 3, 4, 5, 2, 40):
+                x = torch.randn(n, 6)
+                expected = region_branching(model, x)
+                self.assertEqual(compiled(model, x), expected, atol=0, rtol=0)
+        # One for two rows; then one per way the branch goes.
+        self.assertEqual(len(graphs), 3)
+        (region,) = self.compiled_regions(compiled)
+        below, above = region["open"]
+        self.assertNotEqual(below, above)
 
     def test_strides_select_a_variant(self):
         compiled = torch.vm(

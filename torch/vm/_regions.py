@@ -67,8 +67,15 @@ and ``training`` flags) and the grad and autocast modes; a new combination is
 traced and compiled as another variant. What the trace read from anywhere
 else, such as an attribute of a module that is not a tensor or a global that
 is rebound later, is not checked.
+
+Sizes are the exception to "a new combination is another variant". When a
+region is called with tensors that differ from earlier ones in their sizes
+only, the next variant leaves those sizes open: its graph computes with them,
+and it holds for every call that satisfies what its trace needed to know
+about them (see "Sizes" below).
 """
 
+import ast
 import collections
 import contextlib
 import enum
@@ -168,6 +175,11 @@ _PLAIN = frozenset(
 )
 _TENSORS = frozenset({torch.Tensor, nn.Parameter})
 _TENSOR_TYPES = tuple(_TENSORS)
+# What a size is in a trace that leaves it open, and what is computed from it.
+_SYMS = frozenset({torch.SymInt, torch.SymFloat, torch.SymBool})
+# How many variants of a region may leave sizes open, for inputs that are
+# otherwise alike: one per path that the sizes choose.
+_MOST_OPEN = 4
 # How many times regions wait for one that was surveyed before them to be
 # compiled, before they go ahead without it.
 _MOST_WAITS = 256
@@ -321,6 +333,7 @@ def _receiver_problem(
     if (
         isinstance(receiver, (nn.Module, type, types.ModuleType, tuple, frozenset))
         or cls in _VALUES
+        or cls in _SYMS
     ):
         return None
     if cls in _CONTAINERS:
@@ -670,7 +683,7 @@ def _module_state(module: nn.Module) -> _ModuleState:
 class _Inputs:
     """What one call hands a region, as ``_describe`` finds it."""
 
-    __slots__ = ("flat", "held", "seen")
+    __slots__ = ("flat", "held", "offsets", "seen")
 
     def __init__(self) -> None:
         # The tensors, each object once.
@@ -678,6 +691,8 @@ class _Inputs:
         # The objects whose state a region may change: lists, dicts, sets,
         # cells, plain instances.
         self.held: list[Any] = []
+        # The storage offsets of the tensors (see ``_key``).
+        self.offsets = b""
         # Where a tensor is in ``flat``, or, counted down from -1, an object
         # in ``held``; by id.
         self.seen: dict[int, int] = {}
@@ -823,9 +838,11 @@ def _acceptable(obj: Any) -> str | None:
 def _key(parts: list[Any], inputs: _Inputs) -> Any:
     """The key of the variant for a call: what its inputs are apart from
     tensors, what kinds of tensors they hold, the numbers of the call (the
-    sizes and strides of the tensors), and the modes it runs in."""
+    sizes and strides of the tensors), and the modes it runs in. A variant
+    with open sizes is for many keys that differ in their numbers only
+    (``_Sizes``)."""
     try:
-        kinds, numbers, _ = _runtime.tensor_key(inputs.flat, [])
+        kinds, numbers, inputs.offsets = _runtime.tensor_key(inputs.flat, [])
     except TypeError:
         raise _Opaque(0, "a tensor without sizes of its own") from None
     return (tuple(parts), kinds, numbers, _modes())
@@ -1104,6 +1121,283 @@ def _modes() -> tuple[Any, ...]:
     )
 
 
+# ----------------------------------------------------------------------
+# Sizes
+# ----------------------------------------------------------------------
+#
+# A size is a value of the program like any other: the VM has it in a
+# register once the code reads it, and a region is handed it inside a
+# tensor. So a region does not get shapes of a special kind. One call's
+# worth of what a graph can depend on in them is a row of numbers
+# (``_key``): the sizes and strides of the tensors. The first variant for
+# some kind of inputs is for exactly its row. When a call
+# comes with other numbers in some places, those are the places the next
+# variant leaves open: its trace runs on symbols there, its graph computes
+# with them, and what the trace needed to know about them (a branch it took,
+# two sizes it found equal) is the condition under which the variant holds,
+# checked on the row of every call (``ShapeGuard``). Numbers the region
+# computes from sizes are results of its graph and come back as plain ints.
+
+
+class _Sizes:
+    """What a region knows about the numbers of inputs of one kind."""
+
+    __slots__ = ("fixed", "last", "open", "static", "varies")
+
+    def __init__(self, numbers: bytes) -> None:
+        # The numbers of the call a variant was last made for.
+        self.last = numbers
+        # The places that have not held the same number every time, and of
+        # those the ones a trace needed to be the number they were (it
+        # looped over one, say): those are not left open again.
+        self.varies: set[int] = set()
+        self.fixed: set[int] = set()
+        # The variants that leave numbers open, newest last.
+        self.open: list[_Variant] = []
+        # No trace with open numbers worked: every variant is for its row.
+        self.static = False
+
+
+def _kind(key: Any) -> Any:
+    """The key of a variant without its numbers."""
+    return (key[0], key[1], key[3])
+
+
+def _slots(kinds: bytes) -> list[tuple[str, int, int]]:
+    """What each number of a call is: ("size" or "stride", tensor,
+    dimension)."""
+    slots: list[tuple[str, int, int]] = []
+    fields = memoryview(kinds).cast("i")
+    for tensor in range(len(fields) // 6):
+        rank, strided = fields[tensor * 6], fields[tensor * 6 + 3] & 2
+        slots.extend(("size", tensor, dim) for dim in range(rank))
+        if strided:
+            slots.extend(("stride", tensor, dim) for dim in range(rank))
+    return slots
+
+
+def _differing(a: bytes, b: bytes) -> set[int]:
+    if a == b:
+        return set()
+    x, y = memoryview(a).cast("q"), memoryview(b).cast("q")
+    return {i for i in range(min(len(x), len(y))) if x[i] != y[i]}
+
+
+class _Untranslated(Exception):
+    pass
+
+
+_COMPARISONS: dict[type, str] = {
+    ast.Eq: "eq",
+    ast.NotEq: "ne",
+    ast.Lt: "lt",
+    ast.LtE: "le",
+    ast.Gt: "gt",
+    ast.GtE: "ge",
+}
+_ARITHMETIC: dict[type, str] = {
+    ast.Add: "add",
+    ast.Sub: "sub",
+    ast.Mult: "mul",
+    ast.FloorDiv: "floordiv",
+    ast.Mod: "mod",
+}
+_EXTREMES = {"sym_max": "max", "sym_min": "min", "max": "max", "min": "min"}
+
+
+def _named(node: ast.AST) -> str | None:
+    # L['t3']: how the conditions of a ShapeEnv name what a trace was given.
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "L"
+        and isinstance(node.slice, ast.Constant)
+        and isinstance(node.slice.value, str)
+    ):
+        return node.slice.value
+    return None
+
+
+def _number_of(node: ast.AST) -> tuple[str, int, int] | None:
+    """Which number of a call an expression of a condition stands for."""
+    if _named(node) is not None:
+        return None
+    call = node.value if isinstance(node, ast.Subscript) else node
+    if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
+        return None
+    name = _named(call.func.value)
+    if name is None or name[0] != "t" or call.args:
+        return None
+    what = call.func.attr
+    if isinstance(node, ast.Subscript):
+        if what in ("size", "stride") and isinstance(node.slice, ast.Constant):
+            dim: Any = node.slice.value
+            return (what, int(name[1:]), int(dim))
+        return None
+    return ("offset", int(name[1:]), 0) if what == "storage_offset" else None
+
+
+def _condition(node: ast.AST, slot: Callable[[tuple[str, int, int]], int]) -> Any:
+    """A condition of a ShapeEnv, which comes as Python source, as what
+    ``ShapeGuard`` evaluates."""
+    number = _number_of(node)
+    if number is not None:
+        return ("slot", slot(number))
+    if isinstance(node, ast.Constant):
+        value: Any = node.value
+        if type(value) in (int, bool):
+            return ("const", int(value))
+    elif isinstance(node, ast.BoolOp):
+        parts = [_condition(value, slot) for value in node.values]
+        return ("and" if isinstance(node.op, ast.And) else "or", parts)
+    elif isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, (ast.Not, ast.USub)):
+            name = "not" if isinstance(node.op, ast.Not) else "neg"
+            return (name, _condition(node.operand, slot))
+    elif isinstance(node, ast.BinOp):
+        if type(node.op) in _ARITHMETIC:
+            left, right = _condition(node.left, slot), _condition(node.right, slot)
+            return (_ARITHMETIC[type(node.op)], left, right)
+    elif isinstance(node, ast.Compare):
+        if all(type(op) in _COMPARISONS for op in node.ops):
+            operands = [_condition(n, slot) for n in (node.left, *node.comparators)]
+            links = [
+                (_COMPARISONS[type(op)], operands[i], operands[i + 1])
+                for i, op in enumerate(node.ops)
+            ]
+            return links[0] if len(links) == 1 else ("and", links)
+    elif isinstance(node, ast.Call) and not node.keywords and len(node.args) >= 2:
+        callee = node.func
+        name = callee.attr if isinstance(callee, ast.Attribute) else None
+        name = callee.id if isinstance(callee, ast.Name) else name
+        if name in _EXTREMES:
+            result = _condition(node.args[0], slot)
+            for arg in node.args[1:]:
+                result = (_EXTREMES[name], result, _condition(arg, slot))
+            return result
+    raise _Untranslated
+
+
+def _is_open(value: Any) -> bool:
+    return type(value) is torch.SymInt and value.node.maybe_as_int() is None
+
+
+class _Open:
+    """The inputs of a trace that leaves numbers of a call open.
+
+    The tensors of the trace have symbols where sizes are open, all of one
+    ``ShapeEnv``. It does the algebra while the trace and the backend run;
+    what it knows in the end is turned into the condition of the variant
+    (``guard``).
+    """
+
+    def __init__(self, key: Any, inputs: _Inputs, opened: set[int]) -> None:
+        from torch._dynamo.source import LocalSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        self.slots = _slots(key[1])
+        self.opened = opened
+        self.env = ShapeEnv(duck_shape=False)
+        mode = FakeTensorMode(shape_env=self.env)
+        dims: dict[int, set[int]] = {}
+        for slot in sorted(opened):
+            _, which, dim = self.slots[slot]
+            dims.setdefault(which, set()).add(dim)
+        static, dynamic = DimDynamic.STATIC, DimDynamic.DYNAMIC
+        self.fakes: list[torch.Tensor] = []
+        self.sources: list[Any] = []
+        for t, tensor in enumerate(inputs.flat):
+            source = LocalSource(f"t{t}")
+            mine = dims.get(t, ())
+            base = None
+            if tensor._is_view() and tensor._base is not None:
+                # What it is a view of is no input of the graph.
+                base = StatelessSymbolicContext(
+                    dynamic_sizes=[static] * tensor._base.ndim
+                )
+            context = StatelessSymbolicContext(
+                dynamic_sizes=[
+                    dynamic if d in mine else static for d in range(tensor.ndim)
+                ],
+                view_base_context=base,
+            )
+            fake = mode.from_tensor(tensor, source=source, symbolic_context=context)
+            self.fakes.append(fake)
+            self.sources.append(source)
+
+    def example(self) -> list[Any]:
+        return list(self.fakes)
+
+    def left(self) -> set[int]:
+        """The numbers that are open by now: the trace, and then the
+        backend, may have needed some to be what they were."""
+        index = {slot: i for i, slot in enumerate(self.slots)}
+        left: set[int] = set()
+        for t, fake in enumerate(self.fakes):
+            for d, size in enumerate(fake.shape):
+                if _is_open(size):
+                    left.add(index[("size", t, d)])
+            if ("stride", t, 0) in index:
+                for d, stride in enumerate(fake.stride()):
+                    if _is_open(stride):
+                        left.add(index[("stride", t, d)])
+        return left
+
+    def conditions(self) -> list[str]:
+        """What the ShapeEnv knows by now, as Python source over the inputs."""
+        helpers = self.env.produce_guards_verbose(
+            self.example(), self.sources, source_ref=lambda source: source.name
+        )
+        return list(dict.fromkeys(helpers[0].exprs))
+
+    def guard(
+        self, numbers: bytes, offsets: bytes, texts: list[str]
+    ) -> tuple[Any, list[str], set[int]]:
+        """The condition of a variant made from this trace, for calls whose
+        key differs from the one it was made for in the numbers only: what
+        to check, the same as text, and the places that are open."""
+        index = {slot: i for i, slot in enumerate(self.slots)}
+        count = len(self.slots)
+
+        def slot(number: tuple[str, int, int]) -> int:
+            if number[0] == "offset":
+                return count + number[1]
+            return index[number]
+
+        left = self.left()
+        conditions: list[Any] = []
+        kept: list[str] = []
+        made_on = memoryview(offsets).cast("q")
+        for text in texts:
+            tree = ast.parse(text, mode="eval").body
+            try:
+                conditions.append(_condition(tree, slot))
+                kept.append(text)
+                continue
+            except (_Untranslated, LookupError, ValueError):
+                pass
+            # Not something that is checked on numbers alone: it holds
+            # where the numbers it speaks of are what they were.
+            spoken = {_number_of(node) for node in ast.walk(tree)} - {None}
+            if not spoken:
+                raise _Failed(None, "a condition on sizes that cannot be checked")
+            for number in spoken:
+                if number[0] == "offset":  # type: ignore[index]
+                    at = number[1]  # type: ignore[index]
+                    conditions.append(
+                        ("eq", ("slot", count + at), ("const", made_on[at]))
+                    )
+                else:
+                    left.discard(index[number])  # type: ignore[index]
+        shape = _runtime.ShapeGuard(numbers, offsets, sorted(left), conditions)
+        return shape, kept, left
+
+
 def _trace(fn: Callable[..., Any], example: list[Any]) -> Any:
     """The graph of what ``fn`` does to tensors like ``example``."""
     from torch.fx.experimental.proxy_tensor import make_fx
@@ -1322,7 +1616,7 @@ class _Recipes:
         # that stand for its inputs: the call has the real ones.
         self.given = given
         self.inputs = inputs
-        self.results: list[torch.Tensor] = []
+        self.results: list[Any] = []
         self.memo: dict[int, list[Any]] = {}
         self.alive: list[Any] = []
         self.young: set[int] | None = None
@@ -1332,6 +1626,17 @@ class _Recipes:
         if self.young is None:
             self.young = {id(o) for o in gc.get_objects(generation=0)}
         return id(obj) in self.young
+
+    def number(self, obj: Any) -> list[Any]:
+        """A value computed from open sizes. An integer is a result of the
+        graph, which gives it back as a plain one; anything else is what it
+        is for the sizes of the trace, which the variant is then held to."""
+        if type(obj) is torch.SymInt:
+            if obj.node.maybe_as_int() is not None:
+                return ["same", False, int(obj)]
+            self.results.append(obj)
+            return ["result", True, len(self.results) - 1]
+        return ["same", False, bool(obj) if type(obj) is torch.SymBool else float(obj)]
 
     def of(self, obj: Any, depth: int = 0) -> list[Any]:
         known = self.memo.get(id(obj))
@@ -1349,6 +1654,13 @@ class _Recipes:
         elif is_fake_tensor(obj):
             recipe = ["result", True, len(self.results)]
             self.results.append(obj)
+        elif cls in _SYMS:
+            recipe = self.number(obj)
+        elif (cls is torch.Size or cls is slice) and _holds_size(obj):
+            # A plain value that is made of open sizes: made again from them.
+            parts = list(obj) if cls is torch.Size else [obj.start, obj.stop, obj.step]
+            recipe = ["sequence", False, torch.Size if cls is torch.Size else _slice]
+            children = parts
         elif _static_output(obj, self.reachable):
             recipe = ["same", False, obj]
         elif cls in (tuple, list, set, frozenset):
@@ -1382,6 +1694,15 @@ class _Recipes:
                 # is made on every call.
                 recipe[:] = ["same", False, obj]
         return recipe
+
+
+def _slice(parts: list[Any]) -> slice:
+    return slice(*parts)
+
+
+def _holds_size(obj: Any) -> bool:
+    parts = obj if type(obj) is torch.Size else (obj.start, obj.stop, obj.step)
+    return any(type(part) in _SYMS for part in parts)
 
 
 def _build(
@@ -1420,6 +1741,7 @@ class _Variant:
 
     __slots__ = (
         "compiled",
+        "conditions",
         "direct",
         "effects",
         "grows",
@@ -1429,6 +1751,7 @@ class _Variant:
         "ops",
         "proven",
         "recipes",
+        "shape",
     )
 
     def __init__(
@@ -1453,6 +1776,10 @@ class _Variant:
         # one of them with other items, keys or attributes than it had.
         self.effects: list[Any] = []
         self.grows = False
+        # For a variant that leaves sizes open: which calls it holds for
+        # (a ``ShapeGuard``), and the same as text.
+        self.shape: Any = None
+        self.conditions: list[str] = []
 
     def run(self, inputs: _Inputs) -> Any:
         flat, held = inputs.flat, inputs.held
@@ -1493,6 +1820,8 @@ class _Region:
         self.inputs, self.outputs = plan.replay.io(lo, hi)
         # None: these inputs run the instructions as they are.
         self.variants: dict[Any, _Variant | None] = {}
+        # By the kind of the inputs (``_kind``): what their numbers did.
+        self.sizes: dict[Any, _Sizes] = {}
         self.hot = False
         # Whether the instructions were checked on real values.
         self.surveyed = False
@@ -1511,12 +1840,26 @@ class _Region:
             return self.decline(args)
         variant = self.variants.get(key, self)
         if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
+            variant = self.widened(key, inputs)
+            if variant is not None:
+                # Made for other numbers than these: what the backend made
+                # of it may still fail on them.
+                return self.first_run(key, variant, args, inputs)
             variant = self.specialize(key, args, inputs)
         if variant is None:
             return self.decline(args)
         if variant.proven:  # type: ignore[union-attr]
             return variant.run(inputs)  # type: ignore[union-attr]
         return self.first_run(key, variant, args, inputs)  # type: ignore[arg-type]
+
+    def widened(self, key: Any, inputs: _Inputs) -> _Variant | None:
+        """A variant that leaves open what this call has other numbers for."""
+        known = self.sizes.get((key[0], key[1], key[3]))
+        if known is not None:
+            for variant in reversed(known.open):
+                if variant.shape.holds(key[2], inputs.offsets) and variant.holds():
+                    return variant
+        return None
 
     def install(self, region: Any) -> bool:
         """Puts the region into the block a pass is working on."""
@@ -1537,15 +1880,19 @@ class _Region:
     def first_run(
         self, key: Any, variant: "_Variant", args: tuple[Any, ...], inputs: _Inputs
     ) -> tuple[Any, ...]:
-        """Runs a variant that has not run yet. What a backend made can fail
-        where the instructions would not (or would with another error): then
-        they run instead, this time and from now on."""
+        """Runs a variant on numbers it has not run on yet. What a backend
+        made can fail where the instructions would not (or would with another
+        error): then they run instead, this time and from now on."""
         generator = torch.get_rng_state()
         try:
             outputs = variant.run(inputs)
         except Exception as e:
             torch.set_rng_state(generator)
             self.variants[key] = None
+            known = self.sizes.get(_kind(key))
+            if known is not None and variant in known.open:
+                known.open.remove(variant)
+                known.static = True
             if not any(self.variants.values()):
                 self.hot = False
                 reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
@@ -1693,7 +2040,55 @@ class _Region:
         self.variants[key] = variant
         return variant
 
+    def opening(self, key: Any, inputs: _Inputs) -> set[int]:
+        """Which numbers of a call to leave open in the variant made for it:
+        the ones that have not been the same every time a variant was made
+        for inputs of its kind."""
+        kind = _kind(key)
+        known = self.sizes.get(kind)
+        if known is None:
+            self.sizes[kind] = _Sizes(key[2])
+            return set()
+        known.varies |= _differing(known.last, key[2])
+        known.last = key[2]
+        if known.static or len(known.open) >= _MOST_OPEN:
+            return set()
+        slots = _slots(key[1])
+        now = memoryview(key[2]).cast("q")
+        # A size of 0 or 1 is not like the others (it broadcasts): a tensor
+        # that has one gets a variant of its own.
+        return {
+            i
+            for i in known.varies - known.fixed
+            if slots[i][0] == "size" and now[i] > 1
+        }
+
+    def open_for(self, key: Any, inputs: _Inputs) -> _Open | None:
+        """The inputs for a trace of this call that leaves numbers open, or
+        None if it is to be traced on the numbers it has."""
+        opened = self.opening(key, inputs)
+        if opened:
+            try:
+                return _Open(key, inputs, opened)
+            except Exception:
+                self.sizes[_kind(key)].static = True
+        return None
+
     def compile(self, key: Any, args: tuple[Any, ...], inputs: _Inputs) -> _Variant:
+        while True:
+            opening = self.open_for(key, inputs)
+            if opening is None:
+                return self.build(key, args, inputs, None)
+            known = self.sizes[_kind(key)]
+            try:
+                return self.build(key, args, inputs, opening)
+            except _Failed:
+                # What a trace on symbols cannot do, one on numbers may.
+                known.static = True
+
+    def build(
+        self, key: Any, args: tuple[Any, ...], inputs: _Inputs, opening: _Open | None
+    ) -> _Variant:
         start = time.perf_counter()
         flat, held = inputs.flat, inputs.held
         modules: dict[int, nn.Module] = {}
@@ -1742,20 +2137,45 @@ class _Region:
             found["effects"] = _effects_of(copies, recipes, stored)
             return tuple(recipes.results)
 
-        graph = _trace(region, list(flat))
+        graph = _trace(region, opening.example() if opening else list(flat))
         ops = self.ops_of(graph)
-        variant = _Variant(self.finish(graph, inputs, key), found["recipes"], ops, keep)
+        compiled, conditions = self.finish(graph, inputs, key, opening)
+        variant = _Variant(compiled, found["recipes"], ops, keep)
         variant.affects(*found["effects"])
+        if opening is not None:
+            self.leave_open(variant, key, inputs, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return variant
+
+    def leave_open(
+        self, variant: _Variant, key: Any, inputs: _Inputs, opening: _Open, texts: Any
+    ) -> None:
+        """Makes a variant one for every call that differs from the one it
+        was traced on in its open numbers, as far as the trace allows."""
+        shape, kept, left = opening.guard(key[2], inputs.offsets, texts)
+        variant.shape, variant.conditions = shape, kept
+        known = self.sizes.get(_kind(key))
+        if known is None:
+            known = self.sizes[_kind(key)] = _Sizes(key[2])
+        # What the trace turned into the number it was is not opened again.
+        known.fixed |= opening.opened - left
+        if left:
+            known.open.append(variant)
 
     @staticmethod
     def ops_of(graph: torch.fx.GraphModule) -> int:
         return sum(1 for node in graph.graph.nodes if node.op == "call_function")
 
-    def finish(self, graph: torch.fx.GraphModule, inputs: _Inputs, key: Any) -> Any:
-        """Hands a traced graph to the backend, unless it has seen it."""
+    def finish(
+        self,
+        graph: torch.fx.GraphModule,
+        inputs: _Inputs,
+        key: Any,
+        opening: _Open | None,
+    ) -> tuple[Any, list[str] | None]:
+        """Hands a traced graph to the backend, unless it has seen it. Also
+        returns, for a graph with open sizes, the conditions it holds under."""
         options = self.plan.options
         ops = self.ops_of(graph)
         if ops < options.min_ops:
@@ -1766,18 +2186,26 @@ class _Region:
         # tensor of its own is not looked up, the code does not say which.
         same = None
         if not any(node.op == "get_attr" for node in graph.graph.nodes):
-            same = (graph.code, key[1], key[2], key[3])
-        compiled = options.compiled.get(same)
-        if compiled is None:
+            opened = tuple(sorted(opening.opened)) if opening is not None else None
+            same = (graph.code, key[1], key[2], key[3], opened)
+        # What this trace needed of the sizes, before the backend adds to it.
+        own = opening.conditions() if opening is not None else None
+        made = options.compiled.get(same)
+        if made is None:
+            example = opening.example() if opening is not None else list(inputs.flat)
             try:
-                compiled = options.backend(graph, list(inputs.flat))
+                compiled = options.backend(graph, example)
             except Exception as e:
                 reason = f"{type(e).__name__}: {e}".split("\n")[0][:200]
                 raise _Failed(None, f"the backend failed: {reason}") from None
+            made = (compiled, opening.conditions() if opening is not None else None)
             if same is not None:
-                options.compiled[same] = compiled
+                options.compiled[same] = made
             self.compiles += 1
-        return compiled
+        if own is None:
+            return made[0], None
+        theirs: list[str] = made[1] or []
+        return made[0], list(dict.fromkeys([*own, *theirs]))
 
     def definition(self, value: int) -> int | None:
         """The instruction of the region that defines a value."""
@@ -1960,8 +2388,10 @@ class _Walk:
         if kind == "jump":
             successor = targets[0]
         elif kind == "br":
-            if type(env.get(value, self)) not in _VALUES:
+            condition = type(env.get(value, self))
+            if condition not in _VALUES and condition not in _SYMS:
                 return False
+            # Of an open size, this is what the variant is then held to.
             successor = targets[0] if env[value] else targets[1]
         elif kind == "br_null":
             successor = targets[0] if value not in env else targets[1]
@@ -2074,16 +2504,25 @@ class _Path(_Region):
             if arg is not undefined and self.inputs[p] not in refused
         ]
         limit: int | None = None
-        for _ in range(8):
+        for _ in range(12):
             inputs = _Inputs()
             key = self.key(args, inputs, positions)
+            opening = self.open_for(key, inputs)
             try:
-                graph, found, keep = self.trace(args, inputs, positions, refused, limit)
+                graph, found, keep = self.trace(
+                    args, inputs, positions, refused, limit, opening
+                )
             except _Retry as again:
                 limit = again.limit if again.limit is not None else limit
                 positions = (
                     again.positions if again.positions is not None else positions
                 )
+                continue
+            except _Failed:
+                if opening is None:
+                    raise
+                # What a trace on symbols cannot do, one on numbers may.
+                self.sizes[_kind(key)].static = True
                 continue
             # Keyed on what some path looked at, and on nothing else.
             wanted = sorted(set(found["used"]) | set(self.positions or ()))
@@ -2104,14 +2543,18 @@ class _Path(_Region):
         if tuple(positions) != self.positions:
             self.positions = tuple(positions)
             self.variants.clear()
-        key = self.key(args, _Inputs())
-        variant = _Variant(
-            self.finish(graph, inputs, key), found["recipes"], self.ops_of(graph), keep
-        )
+            self.sizes.clear()
+        final = _Inputs()
+        key = self.key(args, final)
+        self.sizes.setdefault(_kind(key), _Sizes(key[2]))
+        compiled, conditions = self.finish(graph, inputs, key, opening)
+        variant = _Variant(compiled, found["recipes"], self.ops_of(graph), keep)
         variant.direct = False
         variant.leap = found["leap"]
         variant.guards = found["guards"]
         variant.affects(*found["effects"])
+        if opening is not None:
+            self.leave_open(variant, key, final, opening, conditions)
         self.seconds += time.perf_counter() - start
         _runtime.plan_changed()
         return key, variant
@@ -2123,6 +2566,7 @@ class _Path(_Region):
         positions: list[int],
         refused: set[int],
         limit: int | None,
+        opening: _Open | None,
     ) -> tuple[Any, dict[str, Any], list[Any]]:
         plan = self.plan
         flat, held = inputs.flat, inputs.held
@@ -2201,7 +2645,7 @@ class _Path(_Region):
             ]
             return tuple(recipes.results)
 
-        graph = _trace(path, list(flat))
+        graph = _trace(path, opening.example() if opening else list(flat))
         return graph, found, keep
 
 
@@ -2332,7 +2776,7 @@ class Regions:
         self.plans: list[_Plan] = []
         # What the backend made of each graph, by the code of the graph and
         # what its inputs are like.
-        self.compiled: dict[Any, Callable[..., Any]] = {}
+        self.compiled: dict[Any, Any] = {}
         # Per function: the regions that were surveyed and are compiled at
         # their next call, in the order they were surveyed, and how often
         # another region waited for each.
@@ -2398,6 +2842,13 @@ class Regions:
                         "ends": sorted({v.leap[:2] for v in variants if v.leap}),
                         "ops": max((v.ops for v in variants), default=0),
                         "seconds": part.seconds,
+                        # Per variant that leaves sizes open: what it needs
+                        # of them.
+                        "open": [
+                            v.conditions
+                            for known in part.sizes.values()
+                            for v in known.open
+                        ],
                     }
                 )
             for index, reason in plan.bad.items():
