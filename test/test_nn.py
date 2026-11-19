@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
+    MI300_ARCH, MI350_ARCH, runOnRocmArch, \
     TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
@@ -9648,27 +9649,27 @@ class TestNNDeviceType(NNTestCase):
     # scales None => size-based scale. Ratio is 4 * o_numel / i_numel.
     @parametrize_test("input_hw, output_hw, scales, channels", [
         subtest(((6, 8), (24, 32), (None, None), 16), name="upsample"),  # ratio 64
-        # 5.06: scatter on gfx950 (cut 6), gather on gfx942 (4) and gfx1250 (2).
+        # 5.06: on ROCm channels_last, scatter on gfx950 (cut 6), gather on
+        # gfx1250 (2) and for fp16 on gfx942 (4; bf16/fp32 cut is 16).
         subtest(((8, 8), (9, 9), (None, None), 16), name="near_cut"),
         subtest(((24, 32), (12, 16), (None, None), 16), name="downsample"),  # ratio 1.0
         subtest(((13, 11), (7, 5), (None, None), 16), name="mild_downsample"),  # ratio 0.98
         subtest(((9, 10), (9, 31), (None, None), 16), name="anisotropic"),  # ratio 12.4
         # scales are forward scale_factors; 2.0 matches the 8->16 size-based scale.
         subtest(((8, 8), (16, 16), (2.0, 2.0), 16), name="explicit_scales"),  # ratio 16
-        # C=6 is not a multiple of the fp16/fp32 vector width, so the gather
-        # runs with vec_size 1.
+        # C=6 is not a multiple of the fp16, bf16 or fp32 vector width, so where
+        # the NHWC gather runs it uses vec_size 1 for those dtypes (double has
+        # width 2 and stays vectorized).
         subtest(((6, 8), (24, 32), (None, None), 6), name="odd_channels"),
-        # ratio 4096, above the bf16/fp32 cap: those dtypes scatter, fp16 gathers.
-        subtest(((2, 2), (64, 64), (None, None), 16), name="high_ratio"),
     ])
     def test_upsamplingBilinear2d_backward_many_channels(
         self, device, dtype, memory_format, align_corners, input_hw, output_hw, scales, channels
     ):
-        # channels >= 4 so channels_last takes the NHWC backward. Cuts are per
-        # architecture (gfx950 6, gfx942 4, gfx1250 2). bf16, fp32 and double
-        # also fall back to scatter above the ratio cap; fp16 does not.
-        # NaN-prefilled grad_input checks every element is written (gather) or
-        # correctly zeroed then scattered.
+        # channels >= 4 so channels_last takes the NHWC backward. On ROCm
+        # gfx942/gfx950/gfx1250 that is the NHWC gather above a per-arch,
+        # per-dtype ratio cut and the atomic scatter below it; CUDA and other
+        # ROCm archs always scatter. NaN-prefilled grad_input checks every
+        # element is written (gather) or correctly zeroed then scattered.
         n, c = 2, channels
         input_size = [n, c, *input_hw]
         output_size = list(output_hw)
@@ -9690,16 +9691,37 @@ class TestNNDeviceType(NNTestCase):
         ref = torch.ops.aten.upsample_bilinear2d_backward(
             go.cpu().double(), output_size, input_size, align_corners, scales_h, scales_w,
         ).to(dtype=dtype)
-        # high_ratio is above the bf16/fp32 cap, so those dtypes take the stock
-        # NHWC atomic scatter. At ratio 4096 that scatter does not match the
-        # fp64 reference within the tolerances that cover ratios up to 64.
-        if input_hw == (2, 2) and output_hw == (64, 64) and dtype in (
-            torch.bfloat16, torch.float32,
-        ):
-            atol = 8.0 if dtype is torch.bfloat16 else 2e-4
-            self.assertEqual(gi, ref, atol=atol, rtol=0)
-        else:
-            self.assertEqual(gi, ref)
+        self.assertEqual(gi, ref)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH + MI350_ARCH + ("gfx1250",))
+    @dtypes(torch.half)
+    @toleranceOverride({torch.half: tol(atol=1e-2, rtol=1e-2)})
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_backward_nhwc_gather_high_ratio(self, device, dtype, align_corners):
+        # 2x2 -> 64x64 is 4096 contributions per grad_input address. fp16 has
+        # no upper ratio cap, so on these archs channels_last takes the NHWC
+        # gather with a 4096-element window per thread and accumulates in fp32.
+        # The fp16 atomic scatter used elsewhere does not meet this tolerance.
+        n, c = 2, 16
+        input_size = [n, c, 2, 2]
+        output_size = [64, 64]
+        go = make_tensor((n, c, *output_size), device=device, dtype=dtype, low=-1, high=1)
+        go = go.contiguous(memory_format=torch.channels_last)
+        gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+        gi = gi.contiguous(memory_format=torch.channels_last)
+
+        torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+            go, output_size, input_size, align_corners, None, None, grad_input=gi,
+        )
+
+        self.assertTrue(gi.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(gi.isnan().any())
+        ref = torch.ops.aten.upsample_bilinear2d_backward(
+            go.cpu().double(), output_size, input_size, align_corners, None, None,
+        ).to(dtype=dtype)
+        self.assertEqual(gi, ref)
 
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
