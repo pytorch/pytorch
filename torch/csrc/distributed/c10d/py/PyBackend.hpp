@@ -600,7 +600,9 @@ class PyBackend : public Backend {
         void, Backend, "unregister_abort_hook", unregisterAbortHook, hook_id);
   }
 
- private:
+  // Casts a Python backend to C++ and keeps the Python object alive while C++
+  // holds a reference, so a Python subclass's overrides outlive its last
+  // Python reference. Requires the GIL.
   static c10::intrusive_ptr<Backend> initSlotAndCast(py::object o) {
     // None (e.g. split() on non-members) maps to nullptr.
     if (o.is_none()) {
@@ -613,6 +615,7 @@ class PyBackend : public Backend {
     return backend;
   }
 
+ private:
   // Returns the value of the Python subclass's override of the readonly
   // property `name`, or std::nullopt if it doesn't override it. get_override
   // can't see properties (or plain class attributes), so compare the attribute
