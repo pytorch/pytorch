@@ -2923,6 +2923,17 @@ def frame_case_name(f, args):
     return f"{f.__name__}_{args[-1] if type(args[-1]) in (bool, int) else ''}"
 
 
+def frame_reads_amid_tensor_work(x):
+    y = x * 2 + 1
+    y = y * 2 + 1
+    y = y * 2 + 1
+    frame = sys._getframe()
+    here = (globals() is frame.f_globals, frame.f_code.co_name, frame.f_lineno)
+    z = y * 2 + 1
+    z = z * 2 + 1
+    return z * 3, here
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmFrames(TestCase):
     """A compiled function runs under a frame of the interpreter, with its locals in registers."""
@@ -4348,6 +4359,18 @@ class TestVmRegions(TestCase):
             for r in torch.vm.regions(fn)
             if r["state"] == "vm" and r["where"].startswith(where)
         ]
+
+    def test_frame_readers_amid_tensor_work_find_their_function(self):
+        # The instructions of a region run from frames of the region's own
+        # until its graph is made: what they call is called by the function.
+        graphs = lambda graph, example: graph  # noqa: E731
+        fn = frame_reads_amid_tensor_work
+        compiled = torch.vm(fn, passes=with_graphs(graphs), fallback=False)
+        x = torch.ones(3)
+        for _ in range(8):
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x)[1][:2], (True, fn.__name__))
+        self.assertEqual(len(self.compiled_regions(compiled)), 2)
 
     def test_module_call_is_one_graph(self):
         torch.manual_seed(0)

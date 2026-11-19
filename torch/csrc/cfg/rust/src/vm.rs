@@ -806,6 +806,10 @@ thread_local! {
     /// the functions it calls are then left to the interpreter, whose calls
     /// the tracer sees.
     static REPLAY_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The frame of the function that is calling a region (`Op::CallObject`,
+    /// `Op::Leap`): what the instructions of the region run under when the
+    /// region replays them (see `Compiled::replay`).
+    static REGION_FRAME: std::cell::Cell<Frame> = const { std::cell::Cell::new(Frame::NONE) };
     /// How many blocks are running in the profiling tier on this thread, one
     /// inside the other.
     static PROFILING_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -1824,12 +1828,23 @@ impl Compiled {
         if traced {
             REPLAY_DEPTH.with(|d| d.set(d.get() + 1));
         }
+        // The instructions run as they would in the function: called by its
+        // frame, not by the frames of whatever asked for the replay, so that
+        // what looks at its caller (`globals`, `sys._getframe`, a warning)
+        // finds the function, at the line of the instruction.
+        let frame = REGION_FRAME.with(|f| f.get());
+        let swap = if frame.ptr.is_null() { None } else { capi::api().and_then(|api| api.frame_swap) };
+        let outer = swap.map(|swap| swap(frame.ptr));
+        let origin = insts.get(lo).map_or(0, |inst| inst.bc >> ORIGIN_SHIFT);
         let mut failed = None;
         for (i, inst) in insts.iter().enumerate().take(hi).skip(lo) {
             if !(inst.op.is_replayable() || (steppable && inst.op.is_steppable())) {
                 set_error(ffi::PyExc_RuntimeError, "the instruction cannot be replayed".to_string());
                 failed = Some(i);
                 break;
+            }
+            if outer.is_some() && inst.bc >> ORIGIN_SHIFT == origin {
+                frame.at(inst.bc & OFFSET_MASK);
             }
             match self.exec_op(&mut regs, &inst.op) {
                 Ok(obj) => {
@@ -1847,6 +1862,9 @@ impl Compiled {
                     break;
                 }
             }
+        }
+        if let (Some(swap), Some(outer)) = (swap, outer) {
+            swap(outer);
         }
         if traced {
             REPLAY_DEPTH.with(|d| d.set(d.get() - 1));
@@ -3565,8 +3583,12 @@ impl Compiled {
                                 }
                             }
                             Op::Leap(callee, args) => {
-                                frames.top().at(inst.bc & OFFSET_MASK);
-                                match self.leap(regs, callee.as_ptr(), args) {
+                                let frame = frames.top();
+                                frame.at(inst.bc & OFFSET_MASK);
+                                let outer = REGION_FRAME.with(|f| f.replace(frame));
+                                let target = self.leap(regs, callee.as_ptr(), args);
+                                REGION_FRAME.with(|f| f.set(outer));
+                                match target {
                                     Ok(None) => Ok(null_mut()),
                                     Ok(target) => {
                                         leap = target;
@@ -3574,6 +3596,14 @@ impl Compiled {
                                     }
                                     Err(()) => Err(()),
                                 }
+                            }
+                            Op::CallObject(..) => {
+                                let frame = frames.top();
+                                frame.at(inst.bc & OFFSET_MASK);
+                                let outer = REGION_FRAME.with(|f| f.replace(frame));
+                                let result = self.exec_op(regs, &inst.op);
+                                REGION_FRAME.with(|f| f.set(outer));
+                                result
                             }
                             Op::FrameEnter(function) => {
                                 let function = func.consts.get_unchecked(*function as usize).as_ptr();
