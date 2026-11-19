@@ -2981,8 +2981,8 @@ def error_inputs_multinomial(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(x, args=(3, False,)),
                      error_regex="cannot sample n_sample > prob_dist")
 
-    # CPU and CUDA sample with replacement from a double CDF past 2^24 categories
-    if torch.device(device).type not in ('cpu', 'cuda'):
+    # CPU, CUDA, and MTIA sample with replacement from a double CDF past 2^24 categories
+    if torch.device(device).type not in ('cpu', 'cuda', 'mtia'):
         x = torch.empty(16777217, dtype=dtype, device=device)
         yield ErrorInput(SampleInput(x, args=(3, True)),
                          error_regex="number of categories cannot exceed")
