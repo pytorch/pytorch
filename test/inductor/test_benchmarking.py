@@ -780,11 +780,12 @@ class TestBenchmarker(TestCase):
         benchmarker.__dict__["L2_cache_size"] = 4 * MiB
         with patch.object(torch.version, "hip", None):
             self.assertEqual(benchmarker.get_flush_size("cuda"), 4 * MiB)
-        # HSA's size wins; the gfx table is only a fallback; unknown archs get L2 only.
+        # A nonzero HSA size wins; otherwise the gfx table; unknown archs get L2 only.
         for arch, hsa_size, mall in (
             ("gfx950:sramecc+:xnack-", 256 * MiB, 256),
             ("gfx1201", 32 * MiB, 32),
-            ("gfx942", 0, 0),
+            ("gfx942", 0, 256),
+            ("gfx90a", 0, 0),
             ("gfx950:sramecc+:xnack-", None, 256),
             ("gfx942", None, 256),
             ("gfx90a", None, 0),
@@ -906,6 +907,7 @@ class TestBenchmarker(TestCase):
                 _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
             ),
             patch.object(_bench.torch, "empty", side_effect=fake_empty),
+            patch.object(_bench.torch.cuda, "current_device", return_value=0),
             patch.object(_bench, "_rocm_mall_size", return_value=256),
             patch.object(_bench, "_rocm_read_flush", side_effect=fake_read_flush),
             patch.object(
@@ -925,8 +927,8 @@ class TestBenchmarker(TestCase):
 
         (size,), kwargs = empty_calls[0]
         if hip_value and not triton:
-            # no Triton: same size, but the CUDA zero_() flush
-            self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.int))
+            # no Triton: the CUDA zero_() flush, which only covers the L2
+            self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
             self.assertEqual(flush_passes, [])
             flush, warmup_flushes = "zero_", 3
         elif hip_value:
