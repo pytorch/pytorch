@@ -559,11 +559,10 @@ class TestCuTeDSLPointwise(TestCase):
 
     @parametrize(
         "dtype,op",
-        ((torch.float16, "hardshrink"),)
-        + tuple(
+        tuple(
             (dtype, op)
             for dtype in (torch.float16, torch.bfloat16)
-            for op in ("threshold", "clamp")
+            for op in ("hardshrink", "softshrink", "threshold", "clamp")
         ),
     )
     def test_scalar_bounds_round_to_storage_dtype(
@@ -572,7 +571,8 @@ class TestCuTeDSLPointwise(TestCase):
         values = torch.full((64,), 0.3, device=device, dtype=dtype)
         calls = {
             "hardshrink": lambda: torch.nn.functional.hardshrink(values, 0.3),
-            "threshold": lambda: torch.nn.functional.threshold(values, 0.3, -1.0),
+            "softshrink": lambda: torch.nn.functional.softshrink(values, 0.3),
+            "threshold": lambda: torch.nn.functional.threshold(values, 0.3, -0.3),
             "clamp": lambda: torch.clamp(values, min=0.3, max=0.3),
         }
         self._assert_native_result(calls[op], atol=0, rtol=0)
@@ -739,15 +739,30 @@ class TestCuTeDSLPointwise(TestCase):
                 x, negative_slope=1e100
             )
 
-    def test_channels_last_output_preserved(self, device: str) -> None:
-        x = torch.randn(2, 32, 32, 64, device=device).contiguous(
-            memory_format=torch.channels_last
-        )
+    @parametrize(
+        "kind", ("channels_last", "resize_channels_last", "resize_transpose", "rsub")
+    )
+    def test_output_layout_preserved(self, device: str, kind: str) -> None:
+        if "channels_last" in kind:
+            x = torch.randn(2, 4, 4, 4, device=device).contiguous(
+                memory_format=torch.channels_last
+            )
+        else:
+            x = torch.randn(64, 64, device=device)
+
+        def call() -> torch.Tensor:
+            if kind == "channels_last":
+                return torch.relu(x)
+            if kind == "rsub":
+                return torch.rsub(x, x.t())
+            source = x.t() if kind == "resize_transpose" else x
+            return torch.neg(source, out=torch.empty(0, device=device))
+
         with _disabled():
-            expected = torch.relu(x)
-        actual = torch.relu(x)
-        self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
+            expected = call()
+        actual = call()
         with _disabled():
+            self.assertEqual(actual.stride(), expected.stride())
             self.assertEqual(actual, expected)
 
     @parametrize("op", ("add", "gt", "complex_add"))
@@ -915,14 +930,41 @@ class TestCuTeDSLPointwise(TestCase):
         with _disabled():
             self.assertEqual(out, before)
 
-    @parametrize("name", ("sin", "square", "threshold", "tensor_clamp"))
+    @parametrize(
+        "name",
+        (
+            "sin",
+            "square",
+            "threshold",
+            "tensor_clamp",
+            "logaddexp",
+            "logaddexp2",
+            "bitwise_left_shift",
+            "bitwise_right_shift",
+        ),
+    )
     def test_native_output_casts_remain_supported(self, device: str, name: str) -> None:
         x = torch.tensor([-0.5, 0.0, 0.5], device=device)
         out = torch.empty(x.shape, device=device, dtype=torch.float64)
+        if name in ("threshold", "logaddexp", "logaddexp2"):
+            x = x.half()
+        if name.startswith("bitwise_"):
+            dtype = torch.int32 if name == "bitwise_left_shift" else torch.int64
+            x = torch.full(
+                (1,), 1 if dtype is torch.int32 else 2**40, device=device, dtype=dtype
+            )
+            out = torch.empty_like(
+                x, dtype=torch.int64 if dtype is torch.int32 else torch.int32
+            )
 
         def call(target: torch.Tensor) -> torch.Tensor:
             if name == "threshold":
-                return torch.ops.aten.threshold.out(x, 0.0, 0.0, out=target)
+                return torch.ops.aten.threshold.out(x, 0.1, 0.3, out=target)
+            if name in ("logaddexp", "logaddexp2"):
+                return getattr(torch, name)(x, x, out=target)
+            if name.startswith("bitwise_"):
+                shift = 31 if name == "bitwise_left_shift" else 40
+                return getattr(torch, name)(x, torch.full_like(x, shift), out=target)
             if name == "tensor_clamp":
                 return torch.clamp(
                     x,
