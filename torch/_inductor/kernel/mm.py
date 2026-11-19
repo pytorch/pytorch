@@ -38,6 +38,7 @@ from ..ir import (
     is_triton,
     is_unaligned,
     Layout,
+    TensorBox,
 )
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
@@ -987,11 +988,13 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             inp = lowerings[aten.mul](beta, inp)
         return lowerings[aten.add](inp, product)
 
+    # MultiTemplateBuffer deps cover only inp_expanded, yet its ATen fallback reads input,
+    # so inp_expanded must view inp.
+    inp = realize_inputs(template_inp)
+    if not isinstance(inp, TensorBox):
+        inp = TensorBox(inp)
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
-    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
-        mat1, mat2, template_inp, layout=layout
-    )
-    inp = realize_inputs(inp)
+    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
 

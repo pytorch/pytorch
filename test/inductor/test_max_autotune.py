@@ -1192,6 +1192,23 @@ class TestMaxAutotune(TestCase):
 
         self.assertEqual(compiled_out, eager_out)
 
+    @parametrize("beta", (0, 1))
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.force_extern_kernel_in_multi_template": True,
+        }
+    )
+    def test_addmm_strided_bias_extern_fallback(self, beta):
+        # realize_inputs copies a strided bias; the extern fallback must read that copy.
+        bias = torch.randn(64, device=GPU_TYPE)[::2]
+        x = torch.randn(16, 8, device=GPU_TYPE)
+        y = torch.randn(8, 32, device=GPU_TYPE)
+
+        compiled_out = torch.compile(torch.addmm)(bias, x, y, beta=beta)
+
+        self.assertEqual(compiled_out, torch.addmm(bias, x, y, beta=beta))
+
     @fresh_cache()
     def test_addmm_1d_bias_no_reinterpret_tensor(self):
         """
