@@ -187,6 +187,17 @@ def _outer_config_opt(
 # ------------------------------------------------------------------
 
 
+def _max_autotune_reduction_enabled(inductor_meta: dict[str, Any]) -> bool:
+    # Kernels whose inductor_meta predates max_autotune_reduction carry only
+    # max_autotune_pointwise, which used to cover reductions.
+    return bool(
+        inductor_meta.get("max_autotune")
+        or inductor_meta.get(
+            "max_autotune_reduction", inductor_meta.get("max_autotune_pointwise")
+        )
+    )
+
+
 @register_codegen_heuristic("reduction")
 class ReductionHeuristic(CodegenConfigHeuristics):
     """Default reduction autotuning configs (CUDA non-ROCm)."""
@@ -212,9 +223,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         reduction_hint = inductor_meta.get("reduction_hint")
         rnumel = get_total_reduction_numel(size_hints)
 
-        max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
-            "max_autotune_pointwise"
-        )
+        max_autotune_enabled = _max_autotune_reduction_enabled(inductor_meta)
 
         register_intensive = False
         loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
@@ -459,9 +468,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 r0_block=native_matmul_rblock,
             )
 
-        max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
-            "max_autotune_pointwise"
-        )
+        max_autotune_enabled = _max_autotune_reduction_enabled(inductor_meta)
 
         xblock_vals = self._persistent_xblock_vals()
 
@@ -665,9 +672,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         from torch._inductor.runtime.triton_heuristics import unique_configs
 
-        max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
-            "max_autotune_pointwise"
-        )
+        max_autotune_enabled = _max_autotune_reduction_enabled(inductor_meta)
 
         rsplit_size = inductor_meta.get("RSPLIT_SIZE")
         if not rsplit_size:

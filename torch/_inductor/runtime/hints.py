@@ -344,6 +344,7 @@ class InductorMeta(typing.TypedDict, total=False):
     incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool
+    max_autotune_reduction: bool
     min_split_scan_rblock: int
     spill_threshold: int
     store_cubin: bool

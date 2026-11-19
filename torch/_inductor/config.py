@@ -590,8 +590,20 @@ use_torch_profiler_benchmarker: bool = Config(
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-# enable slow autotuning passes to select pointwise/reductions algorithms
+# enable slow autotuning passes to select pointwise algorithms. Until
+# max_autotune_reduction stops defaulting to None, this also covers reductions.
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# Widen the configs tried for reduction, persistent reduction and split
+# reduction kernels. None follows max_autotune_pointwise. max_autotune=True
+# enables both regardless.
+# TODO: once no callers rely on max_autotune_pointwise also covering reductions
+# (they set max_autotune_reduction=True instead), default this to False and
+# remove the None fallback, so that max_autotune_pointwise covers only pointwise
+# kernels.
+max_autotune_reduction: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_REDUCTION"
+)
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
