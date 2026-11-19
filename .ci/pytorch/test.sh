@@ -1269,6 +1269,12 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
+      # torch.vm with Inductor graphs. The runner checks its accuracy for inference only.
+      if [[ "$DASHBOARD_TAG" == *vm-true* ]] && [[ "$target" == "performance" || "$mode" == "inference" ]]; then
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --vm "${inductor_model_args[@]}" --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/vm_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
       if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
