@@ -393,6 +393,29 @@ class FusionTests(TestCase):
         self.assertEqual(result, f(*inputs))
         self.assertLessEqual(metrics.generated_kernel_count, 3)
 
+    @requires_gpu_and_triton
+    @unittest.skipUnless(DEVICE == "cuda", "requires CUDA device type")
+    @config.patch(force_disable_caches=True, max_complex_pointwise_cat_inputs=4)
+    def test_padded_cat_with_empty_and_repeated_input(self):
+        from torch._inductor import lowering
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(q, *xs):
+            pads = [torch.nn.functional.pad(x, (0, 2), value=1.0) for x in xs]
+            empty = torch.nn.functional.pad(q, (-4, 0), value=1.0)
+            return (torch.cat([*pads, empty, pads[0]]),)
+
+        args = [T(4), *(T(32) for _ in range(8))]
+        # Preserve the empty pad in the ATen graph passed to lowering.
+        gm = make_fx(f, tracing_mode="fake")(*args)
+        with patch.object(
+            lowering, "pointwise_cat", wraps=lowering.pointwise_cat
+        ) as cat:
+            compiled = compile_fx_inner(gm, args)
+        self.assertEqual(compiled(list(args))[0], f(*args)[0])
+        # Individual pads can lower to two-input cats; look for a group of pads.
+        self.assertNotIn(4, [len(call.args[0]) for call in cat.call_args_list])
+
     def test_horizontal_reduction_pointwise(self):
         def f(a):
             b = a.sum(dim=1)

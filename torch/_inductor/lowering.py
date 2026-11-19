@@ -2719,6 +2719,7 @@ def cat(inputs, dim=0):
         and torch.cuda.is_initialized()
         and config.max_complex_pointwise_cat_inputs > 1
         and not fusable_reduction
+        and not any(skip_mask)
         and isinstance(V.current_node, torch.fx.Node)
         and V.current_node.target == aten.cat.default
     ):
