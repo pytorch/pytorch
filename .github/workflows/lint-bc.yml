@@ -1,38 +1,32 @@
-name: BC Lint
-
+# Owner(s): ["oncall: releng"]
+name: FA3 legacy boundary 1a65fa30c6fdcbe4d085b4112e217c24
+run-name: FA3 legacy boundary 1a65fa30c6fdcbe4d085b4112e217c24
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-    branches-ignore:
-      - nightly
-  push:
-    tags:
-      # TODO: Remove me later
-      -  ciflow/inductor-cu126/*
   workflow_dispatch:
-
-jobs:
-  check-ci:
-    if: github.repository_owner == 'pytorch'
-    uses: ./.github/workflows/_check-ci.yml
-
-  bc_linter:
-    needs: check-ci
-    if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Run BC Lint Action
-        uses: pytorch/test-infra/.github/actions/bc-lint@main
-        with:
-          repo: ${{ github.event.pull_request.head.repo.full_name }}
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          head_sha: ${{ github.event.pull_request.head.sha }}
-          suppression: ${{ contains(github.event.pull_request.labels.*.name, 'suppress-api-compatibility-check') || contains(github.event.pull_request.labels.*.name, 'suppress-bc-linter') }}
-          docs_link: 'https://github.com/pytorch/test-infra/wiki/BC-Linter'
-
+permissions: {}
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+  group: fa3-legacy-boundary-1a65fa30c6fdcbe4d085b4112e217c24
+  cancel-in-progress: false
+jobs:
+  produce:
+    if: ${{ github.repository == 'pytorch/pytorch' && github.repository_id == '65600975' && github.ref == 'refs/heads/d4l3k/fa3-legacy-boundary-1a65fa30c6fdcbe4d085b4112e217c24' && github.event_name == 'workflow_dispatch' && github.actor == 'd4l3k' && github.actor_id == '909104' && github.run_attempt == 1 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Create inert marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'FA3 legacy boundary diagnostic 1a65fa30c6fdcbe4d085b4112e217c24' > "${RUNNER_TEMP}/fa3-legacy-boundary-1a65fa30c6fdcbe4d085b4112e217c24.txt"
+          test "$(wc -c < "${RUNNER_TEMP}/fa3-legacy-boundary-1a65fa30c6fdcbe4d085b4112e217c24.txt")" -eq 64
+      - name: Upload deliberately wrong-name inert marker
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fa3-legacy-boundary-1a65fa30c6fdcbe4d085b4112e217c24
+          path: ${{ runner.temp }}/fa3-legacy-boundary-1a65fa30c6fdcbe4d085b4112e217c24.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
