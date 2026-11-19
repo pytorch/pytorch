@@ -15589,6 +15589,7 @@ class TestCommon(TestCase):
         result = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
         expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
         self.assertEqual(result, expected)
+
     @parametrize("shape, dtype", [((2, 3, 4, 5, 6), torch.complex64), ((32, 8192), torch.complex64),
                                   ((8192,), torch.complex32), ((64, 128), torch.complex32)])
     def test_fftn_round_trip(self, device, shape, dtype):
