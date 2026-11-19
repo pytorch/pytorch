@@ -219,7 +219,7 @@ class _DispatchKeyRouter:
         }
         self.keys: torch._C.DispatchKeySet = torch._C._dispatch_keyset_full_after(
             torch._C.DispatchKey.BackendSelect
-        )
+        ).remove(torch._C.DispatchKey.PythonDispatcher)
         for key in self.routers:
             self.keys = self.keys.add(key)
 
