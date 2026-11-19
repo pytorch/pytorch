@@ -11,6 +11,7 @@ import dataclasses
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import json
 import logging
@@ -1060,6 +1061,38 @@ def in_vm(model_iter_fn):
     return found
 
 
+class _VmForward:
+    """What a model that is timed through its ``generate`` has in the place
+    of its forward under ``--vm``: what ``torch.vm`` makes of the forward,
+    and the forward itself under ``torch.compiler.set_stance("force_eager")``,
+    which is how the runner has eager calls timed (the function that
+    ``torch.compile`` returns does the same there)."""
+
+    def __init__(self, forward):
+        self.forward = forward
+        # ``generate`` asks the forward it finds what arguments it takes.
+        self.__signature__ = inspect.signature(forward)
+        torch.distributions.Distribution.set_default_validate_args(False)
+
+        def call(*args, **kwargs):
+            return forward(*args, **kwargs)
+
+        passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+        self.compiled = torch.vm(call, passes=passes)
+
+    def __call__(self, *args, **kwargs):
+        if torch._dynamo.eval_frame._stance.stance == "force_eager":
+            return self.forward(*args, **kwargs)
+        return self.compiled(*args, **kwargs)
+
+
+def _vm_of(fn, model):
+    """The function of ``torch.vm`` behind what the runner calls: ``fn``
+    itself, or the forward of a model that is called through ``generate``."""
+    forward = vars(model).get("forward")
+    return forward.compiled if isinstance(forward, _VmForward) else fn
+
+
 def settle_vm(fn, model, example_inputs, most=1000, seconds=600.0, calm=16, **kwargs):
     """Calls what ``in_vm`` returned until it has stopped compiling and
     measuring: ``torch.vm`` compiles a region after some calls of it, and
@@ -1073,12 +1106,13 @@ def settle_vm(fn, model, example_inputs, most=1000, seconds=600.0, calm=16, **kw
     there was none)."""
     quiet, before, start, calls = 0, None, time.perf_counter(), 0
     calm_start = start
+    watched = _vm_of(fn, model)
     while calls < most:
         fn(model, example_inputs, **kwargs)
         calls += 1
-        regions = torch.vm.regions(fn)
+        regions = torch.vm.regions(watched)
         now = (len(regions), sum(r.get("variants", 0) for r in regions))
-        if fn.stats()["measuring"] or now != before:
+        if watched.stats()["measuring"] or now != before:
             synchronize()
             quiet, calm_start = 0, time.perf_counter()
         else:
@@ -1135,7 +1169,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     elif args.aot_precompile:
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
     elif args.vm:
-        frozen_model_iter_fn = in_vm(model_iter_fn)
+        # A model that is called through ``generate`` has what torch.vm made
+        # of its forward in the place of it (``_VmForward``).
+        frozen_model_iter_fn = model_iter_fn
+        if not kwargs["hf_llm"]:
+            frozen_model_iter_fn = in_vm(model_iter_fn)
     else:
         if kwargs["hf_llm"]:
             # If it's an llm, we want to optimize model.forward, and use
@@ -3110,7 +3148,10 @@ class BenchmarkRunner:
                 if getattr(self, "hf_llm", False):
                     # If it's an llm, we want to optimize model.forward, and use
                     # the generate function
-                    model.forward = optimize_ctx(model.forward)
+                    if self.args.vm:
+                        model.forward = _VmForward(model.forward)
+                    else:
+                        model.forward = optimize_ctx(model.forward)
                     optimized_model_iter_fn = self.model_iter_fn
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -3164,16 +3205,15 @@ class BenchmarkRunner:
                 # there was a graph.
                 compilation_time = dynamo_latency - settled["steady"] * settled["calls"]
             if self.args.vm:
+                watched = _vm_of(optimized_model_iter_fn, model)
                 found = [
-                    r
-                    for r in torch.vm.regions(optimized_model_iter_fn)
-                    if r["state"] == "compiled"
+                    r for r in torch.vm.regions(watched) if r["state"] == "compiled"
                 ]
                 print(
                     f"torch.vm: {sum(r['variants'] for r in found)} graphs of "
                     f"{sum(r['ops'] for r in found)} operations after "
                     f"{settled['calls']} calls, "
-                    f"demoted: {optimized_model_iter_fn.stats()['demoted']}"
+                    f"demoted: {watched.stats()['demoted']}"
                 )
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
