@@ -345,6 +345,9 @@ _ViewMetadata = tuple[
 _TensorBases = dict[str, _ViewMetadata | list[_ViewMetadata | None] | None]
 
 
+_MISSING_OP: Any = object()
+
+
 class AutoFunctionalized(HigherOrderOperator):
     """auto_functionalized(_mutable_op, _tensor_bases=None, /, **kwargs)
 
@@ -366,12 +369,16 @@ class AutoFunctionalized(HigherOrderOperator):
     compact its layout. Arguments are cloned independently, as in V1 without
     metadata; this protocol does not add support for overlapping mutations.
 
+    V1 cannot clone a mutable conjugate or negative view for an operator that
+    handles the corresponding dispatch key itself. Cloning resolves the bit
+    before the operator runs.
+
     We have some restrictions on `_mutable_op`.
     See `can_auto_functionalize` for the restrictions. We can likely lift
     many of these if users request it.
 
-    The reason why _mutable_op is prefixed with an
-    underscore is to prevent collisions with kwarg names in **kwargs.
+    The legacy spelling ``auto_functionalized(_mutable_op=op, **kwargs)`` is
+    also supported. With a positional op, all keywords belong to its schema.
     """
 
     def __init__(self) -> None:
@@ -379,11 +386,15 @@ class AutoFunctionalized(HigherOrderOperator):
 
     def __call__(
         self,
-        _mutable_op: OpOverload,
+        _mutable_op: OpOverload = _MISSING_OP,
         _tensor_bases: _TensorBases | None = None,
         /,
         **kwargs: Any,
     ) -> tuple[Any, tuple[Tensor, ...]]:
+        if _mutable_op is _MISSING_OP:
+            if "_mutable_op" not in kwargs:
+                raise TypeError("auto_functionalized requires a mutable operator")
+            _mutable_op = kwargs.pop("_mutable_op")
         if not can_auto_functionalize(_mutable_op):
             raise AssertionError(f"Cannot auto-functionalize op {_mutable_op}")
         if not isinstance(kwargs, dict):
@@ -400,8 +411,6 @@ auto_functionalized.__module__ = "torch.ops.higher_order"
 
 auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
-auto_functionalized.fallthrough(DispatchKey.Conjugate)
-auto_functionalized.fallthrough(DispatchKey.Negative)
 
 
 _MutableOpType = OpOverload | HigherOrderOperator
@@ -570,6 +579,12 @@ def do_auto_functionalize(
     def get_view_metadata(tensor) -> _ViewMetadata | None:
         from torch.fx.experimental.symbolic_shapes import guard_or_false
 
+        if (
+            tensor.is_conj() and op.has_kernel_for_dispatch_key(DispatchKey.Conjugate)
+        ) or (tensor.is_neg() and op.has_kernel_for_dispatch_key(DispatchKey.Negative)):
+            raise NotImplementedError(
+                "V1 auto-functionalization cannot preserve conjugate or negative view bits"
+            )
         base = get_base(tensor)
         if base is None:
             return None
@@ -1038,7 +1053,7 @@ def auto_functionalized_dense(
             return clone_preserve_strides(tensor)
         base, size, stride, storage_offset = view_metadata
         view = torch.as_strided(base, size, stride, storage_offset)
-        return clone_preserve_strides(view, base=base)
+        return clone_preserve_strides(view, base=base, clone_base_extent=False)
 
     _mutable_args_names, _ = get_mutable_args(_mutable_op)
     for name in _mutable_args_names:

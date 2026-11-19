@@ -2128,7 +2128,7 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
     return layout if layout is not None else torch.strided
 
 
-def clone_preserve_strides(x, *, base=None):
+def clone_preserve_strides(x, *, base=None, clone_base_extent=True):
     """Clone x, preserving its size, stride and storage_offset.
 
     The clone spans storage_offset + span elements and is copied out of x's storage,
@@ -2140,11 +2140,11 @@ def clone_preserve_strides(x, *, base=None):
     from it -- every access then stays inside one real buffer. See how
     auto_functionalize clones mutable custom-op args via their bases.
 
-    A ``base`` must span all of x: the buffer is sized to the base's required
-    extent, and x is then re-derived from it at x's own storage_offset. Anything
-    x addresses beyond that extent is not in the clone. Eager catches this when
-    setStorage bounds-checks the re-derive, but under fake tensors it passes and
-    codegens an out-of-bounds read, so the contract is checked explicitly.
+    A ``base`` must span all of x. By default its entire required extent is cloned.
+    Set ``clone_base_extent=False`` to copy only the prefix needed by x while
+    still reading from the base. Check coverage explicitly because fake tensors
+    can accept an as_strided view that exceeds the base and reaches outside
+    the real buffer when lowered.
     """
     src = x if base is None else base
     needed_size = compute_required_storage_length(
@@ -2160,6 +2160,8 @@ def clone_preserve_strides(x, *, base=None):
             f"addresses {x_size}, so cloning through the base would drop what x needs. "
             f"Pass a base that spans x, or omit base to clone x's own storage.",
         )
+        if not clone_base_extent:
+            needed_size = x_size
     # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
     # so these as_strided() calls are not seen by autograd.
     # We need to mimic this behavior in our ref/prim implementations.

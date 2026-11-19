@@ -2282,124 +2282,6 @@ class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @inductor_config.patch(enable_auto_functionalized_v2=False)
-    @parametrize("metadata", [False, True])
-    @parametrize("dynamic", [False, True])
-    def test_pattern_replacement_joint_provenance(self, device, metadata, dynamic):
-        from torch._higher_order_ops.auto_functionalize import auto_functionalized
-        from torch._inductor.pattern_matcher import (
-            joint_fwd_bwd,
-            PatternMatcherPass,
-            register_replacement,
-        )
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            for name in ("partial", "replacement"):
-                lib.define(f"{name}(Tensor(a!) out) -> ()")
-
-                def partial(out):
-                    out[:-2].add_(100)
-                    out[-1:].add_(200)
-
-                lib.impl(name, partial, "CompositeExplicitAutograd")
-                torch.library.register_fake("mylib::" + name, lambda out: None, lib=lib)
-
-            original = torch.ops.mylib.partial.default
-            replacement_op = torch.ops.mylib.replacement.default
-
-            def pattern(out, weight):
-                return auto_functionalized(original, out=out)[1] * weight
-
-            def replacement(out, weight):
-                view = out.view(out.shape[0], 2, 4)
-                result = auto_functionalized(replacement_op, out=view)[1]
-                return result.view(out.shape) * weight
-
-            patterns = PatternMatcherPass()
-            register_replacement(
-                pattern,
-                replacement,
-                [
-                    torch.empty(6, 8, device=device),
-                    torch.empty(6, 8, device=device, requires_grad=True),
-                ],
-                joint_fwd_bwd,
-                patterns,
-            )
-            counts = []
-
-            def custom_pass(graph):
-                before = next(
-                    iter(
-                        graph.find_nodes(op="call_function", target=auto_functionalized)
-                    )
-                )
-                self.assertEqual(len(before.args), 2 if metadata else 1)
-                base = before.args[1]["out"][0] if metadata else None
-                counts.append(patterns.apply(graph))
-                after = list(
-                    graph.find_nodes(op="call_function", target=auto_functionalized)
-                )
-                self.assertEqual(len(after), 1)
-                self.assertIs(after[0].args[0], replacement_op)
-                self.assertEqual(len(after[0].args), 2 if metadata else 1)
-                if metadata:
-                    entry = after[0].args[1]["out"]
-                    self.assertIs(entry[0], base)
-                    size, stride, offset = torch.fx.map_arg(
-                        entry[1:], lambda node: node.meta["val"]
-                    )
-                    value = after[0].kwargs["out"].meta["val"]
-                    self.assertEqual(tuple(size), tuple(value.shape))
-                    self.assertEqual(tuple(stride), (16, 8, 2))
-                    self.assertEqual(offset, 32)
-                graph.lint()
-
-            def fn(buf, weight):
-                base = buf + 10
-                if metadata:
-                    view = base[2:, ::2]
-                    result = auto_functionalized(
-                        original,
-                        {"out": (base, view.size(), view.stride(), 32)},
-                        out=view,
-                    )[1]
-                else:
-                    result = auto_functionalized(original, out=base)[1]
-                return result * weight
-
-            with inductor_config.patch(joint_custom_post_pass=custom_pass):
-                compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
-                for rows in [6, 8] if dynamic else [6]:
-                    shape = (rows + 2, 16) if metadata else (rows, 8)
-                    for offset in (1, 100):
-                        buf = (
-                            torch.arange(
-                                shape[0] * shape[1], device=device, dtype=torch.float32
-                            ).reshape(shape)
-                            + offset
-                        )
-                        saved = buf.clone()
-                        weight = torch.randn(rows, 8, device=device, requires_grad=True)
-                        expected = fn(buf, weight)
-                        actual = compiled(buf, weight)
-                        tangent = (
-                            torch.arange(
-                                rows * 8, device=device, dtype=torch.float32
-                            ).reshape(rows, 8)
-                            % 3
-                            + 1
-                        )
-                        expected_grad = torch.autograd.grad(expected, weight, tangent)[
-                            0
-                        ]
-                        actual_grad = torch.autograd.grad(actual, weight, tangent)[0]
-                        self.assertEqual(actual, expected, atol=0, rtol=0)
-                        self.assertEqual(actual_grad, expected_grad, atol=0, rtol=0)
-                        self.assertEqual(buf, saved, atol=0, rtol=0)
-            self.assertTrue(counts)
-            self.assertEqual(counts, [1] * len(counts))
-
-    @inductor_config.patch(enable_auto_functionalized_v2=False)
     @parametrize(
         "kind",
         [
@@ -2525,7 +2407,7 @@ class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
                         ),
                         output_layout,
                     )
-                if kind in ("unmatched", "manual"):
+                if kind in ("unmatched", "manual", "derived"):
                     self.assertIs(after[0].args[0], original)
                     self.assertEqual(after[0].args[1], metadata)
                 else:
@@ -2570,548 +2452,8 @@ class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
             self.assertTrue(counts)
             self.assertEqual(
                 counts,
-                [int(kind not in ("unmatched", "manual"))] * len(counts),
+                [int(kind not in ("unmatched", "manual", "derived"))] * len(counts),
             )
-
-    @inductor_config.patch(enable_auto_functionalized_v2=False)
-    @parametrize("kind", ["split", "rank_view"])
-    @parametrize("dynamic", [False, True])
-    @parametrize("inference", [False, True])
-    def test_pattern_replacement_created_views(self, device, kind, dynamic, inference):
-        from torch._higher_order_ops.auto_functionalize import auto_functionalized
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define("partial(Tensor(a!) out) -> ()")
-            lib.define("replacement(Tensor(a!)[] destinations) -> ()")
-
-            def partial(out):
-                out[:-2].add_(100)
-                out[-1:].add_(200)
-
-            lib.impl("partial", partial, "CompositeExplicitAutograd")
-
-            def replace_impl(destinations):
-                for out in destinations:
-                    partial(out)
-
-            lib.impl("replacement", replace_impl, "CompositeExplicitAutograd")
-            torch.library.register_fake("mylib::partial", lambda out: None, lib=lib)
-            torch.library.register_fake(
-                "mylib::replacement", lambda destinations: None, lib=lib
-            )
-            original = torch.ops.mylib.partial.default
-            replacement_op = torch.ops.mylib.replacement.default
-
-            def pattern(out):
-                return auto_functionalized(original, out=out)[1]
-
-            def replacement(out):
-                destinations = (
-                    list(out.split([3, 5], dim=1))
-                    if kind == "split"
-                    else [out.view(out.shape[0], 2, 4)]
-                )
-                result = auto_functionalized(replacement_op, destinations=destinations)[
-                    1
-                ]
-                return (
-                    torch.cat(result, dim=1)
-                    if kind == "split"
-                    else result[0].view(out.shape)
-                )
-
-            patterns = PatternMatcherPass()
-            register_replacement(
-                pattern,
-                replacement,
-                [torch.empty(6, 8, device=device)],
-                fwd_only,
-                patterns,
-            )
-            counts = []
-
-            def custom_pass(graph):
-                before = next(
-                    iter(
-                        graph.find_nodes(op="call_function", target=auto_functionalized)
-                    )
-                )
-                original_metadata = before.args[1]["out"]
-                counts.append(patterns.apply(graph))
-                hops = list(
-                    graph.find_nodes(op="call_function", target=auto_functionalized)
-                )
-                self.assertEqual(len(hops), 1)
-                hop = hops[0]
-                self.assertIs(hop.args[0], replacement_op)
-                self.assertEqual(len(hop.args), 2)
-                entries = hop.args[1]["destinations"]
-                self.assertEqual(len(entries), 2 if kind == "split" else 1)
-                if kind == "split":
-                    self.assertTrue(
-                        list(
-                            graph.find_nodes(
-                                op="call_function",
-                                target=torch.ops.aten.split_with_sizes.default,
-                            )
-                        )
-                    )
-                for destination, entry in zip(hop.kwargs["destinations"], entries):
-                    self.assertIs(entry[0], original_metadata[0])
-                    value = destination.meta["val"]
-                    size, stride, offset = torch.fx.map_arg(
-                        entry[1:], lambda node: node.meta["val"]
-                    )
-                    self.assertEqual(tuple(size), tuple(value.shape))
-                    self.assertEqual(tuple(stride), value.stride())
-                    self.assertEqual(offset, value.storage_offset())
-                graph.lint()
-
-            def f(x):
-                base = x + 10
-                view = base[2:, ::2]
-                original(view)
-                return base, view
-
-            with (
-                torch.inference_mode(inference),
-                inductor_config.patch(post_grad_custom_post_pass=custom_pass),
-            ):
-                compiled = torch.compile(f, fullgraph=True, dynamic=dynamic)
-                for rows in [8, 10] if dynamic else [8]:
-                    x = torch.arange(rows * 16, device=device, dtype=torch.float32)
-                    x = x.reshape(rows, 16)
-                    actual = compiled(x)
-                    expected = f(x)
-                    self.assertEqual(actual, expected, atol=0, rtol=0)
-                    self.assertEqual(
-                        actual[0].untyped_storage()._cdata,
-                        actual[1].untyped_storage()._cdata,
-                    )
-                    self.assertEqual(actual[1].stride(), expected[1].stride())
-                    self.assertEqual(actual[1].storage_offset(), 32)
-                    self.assertEqual(
-                        x,
-                        torch.arange(
-                            rows * 16, device=device, dtype=torch.float32
-                        ).reshape(rows, 16),
-                    )
-            self.assertTrue(counts)
-            self.assertEqual(counts, [1] * len(counts))
-
-    @parametrize("kind", ["fresh", "mixed"])
-    def test_pattern_replacement_fresh_buffers(self, device, kind):
-        from torch._higher_order_ops.auto_functionalize import auto_functionalized
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define("partial(Tensor(a!) out) -> ()")
-            lib.define("replacement(Tensor(a!)[] destinations) -> ()")
-
-            def partial(out):
-                out[:-2].add_(100)
-                out[-1:].add_(200)
-
-            def replace_impl(destinations):
-                for out in destinations:
-                    partial(out)
-
-            lib.impl("partial", partial, "CompositeExplicitAutograd")
-            lib.impl("replacement", replace_impl, "CompositeExplicitAutograd")
-            torch.library.register_fake("mylib::partial", lambda out: None, lib=lib)
-            torch.library.register_fake(
-                "mylib::replacement", lambda destinations: None, lib=lib
-            )
-            original = torch.ops.mylib.partial.default
-            replacement_op = torch.ops.mylib.replacement.default
-
-            def pattern(out):
-                return auto_functionalized(original, out=out)[1]
-
-            def replacement(out):
-                fresh = out.clone()
-                destinations = (
-                    [fresh] if kind == "fresh" else [out.view(6, 2, 4), fresh]
-                )
-                result = auto_functionalized(replacement_op, destinations=destinations)[
-                    1
-                ]
-                if kind == "fresh":
-                    return result[0]
-                # Consume both buffers so the fresh output stays live.
-                return (result[0].view(6, 8) + result[1]) / 2
-
-            def f(base):
-                return auto_functionalized(
-                    original,
-                    {"out": (base, (6, 8), (16, 2), 32)},
-                    out=base[2:, ::2],
-                )[1]
-
-            x = torch.arange(128, device=device, dtype=torch.float32).reshape(8, 16)
-            patterns = PatternMatcherPass()
-            register_replacement(pattern, replacement, [x[2:, ::2]], fwd_only, patterns)
-            gm = make_fx(f, tracing_mode="fake")(x)
-            gm.graph.eliminate_dead_code()
-            base = next(n for n in gm.graph.nodes if n.op == "placeholder")
-            self.assertEqual(patterns.apply(gm.graph), 1)
-            hop = next(
-                iter(
-                    gm.graph.find_nodes(op="call_function", target=auto_functionalized)
-                )
-            )
-            self.assertIs(hop.args[0], replacement_op)
-            if kind == "fresh":
-                self.assertEqual(len(hop.args), 1)
-            else:
-                self.assertEqual(len(hop.args), 2)
-                self.assertEqual(
-                    hop.args[1],
-                    {"destinations": [(base, (6, 2, 4), (16, 8, 2), 32), None]},
-                )
-            gm.graph.lint()
-            gm.recompile()
-            for offset in (0, 100):
-                inp = x + offset
-                self.assertEqual(gm(inp), f(inp), atol=0, rtol=0)
-                self.assertEqual(inp, x + offset)
-
-    @inductor_config.patch(enable_auto_functionalized_v2=False)
-    @parametrize("metadata", [False, True])
-    @parametrize("replacement_hop", [False, True])
-    def test_pattern_replacement_with_internal_base(
-        self, device, metadata, replacement_hop
-    ):
-        from torch._higher_order_ops.auto_functionalize import auto_functionalized
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define("partial(Tensor(a!) out) -> ()")
-            lib.define("replacement(Tensor(a!) out) -> ()")
-
-            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
-            def partial(out):
-                out[:-2].add_(100)
-                out[-1:].add_(200)
-
-            @torch.library.register_fake("mylib::partial", lib=lib)
-            def partial_fake(out):
-                return None
-
-            lib.impl("replacement", partial, "CompositeExplicitAutograd")
-            torch.library.register_fake("mylib::replacement", partial_fake, lib=lib)
-
-            def pattern(x):
-                base = x + 10
-                return auto_functionalized(
-                    torch.ops.mylib.partial.default, out=base[2:]
-                )[1]
-
-            def replacement(x):
-                view = (x + 10)[2:]
-                if replacement_hop:
-                    return auto_functionalized(
-                        torch.ops.mylib.replacement.default, out=view
-                    )[1]
-                return torch.cat((view[:-2] + 100, view[-2:-1], view[-1:] + 200))
-
-            patterns = PatternMatcherPass()
-            register_replacement(
-                pattern,
-                replacement,
-                [torch.empty(8, device=device)],
-                fwd_only,
-                patterns,
-            )
-            counts = []
-
-            def custom_pass(graph):
-                counts.append(patterns.apply(graph))
-                hops = list(
-                    graph.find_nodes(op="call_function", target=auto_functionalized)
-                )
-                self.assertEqual(len(hops), int(replacement_hop))
-                if replacement_hop:
-                    hop = hops[0]
-                    self.assertIs(hop.args[0], torch.ops.mylib.replacement.default)
-                    self.assertEqual(len(hop.args), 2 if metadata else 1)
-                    if metadata:
-                        base, size, stride, offset = hop.args[1]["out"]
-                        self.assertEqual(base.target, torch.ops.aten.add.Tensor)
-                        self.assertEqual(
-                            (tuple(size), tuple(stride), offset), ((6,), (1,), 2)
-                        )
-                graph.lint()
-
-            def f(x):
-                if not metadata:
-                    return pattern(x)
-                base = x + 10
-                return auto_functionalized(
-                    torch.ops.mylib.partial.default,
-                    {"out": (base, (6,), (1,), 2)},
-                    out=base[2:],
-                )[1]
-
-            with inductor_config.patch(post_grad_custom_post_pass=custom_pass):
-                compiled = torch.compile(f, fullgraph=True)
-                for offset in (1, 100):
-                    x = torch.arange(
-                        offset, offset + 8, device=device, dtype=torch.float32
-                    )
-                    self.assertEqual(compiled(x), f(x), atol=0, rtol=0)
-            self.assertEqual(counts, [1])
-
-    def test_pattern_replacement_with_explicit_view_metadata(self, device):
-        from torch._higher_order_ops.auto_functionalize import auto_functionalized
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            for name in ("partial", "replacement"):
-                lib.define(f"{name}(Tensor(a!) out) -> ()")
-
-                def partial(out):
-                    out[:2].add_(100)
-
-                def partial_fake(out):
-                    return None
-
-                lib.impl(name, partial, "CompositeExplicitAutograd")
-                torch.library.register_fake("mylib::" + name, partial_fake, lib=lib)
-
-            original = torch.ops.mylib.partial.default
-            replacement_op = torch.ops.mylib.replacement.default
-
-            def pattern(base):
-                return auto_functionalized(
-                    original, {"out": (base, (6,), (1,), 2)}, out=base[2:]
-                )[1]
-
-            def replacement(base):
-                return auto_functionalized(
-                    replacement_op, {"out": (base, (6,), (1,), 2)}, out=base[2:]
-                )[1]
-
-            x = torch.arange(8, device=device, dtype=torch.float32)
-            patterns = PatternMatcherPass()
-            register_replacement(pattern, replacement, [x], fwd_only, patterns)
-            gm = make_fx(pattern)(x)
-            gm.graph.eliminate_dead_code()
-            gm.recompile()
-            before = next(
-                iter(
-                    gm.graph.find_nodes(op="call_function", target=auto_functionalized)
-                )
-            )
-            metadata_base = before.args[1]["out"][0]
-            self.assertEqual(patterns.apply(gm.graph), 1)
-            gm.graph.lint()
-            gm.recompile()
-            hops = list(
-                gm.graph.find_nodes(op="call_function", target=auto_functionalized)
-            )
-            self.assertEqual(len(hops), 1)
-            self.assertIs(hops[0].args[0], replacement_op)
-            self.assertEqual(hops[0].args[1], {"out": (metadata_base, (6,), (1,), 2)})
-            for offset in (0, 20):
-                inp = x + offset
-                self.assertEqual(gm(inp), pattern(inp), atol=0, rtol=0)
-                self.assertEqual(inp, x + offset)
-
-    @parametrize(
-        "kind",
-        [
-            "inplace",
-            "out",
-            "mutable_alias",
-            "ambiguous_alias",
-            "hop_getitem",
-            "unsafe_view",
-            "reshape_copy",
-            "contiguous_copy",
-            "reshape_alias",
-            "contiguous_alias",
-            "view_alias",
-        ],
-    )
-    def test_pattern_replacement_checks_provenance(self, device, kind):
-        from torch._higher_order_ops.auto_functionalize import auto_functionalized
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            for name in ("partial", "replacement", "identity"):
-                lib.define(f"{name}(Tensor(a!) out) -> ()")
-
-                def mutate(out):
-                    out[:-2].add_(100)
-                    out[-1:].add_(200)
-
-                lib.impl(
-                    name,
-                    (lambda out: None) if name == "identity" else mutate,
-                    "CompositeExplicitAutograd",
-                )
-                torch.library.register_fake("mylib::" + name, lambda out: None, lib=lib)
-
-            lib.define("mutable_alias(Tensor(a!) out) -> Tensor(a!)")
-            lib.define(
-                "ambiguous_alias(Tensor(a) left, Tensor(b) right) -> Tensor(a|b)"
-            )
-            lib.impl(
-                "mutable_alias", lambda out: out.add_(0), "CompositeExplicitAutograd"
-            )
-            lib.impl(
-                "ambiguous_alias", lambda left, right: left, "CompositeExplicitAutograd"
-            )
-            torch.library.register_fake(
-                "mylib::mutable_alias", lambda out: out, lib=lib
-            )
-            torch.library.register_fake(
-                "mylib::ambiguous_alias", lambda left, right: left, lib=lib
-            )
-            original = torch.ops.mylib.partial.default
-            replacement_op = torch.ops.mylib.replacement.default
-
-            def pattern(out):
-                return auto_functionalized(original, out=out)[1]
-
-            def replacement(out):
-                if kind == "view_alias":
-                    derived = out.view(6, 2, 4).view(6, 8)
-                elif kind == "inplace":
-                    derived = out.add_(0)
-                elif kind == "out":
-                    derived = torch.ops.aten.add.out(out, 0, out=out)
-                elif kind == "mutable_alias":
-                    derived = torch.ops.mylib.mutable_alias.default(out)
-                elif kind == "ambiguous_alias":
-                    derived = torch.ops.mylib.ambiguous_alias.default(out, out.clone())
-                elif kind == "hop_getitem":
-                    derived = auto_functionalized(
-                        torch.ops.mylib.identity.default, out=out
-                    )[1]
-                elif kind == "unsafe_view":
-                    derived = torch.ops.aten._unsafe_view.default(out, out.shape)
-                elif kind == "reshape_alias":
-                    derived = out.reshape(6, 2, 4).view(6, 8)
-                elif kind == "reshape_copy":
-                    derived = out.t().reshape(-1).view(8, 6).t()
-                else:
-                    derived = torch.ops.aten.contiguous.default(out)
-                return auto_functionalized(replacement_op, out=derived)[1]
-
-            aliases = kind in ("reshape_alias", "contiguous_alias")
-            accepted = aliases or kind == "view_alias"
-            columns = 8 if aliases else 16
-            step = 1 if aliases else 2
-            geometry = ((6, 8), (columns, step), 2 * columns)
-
-            def fn(base):
-                return auto_functionalized(
-                    original, {"out": (base, *geometry)}, out=base[2:, ::step]
-                )[1]
-
-            x = torch.arange(8 * columns, device=device, dtype=torch.float32).reshape(
-                8, columns
-            )
-            patterns = PatternMatcherPass()
-
-            # Keep conditional-copy schemas, unsafe views, and mutable operators.
-            def trace_fn(fn, args, **kwargs):
-                if kind in (
-                    "reshape_copy",
-                    "contiguous_copy",
-                    "reshape_alias",
-                    "contiguous_alias",
-                ):
-                    traced = make_fx(fn, pre_dispatch=True, tracing_mode="fake")(*args)
-                    if fn is replacement:
-                        target = (
-                            torch.ops.aten.reshape.default
-                            if kind.startswith("reshape_")
-                            else torch.ops.aten.contiguous.default
-                        )
-                        self.assertTrue(
-                            list(
-                                traced.graph.find_nodes(
-                                    op="call_function", target=target
-                                )
-                            )
-                        )
-                else:
-                    kwargs.update(get_decomp_fn=dict, run_functional_passes=False)
-                    traced = fwd_only(fn, args, **kwargs)
-                # Match the target graph's user counts, including unused HOP returns.
-                traced.graph.eliminate_dead_code()
-                traced.recompile()
-                return traced
-
-            register_replacement(
-                pattern, replacement, [x[2:, ::step]], trace_fn, patterns
-            )
-            gm = make_fx(fn, tracing_mode="fake")(x)
-            gm.graph.eliminate_dead_code()
-            gm.recompile()
-            original_hop = next(
-                iter(
-                    gm.graph.find_nodes(op="call_function", target=auto_functionalized)
-                )
-            )
-            original_value = original_hop.kwargs["out"].meta["val"]
-            self.assertEqual(
-                (
-                    tuple(original_value.shape),
-                    original_value.stride(),
-                    original_value.storage_offset(),
-                ),
-                geometry,
-            )
-            before = gm.code
-            self.assertEqual(patterns.apply(gm.graph), int(accepted))
-            gm.graph.lint()
-            gm.recompile()
-            if accepted:
-                hop = next(
-                    iter(
-                        gm.graph.find_nodes(
-                            op="call_function", target=auto_functionalized
-                        )
-                    )
-                )
-                self.assertIs(hop.args[0], replacement_op)
-                self.assertEqual(len(hop.args), 2)
-                base = next(n for n in gm.graph.nodes if n.op == "placeholder")
-                self.assertEqual(hop.args[1], {"out": (base, *geometry)})
-            else:
-                self.assertEqual(gm.code, before)
-            for offset in (0, 100):
-                inp = x + offset
-                self.assertEqual(gm(inp), fn(inp), atol=0, rtol=0)
-                self.assertEqual(inp, x + offset)
 
     @inductor_config.patch(enable_auto_functionalized_v2=False)
     @parametrize("kind", ["legacy", "explicit_metadata", "varargs"])
@@ -3436,6 +2778,136 @@ class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
                     )
                     self.assertEqual(compiled(x), f(x), atol=0, rtol=0)
 
+    def test_v1_mutable_op_keyword(self, device):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("update(Tensor(a!) out) -> ()")
+            lib.define("collide(Tensor(a!) _mutable_op, Tensor _tensor_bases) -> ()")
+
+            @torch.library.impl(lib, "update", "CompositeExplicitAutograd")
+            def update(out):
+                out.add_(1)
+
+            @torch.library.impl(lib, "collide", "CompositeExplicitAutograd")
+            def collide(_mutable_op, _tensor_bases):
+                _mutable_op.add_(_tensor_bases)
+
+            op = torch.ops.mylib.update.default
+            x = torch.arange(8, dtype=torch.float32, device=device)
+            self.assertEqual(auto_functionalized(_mutable_op=op, out=x)[1], x + 1)
+            v = x[1:5]
+            metadata = {"_mutable_op": (x, v.size(), v.stride(), v.storage_offset())}
+            actual = auto_functionalized(
+                torch.ops.mylib.collide.default,
+                metadata,
+                _mutable_op=v,
+                _tensor_bases=v,
+            )[1]
+            self.assertEqual(actual, v + v)
+
+    @parametrize(
+        "start,stop,step,extent", [(1, 5, 1, 5), (3, 12, 2, 12), (10, 10, 1, 0)]
+    )
+    def test_view_metadata_clone_extent(self, device, start, stop, step, extent):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:1].add_(100)
+
+            base = torch.arange(1024, dtype=torch.float32, device=device)
+            view = base[start:stop:step]
+            metadata = {"out": (base, view.size(), view.stride(), start)}
+            op = torch.ops.mylib.partial.default
+            clone = auto_functionalized(op, metadata, out=view)[1]
+            expected_bytes = extent * base.element_size()
+            self.assertEqual(clone.untyped_storage().nbytes(), expected_bytes)
+            self.assertEqual(clone.size(), view.size())
+            self.assertEqual(clone.stride(), view.stride())
+            self.assertEqual(clone.storage_offset(), start)
+            expected = base[:extent].clone()
+            expected[start:stop:step][:1].add_(100)
+            self.assertEqual(clone.as_strided((extent,), (1,), 0), expected)
+            self.assertEqual(base, torch.arange(1024, dtype=base.dtype, device=device))
+
+    @parametrize("case", ["separate", "prefix", "alias", "view", "detached", "sparse"])
+    def test_pattern_refresh_preserves_observable_storage(self, device, case):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("update(Tensor(a!) out) -> ()")
+            lib.define("inspect_storage(Tensor x, Tensor y) -> Tensor")
+
+            @torch.library.impl(lib, "update", "CompositeExplicitAutograd")
+            def update(out):
+                out.add_(1)
+
+            @torch.library.register_fake("mylib::update", lib=lib)
+            def update_fake(out):
+                return None
+
+            def storage_value(x, y):
+                if case in ("view", "detached"):
+                    return int(x._is_view())
+                if case == "sparse":
+                    return int(y.layout == torch.sparse_coo)
+                return x.untyped_storage().nbytes() + int(torch._C._is_alias_of(x, y))
+
+            @torch.library.impl(lib, "inspect_storage", "CompositeExplicitAutograd")
+            def inspect_storage(x, y):
+                return x.new_full((), storage_value(x, y))
+
+            @torch.library.register_fake("mylib::inspect_storage", lib=lib)
+            def inspect_storage_fake(x, y):
+                return x.new_empty(())
+
+            op = torch.ops.mylib.update.default
+            inspect_op = torch.ops.mylib.inspect_storage.default
+
+            def search(x, y):
+                return auto_functionalized(op, out=x)[1] + inspect_op(x, y)
+
+            def replacement(x, y):
+                return auto_functionalized(op, out=x)[1] + storage_value(x, y)
+
+            def fn(owner, other):
+                base = owner[:12] if case == "prefix" else owner
+                v = base[1:5]
+                if case == "detached":
+                    v = other
+                y = v.view(4) if case == "alias" else other
+                if case == "detached":
+                    y = torch.empty_like(v)
+                metadata = {"out": (base, v.size(), v.stride(), v.storage_offset())}
+                return auto_functionalized(op, metadata, out=v)[1] + inspect_op(v, y)
+
+            other = torch.empty(4, device=device)
+            owner = torch.arange(64, dtype=other.dtype, device=device)
+            patterns = PatternMatcherPass()
+            register_replacement(
+                search, replacement, [other, other.clone()], fwd_only, patterns
+            )
+            if case == "sparse":
+                other = other.to_sparse()
+            elif case == "detached":
+                other = owner[1:5].detach()
+            gm = make_fx(fn, tracing_mode="fake")(owner, other)
+            gm.graph.eliminate_dead_code()
+            self.assertEqual(patterns.apply(gm.graph), int(case == "separate"))
+            gm.graph.lint()
+            gm.recompile()
+            self.assertEqual(gm(owner, other), fn(owner, other))
+
     @parametrize("fake", [False, True])
     def test_view_metadata_rejects_short_base(self, device, fake):
         from contextlib import nullcontext
@@ -3473,8 +2945,8 @@ class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
 
             @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
             def partial(out):
-                out[:-2].add_(1000)
-                out[-1:].add_(2000)
+                out[:-2].add_(1001 if out.is_conj() else 1000)
+                out[-1:].add_(2001 if out.is_neg() else 2000)
 
             # The implementation uses ATen operations that support view bits.
             lib.impl("partial", torch.library.fallthrough_kernel, "Conjugate")
@@ -3508,9 +2980,16 @@ class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
                     x = x.reshape(8, 16)
                     if kind in ("real", "conjugate"):
                         x = x.to(torch.complex64) * (1 + 1j)
-                self.assertEqual(
-                    torch.compile(f, fullgraph=True)(x), f(x), atol=0, rtol=0
-                )
+                expected = f(x)
+                compiled = torch.compile(f, fullgraph=True)
+                if kind in ("conjugate", "negative"):
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.BackendCompilerFailed,
+                        "V1 auto-functionalization cannot preserve conjugate or negative view bits",
+                    ):
+                        compiled(x)
+                else:
+                    self.assertEqual(compiled(x), expected, atol=0, rtol=0)
 
     @inductor_config.patch(enable_auto_functionalized_v2=False)
     @parametrize("inference", [False, True])
