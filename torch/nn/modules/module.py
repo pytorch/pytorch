@@ -7,7 +7,8 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Optional, overload, Self, TypeVar, Union
+from typing import Any, Optional, overload, TypeVar, Union
+from typing_extensions import Self  # noqa: UP035
 
 import torch
 from torch import device, dtype, memory_format, Tensor
