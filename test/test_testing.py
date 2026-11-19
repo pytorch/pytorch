@@ -4327,6 +4327,7 @@ class TestImports(TestCase):
                            "torch._native.ops.reductions.kernel_xcta",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_coltile",  # depends on cutlass
                            "torch._native.ops.reductions.ordered",  # depends on cutlass
+                           "torch._native.ops.scaled_grouped_mm",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._native.ops.quantize_tensor.blockscaled_tma",  # depends on cutlass
