@@ -207,18 +207,14 @@ class TestNativeDecompTable(TestCase):
         # PyTorch version, but it's in the hundreds).
         self.assertGreater(len(table), 100)
 
-    def test_table_override_wins_on_conflict(self):
-        """If an op has both a default decomp and a registered override,
-        the override wins (merged last)."""
+    def test_table_override_wins_on_conflict(self) -> None:
+        """Registered overrides take precedence over default decompositions."""
         self._register("add.Tensor", _always_true, _make_fill_impl(99))
 
-        # The stored override is a router closure that wraps our impl -- not
-        # our impl directly -- so we verify table identity against the
-        # closure we queued.
         table = native_decomp_table()
-        self.assertIs(
-            table[torch.ops.aten.add.Tensor],
-            self.registry._native_decomp_overrides[torch.ops.aten.add.Tensor],
+        self.assertEqual(
+            table[torch.ops.aten.add.Tensor](torch.ones(3), torch.ones(3)),
+            torch.full((3,), 99.0),
         )
 
     def test_table_overrides_only(self):
