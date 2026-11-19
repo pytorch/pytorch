@@ -3448,6 +3448,10 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
             f"({folded.group(0) if folded else ''!r})",
         )
 
+    # Re-check on every pin bump: base-action reads stage A's appended system
+    # prompt from the undeclared INPUT_APPEND_SYSTEM_PROMPT
+    # (base-action/src/index.ts), so a pin that stops reading it, or declares
+    # an input that overrides it, drops the untrusted-content rules silently.
     BASE_ACTION = (
         "anthropics/claude-code-action/base-action@"
         "9ca9355b36297178e28d37c799d1c9c8a28e6507"
@@ -3460,12 +3464,13 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
         GitHub API call and takes no GitHub token, so Claude Code, which reads
         PR content, is handed none.
         """
-        # The steps are found by what they RUN, not by a marker another step
-        # could carry: exactly the two stages use an anthropics action.
+        # The steps are found by what they RUN, read through step_uses, so a
+        # quoted `uses:` value is not invisible: exactly the two stages use an
+        # anthropics action.
         steps = [
             s
-            for s in self.code.split("- name:")
-            if re.search(r"(?m)^\s*uses:\s*anthropics/", s)
+            for s in re.split(r"(?m)^      -(?: |$)", self.code)[1:]
+            if step_uses(s).startswith("anthropics/")
         ]
         self.assertEqual(
             [re.search(r"(?m)^\s*id:\s*(\S+)\s*$", s).group(1) for s in steps],
@@ -3477,27 +3482,27 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
                 self._check_base_action_step(step)
 
     def _check_base_action_step(self, step: str) -> None:
-        uses = re.findall(r"(?m)^\s*uses:\s*(\S+)", step)
-        self.assertEqual(uses, [self.BASE_ACTION])
+        self.assertEqual(step_uses(step), self.BASE_ACTION)
         # Only base-action's own inputs: the full action's token, bot and
         # write-access inputs would be unknown inputs here, silently ignored.
+        # Keys at the mapping's own column, derived rather than assumed;
+        # mapping_items refuses the `claude_args: |` block scalar.
+        inputs = [ln for ln in with_block(step) if ln.strip()]
+        own = min(len(ln) - len(ln.lstrip()) for ln in inputs)
         keys = [
             m.group(1)
-            for ln in with_block(step)
-            if (m := re.match(r"^ {10}([A-Za-z_][\w-]*)\s*:", ln))
+            for ln in inputs
+            if len(ln) - len(ln.lstrip()) == own
+            and (m := re.match(r"\s*([A-Za-z_][\w-]*)\s*:", ln))
         ]
         self.assertEqual(sorted(keys), ["claude_args", "prompt", "use_bedrock"])
-        # In the step's `env:`, not `with:`, where each would be an unknown input.
-        env = re.search(r"(?ms)^ {8}env:\s*\n(.*?)(?=^ {8}\S)", step)
-        self.assertIsNotNone(env, "the model step declares no env:")
-        # Claude Code's subprocess scrub needs bubblewrap, which this sudo-less
-        # job cannot add.
-        self.assertRegex(
-            env.group(1), r'(?m)^ {10}CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"$'
-        )
+        # In the step's `env:`, not `with:`, where each would be an unknown
+        # input. Claude Code's subprocess scrub needs bubblewrap, which this
+        # sudo-less job cannot add.
+        self.assertEqual(env_values(step, "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"), ["0"])
         # base-action's setup-node defaults to 18.x, which the runner image
         # does not cache; resolving it calls api.github.com on the job token.
-        self.assertRegex(env.group(1), r'(?m)^ {10}NODE_VERSION: "24"$')
+        self.assertEqual(env_values(step, "NODE_VERSION"), ["24"])
 
     def test_review_job_caches_nothing(self):
         """Cache writes land in the default-branch scope — poisonable from a fork."""
@@ -6859,6 +6864,9 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
     then exit 1; fi` rejects each single mismatch — one field still agrees —
     and accepts the run where both differ, which is the interesting one.
 
+    The same step also holds the bot allowlist, the only gate on which bots
+    may start a review; its tests are the `bot` ones below.
+
     WHAT THIS HARNESS DOES NOT EXERCISE, stated so the next reader does not
     infer coverage from the class name: the artifact size cap, the four shape
     regexes in `coords`, the draft/label eligibility gate, and the changed-file
@@ -6921,6 +6929,7 @@ class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
             ("pytorch-bot[bot]", "Organization", True),
             ("some-org", "Organization", False),
             ("pytorch-bot[bot]x", "Bot", False),
+            ("x[bot]", "", False),
         ):
             with self.subTest(actor=actor, actor_type=actor_type):
                 with tempfile.TemporaryDirectory() as td:
