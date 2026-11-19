@@ -21,6 +21,7 @@ from ...utils import (
     ceildiv,
     get_k_splits,
     get_num_sms,
+    rocm_gfx_arch,
     use_triton_blackwell_tma_template,
 )
 from ...virtualized import V
@@ -38,10 +39,17 @@ if TYPE_CHECKING:
 def decompose_k_split_bounds(device: torch.device) -> tuple[int, int]:
     """Return (min_output_tiles, max_workspace_bytes) for decompose-K splits.
 
-    0 means unbounded. Tuned by timing every legal split against ATen on B200 and
-    H100 and checking that no split that beat ATen gets filtered out.
+    0 means unbounded. Tuned by timing every legal split against ATen on B200,
+    H100 and MI350X and checking that no split that beat ATen gets filtered out.
     """
     device_properties = DeviceProperties.create(device)
+    if device_properties.type == "hip":
+        # gfx950: winning splits use up to 64 MiB of FP32 workspace, and none had
+        # fewer than 32 split x output tiles. Other ROCm targets are untuned and
+        # unbounded.
+        if rocm_gfx_arch() == "gfx950":
+            return 32, 64 * 1024 * 1024
+        return 0, 0
     if device_properties.type != "cuda":
         return 0, 0
     if (device_properties.major or 0) >= 10:
