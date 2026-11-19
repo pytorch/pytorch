@@ -32,6 +32,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
+    Max,
     Min,
     Mod,
     ModularIndexing,
@@ -51,7 +52,7 @@ from ...utils._sympy.symbol import (
     SymT,
     symt_to_block_prefix,
 )
-from ...utils._sympy.value_ranges import ValueRanges
+from ...utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
@@ -963,11 +964,15 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             # this workaround prints the float as an integer
             # xref: https://github.com/sympy/sympy/issues/26620
             ret = str(int(expr))
-        elif config.is_fbcode() and torch.version.hip:
-            ret = f"{expr}"
         else:
-            float_type = self._get_scalar_float_type()
-            ret = f"tl.full([], {expr}, {float_type})"
+            # Use base class method to handle double precision floats
+            # in order to avoid literal truncation
+            float_literal = super()._print_Float(expr)
+            if config.is_fbcode() and torch.version.hip:
+                ret = f"{float_literal}"
+            else:
+                float_type = self._get_scalar_float_type()
+                ret = f"tl.full([], {float_literal}, {float_type})"
         return ret
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
@@ -2607,12 +2612,16 @@ class TritonKernelOverrides(TritonOverrides):
         finally:
             V.kernel._index_dtype = real_index_dtype
         if real_index_dtype != dtype or var.dtype != dtype:
+            index_var = var
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
                 dtype=dtype,
                 shape=var.shape,
             )
+            # the cast is only valid where the index expression is, and a later
+            # indirect_indexing bounds assert needs that mask
+            var.mask_vars = index_var.mask_vars
         return var
 
     @staticmethod
@@ -3676,6 +3685,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
+        # Set on HIP when this kernel may access a graph input that as_strided
+        # rebased to a negative offset below its data pointer, which AMD buffer
+        # ops cannot address.
+        self.negative_offset_found = False
 
     @property
     def uses_tma(self) -> bool:
@@ -5359,6 +5372,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             PartialAccumulate(name, reduction_type, val)
         )
 
+    def _record_negative_offset(self, name: str, index: sympy.Expr | None) -> None:
+        """Set ``negative_offset_found`` if this access may go below ``name``'s pointer.
+
+        Only graph inputs that as_strided rebased to a negative offset on HIP are
+        checked; ``name`` may also be a mutation buffer of such an input. ``index``
+        is the offset from the data pointer, or ``None`` when it is only known at
+        runtime. A ``None`` index, or one whose lower bound cannot be determined,
+        counts as negative. The flag is never cleared.
+        """
+        if torch.version.hip is None or self.negative_offset_found:
+            return
+        # A store into a mutated input names the mutation buffer, not the input.
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if name not in V.graph.inputs_with_negative_as_strided_offset:
+            return
+        if index is None:
+            self.negative_offset_found = True
+            return
+
+        index = sympy.expand(
+            V.graph.sizevars.remove_precomputed_replacements(index), identity=True
+        )
+        if not index.free_symbols:
+            self.negative_offset_found = bool(index < 0)
+            return
+
+        if not any(
+            term.could_extract_minus_sign() for term in sympy.Add.make_args(index)
+        ):
+            return
+
+        shape_ranges = V.graph.sizevars.shape_env.var_to_range
+        var_ranges = dict(shape_ranges)
+        try:
+            for var, size in self.var_ranges().items():
+                size_upper = bound_sympy(Max(size - 1, 0), shape_ranges).upper
+                var_ranges[var] = ValueRanges(0, size_upper)
+            self.negative_offset_found = bool(bound_sympy(index, var_ranges).lower < 0)
+        except Exception:
+            # A negative term with unknown bounds cannot safely use unsigned offsets.
+            self.negative_offset_found = True
+
     def load(self, name: str, index: sympy.Expr):
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
@@ -5403,6 +5459,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
         if isinstance(indexing, IndexingOptions):
+            self._record_negative_offset(name, indexing.index)
             if self._has_stride1_on_rdim(indexing.index):
                 self.has_load_with_contiguous_rdim = True
 
@@ -5444,7 +5501,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             ep = ""
 
-        if (has_tmpmask or has_rindex) and indexing.has_mask():
+        if (
+            has_tmpmask or has_rindex or self._load_other is not None
+        ) and indexing.has_mask():
             if self._load_other:
                 other = f", other={constant_repr(self._load_other)}"
             elif uses_uint8_storage:
@@ -5653,10 +5712,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask_constant_index=mode == "atomic_add",
         )
 
-        if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
-            indexing.index
-        ):
-            self.stores_with_contiguous_rdim.append(name)
+        if isinstance(indexing, IndexingOptions):
+            self._record_negative_offset(name, indexing.index)
+            if self._has_stride1_on_rdim(indexing.index):
+                self.stores_with_contiguous_rdim.append(name)
 
         # Guard against write-after-read corruption in triton.
         # See # https://github.com/triton-lang/triton/issues/1615
@@ -5773,6 +5832,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # If we're trying to use a bucketize kernel, we should make sure that an
         # autotuning config with num_elements_per_warp=(warp_size) exists.
         self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
+
+        # The search reads both lookup tensors at offsets known only at runtime.
+        self._record_negative_offset(boundaries[0], None)
+        if sorter:
+            self._record_negative_offset(sorter[0], None)
 
         boundaries_ptr = self.args.input(boundaries[0])
         boundary_size = self.index_to_str(boundaries[1])
@@ -8192,14 +8256,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return False
 
     def pointer_range_override(self) -> tuple[int, ...] | None:
-        """Suppress ``tt.pointer_range=32`` when this kernel uses atomics.
+        """Suppress ``tt.pointer_range=32`` for incompatible HIP accesses.
 
-        On HIP the annotation lets the backend use buffer ops, and buffer atomics are
-        far slower than global ones under contention. ``()`` suppresses; ``None`` lets
-        ``config_of`` decide, which is also where the config flag is applied. Only
-        valid once the kernel body exists, since it reads ``atomic_add_found``.
+        On HIP the annotation lets the backend use buffer ops. Buffer atomics are far
+        slower than global ones under contention, and buffer ops cannot address memory
+        below the kernel pointer, which a negative as_strided rebase can require.
+        ``()`` suppresses; ``None`` lets ``config_of`` decide, which is also where the
+        config flag is applied. Only valid once the kernel body exists.
         """
-        if torch.version.hip is not None and self.atomic_add_found:
+        if torch.version.hip is not None and (
+            self.atomic_add_found or self.negative_offset_found
+        ):
             return ()
         return None
 
@@ -8385,7 +8452,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Computed after codegen_body() so self.atomic_add_found is accurate.
+        # Computed after codegen_body() so atomic_add_found and negative_offset_found
+        # are accurate.
         triton_meta["configs"] = [
             config_of(
                 signature,
@@ -8633,15 +8701,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for arg, arg_signature in zip(call_args, arg_signatures):
             if isinstance(arg_signature, TensorArg):
                 tensor_name = f"{self.kernel_name}: {arg}"
-                if V.graph.cpp_wrapper:
-                    wrapper.writeline(
-                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{tensor_name}", {arg}));'
-                    )
-                else:
-                    line = f"assert not {arg}.isnan().any().item(), {f'{tensor_name} contains NaN'!r}"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item(), {f'{tensor_name} contains Inf'!r}"
-                    wrapper.writeline(line)
+                wrapper.codegen_nan_assert(arg, tensor_name)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:
         return TritonCSEVariable(*args, **kwargs)
