@@ -218,7 +218,9 @@ class TODO_UNKNOWN:
 
 
 def _clear_fake_mode_weakrefs(
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    | torch._subclasses.fake_tensor.CppFakeTensorMode
+    | None,
 ) -> None:
     """Clear WeakIdRef entries from a FakeTensorMode's describer."""
     if fake_mode is None:
@@ -377,7 +379,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-                torch.use_deterministic_algorithms(
+                torch._C._set_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
                 torch.random.set_rng_state(torch_rng_state)
@@ -1127,7 +1129,10 @@ class BackendInput:
     backend_id: str
     graph_module: torch.fx.GraphModule
     example_inputs: Any
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    fake_mode: (
+        torch._subclasses.fake_tensor.FakeTensorMode
+        | torch._subclasses.fake_tensor.CppFakeTensorMode
+    )
     tensor_to_context: WeakIdKeyDictionary
 
 
@@ -1751,12 +1756,13 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
-            # Hold _is_compiling_flag True for the duration of compilation so
-            # torch.compiler.is_compiling() is observable in code that runs
-            # during the compile session but is not directly Dynamo-traced
-            # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
-            # make_fx invoked from a custom backend, etc.). Export sets the
-            # flag itself via _compiling_state_context, so skip there.
+            # Hold the current thread's is_compiling flag True for the
+            # duration of compilation so torch.compiler.is_compiling() is
+            # observable in code that runs during the compile session in this
+            # thread but is not directly Dynamo-traced (wrapper-subclass
+            # __torch_dispatch__ invoked by AOTAutograd, make_fx invoked from
+            # a custom backend, etc.). Export sets the flag itself via
+            # _compiling_state_context, so skip there.
             if not export:
                 stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(deferred_full_gc())
