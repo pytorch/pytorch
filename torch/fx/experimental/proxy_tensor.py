@@ -767,10 +767,12 @@ def extract_val(
 ) -> _ExtractValType:
     """Snapshot a value for FX node metadata.
 
-    If ``include_real`` is true, retain the real tensor for placeholder
-    metadata. Otherwise, real dense tensors are replaced by fake tensors. If
-    no fake mode is active, ``get_metadata_fake_mode`` lazily supplies one;
-    repeated calls must return the same mode to share it across metadata values.
+    Real dense tensors are replaced by fake tensors with the same shape,
+    strides, dtype and device, created under the active fake mode. If no
+    fake mode is active, ``get_metadata_fake_mode`` lazily supplies one;
+    repeated calls must return the same mode to share it across metadata
+    values. Without it, each value gets a fresh mode. If ``include_real`` is
+    true, fake tensors keep their attached real tensor.
 
     Returns the value in a form suitable for node metadata, or ``None`` for
     unsupported values such as sparse tensors.
@@ -888,7 +890,7 @@ def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
     proxy.node.meta["val"] = extract_val(
         val,
         include_real=(proxy.node.op == "placeholder"),
-        get_metadata_fake_mode=functools.partial(_get_metadata_fake_mode, tracer),
+        get_metadata_fake_mode=lambda: _get_metadata_fake_mode(tracer),
     )
 
     with _enable_thunkify(tracer):
@@ -1887,9 +1889,7 @@ class PythonKeyTracer(Tracer):
                 with disable_proxy_modes_tracing():
                     node.meta["val"] = extract_val(
                         attr,
-                        get_metadata_fake_mode=functools.partial(
-                            _get_metadata_fake_mode, self
-                        ),
+                        get_metadata_fake_mode=lambda: _get_metadata_fake_mode(self),
                     )
 
         def map_fn(v: Any) -> _ExtractValType | None:
