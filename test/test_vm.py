@@ -3978,6 +3978,41 @@ def region_branching(model, x):
     return out.sin()
 
 
+class RegionAsks(torch.nn.Module):
+    # Code of a model that asks what a number is, in the way ``how`` says:
+    # the number of rows of its input, or the one it is handed.
+    def __init__(self, how):
+        super().__init__()
+        self.net = RegionLinears()
+        self.how = how
+
+    def forward(self, x, n):
+        if n is None:
+            n = x.shape[0]
+        if self.how == "isinstance":
+            whole = isinstance(n, int)
+        elif self.how == "type":
+            whole = type(n) is int
+        else:
+            whole = str(n).isdigit()
+        if whole:
+            x = x * n
+        return self.net(x)
+
+
+def region_asked(model, x, n):
+    return model(x, n)
+
+
+class RegionNames(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = RegionLinears()
+
+    def forward(self, x):
+        return {f"rows_{x.shape[0]}": self.net(x)}
+
+
 def region_clock(model, x):
     start = time.perf_counter_ns()
     out = model(x)
@@ -4926,6 +4961,51 @@ class TestVmRegions(TestCase):
         (region,) = self.compiled_regions(compiled)
         below, above = region["open"]
         self.assertNotEqual(below, above)
+
+    def asked(self, how, calls):
+        """Runs a model that asks what a number is, and returns the
+        conditions of the open variants of the region around its call."""
+        model = RegionAsks(how).eval()
+        compiled = torch.vm(
+            region_asked, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with torch.no_grad():
+            for rows, n in calls:
+                x = torch.randn(rows, 6)
+                self.assertEqual(compiled(model, x, n), model(x, n), msg=how)
+        return [
+            conditions
+            for region in self.compiled_regions(compiled)
+            if region["where"].startswith("region_asked")
+            for conditions in region["open"]
+        ]
+
+    def test_code_that_asks_what_a_size_is(self):
+        torch.manual_seed(0)
+        calls = [(rows, None) for rows in (2, 2, 2, 2, 3, 4, 5, 6, 7, 3)]
+        # isinstance is told what it will be told when the code runs for
+        # real, and the call of the model is one graph for all the sizes.
+        self.assertEqual(len(self.asked("isinstance", calls)), 1)
+        # type() and str() cannot be told: for them the size stays the
+        # number it is, and every size has a graph of its own.
+        self.assertEqual(self.asked("type", calls), [])
+        self.assertEqual(self.asked("text", calls), [])
+
+    def test_text_of_a_size(self):
+        torch.manual_seed(0)
+        model = RegionNames().eval()
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with torch.no_grad():
+            for n in (4, 4, 4, 4, 5, 6, 7, 5):
+                x = torch.randn(n, 6)
+                result = compiled(model, x)
+                self.assertEqual(list(result), [f"rows_{n}"])
+                self.assertEqual(result[f"rows_{n}"], model.net(x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_infer"))
+        self.assertEqual(region["open"], [])
 
     def test_strides_select_a_variant(self):
         compiled = torch.vm(
