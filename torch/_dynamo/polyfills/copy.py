@@ -79,15 +79,8 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
 _legacy_deepcopy_atomic = getattr(copy, "_deepcopy_atomic", None)
 
 
-def is_unmemoized_atomic_key(item: Any, memo: dict[int, Any], owner: Any) -> bool:
-    # Legacy deepcopy consults the memo before recognizing atomic keys. A memo
-    # containing only the OrderedDict's ID cannot contain its scalar key's ID.
+def is_deepcopy_atomic(item: Any) -> bool:
     dispatch = copy._deepcopy_dispatch  # pyrefly: ignore[missing-attribute]
-    if type(memo) is not dict or len(memo) != 1 or type(dispatch) is not dict:
-        return False
-    token = next(iter(memo))
     return (
-        type(token) is int
-        and token == id(owner)
-        and dispatch.get(type(item)) is _legacy_deepcopy_atomic
+        type(dispatch) is dict and dispatch.get(type(item)) is _legacy_deepcopy_atomic
     )

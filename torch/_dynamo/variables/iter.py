@@ -995,6 +995,9 @@ class DictViewIterator(IteratorVariable):
         container = owner.dv_dict if isinstance(owner, DictViewVariable) else owner
         if not isinstance(container, (ConstDictVariable, BaseSetVariable)):
             return super().reconstruct(codegen)
+        # Stack reconstruction precedes replay of mutations to a live input.
+        if container.source and codegen.tx.output.side_effects.is_modified(container):
+            return super().reconstruct(codegen)
         if len(container.items) != self._initial_size:
             return super().reconstruct(codegen)
         if self.linked_order:

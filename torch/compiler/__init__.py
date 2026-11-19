@@ -1000,6 +1000,7 @@ def nested_compile_region(
         max_reuse_entries: Maximum number of reuse cache entries per function
             before raising an error. If this limit is hit, guards keep failing
             across invocations and hierarchical compilation is not effective.
+            Functions with closures, defaults or different globals have distinct automatic caches.
         reuse_hash_fn: Optional callable that takes the same ``*args, **kwargs``
             as the wrapped function and returns an integer hash key. When
             provided, Dynamo traces this function to obtain a constant integer
