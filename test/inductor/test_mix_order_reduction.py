@@ -1497,6 +1497,29 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(list(act[1].shape), list(ref[1].shape))
         self.assertTrue(same(ref, act, tol=1e-3))
 
+    def test_mixed_split_origins_do_not_crash(self):
+        """
+        Sibling split reductions whose split loops coincide but whose
+        original shapes differ fuse horizontally into one node. That node
+        is not a mix-order candidate: its split reductions cannot be
+        reverted to one original reduction, so scoring the fusion must
+        not trip the original-shape check in MixOrderReduction.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/205624
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, y):
+            # (1) per sample: 3072 outputs x 1280; (2) over samples and
+            # tokens: 192 outputs x 20480; (3) per sample over another
+            # tensor. All three split to (30720, 128) stage-1 loops.
+            return x.sum(1), (x * y).sum((0, 1)), y.sum(1)
+
+        x, y = (torch.randn(16, 1280, 192, device=GPU_TYPE) for _ in range(2))
+        self.check_numeric(f, (x, y))
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
+
 
 class OverFusionTest(TestBase):
     """
