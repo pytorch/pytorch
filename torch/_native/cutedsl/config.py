@@ -99,6 +99,6 @@ def pointwise_presets(
         if name == "sin" and dtype == "float16":
             return ((0, 1, 128), (4 * 1024**2, 2, 128))
         if storage_bits < 32 and nin == 1:
-            return ((0, 1, 128), (POINTWISE_DENSE_MIN, 4, 256))
+            return ((0, 1, 64), (POINTWISE_DENSE_MIN, 4, 128))
         return ((0, 1, 128), (POINTWISE_DENSE_MIN, 2, 128))
     return ((0, 1, 128), (384 * 1024, 2, 128), (768 * 1024, 4, 128))

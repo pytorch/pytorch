@@ -20,7 +20,7 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from torchgen.model import DispatchKey
+from torchgen.model import BaseTy, BaseType, DispatchKey
 from torchgen.native_aot_decl import decl_id_for_op as _decl_id, discover_declarations
 
 
@@ -209,6 +209,18 @@ def gen_stub_consultation(
     )
 
 
+def first_tensor_arg(f: NativeFunction) -> str | None:
+    """Choose a required Tensor for unstructured device checks and guards."""
+    return next(
+        (
+            a.name
+            for a in f.func.arguments.flat_non_out
+            if a.type == BaseType(BaseTy.Tensor)
+        ),
+        None,
+    )
+
+
 def validate_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest],
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
@@ -253,6 +265,11 @@ def validate_native_aot_manifests(
                 raise RuntimeError(
                     f"native-aot declaration for {op}@{key}: STRUCTURED=False "
                     "requires fresh Tensor returns or an inplace return aliasing self"
+                )
+            if f is None or first_tensor_arg(f) is None:
+                raise RuntimeError(
+                    f"native-aot declaration for {op}@{key}: unstructured hooks "
+                    "require a non-optional Tensor argument for the device guard"
                 )
             continue
         base = op.split(".")[0]
