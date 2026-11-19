@@ -73,6 +73,30 @@ class GraphBreakingInt(int):
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @torch._dynamo.config.patch(trace_autograd_ops=False)
+    def test_requires_grad_restart_before_backward(self):
+        def helper(x):
+            leaf = x.sin().cos().requires_grad_()
+            leaf.square().sum().backward()
+            return leaf.grad
+
+        def fn(x):
+            return helper(x + 1) + 2
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        torch.compile(fn, backend="eager")(torch.ones(3))
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        reasons = metrics[0].restart_reasons
+        self.assertIn(
+            "source-less requires_grad_() intermediate leaked as output", reasons
+        )
+        self.assertFalse(
+            any(
+                reason.startswith("Unsupported Tensor.backward() call")
+                for reason in reasons
+            )
+        )
+
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
@@ -1752,7 +1776,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(g, backend=cnts)(x), x + 1)
 
     def test_ngb_suppressed_for_inline_module(self):
-        """NGB should be suppressed for functions in NGB_SUPPRESS_INLINELIST."""
+        """NGB should be suppressed for functions in NGB_SUPPRESS_MODULES."""
         from unittest.mock import patch
 
         def inner(x):
@@ -1769,7 +1793,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         inner_file = inner.__code__.co_filename
         with patch(
-            "torch._dynamo.trace_rules.is_ngb_suppressed_inline",
+            "torch._dynamo.trace_rules.is_ngb_suppressed_module",
             side_effect=lambda f: f == inner_file,
         ):
             self.assertEqual(outer(inp), inp + 6)
@@ -1777,6 +1801,102 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # NGB normally handles an inlined graph break in 2 frames.
         # With suppression, the break propagates to the parent, producing more.
         self.assertGreater(cnts.frame_count, 2)
+
+    def test_ngb_with_unhashable_qualname(self):
+        class UnhashableQualname(str):
+            __slots__ = ()
+            __hash__ = None
+
+        events = []
+
+        def inner(x):
+            events.append("before")
+            result = x.sin()
+            torch._dynamo.graph_break()
+            events.append("after")
+            return result.cos()
+
+        inner.__module__ = "torch._prims_common.wrappers"
+        inner.__qualname__ = UnhashableQualname("inner")
+
+        def outer(x):
+            return inner(x + 1) + 2
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.arange(3, dtype=torch.float64)
+        for _ in range(2):
+            events.clear()
+            self.assertEqual(compiled(x), (x + 1).sin().cos() + 2)
+            self.assertEqual(events, ["before", "after"])
+        self.assertEqual(
+            [
+                [node.target for node in graph.graph.nodes if node.op == "call_method"]
+                for graph in backend.graphs
+            ],
+            [["sin"], ["cos"]],
+        )
+
+    @parametrize("dynamic", [False, True])
+    def test_ngb_suppressed_for_resize_out(self, dynamic):
+        from torch._prims_common.wrappers import _maybe_resize_out
+
+        def fn(x, out):
+            result = x.sin()
+            return _maybe_resize_out(out, result.shape).copy_(result)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        x = torch.arange(3, dtype=torch.float64)
+        out = torch.empty(2, dtype=x.dtype)
+        with self.assertWarns(UserWarning):
+            actual = torch.compile(fn, backend=backend, dynamic=dynamic)(x, out)
+        self.assertIs(actual, out)
+        self.assertEqual(actual, x.sin())
+        targets = [
+            node.target
+            for graph in backend.graphs
+            for node in graph.graph.nodes
+            if node.op == "call_method"
+        ]
+        self.assertIn("sin", targets)
+        self.assertIn("copy_", targets)
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        self.assertTrue(
+            all(metric.graph_op_count for metric in metrics),
+            [(metric.co_name, metric.graph_op_count) for metric in metrics],
+        )
+
+    def test_ngb_allowed_in_testing_callback(self):
+        from torch.testing._internal.common_utils import outs_and_grads
+
+        events = []
+
+        def callback(x):
+            events.append("before")
+            result = x.sin()
+            torch._dynamo.graph_break()
+            events.append("after")
+            return result.cos()
+
+        def fn(x):
+            result, _ = outs_and_grads(callback, (x + 1,), ())
+            return result + 2
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.arange(3, dtype=torch.float64)
+        for _ in range(2):
+            events.clear()
+            self.assertEqual(compiled(x), (x + 1).sin().cos() + 2)
+            self.assertEqual(events, ["before", "after"])
+        self.assertEqual(
+            [
+                [node.target for node in graph.graph.nodes if node.op == "call_method"]
+                for graph in backend.graphs
+            ],
+            [["sin"], ["cos"]],
+        )
 
     def test_complex_nan_constant_across_graph_break(self):
         """Graph break with complex constants containing nan/inf imaginary parts.
