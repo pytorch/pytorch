@@ -959,6 +959,7 @@ def fold_cols_rolled(
         )
     if const_expr(grouped):
         leaf_fn, combine_fn = trait.leaf, trait.combine
+        equal_fn = trait.combine_equal if const_expr(col_group > 1) else None
         gfrag = cute.make_rmem_tensor(cute.make_layout((vec, group)), mX.element_type)
         ngroups = (nrows - online) // Int32(group)
         for g in cutlass.range(ngroups):
@@ -974,7 +975,7 @@ def fold_cols_rolled(
                 for i in range(vec)
             ]
             if const_expr(col_group > 1):
-                roots = [_equal_count_reduce(lv, trait.combine_equal) for lv in leaves]
+                roots = [_equal_count_reduce(lv, equal_fn) for lv in leaves]
             else:
                 roots = [_inner_tree_reduce(lv, combine_fn) for lv in leaves]
             accs = tuple(combine_fn(accs[i], roots[i]) for i in range(vec))
@@ -1170,8 +1171,10 @@ class TileReduce:
         self.uniform_tree_loads, tail = divmod(tree_count, threads_per_block)
         self.uniform_tree_tail = bool(tail)
         self.col_group = col_group
-        # Grouped column folds run their online prefix at unroll 1, so plans differing only
-        # in unroll share a kernel; fold_cols_rolled itself honors any unroll.
+        # Grouped column folds run their online prefix at unroll 1, so plans that differ
+        # only in unroll share a kernel; fold_cols_rolled itself honors any unroll.
+        # cache_sig keys only col_unroll because _col_group_issue limits col_group > 1
+        # to column inputs, not partials.
         self.col_unroll = 1 if col_group > 1 else unroll
         self.use_tma = use_tma
         self.combine = combine
