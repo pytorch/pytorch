@@ -1435,6 +1435,7 @@ def _use_cudnn_ctc_loss(
 ) -> bool:
     return (
         torch._C._has_cudnn
+        and torch.version.hip is None
         and torch._C._get_cudnn_enabled()
         and blank == 0
         and log_probs.dim() == 3
@@ -1460,6 +1461,8 @@ def _use_cudnn_ctc_loss_tensor(
     target_lengths: FakeTensor,
     blank: int,
 ) -> bool:
+    # eager also needs target lengths < 256 and <= input lengths, which are
+    # unknown here, so use the native kernel (differs under propagate_real_tensors)
     return False
 
 
@@ -1478,14 +1481,24 @@ def _cudnn_ctc_loss(
 ) -> tuple[FakeTensor, FakeTensor]:
     torch._check(log_probs.dim() == 3, lambda: "log_probs must be 3-D")
     torch._check(log_probs.dtype == torch.float, lambda: "log_probs must be float")
+    torch._check(log_probs.device.type == "cuda", lambda: "log_probs must be on cuda")
     torch._check(targets.dim() == 1, lambda: "targets must be 1-D")
     torch._check(targets.dtype == torch.int, lambda: "targets must be int32")
+    torch._check(targets.is_contiguous(), lambda: "targets must be contiguous")
+    dev = "cpu" if func is aten._cudnn_ctc_loss.default else "cuda"
+    torch._check(targets.device.type == dev, lambda: f"targets must be on {dev}")
     torch._check(blank == 0, lambda: "blank must be label 0 for cudnn_ctc_loss")
     batch_size = log_probs.size(1)
 
-    for lengths in (input_lengths, target_lengths):
-        size = len(lengths) if isinstance(lengths, list) else lengths.numel()
-        torch._check(size == batch_size, lambda: "lengths must match batch_size")
+    for name, lengths in zip(("input", "target"), (input_lengths, target_lengths)):
+        if isinstance(lengths, list):
+            size = len(lengths)
+        else:
+            size = lengths.size(0) if lengths.dim() > 0 else 1
+        torch._check(
+            size == batch_size,
+            lambda: f"{name}_lengths needs to have size to match batch_size",
+        )
 
     costs = log_probs.new_empty(batch_size)
     grad = torch.empty_like(log_probs, memory_format=torch.contiguous_format)
