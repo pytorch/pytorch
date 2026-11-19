@@ -19,8 +19,8 @@ from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, IO, TypeVar
-from typing_extensions import Never, ParamSpec
+from typing import Any, IO, Never, TypeVar
+from typing_extensions import ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
