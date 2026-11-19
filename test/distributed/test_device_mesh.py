@@ -250,8 +250,8 @@ class DeviceMeshTest(DTensorTestBase):
 
     # TODO: need to refactor the other tests in this file to test both
     # eager_init=True and eager_init=False scenarios.
-    # XCCL does not support process group splitting: https://github.com/intel/torch-xpu-ops/issues/5385
-    @xfailIf(TEST_XPU)
+    # XCCL can't split groups: https://github.com/intel/torch-xpu-ops/issues/5385 (with < 4 XPUs this runs on gloo)
+    @xfailIf(TEST_XPU and device_count >= 4)
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
@@ -264,8 +264,8 @@ class DeviceMeshTest(DTensorTestBase):
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
-    # XCCL does not support process group splitting: https://github.com/intel/torch-xpu-ops/issues/5385
-    @xfailIf(TEST_XPU)
+    # XCCL can't split groups: https://github.com/intel/torch-xpu-ops/issues/5385 (with < 4 XPUs this runs on gloo)
+    @xfailIf(TEST_XPU and device_count >= 4)
     @with_comms(eager_init=True)
     def test_device_mesh_preserve_rank_order_eager(self):
         mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
