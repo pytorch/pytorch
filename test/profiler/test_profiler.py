@@ -1137,6 +1137,28 @@ class TestProfiler(TestCase):
                     )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profiler_process_metadata(self):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(1)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+        pid = os.getpid()
+        metadata = {
+            event["name"]: event["args"]
+            for event in trace["traceEvents"]
+            if event.get("ph") == "M" and event.get("pid") == pid
+        }
+        self.assertEqual(
+            metadata.get("process_name"), {"name": os.path.basename(sys.executable)}
+        )
+        self.assertEqual(metadata.get("process_labels"), {"labels": "CPU"})
+        self.assertEqual(metadata.get("process_sort_index"), {"sort_index": pid})
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_profiler_trace_sanitizes_python_function_names(self):
         def template():
             return None
