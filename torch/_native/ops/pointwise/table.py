@@ -145,7 +145,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         dtypes=(torch.bfloat16, torch.float32, torch.float64),
     ),
     PointwiseDef("hypot", 2, Functor("_hypot")),
-    PointwiseDef("logaddexp", 2, Functor("_logaddexp")),
+    PointwiseDef("logaddexp", 2, Functor("_logaddexp"), precondition=_all_same_dtype),
     PointwiseDef(
         "xlogy.Tensor", 2, Functor("_xlogy"), promotion=_INT2FLOAT, int_via_float=True
     ),
@@ -258,7 +258,13 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         promotion=_INT2FLOAT,
         precondition=_all_same_dtype,
     ),
-    PointwiseDef("threshold", 1, Functor("_threshold"), scalars=("threshold", "value")),
+    PointwiseDef(
+        "threshold",
+        1,
+        Functor("_threshold"),
+        scalars=("threshold", "value"),
+        precondition=_all_same_dtype,
+    ),
     PointwiseDef(
         "hardshrink",
         1,
@@ -343,12 +349,14 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         "bitwise_left_shift.Tensor",
         2,
         Functor("_bitwise_left_shift"),
+        precondition=_all_same_dtype,
         dtypes=_INT_DTYPES,
     ),
     PointwiseDef(
         "bitwise_right_shift.Tensor",
         2,
         Functor("_bitwise_right_shift"),
+        precondition=_all_same_dtype,
         dtypes=_INT_DTYPES,
     ),
     # Ternary and multiple-output operations.
@@ -380,7 +388,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         int_dtypes=_INT_DTYPES,
         precondition=_all_same_dtype,
     ),
-    PointwiseDef("logaddexp2", 2, Functor("_logaddexp2")),
+    PointwiseDef("logaddexp2", 2, Functor("_logaddexp2"), precondition=_all_same_dtype),
     PointwiseDef("special_entr", 1, Functor("_entr"), promotion=_INT2FLOAT),
     PointwiseDef(
         "special_xlog1py",
