@@ -41,6 +41,37 @@ void dispatch_trace_nesting_incr() { ++dispatch_trace_nesting_value_; }
 void dispatch_trace_nesting_decr() { --dispatch_trace_nesting_value_; }
 int64_t dispatch_trace_nesting_value() { return dispatch_trace_nesting_value_; }
 
+DispatchCaptureSink::~DispatchCaptureSink() = default;
+
+namespace impl {
+#if defined(_WIN32)
+static std::atomic<int> dispatch_capture_sink_count{0};
+
+bool dispatch_capture_enabled() {
+  return dispatch_capture_sink_count.load(std::memory_order_relaxed) != 0;
+}
+#else // defined(_WIN32)
+std::atomic<int> dispatch_capture_sink_count{0};
+#endif // defined(_WIN32)
+
+static thread_local DispatchCaptureSink* tls_dispatch_capture_sink_ = nullptr;
+
+DispatchCaptureSink* tls_dispatch_capture_sink() {
+  return tls_dispatch_capture_sink_;
+}
+} // namespace impl
+
+DispatchCaptureSink* setDispatchCaptureSink(DispatchCaptureSink* sink) {
+  auto* prev = impl::tls_dispatch_capture_sink_;
+  if (sink != nullptr && prev == nullptr) {
+    impl::dispatch_capture_sink_count.fetch_add(1, std::memory_order_relaxed);
+  } else if (sink == nullptr && prev != nullptr) {
+    impl::dispatch_capture_sink_count.fetch_sub(1, std::memory_order_relaxed);
+  }
+  impl::tls_dispatch_capture_sink_ = sink;
+  return prev;
+}
+
 namespace detail {
 
 class RegistrationListenerList final {
